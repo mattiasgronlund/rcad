@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 74f53f51accf69ec70f9bea1651fb32cfdce3079b4081e7c987f9fea7f00fc03 # shrinks to quadruple = [[0.0, -7.0, 5.0], [0.0, -7.0, 5.0], [0.0, -742.0, 530.0], [13159665.0, -9738647.0, 1316320.0]]
+cc ecdd487768e447466617e36f4487221c30f110db1c1025e0725c3e4902da129f # shrinks to quadruple = [[0.0, -7.0, 5.0], [15071500.0, -2390009.0, -4752065.0], [12359570.0, -1959956.0, -3896990.0], [0.0, -14.0, 10.0]], axis = 0, ulps = 1
+cc 91afe001f7a2206138df980d2a8c6ed65cbab7ffb5940a95f315bf9cd9009d88 # shrinks to quadruple = [[0.0, 0.0, -0.0], [0.0, 7.0, -5.0], [0.0, -6958.0, 4970.0], [4896345.0, -5816676.0, 2056335.0]], axis = 0, ulps = 0
