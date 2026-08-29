@@ -257,6 +257,28 @@ exhaustively on purpose.
 
 `publish = false`, version `0.0.0` until M1. M0 has nothing a stranger would want.
 
+### 3.7 `Orientation` is exhaustive
+
+**Added 2026-08-30, during M0 implementation.** `Orientation` carries `Forward`
+and `Reversed` and will never carry anything else — there is no third way round
+a face. §3.6's rule is about enums that grow, and this is not one of them, so
+marking it `#[non_exhaustive]` would only force a `_` arm at every match in
+`rcad-topo`: noise that hides nothing and that would silently swallow a variant
+if one ever did appear. It stays exhaustive. `Surface`, `Error`, `Cause`,
+`Decision` and `Unit` keep the attribute; all of those grow.
+
+### 3.8 The default tolerance is a billionth of the nominal size
+
+**Added 2026-08-30, during M0 implementation.** §3.5 says default tolerances
+derive from `nominal_size` without saying by how much. The factor is `1e-9`
+(`Scale::RELATIVE_LINEAR_TOLERANCE`), so a 100 mm part gets `1e-7` mm — the same
+figure OCCT uses for confusion at that working size.
+
+The reasoning: `f64` resolves about one part in `2.2e-16`, and `1e-9` leaves
+roughly seven decimal digits above that for rounding to accumulate over a long
+chain of operations without eating the tolerance. It is one named constant, so
+changing it later is a one-line change and a re-run of the suite.
+
 ---
 
 ## 4. Errors and invariants

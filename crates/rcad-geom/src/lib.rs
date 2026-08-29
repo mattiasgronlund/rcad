@@ -17,18 +17,31 @@
 //! Bad caller input is an `Err`. A broken invariant *inside* an already-valid
 //! value is a panic. See `docs/decisions.md` §4.1.
 //!
-//! # Deciding signs is not this crate's job yet
+//! # Two kinds of answer, and they are not interchangeable
 //!
-//! Nothing here returns a `Decision`. [`Plane::signed_distance_to`] and friends
-//! are ordinary `f64` arithmetic and their sign is not trustworthy near zero.
-//! The certified sign predicates arrive with the predicate cascade; until then,
-//! do not branch on the sign of a distance returned from this crate.
+//! [`Plane::signed_distance_to`] is ordinary `f64` arithmetic. Its magnitude is
+//! a real distance; its *sign*, close to zero, is not something to trust, and
+//! nothing may branch on it.
+//!
+//! The trustworthy answers come from the predicate cascade and are named for
+//! it: [`Plane::side_of_point`], and
+//! [`SideOfSurface::side_of`](rcad_predicates::SideOfSurface::side_of) for
+//! [`Sphere`] and [`Cylinder`]. They return a
+//! [`Decision`](rcad_predicates::Decision), so every call site has to say what
+//! it does when the cascade could not tell.
+//!
+//! Even those are only exact about the numbers a surface holds. Every
+//! constructor here scales a normal or a direction to length one, and that
+//! division rounds — so a point that helped build a face is provably a rounding
+//! off the face's *stored* plane while being exactly on its true one. Read the
+//! note on [`Plane::side_of_point`] before using it to answer that question.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 mod cylinder;
 mod error;
+mod exact;
 mod isometry;
 mod orientation;
 mod plane;
@@ -38,13 +51,13 @@ mod segment;
 mod sphere;
 mod surface;
 
-pub use crate::cylinder::Cylinder;
+pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
 pub use crate::error::{Error, Result};
 pub use crate::isometry::Isometry;
 pub use crate::orientation::Orientation;
-pub use crate::plane::Plane;
+pub use crate::plane::{Plane, SIDE_OF_PLANE};
 pub use crate::point::{Axis, Point, Vector};
-pub use crate::scale::{DynamicRange, Scale, Unit};
+pub use crate::scale::{DYNAMIC_RANGE_CHECK, DynamicRange, Scale, Unit};
 pub use crate::segment::Segment;
-pub use crate::sphere::Sphere;
+pub use crate::sphere::{SIDE_OF_SPHERE, Sphere};
 pub use crate::surface::Surface;

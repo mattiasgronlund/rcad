@@ -75,6 +75,11 @@ pub enum Error {
         /// Largest coordinate magnitude divided by smallest feature size.
         ratio: f64,
     },
+
+    /// A predicate refused the input it was handed — three planes with no
+    /// single meeting point, for instance.
+    #[error(transparent)]
+    Predicate(#[from] rcad_predicates::Error),
 }
 
 /// The result of anything in this crate that can refuse.

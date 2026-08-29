@@ -1,5 +1,8 @@
 //! What the numbers mean, and how big the part is.
 
+use rcad_predicates::{
+    Approximation, Cause, Decision, Level, Policy, ProvenanceLog, Record, Severity,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
@@ -132,11 +135,11 @@ impl From<Scale> for (Unit, f64) {
 /// The roadmap §2.2 names this as the case to detect and report rather than
 /// quietly degrade on, and it costs one division.
 ///
-/// [`DynamicRange::check`] fails on its own, today. Whether that failure is
-/// fatal or a warning is what `Policy::dynamic_range_check` decides, and that
-/// wiring arrives with the predicate crate.
+/// [`DynamicRange::check`] fails on its own. [`DynamicRange::check_under_policy`]
+/// is the same test with [`Policy::dynamic_range_check`] deciding how loud to be.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DynamicRange {
+    largest_coordinate_magnitude: f64,
     ratio: f64,
 }
 
@@ -169,6 +172,7 @@ impl DynamicRange {
             });
         }
         Ok(Self {
+            largest_coordinate_magnitude,
             ratio: largest_coordinate_magnitude / smallest_feature_size,
         })
     }
@@ -198,7 +202,76 @@ impl DynamicRange {
             Err(Error::DynamicRangeTooWide { ratio: self.ratio })
         }
     }
+
+    /// [`DynamicRange::check`] with [`Policy::dynamic_range_check`] saying how
+    /// loud to be about a failure.
+    ///
+    /// A model inside the supported range returns `Ok(None)` and leaves `log`
+    /// alone whatever the policy says — a check that passed is a certified
+    /// outcome, and certified outcomes are not recorded
+    /// (`docs/decisions.md` §5).
+    ///
+    /// Outside it:
+    ///
+    /// - [`Severity::Ignore`] returns `Ok(None)` and records nothing. No
+    ///   `Policy` constructor hands out that severity today; the arm is here
+    ///   because it is the severity that decides, not the constructor.
+    /// - [`Severity::Warn`] pushes a record onto `log` and hands back an
+    ///   [`Approximation`] for the caller to hang on whatever it builds. Every
+    ///   coordinate in a model this wide carries at least one coordinate
+    ///   spacing of slop, and that spacing is the magnitude on the tag.
+    /// - [`Severity::Fail`] returns [`Error::DynamicRangeTooWide`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::DynamicRangeTooWide`] under [`Severity::Fail`].
+    ///
+    /// # Panics
+    ///
+    /// If `policy` carries a severity this crate has never heard of. Both
+    /// crates ship together, so that is our own bug, not a caller's.
+    pub fn check_under_policy(
+        &self,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Option<Approximation>> {
+        if self.is_within_supported_range() {
+            return Ok(None);
+        }
+
+        match policy.dynamic_range_check() {
+            Severity::Ignore => Ok(None),
+            Severity::Warn => {
+                let slop = self.coordinate_spacing();
+                // A range check is not a predicate and has no sign to be
+                // undecided about. `Undecidable` is still the honest outcome to
+                // record: it says every predicate on this model is uncertain by
+                // at least this much, which is exactly what a spacing wider
+                // than the smallest feature means.
+                log.push(Record::new(
+                    DYNAMIC_RANGE_CHECK,
+                    &[],
+                    Level::Float,
+                    Decision::Undecidable { enclosure: slop },
+                ));
+                Ok(Some(Approximation::new(slop, Cause::TolerantFallback)))
+            }
+            Severity::Fail => Err(Error::DynamicRangeTooWide { ratio: self.ratio }),
+            other => unreachable!("unhandled severity for the dynamic range check: {other:?}"),
+        }
+    }
+
+    /// How far apart neighbouring `f64` are at the model's largest coordinate.
+    ///
+    /// No feature smaller than this can be told apart from the one next to it,
+    /// wherever it sits in the model.
+    fn coordinate_spacing(&self) -> f64 {
+        self.largest_coordinate_magnitude * f64::EPSILON
+    }
 }
+
+/// The name the dynamic range check goes by in provenance records.
+pub const DYNAMIC_RANGE_CHECK: &str = "dynamic range check";
 
 #[cfg(test)]
 mod tests {
@@ -276,6 +349,44 @@ mod tests {
                 what: "largest coordinate magnitude"
             })
         );
+    }
+
+    #[test]
+    fn a_model_that_fits_records_nothing_however_strict_the_policy_is() {
+        let range = DynamicRange::measure(100.0, 0.001).unwrap();
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            let mut log = ProvenanceLog::new();
+            assert_eq!(range.check_under_policy(&policy, &mut log), Ok(None));
+            assert!(log.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_certified_policy_refuses_a_model_that_is_too_wide_to_work_in() {
+        let range = DynamicRange::measure(1.0e6, 1.0e-6).unwrap();
+        let mut log = ProvenanceLog::new();
+        assert_eq!(
+            range.check_under_policy(&Policy::certified(), &mut log),
+            Err(Error::DynamicRangeTooWide { ratio: 1.0e12 })
+        );
+        assert!(log.is_empty(), "a refusal is the report; nothing to log");
+    }
+
+    #[test]
+    fn a_tolerant_policy_carries_on_and_hands_back_the_slop_it_accepted() {
+        let range = DynamicRange::measure(1.0e6, 1.0e-6).unwrap();
+        let mut log = ProvenanceLog::new();
+
+        let tag = range
+            .check_under_policy(&Policy::tolerant(1.0e6), &mut log)
+            .unwrap()
+            .expect("a model this wide puts slop into everything built from it");
+
+        assert_eq!(tag.magnitude(), 1.0e6 * f64::EPSILON);
+        assert_eq!(tag.cause(), Cause::TolerantFallback);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.records()[0].predicate(), DYNAMIC_RANGE_CHECK);
+        assert_eq!(log.worst_enclosure(), tag.magnitude());
     }
 
     #[test]

@@ -1,17 +1,27 @@
 //! Round pipe surfaces.
 
+use rcad_predicates::expansion::{
+    expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
+};
+use rcad_predicates::{
+    Decision, Filtered, Interval, Point as PredicatePoint, Predicate, SideOfSurface, decide,
+};
 use serde::{Deserialize, Serialize};
 
+use crate::exact::{difference, square_of_expansion};
 use crate::isometry::Isometry;
 use crate::point::Axis;
 use crate::{Error, Result};
 
+/// The name the cylinder's sign predicate goes by in provenance records.
+pub const SIDE_OF_CYLINDER: &str = "side of cylinder";
+
 /// An endless round pipe's skin: every point exactly `radius` away from `axis`.
 ///
-/// Ships as a type only, for the same reason as
-/// [`Sphere`](crate::Sphere): the inside/on/outside answer is a predicate
-/// returning a `Decision` and it arrives with the predicate cascade. No
-/// `signed_distance_to` here on purpose.
+/// Ships as a type and a sign predicate, for the same reason as
+/// [`Sphere`](crate::Sphere): nothing in M0 builds a face on one, so
+/// [`SideOfSurface::side_of`] is the whole of what it does. There is
+/// deliberately no `signed_distance_to`.
 ///
 /// Serializes as `(axis, radius)` and is re-checked on the way in.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -64,6 +74,227 @@ impl Cylinder {
     }
 }
 
+/// Inside, on, or outside, decided through the cascade.
+///
+/// The sign of `|(point - axis origin) × axis direction|² - radius²`:
+/// [`Decision::Neg`] inside the pipe, [`Decision::Pos`] outside,
+/// [`Decision::Zero`] exactly on the skin.
+///
+/// A point with exact `f64` coordinates always gets a certified answer, as long
+/// as no product overflows or falls into the subnormals. A constructed point is
+/// only known to lie inside a box, so when that box straddles the skin the
+/// answer is [`Decision::Undecidable`] (`docs/decisions.md` §2.5).
+///
+/// # What is certified here
+///
+/// The axis direction was scaled to length one when the [`Axis`] was built, and
+/// that division rounds. So the stored direction has length one only to within
+/// a rounding, and the surface this predicate is certified against is the pipe
+/// of radius `radius / length(stored direction)` — displaced from the one the
+/// caller named by something of order `radius * 1e-16`. Every answer below is
+/// exact about the numbers as stored. It is not exact about the pipe those
+/// numbers were rounded from. The same caveat, for the same reason, applies to
+/// [`Plane::side_of_point`](crate::Plane::side_of_point).
+impl SideOfSurface for Cylinder {
+    fn side_of(&self, point: PredicatePoint) -> Decision {
+        decide(&HowFarFromTheSkin {
+            cylinder: *self,
+            point,
+        })
+        .0
+    }
+}
+
+/// `|(point - origin) × direction|² - radius²`, evaluated three ways.
+struct HowFarFromTheSkin {
+    cylinder: Cylinder,
+    point: PredicatePoint,
+}
+
+impl Predicate for HowFarFromTheSkin {
+    fn name(&self) -> &'static str {
+        SIDE_OF_CYLINDER
+    }
+
+    fn on_floats(&self) -> Option<Filtered> {
+        let point = self.point.exact_coordinates()?;
+        let origin = self.cylinder.axis.origin().coordinates();
+        let direction = self.cylinder.axis.direction().components();
+
+        let from_origin = [0, 1, 2].map(|axis| point[axis] - origin[axis]);
+        let halves = cross_product_halves(from_origin, direction);
+        let radius_squared = self.cylinder.radius * self.cylinder.radius;
+
+        let squares = halves.map(|(left, right)| {
+            let component = left - right;
+            component * component
+        });
+
+        // Each cross-product component is a difference, so it can cancel and
+        // its own magnitude says nothing about the rounding it carries. The
+        // permanent has to use the sum of the two halves instead, squared
+        // because the component is squared.
+        let spread = halves.map(|(left, right)| {
+            let reach = left.abs() + right.abs();
+            reach * reach
+        });
+        let permanent = spread[0] + spread[1] + spread[2] + radius_squared;
+
+        Some(Filtered {
+            value: squares[0] + squares[1] + squares[2] - radius_squared,
+            error_bound: SIDE_OF_CYLINDER_ERROR_BOUND * permanent,
+        })
+    }
+
+    fn on_intervals(&self) -> Interval {
+        let point = self.point.enclosure();
+        let origin = self.cylinder.axis.origin().coordinates();
+        let direction = self.cylinder.axis.direction().components();
+
+        let from_origin = [0, 1, 2].map(|axis| point[axis] - Interval::exactly(origin[axis]));
+        let along = direction.map(Interval::exactly);
+        let halves = cross_product_halves(from_origin, along);
+
+        let squared = |axis: usize| {
+            let (left, right) = halves[axis];
+            let component = left - right;
+            component * component
+        };
+        let radius = Interval::exactly(self.cylinder.radius);
+        squared(0) + squared(1) + squared(2) - radius * radius
+    }
+
+    fn exactly(&self) -> Option<Decision> {
+        let point = self.point.exact_coordinates()?;
+        let origin = self.cylinder.axis.origin().coordinates();
+        let direction = self.cylinder.axis.direction().components();
+        let from_origin = [0, 1, 2].map(|axis| difference(point[axis], origin[axis]));
+
+        let mut total = [0.0f64; LONGEST_CYLINDER_TOTAL];
+        let mut total_len = 0;
+        let mut merged = [0.0f64; LONGEST_CYLINDER_TOTAL];
+        let mut component = [0.0f64; LONGEST_CROSS_COMPONENT];
+        let mut squared = [0.0f64; LONGEST_SQUARED_COMPONENT];
+
+        for axis in 0..3 {
+            let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+            let component_len = cross_component(
+                from_origin[next],
+                direction[after],
+                from_origin[after],
+                direction[next],
+                &mut component,
+            )?;
+            let squared_len = square_of_expansion(&component[..component_len], &mut squared)?;
+            total_len = expansion_sum(&total[..total_len], &squared[..squared_len], &mut merged);
+            core::mem::swap(&mut total, &mut merged);
+        }
+
+        let radius = self.cylinder.radius;
+        if !product_is_exact(radius, radius) {
+            return None;
+        }
+        let (radius_squared, roundoff) = two_product(radius, radius);
+        total_len = expansion_sum(
+            &total[..total_len],
+            &[-roundoff, -radius_squared],
+            &mut merged,
+        );
+
+        match expansion_sign(&merged[..total_len]) {
+            Decision::Neg => Some(Decision::Neg),
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Pos => Some(Decision::Pos),
+            // A product overflowed. Exact arithmetic that is not exact has
+            // nothing to offer, so this level cannot run.
+            Decision::Undecidable { .. } => None,
+            other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+        }
+    }
+}
+
+/// The two halves of each component of `from_origin × along`, left half first.
+///
+/// Kept apart rather than subtracted so that level 1 can size its error bound
+/// against both of them; the difference on its own hides the cancellation.
+fn cross_product_halves<T: Copy + core::ops::Mul<Output = T>>(
+    from_origin: [T; 3],
+    along: [T; 3],
+) -> [(T, T); 3] {
+    [
+        (from_origin[1] * along[2], from_origin[2] * along[1]),
+        (from_origin[2] * along[0], from_origin[0] * along[2]),
+        (from_origin[0] * along[1], from_origin[1] * along[0]),
+    ]
+}
+
+/// `first * first_factor - second * second_factor`, exactly.
+///
+/// `None` when one of the products would round, which is what
+/// [`product_is_exact`] is for.
+fn cross_component(
+    first: [f64; 2],
+    first_factor: f64,
+    second: [f64; 2],
+    second_factor: f64,
+    out: &mut [f64],
+) -> Option<usize> {
+    let exact = first
+        .iter()
+        .all(|&entry| product_is_exact(entry, first_factor))
+        && second
+            .iter()
+            .all(|&entry| product_is_exact(entry, second_factor));
+    if !exact {
+        return None;
+    }
+
+    let mut scaled_first = [0.0f64; 4];
+    let first_len = scale_expansion(&first, first_factor, &mut scaled_first);
+    let mut scaled_second = [0.0f64; 4];
+    let second_len = scale_expansion(&second, -second_factor, &mut scaled_second);
+    Some(expansion_sum(
+        &scaled_first[..first_len],
+        &scaled_second[..second_len],
+        out,
+    ))
+}
+
+/// Level 1's forward error bound, as a multiple of the permanent.
+///
+/// `epsilon` is the `f64` unit roundoff, 2⁻⁵³.
+///
+/// Where the 10 comes from: follow the longest chain of roundings from an input
+/// coordinate to `value` in [`HowFarFromTheSkin::on_floats`]. The step
+/// `point - origin` is one rounding. Multiplying it by a direction component is
+/// a second, and it carries the first along, so the half is at `(1 + epsilon)²`.
+/// Subtracting the two halves is a third. Squaring that component is a fourth,
+/// and it multiplies two copies of a value already at `(1 + epsilon)³`, so the
+/// square sits at `(1 + epsilon)⁷`. Two additions to fold the three squares
+/// together make eight and nine, and subtracting the radius term makes ten.
+/// `(1 + epsilon)^10 - 1 <= 10*epsilon + 45*epsilon^2 + ...` times the
+/// permanent.
+///
+/// The radius term travels two roundings, so the ten covers it. The
+/// `80*epsilon^2` covers the higher-order terms and the rounding of the
+/// permanent itself; what it has to beat is about `45*epsilon`.
+///
+/// As with every bound of this shape it holds only while nothing overflows or
+/// falls into the subnormals.
+const SIDE_OF_CYLINDER_ERROR_BOUND: f64 = {
+    let epsilon = f64::EPSILON / 2.0;
+    (10.0 + 80.0 * epsilon) * epsilon
+};
+
+/// Two two-entry steps, each scaled by an `f64` into four, then subtracted.
+const LONGEST_CROSS_COMPONENT: usize = 8;
+
+/// The square of one of those.
+const LONGEST_SQUARED_COMPONENT: usize = 2 * LONGEST_CROSS_COMPONENT * LONGEST_CROSS_COMPONENT;
+
+/// Three squared components and a squared radius, exactly.
+const LONGEST_CYLINDER_TOTAL: usize = 3 * LONGEST_SQUARED_COMPONENT + 2;
+
 impl TryFrom<(Axis, f64)> for Cylinder {
     type Error = Error;
 
@@ -80,8 +311,14 @@ impl From<Cylinder> for (Axis, f64) {
 
 #[cfg(test)]
 mod tests {
+    use rcad_predicates::{Level, decide, meet_of_three_planes};
+
     use super::*;
     use crate::{Point, Vector};
+
+    fn unit_pipe_about_z() -> Cylinder {
+        Cylinder::new(Axis::z(), 1.0).unwrap()
+    }
 
     #[test]
     fn a_pipe_with_no_radius_is_not_a_pipe() {
@@ -93,11 +330,114 @@ mod tests {
 
     #[test]
     fn moving_a_pipe_moves_its_axis_and_leaves_its_radius_alone() {
-        let pipe = Cylinder::new(Axis::z(), 2.0).unwrap();
+        let pipe = unit_pipe_about_z();
         let shift = Isometry::translation(Vector::new(4.0, 0.0, 0.0)).unwrap();
         let moved = pipe.transformed(&shift);
         assert_eq!(moved.axis().origin(), Point::new(4.0, 0.0, 0.0));
         assert_eq!(moved.axis().direction(), Vector::new(0.0, 0.0, 1.0));
-        assert_eq!(moved.radius(), 2.0);
+        assert_eq!(moved.radius(), 1.0);
+    }
+
+    #[test]
+    fn a_point_well_outside_is_positive_and_one_well_inside_is_negative() {
+        let pipe = unit_pipe_about_z();
+        assert_eq!(
+            pipe.side_of(PredicatePoint::from([3.0, 0.0, 100.0])),
+            Decision::Pos
+        );
+        assert_eq!(
+            pipe.side_of(PredicatePoint::from([0.25, 0.25, -100.0])),
+            Decision::Neg
+        );
+    }
+
+    #[test]
+    fn a_point_clear_of_the_skin_is_settled_by_the_cheapest_level() {
+        let (decision, level) = decide(&HowFarFromTheSkin {
+            cylinder: unit_pipe_about_z(),
+            point: PredicatePoint::from([3.0, 0.0, 100.0]),
+        });
+        assert_eq!(decision, Decision::Pos);
+        assert_eq!(level, Level::Float);
+    }
+
+    #[test]
+    fn sliding_along_the_axis_does_not_change_which_side_a_point_is_on() {
+        let pipe = unit_pipe_about_z();
+        for height in [-1e6, 0.0, 1e6] {
+            assert_eq!(
+                pipe.side_of(PredicatePoint::from([1.0, 0.0, height])),
+                Decision::Zero
+            );
+        }
+    }
+
+    /// Legs and hypotenuse of a Pythagorean triple big enough that the squares
+    /// run past 53 bits, so only exact arithmetic can see the point is on the
+    /// skin.
+    #[test]
+    fn a_point_on_a_pipe_too_wide_to_see_in_f64_still_comes_out_exactly_on_it() {
+        let pipe = Cylinder::new(Axis::z(), 198_489_546.0).unwrap();
+        let on_the_skin = PredicatePoint::from([106_308_504.0, 167_620_410.0, 12_345.0]);
+
+        let (decision, level) = decide(&HowFarFromTheSkin {
+            cylinder: pipe,
+            point: on_the_skin,
+        });
+        assert_eq!(decision, Decision::Zero);
+        assert_eq!(level, Level::Exact);
+    }
+
+    /// The three planes meet at (1/3, 1/3, 1/3), which is not an `f64`, and the
+    /// pipe through it has radius sqrt(2)/3, which is not one either.
+    #[test]
+    fn a_constructed_point_sitting_on_the_skin_cannot_be_placed() {
+        let meet = meet_of_three_planes(
+            [1.0, 1.0, 1.0, -1.0],
+            [1.0, -1.0, 0.0, 0.0],
+            [0.0, 1.0, -1.0, 0.0],
+        )
+        .unwrap();
+        let pipe = Cylinder::new(Axis::z(), (2.0f64 / 9.0).sqrt()).unwrap();
+
+        match pipe.side_of(meet) {
+            Decision::Neg | Decision::Zero | Decision::Pos => {
+                panic!("neither the box nor the radius is exact enough to place this")
+            }
+            Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
+            other => panic!("unhandled decision: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_constructed_point_well_inside_is_still_decided() {
+        let meet = meet_of_three_planes(
+            [1.0, 1.0, 1.0, -1.0],
+            [1.0, -1.0, 0.0, 0.0],
+            [0.0, 1.0, -1.0, 0.0],
+        )
+        .unwrap();
+
+        match unit_pipe_about_z().side_of(meet) {
+            Decision::Neg => (),
+            other => panic!("a box around (1/3, 1/3, 1/3) is inside the unit pipe: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_pipe_about_a_slanted_axis_still_places_points_on_its_skin() {
+        let slanted = Axis::new(Point::origin(), Vector::new(1.0, 1.0, 0.0)).unwrap();
+        let pipe = Cylinder::new(slanted, 1.0).unwrap();
+
+        assert_eq!(
+            pipe.side_of(PredicatePoint::from([0.0, 0.0, 5.0])),
+            Decision::Pos,
+            "the axis lies in the xy plane, so five up is five away from it"
+        );
+        assert_eq!(
+            pipe.side_of(PredicatePoint::from([1.0, 1.0, 0.0])),
+            Decision::Neg,
+            "this point is on the axis itself"
+        );
     }
 }

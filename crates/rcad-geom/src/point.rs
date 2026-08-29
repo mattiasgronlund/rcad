@@ -127,6 +127,15 @@ impl From<Point> for [f64; 3] {
     }
 }
 
+/// A point read out of a model is exact as written, so the predicates get to
+/// use all three levels of the cascade on it. Only a point that came out of a
+/// construction is a box, and those are built by the predicate crate itself.
+impl From<Point> for rcad_predicates::Point {
+    fn from(point: Point) -> Self {
+        rcad_predicates::Point::Exact(point.coordinates())
+    }
+}
+
 impl From<na::Point3<f64>> for Point {
     fn from(point: na::Point3<f64>) -> Self {
         Self(point)

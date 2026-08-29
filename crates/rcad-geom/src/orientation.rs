@@ -8,7 +8,11 @@ use serde::{Deserialize, Serialize};
 /// Topology reuses one surface or curve from several places, and each use picks
 /// a side. Reversing twice gets you back to forward, which is what
 /// [`Orientation::composed_with`] is for.
-#[non_exhaustive]
+///
+/// Exhaustive on purpose, unlike every other public enum here. There is no
+/// third way round, so a `_` arm at every call site in topology would be noise
+/// that hides nothing. `docs/decisions.md` §3.6 names the enums that grow;
+/// this is not one of them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Orientation {
     /// The geometry is used the way it points.

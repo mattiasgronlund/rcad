@@ -16,7 +16,10 @@ use crate::{Error, Result};
 ///
 /// Serializes as a `([x, y, z], [w, i, j, k])` pair of translation and rotation.
 /// The stored rotation is scaled back to length one when it is read, so a file
-/// cannot hand us a movement that also stretches the part.
+/// cannot hand us a movement that also stretches the part. That scaling can move
+/// the last bit or two of a rotation that was already very nearly unit length,
+/// so a movement that has been written and read back puts points in the same
+/// places to within rounding, not bit for bit.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "([f64; 3], [f64; 4])", into = "([f64; 3], [f64; 4])")]
 pub struct Isometry(na::Isometry3<f64>);
