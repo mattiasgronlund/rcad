@@ -22,3 +22,14 @@ rayon.workspace = true
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "classifying_a_grid_of_points"
+harness = false
+
+# The bit-identity half of decisions.md §9.2 is a correctness check, not a
+# timing, so it keeps the default harness and `test = true` — that is what makes
+# the normal test run execute it.
+[[bench]]
+name = "the_parallel_run_matches_the_serial_one"
+test = true
