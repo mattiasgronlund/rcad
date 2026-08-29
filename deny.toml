@@ -1,0 +1,51 @@
+[graph]
+all-features = true
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "MIT-0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  "CC0-1.0",
+  "MPL-2.0",
+]
+
+# LGPL puts static-linking obligations on anyone embedding the kernel
+# (decisions.md §7.1). Named explicitly so a transitive pull fails the
+# build with a recognisable message rather than "unlisted licence".
+[[licenses.exceptions]]
+name = "rcad"
+allow = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[[bans.deny]]
+name = "rug"
+reason = "LGPL-3.0+ runtime dependency; decisions.md §7.1"
+
+[[bans.deny]]
+name = "malachite"
+reason = "LGPL-3.0-only runtime dependency; decisions.md §7.1"
+
+[[bans.deny]]
+name = "gmp-mpfr-sys"
+reason = "LGPL C dependency reachable through inari's optional features; decisions.md §2.4"
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

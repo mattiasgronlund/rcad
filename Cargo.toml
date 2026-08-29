@@ -1,0 +1,43 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.96"
+license = "Apache-2.0"
+publish = false
+repository = "https://github.com/mattiasgronlund/rcad"
+
+[workspace.dependencies]
+rcad-predicates = { path = "crates/rcad-predicates", version = "0.0.0" }
+rcad-geom = { path = "crates/rcad-geom", version = "0.0.0" }
+rcad-topo = { path = "crates/rcad-topo", version = "0.0.0" }
+
+inari = { version = "=2.0.0", default-features = false }
+nalgebra = "0.35"
+serde = { version = "1", features = ["derive"] }
+slotmap = { version = "1.1", features = ["serde"] }
+smallvec = { version = "1", features = ["serde", "union"] }
+thiserror = "2"
+
+criterion = { version = "0.8", features = ["html_reports"] }
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+proptest = "1"
+rayon = "1"
+robust = "1.2"
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+# Numeric code: these fire constantly and carry no signal here.
+similar_names = "allow"
+many_single_char_names = "allow"
+
+[profile.bench]
+debug = true

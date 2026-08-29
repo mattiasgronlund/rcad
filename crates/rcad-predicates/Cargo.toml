@@ -1,0 +1,21 @@
+[package]
+name = "rcad-predicates"
+description = "Tiered geometric predicate cascade: f64 with error bound, interval, exact expansion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+inari.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+robust.workspace = true
+
+[lints]
+workspace = true
