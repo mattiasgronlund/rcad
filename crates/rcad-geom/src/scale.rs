@@ -213,9 +213,8 @@ impl DynamicRange {
     ///
     /// Outside it:
     ///
-    /// - [`Severity::Ignore`] returns `Ok(None)` and records nothing. No
-    ///   `Policy` constructor hands out that severity today; the arm is here
-    ///   because it is the severity that decides, not the constructor.
+    /// - [`Severity::Ignore`] returns `Ok(None)` and records nothing, the same
+    ///   as a model that was within range to begin with.
     /// - [`Severity::Warn`] pushes a record onto `log` and hands back an
     ///   [`Approximation`] for the caller to hang on whatever it builds. Every
     ///   coordinate in a model this wide carries at least one coordinate
@@ -370,6 +369,16 @@ mod tests {
             Err(Error::DynamicRangeTooWide { ratio: 1.0e12 })
         );
         assert!(log.is_empty(), "a refusal is the report; nothing to log");
+    }
+
+    #[test]
+    fn a_model_far_beyond_the_range_limit_passes_when_the_policy_says_ignore() {
+        let range = DynamicRange::measure(1.0e6, 1.0e-6).unwrap();
+        let policy = Policy::certified().with_dynamic_range_check(Severity::Ignore);
+        let mut log = ProvenanceLog::new();
+
+        assert_eq!(range.check_under_policy(&policy, &mut log), Ok(None));
+        assert!(log.is_empty(), "ignore means nothing gets recorded either");
     }
 
     #[test]

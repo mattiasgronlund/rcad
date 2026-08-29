@@ -60,6 +60,25 @@ impl Policy {
         }
     }
 
+    /// Replace the severity [`Policy::dynamic_range_check`] reports.
+    ///
+    /// A consuming, named method rather than a setter: turning off the check
+    /// that catches a model too wide for `f64` (decisions.md §3.5) should read
+    /// as a deliberate choice at the call site, not a field a caller reaches
+    /// for out of habit.
+    ///
+    /// ```
+    /// use rcad_predicates::{Policy, Severity};
+    ///
+    /// let policy = Policy::certified().with_dynamic_range_check(Severity::Ignore);
+    /// assert_eq!(policy.dynamic_range_check(), Severity::Ignore);
+    /// ```
+    #[must_use]
+    pub fn with_dynamic_range_check(mut self, severity: Severity) -> Self {
+        self.dynamic_range_check = severity;
+        self
+    }
+
     /// Whether undecided predicates are allowed to be resolved.
     pub fn strictness(self) -> Strictness {
         self.strictness
@@ -68,14 +87,21 @@ impl Policy {
     /// The widest enclosure an operation may report before treating the
     /// geometry as broken.
     ///
-    /// No predicate acts on this. Judging a whole operation is the operation's
-    /// job (decisions.md §5), so `rcad-topo` and the facade read it here.
+    /// Nothing in this crate reads this field — no predicate here judges a
+    /// whole operation. It is carried on `Policy` for `rcad-topo` and the
+    /// facade to read, since judging a whole operation is the operation's job
+    /// (decisions.md §5).
     pub fn max_enclosure(self) -> f64 {
         self.max_enclosure
     }
 
     /// What to do when a model's coordinate range is too wide to work in
-    /// (decisions.md §3.5). Read by `rcad-topo`'s validity check.
+    /// (decisions.md §3.5).
+    ///
+    /// Nothing in this crate reads this field either — the dynamic range
+    /// check itself lives in `rcad-geom`, next to the coordinates it
+    /// measures. `Policy` only carries the caller's answer for that check
+    /// (and `rcad-topo`'s validity check) to read.
     pub fn dynamic_range_check(self) -> Severity {
         self.dynamic_range_check
     }
@@ -221,6 +247,16 @@ mod tests {
     #[should_panic(expected = "positive working size")]
     fn a_tolerant_policy_needs_a_real_working_size() {
         let _ = Policy::tolerant(0.0);
+    }
+
+    #[test]
+    fn with_dynamic_range_check_replaces_only_that_one_field() {
+        let policy = Policy::certified().with_dynamic_range_check(Severity::Ignore);
+
+        assert_eq!(policy.dynamic_range_check(), Severity::Ignore);
+        assert_eq!(policy.strictness(), Strictness::Certified);
+        assert_eq!(policy.max_enclosure(), 0.0);
+        assert!(!policy.symbolic_perturbation());
     }
 
     #[test]
