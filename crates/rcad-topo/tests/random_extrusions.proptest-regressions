@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 60f2ee6f90965fc5d128a1dbebb7987df904ac1d3213dae058ad18578683405f # shrinks to profile = Profile { outline: [[1.25, 0.0], [-0.6249999999999998, 1.0825317547305484], [-0.6250000000000006, -1.082531754730548]], holes: [[[-0.25, 0.25], [0.25, 0.25], [0.25, -0.25], [-0.25, -0.25]]] }, height = 0.1
