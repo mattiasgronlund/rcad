@@ -67,8 +67,10 @@ fn a_tolerant_policy_carries_on_and_says_how_much_slop_it_accepted() {
     assert_eq!(log.len(), 1, "a warning is a record, not silence");
     // Nothing in a model this wide can be resolved more finely than the gap
     // between neighbouring `f64` at its largest coordinate.
+    // The range check already reports a distance, so reading it as one is the
+    // identity and the working size passed here does not enter into it.
     assert_eq!(
-        log.worst_enclosure(),
+        log.worst_wobble(1.0),
         largest_coordinate_of(&model) * f64::EPSILON
     );
 }

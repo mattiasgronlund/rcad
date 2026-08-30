@@ -44,6 +44,35 @@ pub struct Plane {
 }
 
 impl Plane {
+    /// What rounding can cost [`Plane::signed_distance_to`], per unit of the
+    /// largest coordinate it is handed.
+    ///
+    /// The expression is `normal · (point − origin) − offset`. The origin is
+    /// exactly zero, so subtracting it rounds nothing; what is left is three
+    /// products, two additions and a subtraction.
+    ///
+    /// Counting halves of an ulp does not give the answer, because a rounding
+    /// costs half an ulp of the *running sum*, which is bigger than any one
+    /// term. Track how many roundings each term passes through instead. With
+    /// `u = f64::EPSILON / 2` and terms `tᵢ = normalᵢ · pointᵢ`: `t₁` and `t₂`
+    /// are rounded on the way in and then survive two additions and the
+    /// subtraction, so `4u` each; `t₃` joins later and takes `3u`; the offset
+    /// only meets the subtraction, so `u`. That gives
+    /// `4u·(|t₁| + |t₂| + |t₃|) + u·|offset|`.
+    ///
+    /// A unit normal has `|n₁| + |n₂| + |n₃| ≤ √3`, so the sum of the terms is
+    /// at most `√3` times the largest coordinate. Against `L`, the largest of
+    /// the coordinates and the offset, the whole thing comes to
+    /// `u·(4√3 + 1)·L ≈ 3.97·u·2·L`, which is under `4 · f64::EPSILON · L`.
+    ///
+    /// This bounds the *reading* and nothing else. It says nothing about how
+    /// well the stored plane matches the one a caller meant — a normal is
+    /// scaled to unit length on the way in, and that rounds too. A caller
+    /// deciding how far off a plane a point may sit wants this times a slack
+    /// factor of its own, and that factor belongs at the caller with its own
+    /// reason (`docs/decisions.md` §15.6).
+    pub const SIGNED_DISTANCE_ROUNDOFF: f64 = 4.0 * f64::EPSILON;
+
     /// The plane through `point` at right angles to `normal`.
     ///
     /// # Errors

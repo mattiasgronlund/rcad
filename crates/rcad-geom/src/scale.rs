@@ -1,7 +1,7 @@
 //! What the numbers mean, and how big the part is.
 
 use rcad_predicates::{
-    Approximation, Cause, Decision, Level, Policy, ProvenanceLog, Record, Severity,
+    Approximation, Cause, Decision, Level, Measures, Policy, ProvenanceLog, Record, Severity,
 };
 use serde::{Deserialize, Serialize};
 
@@ -252,6 +252,10 @@ impl DynamicRange {
                     &[],
                     Level::Float,
                     Decision::Undecidable { enclosure: slop },
+                    // The spacing between neighbouring coordinates is already a
+                    // distance, so this record needs no converting to be read
+                    // as one (decisions.md §15.2).
+                    Measures::Length,
                 ));
                 Ok(Some(Approximation::new(slop, Cause::TolerantFallback)))
             }
@@ -395,7 +399,7 @@ mod tests {
         assert_eq!(tag.cause(), Cause::TolerantFallback);
         assert_eq!(log.len(), 1);
         assert_eq!(log.records()[0].predicate(), DYNAMIC_RANGE_CHECK);
-        assert_eq!(log.worst_enclosure(), tag.magnitude());
+        assert_eq!(log.worst_wobble(1.0e6), tag.magnitude());
     }
 
     #[test]

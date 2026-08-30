@@ -1,10 +1,10 @@
-use rcad_geom::{DynamicRange, Isometry, Orientation, Vector};
+use rcad_geom::{DynamicRange, Isometry, Orientation, Plane, Vector};
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
 };
 use rcad_predicates::{
-    Approximation, Decision, Filtered, Interval, Point as PredicatePoint, Policy, Predicate,
-    ProvenanceLog, Record, decide,
+    Approximation, Decision, Filtered, Interval, Measures, Point as PredicatePoint, Policy,
+    Predicate, ProvenanceLog, Record, decide,
 };
 use slotmap::SecondaryMap;
 
@@ -360,8 +360,9 @@ impl Model {
     /// itself is allowed to be — a face built here is exactly planar in the
     /// model's own frame, so this is only taking up the slack in fitting a
     /// plane through corners that arrived from somewhere else. The second is
-    /// how far off our own *measurement* of it could be, which is
-    /// [`MEASURING_ROUNDOFF`] times the largest coordinate in the model.
+    /// how far off our own *measurement* of it could be: what the plane says
+    /// its own arithmetic costs, times the largest coordinate in the model,
+    /// times [`MEASURING_SLACK`].
     fn allowed_wobble(&self) -> f64 {
         let largest = self
             .data()
@@ -369,25 +370,25 @@ impl Model {
             .values()
             .map(|vertex| vertex.point.largest_coordinate_magnitude())
             .fold(0.0, f64::max);
-        self.scale().default_linear_tolerance() + MEASURING_ROUNDOFF * largest
+        self.scale().default_linear_tolerance()
+            + MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * largest
     }
 }
 
-/// What reading a distance off a plane can cost in rounding, per unit of the
-/// largest coordinate involved.
+/// How much slack to allow on top of what reading the distance costs.
 ///
-/// `Plane::signed_distance_to` is `normal · (point − origin) − offset`: three
-/// products, two additions and a subtraction, so six roundings, each at most
-/// half an ulp of a term no larger than the biggest coordinate. That comes to
-/// `3 * f64::EPSILON`, and 64 is a little over twenty times that.
+/// [`Plane::SIGNED_DISTANCE_ROUNDOFF`] is what one reading rounds away, and it
+/// is derived where the arithmetic lives. This is the part that is not derived,
+/// and it is here rather than there because it is a judgement about how much
+/// room this particular check wants, not a fact about the expression
+/// (decisions.md §15.6).
 ///
-/// The twentyfold is the part that is not derived, and it is here rather
-/// than in `rcad-geom` where the arithmetic it bounds actually lives. The right
-/// home is a bound published next to `Plane::signed_distance_to` itself, the
-/// way the cascade's level 1 bounds sit next to the expressions they bound;
-/// then this line would read "the model's own tolerance plus what the plane
-/// says its own arithmetic costs" and neither half would be a guess.
-const MEASURING_ROUNDOFF: f64 = 64.0 * f64::EPSILON;
+/// A corner is not only measured with rounding; the plane it is measured
+/// against was fitted through corners that had already been rounded, and the
+/// constructors scale a normal to unit length on the way in. Sixteen is wide
+/// enough that ordinary construction never trips the check and narrow enough
+/// that a corner genuinely off its plane still does.
+const MEASURING_SLACK: f64 = 16.0;
 
 /// Which way `wire` winds round `normal`.
 ///
@@ -426,7 +427,13 @@ fn winding_of(wire: WireView<'_>, normal: Vector) -> Result<Decision> {
                 .map(|&corner| PredicatePoint::from(corner))
                 .collect();
             let mut records = ProvenanceLog::new();
-            records.push(Record::new(SWEPT_AREA, &corners, level, decision));
+            records.push(Record::new(
+                SWEPT_AREA,
+                &corners,
+                level,
+                decision,
+                Measures::Area,
+            ));
             Err(crate::Error::Undecidable { records })
         }
         // `Decision` grows a variant at every milestone. Whatever the new one

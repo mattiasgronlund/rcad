@@ -130,41 +130,56 @@ fn a_certified_policy_reports_the_undecided_answer_and_records_why() {
     );
 }
 
+/// Deliberately not at a working size of one. `orient3d` measures a volume, so
+/// at a working size of one its enclosure and the wobble that enclosure stands
+/// for are the same number — which is where a units bug of this shape hides
+/// (decisions.md §12.4).
 #[test]
 fn a_tolerant_policy_reads_the_undecided_answer_as_coplanar_and_tags_it() {
     let [a, b, c] = the_plane_through_the_meeting_point();
-    let policy = Policy::tolerant(1.0);
+    let working_size = 1000.0;
+    let policy = Policy::tolerant(working_size);
     let mut log = ProvenanceLog::new();
 
     let decision = orient3d_tolerantly(a, b, c, the_meeting_point(), &policy, &mut log);
 
     assert_eq!(decision, Decision::Zero);
     assert_eq!(log.len(), 1);
-    let tag = log.records()[0]
+    let record = &log.records()[0];
+    let tag = record
         .approximation()
         .expect("a resolved record carries the tag to hang on the entity");
     assert_eq!(tag.cause(), Cause::UndecidableResolved);
-    assert_eq!(tag.magnitude(), log.records()[0].enclosure());
-    assert_eq!(log.worst_enclosure(), tag.magnitude());
+
+    // The tag is a distance; the record keeps the volume the cascade saw.
+    assert_eq!(record.measures(), Measures::Volume);
+    assert_eq!(
+        tag.magnitude(),
+        record.enclosure() / (working_size * working_size)
+    );
+    assert_eq!(log.worst_wobble(working_size), tag.magnitude());
+    assert!(policy.wobble_is_acceptable(tag.magnitude()));
 }
 
 #[test]
 fn a_tolerant_policy_for_a_much_smaller_model_refuses_the_same_slop() {
     let [a, b, c] = the_plane_through_the_meeting_point();
-    // `orient3d` measures a volume, so its budget scales with the cube of the
-    // working size: a model a thousand times smaller has a budget a billion
-    // times smaller.
-    let policy = Policy::tolerant(1e-3);
-    let max_slop = policy.max_slop(Measures::Volume);
+    // A model a thousand times smaller will put up with a wobble a thousand
+    // times smaller, and this enclosure stands for far more than that.
+    let working_size = 1e-3;
+    let policy = Policy::tolerant(working_size);
+    let budget = policy.max_wobble();
     let mut log = ProvenanceLog::new();
 
     let decision = orient3d_tolerantly(a, b, c, the_meeting_point(), &policy, &mut log);
 
     match decision {
         Decision::Neg | Decision::Zero | Decision::Pos => {
-            panic!("this enclosure is far wider than a budget of {max_slop}")
+            panic!("this enclosure moves a point far further than {budget}")
         }
-        Decision::Undecidable { enclosure } => assert!(enclosure > max_slop),
+        Decision::Undecidable { enclosure } => {
+            assert!(Measures::Volume.wobble_of(enclosure, working_size) > budget);
+        }
         other => panic!("unhandled decision {other:?}"),
     }
     assert_eq!(log.records()[0].approximation(), None);

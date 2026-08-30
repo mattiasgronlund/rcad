@@ -64,8 +64,8 @@ pub fn orient2d_tolerantly(
     // A record carries [`Point`], which is three-dimensional. A flat predicate
     // has no third coordinate to report, so its inputs go in at height zero.
     let inputs = [at_height_zero(a), at_height_zero(b), at_height_zero(c)];
-    let record = Record::new(ORIENT2D, &inputs, level, decision);
-    resolve_under_policy(record, Measures::Area, policy, log)
+    let record = Record::new(ORIENT2D, &inputs, level, decision, Measures::Area);
+    resolve_under_policy(record, policy, log)
 }
 
 fn at_height_zero(point: [f64; 2]) -> Point {

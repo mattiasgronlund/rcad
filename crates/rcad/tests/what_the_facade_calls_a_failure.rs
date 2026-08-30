@@ -15,7 +15,7 @@
 
 use rcad::{
     Approximation, Cause, Containment, Decision, Error, GeometryError, Invalid, Isometry, Level,
-    Model, Point, Policy, PredicateError, ProfileBuilder, ProvenanceLog, Record, Scale,
+    Measures, Model, Point, Policy, PredicateError, ProfileBuilder, ProvenanceLog, Record, Scale,
     TopologyError,
 };
 
@@ -43,6 +43,7 @@ fn an_operation_that_could_not_decide_keeps_its_own_variant_at_the_facade() {
         &[],
         Level::Interval,
         Decision::Undecidable { enclosure: 1e-17 },
+        Measures::Volume,
     ));
 
     // Buried inside `Error::Topology` this would be worth nothing: a caller
@@ -53,7 +54,7 @@ fn an_operation_that_could_not_decide_keeps_its_own_variant_at_the_facade() {
     match raised {
         Error::Undecidable { records } => {
             assert_eq!(records.len(), 1);
-            assert_eq!(records.worst_enclosure(), 1e-17);
+            assert_eq!(records.worst_wobble(1.0), 1e-17);
         }
         other => panic!("an undecided operation must stay undecided: {other:?}"),
     }

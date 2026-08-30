@@ -36,7 +36,7 @@ fn a_profile_too_big_for_f64_to_multiply_is_refused_rather_than_guessed() {
     match refused {
         Err(Error::Undecidable { records }) => {
             assert!(!records.is_empty(), "the records say which decision failed");
-            assert!(records.worst_enclosure() > 0.0);
+            assert!(records.worst_wobble(1.0) > 0.0);
         }
         other => panic!("this cannot be settled in f64: {other:?}"),
     }
@@ -111,17 +111,24 @@ fn a_tolerant_policy_says_in_the_log_what_it_had_to_approximate() {
         .approximation()
         .expect("the profile carries what it cost to accept it");
     assert_eq!(slop.cause(), Cause::UndecidableResolved);
-    assert_eq!(slop.magnitude(), log.worst_enclosure());
+    assert_eq!(slop.magnitude(), log.worst_wobble(100.0));
     // The turns in doubt are read off corners a unit away, so the widest
-    // interval that straddled zero is a handful of the last bits of one.
-    assert!(slop.magnitude() > 0.0 && slop.magnitude() < 16.0 * f64::EPSILON);
+    // interval that straddled zero is a handful of the last bits of one. What
+    // lands on the profile is not that interval though — `orient2d` measures an
+    // area, so at this working size the distance a corner could be out by is a
+    // hundredth of it (decisions.md §15.2).
+    assert!(slop.magnitude() > 0.0 && slop.magnitude() < 16.0 * f64::EPSILON / 100.0);
     for record in log.records() {
         assert_eq!(record.predicate(), "orient2d");
         let resolved = record
             .approximation()
             .expect("every record here was resolved rather than given up on");
         assert_eq!(resolved.cause(), Cause::UndecidableResolved);
-        assert_eq!(resolved.magnitude(), record.enclosure());
+        // What goes on the entity is a distance, and what the cascade saw is
+        // an area. At this working size they are a hundred apart, and the tag
+        // is the one a caller can compare against a tolerance.
+        assert_eq!(resolved.magnitude(), record.wobble(100.0));
+        assert_ne!(resolved.magnitude(), record.enclosure());
         assert!(resolved.magnitude() <= slop.magnitude());
     }
 }
@@ -136,7 +143,7 @@ fn a_tolerant_policy_with_too_small_a_budget_still_refuses() {
 
     match refused {
         Err(Error::Undecidable { records }) => {
-            assert!(records.worst_enclosure() > 0.0);
+            assert!(records.worst_wobble(1e-6) > 0.0);
             assert_eq!(records.records()[0].approximation(), None);
         }
         other => panic!("that budget cannot cover this corner: {other:?}"),

@@ -28,8 +28,8 @@ impl Policy {
     ///
     /// `scale` is the working size of the model — millimetres if the model is
     /// in millimetres. It is kept as it was handed over, and every budget is
-    /// worked out from it on demand by [`Policy::max_slop`], because what a
-    /// budget comes to depends on what the predicate asking for it measures.
+    /// worked out from it on demand by [`Policy::max_wobble`], and an
+    /// enclosure is converted to compare against it by [`Measures::wobble_of`].
     ///
     /// # Panics
     ///
@@ -48,34 +48,30 @@ impl Policy {
         }
     }
 
-    /// The widest enclosure that may be read as zero, in the units of a
-    /// predicate that measures `measures`. Always zero under
-    /// [`Strictness::Certified`].
+    /// How far out of place a decision may leave a point before this policy
+    /// stops accepting it. Always zero under [`Strictness::Certified`].
     ///
-    /// The budget is 64 roundings at the working size, and a rounding at the
-    /// working size is a different number for every degree: `eps * scale` for a
-    /// length, `eps * scale²` for an area, `eps * scale³` for a volume. That is
-    /// why the caller has to say which.
+    /// A length — 64 roundings at the working size — and there is only one of
+    /// them, whatever predicate is asking. A predicate's own enclosure is not
+    /// comparable against this until [`Measures::wobble_of`] has turned it into
+    /// a wobble, and that conversion is the only place the predicate's degree
+    /// comes into it (decisions.md §15.3).
     ///
     /// ```
-    /// use rcad_predicates::{Measures, Policy};
+    /// use rcad_predicates::Policy;
     ///
-    /// // At a 100 mm working size an area budget and a volume budget are a
-    /// // hundredfold apart. Judging one against the other is the units bug
-    /// // this argument exists to prevent.
-    /// let policy = Policy::tolerant(100.0);
+    /// // Ten times the part, ten times the slack. Nothing else moves it.
     /// assert_eq!(
-    ///     policy.max_slop(Measures::Volume),
-    ///     policy.max_slop(Measures::Area) * 100.0
+    ///     Policy::tolerant(1000.0).max_wobble(),
+    ///     Policy::tolerant(100.0).max_wobble() * 10.0
     /// );
+    /// assert_eq!(Policy::certified().max_wobble(), 0.0);
     /// ```
     #[must_use]
-    pub fn max_slop(self, measures: Measures) -> f64 {
+    pub fn max_wobble(self) -> f64 {
         match self.strictness {
             Strictness::Certified => 0.0,
-            Strictness::TolerantFallback { working_size } => {
-                64.0 * f64::EPSILON * measures.at(working_size)
-            }
+            Strictness::TolerantFallback { working_size } => 64.0 * f64::EPSILON * working_size,
         }
     }
 
@@ -103,25 +99,6 @@ impl Policy {
         self.strictness
     }
 
-    /// The widest enclosure an operation may report before treating the
-    /// geometry as broken, in the units of a predicate that measures
-    /// `measures`.
-    ///
-    /// Same number as [`Policy::max_slop`], and a different question: that one
-    /// asks whether a single undecided predicate may be read as zero, this one
-    /// whether a whole operation's worst enclosure is small enough to trust the
-    /// solid it built. It takes `measures` for the same reason — an enclosure
-    /// carries the units of whatever produced it.
-    ///
-    /// Nothing in this crate reads it. No predicate here judges a whole
-    /// operation; it is carried on `Policy` for `rcad-topo` and the facade to
-    /// read, since judging a whole operation is the operation's job
-    /// (decisions.md §5).
-    #[must_use]
-    pub fn max_enclosure(self, measures: Measures) -> f64 {
-        self.max_slop(measures)
-    }
-
     /// What to do when a model's coordinate range is too wide to work in
     /// (decisions.md §3.5).
     ///
@@ -145,11 +122,17 @@ impl Policy {
         self.symbolic_perturbation
     }
 
-    /// Whether an enclosure this wide, from a predicate measuring `measures`,
-    /// is within what the policy will report.
+    /// Whether a point being this far out of place is within what the policy
+    /// will accept.
+    ///
+    /// Asked of a single decision by [`resolve_under_policy`], and of a whole
+    /// operation's worst wobble by whoever ran the operation — the fuse of
+    /// decisions.md §1.7 is the first. One budget answers both, which is what
+    /// stops an operation refusing a solid built out of decisions it had
+    /// already accepted one at a time.
     #[must_use]
-    pub fn enclosure_is_acceptable(self, enclosure: f64, measures: Measures) -> bool {
-        enclosure <= self.max_enclosure(measures)
+    pub fn wobble_is_acceptable(self, wobble: f64) -> bool {
+        wobble <= self.max_wobble()
     }
 }
 
@@ -181,12 +164,51 @@ pub enum Measures {
 }
 
 impl Measures {
-    /// The working size raised to as many dimensions as this measures.
-    fn at(self, working_size: f64) -> f64 {
+    /// What `value` says about how far out of place a point could be, at a
+    /// model of size `working_size`.
+    ///
+    /// The conversion the rest of the kernel is built on. Everything stored on
+    /// an entity or judged against a budget goes through here first, so that a
+    /// number from one predicate can be compared with a number from another
+    /// (decisions.md §15.2).
+    ///
+    /// ```
+    /// use rcad_predicates::Measures;
+    ///
+    /// // The same wobble of a corner shows up a hundred times larger in a
+    /// // volume than in an area, at a 100 mm working size. Reading one as if
+    /// // it were the other is the units bug this exists to prevent.
+    /// let area = Measures::Area.wobble_of(1e-9, 100.0);
+    /// let volume = Measures::Volume.wobble_of(1e-9 * 100.0, 100.0);
+    /// assert_eq!(area, volume);
+    ///
+    /// // A length is already a wobble and passes through untouched.
+    /// assert_eq!(Measures::Length.wobble_of(1e-9, 100.0), 1e-9);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If `working_size` is not a positive finite number.
+    #[must_use]
+    pub fn wobble_of(self, value: f64, working_size: f64) -> f64 {
+        assert!(
+            working_size.is_finite() && working_size > 0.0,
+            "a wobble needs a positive working size, got {working_size}"
+        );
+        value / self.value_per_wobble(working_size)
+    }
+
+    /// How much a predicate's value moves when a corner moves by one, at a
+    /// model of size `working_size`.
+    ///
+    /// The working size raised to one dimension fewer than this measures: a
+    /// length moves with the corner, an area sweeps a side along with it, a
+    /// volume sweeps a face.
+    fn value_per_wobble(self, working_size: f64) -> f64 {
         match self {
-            Measures::Length => working_size,
-            Measures::Area => working_size * working_size,
-            Measures::Volume => working_size * working_size * working_size,
+            Measures::Length => 1.0,
+            Measures::Area => working_size,
+            Measures::Volume => working_size * working_size,
         }
     }
 }
@@ -202,9 +224,9 @@ pub enum Strictness {
     TolerantFallback {
         /// The working size of the model, in the model's own units.
         ///
-        /// Not a budget: a budget is this raised into whatever the predicate
-        /// measures, which is [`Policy::max_slop`]'s job. Keeping the raw size
-        /// here is what stops a volume budget being compared against an area.
+        /// Not a budget: [`Policy::max_wobble`] is the budget, and it is a
+        /// distance. Keeping the raw size here is what lets an enclosure of any
+        /// degree be read as a distance before it is judged.
         working_size: f64,
     },
 }
@@ -230,9 +252,11 @@ pub enum Severity {
 /// somewhere in a band around zero this narrow" — and the record picks up an
 /// [`Approximation`] for the caller to hang on the entity it builds.
 ///
-/// `measures` is what the predicate's value is a measure of. An enclosure
-/// carries the units of whatever produced it, so without it there is no saying
-/// whether the enclosure is inside the budget or a hundred times outside it.
+/// The record carries what its predicate measures, so the enclosure can be read
+/// as a wobble and judged against the policy's one budget. Judging and tagging
+/// use the same number on purpose: a tag that would not survive
+/// [`Policy::wobble_is_acceptable`] is a tag an operation is about to refuse the
+/// solid over.
 ///
 /// Either way the record lands in `log`, because it is only ever called on a
 /// non-certified outcome.
@@ -243,7 +267,6 @@ pub enum Severity {
 /// recorded (decisions.md §5), so calling this on one is a bug in the caller.
 pub fn resolve_under_policy(
     mut record: Record,
-    measures: Measures,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Decision {
@@ -257,11 +280,12 @@ pub fn resolve_under_policy(
 
     let outcome = match policy.strictness() {
         Strictness::Certified => Decision::Undecidable { enclosure },
-        Strictness::TolerantFallback { .. } => {
-            if enclosure <= policy.max_slop(measures) {
+        Strictness::TolerantFallback { working_size } => {
+            let wobble = record.wobble(working_size);
+            if policy.wobble_is_acceptable(wobble) {
                 record.resolve_to(
                     Decision::Zero,
-                    Approximation::new(enclosure, Cause::UndecidableResolved),
+                    Approximation::new(wobble, Cause::UndecidableResolved),
                 );
                 Decision::Zero
             } else {
@@ -280,11 +304,16 @@ mod tests {
     use crate::{Cause, Decision, Level, Point, ProvenanceLog, Record};
 
     fn record_with_enclosure(enclosure: f64) -> Record {
+        record_measuring(enclosure, Measures::Volume)
+    }
+
+    fn record_measuring(enclosure: f64, measures: Measures) -> Record {
         Record::new(
             "orient3d",
             &[Point::from([0.0, 0.0, 0.0])],
             Level::Interval,
             Decision::Undecidable { enclosure },
+            measures,
         )
     }
 
@@ -292,10 +321,10 @@ mod tests {
     fn a_certified_policy_refuses_every_kind_of_slop() {
         let policy = Policy::certified();
         assert_eq!(policy.strictness(), Strictness::Certified);
-        assert_eq!(policy.max_enclosure(Measures::Volume), 0.0);
+        assert_eq!(policy.max_wobble(), 0.0);
         assert_eq!(policy.dynamic_range_check(), Severity::Fail);
         assert!(!policy.symbolic_perturbation());
-        assert!(!policy.enclosure_is_acceptable(1e-30, Measures::Volume));
+        assert!(!policy.wobble_is_acceptable(1e-30));
     }
 
     #[test]
@@ -308,49 +337,42 @@ mod tests {
         assert!(!policy.symbolic_perturbation());
     }
 
-    /// The budget for a volume grows as the cube of the working size, for an
-    /// area as the square, and for a length in step with it. Comparing an
-    /// enclosure against the budget for the wrong degree is off by a whole
-    /// factor of the working size for every degree of difference.
+    /// One policy permits one wobble, whatever predicate is asking. The widest
+    /// enclosure each degree can get away with differs by a factor of the
+    /// working size per degree, and all three come back to the same distance.
     #[test]
-    fn each_degree_gets_its_own_budget() {
-        let small = Policy::tolerant(1.0);
-        let large = Policy::tolerant(10.0);
+    fn one_policy_permits_one_wobble_whatever_the_predicate_measures() {
+        let policy = Policy::tolerant(100.0);
+        let budget = policy.max_wobble();
 
-        assert_eq!(
-            large.max_slop(Measures::Length),
-            small.max_slop(Measures::Length) * 10.0
-        );
-        assert_eq!(
-            large.max_slop(Measures::Area),
-            small.max_slop(Measures::Area) * 100.0
-        );
-        assert_eq!(
-            large.max_slop(Measures::Volume),
-            small.max_slop(Measures::Volume) * 1000.0
-        );
+        for measures in [Measures::Length, Measures::Area, Measures::Volume] {
+            let widest_enclosure = measures.value_per_wobble(100.0) * budget;
+            assert_eq!(measures.wobble_of(widest_enclosure, 100.0), budget);
+            assert!(policy.wobble_is_acceptable(measures.wobble_of(widest_enclosure, 100.0)));
+        }
 
-        // At a working size of one every degree comes to the same number, which
-        // is exactly why a units bug of this shape hides in unit-sized tests.
+        // The enclosures themselves are a hundredfold apart per degree. It is
+        // only after converting that they are the same question.
         assert_eq!(
-            small.max_slop(Measures::Length),
-            small.max_slop(Measures::Volume)
+            Measures::Volume.value_per_wobble(100.0),
+            Measures::Area.value_per_wobble(100.0) * 100.0
         );
     }
 
-    /// The bug this argument exists to stop: an enclosure that is far too wide
-    /// to be read as zero for the area predicate that produced it would sail
-    /// through if it were judged against a volume budget.
+    /// The bug this whole arrangement exists to stop, now at the tagging end.
+    ///
+    /// An enclosure fifty times too wide for the area predicate that produced
+    /// it must be refused. Read as a volume it would be waved through, because
+    /// the same number means a hundred times less wobble at this working size.
     #[test]
-    fn an_area_judged_against_a_volume_budget_is_waved_through_when_it_should_not_be() {
+    fn an_area_read_as_a_volume_is_waved_through_when_it_should_not_be() {
         let policy = Policy::tolerant(100.0);
-        let too_wide_for_an_area = policy.max_slop(Measures::Area) * 50.0;
-        assert!(too_wide_for_an_area < policy.max_slop(Measures::Volume));
+        let too_wide_for_an_area =
+            Measures::Area.value_per_wobble(100.0) * policy.max_wobble() * 50.0;
 
         let mut log = ProvenanceLog::new();
         let honest = resolve_under_policy(
-            record_with_enclosure(too_wide_for_an_area),
-            Measures::Area,
+            record_measuring(too_wide_for_an_area, Measures::Area),
             &policy,
             &mut log,
         );
@@ -362,12 +384,79 @@ mod tests {
         );
 
         let with_the_wrong_units = resolve_under_policy(
-            record_with_enclosure(too_wide_for_an_area),
-            Measures::Volume,
+            record_measuring(too_wide_for_an_area, Measures::Volume),
             &policy,
             &mut log,
         );
         assert_eq!(with_the_wrong_units, Decision::Zero);
+    }
+
+    /// The point of §15.2: what lands on an entity is a distance, not the
+    /// predicate's own value. At a working size of one hundred an `orient3d`
+    /// enclosure is ten thousand times the wobble it stands for, so a tag that
+    /// still held the enclosure would be out by that much.
+    ///
+    /// The old behaviour stored the enclosure, and every test that could have
+    /// caught it ran at a working size of one — where the two are equal.
+    #[test]
+    fn a_tag_holds_how_far_out_of_place_a_point_could_be_not_the_predicates_own_value() {
+        let policy = Policy::tolerant(100.0);
+        let enclosure = 1e-20;
+        let mut log = ProvenanceLog::new();
+
+        let outcome = resolve_under_policy(
+            record_measuring(enclosure, Measures::Volume),
+            &policy,
+            &mut log,
+        );
+
+        assert_eq!(outcome, Decision::Zero);
+        let tag = log.records()[0]
+            .approximation()
+            .expect("a resolved record carries an approximation");
+        assert_eq!(tag.magnitude(), enclosure / (100.0 * 100.0));
+        assert_ne!(tag.magnitude(), enclosure);
+
+        // The raw enclosure is still on the record, in its own units. Losing it
+        // would be losing what the cascade actually saw.
+        assert_eq!(log.records()[0].enclosure(), enclosure);
+    }
+
+    /// Judging and tagging read the same number, so an operation can never
+    /// refuse a solid over slop that the very same policy accepted one decision
+    /// at a time. Walking the boundary is where a second conversion, or a
+    /// budget held in different units from the tag, would show up.
+    #[test]
+    fn anything_a_policy_resolves_is_something_the_same_policy_still_accepts() {
+        for working_size in [1.0, 100.0, 1e6] {
+            let policy = Policy::tolerant(working_size);
+            for measures in [Measures::Length, Measures::Area, Measures::Volume] {
+                let at_the_edge = measures.value_per_wobble(working_size) * policy.max_wobble();
+                for enclosure in [
+                    at_the_edge * 0.5,
+                    at_the_edge * (1.0 - f64::EPSILON),
+                    at_the_edge,
+                ] {
+                    let mut log = ProvenanceLog::new();
+                    let outcome = resolve_under_policy(
+                        record_measuring(enclosure, measures),
+                        &policy,
+                        &mut log,
+                    );
+                    if outcome == Decision::Zero {
+                        let tag = log.records()[0]
+                            .approximation()
+                            .expect("a resolved record carries an approximation");
+                        assert!(
+                            policy.wobble_is_acceptable(tag.magnitude()),
+                            "resolved a {measures:?} enclosure of {enclosure} at working size \
+                             {working_size} into a wobble of {} the same policy will not accept",
+                            tag.magnitude()
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -382,19 +471,15 @@ mod tests {
 
         assert_eq!(policy.dynamic_range_check(), Severity::Ignore);
         assert_eq!(policy.strictness(), Strictness::Certified);
-        assert_eq!(policy.max_enclosure(Measures::Volume), 0.0);
+        assert_eq!(policy.max_wobble(), 0.0);
         assert!(!policy.symbolic_perturbation());
     }
 
     #[test]
     fn a_certified_policy_leaves_an_undecided_answer_undecided_but_still_logs_it() {
         let mut log = ProvenanceLog::new();
-        let outcome = resolve_under_policy(
-            record_with_enclosure(1e-17),
-            Measures::Volume,
-            &Policy::certified(),
-            &mut log,
-        );
+        let outcome =
+            resolve_under_policy(record_with_enclosure(1e-17), &Policy::certified(), &mut log);
 
         assert_eq!(outcome, Decision::Undecidable { enclosure: 1e-17 });
         assert_eq!(log.len(), 1);
@@ -405,12 +490,7 @@ mod tests {
     fn a_tolerant_policy_reads_a_narrow_enclosure_as_zero_and_tags_it() {
         let policy = Policy::tolerant(1.0);
         let mut log = ProvenanceLog::new();
-        let outcome = resolve_under_policy(
-            record_with_enclosure(1e-17),
-            Measures::Volume,
-            &policy,
-            &mut log,
-        );
+        let outcome = resolve_under_policy(record_with_enclosure(1e-17), &policy, &mut log);
 
         assert_eq!(outcome, Decision::Zero);
         let tag = log.records()[0]
@@ -425,12 +505,7 @@ mod tests {
     fn a_tolerant_policy_still_refuses_an_enclosure_wider_than_its_budget() {
         let policy = Policy::tolerant(1.0);
         let mut log = ProvenanceLog::new();
-        let outcome = resolve_under_policy(
-            record_with_enclosure(1.0),
-            Measures::Volume,
-            &policy,
-            &mut log,
-        );
+        let outcome = resolve_under_policy(record_with_enclosure(1.0), &policy, &mut log);
 
         assert_eq!(outcome, Decision::Undecidable { enclosure: 1.0 });
         assert_eq!(log.records()[0].approximation(), None);
@@ -444,11 +519,6 @@ mod tests {
             Decision::Zero,
             crate::Approximation::new(1e-17, Cause::UndecidableResolved),
         );
-        let _ = resolve_under_policy(
-            record,
-            Measures::Volume,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
+        let _ = resolve_under_policy(record, &Policy::certified(), &mut ProvenanceLog::new());
     }
 }

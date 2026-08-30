@@ -75,8 +75,8 @@ pub fn orient3d_tolerantly(
     if decision.is_certified() {
         return decision;
     }
-    let record = Record::new(ORIENT3D, &[a, b, c, d], level, decision);
-    resolve_under_policy(record, Measures::Volume, policy, log)
+    let record = Record::new(ORIENT3D, &[a, b, c, d], level, decision, Measures::Volume);
+    resolve_under_policy(record, policy, log)
 }
 
 struct Orient3d {

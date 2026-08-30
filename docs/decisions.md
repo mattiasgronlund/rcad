@@ -161,7 +161,10 @@ it runs under.
 6. The §11.2 metamorphic properties as a `proptest` suite: inclusion–exclusion on
    volume, associativity, `A \ (A \ B) ≡ A ∩ B`, transform invariance.
 7. `Policy::max_enclosure` has a caller — the fuse judges its worst enclosure
-   against it and refuses. Closes the first gap in §12.6.
+   against it and refuses. Closes the first gap in §12.6. *(Amended
+   2026-08-30: §15.3 renames these. The criterion is now that
+   `Policy::max_wobble` has a caller, judged against
+   `ProvenanceLog::worst_wobble`.)*
 8. A measured refusal rate under `Policy::certified()` over that corpus,
    recorded in this file.
 
@@ -260,6 +263,12 @@ pub struct Policy {
     symbolic_perturbation: bool,     // always false; see §1.5
 }
 ```
+
+**Amended 2026-08-30.** The budget is now a single distance, `max_wobble`, and
+the working size lives on `Strictness::TolerantFallback` rather than a
+precomputed slop being stored. §12.4 made the first half of that change and
+§15.3 the second; this sketch is left as written so the two amendments have
+something to be amendments to.
 
 Passed as `&Policy` to every operation that can make a decision. **Not** a field on
 `Model` — model state that silently changes results is the footgun this design
@@ -1123,6 +1132,18 @@ and an argument with one right answer is a way to get it wrong.
 | `Policy::max_enclosure(Measures)` | `Policy::max_wobble()` | the widest a point may be out of place, `64·ε·working_size` |
 | `Policy::enclosure_is_acceptable(f64, Measures)` | `Policy::wobble_is_acceptable(f64)` | judged against the above |
 | `ProvenanceLog::worst_enclosure()` | `ProvenanceLog::worst_wobble(working_size)` | the worst wobble in the log |
+| `Policy::max_slop(Measures)` | *gone* | see below |
+
+**Amended 2026-08-30, while implementing.** `max_slop` is removed rather than
+kept alongside. It was the same budget expressed in a predicate's own units, and
+`resolve_under_policy` was its only caller. Leaving it would mean the predicate
+judging an enclosure against one number while the operation judges a wobble
+against another — equal in exact arithmetic, not equal in `f64`, so a decision
+could be accepted at the predicate and then push a solid over the operation's
+budget by an ulp. Instead the conversion happens once, before the judgement, and
+the number that is judged is the number that gets stored. `Measures::wobble_of`
+carries the units knowledge and has a real caller in `Record::wobble`, so §13
+rule 3 is satisfied where it was not before.
 
 `Record::enclosure()` stays as it is and keeps returning the raw value in the
 predicate's own units — it is the honest record of what the cascade saw, and
@@ -1198,10 +1219,32 @@ evaluation, derivatives — so the rule matters more than the one case:
    own reason. Multiplying a derived bound by twenty is a judgement about how
    much slack a caller wants, and it is not part of the bound.
 
-Applied to the open case: the `3·ε` moves to `rcad-geom` next to
-`signed_distance_to`; the twentyfold stays in `validate.rs` under its own name.
-This is why the fix lands before the fork — it touches `rcad-geom`, which M1
-owns from then on.
+Applied to the open case: the bound moves to `rcad-geom` next to
+`signed_distance_to`; the slack factor stays in `validate.rs` under its own
+name. This is why the fix lands before the fork — it touches `rcad-geom`, which
+M1 owns from then on.
+
+**Amended 2026-08-30, while implementing. The `3·ε` was not a bound.** §12.6's
+fourth gap, and the paragraph above as first written, both called `3·ε` the
+rigorous figure that `64·ε` was a guess at. Writing the derivation out properly
+showed it is not: it counts half an ulp per *term*, but a rounding costs half an
+ulp of the **running sum**, which is larger than any one term. Charging each
+term for every operation it passes through, and using `|n₁| + |n₂| + |n₃| ≤ √3`
+for a unit normal, gives `u·(4√3 + 1)·L` — just under `4·ε·L`.
+
+So `Plane::SIGNED_DISTANCE_ROUNDOFF` is `4 * f64::EPSILON`, and the slack at the
+consumer is 16 rather than the "little over twenty" the old comment described.
+The product is `64·ε` either way, so nothing the kernel does changes; what
+changes is that the figure is now derived rather than asserted.
+
+Worth noting how it was caught, because it is §14.1 question 1 exactly: the
+number had a derivation written next to it and was still wrong, because nothing
+executed the derivation. The bound only became true when a test evaluated the
+same expression in exact arithmetic and subtracted. **A published bound needs a
+test that could fail, not a paragraph.** That test cannot show a bound is
+*tight* — rounding errors cancel, and it passes at `2·ε` and `3·ε` too — so the
+derivation is still what makes it a bound. The test is what stops the expression
+drifting out from under it.
 
 ### 15.7 The intersection result type lives in `rcad-topo`
 
@@ -1258,6 +1301,12 @@ it, per `CLAUDE.md`:
 Items 1–3 are in `rcad-predicates` and item 4 is in `rcad-geom` — both crates
 the fork would otherwise contend for, which is why all four land first. None is
 large. Doing them afterwards means doing them twice.
+
+**All four landed 2026-08-30.** Two things came out of the work that the plan
+above could not have known, both recorded where they belong: `Policy::max_slop`
+is removed rather than kept (§15.3), and `3·ε` was never a bound (§15.6). The
+change is covered by four tests that fail without it — three on what a tag holds
+and how a log is summed, one on the plane bound — and the suite is 404 green.
 
 **After the fork.**
 

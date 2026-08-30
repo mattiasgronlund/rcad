@@ -169,7 +169,7 @@ pub fn classify_across_threads(solid: SolidView<'_>, points: &[Point]) -> Vec<An
 pub struct Answer {
     containment: Containment,
     records: usize,
-    worst_enclosure: f64,
+    worst_wobble: f64,
 }
 
 fn ask_about(solid: SolidView<'_>, point: Point, policy: &Policy) -> Answer {
@@ -178,7 +178,10 @@ fn ask_about(solid: SolidView<'_>, point: Point, policy: &Policy) -> Answer {
     Answer {
         containment,
         records: log.len(),
-        worst_enclosure: log.worst_enclosure(),
+        // Reading the log as a distance needs a working size. Any fixed
+        // positive one does for a bit-identity check, and one keeps the number
+        // the same as the enclosure it came from.
+        worst_wobble: log.worst_wobble(1.0),
     }
 }
 
@@ -215,7 +218,7 @@ fn bits_of(answer: Answer) -> (u8, u64, usize, u64) {
         tag,
         enclosure,
         answer.records,
-        answer.worst_enclosure.to_bits(),
+        answer.worst_wobble.to_bits(),
     )
 }
 

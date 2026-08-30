@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Decision, Level, Point};
+use crate::{Decision, Level, Measures, Point};
 
 /// The tag an entity carries because a decision put slop into it.
 ///
@@ -16,6 +16,12 @@ pub struct Approximation {
 impl Approximation {
     /// A tag saying `magnitude` of slop was introduced, for the given reason.
     ///
+    /// `magnitude` is a **length** — how far out of place a point could be, in
+    /// the model's own unit. Never the raw value of a predicate, which carries
+    /// whatever units that predicate's degree gives it. [`Measures::wobble_of`]
+    /// is what converts one into the other, and decisions.md §15.2 is why there
+    /// is only one answer to what this field means.
+    ///
     /// # Panics
     ///
     /// If `magnitude` is negative or not a number. An approximation you cannot
@@ -28,7 +34,7 @@ impl Approximation {
         Self { magnitude, cause }
     }
 
-    /// How much slop was introduced, in the units of whatever produced it.
+    /// How far out of place a point could be, in the model's own unit.
     pub fn magnitude(self) -> f64 {
         self.magnitude
     }
@@ -68,17 +74,29 @@ pub struct Record {
     level: Level,
     outcome: Decision,
     enclosure: f64,
+    measures: Measures,
     approximation: Option<Approximation>,
 }
 
 impl Record {
     /// A record of `predicate` on `inputs` coming back `outcome` at `level`.
     ///
+    /// `measures` says what the predicate's value is a measure of, and it is
+    /// not optional. Without it the enclosure below is a bare number whose
+    /// units nobody can recover, and a maximum taken over two records of
+    /// different degrees means nothing (decisions.md §15.3).
+    ///
     /// # Panics
     ///
     /// If `outcome` is certified. A certified outcome does not get a record —
     /// that is the whole reason an empty log means something.
-    pub fn new(predicate: &'static str, inputs: &[Point], level: Level, outcome: Decision) -> Self {
+    pub fn new(
+        predicate: &'static str,
+        inputs: &[Point],
+        level: Level,
+        outcome: Decision,
+        measures: Measures,
+    ) -> Self {
         let enclosure = match outcome {
             Decision::Undecidable { enclosure } => enclosure,
             Decision::Neg | Decision::Zero | Decision::Pos => {
@@ -91,6 +109,7 @@ impl Record {
             level,
             outcome,
             enclosure,
+            measures,
             approximation: None,
         }
     }
@@ -116,10 +135,36 @@ impl Record {
         self.outcome
     }
 
-    /// How wide the interval that straddled zero was. Survives resolution, so
-    /// it is still here after `outcome` has become a sign.
+    /// How wide the interval that straddled zero was, in the units of
+    /// [`Record::measures`]. Survives resolution, so it is still here after
+    /// `outcome` has become a sign.
+    ///
+    /// This is the honest record of what the cascade saw and it is not
+    /// comparable across predicate degrees. [`Record::wobble`] is the
+    /// comparable form.
     pub fn enclosure(&self) -> f64 {
         self.enclosure
+    }
+
+    /// What the predicate's value was a measure of, which is what says how to
+    /// read [`Record::enclosure`].
+    pub fn measures(&self) -> Measures {
+        self.measures
+    }
+
+    /// [`Record::enclosure`] read as how far out of place a point could be, at
+    /// a model of size `working_size`.
+    ///
+    /// A length, so two records may be compared with this even when the
+    /// predicates behind them have different degrees.
+    ///
+    /// # Panics
+    ///
+    /// If `working_size` is not a positive finite number. A model's working
+    /// size is checked when the model is made, so a bad one arriving here is a
+    /// bug in the caller rather than something a user typed.
+    pub fn wobble(&self, working_size: f64) -> f64 {
+        self.measures.wobble_of(self.enclosure, working_size)
     }
 
     /// The tag to put on any entity built from this decision, if a policy
@@ -171,11 +216,23 @@ impl ProvenanceLog {
         &self.records
     }
 
-    /// The widest enclosure in the log, or zero if the log is empty.
-    pub fn worst_enclosure(&self) -> f64 {
+    /// The furthest out of place any of these decisions could have put a
+    /// point, at a model of size `working_size`. Zero if the log is empty.
+    ///
+    /// A length, which is the whole point. A log may hold records from
+    /// predicates of different degrees — the fuse of decisions.md §1.7 will
+    /// hold them by the thousand — and a maximum over their raw enclosures
+    /// would be picking the largest of an area and a volume. That is
+    /// §12.4's mistake one level up, which is why there is no
+    /// `worst_enclosure` to reach for instead.
+    ///
+    /// # Panics
+    ///
+    /// If `working_size` is not a positive finite number.
+    pub fn worst_wobble(&self, working_size: f64) -> f64 {
         self.records
             .iter()
-            .map(Record::enclosure)
+            .map(|record| record.wobble(working_size))
             .fold(0.0, f64::max)
     }
 
@@ -194,14 +251,19 @@ impl ProvenanceLog {
 #[cfg(test)]
 mod tests {
     use super::{Approximation, Cause, ProvenanceLog, Record};
-    use crate::{Decision, Level, Point};
+    use crate::{Decision, Level, Measures, Point};
 
     fn undecided_record() -> Record {
+        record_measuring(1e-17, Measures::Volume)
+    }
+
+    fn record_measuring(enclosure: f64, measures: Measures) -> Record {
         Record::new(
             "orient3d",
             &[Point::from([0.0, 0.0, 0.0])],
             Level::Interval,
-            Decision::Undecidable { enclosure: 1e-17 },
+            Decision::Undecidable { enclosure },
+            measures,
         )
     }
 
@@ -210,7 +272,7 @@ mod tests {
         let log = ProvenanceLog::new();
         assert!(log.is_empty());
         assert_eq!(log.len(), 0);
-        assert_eq!(log.worst_enclosure(), 0.0);
+        assert_eq!(log.worst_wobble(100.0), 0.0);
     }
 
     #[test]
@@ -232,17 +294,39 @@ mod tests {
     }
 
     #[test]
-    fn the_worst_enclosure_is_the_widest_one() {
+    fn the_worst_wobble_is_the_widest_one() {
         let mut log = ProvenanceLog::new();
-        log.push(undecided_record());
-        log.push(Record::new(
-            "orient3d",
-            &[],
-            Level::Interval,
-            Decision::Undecidable { enclosure: 4e-17 },
-        ));
+        log.push(record_measuring(1e-17, Measures::Volume));
+        log.push(record_measuring(4e-17, Measures::Volume));
         assert_eq!(log.len(), 2);
-        assert_eq!(log.worst_enclosure(), 4e-17);
+        assert_eq!(log.worst_wobble(1.0), 4e-17);
+    }
+
+    /// The reason there is no `worst_enclosure` to reach for.
+    ///
+    /// Two records, and the one with the *smaller* enclosure is the one that
+    /// could have moved a point further — because an area and a volume are a
+    /// hundredfold apart at this working size. A maximum taken over the raw
+    /// enclosures picks the wrong record.
+    #[test]
+    fn the_widest_enclosure_is_not_the_worst_wobble_when_two_degrees_share_a_log() {
+        let working_size = 100.0;
+        let from_an_area = 2e-15;
+        let from_a_volume = 1e-14;
+        let mut log = ProvenanceLog::new();
+        log.push(record_measuring(from_an_area, Measures::Area));
+        log.push(record_measuring(from_a_volume, Measures::Volume));
+
+        // The volume's enclosure is the wider number, so a maximum over raw
+        // enclosures would pick it.
+        assert!(from_a_volume > from_an_area);
+
+        // The area's wobble is the worse answer, so the maximum that matters
+        // picks the other one.
+        let from_the_area = Measures::Area.wobble_of(from_an_area, working_size);
+        let from_the_volume = Measures::Volume.wobble_of(from_a_volume, working_size);
+        assert!(from_the_area > from_the_volume * 10.0);
+        assert_eq!(log.worst_wobble(working_size), from_the_area);
     }
 
     #[test]
@@ -260,7 +344,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "does not get a provenance record")]
     fn a_certified_outcome_may_not_be_recorded() {
-        let _ = Record::new("orient3d", &[], Level::Float, Decision::Pos);
+        let _ = Record::new(
+            "orient3d",
+            &[],
+            Level::Float,
+            Decision::Pos,
+            Measures::Volume,
+        );
     }
 
     #[test]
