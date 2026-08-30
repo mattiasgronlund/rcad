@@ -84,6 +84,89 @@ instantiated twice.
 `f64` only. If double-double ever happens it is a separate build of the numeric
 layer, not a type parameter dragged through topology.
 
+### 1.7 A planar boolean before intersection (roadmap §12, §13)
+
+*Added 2026-08-30, after M0.*
+
+The roadmap orders M3 intersection, then M4 booleans. That builds surface–surface
+intersection before anything exists to consume it, and it puts the first
+measurement of whether this kernel refuses too much at eighteen to thirty months.
+
+**Insert M2.5: a general fuse over planar solids only.** M3 stays intersection.
+M4 becomes *extend the fuse to curved intersections* rather than *build the fuse*.
+
+Everything layer 4 needs — the decomposition, face and edge splitting,
+IN/OUT/ON classification, shell reassembly, history maps, the multi-argument
+signature roadmap §7.2 requires — does not depend on what kind of curve two faces
+meet along. On planes that curve is a segment we can compute exactly, so all of
+it sits on layers 0–2.
+
+What that buys:
+
+- **A refusal rate we can read off.** Roadmap §13's second risk is that the
+  certified approach refuses too much to be usable. Nothing measures that today
+  and nothing will until an operation exists to do the refusing. §12.6 already
+  shows the symptom: `Policy::max_enclosure` and `enclosure_is_acceptable` have
+  no caller anywhere in the workspace. A refusal rate is a property of an
+  operation, not of a predicate.
+- **Most of roadmap §7.4's degeneracy catalogue.** Coplanar faces, coincident
+  edges, vertex-on-face, vertex-on-edge, zero-length edges, sliver faces, fully
+  contained solids, touching-but-not-overlapping — all reachable with planes.
+  Roadmap §1.3 puts booleans at 30% of the hard part and says that share is
+  mostly degeneracy handling. This is that share, unblocked without touching
+  intersection.
+- **The metamorphic suite two milestones early.** `vol(A ∪ B) + vol(A ∩ B) =
+  vol(A) + vol(B)`, associativity, `A \ (A \ B) ≡ A ∩ B`. §12.2 is the argument
+  for wanting these as early as possible: where an oracle shares a lineage with
+  the code under test, only a property the answer must satisfy can see the bug.
+
+**This is a departure, not a schedule note.** Roadmap §13 files analytic-only
+booleans as what to ship *if* M3 overruns. We are making the contingency the
+plan. Without this recorded, a later reader who finds booleans arriving before an
+intersector reads it as the schedule having slipped and "fixes" the order back.
+
+**What it costs.** An interface designed against exact segments may not survive
+marched, approximate curves carrying an `Undecidable`. Two guards, both cheap now
+and expensive later:
+
+- The fuse consumes an intersection *result* type that carries an enclosure and
+  an `Approximation` from its first line, even though the planar producer never
+  populates them. The curved case is then a new producer, not a new contract.
+- The splitter is seeded with §2.5's three-planes-meeting cases, so the path
+  where a split vertex is known only as an interval is live in the planar world.
+  §12.3 is the warning: a generator of one shape family finds one family of bugs.
+
+Rejected: keep the roadmap order and measure the refusal rate at M4. The answer
+changes the design, and at M4 it arrives too late to act on.
+
+Rejected: a throwaway boolean prototype instead. Throwaway code does not carry
+the local invariant checks of §4.3, and a finding from code without invariants
+does not transfer to code with them.
+
+**M2.5 exit criteria.**
+
+1. One decomposition and three selection rules — union, difference,
+   intersection — over `Vec<Solid>` arguments and tools per roadmap §7.2. Not
+   three algorithms.
+2. Face and edge splitting at intersections, with image maps.
+3. Point-in-solid classification reused from §9.2's benchmark, not a second
+   implementation of it.
+4. History maps returned per operation: generated, modified, deleted.
+5. Roadmap §7.4's catalogue as explicit hand-written cases, planar entries only,
+   each either passing or refusing with a recorded reason.
+6. The §11.2 metamorphic properties as a `proptest` suite: inclusion–exclusion on
+   volume, associativity, `A \ (A \ B) ≡ A ∩ B`, transform invariance.
+7. `Policy::max_enclosure` has a caller — the fuse judges its worst enclosure
+   against it and refuses. Closes the first gap in §12.6.
+8. A measured refusal rate under `Policy::certified()` over that corpus,
+   recorded in this file.
+
+**Schedule risk.** Item 5. The catalogue is where the roadmap says booleans
+actually cost, and its size is unknown until entries start failing. §12.1's
+lesson also applies here: the risk is not the part that looks hard, it is the
+part that looks done — which here is classification, already shipped and
+benchmarked in M0.
+
 ---
 
 ## 2. Numeric model
@@ -527,13 +610,21 @@ slips, it slips there.
 
 | Thing | Until | Why |
 |---|---|---|
-| Bump arena in signatures | M4 | §1.4 — nothing to measure yet |
+| Bump arena in signatures | M2.5 | §1.4 — nothing to measure yet |
 | Symbolic perturbation | Never, unless a caller asks | §1.5 — competes with `Undecidable` |
 | `rkyv` zero-copy format | M2 | §6 — model still churning |
 | `cargo-fuzz` | M2 | §6 — needs a format worth fuzzing |
 | `rayon` inside the library | M2 | §7.3 — tessellation is the first real need |
 | `ProvenanceSink` streaming | On demand | §5 — no caller yet |
 | Branded lifetimes for cross-model keys | Indefinitely | Debug-checked model id is the pragmatic fix |
+
+**Amended 2026-08-30.** §1.7 inserts M2.5, and the planar fuse is where scratch
+allocation first becomes measurable — candidate pair lists, split pieces, image
+maps, per-face working sets, all short-lived. The bump arena row therefore moves
+from M4 to M2.5; §1.4's reason for deferring it, "nothing to measure yet",
+expires there rather than at M4. `rkyv`, `cargo-fuzz` and `rayon` stay at M2:
+all three are gated on tessellation and a settled format, and M2.5 changes
+neither.
 
 ---
 
@@ -691,7 +782,8 @@ moment a second predicate took constructed input.
   in the workspace. The natural one judges an operation's worst enclosure and
   belongs in `rcad-topo` or the facade; `ProvenanceLog::worst_enclosure()` is
   the obvious input. §2.6 lists the field, so this is a missing caller, not a
-  field to delete.
+  field to delete. **Amended 2026-08-30:** §1.7 names the caller — the M2.5
+  fuse, exit criterion 7.
 - `Approximation` magnitudes from a tolerant `orient2d` are areas, while
   §5.4's `tol(vertex) ≥ tol(edge) ≥ tol(face)` ordering wants lengths.
   Consistent within one predicate degree, wrong across degrees. Same root cause
@@ -707,3 +799,73 @@ moment a second predicate took constructed input.
 - `PredicatePoint::enclosure()` returns `[Interval; 3]`, so the facade's rustdoc
   names a type §3.6 deliberately keeps private. Cosmetic today; the seam to
   watch if it bites.
+
+The second and fourth of these are the same kind of mistake — a meaning settled
+in one place and not carried to the other. §13 rule 4 is the general form.
+
+---
+
+## 13. How work is decomposed
+
+*Recorded 2026-08-30, alongside §12.*
+
+§1–§12 say what to build. This says how the work is cut into pieces, because
+M0's cost landed somewhere the milestone list cannot show. §12.1: the hard part
+was easy, and the money went to code that was already written and looked
+finished.
+
+Every gap in §12.6 is a **seam**. A field with no caller. An `Approximation`
+magnitude in the units of the wrong predicate degree. An error bound living in a
+different crate from the expression it bounds. A private type leaking through the
+facade. None of them is a bug inside a unit; all of them are bugs between two.
+That is the failure this section exists to bound, and running more than one piece
+of work at a time makes exactly that failure more likely.
+
+**1. Split by oracle, not by milestone subpart.** A piece can be worked on
+independently when the property that decides it is correct can be written down
+*before* the work starts: a textbook formula, a differential test against an
+implementation sharing no lineage (§2.2), or a metamorphic relation (§12.2). A
+piece whose specification is discovered by writing it is design work, and design
+work does not split.
+
+**2. A milestone is shaped gate, fan, gate.** Not a uniform graph. M1
+concretely: settle the `Curve` and `Surface` extension, the knot vector type and
+its invariants, the homogeneous-internal / affine-external boundary of roadmap
+§4.1 and the `EvalError` cases of roadmap §4.5 — one pass, one head. Then the
+Piegl & Tiller algorithms fan wide, each with its own textbook oracle. Then
+rejoin for surface poles, continuity classification, and the seam where a NURBS
+point becomes a `PredicatePoint` carrying an enclosure.
+
+**3. No named consumer, no build.** §12.6's first gap is a field specified in
+§2.6, implemented, tested, and called by nothing. §11 already defers
+`ProvenanceSink` for exactly this reason — "no caller yet". Generalize it: a
+piece with no consumer inside the current milestone is deferred to the milestone
+where its consumer appears.
+
+**4. Settle shared meanings before the fan-out, in writing.** §12.4: an enclosure
+carries the units of the predicate that produced it. That is one decision, and
+two people making it independently make it twice, differently. Before M1 fans
+out, settle here what an `Approximation` magnitude measures across predicate
+degrees, and that an error bound is published beside the expression it bounds —
+the way `ORIENT3D_ERROR_BOUND` sits beside its expression and
+`Model::validate`'s `allowed_wobble` does not.
+
+**5. Vary the generators across pieces.** §12.3: one family of shapes finds one
+family of bugs. Two pieces sharing a generator report green together, and the
+agreement means nothing.
+
+**6. Review is the constraint, not authoring.** §12.1: three bugs shipped through
+a passing suite and were found only by review. More work in flight produces more
+code per unit of review, which pushes on the constraint from the wrong side. Cap
+work in flight inside a single crate at two or three pieces. Go wider only across
+crate boundaries that are already stable contracts.
+
+| Splits | Does not split |
+|---|---|
+| Roadmap §4.2–4.4's algorithm list — each one is a textbook formula | What a shared type means: enclosure units, `Approximation` semantics, the `Decision` contract |
+| Cone and torus sign predicates, once the cascade is fixed | Surface–surface marching (roadmap §6.3) — the branches interact |
+| Roadmap §7.4's catalogue written as test cases | Boolean classification and shell assembly — graph traversal |
+| `cargo-fuzz` harness, `criterion` benches, `ruststep` plumbing | Review |
+
+Rule 3's operational half is also in `CLAUDE.md`, because that is what is read
+every session. The reasoning is here.

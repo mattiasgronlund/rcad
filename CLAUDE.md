@@ -33,6 +33,8 @@ These are the ones that are expensive to notice late.
 - Validity checks after a mutation are **local to touched entities**. The full
   sweep is `Model::validate()`, called at test and import boundaries. A full sweep
   per operation makes the test suite quadratic.
+- **A part with no named consumer is not built.** Defer it to the milestone where
+  the consumer appears. `docs/decisions.md` §13 says why.
 
 ## Tooling
 
