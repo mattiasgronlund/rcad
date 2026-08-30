@@ -245,8 +245,8 @@ pub use rcad_predicates::Error as PredicateError;
 pub use rcad_topo::Error as TopologyError;
 
 pub use rcad_geom::{
-    Axis, Cylinder, Isometry, Orientation, Plane, Point, Scale, Segment, Sphere, Surface, Unit,
-    Vector,
+    Axis, BSplineCurve, BSplineSurface, Cylinder, Isometry, KnotVector, MAX_DEGREE, Orientation,
+    Plane, Point, Scale, Segment, Sphere, Surface, Unit, Vector,
 };
 pub use rcad_predicates::{
     Approximation, Cause, Decision, Level, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint,

@@ -35,14 +35,24 @@
 //! division rounds — so a point that helped build a face is provably a rounding
 //! off the face's *stored* plane while being exactly on its true one. Read the
 //! note on [`Plane::side_of_point`] before using it to answer that question.
+//!
+//! A third kind is coming, for the splines. A point on a curve is worked out by
+//! arithmetic, so it is neither a trustworthy `f64` nor an exact input to a
+//! predicate — the honest answer is an *enclosed* one: a box the true point is
+//! somewhere inside. It will arrive as `evaluate_with_enclosure` on
+//! [`BSplineCurve`] and [`BSplineSurface`], and it is the only form a predicate
+//! may be asked about a spline point in.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod bspline_curve;
+mod bspline_surface;
 mod cylinder;
 mod error;
 mod exact;
 mod isometry;
+mod knot_vector;
 mod orientation;
 mod plane;
 mod point;
@@ -51,9 +61,12 @@ mod segment;
 mod sphere;
 mod surface;
 
+pub use crate::bspline_curve::BSplineCurve;
+pub use crate::bspline_surface::BSplineSurface;
 pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
 pub use crate::error::{Error, Result};
 pub use crate::isometry::Isometry;
+pub use crate::knot_vector::{KnotVector, MAX_DEGREE};
 pub use crate::orientation::Orientation;
 pub use crate::plane::{Plane, SIDE_OF_PLANE};
 pub use crate::point::{Axis, Point, Vector};

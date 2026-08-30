@@ -76,6 +76,89 @@ pub enum Error {
         ratio: f64,
     },
 
+    /// A spline was asked for at a degree this kernel does not carry.
+    #[error(
+        "the degree must be between 1 and {limit}, but it was {degree}",
+        limit = crate::MAX_DEGREE
+    )]
+    DegreeNotSupported {
+        /// What the caller asked for.
+        degree: usize,
+    },
+
+    /// A knot vector too short to be clamped at both ends.
+    ///
+    /// A degree `p` spline needs `p + 1` knots at each end before anything else
+    /// can be said about it.
+    #[error("{knots} knots is too few for a degree {degree} spline")]
+    TooFewKnots {
+        /// The degree that was asked for.
+        degree: usize,
+        /// How many knots came with it.
+        knots: usize,
+    },
+
+    /// A knot is smaller than the one before it.
+    #[error("the knot at position {at} is smaller than the one before it")]
+    KnotsGoBackwards {
+        /// Where the drop is.
+        at: usize,
+    },
+
+    /// The first or last knot is not repeated enough times to pin the curve to
+    /// its end control point.
+    #[error(
+        "the first and last knot must each be repeated one more time than the degree; \
+         periodic knot vectors first arrive with STEP import at M5"
+    )]
+    KnotVectorNotClamped,
+
+    /// An interior knot appears more often than the degree allows, which would
+    /// leave a control point with no basis function of its own.
+    #[error("the interior knot {knot} appears {times} times, more than the degree {degree}")]
+    KnotRepeatedTooOften {
+        /// The knot value that repeats.
+        knot: f64,
+        /// How many times it appears in the whole vector.
+        times: usize,
+        /// The degree it was measured against.
+        degree: usize,
+    },
+
+    /// Every span between the ends has zero width, so the knot vector names no
+    /// stretch of parameter at all.
+    #[error("every span between the first and last knot has zero width")]
+    KnotVectorHasNoSpan,
+
+    /// The control net does not have the number of points the knot vector asks
+    /// for.
+    #[error("the knot vector asks for {expected} control points, but {given} were given")]
+    WrongNumberOfControlPoints {
+        /// How many the knot vector asks for.
+        expected: usize,
+        /// How many the caller handed over.
+        given: usize,
+    },
+
+    /// A weight that cannot be divided back out.
+    #[error("every weight must be a finite number greater than zero, but one was {weight}")]
+    WeightNotPositive {
+        /// The weight that was refused.
+        weight: f64,
+    },
+
+    /// A parameter fell outside the stretch of parameter a spline is defined
+    /// over.
+    #[error("the parameter {parameter} is not between {lo} and {hi}")]
+    ParameterOutsideDomain {
+        /// What the caller asked for.
+        parameter: f64,
+        /// The bottom of the domain.
+        lo: f64,
+        /// The top of the domain.
+        hi: f64,
+    },
+
     /// A predicate refused the input it was handed — three planes with no
     /// single meeting point, for instance.
     #[error(transparent)]
