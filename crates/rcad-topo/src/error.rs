@@ -77,6 +77,30 @@ pub enum Error {
         expected: u32,
     },
 
+    /// One of the solids handed to a fuse runs through itself: two of its own
+    /// faces cross somewhere that is not an edge they share.
+    ///
+    /// Deliberately not something [`Model::validate`] looks for. Every face
+    /// against every other is quadratic in the face count, and a fuse is
+    /// already working out where faces meet, so it notices this for free
+    /// (decisions.md §17.4, §4.3).
+    ///
+    /// [`Model::validate`]: crate::Model::validate
+    #[error("one of the solids handed over runs through itself")]
+    ArgumentIntersectsItself,
+
+    /// The result of a fuse would have an edge with something other than two
+    /// faces along it, so it is not a solid this kernel can hold.
+    ///
+    /// A `Model` means an edge is used by exactly two coedges everywhere, and
+    /// relaxing that changes what a model *is* rather than what one boolean does
+    /// (decisions.md §17.4).
+    #[error("the result would not be a solid: an edge would have {count} faces along it")]
+    ResultIsNotManifold {
+        /// How many faces would meet along the worst edge.
+        count: usize,
+    },
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the
