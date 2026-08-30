@@ -79,11 +79,6 @@
 mod build;
 mod classify;
 mod error;
-// The fuse's front door is `Model::fuse`, and it arrives with the selection
-// rules and the commit that go on top of the cutting this module does. Until
-// then nothing outside the module calls into it and the compiler is right to
-// say so.
-#[allow(dead_code)]
 mod fuse;
 mod key;
 mod measure;
@@ -95,6 +90,7 @@ mod view;
 pub use build::{Profile, ProfileBuilder};
 pub use classify::Containment;
 pub use error::{Error, Invalid, Result};
+pub use fuse::{Fused, Rule};
 pub use key::{CoedgeKey, EdgeKey, FaceKey, ShellKey, SolidKey, VertexKey, WireKey};
 pub use measure::Measurement;
 pub use model::Model;

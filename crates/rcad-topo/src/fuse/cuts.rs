@@ -8,32 +8,57 @@
 //! lies on two planes. That is the only place the coplanar case is special: the
 //! arrangement sees one uniform kind of input.
 //!
-//! Lines are gathered between the two groups and not within one of them. A face
-//! of an argument is never cut by another argument, so two argument solids that
-//! overlap each other are not decomposed against each other. The signature calls
-//! `A` the union of the arguments (§17.4), and making that union real is work
-//! that has no consumer yet.
+//! Lines are gathered between **every pair of distinct input solids**, whether
+//! the two are in the same group or not. `A` is the union of the arguments and
+//! `B` the union of the tools (§17.4), and a union is only real if the solids
+//! making it up have been cut against each other: otherwise two overlapping
+//! arguments keep the halves of each other's faces that are buried inside the
+//! other one, and the answer is a self-overlapping shell rather than a union.
+//!
+//! # Every face of a solid is cut by every plane of the other
+//!
+//! Two solids whose boxes miss each other are skipped whole, and that changes
+//! no answer: solids that cannot touch leave every face of both alone. Inside a
+//! pair that might touch, though, **no face pair is skipped**, and a box test
+//! there would be wrong rather than merely keen.
+//!
+//! A cut is by a *plane*, and a plane reaches past the face that carries it. A
+//! face whose box is nowhere near the other solid can still be crossed by one
+//! of its planes, and if its neighbour is crossed by that plane too then the
+//! two are split at the same point of the edge between them. Skip the pair the
+//! box test calls hopeless and only one side of that edge gets split, so the
+//! two no longer meet along one edge and the result is not a manifold. §17.4
+//! throws the BVH out because a broad phase "changes no answer"; a face-level
+//! box test here does change one, which is the same argument arriving from the
+//! other side.
+//!
+//! # Two gaps, left open on purpose
+//!
+//! A solid is only refused for running through itself when the overlap is
+//! *proved*. Two faces whose stretches merely touch inside their enclosures have
+//! not been shown to cross, and refusing them would refuse a sound solid whose
+//! faces meet at a single corner.
+//!
+//! Two **coplanar** faces of one solid are not checked against each other at
+//! all. The pair carries no cut line — a plane does not cut itself — so an
+//! overlap between them would have to be found by comparing the two outlines in
+//! their shared plane, and nothing here does that. A solid built by folding one
+//! face back onto another is therefore not caught. Both gaps belong with roadmap
+//! §7.4's catalogue of degenerate inputs, which is where the cases that would
+//! close them get written.
 
 use rcad_geom::{Plane, PlaneAgreement};
 use rcad_predicates::{Policy, ProvenanceLog};
 
-use crate::{Error, FaceKey, Result};
+use crate::{Error, Result};
 
 use super::arrange::{agreement_of_two_planes, planes_are_parallel, stretches_of_a_line_inside};
 use super::bake::{BakedFace, BakedSolid};
 
-/// One line cutting one face: the second plane of the pair.
-///
-/// The face's own plane is the first, so it is not stored here.
-#[derive(Clone, Debug)]
-pub(crate) struct Cut {
-    /// The plane that, met with the face's own, carries the line.
-    pub(crate) partner: Plane,
-    /// The face of the other group that put this line here.
-    pub(crate) from: FaceKey,
-}
-
 /// Work out every cut line, and hang each on the face it cuts.
+///
+/// Every pair of distinct solids is cut against every other, whichever group
+/// each came from.
 ///
 /// # Errors
 ///
@@ -41,51 +66,46 @@ pub(crate) struct Cut {
 /// run through each other, [`Error::Undecidable`] when a decision that takes
 /// could not be settled under `policy`.
 pub(crate) fn gather(
-    arguments: &mut [BakedSolid],
-    tools: &mut [BakedSolid],
+    solids: &mut [BakedSolid],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<()> {
-    for solid in arguments.iter().chain(tools.iter()) {
+    for solid in solids.iter() {
         check_it_does_not_cross_itself(solid, policy, log)?;
     }
 
-    let mut onto_arguments: Vec<(usize, usize, Cut)> = Vec::new();
-    let mut onto_tools: Vec<(usize, usize, Cut)> = Vec::new();
-    for (argument, one) in arguments.iter().enumerate() {
-        for (tool, other) in tools.iter().enumerate() {
-            if !one.bounds.overlap(other.bounds) {
+    let mut found: Vec<(usize, usize, Plane)> = Vec::new();
+    for one in 0..solids.len() {
+        for other in (one + 1)..solids.len() {
+            if !solids[one].bounds.overlap(solids[other].bounds) {
                 continue;
             }
-            for (mine, face) in one.faces.iter().enumerate() {
-                for (theirs, against) in other.faces.iter().enumerate() {
-                    if !face.bounds.overlap(against.bounds) {
-                        continue;
-                    }
+            for mine in 0..solids[one].faces.len() {
+                for theirs in 0..solids[other].faces.len() {
+                    let face = &solids[one].faces[mine];
+                    let against = &solids[other].faces[theirs];
                     let (onto_face, onto_against) = cuts_between(face, against, policy, log)?;
-                    onto_arguments.extend(onto_face.into_iter().map(|cut| (argument, mine, cut)));
-                    onto_tools.extend(onto_against.into_iter().map(|cut| (tool, theirs, cut)));
+                    found.extend(onto_face.into_iter().map(|cut| (one, mine, cut)));
+                    found.extend(onto_against.into_iter().map(|cut| (other, theirs, cut)));
                 }
             }
         }
     }
 
-    for (solid, face, cut) in onto_arguments {
-        arguments[solid].faces[face].cuts.push(cut);
-    }
-    for (solid, face, cut) in onto_tools {
-        tools[solid].faces[face].cuts.push(cut);
+    for (solid, face, cut) in found {
+        solids[solid].faces[face].cuts.push(cut);
     }
     Ok(())
 }
 
-/// The lines each of two faces cuts in the other.
+/// The lines each of two faces cuts in the other, each as the second plane of
+/// the pair — the face's own plane is the first and is not repeated.
 fn cuts_between(
     face: &BakedFace,
     against: &BakedFace,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<(Vec<Cut>, Vec<Cut>)> {
+) -> Result<(Vec<Plane>, Vec<Plane>)> {
     match agreement_of_two_planes(&face.plane, &against.plane, log)? {
         PlaneAgreement::SameWay | PlaneAgreement::OppositeWay => {
             Ok((boundary_of(against), boundary_of(face)))
@@ -94,30 +114,18 @@ fn cuts_between(
             if planes_are_parallel(&face.plane, &against.plane, policy, log)? {
                 return Ok((Vec::new(), Vec::new()));
             }
-            Ok((
-                vec![Cut {
-                    partner: against.plane,
-                    from: against.key,
-                }],
-                vec![Cut {
-                    partner: face.plane,
-                    from: face.key,
-                }],
-            ))
+            Ok((vec![against.plane], vec![face.plane]))
         }
         other => panic!("plane agreement came back with an answer nothing here knows: {other:?}"),
     }
 }
 
 /// One cut line per edge of a face, for cutting a face coplanar with it.
-fn boundary_of(face: &BakedFace) -> Vec<Cut> {
+fn boundary_of(face: &BakedFace) -> Vec<Plane> {
     face.wires
         .iter()
         .flatten()
-        .map(|edge| Cut {
-            partner: edge.across,
-            from: face.key,
-        })
+        .map(|edge| edge.across)
         .collect()
 }
 
@@ -181,7 +189,7 @@ fn share_a_corner(face: &BakedFace, against: &BakedFace) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Isometry, Scale, Vector};
+    use rcad_geom::{Isometry, Plane, Scale, Vector};
     use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::gather;
@@ -189,7 +197,7 @@ mod tests {
     use crate::{Error, Model, SolidKey};
 
     /// Two cubes of side two, the second one moved by `shift`.
-    fn two_cubes(shift: Vector) -> (Vec<BakedSolid>, Vec<BakedSolid>) {
+    fn two_cubes(shift: Vector) -> Vec<BakedSolid> {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
@@ -201,10 +209,7 @@ mod tests {
             other,
             &Isometry::translation(shift).expect("a finite shift"),
         );
-        (
-            bake(&model, &[one]).expect("a cube bakes"),
-            bake(&model, &[other]).expect("a cube bakes"),
-        )
+        bake(&model, &[one, other]).expect("two cubes bake")
     }
 
     fn facing(solid: &BakedSolid, way: Vector) -> &BakedFace {
@@ -215,70 +220,85 @@ mod tests {
             .expect("a cube has a face pointing every way")
     }
 
-    fn gathered(arguments: &mut [BakedSolid], tools: &mut [BakedSolid]) {
+    fn gathered(solids: &mut [BakedSolid]) {
         let mut log = ProvenanceLog::new();
-        gather(arguments, tools, &Policy::certified(), &mut log)
+        gather(solids, &Policy::certified(), &mut log)
             .expect("two lattice-aligned cubes leave nothing undecided");
         assert!(log.is_empty(), "nothing here had to be approximated");
     }
 
     #[test]
     fn two_cubes_that_overlap_cut_each_other_where_their_faces_cross() {
-        let (mut arguments, mut tools) = two_cubes(Vector::new(1.0, 1.0, 1.0));
+        let mut solids = two_cubes(Vector::new(1.0, 1.0, 1.0));
 
-        gathered(&mut arguments, &mut tools);
+        gathered(&mut solids);
 
-        let up = facing(&arguments[0], Vector::new(0.0, 0.0, 1.0));
-        let mut cutting: Vec<[f64; 4]> = up
-            .cuts
-            .iter()
-            .map(|cut| cut.partner.coefficients())
-            .collect();
+        let up = facing(&solids[0], Vector::new(0.0, 0.0, 1.0));
+        let mut cutting: Vec<[f64; 4]> = up.cuts.iter().map(Plane::coefficients).collect();
         cutting.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
         assert_eq!(
             cutting,
-            [[-1.0, 0.0, 0.0, 1.0], [0.0, -1.0, 0.0, 1.0]],
-            "the top of the lower cube is cut by the two walls of the upper one that reach it"
+            [
+                [-1.0, 0.0, 0.0, 1.0],
+                [0.0, -1.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0, -3.0],
+                [1.0, 0.0, 0.0, -3.0]
+            ],
+            "all four walls of the upper cube, the two far ones included: a cut is by a plane, \
+             and a plane reaches past the face carrying it"
         );
     }
 
+    /// The bottom of the lower cube is nowhere near the upper one, and is cut by
+    /// its walls all the same — because its own neighbours are, and a face split
+    /// on one side of a shared edge and not the other leaves an edge with one
+    /// face along it.
     #[test]
-    fn a_face_the_other_cube_cannot_reach_is_cut_by_nothing() {
-        let (mut arguments, mut tools) = two_cubes(Vector::new(1.0, 1.0, 1.0));
+    fn a_face_the_other_cube_cannot_reach_is_cut_all_the_same() {
+        let mut solids = two_cubes(Vector::new(1.0, 1.0, 1.0));
 
-        gathered(&mut arguments, &mut tools);
+        gathered(&mut solids);
 
-        let down = facing(&arguments[0], Vector::new(0.0, 0.0, -1.0));
-        assert!(
-            down.cuts.is_empty(),
-            "the bottom of the lower cube is nowhere near the upper one"
+        let down = facing(&solids[0], Vector::new(0.0, 0.0, -1.0));
+        let mut cutting: Vec<[f64; 4]> = down.cuts.iter().map(Plane::coefficients).collect();
+        cutting.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
+        assert_eq!(
+            cutting.len(),
+            4,
+            "the four walls of the upper cube, none of which reaches down here"
         );
     }
 
+    /// Two coplanar faces cut each other with the four edges of the other, not
+    /// with a plane that is the same plane.
+    ///
+    /// The upper cube's four walls also reach down to the face they share and
+    /// cut it directly, and they lie on the very same four planes — so eight cut
+    /// lines arrive and four distinct planes carry them. Without the coplanar
+    /// branch only the four direct ones would.
     #[test]
     fn one_cube_sitting_on_another_is_cut_once_per_edge_of_the_face_they_share() {
-        let (mut arguments, mut tools) = two_cubes(Vector::new(0.0, 0.0, 2.0));
+        let mut solids = two_cubes(Vector::new(0.0, 0.0, 2.0));
 
-        gathered(&mut arguments, &mut tools);
+        gathered(&mut solids);
 
-        let up = facing(&arguments[0], Vector::new(0.0, 0.0, 1.0));
-        let down = facing(&tools[0], Vector::new(0.0, 0.0, -1.0));
-        assert_eq!(
-            up.cuts.iter().filter(|cut| cut.from == down.key).count(),
-            4,
-            "two coplanar faces cut each other with the four edges of the other, not with a plane \
-             that is the same plane"
-        );
-        assert_eq!(down.cuts.iter().filter(|cut| cut.from == up.key).count(), 4);
+        for (solid, way) in [(0, 1.0), (1, -1.0)] {
+            let shared = facing(&solids[solid], Vector::new(0.0, 0.0, way));
+            assert_eq!(shared.cuts.len(), 8);
+            let mut distinct: Vec<[f64; 4]> = shared.cuts.iter().map(Plane::coefficients).collect();
+            distinct.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
+            distinct.dedup();
+            assert_eq!(distinct.len(), 4);
+        }
     }
 
     #[test]
     fn two_cubes_that_are_nowhere_near_each_other_cut_nothing() {
-        let (mut arguments, mut tools) = two_cubes(Vector::new(10.0, 0.0, 0.0));
+        let mut solids = two_cubes(Vector::new(10.0, 0.0, 0.0));
 
-        gathered(&mut arguments, &mut tools);
+        gathered(&mut solids);
 
-        for solid in arguments.iter().chain(&tools) {
+        for solid in &solids {
             for face in &solid.faces {
                 assert!(face.cuts.is_empty());
             }
@@ -287,8 +307,8 @@ mod tests {
 
     #[test]
     fn a_cube_does_not_run_through_itself() {
-        let (mut arguments, mut tools) = two_cubes(Vector::new(1.0, 1.0, 1.0));
-        gathered(&mut arguments, &mut tools);
+        let mut solids = two_cubes(Vector::new(1.0, 1.0, 1.0));
+        gathered(&mut solids);
     }
 
     /// Two cubes wired into one solid, overlapping. Nothing a profile can build
@@ -309,12 +329,30 @@ mod tests {
         );
         let crossed = both_solids_as_one(&mut model, one, other);
 
-        let mut arguments = bake(&model, &[crossed]).expect("it bakes");
-        let refusal = gather(&mut arguments, &mut [], &policy, &mut log);
+        let mut solids = bake(&model, &[crossed]).expect("it bakes");
+        let refusal = gather(&mut solids, &policy, &mut log);
 
         assert!(
             matches!(refusal, Err(Error::ArgumentIntersectsItself)),
             "expected a refusal, got {refusal:?}"
+        );
+    }
+
+    /// Two solids handed over on the *same* side still cut each other. `A` is
+    /// the union of the arguments, and a union of two overlapping cubes that
+    /// were never cut against each other keeps the halves buried inside the
+    /// other one.
+    #[test]
+    fn two_cubes_in_one_group_cut_each_other_the_same_as_two_in_opposite_groups() {
+        let mut solids = two_cubes(Vector::new(1.0, 1.0, 1.0));
+
+        gathered(&mut solids);
+
+        let up = facing(&solids[0], Vector::new(0.0, 0.0, 1.0));
+        assert_eq!(
+            up.cuts.len(),
+            4,
+            "the top of the lower cube is cut by the four walls of the upper one"
         );
     }
 

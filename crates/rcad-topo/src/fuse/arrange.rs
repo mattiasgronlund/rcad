@@ -42,14 +42,16 @@ use core::cmp::Ordering;
 
 use rcad_geom::{Orientation, Plane, PlaneAgreement, SIDE_OF_PLANE};
 use rcad_predicates::{
-    Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
-    ProvenanceLog, Record, orient2d, orient3d,
+    Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
+    ProvenanceLog, orient2d, orient3d,
 };
 
-use crate::{Error, FaceKey, Invalid, Result, VertexKey};
+use crate::{EdgeKey, FaceKey, Invalid, Result, VertexKey};
 
 use super::bake::BakedFace;
-use super::{FaceMeet, MeetPoint, must_decide};
+use super::{
+    FaceMeet, MeetPoint, Sameness, as_exact_as_it_is, gave_up, must_decide, the_other_way,
+};
 
 /// Cut one face into the pieces its cut lines leave behind.
 ///
@@ -57,8 +59,8 @@ use super::{FaceMeet, MeetPoint, must_decide};
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] when a decision the split depends on could not be
-/// settled under `policy`, and [`Error::Invalid`] when the face turns out to be
+/// [`Error::Undecidable`](crate::Error::Undecidable) when a decision the split depends on could not be
+/// settled under `policy`, and [`Error::Invalid`](crate::Error::Invalid) when the face turns out to be
 /// broken — two of its corners in the same place, say.
 ///
 /// # Panics
@@ -173,7 +175,7 @@ fn certain_part([from, to]: [Interval; 2]) -> (f64, f64) {
 /// dropped; two *different* planes that happen to cut `p` in the same line are
 /// found later by [`relation_of_two_lines`], which is exact.
 fn canonical_cut_planes(face: &BakedFace) -> Vec<Plane> {
-    let mut planes: Vec<Plane> = face.cuts.iter().map(|cut| cut.partner).collect();
+    let mut planes: Vec<Plane> = face.cuts.clone();
     planes.sort_by(|one, other| {
         let (one, other) = (one.coefficients(), other.coefficients());
         (0..4)
@@ -253,6 +255,8 @@ struct Boundary {
     wire: usize,
     /// Whether the wire walks this arc in the line's forward direction.
     runs_forward: bool,
+    /// The input edge this stretch of the boundary is part of.
+    edge: EdgeKey,
 }
 
 /// A way to leave a node: along a line, one way or the other.
@@ -649,7 +653,11 @@ impl<'f> Arrangement<'f> {
                             boundary[step].is_none(),
                             "two edges of one face run along the same stretch of one line"
                         );
-                        boundary[step] = Some(Boundary { wire, runs_forward });
+                        boundary[step] = Some(Boundary {
+                            wire,
+                            runs_forward,
+                            edge: edges[position].key,
+                        });
                         present[step] = true;
                     }
                 }
@@ -1012,7 +1020,7 @@ impl<'f> Arrangement<'f> {
     ///
     /// # Errors
     ///
-    /// [`Error::Undecidable`] when no line through the lump gives an answer.
+    /// [`Error::Undecidable`](crate::Error::Undecidable) when no line through the lump gives an answer.
     ///
     /// A ray that cannot be followed — one that runs along an arc, or that
     /// reaches an arc's end, or whose distances cannot be told apart — is
@@ -1213,6 +1221,9 @@ impl<'f> Arrangement<'f> {
                     self.meet_point(self.from(half_edge)),
                     self.meet_point(self.to(half_edge)),
                 ],
+                along: self.arcs[half_edge / 2]
+                    .boundary
+                    .map(|boundary| boundary.edge),
                 approximation: None,
             })
             .collect()
@@ -1265,53 +1276,11 @@ enum Crossing {
     AtAnEnd,
 }
 
-/// Give up on a decision nothing can bound, recording that it was asked.
-///
-/// The enclosure is infinite because that is the truth: there is no width here
-/// to compare against a budget, so no policy can accept it and none is asked.
-fn gave_up(
-    predicate: &'static str,
-    inputs: &[PredicatePoint],
-    measures: Measures,
-    log: &mut ProvenanceLog,
-) -> Error {
-    log.push(Record::new(
-        predicate,
-        inputs,
-        Level::Interval,
-        Decision::Undecidable {
-            enclosure: f64::INFINITY,
-        },
-        measures,
-    ));
-    Error::Undecidable {
-        records: core::mem::take(log),
-    }
-}
-
 fn at_in(order: &[usize], node: usize) -> usize {
     order
         .iter()
         .position(|&other| other == node)
         .expect("a corner is one of the nodes on the line its edge runs along")
-}
-
-fn the_other_way(decision: Decision) -> Decision {
-    match decision {
-        Decision::Pos => Decision::Neg,
-        Decision::Neg => Decision::Pos,
-        other => other,
-    }
-}
-
-/// A box that has collapsed onto one `f64` triple *is* that triple. See
-/// `bake.rs` for why saying so matters.
-fn as_exact_as_it_is(point: PredicatePoint) -> PredicatePoint {
-    let box_of_it = point.enclosure();
-    if box_of_it.iter().all(|side| side.lo() == side.hi()) {
-        return PredicatePoint::from([box_of_it[0].lo(), box_of_it[1].lo(), box_of_it[2].lo()]);
-    }
-    point
 }
 
 /// Which axis the line `p ∩ q` climbs fastest along, and whether
@@ -1326,7 +1295,7 @@ fn as_exact_as_it_is(point: PredicatePoint) -> PredicatePoint {
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] when no component can be shown to be non-zero, which
+/// [`Error::Undecidable`](crate::Error::Undecidable) when no component can be shown to be non-zero, which
 /// for two planes that are not parallel takes coefficients too extreme to
 /// multiply.
 fn dominant_axis(plane: &Plane, partner: &Plane, log: &mut ProvenanceLog) -> Result<(usize, bool)> {
@@ -1478,41 +1447,6 @@ pub(crate) fn agreement_of_two_planes(
     }
 }
 
-/// Which things have turned out to be one thing.
-struct Sameness {
-    leader: Vec<usize>,
-    joined: bool,
-}
-
-impl Sameness {
-    fn of(count: usize) -> Self {
-        Self {
-            leader: (0..count).collect(),
-            joined: false,
-        }
-    }
-
-    fn leader(&self, mut of: usize) -> usize {
-        while self.leader[of] != of {
-            of = self.leader[of];
-        }
-        of
-    }
-
-    fn join(&mut self, one: usize, other: usize) {
-        let (one, other) = (self.leader(one), self.leader(other));
-        if one == other {
-            return;
-        }
-        self.leader[one.max(other)] = one.min(other);
-        self.joined = true;
-    }
-
-    fn joined_anything(&self) -> bool {
-        self.joined
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use rcad_geom::{Isometry, Plane, Scale, Vector};
@@ -1520,7 +1454,7 @@ mod tests {
 
     use super::{Piece, split_a_face, the_other_way};
     use crate::fuse::bake::{BakedFace, bake};
-    use crate::fuse::{Cut, FaceMeet, MeetPoint};
+    use crate::fuse::{FaceMeet, MeetPoint};
     use crate::{Model, ProfileBuilder, SolidKey};
 
     /// The identity the anticlockwise order of two lines round a corner rests
@@ -1607,10 +1541,7 @@ mod tests {
         let mut cut = face.clone();
         cut.cuts = planes
             .iter()
-            .map(|&coefficients| Cut {
-                partner: Plane::from_coefficients(coefficients).expect("a plane"),
-                from: face.key,
-            })
+            .map(|&coefficients| Plane::from_coefficients(coefficients).expect("a plane"))
             .collect();
         cut
     }

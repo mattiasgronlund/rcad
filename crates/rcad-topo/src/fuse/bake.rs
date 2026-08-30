@@ -6,12 +6,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{Orientation, Plane, Point};
-use rcad_predicates::{Approximation, Cause, Decision, Point as PredicatePoint};
+use rcad_predicates::{Decision, Point as PredicatePoint};
 
 use crate::key::{FaceSlot, VertexSlot};
-use crate::{Error, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
+use crate::{
+    EdgeKey, Error, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey,
+};
 
-use super::Cut;
+use super::{as_exact_as_it_is, middle_of};
 
 /// Move every solid in `solids` into world coordinates.
 ///
@@ -65,8 +67,9 @@ pub(crate) struct BakedFace {
     /// the outer wire and clockwise for a hole, which is what
     /// [`Model::validate`] enforces.
     pub(crate) wires: Vec<Vec<BakedEdge>>,
-    /// The lines cutting this face, filled in by the gathering step.
-    pub(crate) cuts: Vec<Cut>,
+    /// The second plane of each line cutting this face, filled in by the
+    /// gathering step. The first is always the face's own.
+    pub(crate) cuts: Vec<Plane>,
     /// A box round the face.
     pub(crate) bounds: Bounds,
 }
@@ -74,6 +77,9 @@ pub(crate) struct BakedFace {
 /// One edge of one wire of a face.
 #[derive(Clone, Debug)]
 pub(crate) struct BakedEdge {
+    /// The input edge this is. Carried so that a piece of it can name the edge
+    /// it came out of, which is what the history's edge images are made of.
+    pub(crate) key: EdgeKey,
     /// The corner the wire is at when it starts along this edge.
     pub(crate) start: BakedCorner,
     /// The plane of the face on the other side of this edge. Together with the
@@ -95,13 +101,14 @@ pub(crate) struct BakedCorner {
     /// through a corner is then a question about the model rather than about
     /// arithmetic, which is what keeps the arrangement from having to prove a
     /// corner is on a line it is on by construction.
-    pub(crate) around: Vec<Plane>,
-    /// How far this corner may be from where its planes really meet.
     ///
-    /// Representation wobble (§17.2): present even though every decision was
-    /// proved, because Cramer's rule divides. It is reported, never refused on,
-    /// and it never goes in a [`ProvenanceLog`](rcad_predicates::ProvenanceLog).
-    pub(crate) approximation: Approximation,
+    /// How far the corner may be from where its planes really meet is the width
+    /// of [`BakedCorner::point`]'s own box — representation wobble (§17.2),
+    /// present even though every decision was proved, because Cramer's rule
+    /// divides. It is carried on the point rather than beside it so that the
+    /// number tagged on the committed vertex and the number the arrangement
+    /// decided with cannot drift apart.
+    pub(crate) around: Vec<Plane>,
 }
 
 /// A box round some geometry, in world coordinates.
@@ -287,36 +294,8 @@ fn derive_a_corner(vertex: VertexKey, around: Vec<Plane>) -> Result<BakedCorner>
         vertex,
         planes,
         point,
-        approximation: Approximation::new(point.uncertainty(), Cause::ConstructedPoint),
         around,
     })
-}
-
-/// A box that has collapsed onto one `f64` triple *is* that triple.
-///
-/// The box is a certified enclosure, so a box of no width proves the true meet
-/// is exactly the number in it, and saying so is a statement of what was proved
-/// rather than a rounding.
-///
-/// It matters more than it looks. Level 3 of the cascade cannot run on a
-/// constructed point, so a lattice-aligned model — where every meet lands
-/// exactly on an `f64` — would otherwise come back undecided on decisions it can
-/// prove, and §17.7's control family, whose expected refusal rate is zero, would
-/// refuse everything.
-fn as_exact_as_it_is(point: PredicatePoint) -> PredicatePoint {
-    let box_of_it = point.enclosure();
-    if box_of_it.iter().all(|side| side.lo() == side.hi()) {
-        return PredicatePoint::from([box_of_it[0].lo(), box_of_it[1].lo(), box_of_it[2].lo()]);
-    }
-    point
-}
-
-/// The middle of a point's box, for reporting a distance a caller can read.
-fn middle_of(point: PredicatePoint) -> Point {
-    let box_of_it = point.enclosure();
-    let axis =
-        |axis: usize| box_of_it[axis].lo() + (box_of_it[axis].hi() - box_of_it[axis].lo()) / 2.0;
-    Point::new(axis(0), axis(1), axis(2))
 }
 
 /// # Panics
@@ -343,6 +322,7 @@ fn bake_one_face(
         .map(|wire| {
             wire.coedges()
                 .map(|coedge| BakedEdge {
+                    key: coedge.edge().key(),
                     start: corners[&coedge.start().key().slot_in(model.id())].clone(),
                     across: planes[&face_across(model, key, coedge.edge().key())],
                 })
@@ -360,7 +340,7 @@ fn bake_one_face(
     }
 }
 
-fn face_across(model: &Model, face: FaceKey, edge: crate::EdgeKey) -> FaceSlot {
+fn face_across(model: &Model, face: FaceKey, edge: EdgeKey) -> FaceSlot {
     let mine = face.slot_in(model.id());
     let across: Vec<FaceSlot> = model
         .edge(edge)
@@ -379,7 +359,7 @@ fn face_across(model: &Model, face: FaceKey, edge: crate::EdgeKey) -> FaceSlot {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
-    use rcad_predicates::{Cause, Policy, ProvenanceLog};
+    use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::{Bounds, bake};
     use crate::VertexKey;
@@ -438,8 +418,7 @@ mod tests {
                         Some(stored(&corners, edge.start.vertex)),
                         "an axis-aligned corner is an f64 and comes back as one"
                     );
-                    assert_eq!(edge.start.approximation.magnitude(), 0.0);
-                    assert_eq!(edge.start.approximation.cause(), Cause::ConstructedPoint);
+                    assert_eq!(edge.start.point.uncertainty(), 0.0);
                 }
             }
         }
@@ -475,9 +454,8 @@ mod tests {
                             stored[axis]
                         );
                     }
-                    if edge.start.approximation.magnitude() > 0.0 {
+                    if edge.start.point.uncertainty() > 0.0 {
                         anything_was_built = true;
-                        assert_eq!(edge.start.approximation.cause(), Cause::ConstructedPoint);
                     }
                 }
             }

@@ -259,6 +259,6 @@ pub use rcad_predicates::{
 };
 pub use rcad_topo::{
     CoedgeKey, CoedgeView, Containment, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef,
-    FaceView, Invalid, Measurement, Model, Profile, ProfileBuilder, ShellKey, ShellView, SolidKey,
-    SolidView, VertexKey, VertexView, WireKey, WireView,
+    FaceView, Fused, Invalid, Measurement, Model, Profile, ProfileBuilder, Rule, ShellKey,
+    ShellView, SolidKey, SolidView, VertexKey, VertexView, WireKey, WireView,
 };
