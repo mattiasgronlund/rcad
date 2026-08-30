@@ -1,11 +1,12 @@
 //! Spline surfaces, always rational.
 
+use rcad_predicates::Point as PredicatePoint;
 use serde::{Deserialize, Serialize};
 
 use crate::bspline_curve::weigh;
 use crate::de_boor::{
-    EVALUATION_ROUNDOFF, after_two_passes, de_boor, derived_points, divided, rational_derivative,
-    roundoff_of_a_divided_point,
+    Coefficient, EVALUATION_ROUNDOFF, after_two_passes, de_boor, derived_points, divided, enclosed,
+    rational_derivative, roundoff_of_a_divided_point,
 };
 use crate::knot_vector::{KnotVector, MAX_DEGREE};
 use crate::point::{Point, Vector};
@@ -131,7 +132,7 @@ impl BSplineSurface {
     /// across the results, all in homogeneous coordinates with the divide
     /// happening once at the end.
     ///
-    /// Ordinary `f64` — see the crate doc's "two kinds of answer".
+    /// Ordinary `f64` — see the crate doc's "three kinds of answer".
     ///
     /// # Errors
     ///
@@ -194,6 +195,28 @@ impl BSplineSurface {
         Ok(rational_derivative(value, rate))
     }
 
+    /// A box the true point at `(u, v)` is somewhere inside, ready for the
+    /// predicate cascade.
+    ///
+    /// Both de Boor passes over intervals instead of `f64`, then the same
+    /// perspective divide — see
+    /// [`BSplineCurve::evaluate_with_enclosure`](crate::BSplineCurve::evaluate_with_enclosure)
+    /// for why this is the only enclosure, why it is never intersected with
+    /// [`EVALUATION_ROUNDOFF`], and when an exact point comes back out of
+    /// interval arithmetic.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ParameterOutsideDomain`], as [`BSplineSurface::evaluate`] —
+    /// the same one failure and no other.
+    ///
+    /// # Panics
+    ///
+    /// For the same broken invariant [`BSplineSurface::evaluate`] panics on.
+    pub fn evaluate_with_enclosure(&self, u: f64, v: f64) -> Result<PredicatePoint> {
+        Ok(enclosed(self.homogeneous_evaluate(u, v)?))
+    }
+
     /// How far [`BSplineSurface::evaluate`] at `(u, v)` can be from the true
     /// point, per coordinate.
     ///
@@ -214,8 +237,13 @@ impl BSplineSurface {
         ))
     }
 
-    /// The point at `(u, v)` before the weight is divided back out.
-    pub(crate) fn homogeneous_evaluate(&self, u: f64, v: f64) -> Result<[f64; 4]> {
+    /// The point at `(u, v)` before the weight is divided back out, in
+    /// whichever arithmetic the caller asked for.
+    ///
+    /// One body serves [`BSplineSurface::evaluate`] and
+    /// [`BSplineSurface::evaluate_with_enclosure`], for the reason the curve's
+    /// own version of this gives.
+    pub(crate) fn homogeneous_evaluate<C: Coefficient>(&self, u: f64, v: f64) -> Result<[C; 4]> {
         let (u_span, v_span) = self.spans_of(u, v)?;
         let degree = self.u_knots.degree();
         let mut rows = self.rows_collapsed_along_v(u_span, v_span, v);
@@ -252,22 +280,22 @@ impl BSplineSurface {
 
     /// Each of the `degree_u + 1` active rows, collapsed to one homogeneous
     /// point by de Boor in `v`.
-    fn rows_collapsed_along_v(
+    fn rows_collapsed_along_v<C: Coefficient>(
         &self,
         u_span: usize,
         v_span: usize,
         v: f64,
-    ) -> [[f64; 4]; MAX_DEGREE + 1] {
+    ) -> [[C; 4]; MAX_DEGREE + 1] {
         let u_degree = self.u_knots.degree();
         let v_degree = self.v_knots.degree();
         let across = self.v_knots.control_point_count();
 
-        let mut rows = [[0.0f64; 4]; MAX_DEGREE + 1];
+        let mut rows = [[C::exactly(0.0); 4]; MAX_DEGREE + 1];
         for (offset, row) in rows[..=u_degree].iter_mut().enumerate() {
             let i = offset + u_span - u_degree;
-            let mut along = [[0.0f64; 4]; MAX_DEGREE + 1];
+            let mut along = [[C::exactly(0.0); 4]; MAX_DEGREE + 1];
             for (step, point) in along[..=v_degree].iter_mut().enumerate() {
-                *point = self.net[i * across + step + v_span - v_degree];
+                *point = self.net[i * across + step + v_span - v_degree].map(C::exactly);
             }
             *row = de_boor(
                 v_degree,
@@ -571,6 +599,23 @@ mod tests {
         }
     }
 
+    /// A corner of a clamped patch is the corner control point through both
+    /// passes with nothing rounded, so the enclosure there is a point and not a
+    /// box. That is what lets the exact level of the cascade run on a surface
+    /// point, and always answering with a box would lose it.
+    #[test]
+    fn a_corner_of_a_patch_encloses_its_control_point_with_no_width_at_all() {
+        let patch = a_lumpy_patch();
+        for (u, i) in [(0.0, 0), (1.0, 2)] {
+            for (v, j) in [(0.0, 0), (1.0, 1)] {
+                assert_eq!(
+                    patch.evaluate_with_enclosure(u, v).unwrap(),
+                    PredicatePoint::Exact(patch.control_point(i, j).coordinates())
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_parameter_off_the_surface_is_refused_in_whichever_direction_it_is_off() {
         let patch = a_lumpy_patch();
@@ -579,6 +624,7 @@ mod tests {
                 patch.evaluate(u, v).err(),
                 patch.partial_u(u, v).err(),
                 patch.partial_v(u, v).err(),
+                patch.evaluate_with_enclosure(u, v).err(),
                 patch.evaluation_roundoff_at(u, v).err(),
             ];
             for refusal in refusals {

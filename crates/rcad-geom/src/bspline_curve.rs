@@ -1,10 +1,11 @@
 //! Spline curves, always rational.
 
+use rcad_predicates::Point as PredicatePoint;
 use serde::{Deserialize, Serialize};
 
 use crate::de_boor::{
-    EVALUATION_ROUNDOFF, de_boor, derived_points, divided, rational_derivative,
-    roundoff_of_a_divided_point,
+    Coefficient, EVALUATION_ROUNDOFF, de_boor, derived_points, divided, enclosed,
+    rational_derivative, roundoff_of_a_divided_point,
 };
 use crate::knot_vector::{KnotVector, MAX_DEGREE};
 use crate::point::{Point, Vector};
@@ -141,7 +142,7 @@ impl BSplineCurve {
     /// The point on the curve at `u`.
     ///
     /// Ordinary `f64`. Nothing may branch on it near a decision — see the crate
-    /// doc's "two kinds of answer". [`BSplineCurve::evaluation_roundoff_at`]
+    /// doc's "three kinds of answer". [`BSplineCurve::evaluation_roundoff_at`]
     /// says how far off it can be.
     ///
     /// # Errors
@@ -186,6 +187,40 @@ impl BSplineCurve {
         Ok(rational_derivative(value, rate))
     }
 
+    /// A box the true point at `u` is somewhere inside, ready for the predicate
+    /// cascade.
+    ///
+    /// The same de Boor recursion as [`BSplineCurve::evaluate`], run over
+    /// intervals instead of `f64`, with the perspective divide done the same
+    /// way at the end. **This is the enclosure, and it is the only one.**
+    /// [`EVALUATION_ROUNDOFF`] is tested against it and is not a second source:
+    /// the two are never intersected. An empty intersection would be a free
+    /// cross-check, and it would make a published bound load-bearing at
+    /// runtime, which is exactly where `docs/decisions.md` §12.2's mistake
+    /// lives. The cross-check is a test instead.
+    ///
+    /// Comes back [`PredicatePoint::Exact`] when all three sides have zero
+    /// width, and [`PredicatePoint::Constructed`] otherwise. Zero width says
+    /// the true coordinate *is* that `f64`, so exact is sound — and it is
+    /// strictly stronger, because only an exact point runs level 3 of the
+    /// cascade. That is what makes a degree-1 curve through exact control
+    /// points, read at an exact parameter, decidable at all.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ParameterOutsideDomain`] if `u` is not a finite number inside
+    /// [`BSplineCurve::domain`] — the same one failure
+    /// [`BSplineCurve::evaluate`] has, and no other.
+    ///
+    /// # Panics
+    ///
+    /// For the same broken invariant [`BSplineCurve::evaluate`] panics on. A
+    /// weight whose *enclosure* holds zero is not that, and does not panic; see
+    /// the note on the divide in `de_boor.rs`.
+    pub fn evaluate_with_enclosure(&self, u: f64) -> Result<PredicatePoint> {
+        Ok(enclosed(self.homogeneous_evaluate(u)?))
+    }
+
     /// How far [`BSplineCurve::evaluate`] at `u` can be from the true point,
     /// per coordinate.
     ///
@@ -207,11 +242,17 @@ impl BSplineCurve {
         ))
     }
 
-    /// The point at `u` before the weight is divided back out.
+    /// The point at `u` before the weight is divided back out, in whichever
+    /// arithmetic the caller asked for.
+    ///
+    /// One body serves [`BSplineCurve::evaluate`] and
+    /// [`BSplineCurve::evaluate_with_enclosure`], so "the enclosure runs the
+    /// same recursion" is true of the same code and not of two copies that
+    /// agree today.
     ///
     /// The fourth coordinate is `Σ Nᵢ,ₚ(u) · wᵢ`, which is what the
     /// partition-of-unity oracle reads.
-    pub(crate) fn homogeneous_evaluate(&self, u: f64) -> Result<[f64; 4]> {
+    pub(crate) fn homogeneous_evaluate<C: Coefficient>(&self, u: f64) -> Result<[C; 4]> {
         let span = self.span_of(u)?;
         let degree = self.degree();
         let mut active = self.active_net(span);
@@ -264,11 +305,11 @@ impl BSplineCurve {
     }
 
     /// The `degree + 1` control points the span reaches, ready for de Boor.
-    fn active_net(&self, span: usize) -> [[f64; 4]; MAX_DEGREE + 1] {
+    fn active_net<C: Coefficient>(&self, span: usize) -> [[C; 4]; MAX_DEGREE + 1] {
         let degree = self.degree();
-        let mut active = [[0.0f64; 4]; MAX_DEGREE + 1];
+        let mut active = [[C::exactly(0.0); 4]; MAX_DEGREE + 1];
         for (j, point) in active[..=degree].iter_mut().enumerate() {
-            *point = self.net[j + span - degree];
+            *point = self.net[j + span - degree].map(C::exactly);
         }
         active
     }
@@ -533,7 +574,7 @@ mod tests {
             let curve = BSplineCurve::new(knots.clone(), &origins, &weights).unwrap();
 
             for u in parameters_across(&knots) {
-                let total = curve.homogeneous_evaluate(u).unwrap()[3];
+                let total = curve.homogeneous_evaluate::<f64>(u).unwrap()[3];
                 assert!(
                     (total - 1.0).abs() <= EVALUATION_ROUNDOFF,
                     "degree {} at {u}: the basis functions add up to {total}",
@@ -664,6 +705,35 @@ mod tests {
         assert_eq!(middle.z(), 0.0, "a flat arc has an exact z");
     }
 
+    /// The same point as the test above, with no bound anywhere in the
+    /// assertion. Three fifths is not an `f64`, so the box has to have width,
+    /// and `z` is exactly zero, which is what stops this from being a box around
+    /// everything.
+    ///
+    /// The box is asserted to hold `0.6` strictly, which is the `f64` nearest
+    /// three fifths rather than three fifths itself. That settles the real
+    /// claim: the true value is within half a step of `0.6`, and a box with
+    /// `0.6` strictly inside it holds everything within half a step of it.
+    #[test]
+    fn the_enclosure_at_the_middle_of_the_quarter_circle_holds_three_fifths_and_four_fifths() {
+        let arc = the_quarter_circle();
+        let [x, y, z] = match arc.evaluate_with_enclosure(0.5).unwrap() {
+            PredicatePoint::Constructed(sides) => sides,
+            other => panic!("three fifths is not an f64, so this cannot be exact: {other:?}"),
+        };
+
+        assert!(
+            x.lo() < 0.6 && 0.6 < x.hi(),
+            "{x:?} does not hold three fifths"
+        );
+        assert!(
+            y.lo() < 0.8 && 0.8 < y.hi(),
+            "{y:?} does not hold four fifths"
+        );
+        assert_eq!(z.width(), 0.0, "a flat arc has an exact z");
+        assert_eq!(z.lo(), 0.0);
+    }
+
     #[test]
     fn a_parameter_off_the_curve_is_refused_by_everything_that_takes_one() {
         let curve = the_quarter_circle();
@@ -671,6 +741,7 @@ mod tests {
             let refusals = [
                 curve.evaluate(u).err(),
                 curve.tangent(u).err(),
+                curve.evaluate_with_enclosure(u).err(),
                 curve.evaluation_roundoff_at(u).err(),
             ];
             for refusal in refusals {

@@ -249,9 +249,9 @@ pub use rcad_geom::{
     MAX_DEGREE, Orientation, Plane, Point, Scale, Segment, Sphere, Surface, Unit, Vector,
 };
 pub use rcad_predicates::{
-    Approximation, Cause, Decision, Level, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint,
-    Policy, ProvenanceLog, Record, Severity, SideOfSurface, Strictness, orient2d,
-    orient2d_tolerantly, orient3d, orient3d_of_points, orient3d_tolerantly,
+    Approximation, Cause, Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D,
+    Point as PredicatePoint, Policy, ProvenanceLog, Record, Severity, SideOfSurface, Strictness,
+    orient2d, orient2d_tolerantly, orient3d, orient3d_of_points, orient3d_tolerantly,
 };
 pub use rcad_topo::{
     CoedgeKey, CoedgeView, Containment, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef,

@@ -15,8 +15,13 @@ serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 postcard.workspace = true
 proptest.workspace = true
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "how_wide_the_enclosure_gets"
+harness = false

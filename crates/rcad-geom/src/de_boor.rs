@@ -1,9 +1,10 @@
 //! The de Boor recursion, written once.
 //!
-//! Curves and surfaces share it, and so will the interval arithmetic that
-//! arrives with the enclosure: everything here is generic over [`Coefficient`],
-//! a scalar that can be built from an exact `f64`, added, subtracted,
-//! multiplied and divided. Only `f64` implements it so far.
+//! Curves and surfaces share it, and so does the interval arithmetic that
+//! carries the enclosure: everything here is generic over [`Coefficient`], a
+//! scalar that can be built from an exact `f64`, added, subtracted, multiplied
+//! and divided. `f64` and [`Interval`] are the two that implement it, and the
+//! recursion cannot tell them apart.
 //!
 //! Everything runs on the **homogeneous** net — `[w*x, w*y, w*z, w]` — and the
 //! divide back to a point happens once, at the very end. That is what lets a
@@ -18,7 +19,8 @@
 
 use core::ops::{Add, Mul, Sub};
 
-use rcad_predicates::product_is_normal;
+use rcad_predicates::expansion::{product_is_exact, two_product};
+use rcad_predicates::{Interval, Point as PredicatePoint, product_is_normal};
 
 use crate::knot_vector::MAX_DEGREE;
 use crate::point::{Point, Vector};
@@ -98,10 +100,9 @@ pub const EVALUATION_ROUNDOFF: f64 = {
 
 /// A number the recursion can run on.
 ///
-/// `f64` is the whole of it today. The interval arithmetic that carries the
-/// enclosure implements the same three operations and the same two named ones,
-/// which is why the recursion below never mentions `f64` except to read a
-/// stored knot.
+/// `f64` for the ordinary answer and [`Interval`] for the enclosure. They
+/// implement the same three operations and the same two named ones, which is
+/// why the recursion below never mentions either except to read a stored knot.
 pub(crate) trait Coefficient:
     Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self>
 {
@@ -120,6 +121,23 @@ impl Coefficient for f64 {
 
     fn divided_by(self, divisor: Self) -> Self {
         self / divisor
+    }
+}
+
+/// The arithmetic the enclosure is made of.
+///
+/// de Boor suits it unusually well: every coefficient the recursion forms lies
+/// in `[0, 1]`, so a stage is a weighted average of two numbers the true answer
+/// already sits between, and there is no catastrophic cancellation anywhere for
+/// a width to blow up on. What width there is comes from the knot differences
+/// and from the perspective divide, and both are one division each.
+impl Coefficient for Interval {
+    fn exactly(value: f64) -> Self {
+        Interval::exactly(value)
+    }
+
+    fn divided_by(self, divisor: Self) -> Self {
+        quotient_enclosing(self, divisor)
     }
 }
 
@@ -253,6 +271,44 @@ pub(crate) fn divided(homogeneous: [f64; 4]) -> Point {
     Point::new(x / weight, y / weight, z / weight)
 }
 
+/// The homogeneous enclosure brought back to a point the cascade will take.
+///
+/// # Why an exact point comes out of interval arithmetic
+///
+/// A side of zero width says the true coordinate is that `f64` and nothing
+/// else, so [`PredicatePoint::Exact`] is sound. It is also strictly stronger
+/// than handing back a zero-width box: only an exact point can run level 3 of
+/// the cascade, and that is what makes a degree-1 curve through exact control
+/// points, read at an exact parameter, decidable at all. Always saying
+/// [`PredicatePoint::Constructed`] would be safe in the sense of never
+/// certifying a wrong sign, and it would refuse cases whose answer is there to
+/// be had — a timid filter, which is the thing the acceptance oracle exists to
+/// catch (`docs/decisions.md` §14.7).
+///
+/// # A weight that straddles zero
+///
+/// Every stored weight is above zero, so the true weight here is too. A wide
+/// enough enclosure can still hold zero anyway — a coefficient one rounding
+/// outside `[0, 1]` against control weights sixteen orders of magnitude apart
+/// does it — and then the true point really could be anywhere on the line.
+/// Unlike [`divided`], that is not a broken invariant; it is the arithmetic
+/// saying it does not know, and every real number is the honest answer. It can
+/// never certify anything, which is exactly what an enclosure that knows
+/// nothing should do.
+pub(crate) fn enclosed(homogeneous: [Interval; 4]) -> PredicatePoint {
+    let weight = homogeneous[3];
+    if weight.contains_zero() {
+        return PredicatePoint::Constructed([Interval::ENTIRE; 3]);
+    }
+
+    let sides: [Interval; 3] =
+        core::array::from_fn(|axis| quotient_enclosing(homogeneous[axis], weight));
+    if sides.iter().all(|side| side.width() == 0.0) {
+        return PredicatePoint::Exact(sides.map(Interval::lo));
+    }
+    PredicatePoint::Constructed(sides)
+}
+
 /// The first derivative of the rational curve or surface, from the homogeneous
 /// value and the homogeneous derivative.
 ///
@@ -376,6 +432,82 @@ fn blended<C: Coefficient>(rest: C, before: [C; 4], share: C, after: [C; 4]) -> 
     core::array::from_fn(|axis| rest * before[axis] + share * after[axis])
 }
 
+/// A range holding every quotient of a number in `over` by a number in `under`.
+///
+/// [`Interval`] has no public division and `docs/decisions.md` §15.9 freezes
+/// the crate it lives in, so this is built out of `Interval::new`, `lo` and
+/// `hi` rather than added there.
+///
+/// # Why the four corners and a step enclose
+///
+/// `under` keeps away from zero, so the quotient is monotone in each argument
+/// across the whole box and its extremes sit at the corners. Each corner is one
+/// `f64` division, and IEEE division rounds to nearest: the true quotient of
+/// two `f64` is therefore somewhere between the computed one's two neighbours.
+/// Widening the smallest corner down a step and the largest up a step covers
+/// all four, since `next_down` and `next_up` both keep the order.
+///
+/// That is at most one step wider at each end than a directed-rounding divide
+/// would give, which is the price of keeping the freeze.
+///
+/// # Why an exact corner is not widened
+///
+/// A quotient that came out exactly — [`quotient_is_exact`] proves it, rather
+/// than assuming a `1.0` divisor is the only case — is widened by nothing. This
+/// is not an optimisation. Widen it and *every* enclosure has width, a
+/// degree-1 curve through dyadic control points at a dyadic parameter stops
+/// being an exact point, level 3 of the cascade never runs on a spline point,
+/// and the acceptance half of the oracle fails.
+///
+/// # Panics
+///
+/// If `under` touches zero. Dividing by a range that straddles zero has no
+/// enclosure to hand back, and every caller here has already checked: the knot
+/// differences are positive by the knot vector's own invariants, and
+/// [`enclosed`] tests the weight before it divides by it.
+fn quotient_enclosing(over: Interval, under: Interval) -> Interval {
+    assert!(
+        !under.contains_zero(),
+        "dividing by {under:?}, which touches zero, has no enclosure"
+    );
+
+    let mut lowest = f64::INFINITY;
+    let mut highest = f64::NEG_INFINITY;
+    for top in [over.lo(), over.hi()] {
+        for bottom in [under.lo(), under.hi()] {
+            let corner = top / bottom;
+            let (below, above) = if quotient_is_exact(top, bottom, corner) {
+                (corner, corner)
+            } else {
+                (corner.next_down(), corner.next_up())
+            };
+            lowest = lowest.min(below);
+            highest = highest.max(above);
+        }
+    }
+
+    // A corner is only ever a NaN if an infinite range was divided by an
+    // infinite one, and a divisor with an infinite end cannot reach here from a
+    // net of finite control points.
+    Interval::new(lowest, highest)
+        .expect("no corner is a NaN, so the smallest is below the largest")
+}
+
+/// Whether `top` divided by `bottom` is `corner` with nothing rounded away.
+///
+/// `corner * bottom` is worked out to the last bit and compared with `top`. The
+/// [`product_is_exact`] guard is what makes that comparison mean something: a
+/// product down in the subnormals loses its low half, and without the guard a
+/// quotient off by a fraction of the smallest `f64` would be certified exact
+/// and handed to the cascade as a point.
+fn quotient_is_exact(top: f64, bottom: f64, corner: f64) -> bool {
+    if !product_is_exact(corner, bottom) {
+        return false;
+    }
+    let (high, low) = two_product(corner, bottom);
+    high == top && low == 0.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,6 +599,109 @@ mod tests {
         )
         .expect("a net of weights alone is as ordinary as it gets");
         assert_eq!(bound, 0.0);
+    }
+
+    /// One third is not an `f64`, so the enclosure of `1 / 3` has to hold the
+    /// true third strictly inside it, one step below the nearest `f64` and one
+    /// above.
+    ///
+    /// The check is exact integer arithmetic rather than a comparison against
+    /// `1.0 / 3.0`, which is the very number under test. Both bounds land
+    /// between a quarter and a half, where every `f64` is a whole multiple of
+    /// `2⁻⁵⁴`, so multiplying by `2⁵⁴` is exact and comparing `3 * k` with
+    /// `2⁵⁴` settles `k · 2⁻⁵⁴ < 1/3` with nothing rounded away.
+    #[test]
+    fn the_enclosure_of_a_third_holds_the_true_third_strictly_inside_it() {
+        let third = quotient_enclosing(Interval::exactly(1.0), Interval::exactly(3.0));
+        let whole_multiples_of = 2f64.powi(54);
+        for bound in [third.lo(), third.hi()] {
+            assert!(
+                (0.25..0.5).contains(&bound),
+                "{bound} is not where a third is, so the exact check below says nothing"
+            );
+        }
+
+        let low = (third.lo() * whole_multiples_of) as i128;
+        let high = (third.hi() * whole_multiples_of) as i128;
+        assert!(
+            3 * low < 1i128 << 54,
+            "{:?} starts at or above a third",
+            third
+        );
+        assert!(
+            3 * high > 1i128 << 54,
+            "{:?} ends at or below a third",
+            third
+        );
+    }
+
+    /// The number the ordinary evaluator would produce is inside the enclosure
+    /// of the same divide, which is the whole claim in one line.
+    #[test]
+    fn the_f64_quotient_is_inside_the_enclosure_of_the_same_divide() {
+        for (top, bottom) in [(1.0, 3.0), (-7.0, 9.0), (1e-6, 1e6), (2.5, 0.1)] {
+            let enclosure = quotient_enclosing(Interval::exactly(top), Interval::exactly(bottom));
+            assert!((enclosure.lo()..=enclosure.hi()).contains(&(top / bottom)));
+        }
+    }
+
+    /// A divide that came out exactly is not widened. Every enclosure having
+    /// width would cost the cascade its exact level on spline points, which is
+    /// the acceptance half of `docs/decisions.md` §14.7.
+    #[test]
+    fn a_divide_that_rounded_nothing_stays_a_single_number() {
+        for (top, bottom, quotient) in [(1.0, 4.0, 0.25), (3.0, 1.5, 2.0), (0.0, 7.0, 0.0)] {
+            let enclosure = quotient_enclosing(Interval::exactly(top), Interval::exactly(bottom));
+            assert_eq!(
+                enclosure.width(),
+                0.0,
+                "{top} / {bottom} is exactly {quotient}"
+            );
+            assert_eq!(enclosure.lo(), quotient);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "touches zero")]
+    fn dividing_by_a_range_that_straddles_zero_has_no_answer() {
+        let _ = quotient_enclosing(Interval::exactly(1.0), Interval::new(-1.0, 1.0).unwrap());
+    }
+
+    #[test]
+    fn a_homogeneous_point_that_divides_exactly_comes_back_as_an_exact_point() {
+        let exactly = |value: f64| Interval::exactly(value);
+        let point = enclosed([exactly(3.0), exactly(-2.0), exactly(0.0), exactly(4.0)]);
+        assert_eq!(point, PredicatePoint::Exact([0.75, -0.5, 0.0]));
+    }
+
+    /// Three fifths is not an `f64`, so this point is a box — and its `z`, which
+    /// divided exactly, is still a single number inside that box.
+    #[test]
+    fn a_homogeneous_point_with_one_rounded_coordinate_comes_back_as_a_box() {
+        let exactly = |value: f64| Interval::exactly(value);
+        let point = enclosed([exactly(3.0), exactly(0.0), exactly(0.0), exactly(5.0)]);
+        match point {
+            PredicatePoint::Constructed([x, y, z]) => {
+                assert!(x.width() > 0.0);
+                assert_eq!((y.width(), z.width()), (0.0, 0.0));
+            }
+            other => panic!("three fifths is not an f64: {other:?}"),
+        }
+    }
+
+    /// Not a broken invariant — the stored weights are all above zero, but an
+    /// enclosure wide enough to hold zero leaves the true point anywhere at all,
+    /// and saying so is the only sound answer.
+    #[test]
+    fn a_weight_whose_enclosure_holds_zero_puts_the_point_nowhere_in_particular() {
+        let straddling = Interval::new(-1e-30, 1.0).unwrap();
+        let point = enclosed([
+            Interval::exactly(1.0),
+            Interval::exactly(1.0),
+            Interval::exactly(1.0),
+            straddling,
+        ]);
+        assert_eq!(point, PredicatePoint::Constructed([Interval::ENTIRE; 3]));
     }
 
     /// Coordinates around a kilometre with weights around a thousandth. Sharing
