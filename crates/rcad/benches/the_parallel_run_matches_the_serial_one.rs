@@ -12,7 +12,7 @@
 mod plate_with_holes;
 
 use rayon::ThreadPoolBuilder;
-use rcad::Policy;
+use rcad::{Policy, ProvenanceLog};
 
 use plate_with_holes::{
     classify_across_threads, classify_one_at_a_time, first_difference, grid_over, plate_with_holes,
@@ -32,7 +32,7 @@ const THREADS: usize = 8;
 fn classifying_a_grid_of_points_across_threads_gives_the_same_bits_as_one_thread() {
     let (model, plate) = plate_with_holes();
     model
-        .validate(&Policy::certified())
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the plate is a valid solid");
 
     let solid = model.solid(plate);

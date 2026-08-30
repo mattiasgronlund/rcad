@@ -2,7 +2,7 @@
 //! profiles.
 
 use rcad_geom::{Isometry, Point, Scale};
-use rcad_predicates::Policy;
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Profile, ProfileBuilder};
 
 fn empty_model() -> Model {
@@ -78,7 +78,9 @@ fn a_cube_passes_the_full_validity_sweep() {
     let mut model = empty_model();
     model.add_cube(2.0).expect("a cube of side two");
 
-    model.validate(&Policy::certified()).expect("a sound cube");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a sound cube");
 }
 
 #[test]
@@ -92,7 +94,9 @@ fn a_plate_with_a_square_hole_has_the_hole_missing_from_its_volume() {
     let solid = model
         .add_extrusion(&plate, 3.0, &Isometry::identity())
         .expect("a plate three thick");
-    model.validate(&Policy::certified()).expect("a sound plate");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a sound plate");
 
     let measured = model.solid(solid).measure();
     assert_eq!(measured.volume(), (100.0 - 4.0) * 3.0);
@@ -115,7 +119,9 @@ fn a_plate_with_two_holes_still_has_two_coedges_on_every_edge() {
     let solid = model
         .add_extrusion(&plate, 2.0, &Isometry::identity())
         .expect("a plate two thick");
-    model.validate(&Policy::certified()).expect("a sound plate");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a sound plate");
 
     assert_eq!(model.solid(solid).measure().volume(), (100.0 - 8.0) * 2.0);
     for edge in model.edges() {
@@ -138,7 +144,9 @@ fn an_l_shape_is_measured_right_even_though_it_is_not_convex() {
     let solid = model
         .add_extrusion(&ell, 1.0, &Isometry::identity())
         .expect("an L one thick");
-    model.validate(&Policy::certified()).expect("a sound L");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a sound L");
 
     let measured = model.solid(solid).measure();
     assert_eq!(measured.volume(), 3.0);

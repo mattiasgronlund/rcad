@@ -31,14 +31,16 @@
 //!
 //! let mut model = Model::new(Scale::millimetres(100.0)?);
 //! let cube = model.add_cube(2.0)?;
-//! model.validate(&Policy::certified())?;
+//!
+//! let mut log = ProvenanceLog::new();
+//! model.validate(&Policy::certified(), &mut log)?;
+//! assert!(log.is_empty(), "a clean sweep records nothing at all");
 //!
 //! let measured = model.solid(cube).measure();
 //! assert_eq!(measured.volume(), 8.0);
 //! assert_eq!(measured.surface_area(), 24.0);
 //! assert_eq!(measured.centroid(), Point::new(1.0, 1.0, 1.0));
 //!
-//! let mut log = ProvenanceLog::new();
 //! let policy = Policy::certified();
 //! let middle = model
 //!     .solid(cube)
@@ -76,7 +78,6 @@
 mod build;
 mod classify;
 mod error;
-mod exact2d;
 mod key;
 mod measure;
 mod model;

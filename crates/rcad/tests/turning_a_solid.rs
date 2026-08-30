@@ -37,7 +37,7 @@ mod shapes;
 use core::f64::consts::FRAC_PI_2;
 
 use proptest::prelude::*;
-use rcad::{Axis, Isometry, Model, Point, Policy, Scale, SolidKey};
+use rcad::{Axis, Isometry, Model, Point, Policy, ProvenanceLog, Scale, SolidKey};
 use shapes::{a_notched_polygon_with_holes, an_arbitrary_movement, extruded};
 
 /// Room for two hundred roundings of a quantity that is cubic in the
@@ -57,7 +57,7 @@ fn a_cube_turned_a_quarter_of_the_way_round_the_z_axis_is_still_the_same_cube() 
     let quarter = Isometry::rotation(&Axis::z(), FRAC_PI_2).expect("a quarter turn");
     model.place_solid(cube, &quarter);
     model
-        .validate(&Policy::certified())
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("turning a cube leaves it a cube");
     let after = model.solid(cube).measure();
 
@@ -82,7 +82,7 @@ proptest! {
         let before = model.solid(solid).measure();
 
         model.place_solid(solid, &movement);
-        model.validate(&Policy::certified())?;
+        model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
         let after = model.solid(solid).measure();
 
         prop_assert!(
@@ -138,7 +138,7 @@ proptest! {
         let before = model.solid(solid).measure();
 
         model.place_solid(solid, &turn);
-        model.validate(&Policy::certified())?;
+        model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
         let after = model.solid(solid).measure();
 
         prop_assert!(

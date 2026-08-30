@@ -63,7 +63,7 @@ proptest! {
         let mut model = empty_model();
         let solid = model.add_extrusion(&profile, height, &Isometry::identity())?;
 
-        model.validate(&Policy::certified())?;
+        model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
 
         let measured = model.solid(solid).measure();
         prop_assert!(measured.volume() > 0.0);
@@ -85,7 +85,7 @@ proptest! {
         model.place_solid(solid, &Isometry::rotation(&axis, angle).expect("a rotation"));
         let after = model.solid(solid).measure();
 
-        model.validate(&Policy::certified())?;
+        model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
         let slack = 1e-9 * before.volume().max(before.surface_area());
         prop_assert!((after.volume() - before.volume()).abs() <= slack);
         prop_assert!((after.surface_area() - before.surface_area()).abs() <= slack);

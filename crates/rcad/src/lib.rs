@@ -29,6 +29,12 @@
 //! carries the [`ProvenanceLog`] of exactly which decisions gave up and how
 //! wide their enclosures were (`docs/decisions.md` §4.2).
 //!
+//! [`Error`] keeps the three layers underneath it visible rather than
+//! flattening them: [`Error::Predicate`], [`Error::Geometry`] and
+//! [`Error::Topology`] wrap [`PredicateError`], [`GeometryError`] and
+//! [`TopologyError`], all three re-exported here. Matching through to an inner
+//! variant never needs a dependency on a crate this facade exists to hide.
+//!
 //! Every call site that receives a [`Decision`] or a [`Containment`] must say
 //! what it does with all of the cases. That is the point of the type.
 //!
@@ -50,7 +56,10 @@
 //!
 //! let mut model = Model::new(Scale::millimetres(100.0)?);
 //! let cube = model.add_cube(10.0)?;
-//! model.validate(&Policy::certified())?;
+//!
+//! let mut log = ProvenanceLog::new();
+//! model.validate(&Policy::certified(), &mut log)?;
+//! assert!(log.is_empty(), "a clean sweep records nothing at all");
 //!
 //! let measured = model.solid(cube).measure();
 //! assert_eq!(measured.volume(), 1000.0);
@@ -58,7 +67,6 @@
 //! assert_eq!(measured.centroid(), Point::new(5.0, 5.0, 5.0));
 //!
 //! let policy = Policy::certified();
-//! let mut log = ProvenanceLog::new();
 //! match model
 //!     .solid(cube)
 //!     .classify_point(Point::new(5.0, 5.0, 5.0), &policy, &mut log)
@@ -77,7 +85,7 @@
 //!
 //! let bytes = postcard::to_allocvec(&model)?;
 //! let read_back: Model = postcard::from_bytes(&bytes)?;
-//! read_back.validate(&Policy::certified())?;
+//! read_back.validate(&Policy::certified(), &mut log)?;
 //! let same_cube = read_back.solids().next().expect("the cube came back");
 //! assert_eq!(same_cube.measure(), measured);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -138,6 +146,10 @@
 mod error;
 
 pub use crate::error::{Error, Result};
+
+pub use rcad_geom::Error as GeometryError;
+pub use rcad_predicates::Error as PredicateError;
+pub use rcad_topo::Error as TopologyError;
 
 pub use rcad_geom::{
     Axis, Cylinder, Isometry, Orientation, Plane, Point, Scale, Segment, Sphere, Surface, Unit,

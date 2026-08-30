@@ -8,23 +8,14 @@
 //! report rather than quietly degrade on.
 //!
 //! How loud to be is [`Policy`]'s to say, and the two constructors disagree on
-//! purpose: [`Policy::certified`] fails, [`Policy::tolerant`] warns.
-//!
-//! # Why one half of this reaches past the facade
-//!
-//! [`Model::validate`] has nowhere to put a warning — it returns `Result<()>`
-//! and takes no [`ProvenanceLog`] — so under [`Severity::Warn`] it can only
-//! pass. The record and the [`Approximation`] that a warning actually consists
-//! of come out of `rcad_geom::DynamicRange::check_under_policy`, which is
-//! geometry-layer machinery the facade deliberately does not re-export. Naming
-//! it here is the only way to test that half, and it is worth knowing that a
-//! caller who only ever sees `rcad` cannot see a range warning at all.
+//! purpose: [`Policy::certified`] fails, [`Policy::tolerant`] warns. Both
+//! halves are visible from the facade alone: a refusal is an [`Error`], and a
+//! warning is a [`Record`] in the [`ProvenanceLog`] the sweep is handed.
 
 use rcad::{
-    Approximation, Error, Invalid, Isometry, Model, Policy, Profile, ProfileBuilder, ProvenanceLog,
-    Scale, Severity,
+    Error, Invalid, Isometry, Model, Policy, Profile, ProfileBuilder, ProvenanceLog, Scale,
+    Severity, TopologyError,
 };
-use rcad_geom::DynamicRange;
 
 /// The ratio above which `f64` has run out of digits.
 const WIDEST_THAT_STILL_WORKS: f64 = 1e11;
@@ -33,33 +24,29 @@ const WIDEST_THAT_STILL_WORKS: f64 = 1e11;
 fn a_model_with_a_feature_a_million_times_finer_than_the_part_is_fine() {
     let mut model = Model::new(Scale::millimetres(1.0).expect("a working size"));
     model.add_cube(1.0).expect("a cube of side one");
-
-    assert!(range_of(&model).ratio() < WIDEST_THAT_STILL_WORKS);
-    model
-        .validate(&Policy::certified())
-        .expect("a cube is not a hard model to work in");
+    assert!(range_of(&model) < WIDEST_THAT_STILL_WORKS);
 
     let mut log = ProvenanceLog::new();
-    assert_eq!(
-        range_of(&model).check_under_policy(&Policy::tolerant(1.0), &mut log),
-        Ok(None),
-        "a range that fits is a certified outcome"
-    );
-    assert!(log.is_empty(), "and certified outcomes are not recorded");
+    model
+        .validate(&Policy::tolerant(1.0), &mut log)
+        .expect("a cube is not a hard model to work in");
+
+    assert!(log.is_empty(), "certified outcomes are not recorded");
 }
 
 #[test]
 fn a_strict_policy_refuses_a_model_whose_smallest_edge_is_a_trillionth_of_the_part() {
     let model = a_square_with_one_hair_thin_edge();
-    assert!(range_of(&model).ratio() > WIDEST_THAT_STILL_WORKS);
+    assert!(range_of(&model) > WIDEST_THAT_STILL_WORKS);
 
-    let refused: rcad::Result<()> = model.validate(&Policy::certified()).map_err(Into::into);
+    let refused: rcad::Result<()> = model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .map_err(Into::into);
 
-    let Err(Error::Topology(topology)) = refused else {
-        panic!("a range this wide has to be refused, and it was {refused:?}");
-    };
-    let rcad_topo::Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) = topology else {
-        panic!("it has to be refused for being too wide, and it was {topology:?}");
+    let Err(Error::Topology(TopologyError::Invalid(Invalid::DynamicRangeTooWide { ratio }))) =
+        refused
+    else {
+        panic!("a range this wide has to be refused for being wide, and it was {refused:?}");
     };
     assert!(ratio > WIDEST_THAT_STILL_WORKS);
 }
@@ -70,24 +57,31 @@ fn a_tolerant_policy_carries_on_and_says_how_much_slop_it_accepted() {
     let policy = Policy::tolerant(1.0);
     assert_eq!(policy.dynamic_range_check(), Severity::Warn);
 
+    let mut log = ProvenanceLog::new();
     model
-        .validate(&policy)
+        .validate(&policy, &mut log)
         .expect("a warning is not a refusal, so the sweep still passes");
 
-    let mut log = ProvenanceLog::new();
-    let tag: Approximation = range_of(&model)
-        .check_under_policy(&policy, &mut log)
-        .expect("warning is not failing")
-        .expect("a model this wide puts slop into everything built from it");
-
+    assert_eq!(log.len(), 1, "a warning is a record, not silence");
     // Nothing in a model this wide can be resolved more finely than the gap
     // between neighbouring `f64` at its largest coordinate.
     assert_eq!(
-        tag.magnitude(),
+        log.worst_enclosure(),
         largest_coordinate_of(&model) * f64::EPSILON
     );
-    assert_eq!(log.len(), 1, "a warning is a record, not silence");
-    assert_eq!(log.worst_enclosure(), tag.magnitude());
+}
+
+#[test]
+fn a_policy_that_ignores_the_check_leaves_nothing_behind_to_read() {
+    let model = a_square_with_one_hair_thin_edge();
+    let policy = Policy::tolerant(1.0).with_dynamic_range_check(Severity::Ignore);
+
+    let mut log = ProvenanceLog::new();
+    model
+        .validate(&policy, &mut log)
+        .expect("ignoring the check cannot fail the sweep");
+
+    assert!(log.is_empty(), "an ignored check has nothing to say");
 }
 
 /// The unit square with one extra corner a trillionth of a millimetre from the
@@ -117,18 +111,19 @@ fn a_square_with_one_hair_thin_edge() -> Model {
     model
 }
 
-/// The spread the model's own vertices and edges come to.
+/// The spread the model's own vertices and edges come to: largest coordinate
+/// divided by shortest edge, which is what the sweep measures.
 ///
 /// # Panics
 ///
-/// If the model has no edges, or the numbers are not measurable at all.
-fn range_of(model: &Model) -> DynamicRange {
+/// If the model has no edges.
+fn range_of(model: &Model) -> f64 {
     let smallest_feature = model
         .edges()
         .map(|edge| edge.length())
         .fold(f64::INFINITY, f64::min);
-    DynamicRange::measure(largest_coordinate_of(model), smallest_feature)
-        .expect("a built model has finite coordinates and edges with length")
+    assert!(smallest_feature.is_finite(), "a model needs edges");
+    largest_coordinate_of(model) / smallest_feature
 }
 
 fn largest_coordinate_of(model: &Model) -> f64 {

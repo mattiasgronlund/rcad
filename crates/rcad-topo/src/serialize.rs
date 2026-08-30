@@ -11,7 +11,7 @@
 //!
 //! ```
 //! use rcad_geom::Scale;
-//! use rcad_predicates::Policy;
+//! use rcad_predicates::{Policy, ProvenanceLog};
 //! use rcad_topo::Model;
 //!
 //! let mut model = Model::new(Scale::millimetres(100.0)?);
@@ -21,7 +21,7 @@
 //! let bytes = postcard::to_allocvec(&model)?;
 //! let read_back: Model = postcard::from_bytes(&bytes)?;
 //!
-//! read_back.validate(&Policy::certified())?;
+//! read_back.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
 //! let solid = read_back.solids().next().expect("the cube came back");
 //! assert_eq!(solid.measure(), before);
 //! # Ok::<(), Box<dyn std::error::Error>>(())

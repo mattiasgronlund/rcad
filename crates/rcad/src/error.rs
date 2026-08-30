@@ -23,20 +23,30 @@ use rcad_predicates::ProvenanceLog;
 /// is left with nothing to hand back does it become
 /// [`Error::Undecidable`](crate::Error::Undecidable), carrying the records of
 /// the decisions that gave up (`docs/decisions.md` §4.2).
+///
+/// The three wrapped types are re-exported as [`PredicateError`],
+/// [`GeometryError`] and [`TopologyError`], so matching all the way through to
+/// an inner variant needs nothing but `rcad::` paths. They stay three separate
+/// layers rather than one flattened enum: which layer refused says what kind of
+/// thing went wrong, and that is worth keeping visible.
+///
+/// [`PredicateError`]: crate::PredicateError
+/// [`GeometryError`]: crate::GeometryError
+/// [`TopologyError`]: crate::TopologyError
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// A predicate refused the input it was handed.
     #[error(transparent)]
-    Predicate(#[from] rcad_predicates::Error),
+    Predicate(#[from] crate::PredicateError),
 
     /// A piece of geometry refused to be built.
     #[error(transparent)]
-    Geometry(#[from] rcad_geom::Error),
+    Geometry(#[from] crate::GeometryError),
 
     /// Building, reading or checking a model went wrong.
     #[error(transparent)]
-    Topology(rcad_topo::Error),
+    Topology(crate::TopologyError),
 
     /// The operation ran out of things it could prove.
     ///
@@ -56,10 +66,10 @@ pub enum Error {
 /// [`Error::Undecidable`] carrying the records. If the topology crate's own
 /// undecided error stayed wrapped, a caller would have to unwrap two layers to
 /// find out that is what happened, and the promise would be worth nothing.
-impl From<rcad_topo::Error> for Error {
-    fn from(error: rcad_topo::Error) -> Self {
+impl From<crate::TopologyError> for Error {
+    fn from(error: crate::TopologyError) -> Self {
         match error {
-            rcad_topo::Error::Undecidable { records } => Error::Undecidable { records },
+            crate::TopologyError::Undecidable { records } => Error::Undecidable { records },
             other => Error::Topology(other),
         }
     }

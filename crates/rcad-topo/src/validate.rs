@@ -1,5 +1,5 @@
 use rcad_geom::{DynamicRange, Isometry, Orientation, Point, Vector};
-use rcad_predicates::{Approximation, Policy, Severity};
+use rcad_predicates::{Approximation, Policy, ProvenanceLog};
 use slotmap::SecondaryMap;
 
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
@@ -34,12 +34,18 @@ impl Model {
     /// - the coordinate range is narrow enough to compute in, as loudly as
     ///   `policy` asks for (decisions.md §3.5).
     ///
+    /// A sweep that certifies everything leaves `log` untouched. The one check
+    /// here that can come back non-certified is the coordinate range under
+    /// [`Severity::Warn`](rcad_predicates::Severity::Warn), and that is the
+    /// only thing that ever lands in `log`. An empty log means the model was
+    /// checked with nothing approximated (decisions.md §5).
+    ///
     /// # Errors
     ///
     /// [`Error::Invalid`](crate::Error::Invalid) naming the first invariant
     /// that does not hold, or [`Error::Geometry`](crate::Error::Geometry) if
     /// the coordinate range could not even be measured.
-    pub fn validate(&self, policy: &Policy) -> Result<()> {
+    pub fn validate(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         self.check_vertices()?;
         self.check_edges()?;
         self.check_coedges()?;
@@ -47,7 +53,7 @@ impl Model {
         self.check_faces()?;
         self.check_shells_and_solids()?;
         self.check_approximation_ordering()?;
-        self.check_dynamic_range(policy)
+        self.check_dynamic_range(policy, log)
     }
 
     fn check_vertices(&self) -> Result<()> {
@@ -308,7 +314,7 @@ impl Model {
         Ok(())
     }
 
-    fn check_dynamic_range(&self, policy: &Policy) -> Result<()> {
+    fn check_dynamic_range(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         let largest = self
             .data()
             .vertices
@@ -324,13 +330,19 @@ impl Model {
         }
 
         let range = DynamicRange::measure(largest, smallest_feature)?;
-        if policy.dynamic_range_check() == Severity::Fail && !range.is_within_supported_range() {
-            return Err(Invalid::DynamicRangeTooWide {
-                ratio: range.ratio(),
+        match range.check_under_policy(policy, log) {
+            // The tag says how much slop a range this wide puts into anything
+            // built from the model. A sweep builds nothing, so there is no
+            // entity to hang it on; the record it pushed into `log` is the part
+            // a caller can act on.
+            Ok(_) => Ok(()),
+            // Both layers already have a name for this. Keep reporting the
+            // topology one, since the sweep is what found it.
+            Err(rcad_geom::Error::DynamicRangeTooWide { ratio }) => {
+                Err(Invalid::DynamicRangeTooWide { ratio }.into())
             }
-            .into());
+            Err(other) => Err(other.into()),
         }
-        Ok(())
     }
 
     /// How far off its own plane a face's corner is allowed to sit.

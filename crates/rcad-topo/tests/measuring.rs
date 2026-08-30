@@ -2,7 +2,7 @@
 //! the first two (roadmap §11.2 says start here, and it costs nothing).
 
 use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
-use rcad_predicates::Policy;
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, ProfileBuilder, SolidKey};
 
 fn a_cube_of_side_two() -> (Model, SolidKey) {
@@ -43,7 +43,7 @@ fn a_rotated_cube_is_still_a_sound_solid() {
     model.place_solid(cube, &a_third_of_a_turn_about_a_slanted_axis());
 
     model
-        .validate(&Policy::certified())
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a rotation cannot break a solid");
 }
 
@@ -64,7 +64,9 @@ fn moving_a_plate_with_a_hole_leaves_its_volume_alone() {
 
     assert!((after.volume() - before.volume()).abs() < 1e-11);
     assert!((after.surface_area() - before.surface_area()).abs() < 1e-11);
-    model.validate(&Policy::certified()).expect("still sound");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("still sound");
 }
 
 #[test]
@@ -106,6 +108,6 @@ fn a_bigger_cube_holds_the_cube_of_its_side() {
     assert_eq!(model.solid(small).measure().volume(), 1.0);
     assert_eq!(model.solid(large).measure().volume(), 27.0);
     model
-        .validate(&Policy::certified())
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("two sound cubes");
 }

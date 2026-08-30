@@ -778,7 +778,7 @@ pub(crate) struct ShellUse {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{Axis, Orientation, Point, Scale, Surface, Vector};
-    use rcad_predicates::{Approximation, Cause, Policy};
+    use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
 
     use super::Model;
     use crate::{Error, Invalid, SolidKey};
@@ -955,7 +955,7 @@ mod tests {
 
         assert_eq!(model.worst_approximation(), 1e-6);
         model
-            .validate(&Policy::certified())
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
             .expect("the ordering holds");
         model.place_solid(cube, &a_movement());
     }
@@ -1008,7 +1008,7 @@ mod tests {
             }
         }
 
-        let refused = model.validate(&Policy::certified());
+        let refused = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
 
         assert!(matches!(
             refused,
@@ -1031,7 +1031,7 @@ mod tests {
             .expect("a cube's faces sit on planes");
         face.surface = Surface::Plane(plane.reversed());
 
-        let refused = model.validate(&Policy::certified());
+        let refused = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
 
         assert!(matches!(
             refused,
@@ -1051,7 +1051,7 @@ mod tests {
             .expect("a cube has faces")
             .surface = Surface::Sphere(ball);
 
-        let refused = model.validate(&Policy::certified());
+        let refused = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
 
         assert!(matches!(
             refused,
@@ -1070,7 +1070,7 @@ mod tests {
             .expect("a cube has edges")
             .approximation = Some(Approximation::new(1e-6, Cause::ImportedUncertainty));
 
-        let refused = model.validate(&Policy::certified());
+        let refused = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
 
         assert!(matches!(
             refused,

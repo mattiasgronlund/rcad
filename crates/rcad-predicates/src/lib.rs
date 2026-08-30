@@ -63,6 +63,7 @@ mod cascade;
 mod decision;
 mod error;
 mod interval;
+mod orient2d;
 mod orient3d;
 mod planes;
 mod point;
@@ -76,6 +77,7 @@ pub use cascade::{Filtered, Level, Predicate, decide};
 pub use decision::Decision;
 pub use error::Error;
 pub use interval::Interval;
+pub use orient2d::{ORIENT2D, orient2d, orient2d_reporting_level, orient2d_tolerantly};
 pub use orient3d::{
     ORIENT3D, orient3d, orient3d_of_points, orient3d_reporting_level, orient3d_tolerantly,
 };

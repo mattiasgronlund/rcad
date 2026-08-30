@@ -47,7 +47,7 @@ proptest! {
     ) {
         let (model, solid) = extruded(&profile, height);
 
-        model.validate(&Policy::certified())?;
+        model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
 
         let measured = model.solid(solid).measure();
         prop_assert!(measured.volume() > 0.0, "volume {}", measured.volume());
@@ -99,7 +99,7 @@ proptest! {
         let bytes = postcard::to_allocvec(&model)?;
         let read_back: Model = postcard::from_bytes(&bytes)?;
 
-        read_back.validate(&Policy::certified())?;
+        read_back.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
         let same = read_back.solids().next().expect("the solid came back");
         // Exactly equal, not nearly. Coordinates go out and come back as the
         // same bits and the measurement adds them up in the same order, so

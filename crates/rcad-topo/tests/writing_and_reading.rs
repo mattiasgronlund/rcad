@@ -5,7 +5,7 @@
 //! (decisions.md §6).
 
 use rcad_geom::{Isometry, Scale, Vector};
-use rcad_predicates::{Approximation, Cause, Policy};
+use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
 use rcad_topo::{FORMAT_VERSION, Model, ProfileBuilder};
 
 fn empty_model() -> Model {
@@ -25,7 +25,9 @@ fn a_cube_comes_back_sound_and_measuring_the_same() {
 
     let after = round_tripped(&model);
 
-    after.validate(&Policy::certified()).expect("still sound");
+    after
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("still sound");
     let solid = after.solids().next().expect("the cube came back");
     assert_eq!(solid.measure(), before);
     assert_eq!(after.vertex_count(), model.vertex_count());
@@ -48,7 +50,9 @@ fn a_plate_with_two_holes_comes_back_sound_and_measuring_the_same() {
 
     let after = round_tripped(&model);
 
-    after.validate(&Policy::certified()).expect("still sound");
+    after
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("still sound");
     assert_eq!(
         after
             .solids()
@@ -96,7 +100,9 @@ fn approximation_tags_come_back_with_the_model() {
 
     let after = round_tripped(&model);
 
-    after.validate(&Policy::certified()).expect("still sound");
+    after
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("still sound");
     assert_eq!(after.worst_approximation(), 2.5e-9);
     let tagged = after
         .edges()
