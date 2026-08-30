@@ -476,8 +476,8 @@ mod tests {
     use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
     use rcad_predicates::{Policy, ProvenanceLog};
 
-    use super::{MeetPoint, Piece, Scratch};
-    use crate::{Model, SolidKey};
+    use super::{MeetPoint, Piece, Rule, Scratch};
+    use crate::{Error, Model, SolidKey};
 
     /// Two cubes of side two, the second moved by `shift` and then turned by
     /// `turn` about the origin.
@@ -667,5 +667,47 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Roadmap §7.4's ninth planar catalogue entry, and the one that cannot sit
+    /// with the other eight in `tests/degenerate_fuses.rs`: nothing in the
+    /// public API builds a solid that runs through itself. `ProfileBuilder`
+    /// refuses an outline that crosses itself and an extrusion of a sound
+    /// profile never crosses itself either, so the input has to be wired
+    /// together by hand from two overlapping cubes.
+    ///
+    /// The refusal is the right answer and not a limitation. §17.4 settles that
+    /// the fuse notices this for free — it is already working out where every
+    /// pair of faces meets — and that `Model::validate` deliberately does not
+    /// look for it, since every face against every other is quadratic in the
+    /// face count.
+    #[test]
+    fn a_solid_that_runs_through_itself_cannot_be_fused() {
+        let (mut model, one, other) = two_cubes(Vector::new(1.0, 1.0, 1.0), None);
+        let crossed = both_solids_as_one(&mut model, one, other);
+
+        let refused = model.fuse(
+            &[crossed],
+            &[],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+
+        assert!(
+            matches!(refused, Err(Error::ArgumentIntersectsItself)),
+            "expected a refusal, got {refused:?}"
+        );
+    }
+
+    /// Two solids wired into one, sharing their shells.
+    fn both_solids_as_one(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {
+        let mut shells = model.data().solids[one.slot_in(model.id())].shells.clone();
+        let theirs = model.data().solids[other.slot_in(model.id())]
+            .shells
+            .clone();
+        shells.extend(theirs);
+        let slot = model.add_solid(shells);
+        model.key_for_solid(slot)
     }
 }

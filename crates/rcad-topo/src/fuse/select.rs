@@ -439,7 +439,15 @@ fn coincident_face(
             .iter()
             .map(|wire| wire.iter().map(|edge| edge.start.point).collect())
             .collect();
-        if in_plane.winding_around(&corners, point) == Some(1) {
+        // Either sign means the point is in this face's material. Which one
+        // comes out says only which way that face's outline runs round *this*
+        // piece's normal, and a face pressed against this one from the other
+        // side runs the other way — which is what `OppositeWay` above already
+        // said. Zero is the only answer that puts the point outside it.
+        if in_plane
+            .winding_around(&corners, point)
+            .is_some_and(|winding| winding != 0)
+        {
             return Ok(Some(same_way));
         }
     }
@@ -544,15 +552,36 @@ impl InPlane {
 
     /// How many times the wires wind round `point`: one inside the material,
     /// zero outside it and inside a hole. `None` when the point sits on the
-    /// boundary of one of the triangles the count is made of, or when a turn
-    /// could not be decided.
+    /// outline itself, or when a turn could not be decided.
     ///
-    /// The wires are fanned from one corner, exactly the way
+    /// Every corner of the outer wire is tried as the apex in turn, and the
+    /// first fan that can answer does. The count does not depend on which
+    /// corner the fan starts from, but where its chords run does, and a point
+    /// sitting exactly on a chord is on the boundary of two of the triangles
+    /// with neither able to say whether it is in it. Moving the apex moves the
+    /// chords off the point.
+    ///
+    /// A rectangle is what forces this rather than a stray case: every point
+    /// [`candidate_points`] can offer for a rectangular piece lies on one of
+    /// its two diagonals or on an edge, so a fan from one fixed corner leaves
+    /// two rectangles pressed together with nothing to say about each other.
+    fn winding_around(&self, wires: &[Vec<PredicatePoint>], point: PredicatePoint) -> Option<i32> {
+        wires
+            .first()?
+            .iter()
+            .find_map(|&apex| self.winding_fanned_from(apex, wires, point))
+    }
+
+    /// The count from one apex, exactly the way
     /// [`FaceView::for_each_triangle`](crate::FaceView::for_each_triangle) fans
     /// a face: the signed triangles add up to the polygon, holes included,
     /// because a hole is wound the other way and subtracts itself.
-    fn winding_around(&self, wires: &[Vec<PredicatePoint>], point: PredicatePoint) -> Option<i32> {
-        let apex = *wires.first()?.first()?;
+    fn winding_fanned_from(
+        &self,
+        apex: PredicatePoint,
+        wires: &[Vec<PredicatePoint>],
+        point: PredicatePoint,
+    ) -> Option<i32> {
         let mut winding = 0;
         for wire in wires {
             for (index, &from) in wire.iter().enumerate() {
