@@ -1,0 +1,16 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e90cbf0d9c8b021b4b5cf0a94176ba4ec9b605b2585acf24916137d216a258e6 # shrinks to Configuration { solids: [Placed { shape: Frame { width: 4, depth: 4 }, height: 2, at: [0, 0, 0] }, Placed { shape: Block { width: 1, depth: 3 }, height: 1, at: [4, 0, 2] }, Placed { shape: Block { width: 1, depth: 1 }, height: 1, at: [0, 0, 0] }], turn: None }
+cc 668d50d60de7e3a347eaca4e60f188ca54428513dac3f8e5e69ba5bda4397be6 # shrinks to Configuration { solids: [Placed { shape: Block { width: 1, depth: 3 }, height: 1, at: [0, 0, 0] }, Placed { shape: Block { width: 4, depth: 3 }, height: 1, at: [-1, -1, 0] }], turn: Some(Turn { direction: [-2, -1, 0], steps: 5 }) }
+cc dbc2b3eed06f59218d4f48aafa5877dd3e247a392a7f1ccb6f293d4554f0cbc4 # shrinks to Configuration { solids: [Placed { shape: Comb { teeth: 3, tooth_height: 1 }, height: 1, at: [0, 0, 0] }, Placed { shape: Comb { teeth: 3, tooth_height: 1 }, height: 1, at: [-2, -2, 0] }, Placed { shape: Block { width: 1, depth: 1 }, height: 1, at: [0, 0, 2] }], turn: None }
+cc ae7b71e7896139253a6b7fee32f15eeb4d6491b9d3585c470f1e40968d0c9c34 # shrinks to Configuration { solids: [Placed { shape: Frame { width: 3, depth: 3 }, height: 1, at: [0, 0, 0] }, Placed { shape: Block { width: 1, depth: 1 }, height: 1, at: [0, 0, 2] }], turn: None }
+cc 0496ebd75c07f7cd1499e74ed5c9bb038f1fc97267718c3b850b2002dec8a36c # shrinks to Configuration { solids: [Placed { shape: Frame { width: 3, depth: 3 }, height: 1, at: [0, 0, 0] }, Placed { shape: Block { width: 1, depth: 1 }, height: 1, at: [0, 0, -2] }], turn: None }
+cc fefc0ba4babfdd42f249b317046d1a8393e9faf06329152e1c9db8d7addf8453 # shrinks to Configuration { solids: [Placed { shape: Frame { width: 3, depth: 3 }, height: 1, at: [0, 0, 0] }, Placed { shape: Frame { width: 3, depth: 3 }, height: 1, at: [3, 3, 0] }], turn: None }
+cc 85d4349c32ab3f3aeff6e45aa71667f0cdc667c5d52666df5fbe01481dda5a2e # shrinks to Configuration { solids: [Placed { shape: Comb { teeth: 1, tooth_height: 1 }, height: 1, at: [0, 0, 0] }, Placed { shape: Frame { width: 3, depth: 3 }, height: 1, at: [0, 3, 0] }], turn: None }
+cc 25ee5546d833c04014268e716bf5cf89865d5bf3b7131c13f007c52b1d431ea4 # shrinks to Configuration { solids: [Placed { shape: Frame { width: 3, depth: 3 }, height: 1, at: [0, 0, 0] }, Placed { shape: Frame { width: 3, depth: 3 }, height: 1, at: [3, 3, 0] }], turn: None }
+cc 1309c1b38f1e57a08e0b8ebcd1c701c605dd16ea414ad2419b3e014816ca85c4 # shrinks to Configuration { solids: [Placed { shape: Frame { width: 3, depth: 3 }, height: 1, at: [0, 0, 0] }, Placed { shape: Block { width: 1, depth: 1 }, height: 1, at: [0, 0, -2] }], turn: None }
+cc a3cc03d0ae0cdd6c63fb4675c6c87903f3d704c3440160c789a5e79800cf3e43 # shrinks to (Configuration { solids: [Placed { shape: Frame { width: 3, depth: 3 }, height: 1, at: [0, 0, 0] }, Placed { shape: Block { width: 1, depth: 1 }, height: 1, at: [0, 0, -2] }], turn: None }, Rigid { quarters: 0, shift: [0, 0, 0] })

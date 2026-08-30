@@ -43,9 +43,9 @@
 //! crosses itself and an extrusion of a sound profile never does — so the input
 //! has to be wired together from two cubes inside the crate.
 
-use rcad_geom::{Isometry, Point, Scale, Vector};
+use rcad_geom::{Isometry, PlaneAgreement, Point, Scale, Segment, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
@@ -131,6 +131,32 @@ fn corners_of(model: &Model, solid: SolidKey) -> Vec<Point> {
     corners
 }
 
+/// Every edge of a solid, once each.
+fn edges_of(model: &Model, solid: SolidKey) -> Vec<Segment> {
+    let mut seen = Vec::new();
+    let mut edges = Vec::new();
+    for face in model.solid(solid).faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                let edge = coedge.edge();
+                if !seen.contains(&edge.key()) {
+                    seen.push(edge.key());
+                    edges.push(edge.segment());
+                }
+            }
+        }
+    }
+    edges
+}
+
+/// The edges of a solid that run through a point, ends included.
+fn edges_through(model: &Model, solid: SolidKey, point: Point) -> Vec<Segment> {
+    edges_of(model, solid)
+        .into_iter()
+        .filter(|edge| edge.closest_point(point) == point)
+        .collect()
+}
+
 /// How much skin each face of a solid has, face by face.
 fn areas_of(model: &Model, solid: SolidKey) -> Vec<f64> {
     model
@@ -173,14 +199,50 @@ fn nothing_in_it_is_degenerate(model: &Model, solids: &[SolidKey]) {
     }
 }
 
+/// No face of the answer is half of a face.
+///
+/// Two faces on one plane, facing one way, with an edge between them are one
+/// flat region cut in two, and §17.4's amendment settles that the commit joins
+/// them back up. That is what leaves three planes round every corner of the
+/// answer, which is what lets §17.1 re-derive that corner when the answer is
+/// fused again — so this is the property the whole partition rests on, and
+/// nothing else here looks at it directly.
+///
+/// A face that runs up against *itself* along an edge is still bounded there,
+/// so only faces that are two different faces are compared.
+fn no_face_of_it_is_half_of_another(model: &Model, solids: &[SolidKey]) {
+    for &solid in solids {
+        for face in model.solid(solid).faces() {
+            for wire in face.wires() {
+                for coedge in wire.coedges() {
+                    for neighbour in coedge.edge().neighbouring_faces() {
+                        if neighbour == face.key() {
+                            continue;
+                        }
+                        assert_ne!(
+                            face.plane().agreement_with(&model.face(neighbour).plane()),
+                            PlaneAgreement::SameWay,
+                            "two faces sharing an edge lie on one plane facing one way, \
+                             so they are one face and should have been joined"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 // 1. Coplanar faces, sharing the whole face.
 
 /// Two cubes of side two, one straight on top of the other. The face they share
 /// is the same square in both inputs, corner for corner.
 ///
 /// The tops and bottoms that meet point opposite ways, so the union drops both
-/// and the answer is a plain 2×2×4 box: five faces from each cube, and no face
-/// at all on the plane they shared.
+/// and the answer is a plain 2×2×4 box. Each of its four walls arrives in two
+/// halves, one from each cube, and the two halves are one plane facing one way
+/// with an edge between them — which §17.4's amendment joins into the one wall
+/// they are. Ten faces was the count of surviving *pieces*, which described the
+/// splitter's leftovers; the shape the test is named for has six.
 #[test]
 fn two_cubes_sharing_a_whole_face_unite_into_one_box() {
     let mut model = a_model();
@@ -190,12 +252,15 @@ fn two_cubes_sharing_a_whole_face_unite_into_one_box() {
     let united = fused(&mut model, &[lower], &[upper], Rule::Union);
 
     assert_eq!(united.solids().len(), 1);
-    let solid = model.solid(united.solids()[0]);
-    assert_eq!(solid.shells().count(), 1);
+    let solid = united.solids()[0];
+    assert_eq!(model.solid(solid).shells().count(), 1);
+    assert_eq!(model.solid(solid).faces().count(), 6, "a box has six faces");
+    let mut areas = areas_of(&model, solid);
+    areas.sort_by(f64::total_cmp);
     assert_eq!(
-        solid.faces().count(),
-        10,
-        "a bottom, a top, and four walls in two halves each"
+        areas,
+        vec![4.0, 4.0, 8.0, 8.0, 8.0, 8.0],
+        "two 2×2 ends and four walls that are 2×4 each, not eight halves of 2×2"
     );
     assert_eq!(volume_of(&model, united.solids()), 16.0);
     nothing_in_it_is_degenerate(&model, united.solids());
@@ -311,9 +376,23 @@ fn two_cubes_sharing_one_whole_edge_still_intersect_and_subtract() {
 /// Two cubes of side four, the second slid two along in `x` and two in `y`. The
 /// corners `(2, 2, 0)` and `(2, 2, 4)` of the second land exactly in the middle
 /// of the first one's bottom and top faces — not on an edge of them, in the
-/// interior — and the answer has to carry those points as corners of its own.
+/// interior.
+///
+/// Whether the fuse *copes* with that is the catalogue entry; whether the point
+/// stays a corner is a different question, and the answer to it is no. Under
+/// §17.1 a face is its plane, and the two bottom squares are one flat region
+/// with one plane over it, so the answer's bottom is one face and the landed
+/// point is in the middle of it. Keeping it as a corner would put four coplanar
+/// faces round one point, and a point like that has two planes round it and not
+/// three, so the *next* fuse over the answer could not re-derive it at all
+/// (§17.4, amended).
+///
+/// So the claim is that the coincidence was decided and proved, the volume is
+/// exactly right, the answer is a model in good standing, and the corner is
+/// absorbed rather than lost: still on the skin of the answer, on none of its
+/// edges and none of its corners, which places it strictly inside a face.
 #[test]
-fn a_corner_landing_inside_a_face_survives_as_a_corner_of_the_answer() {
+fn a_corner_landing_inside_a_face_is_absorbed_into_that_face() {
     let mut model = a_model();
     let one = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
     let other = cube(&mut model, 4.0, Vector::new(2.0, 2.0, 0.0));
@@ -321,14 +400,34 @@ fn a_corner_landing_inside_a_face_survives_as_a_corner_of_the_answer() {
     let united = fused(&mut model, &[one], &[other], Rule::Union);
 
     assert_eq!(united.solids().len(), 1);
+    let solid = united.solids()[0];
+    assert_eq!(model.solid(solid).shells().count(), 1);
     assert_eq!(volume_of(&model, united.solids()), 112.0);
-    let corners = corners_of(&model, united.solids()[0]);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a fuse writes a sound model or writes nothing");
+
+    let corners = corners_of(&model, solid);
     for landed in [Point::new(2.0, 2.0, 0.0), Point::new(2.0, 2.0, 4.0)] {
+        assert_eq!(
+            model.solid(solid).classify_point(
+                landed,
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+            Containment::OnBoundary,
+            "the corner that landed on a face is still on the skin of the answer"
+        );
         assert!(
-            corners.contains(&landed),
-            "the corner that landed in the middle of a face is a corner of the answer too"
+            !corners.contains(&landed),
+            "a corner in the middle of a flat region is not a corner of anything"
+        );
+        assert!(
+            edges_through(&model, solid, landed).is_empty(),
+            "it is not on the boundary of that face either, it is inside it"
         );
     }
+    no_face_of_it_is_half_of_another(&model, united.solids());
     nothing_in_it_is_degenerate(&model, united.solids());
 }
 
@@ -356,9 +455,20 @@ fn what_two_cubes_offset_by_a_corner_share_is_the_column_under_it() {
 
 /// A 3×3×4 box sitting in the corner of a cube of side four and poking out
 /// through the top. Its corner `(4, 4, 2)` lands exactly partway along the
-/// cube's vertical edge at `x = y = 4`, which the answer has to split in two.
+/// cube's vertical edge at `x = y = 4`.
+///
+/// The two solids are flush on `x = 4` and flush again on `y = 4`, so each of
+/// those two pairs of pieces is one plane facing one way and joins into one
+/// face. The edge between the two joined faces then runs the whole way from
+/// `(4, 4, 0)` up to `(4, 4, 6)`, straight, with the landed point in the middle
+/// of it — a point with two faces round it, which §17.4's amendment drops,
+/// making the two edges either side of it one edge.
+///
+/// So the claim is that the coincidence was decided and proved, the volume is
+/// exactly right, the answer is a model in good standing, and the corner is
+/// absorbed into that one edge rather than lost.
 #[test]
-fn a_corner_landing_partway_along_an_edge_splits_that_edge_in_two() {
+fn a_corner_landing_partway_along_an_edge_is_absorbed_into_one_straight_edge() {
     let mut model = a_model();
     let one = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
     let other = block(&mut model, [3.0, 3.0, 4.0], Vector::new(1.0, 1.0, 2.0));
@@ -366,11 +476,35 @@ fn a_corner_landing_partway_along_an_edge_splits_that_edge_in_two() {
     let united = fused(&mut model, &[one], &[other], Rule::Union);
 
     assert_eq!(united.solids().len(), 1);
+    let solid = united.solids()[0];
     assert_eq!(volume_of(&model, united.solids()), 64.0 + 36.0 - 18.0);
-    let corners = corners_of(&model, united.solids()[0]);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a fuse writes a sound model or writes nothing");
+
+    let landed = Point::new(4.0, 4.0, 2.0);
+    assert_eq!(
+        model
+            .solid(solid)
+            .classify_point(landed, &Policy::certified(), &mut ProvenanceLog::new()),
+        Containment::OnBoundary,
+        "the corner that landed on an edge is still on the skin of the answer"
+    );
     assert!(
-        corners.contains(&Point::new(4.0, 4.0, 2.0)),
-        "the corner that landed on the edge is a corner of the answer"
+        !corners_of(&model, solid).contains(&landed),
+        "a corner in the middle of a straight edge is not a corner of anything"
+    );
+    let through = edges_through(&model, solid, landed);
+    assert_eq!(
+        through.len(),
+        1,
+        "one edge runs through it, not two meeting"
+    );
+    let (bottom, top) = (Point::new(4.0, 4.0, 0.0), Point::new(4.0, 4.0, 6.0));
+    let ends = [through[0].start(), through[0].end()];
+    assert!(
+        ends == [bottom, top] || ends == [top, bottom],
+        "that edge is the whole corner of the answer, {bottom:?} to {top:?}, but it runs {ends:?}"
     );
     nothing_in_it_is_degenerate(&model, united.solids());
 }
@@ -488,9 +622,15 @@ fn a_cube_wholly_inside_another_under_all_three_rules() {
     assert_eq!(model.solid(united.solids()[0]).shells().count(), 1);
     assert_eq!(
         model.solid(united.solids()[0]).faces().count(),
-        54,
-        "a cut is by a plane, so the inner cube's four walls cross all six faces of the outer one \
-         and each comes back in nine pieces"
+        6,
+        "a cut is by a plane, so the inner cube's four walls do cross all six faces of the outer \
+         one and each comes back in nine pieces — but a cut where the solid it belongs to is \
+         nowhere near is not boundary of anything, and §17.4's join puts all nine back together"
+    );
+    assert_eq!(
+        areas_of(&model, united.solids()[0]),
+        vec![16.0; 6],
+        "the six faces are the outer cube's own, whole"
     );
     assert_eq!(volume_of(&model, united.solids()), 64.0);
     assert_eq!(
