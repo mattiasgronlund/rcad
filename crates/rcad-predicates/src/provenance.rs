@@ -57,6 +57,17 @@ pub enum Cause {
     /// An operation chose an approximate construction over failing. Set by
     /// the operation, not by this crate.
     TolerantFallback,
+    /// A point that had to be built rather than read — the meeting of three
+    /// planes, say — landed between two `f64`, and the magnitude is how far
+    /// the nearest `f64` sits from where it should be.
+    ///
+    /// Nothing was guessed here. This happens under a certified policy, with
+    /// every predicate deciding, because a division rarely lands on a number
+    /// `f64` can hold. That is why it is not [`Cause::TolerantFallback`]:
+    /// filing the two together would leave a reader unable to tell an
+    /// operation that decided everything and still could not write the answer
+    /// down from one that could not decide and took the answer anyway.
+    ConstructedPoint,
     /// The data arrived approximate — an imported file that did not close, or
     /// coordinates rounded by the exporter.
     ImportedUncertainty,
@@ -357,6 +368,55 @@ mod tests {
     #[should_panic(expected = "must be a real amount")]
     fn a_negative_approximation_is_a_bug() {
         let _ = Approximation::new(-1.0, Cause::ImportedUncertainty);
+    }
+
+    /// Two logs carrying the same amount of slop for different reasons must
+    /// not look alike.
+    ///
+    /// One operation decided every predicate and still could not write its
+    /// meeting point down exactly; the other could not decide and was allowed
+    /// to take an answer anyway. Same wobble, and the difference is the whole
+    /// diagnosis. Reusing [`Cause::TolerantFallback`] for the first would
+    /// throw it away.
+    #[test]
+    fn a_point_that_would_not_fit_in_an_f64_is_not_a_tolerant_fallback() {
+        let wobble = 1e-17;
+        let causes_of = |log: &ProvenanceLog| {
+            log.records()
+                .iter()
+                .filter_map(|record| record.approximation().map(Approximation::cause))
+                .collect::<Vec<_>>()
+        };
+
+        let mut nothing_was_guessed = ProvenanceLog::new();
+        nothing_was_guessed.push(resolved_with(Cause::ConstructedPoint, wobble));
+        let mut something_was_guessed = ProvenanceLog::new();
+        something_was_guessed.push(resolved_with(Cause::TolerantFallback, wobble));
+
+        assert_eq!(
+            nothing_was_guessed.worst_wobble(1.0),
+            something_was_guessed.worst_wobble(1.0),
+            "the two logs are the same size, so only the cause can tell them apart"
+        );
+        assert_eq!(causes_of(&nothing_was_guessed), [Cause::ConstructedPoint]);
+        assert_eq!(causes_of(&something_was_guessed), [Cause::TolerantFallback]);
+        assert_ne!(nothing_was_guessed, something_was_guessed);
+
+        let tag = Approximation::new(wobble, Cause::ConstructedPoint);
+        let bytes = postcard::to_allocvec(&tag).unwrap();
+        assert_eq!(
+            postcard::from_bytes::<Approximation>(&bytes)
+                .unwrap()
+                .cause(),
+            Cause::ConstructedPoint,
+            "the distinction has to survive being written to disk"
+        );
+    }
+
+    fn resolved_with(cause: Cause, wobble: f64) -> Record {
+        let mut record = undecided_record();
+        record.resolve_to(Decision::Zero, Approximation::new(wobble, cause));
+        record
     }
 
     #[test]

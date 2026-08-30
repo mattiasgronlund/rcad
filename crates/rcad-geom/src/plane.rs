@@ -3,7 +3,7 @@
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Filtered, Interval, Point as PredicatePoint, Predicate, decide, meet_of_three_planes,
-    product_is_normal,
+    orient2d, product_is_normal,
 };
 use serde::{Deserialize, Serialize};
 
@@ -347,6 +347,90 @@ impl Plane {
             third.coefficients(),
         )?)
     }
+
+    /// Whether `other` is the same flat surface as this one, and if so whether
+    /// it faces the same way.
+    ///
+    /// This is the certified "are these two faces coplanar" test, with no
+    /// tolerance in it anywhere and no dot product of normals.
+    ///
+    /// # What "the same plane" means here
+    ///
+    /// The four numbers this plane holds, against the four `other` holds. Two
+    /// coefficient vectors `[a, b, c, d]` describe the same surface exactly
+    /// when one is a multiple of the other, which is exactly when all six of
+    /// their two-by-two minors are zero. Each minor is one cross product of
+    /// two `f64`, so [`orient2d`](rcad_predicates::orient2d) gives its exact
+    /// sign for free.
+    ///
+    /// A minor with a certified non-zero sign *proves* the two surfaces are
+    /// different, so one is enough to answer whatever the other five do.
+    ///
+    /// As with [`Plane::side_of_point`], this is exact about the stored
+    /// numbers and says nothing about the planes a caller meant. Two faces
+    /// built from the same three points by different routes may each round
+    /// their normal a different way, and then they are honestly different
+    /// planes here.
+    #[must_use]
+    pub fn agreement_with(&self, other: &Plane) -> PlaneAgreement {
+        let mine = self.coefficients();
+        let theirs = other.coefficients();
+
+        let mut a_minor_was_undecided = false;
+        for [first, second] in [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]] {
+            match orient2d(
+                [0.0, 0.0],
+                [mine[first], mine[second]],
+                [theirs[first], theirs[second]],
+            ) {
+                Decision::Zero => (),
+                Decision::Neg | Decision::Pos => return PlaneAgreement::Different,
+                Decision::Undecidable { .. } => a_minor_was_undecided = true,
+                other => unreachable!("unhandled decision from orient2d: {other:?}"),
+            }
+        }
+        if a_minor_was_undecided {
+            return PlaneAgreement::CannotTell;
+        }
+
+        // Every minor is zero, so the two vectors are multiples of each other,
+        // and neither is the zero vector — a stored normal always has length
+        // one. Wherever one has a non-zero entry the other does too, and the
+        // two signs are the sign of the multiplier.
+        let position = (0..4)
+            .find(|&position| mine[position] != 0.0)
+            .expect("a stored plane's normal has length one, so it has a non-zero coefficient");
+        assert!(
+            theirs[position] != 0.0,
+            "a plane proportional to another cannot be all zeroes"
+        );
+        if mine[position].is_sign_negative() == theirs[position].is_sign_negative() {
+            PlaneAgreement::SameWay
+        } else {
+            PlaneAgreement::OppositeWay
+        }
+    }
+}
+
+/// What [`Plane::agreement_with`] found.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaneAgreement {
+    /// Same plane, facing the same way.
+    SameWay,
+    /// Same plane, facing opposite ways.
+    OppositeWay,
+    /// Not the same plane, and that is proved rather than assumed.
+    Different,
+    /// One of the six minors could not be given a sign, so the two planes
+    /// cannot be told apart and cannot be shown to match either.
+    ///
+    /// It takes coefficients whose product falls out of the range where `f64`
+    /// multiplication can be undone — a normal tilted by roughly `1e-300`, for
+    /// instance. `docs/decisions.md` §3.5's dynamic-range check is what keeps
+    /// models like that out; a caller reaching this has one anyway, and the
+    /// honest answer is that nothing here can tell.
+    CannotTell,
 }
 
 /// `normal · point - offset`, evaluated three ways for the cascade.
@@ -826,6 +910,149 @@ mod tests {
             Decision::Neg => (),
             other => panic!("a box around (1/3, 1/3, 1/3) is well below z = 2: {other:?}"),
         }
+    }
+
+    /// [`Plane::agreement_with`] reads each of its six minors off `orient2d`,
+    /// which only works if `orient2d` measured from the origin is that
+    /// determinant. Small integers keep the plain `f64` product exact, so it
+    /// serves as the oracle.
+    #[test]
+    fn orient2d_from_the_origin_is_the_sign_of_a_two_by_two_determinant() {
+        for x1 in -2..=2 {
+            for y1 in -2..=2 {
+                for x2 in -2..=2 {
+                    for y2 in -2..=2 {
+                        let [x1, y1, x2, y2] = [x1, y1, x2, y2].map(f64::from);
+                        let determinant = x1 * y2 - y1 * x2;
+                        let expected = if determinant > 0.0 {
+                            Decision::Pos
+                        } else if determinant < 0.0 {
+                            Decision::Neg
+                        } else {
+                            Decision::Zero
+                        };
+                        assert_eq!(
+                            orient2d([0.0, 0.0], [x1, y1], [x2, y2]),
+                            expected,
+                            "{x1} {y1} {x2} {y2}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_plane_is_the_same_plane_as_itself_facing_the_same_way() {
+        let plane = plane_at_height_two();
+        assert_eq!(plane.agreement_with(&plane), PlaneAgreement::SameWay);
+    }
+
+    #[test]
+    fn a_reversed_plane_is_the_same_plane_facing_the_other_way() {
+        let plane = plane_at_height_two();
+        assert_eq!(
+            plane.agreement_with(&plane.reversed()),
+            PlaneAgreement::OppositeWay
+        );
+    }
+
+    #[test]
+    fn two_parallel_planes_at_different_heights_are_not_the_same_plane() {
+        let higher =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 5.0), Vector::new(0.0, 0.0, 1.0))
+                .unwrap();
+        assert_eq!(
+            plane_at_height_two().agreement_with(&higher),
+            PlaneAgreement::Different
+        );
+    }
+
+    #[test]
+    fn two_planes_the_same_distance_from_the_origin_but_facing_elsewhere_are_not_the_same_plane() {
+        let along_x = Plane::from_coefficients([1.0, 0.0, 0.0, -2.0]).unwrap();
+        let along_y = Plane::from_coefficients([0.0, 1.0, 0.0, -2.0]).unwrap();
+        assert_eq!(along_x.offset(), along_y.offset());
+        assert_eq!(along_x.agreement_with(&along_y), PlaneAgreement::Different);
+    }
+
+    /// The case a comparison of coefficients gets wrong.
+    ///
+    /// Every stored `Plane` has its normal scaled to length one, so two
+    /// coefficient vectors that are multiples of each other by anything but
+    /// `-1` cannot be built through the public constructors —
+    /// `[2, 0, 0, -6]` and `[1, 0, 0, -3]` come back bit for bit identical,
+    /// and a comparison would get *those* right. The multiplier that does
+    /// survive is `-1`, and there a comparison says "different plane" where
+    /// the truth is "same plane, other way round". The normal here is
+    /// irrational, so nothing about the answer comes from the numbers being
+    /// tidy.
+    #[test]
+    fn the_same_plane_scaled_by_minus_one_is_not_two_planes() {
+        let plane = Plane::through_three_points(
+            Point::new(1.0, 0.0, 0.0),
+            Point::new(0.0, 2.0, 0.0),
+            Point::new(0.0, 0.0, 3.0),
+        )
+        .unwrap();
+        let other_way = plane.reversed();
+
+        assert_ne!(
+            plane.coefficients(),
+            other_way.coefficients(),
+            "comparing the four numbers calls these two different planes"
+        );
+        assert_eq!(
+            plane.agreement_with(&other_way),
+            PlaneAgreement::OppositeWay
+        );
+
+        let scaled_the_easy_way = Plane::from_coefficients([2.0, 0.0, 0.0, -6.0]).unwrap();
+        assert_eq!(
+            scaled_the_easy_way.coefficients(),
+            Plane::from_coefficients([1.0, 0.0, 0.0, -3.0])
+                .unwrap()
+                .coefficients(),
+            "scaling is undone on the way in, so this is the case that cannot arise"
+        );
+    }
+
+    #[test]
+    fn two_planes_one_ulp_apart_are_different_planes_with_no_tolerance_to_argue_about() {
+        let plane = Plane::from_coefficients([1.0, 0.0, 0.0, -3.0]).unwrap();
+        let a_hair_further_out =
+            Plane::from_coefficients([1.0, 0.0, 0.0, -f64::from_bits(3f64.to_bits() + 1)]).unwrap();
+
+        assert_ne!(plane.offset(), a_hair_further_out.offset());
+        assert!((plane.offset() - a_hair_further_out.offset()).abs() < 1e-15);
+        assert_eq!(
+            plane.agreement_with(&a_hair_further_out),
+            PlaneAgreement::Different
+        );
+    }
+
+    /// A plane tilted by so little that the products of its own coefficients
+    /// fall out of the range where `f64` multiplication can be undone.
+    ///
+    /// The truthful answer is [`PlaneAgreement::OppositeWay`] — it is asked
+    /// against its own reverse — and the `a * b` minor is `1e-300 * -2e-300`
+    /// against `2e-300 * -1e-300`, both of which underflow to zero. Neither
+    /// intervals nor exact arithmetic can prove that difference is zero, so
+    /// saying "different plane" would be a confident lie.
+    #[test]
+    fn a_plane_tilted_by_a_hair_too_small_to_multiply_cannot_be_matched_to_itself() {
+        let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(1e-300, 2e-300, 1.0))
+            .unwrap();
+        assert_eq!(
+            plane.normal().components(),
+            [1e-300, 2e-300, 1.0],
+            "the rest of this test rests on the normal surviving scaling unchanged"
+        );
+
+        assert_eq!(
+            plane.agreement_with(&plane.reversed()),
+            PlaneAgreement::CannotTell
+        );
     }
 
     #[test]

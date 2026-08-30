@@ -55,7 +55,7 @@ pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
 pub use crate::error::{Error, Result};
 pub use crate::isometry::Isometry;
 pub use crate::orientation::Orientation;
-pub use crate::plane::{Plane, SIDE_OF_PLANE};
+pub use crate::plane::{Plane, PlaneAgreement, SIDE_OF_PLANE};
 pub use crate::point::{Axis, Point, Vector};
 pub use crate::scale::{DYNAMIC_RANGE_CHECK, DynamicRange, Scale, Unit};
 pub use crate::segment::Segment;
