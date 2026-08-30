@@ -203,6 +203,10 @@
 //!
 //! **Classify.** [`SolidView::classify_point`] returns a [`Containment`],
 //! decided by exact predicates with no tolerance anywhere in the loop.
+//! [`SolidView::classify_uncertain_point`] is the same body asked about a
+//! [`PredicatePoint`], which may be known only as a box — the meet of three
+//! planes. That is where [`Containment::Undecidable`] comes from: a box
+//! straddling a face cannot be placed however much precision is spent on it.
 //!
 //! **Ask.** The predicates those answers are built from are callable on their
 //! own: [`orient2d`], [`orient3d`], [`orient3d_of_points`],

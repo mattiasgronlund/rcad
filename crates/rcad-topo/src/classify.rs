@@ -1,5 +1,39 @@
+//! Inside a solid, outside it, on its skin, or honestly not sure.
+//!
+//! # Two ways in, one body
+//!
+//! [`SolidView::classify_point`] takes a point with exact coordinates, which is
+//! every point M0 ever had. [`SolidView::classify_uncertain_point`] takes one
+//! that may be known only as a box — the meet of three planes, which is what
+//! the fuse of decisions.md §1.7 asks about. The first is the second with an
+//! exact point handed in. That is the whole arrangement, and it is deliberate:
+//! §1.7's third exit criterion asks for classification *reused*, and a second
+//! ray caster that took boxes would agree with this one right up until it did
+//! not.
+//!
+//! # Where the fourth answer starts happening
+//!
+//! decisions.md §12.5 records that the enclosure and the provenance this
+//! returns "carry no signal today ... and cannot until classification meets
+//! constructed points". That is exactly right, and this is where it stops being
+//! true. Ask about an exact point under a certified policy and every `orient3d`
+//! falls through to exact arithmetic and proves its sign: nothing is ever
+//! recorded, so the log stays empty, and the only way left to
+//! [`Containment::Undecidable`] is all three rays meeting an edge dead on,
+//! which reports an enclosure of zero. Both fields are carried and neither
+//! says anything.
+//!
+//! Ask about a point that is only known to lie inside a box and both start
+//! meaning something. Exact arithmetic cannot run on a coordinate nobody has,
+//! so a box straddling a face's plane leaves the predicate genuinely undecided
+//! and the answer is [`Containment::Undecidable`] carrying the width that
+//! straddled. Under a tolerant policy the same query resolves instead, and the
+//! log picks up a record of what was accepted to get there.
+
 use rcad_geom::Point;
-use rcad_predicates::{Decision, Point as ExactPoint, Policy, ProvenanceLog, orient3d_tolerantly};
+use rcad_predicates::{
+    Decision, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
+};
 
 use crate::SolidView;
 
@@ -32,6 +66,31 @@ pub enum Containment {
 impl SolidView<'_> {
     /// Say whether `point` is inside the solid, outside it, or on its skin.
     ///
+    /// This is [`SolidView::classify_uncertain_point`] with a point whose
+    /// coordinates are exact, and there is no other difference between them.
+    ///
+    /// # Errors
+    ///
+    /// Nothing here fails; not being able to tell is an answer, not a failure.
+    #[must_use]
+    pub fn classify_point(
+        self,
+        point: Point,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Containment {
+        self.classify_uncertain_point(PredicatePoint::from(point.coordinates()), policy, log)
+    }
+
+    /// Say whether a point known only to lie inside a box is inside the solid,
+    /// outside it, or on its skin.
+    ///
+    /// `point` may have exact coordinates or be the meet of three planes, which
+    /// is a box and never an `f64` triple in general. The box is where the
+    /// undecided answer comes from: exact arithmetic cannot run on it, so a box
+    /// straddling a face's plane straddles zero in the predicate too and stays
+    /// straddling however much precision is thrown at it (decisions.md §2.5).
+    ///
     /// # How it works
     ///
     /// The solid's faces are broken into triangles, which form a closed
@@ -43,6 +102,12 @@ impl SolidView<'_> {
     ///
     /// A triangle whose plane holds `point`, with the point inside the
     /// triangle, means the point is on the boundary and that answer wins.
+    ///
+    /// The three corners of a triangle are coordinates stored in the model and
+    /// stay exact. The ray's far target is picked from the solid's bounding box
+    /// and is exact too. `point` is the only thing that may be a box, and it is
+    /// handed to every predicate as it is — nothing here rounds it down to a
+    /// representative coordinate first.
     ///
     /// If the ray meets an edge of a triangle exactly, the count is not to be
     /// trusted, so the whole ray is thrown away and the next of three fixed
@@ -71,9 +136,9 @@ impl SolidView<'_> {
     /// Anything the cascade could not certify lands in `log`, and a fully
     /// certified classification leaves it untouched.
     #[must_use]
-    pub fn classify_point(
+    pub fn classify_uncertain_point(
         self,
-        point: Point,
+        point: PredicatePoint,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Containment {
@@ -106,7 +171,7 @@ impl SolidView<'_> {
 
     fn count_crossings(
         self,
-        point: Point,
+        point: PredicatePoint,
         target: Point,
         policy: &Policy,
         log: &mut ProvenanceLog,
@@ -129,11 +194,26 @@ impl SolidView<'_> {
     }
 }
 
-fn is_outside_the_box(point: Point, low: Point, high: Point) -> bool {
-    let point = point.coordinates();
+/// Whether the whole of `point`'s box sits off one side of the solid's
+/// bounding box.
+///
+/// This decides `Outside` without firing a ray, and it is allowed to because it
+/// is a proof rather than a shortcut. Every triangle of the solid has its three
+/// corners inside the bounding box, and an enclosure is a range the point is
+/// guaranteed to be somewhere in, so a range lying entirely past one side of
+/// the box puts the point outside the solid with nothing left over. No
+/// tolerance is involved and no sign of a rounded quantity is read.
+///
+/// A box that overlaps the solid's bounding box proves nothing either way, so
+/// it falls through and the rays decide it. So does a coordinate with no
+/// enclosure around it at all — an infinity or a `NaN` encloses to every real
+/// number — and the rays then come back undecided, which is the honest answer
+/// to a point that cannot be bounded.
+fn is_outside_the_box(point: PredicatePoint, low: Point, high: Point) -> bool {
+    let point = point.enclosure();
     let low = low.coordinates();
     let high = high.coordinates();
-    (0..3).any(|axis| point[axis] < low[axis] || point[axis] > high[axis])
+    (0..3).any(|axis| point[axis].hi() < low[axis] || point[axis].lo() > high[axis])
 }
 
 /// Three far-off points to aim at, in turn.
@@ -142,6 +222,11 @@ fn is_outside_the_box(point: Point, low: Point, high: Point) -> bool {
 /// because an axis-aligned ray runs straight along the edges of an axis-aligned
 /// box and grazes everything. The multipliers are arbitrary; any fixed set of
 /// three that point in different directions does the same job.
+///
+/// Nothing here looks at the point being classified, which is what keeps aiming
+/// and deciding apart (decisions.md §15.5). A point known only as a box has no
+/// coordinates to aim from, and none are invented for it: the targets come from
+/// the solid alone, and the box itself is what every predicate is handed.
 fn ray_targets(low: Point, high: Point) -> [Point; 3] {
     let low = low.coordinates();
     let high = high.coordinates();
@@ -201,7 +286,7 @@ struct Crossings {
 /// behind it.
 fn look_at_triangle(
     [a, b, c]: [Point; 3],
-    point: Point,
+    point: PredicatePoint,
     target: Point,
     policy: &Policy,
     log: &mut ProvenanceLog,
@@ -246,19 +331,24 @@ fn look_at_triangle(
     }
 }
 
+/// Which side of the plane through `a`, `b` and `c` the point `d` is on.
+///
+/// `a`, `b` and `c` are always exact: a triangle corner read out of the model,
+/// or a ray target worked out from the bounding box. `d` is the point being
+/// classified and is the one that may be a box.
 fn decide(
     a: Point,
     b: Point,
     c: Point,
-    d: Point,
+    d: PredicatePoint,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Decision {
     orient3d_tolerantly(
-        ExactPoint::from(a.coordinates()),
-        ExactPoint::from(b.coordinates()),
-        ExactPoint::from(c.coordinates()),
-        ExactPoint::from(d.coordinates()),
+        PredicatePoint::from(a.coordinates()),
+        PredicatePoint::from(b.coordinates()),
+        PredicatePoint::from(c.coordinates()),
+        d,
         policy,
         log,
     )
