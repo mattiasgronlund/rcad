@@ -31,26 +31,37 @@ fn a_lumpy_outline() -> impl Strategy<Value = Vec<[f64; 2]>> {
 
 /// The same, with a small square hole punched at the middle when there is room
 /// for one.
+///
+/// # Panics
+///
+/// If the builder refuses one, which would be a bug in the kernel rather than
+/// an input to be skipped. Every corner sits at its own angle about the origin
+/// with a positive radius, so each edge stays inside a wedge narrower than half
+/// a turn: adjacent edges share their corner and nothing else, and no two other
+/// edges come near each other at all. The hole only goes in when the outline
+/// clears the unit circle it fits inside.
+///
+/// Discarding a refusal here instead would hide exactly the failure this suite
+/// exists to catch — a sound profile being turned away.
 fn a_lumpy_profile() -> impl Strategy<Value = Profile> {
-    (a_lumpy_outline(), any::<bool>()).prop_filter_map(
-        "the outline has to be a sound profile, with room for the hole",
-        |(outline, wants_a_hole)| {
-            let closest = outline
-                .iter()
-                .map(|point| point[0].hypot(point[1]))
-                .fold(f64::INFINITY, f64::min);
-            let mut builder = ProfileBuilder::new(outline);
-            if wants_a_hole && closest > 1.0 {
-                builder = builder.with_hole(vec![
-                    [-0.25, -0.25],
-                    [0.25, -0.25],
-                    [0.25, 0.25],
-                    [-0.25, 0.25],
-                ]);
-            }
-            builder.build(&Policy::certified()).ok()
-        },
-    )
+    (a_lumpy_outline(), any::<bool>()).prop_map(|(outline, wants_a_hole)| {
+        let closest = outline
+            .iter()
+            .map(|point| point[0].hypot(point[1]))
+            .fold(f64::INFINITY, f64::min);
+        let mut builder = ProfileBuilder::new(outline);
+        if wants_a_hole && closest > 1.0 {
+            builder = builder.with_hole(vec![
+                [-0.25, -0.25],
+                [0.25, -0.25],
+                [0.25, 0.25],
+                [-0.25, 0.25],
+            ]);
+        }
+        builder
+            .build(&Policy::certified())
+            .expect("every lumpy outline is a sound profile")
+    })
 }
 
 fn empty_model() -> Model {

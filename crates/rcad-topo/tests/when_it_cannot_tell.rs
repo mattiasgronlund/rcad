@@ -17,18 +17,18 @@ fn a_unit_square() -> Vec<[f64; 2]> {
     vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
 }
 
-/// The same four corners at unit size make a perfectly ordinary trapezoid.
-fn a_trapezoid(size: f64) -> Vec<[f64; 2]> {
-    vec![[0.0, 0.0], [0.0, size], [size, size], [2.0 * size, 0.0]]
+/// The same four corners at unit size make a perfectly ordinary parallelogram.
+fn a_parallelogram(size: f64) -> Vec<[f64; 2]> {
+    vec![[0.0, 0.0], [size, size], [size, 2.0 * size], [0.0, size]]
 }
 
 #[test]
 fn a_profile_too_big_for_f64_to_multiply_is_refused_rather_than_guessed() {
-    ProfileBuilder::new(a_trapezoid(1.0))
+    ProfileBuilder::new(a_parallelogram(1.0))
         .build(&Policy::certified())
         .expect("the shape itself is sound; only its size is the problem");
 
-    let refused = ProfileBuilder::new(a_trapezoid(1e200)).build(&Policy::certified());
+    let refused = ProfileBuilder::new(a_parallelogram(1e200)).build(&Policy::certified());
 
     match refused {
         Err(Error::Undecidable { records }) => {

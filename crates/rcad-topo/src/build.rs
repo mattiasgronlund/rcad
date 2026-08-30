@@ -153,7 +153,7 @@ fn check_nothing_crosses(
         for second in (first + 1)..edges.len() {
             let (one, other) = (&edges[first], &edges[second]);
             match one.runs_into(other) {
-                Some(corner) => check_the_corner_does_not_double_back(corner)?,
+                Some(corner) => check_the_corner_does_not_double_back(corner, policy, log)?,
                 None => {
                     if segments_meet(one.ends, other.ends, policy, log)? {
                         return Err(Error::ProfileCrossesItself);
@@ -198,13 +198,32 @@ impl ProfileEdge {
 
 /// Two edges that meet end to end may only touch at that corner.
 ///
-/// What matters is whether one of them lies back along the other, which is a
-/// loop folding onto itself.
-fn check_the_corner_does_not_double_back([a, b, c]: [[f64; 2]; 3]) -> Result<()> {
-    if point_is_between(c, a, b) || point_is_between(a, b, c) {
-        return Err(Error::ProfileCrossesItself);
+/// They share it by construction, so a shared corner is never a crossing however
+/// sharp it is. The only way `a` to `b` to `c` can go wrong is by folding flat:
+/// all three on one line, with the two edges then covering a stretch of that
+/// line twice over.
+///
+/// The turn has to be decided before the between test runs. [`point_is_between`]
+/// is a bounding-box test and only means anything once the three points are
+/// known to share a line; on a corner that genuinely turns it reports any
+/// overlap of the two boxes as a fold, which every triangle has.
+///
+/// # Errors
+///
+/// [`Error::ProfileCrossesItself`] if the corner folds flat. [`Error::Undecidable`]
+/// if the turn cannot be decided.
+fn check_the_corner_does_not_double_back(
+    [a, b, c]: [[f64; 2]; 3],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<()> {
+    match turn_of(a, b, c, policy, log)? {
+        Turn::Left | Turn::Right => Ok(()),
+        Turn::Straight if point_is_between(c, a, b) || point_is_between(a, b, c) => {
+            Err(Error::ProfileCrossesItself)
+        }
+        Turn::Straight => Ok(()),
     }
-    Ok(())
 }
 
 fn check_holes_sit_inside(

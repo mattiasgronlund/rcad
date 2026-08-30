@@ -11,9 +11,23 @@
 //!
 //! What is generated instead is a **notched star**: corners at evenly spaced
 //! angles about the origin, alternating between a long arm and a short notch,
-//! with square holes punched inside. Every notch corner is reflex, so the
-//! outline is genuinely not convex, and there is always at least one inner
-//! loop.
+//! with holes punched inside. Every notch corner is reflex, so the outline is
+//! genuinely not convex, and there is always at least one inner loop.
+//!
+//! # Why one family of shapes is not enough
+//!
+//! The star's corners sit at strictly increasing angles about the origin, so
+//! every edge stays inside its own narrow wedge and no two edges ever have
+//! bounding boxes lying on top of each other. Axis-aligned rectangles have the
+//! same property for a different reason. A self-crossing check that confused
+//! "these two boxes overlap" with "these two edges cross" would refuse a plain
+//! triangle and still pass every property here — which is exactly what happened.
+//!
+//! [`a_simple_polygon`] is the answer: a second and third family, chosen for
+//! the shapes the star cannot make. Triangles, corners that lean instead of
+//! turning square, adjacent edges that come within a whisker of parallel, and
+//! edges whose boxes lie almost entirely on top of one another without the
+//! edges ever touching.
 //!
 //! # What shrinks, and toward what
 //!
@@ -30,11 +44,17 @@
 //!   fewest arms; each element shrinks toward `0`, the shortest arm.
 //! - how many holes there are, shrinking toward one.
 //! - how big the holes are, shrinking toward the smallest.
+//! - whether the holes are triangles, shrinking toward `false`, the square.
 //!
 //! The shrink target is therefore a regular four-armed star — eight corners,
 //! every arm at [`SHORTEST_ARM`] and every notch at [`NOTCH_RADIUS`] — with one
-//! smallest hole in it. Small, drawable, and still carrying the reflex corners
-//! and the inner loop that are the two things this shape exists to test.
+//! smallest square hole in it. Small, drawable, and still carrying the reflex
+//! corners and the inner loop that are the two things this shape exists to test.
+//!
+//! [`a_simple_polygon`] shrinks the same way: whole-number width, height, lean,
+//! tooth count and shear, each toward its own floor. The triangle bottoms out at
+//! the unit right triangle `[[0, 0], [1, 0], [0, 1]]` and the comb, with one
+//! tooth and no lean, at the upright rectangle `[[0, 0], [1, 0], [1, 2], [0, 2]]`.
 //!
 //! Deliberately breaking three properties confirms it. "Always fail" shrinks to
 //! exactly that four-armed star with one hole of half-size `0.25`. "Fail above
@@ -56,7 +76,11 @@
 //!   disc of that radius is wholly inside it. Every hole fits inside that disc,
 //!   which puts every hole inside the outline without a test.
 //! - The holes sit on a ring far enough apart that the largest of them still
-//!   cannot touch its neighbour.
+//!   cannot touch its neighbour. A triangular hole is cut out of the same square
+//!   its square counterpart fills, so both arguments above cover it unchanged.
+//!
+//! The two families in [`a_simple_polygon`] hold by construction too, and each
+//! carries its own argument at the strategy that builds it.
 //!
 //! [`extruded`] therefore `expect`s rather than filters: a profile this builder
 //! refuses is a bug here, not an input to be skipped.
@@ -125,6 +149,12 @@ pub const FEWEST_CORNERS: usize = 8;
 /// The most corners a generated outline has.
 pub const MOST_CORNERS: usize = 16;
 
+/// The most teeth a generated comb has.
+pub const MOST_TEETH: usize = 5;
+
+/// How thick the base a comb's teeth stand on is.
+const COMB_BASE_HEIGHT: f64 = 1.0;
+
 /// Roughly how big a generated shape is, for [`Scale`] and for turning a
 /// relative tolerance into an absolute one.
 pub const WORKING_SIZE: f64 = 30.0;
@@ -137,14 +167,62 @@ pub fn a_notched_polygon_with_holes() -> impl Strategy<Value = Profile> {
         proptest::collection::vec(0..=ARM_STEPS, FEWEST_CORNERS / 2..=MOST_CORNERS / 2),
         1usize..=MOST_HOLES,
         HOLE_HALF_SIZES_IN_HUNDREDTHS,
+        any::<bool>(),
     )
-        .prop_map(|(arm_extensions, hole_count, hole_size_in_hundredths)| {
-            notched_polygon_with_holes(
-                &arm_extensions,
-                hole_count,
-                f64::from(hole_size_in_hundredths) / 100.0,
-            )
-        })
+        .prop_map(
+            |(arm_extensions, hole_count, hole_size_in_hundredths, holes_are_triangles)| {
+                notched_polygon_with_holes(
+                    &arm_extensions,
+                    hole_count,
+                    f64::from(hole_size_in_hundredths) / 100.0,
+                    holes_are_triangles,
+                )
+            },
+        )
+}
+
+/// An outline that is simple whatever its parameters come out as, from a family
+/// the notched star cannot reach.
+///
+/// See the module docs for why one family of shapes was not enough.
+pub fn a_simple_polygon() -> impl Strategy<Value = Vec<[f64; 2]>> {
+    prop_oneof![a_triangle(), a_sheared_comb()]
+}
+
+/// Corners at `(0, 0)`, `(width, 0)` and `(lean, height)`.
+///
+/// Three corners that are not all in one line always make a simple polygon, and
+/// `height` is never zero, so every parameter here is sound. `lean` reaches well
+/// past both ends of the base, so the apex overhangs and two of the three edges
+/// come to lie almost entirely within each other's bounding box — the case a
+/// star about the origin never produces. It shrinks to the unit right triangle.
+fn a_triangle() -> impl Strategy<Value = Vec<[f64; 2]>> {
+    (1i32..=10, 1i32..=10, -20i32..=20).prop_map(|(width, height, lean)| {
+        vec![
+            [0.0, 0.0],
+            [f64::from(width), 0.0],
+            [f64::from(lean), f64::from(height)],
+        ]
+    })
+}
+
+/// A comb of square teeth standing on a base, leaned over sideways.
+///
+/// Square-on it is plainly simple: each tooth stands on its own stretch of the
+/// base with a gap either side. Leaning it over is a straight-line map of the
+/// plane, which cannot make two edges cross that did not cross before, and with
+/// whole numbers this small the arithmetic is exact in `f64` — so the leaned
+/// comb is simple too, without anything having to check.
+///
+/// The lean is what this family is for. A tooth travels `shear * height`
+/// sideways while staying one wide, so its edges end up sharing almost all of
+/// their bounding box with the teeth either side of it without ever touching
+/// them, and the top of a tooth runs within a whisker of parallel to the side it
+/// meets. It shrinks to one upright tooth on the base, and no lean at all.
+fn a_sheared_comb() -> impl Strategy<Value = Vec<[f64; 2]>> {
+    (1usize..=MOST_TEETH, 1i32..=8, 0i32..=20).prop_map(|(teeth, tooth_height, shear)| {
+        sheared_comb(teeth, f64::from(tooth_height), f64::from(shear))
+    })
 }
 
 /// An arbitrary rigid movement: a turn about an arbitrary axis, then a shift.
@@ -253,10 +331,32 @@ pub enum Material {
     Empty,
 }
 
+fn sheared_comb(teeth: usize, tooth_height: f64, shear: f64) -> Vec<[f64; 2]> {
+    let top = COMB_BASE_HEIGHT + tooth_height;
+    let span = (2 * teeth - 1) as f64;
+
+    let mut corners = vec![[0.0, 0.0], [span, 0.0]];
+    for tooth in (0..teeth).rev() {
+        let left = 2.0 * tooth as f64;
+        corners.push([left + 1.0, top]);
+        corners.push([left, top]);
+        if tooth > 0 {
+            corners.push([left, COMB_BASE_HEIGHT]);
+            corners.push([left - 1.0, COMB_BASE_HEIGHT]);
+        }
+    }
+
+    for corner in &mut corners {
+        corner[0] += shear * corner[1];
+    }
+    corners
+}
+
 fn notched_polygon_with_holes(
     arm_extensions: &[u32],
     hole_count: usize,
     hole_half_size: f64,
+    holes_are_triangles: bool,
 ) -> Profile {
     let corners = arm_extensions.len() * 2;
     let outline: Vec<[f64; 2]> = (0..corners)
@@ -279,12 +379,25 @@ fn notched_polygon_with_holes(
             HOLE_RING_RADIUS * angle.cos(),
             HOLE_RING_RADIUS * angle.sin(),
         );
-        builder = builder.with_hole(vec![
-            [x - hole_half_size, y - hole_half_size],
-            [x + hole_half_size, y - hole_half_size],
-            [x + hole_half_size, y + hole_half_size],
-            [x - hole_half_size, y + hole_half_size],
-        ]);
+        // Half of the same square, cut corner to corner. It stays inside every
+        // bound the square had, so the module docs' argument that a hole sits
+        // inside the outline and clear of its neighbours covers it without a
+        // word changing — and a right triangle is the shape a self-crossing
+        // check gets wrong first.
+        builder = builder.with_hole(if holes_are_triangles {
+            vec![
+                [x - hole_half_size, y - hole_half_size],
+                [x + hole_half_size, y - hole_half_size],
+                [x - hole_half_size, y + hole_half_size],
+            ]
+        } else {
+            vec![
+                [x - hole_half_size, y - hole_half_size],
+                [x + hole_half_size, y - hole_half_size],
+                [x + hole_half_size, y + hole_half_size],
+                [x - hole_half_size, y + hole_half_size],
+            ]
+        });
     }
     builder
         .build(&Policy::certified())

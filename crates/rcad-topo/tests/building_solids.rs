@@ -130,6 +130,65 @@ fn a_plate_with_two_holes_still_has_two_coedges_on_every_edge() {
 }
 
 #[test]
+fn a_right_triangle_is_a_perfectly_good_profile() {
+    let mut model = empty_model();
+    let triangle = profile_of(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+
+    let solid = model
+        .add_extrusion(&triangle, 2.0, &Isometry::identity())
+        .expect("a triangular prism");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a sound prism");
+
+    assert_eq!(model.solid(solid).measure().volume(), 1.0);
+}
+
+#[test]
+fn a_parallelogram_is_a_perfectly_good_profile() {
+    let mut model = empty_model();
+    let leaning = profile_of(vec![[0.0, 0.0], [1.0, 1.0], [1.0, 2.0], [0.0, 1.0]]);
+
+    let solid = model
+        .add_extrusion(&leaning, 3.0, &Isometry::identity())
+        .expect("a leaning block");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a sound block");
+
+    assert_eq!(model.solid(solid).measure().volume(), 3.0);
+}
+
+#[test]
+fn a_triangular_hole_in_a_square_outline_is_a_perfectly_good_profile() {
+    let mut model = empty_model();
+    let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+        .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]])
+        .build(&Policy::certified())
+        .expect("a plate with a triangular hole");
+
+    let solid = model
+        .add_extrusion(&plate, 3.0, &Isometry::identity())
+        .expect("a plate three thick");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a sound plate");
+
+    assert_eq!(model.solid(solid).measure().volume(), (100.0 - 2.0) * 3.0);
+}
+
+/// A corner can be as sharp as it likes as long as the two edges only share
+/// their end. This one is a hair away from folding back and is still sound;
+/// [`a_profile_that_doubles_back_along_itself_is_refused`] is the same corner
+/// once it has actually folded.
+#[test]
+fn a_corner_almost_folded_back_on_itself_is_still_a_corner() {
+    let sliver = profile_of(vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1e-9], [1.0, 1.0]]);
+
+    assert_eq!(sliver.outline().len(), 4);
+}
+
+#[test]
 fn an_l_shape_is_measured_right_even_though_it_is_not_convex() {
     let mut model = empty_model();
     let ell = profile_of(vec![
