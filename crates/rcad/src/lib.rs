@@ -55,9 +55,10 @@
 //! use rcad::{Containment, Model, Point, Policy, ProvenanceLog, Scale};
 //!
 //! let mut model = Model::new(Scale::millimetres(100.0)?);
-//! let cube = model.add_cube(10.0)?;
-//!
 //! let mut log = ProvenanceLog::new();
+//! let cube = model.add_cube(10.0, &Policy::certified(), &mut log)?;
+//! assert!(log.is_empty(), "a cube of side ten needs nothing approximated");
+//!
 //! model.validate(&Policy::certified(), &mut log)?;
 //! assert!(log.is_empty(), "a clean sweep records nothing at all");
 //!
@@ -130,11 +131,15 @@
 //! stamped with [`FORMAT_VERSION`], and refuses anything that does not match.
 //! Do not archive anything in it (`docs/decisions.md` §6).
 //!
-//! **Account.** Anything the kernel could not certify lands in a
-//! [`ProvenanceLog`] as a [`Record`], and any slop left behind in the model
-//! itself is an [`Approximation`] tag on the entity that carries it. A fully
-//! certified operation logs nothing at all, which is itself the signal that
-//! nothing was fudged (`docs/decisions.md` §5).
+//! **Account.** Every operation that can make a decision takes a `&Policy` and
+//! a `&mut ProvenanceLog`, and anything it could not certify lands in that log
+//! as a [`Record`] — on the way out of a successful operation as much as a
+//! failed one. A fully certified operation logs nothing at all, which is itself
+//! the signal that nothing was fudged. Slop left behind in the model is an
+//! [`Approximation`] tag on the entity carrying it: a tolerant
+//! [`ProfileBuilder::build`] hands its slop to the [`Profile`], and
+//! [`Model::add_extrusion`] passes it on to every vertex, edge and face it
+//! builds from those loops (`docs/decisions.md` §5, §1.2).
 //!
 //! `&Model` is `Sync`, with no interior mutability and no lazy cache, so all of
 //! the reading above parallelizes behind a shared reference with no cooperation

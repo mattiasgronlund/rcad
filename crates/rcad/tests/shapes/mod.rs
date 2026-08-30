@@ -108,7 +108,8 @@
 
 use proptest::prelude::*;
 use rcad::{
-    Axis, Isometry, Model, Point, Policy, Profile, ProfileBuilder, Scale, SolidKey, Vector,
+    Axis, Isometry, Model, Point, Policy, Profile, ProfileBuilder, ProvenanceLog, Scale, SolidKey,
+    Vector,
 };
 
 /// How close the outline comes to the origin, and so how big the disc is that
@@ -400,7 +401,7 @@ fn notched_polygon_with_holes(
         });
     }
     builder
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the generator only builds sound profiles")
 }
 

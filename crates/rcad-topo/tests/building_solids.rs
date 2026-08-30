@@ -11,14 +11,16 @@ fn empty_model() -> Model {
 
 fn profile_of(outline: Vec<[f64; 2]>) -> Profile {
     ProfileBuilder::new(outline)
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a sound outline")
 }
 
 #[test]
 fn a_cube_of_side_two_holds_eight_of_space_and_twentyfour_of_skin() {
     let mut model = empty_model();
-    let cube = model.add_cube(2.0).expect("a cube of side two");
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
 
     let measured = model.solid(cube).measure();
 
@@ -30,7 +32,9 @@ fn a_cube_of_side_two_holds_eight_of_space_and_twentyfour_of_skin() {
 #[test]
 fn a_cube_has_eight_corners_twelve_edges_and_six_faces() {
     let mut model = empty_model();
-    model.add_cube(2.0).expect("a cube of side two");
+    model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
 
     assert_eq!(model.vertex_count(), 8);
     assert_eq!(model.edge_count(), 12);
@@ -44,7 +48,9 @@ fn a_cube_has_eight_corners_twelve_edges_and_six_faces() {
 #[test]
 fn every_edge_of_a_cube_is_used_by_two_coedges_running_opposite_ways() {
     let mut model = empty_model();
-    model.add_cube(2.0).expect("a cube of side two");
+    model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
 
     for edge in model.edges() {
         let ways: Vec<_> = edge
@@ -59,7 +65,9 @@ fn every_edge_of_a_cube_is_used_by_two_coedges_running_opposite_ways() {
 #[test]
 fn every_face_of_a_cube_points_away_from_the_middle_of_it() {
     let mut model = empty_model();
-    let cube = model.add_cube(2.0).expect("a cube of side two");
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     let middle = model.solid(cube).measure().centroid();
 
     for face in model.solid(cube).faces() {
@@ -76,7 +84,9 @@ fn every_face_of_a_cube_points_away_from_the_middle_of_it() {
 #[test]
 fn a_cube_passes_the_full_validity_sweep() {
     let mut model = empty_model();
-    model.add_cube(2.0).expect("a cube of side two");
+    model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
 
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
@@ -88,7 +98,7 @@ fn a_plate_with_a_square_hole_has_the_hole_missing_from_its_volume() {
     let mut model = empty_model();
     let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0]])
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a plate with a hole in it");
 
     let solid = model
@@ -113,7 +123,7 @@ fn a_plate_with_two_holes_still_has_two_coedges_on_every_edge() {
     let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[1.0, 1.0], [3.0, 1.0], [3.0, 3.0], [1.0, 3.0]])
         .with_hole(vec![[6.0, 6.0], [8.0, 6.0], [8.0, 8.0], [6.0, 8.0]])
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a plate with two holes");
 
     let solid = model
@@ -164,7 +174,7 @@ fn a_triangular_hole_in_a_square_outline_is_a_perfectly_good_profile() {
     let mut model = empty_model();
     let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]])
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a plate with a triangular hole");
 
     let solid = model
@@ -244,7 +254,7 @@ fn twice_the_area(ring: &[[f64; 2]]) -> f64 {
 fn a_hole_given_anticlockwise_is_turned_the_right_way_round() {
     let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0]])
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a plate with a hole");
 
     assert_eq!(twice_the_area(&plate.holes()[0]), -8.0);
@@ -252,7 +262,8 @@ fn a_hole_given_anticlockwise_is_turned_the_right_way_round() {
 
 #[test]
 fn a_loop_of_two_points_is_refused() {
-    let refused = ProfileBuilder::new(vec![[0.0, 0.0], [1.0, 0.0]]).build(&Policy::certified());
+    let refused = ProfileBuilder::new(vec![[0.0, 0.0], [1.0, 0.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(refused, Err(Error::TooFewPoints { count: 2 })));
 }
@@ -260,7 +271,7 @@ fn a_loop_of_two_points_is_refused() {
 #[test]
 fn a_profile_that_repeats_a_point_is_refused() {
     let refused = ProfileBuilder::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
-        .build(&Policy::certified());
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(refused, Err(Error::RepeatedPoint { .. })));
 }
@@ -268,7 +279,7 @@ fn a_profile_that_repeats_a_point_is_refused() {
 #[test]
 fn a_profile_with_a_point_that_is_not_a_number_is_refused() {
     let refused = ProfileBuilder::new(vec![[0.0, 0.0], [f64::NAN, 0.0], [1.0, 1.0]])
-        .build(&Policy::certified());
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(
         refused,
@@ -279,7 +290,7 @@ fn a_profile_with_a_point_that_is_not_a_number_is_refused() {
 #[test]
 fn a_bowtie_profile_is_refused() {
     let refused = ProfileBuilder::new(vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]])
-        .build(&Policy::certified());
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(refused, Err(Error::ProfileCrossesItself)));
 }
@@ -287,7 +298,7 @@ fn a_bowtie_profile_is_refused() {
 #[test]
 fn a_profile_that_doubles_back_along_itself_is_refused() {
     let refused = ProfileBuilder::new(vec![[0.0, 0.0], [2.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
-        .build(&Policy::certified());
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(refused, Err(Error::ProfileCrossesItself)));
 }
@@ -302,7 +313,7 @@ fn a_profile_pinched_against_itself_is_refused() {
         [0.0, 2.0],
         [1.0, 1.0],
     ])
-    .build(&Policy::certified());
+    .build(&Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(refused, Err(Error::ProfileCrossesItself)));
 }
@@ -311,7 +322,7 @@ fn a_profile_pinched_against_itself_is_refused() {
 fn a_hole_outside_the_outline_is_refused() {
     let refused = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[20.0, 20.0], [22.0, 20.0], [22.0, 22.0], [20.0, 22.0]])
-        .build(&Policy::certified());
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(
         refused,
@@ -323,7 +334,7 @@ fn a_hole_outside_the_outline_is_refused() {
 fn a_hole_that_pokes_through_the_outline_is_refused() {
     let refused = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[8.0, 4.0], [12.0, 4.0], [12.0, 6.0], [8.0, 6.0]])
-        .build(&Policy::certified());
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(refused, Err(Error::ProfileCrossesItself)));
 }
@@ -333,7 +344,7 @@ fn a_hole_inside_another_hole_is_refused() {
     let refused = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[2.0, 2.0], [8.0, 2.0], [8.0, 8.0], [2.0, 8.0]])
         .with_hole(vec![[3.0, 3.0], [7.0, 3.0], [7.0, 7.0], [3.0, 7.0]])
-        .build(&Policy::certified());
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(
         refused,
@@ -356,7 +367,7 @@ fn an_extrusion_of_no_height_is_refused() {
 fn a_cube_of_no_side_is_refused() {
     let mut model = empty_model();
 
-    let refused = model.add_cube(-1.0);
+    let refused = model.add_cube(-1.0, &Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(refused, Err(Error::HeightNotPositive { .. })));
 }

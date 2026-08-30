@@ -27,7 +27,7 @@ proptest! {
     fn a_polygon_that_is_simple_by_construction_is_always_accepted(
         outline in a_simple_polygon(),
     ) {
-        let built = ProfileBuilder::new(outline.clone()).build(&Policy::certified());
+        let built = ProfileBuilder::new(outline.clone()).build(&Policy::certified(), &mut ProvenanceLog::new());
 
         prop_assert!(
             built.is_ok(),
@@ -41,7 +41,7 @@ proptest! {
         outline in a_simple_polygon(),
         height in 0.5f64..=6.0,
     ) {
-        let profile = ProfileBuilder::new(outline).build(&Policy::certified())?;
+        let profile = ProfileBuilder::new(outline).build(&Policy::certified(), &mut ProvenanceLog::new())?;
         let (model, solid) = extruded(&profile, height);
 
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;

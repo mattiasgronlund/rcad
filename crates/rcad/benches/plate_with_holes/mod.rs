@@ -48,7 +48,7 @@ pub fn plate_with_holes() -> (Model, SolidKey) {
         builder = builder.with_hole(hole_ring(hole));
     }
     let profile = builder
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the plate outline and its holes are a sound profile");
 
     let plate = model

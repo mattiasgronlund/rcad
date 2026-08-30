@@ -6,7 +6,9 @@ use rcad_topo::{Containment, Model, ProfileBuilder, SolidKey};
 
 fn a_cube_of_side_two() -> (Model, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let cube = model.add_cube(2.0).expect("a cube of side two");
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     (model, cube)
 }
 
@@ -109,7 +111,7 @@ fn a_point_in_the_hole_of_a_plate_is_outside_the_plate() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0]])
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a plate with a hole");
     let solid = model
         .add_extrusion(&plate, 3.0, &Isometry::identity())
@@ -140,7 +142,7 @@ fn a_point_in_the_notch_of_an_l_shape_is_outside_it() {
         [2.0, 4.0],
         [0.0, 4.0],
     ])
-    .build(&Policy::certified())
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
     .expect("an L");
     let solid = model
         .add_extrusion(&ell, 2.0, &Isometry::identity())

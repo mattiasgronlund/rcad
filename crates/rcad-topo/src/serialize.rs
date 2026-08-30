@@ -15,7 +15,7 @@
 //! use rcad_topo::Model;
 //!
 //! let mut model = Model::new(Scale::millimetres(100.0)?);
-//! let cube = model.add_cube(10.0)?;
+//! let cube = model.add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())?;
 //! let before = model.solid(cube).measure();
 //!
 //! let bytes = postcard::to_allocvec(&model)?;

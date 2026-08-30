@@ -1,10 +1,12 @@
 use rcad_geom::{Isometry, Orientation, Plane, Point, Surface, Vector};
-use rcad_predicates::{Decision, Policy, ProvenanceLog, orient2d_tolerantly};
+use rcad_predicates::{
+    Approximation, Decision, Policy, ProvenanceLog, Record, orient2d_tolerantly,
+};
 use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse};
-use crate::{Error, Model, Result, SolidKey};
+use crate::{EdgeKey, Error, FaceKey, Model, Result, SolidKey, VertexKey};
 
 /// A flat outline with holes in it, checked and ready to extrude.
 ///
@@ -21,6 +23,7 @@ use crate::{Error, Model, Result, SolidKey};
 pub struct Profile {
     outline: Vec<[f64; 2]>,
     holes: Vec<Vec<[f64; 2]>>,
+    approximation: Option<Approximation>,
 }
 
 impl Profile {
@@ -34,6 +37,17 @@ impl Profile {
     #[must_use]
     pub fn holes(&self) -> &[Vec<[f64; 2]>] {
         &self.holes
+    }
+
+    /// The slop a tolerant policy had to accept to call these loops a profile,
+    /// or `None` when every turn was proved.
+    ///
+    /// The profile is only sound *because* that slop was allowed, so
+    /// [`Model::add_extrusion`] hangs it on everything it builds from these
+    /// loops rather than leaving the caller to remember (decisions.md §1.2).
+    #[must_use]
+    pub fn approximation(&self) -> Option<Approximation> {
+        self.approximation
     }
 }
 
@@ -75,6 +89,11 @@ impl ProfileBuilder {
     /// costs the square of the total number of points. That is fine for the
     /// sizes M0 builds and is worth knowing before someone feeds it a mesh.
     ///
+    /// Every turn `policy` could not certify lands in `log`, whether the build
+    /// went on to succeed or not. A build that proved everything leaves `log`
+    /// untouched, and that empty log is itself the signal that nothing was
+    /// approximated (decisions.md §5).
+    ///
     /// # Errors
     ///
     /// [`Error::TooFewPoints`], [`Error::PointNotFinite`],
@@ -82,9 +101,16 @@ impl ProfileBuilder {
     /// [`Error::ProfileEnclosesNoArea`], [`Error::HoleNotInsideOutline`] or
     /// [`Error::HoleInsideAnotherHole`] when the loops are not a sound profile,
     /// and [`Error::Undecidable`] when a turn could not be settled under
-    /// `policy`.
-    pub fn build(self, policy: &Policy) -> Result<Profile> {
-        let mut log = ProvenanceLog::new();
+    /// `policy`. That last one carries the records itself and leaves `log`
+    /// alone, so no decision is reported in two places at once.
+    pub fn build(self, policy: &Policy, log: &mut ProvenanceLog) -> Result<Profile> {
+        let mut mine = ProvenanceLog::new();
+        let built = self.checked_under(policy, &mut mine);
+        mine.drain_into(log);
+        built
+    }
+
+    fn checked_under(self, policy: &Policy, log: &mut ProvenanceLog) -> Result<Profile> {
         let Self {
             mut outline,
             mut holes,
@@ -94,21 +120,36 @@ impl ProfileBuilder {
         for hole in &holes {
             check_one_loop(hole)?;
         }
-        check_nothing_crosses(&outline, &holes, policy, &mut log)?;
+        check_nothing_crosses(&outline, &holes, policy, log)?;
 
-        if !ring_runs_anticlockwise(&outline, policy, &mut log)? {
+        if !ring_runs_anticlockwise(&outline, policy, log)? {
             outline.reverse();
         }
         for hole in &mut holes {
-            if ring_runs_anticlockwise(hole, policy, &mut log)? {
+            if ring_runs_anticlockwise(hole, policy, log)? {
                 hole.reverse();
             }
         }
 
-        check_holes_sit_inside(&outline, &holes, policy, &mut log)?;
+        check_holes_sit_inside(&outline, &holes, policy, log)?;
 
-        Ok(Profile { outline, holes })
+        Ok(Profile {
+            outline,
+            holes,
+            approximation: worst_approximation(log),
+        })
     }
+}
+
+/// The largest slop any of these decisions left behind.
+///
+/// The largest, because the profile is only sound if *every* turn in it was
+/// settled, so the worst one is what the whole profile is worth.
+fn worst_approximation(log: &ProvenanceLog) -> Option<Approximation> {
+    log.records()
+        .iter()
+        .filter_map(Record::approximation)
+        .max_by(|one, other| one.magnitude().total_cmp(&other.magnitude()))
 }
 
 fn check_one_loop(ring: &[[f64; 2]]) -> Result<()> {
@@ -413,13 +454,19 @@ impl Model {
     ///
     /// # Errors
     ///
-    /// [`Error::HeightNotPositive`] if `side` is not a positive finite number.
-    pub fn add_cube(&mut self, side: f64) -> Result<SolidKey> {
+    /// [`Error::HeightNotPositive`] if `side` is not a positive finite number,
+    /// and whatever [`ProfileBuilder::build`] makes of the square.
+    pub fn add_cube(
+        &mut self,
+        side: f64,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<SolidKey> {
         if !(side.is_finite() && side > 0.0) {
             return Err(Error::HeightNotPositive { height: side });
         }
         let square = ProfileBuilder::new(vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]])
-            .build(&Policy::certified())?;
+            .build(policy, log)?;
         self.add_extrusion(&square, side, &Isometry::identity())
     }
 
@@ -431,6 +478,12 @@ impl Model {
     /// the shell rather than baked into the coordinates — so the profile's own
     /// numbers survive untouched and the location composes on the way out
     /// (decisions.md §3.2).
+    ///
+    /// Nothing here makes a decision — the profile arrived already checked — so
+    /// there is no provenance to hand back. What the profile *does* bring with
+    /// it is the slop a tolerant policy had to accept to call it a profile at
+    /// all, and that lands on every entity this builds
+    /// (see [`Profile::approximation`]).
     ///
     /// # Errors
     ///
@@ -471,8 +524,8 @@ impl Model {
 
         let shell = self.add_shell(
             faces
-                .into_iter()
-                .map(|face| FaceUse {
+                .iter()
+                .map(|&face| FaceUse {
                     face,
                     loc: Isometry::identity(),
                     orient: Orientation::Forward,
@@ -486,7 +539,16 @@ impl Model {
         }]));
 
         self.check_touched_solid(solid);
-        self.assert_approximation_did_not_grow(approximation_before);
+        match profile.approximation() {
+            None => self.assert_approximation_did_not_grow(approximation_before),
+            Some(tag) => {
+                self.tag_everything_the_profile_made(&ladders, &faces, tag);
+                // An extrusion of an approximated profile is allowed to leave
+                // the model more approximate than it found it — by exactly the
+                // slop the profile recorded, and not a bit more.
+                self.assert_approximation_did_not_grow(approximation_before.max(tag.magnitude()));
+            }
+        }
         Ok(self.key_for_solid(solid))
     }
 
@@ -544,6 +606,44 @@ impl Model {
         let wire = self.add_wire(coedges);
         self.add_face(Surface::Plane(plane), SmallVec::from_buf([wire]))
     }
+
+    /// Hang the profile's slop on everything the extrusion just built.
+    ///
+    /// The same tag everywhere, because the profile was accepted as a whole:
+    /// the turn that had to be approximated is what made all of these entities
+    /// legal, and there is no honest way to say the slop belongs to one corner
+    /// rather than its neighbour.
+    ///
+    /// Vertices, then edges, then faces, so `tol(vertex) >= tol(edge) >=
+    /// tol(face)` holds after every single step and not only at the end
+    /// (roadmap §5.4).
+    ///
+    /// # Panics
+    ///
+    /// If any of those tags is refused. Everything here was made moments ago
+    /// and carries no slop yet, so a refusal is a bug in this function.
+    fn tag_everything_the_profile_made(
+        &mut self,
+        ladders: &[Ladder],
+        faces: &[FaceSlot],
+        tag: Approximation,
+    ) {
+        let model = self.id();
+        let vertices: Vec<VertexSlot> = ladders.iter().flat_map(Ladder::vertices).collect();
+        for vertex in vertices {
+            self.set_vertex_approximation(VertexKey::new(vertex, model), tag)
+                .expect("a fresh vertex carries no slop for this tag to undercut");
+        }
+        let edges: Vec<EdgeSlot> = ladders.iter().flat_map(Ladder::edges).collect();
+        for edge in edges {
+            self.set_edge_approximation(EdgeKey::new(edge, model), tag)
+                .expect("the vertices were tagged with the same amount just now");
+        }
+        for &face in faces {
+            self.set_face_approximation(FaceKey::new(face, model), tag)
+                .expect("the edges were tagged with the same amount just now");
+        }
+    }
 }
 
 /// Which cap of the extrusion.
@@ -572,6 +672,8 @@ impl Side {
 /// The vertices and edges one ring of the profile turns into: a bottom rung, a
 /// top rung, and the uprights joining them.
 struct Ladder {
+    bottom_vertices: Vec<VertexSlot>,
+    top_vertices: Vec<VertexSlot>,
     bottom_edges: Vec<EdgeSlot>,
     top_edges: Vec<EdgeSlot>,
     vertical_edges: Vec<EdgeSlot>,
@@ -579,30 +681,49 @@ struct Ladder {
 
 impl Ladder {
     fn built_in(model: &mut Model, ring: &[[f64; 2]], height: f64) -> Self {
-        let bottom: Vec<VertexSlot> = ring
+        let bottom_vertices: Vec<VertexSlot> = ring
             .iter()
             .map(|point| model.add_vertex(Point::new(point[0], point[1], 0.0)))
             .collect();
-        let top: Vec<VertexSlot> = ring
+        let top_vertices: Vec<VertexSlot> = ring
             .iter()
             .map(|point| model.add_vertex(Point::new(point[0], point[1], height)))
             .collect();
 
         let count = ring.len();
         let bottom_edges = (0..count)
-            .map(|index| model.add_edge(bottom[index], bottom[(index + 1) % count]))
+            .map(|index| {
+                model.add_edge(bottom_vertices[index], bottom_vertices[(index + 1) % count])
+            })
             .collect();
         let top_edges = (0..count)
-            .map(|index| model.add_edge(top[index], top[(index + 1) % count]))
+            .map(|index| model.add_edge(top_vertices[index], top_vertices[(index + 1) % count]))
             .collect();
         let vertical_edges = (0..count)
-            .map(|index| model.add_edge(bottom[index], top[index]))
+            .map(|index| model.add_edge(bottom_vertices[index], top_vertices[index]))
             .collect();
 
         Self {
+            bottom_vertices,
+            top_vertices,
             bottom_edges,
             top_edges,
             vertical_edges,
         }
+    }
+
+    fn vertices(&self) -> impl Iterator<Item = VertexSlot> + '_ {
+        self.bottom_vertices
+            .iter()
+            .chain(&self.top_vertices)
+            .copied()
+    }
+
+    fn edges(&self) -> impl Iterator<Item = EdgeSlot> + '_ {
+        self.bottom_edges
+            .iter()
+            .chain(&self.top_edges)
+            .chain(&self.vertical_edges)
+            .copied()
     }
 }

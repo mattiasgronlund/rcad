@@ -14,8 +14,9 @@
 //! should never have to depend on a crate the facade exists to hide.
 
 use rcad::{
-    Approximation, Cause, Containment, Decision, Error, GeometryError, Invalid, Level, Model,
-    Point, Policy, PredicateError, ProfileBuilder, ProvenanceLog, Record, Scale, TopologyError,
+    Approximation, Cause, Containment, Decision, Error, GeometryError, Invalid, Isometry, Level,
+    Model, Point, Policy, PredicateError, ProfileBuilder, ProvenanceLog, Record, Scale,
+    TopologyError,
 };
 
 #[test]
@@ -23,7 +24,7 @@ fn one_question_mark_works_on_all_three_layers_underneath() {
     fn build_a_cube_and_check_it() -> rcad::Result<f64> {
         let scale = Scale::millimetres(100.0)?;
         let mut model = Model::new(scale);
-        let cube = model.add_cube(10.0)?;
+        let cube = model.add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())?;
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
         Ok(model.solid(cube).measure().volume())
     }
@@ -61,7 +62,9 @@ fn an_operation_that_could_not_decide_keeps_its_own_variant_at_the_facade() {
 #[test]
 fn a_model_that_refuses_a_tag_says_which_invariant_it_would_break() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    model.add_cube(2.0).expect("a cube of side two");
+    model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     let face = model.faces().next().expect("a cube has faces").key();
 
     let raised = Error::from(
@@ -107,7 +110,7 @@ fn a_predicate_that_refuses_its_input_is_a_predicate_error() {
 fn a_caller_can_match_a_refused_profile_down_to_its_innermost_variant() {
     let raised: Error = ProfileBuilder::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
         .with_hole(vec![[8.0, 8.0], [9.0, 8.0], [9.0, 9.0], [8.0, 9.0]])
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect_err("a hole nowhere near the outline is not a hole in it")
         .into();
 
@@ -120,7 +123,9 @@ fn a_caller_can_match_a_refused_profile_down_to_its_innermost_variant() {
 #[test]
 fn a_classification_that_lands_on_the_skin_is_an_answer_and_not_an_error() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    let cube = model.add_cube(2.0).expect("a cube of side two");
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     let mut log = ProvenanceLog::new();
 
     let answer =
@@ -139,4 +144,43 @@ fn a_classification_that_lands_on_the_skin_is_an_answer_and_not_an_error() {
         other => panic!("unhandled answer: {other:?}"),
     }
     assert!(log.is_empty(), "nothing had to be approximated");
+}
+
+/// The other half of §5, read from the front door: when a tolerant policy has
+/// to approximate something, the caller gets the shape *and* the account of
+/// what it cost. The same loops under a certified policy get neither.
+#[test]
+fn a_tolerant_build_hands_back_both_the_shape_and_what_it_cost() {
+    let tiny = 1e-150;
+    let loops = vec![
+        [0.0, 0.0],
+        [tiny, 3.0 * tiny],
+        [2.0 * tiny, 0.0],
+        [1.0, -1.0],
+        [1.0, 1.0],
+        [-1.0, 1.0],
+        [-1.0, -1.0],
+    ];
+
+    let refused = ProfileBuilder::new(loops.clone())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect_err("nothing in f64 can place that spike");
+    assert!(matches!(Error::from(refused), Error::Undecidable { .. },));
+
+    let mut log = ProvenanceLog::new();
+    let profile = ProfileBuilder::new(loops)
+        .build(&Policy::tolerant(100.0), &mut log)
+        .expect("a tolerant policy has room for it");
+
+    assert!(!log.is_empty(), "the caller can see what was approximated");
+    let slop: Approximation = profile
+        .approximation()
+        .expect("the shape carries the slop that bought it");
+    assert_eq!(slop.cause(), Cause::UndecidableResolved);
+
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    model
+        .add_extrusion(&profile, 1.0, &Isometry::identity())
+        .expect("an approximated profile still extrudes");
+    assert_eq!(model.worst_approximation(), slop.magnitude());
 }

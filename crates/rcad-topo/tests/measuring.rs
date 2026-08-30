@@ -7,7 +7,9 @@ use rcad_topo::{Model, ProfileBuilder, SolidKey};
 
 fn a_cube_of_side_two() -> (Model, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let cube = model.add_cube(2.0).expect("a cube of side two");
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     (model, cube)
 }
 
@@ -52,7 +54,7 @@ fn moving_a_plate_with_a_hole_leaves_its_volume_alone() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0]])
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a plate with a hole");
     let solid = model
         .add_extrusion(&plate, 3.0, &Isometry::identity())
@@ -102,8 +104,12 @@ fn the_middle_of_a_placed_cube_moves_with_it() {
 #[test]
 fn a_bigger_cube_holds_the_cube_of_its_side() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let small = model.add_cube(1.0).expect("a cube of side one");
-    let large = model.add_cube(3.0).expect("a cube of side three");
+    let small = model
+        .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side one");
+    let large = model
+        .add_cube(3.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side three");
 
     assert_eq!(model.solid(small).measure().volume(), 1.0);
     assert_eq!(model.solid(large).measure().volume(), 27.0);

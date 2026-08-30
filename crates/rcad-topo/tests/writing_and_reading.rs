@@ -20,7 +20,9 @@ fn round_tripped(model: &Model) -> Model {
 #[test]
 fn a_cube_comes_back_sound_and_measuring_the_same() {
     let mut model = empty_model();
-    let cube = model.add_cube(2.0).expect("a cube of side two");
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     let before = model.solid(cube).measure();
 
     let after = round_tripped(&model);
@@ -41,7 +43,7 @@ fn a_plate_with_two_holes_comes_back_sound_and_measuring_the_same() {
     let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[1.0, 1.0], [3.0, 1.0], [3.0, 3.0], [1.0, 3.0]])
         .with_hole(vec![[6.0, 6.0], [8.0, 6.0], [8.0, 8.0], [6.0, 8.0]])
-        .build(&Policy::certified())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a plate with two holes");
     let solid = model
         .add_extrusion(&plate, 2.0, &Isometry::identity())
@@ -66,7 +68,9 @@ fn a_plate_with_two_holes_comes_back_sound_and_measuring_the_same() {
 #[test]
 fn a_placed_solid_comes_back_where_it_was_put() {
     let mut model = empty_model();
-    let cube = model.add_cube(2.0).expect("a cube of side two");
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     model.place_solid(
         cube,
         &Isometry::translation(Vector::new(30.0, -5.0, 7.0)).expect("a finite shift"),
@@ -84,7 +88,9 @@ fn a_placed_solid_comes_back_where_it_was_put() {
 #[test]
 fn approximation_tags_come_back_with_the_model() {
     let mut model = empty_model();
-    model.add_cube(2.0).expect("a cube of side two");
+    model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     for vertex in model.vertices().map(|v| v.key()).collect::<Vec<_>>() {
         model
             .set_vertex_approximation(
@@ -123,7 +129,9 @@ fn approximation_tags_come_back_with_the_model() {
 #[test]
 fn a_model_written_by_a_different_version_of_the_format_is_refused() {
     let mut model = empty_model();
-    model.add_cube(2.0).expect("a cube of side two");
+    model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     let mut bytes = postcard::to_allocvec(&model).expect("a model writes out");
 
     assert_eq!(
@@ -138,7 +146,9 @@ fn a_model_written_by_a_different_version_of_the_format_is_refused() {
 #[test]
 fn the_keys_from_before_a_round_trip_do_not_belong_to_the_model_that_comes_back() {
     let mut model = empty_model();
-    model.add_cube(2.0).expect("a cube of side two");
+    model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
 
     let after = round_tripped(&model);
 

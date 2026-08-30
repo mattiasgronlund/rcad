@@ -59,7 +59,7 @@ fn a_lumpy_profile() -> impl Strategy<Value = Profile> {
             ]);
         }
         builder
-            .build(&Policy::certified())
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
             .expect("every lumpy outline is a sound profile")
     })
 }

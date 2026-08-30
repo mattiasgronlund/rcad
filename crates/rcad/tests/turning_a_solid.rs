@@ -50,7 +50,9 @@ const SLACK_AFTER_A_QUARTER_TURN: f64 = 64.0 * f64::EPSILON;
 #[test]
 fn a_cube_turned_a_quarter_of_the_way_round_the_z_axis_is_still_the_same_cube() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    let cube = model.add_cube(10.0).expect("a cube of side ten");
+    let cube = model
+        .add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side ten");
     let before = model.solid(cube).measure();
     assert_eq!(before.volume(), 1000.0);
 

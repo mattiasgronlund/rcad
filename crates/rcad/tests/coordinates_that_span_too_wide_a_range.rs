@@ -23,7 +23,9 @@ const WIDEST_THAT_STILL_WORKS: f64 = 1e11;
 #[test]
 fn a_model_with_a_feature_a_million_times_finer_than_the_part_is_fine() {
     let mut model = Model::new(Scale::millimetres(1.0).expect("a working size"));
-    model.add_cube(1.0).expect("a cube of side one");
+    model
+        .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side one");
     assert!(range_of(&model) < WIDEST_THAT_STILL_WORKS);
 
     let mut log = ProvenanceLog::new();
@@ -101,7 +103,7 @@ fn a_square_with_one_hair_thin_edge() -> Model {
         [0.0, 1.0],
         [hair, hair],
     ])
-    .build(&Policy::certified())
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
     .expect("a square with a nick out of one corner is a sound profile");
 
     let mut model = Model::new(Scale::millimetres(1.0).expect("a working size"));

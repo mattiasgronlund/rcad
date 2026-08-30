@@ -528,8 +528,10 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the model's worst approximation grew. Only the `set_*_approximation`
-    /// calls are allowed to put slop in, and they say so in their name.
+    /// If the model's worst approximation ended up above `before`. An operation
+    /// that meant to leave slop behind passes the amount it recorded in its
+    /// provenance, so what this catches is slop that appeared with nothing
+    /// accounting for it.
     pub(crate) fn assert_approximation_did_not_grow(&self, before: f64) {
         assert!(
             self.worst_approximation <= before,
@@ -785,7 +787,9 @@ mod tests {
 
     fn a_cube() -> (Model, SolidKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let cube = model.add_cube(2.0).expect("a cube of side two");
+        let cube = model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube of side two");
         (model, cube)
     }
 

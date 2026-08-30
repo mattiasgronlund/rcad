@@ -2,11 +2,14 @@
 //! and back up by key.
 
 use rcad_geom::{Isometry, Orientation, Point, Scale, Vector};
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, SolidKey};
 
 fn a_cube_of_side_two() -> (Model, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let cube = model.add_cube(2.0).expect("a cube of side two");
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
     (model, cube)
 }
 

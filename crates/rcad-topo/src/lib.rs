@@ -30,9 +30,10 @@
 //! use rcad_topo::{Containment, Model};
 //!
 //! let mut model = Model::new(Scale::millimetres(100.0)?);
-//! let cube = model.add_cube(2.0)?;
-//!
 //! let mut log = ProvenanceLog::new();
+//! let cube = model.add_cube(2.0, &Policy::certified(), &mut log)?;
+//! assert!(log.is_empty(), "a cube of side two needs nothing approximated");
+//!
 //! model.validate(&Policy::certified(), &mut log)?;
 //! assert!(log.is_empty(), "a clean sweep records nothing at all");
 //!
