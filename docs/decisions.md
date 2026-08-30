@@ -1346,20 +1346,36 @@ a type the rustdoc names has to be one the facade exports.
 named two candidates: the enclosure width, and — because it is textbook and
 finished-looking — the de Boor evaluator. Neither failed.
 
-The enclosure came in at **2 to 20 `f64` steps of the model's working size**,
-flat across working sizes from 1 to a million and across degrees 1 to 5. That is
-the number §1.7's argument said to measure now rather than in eighteen months,
-and it settles the question it was measured for: **M3's certified marching
-works.** Tens of steps, not thousands.
+On shapes of a stated working size the enclosure came in at **2 to 20 `f64`
+steps of that size**, flat across working sizes from 1 to a million and across
+degrees 1 to 5.
 
 | | curve, well conditioned | curve, wide range | patch, well conditioned | patch, wide range |
 |---|---|---|---|---|
 | steps of the working size | 2–11 | 2.5–14 | 5–14 | 4–20 |
 
-Where the cost actually went was neither algorithm. It went to **defining the two
-numbers before measuring them** — §16.2 and §16.3 below. Both are the same
-mistake in different clothes: a quantity that is meaningless until you say what
-it is measured against.
+**The answer for M3 is conditional, and the condition is the interesting half.**
+For well-conditioned input this settles it: tens of steps, not thousands, and
+certified marching works. But the first version of this figure was measured with
+every knot vector drawn from the same six small whole numbers — the monoculture
+§16.9 records — and once the generators put a span of a million steps next to a
+span of one, the tail moved. Over a million draws of the six-decades-of-weight
+family: **median 15 steps, 99.9th percentile 986, worst 66,120.** That is a
+parameter landing a hair below a knot in a span a million times wider than its
+neighbour, which is the curve being ill-conditioned rather than the arithmetic
+being sloppy — the box is honest about it, which is the whole point of having
+one. **M3 will need centred forms for that case**, and it now knows which case,
+eighteen months before it would otherwise have found out.
+
+That family is therefore held to a scale-free ceiling — the enclosure's
+half-width against the published `f64` bound, worst measured 0.145 — because a
+ceiling in steps of the working size would have to sit near a million to stop
+flickering, and a ceiling that loose asserts nothing.
+
+Where the cost actually went was neither algorithm. It went to **defining the
+numbers before measuring them** — §16.2 and §16.3 below, and the ceiling above.
+All three are the same mistake in different clothes: a quantity that is
+meaningless until you say what it is measured against.
 
 ### 16.2 An enclosure width has to be measured against the right thing
 
@@ -1523,8 +1539,83 @@ that needs arguing for.
   divide computes four corner quotients where both operands are usually single
   numbers; it was left alone deliberately, because it is a correctness-critical
   divide and M3 is the first caller that will care.
-- **The published `f64` bound can be far wider than the enclosure it is tested
-  against.** On family 4 — weights spanning six orders of magnitude — it runs
-  about 100× wider. That is the honest behaviour of a bound stated over the
-  homogeneous net when the net is 500 times the affine one, and it is another
-  reason the bound is not a second enclosure source.
+- **The published `f64` bound is much wider than the enclosure it is tested
+  against.** Across every family the enclosure's half-width never passed 0.145 of
+  the bound, so the bound is at worst about seven times looser and usually far
+  more. That is the honest behaviour of a bound stated over the homogeneous net
+  when the net can be five hundred times the affine one, and it is another reason
+  the bound is not a second enclosure source. It also means the ratio makes a
+  usable scale-free ceiling where a count of `f64` steps does not — §16.1.
+
+### 16.9 Review found what the suite did not, again
+
+*Added after the milestone's adversarial review, which ran before the merge.*
+
+§12.1 recorded that M0 shipped three bugs through a green 335-test suite and
+that every one was found by review. **M1 did the same thing.** The suite was 549
+green and `just` passed when the review started. It found seven defects, two of
+them serious, and this section exists so the pattern is recorded twice rather
+than rediscovered a third time.
+
+**A certified wrong answer.** A de Boor coefficient's denominator overflows when
+the knot range passes `f64::MAX`, every share collapses to zero, and evaluation
+returns control point 0. On a degree-3 curve spanning `-9e307` to `9e307` that is
+`0.0` where the truth is `1.5` — and `evaluation_roundoff_at` certified it with a
+bound of `4.5e-14`.
+
+This is **§12.2 in its third location**, and the shape is now unmistakable.
+`EVALUATION_ROUNDOFF` is relative throughout, so it holds only while its
+hypothesis does, and the hypothesis was enforced on the control coordinates and
+on the weight but not on the knots. §12.2's own words were that we already knew
+and guarded one of the three places the hazard appears; M1's plan called itself
+the second; this was the third, in the same milestone, in a bound written by
+someone who had read §12.2. **Enumerate every input a relative bound depends on,
+and guard each one, or the count will keep going up.** The fix refuses such a
+knot vector at construction, and the bound's doc comment now numbers all three
+places rather than two.
+
+The interval path was sound throughout and returned a box that does contain the
+true point. That is the seam working exactly as designed, and it is the strongest
+evidence in the milestone that making the enclosure the only enclosure — never
+intersecting it with the `f64` bound — was the right call. Had they been
+intersected, this bug would have produced a confidently wrong box.
+
+**A silent NaN.** `tangent` returned `NaN` where the true derivative was exactly
+`1e8`, because the derived net scaled before dividing. §4.1 ranks a silent
+corrupt value below a crash, and this was one.
+
+**Three oracles that could not fail.** The knot-insertion oracle — §14.3's *first*
+exactly-true relation — asserted nothing on about half of every family's draws,
+because the helper choosing untouched control points returns an empty list on
+short curves and only one of four tests checked. The split oracle's "two routes
+to one answer" was one route: the by-hand raising loop was character for
+character `split_at`'s own. Both are §14.1 question 2 answered "yes" by tests
+that could not have said "no".
+
+**And the cause of all of it: one generator family.** Every strategy drew its
+knots from the same six small whole numbers, and the scaling oracle cloned the
+knot vector unchanged while scaling only the control net — so the de Boor
+coefficients, which are the dangerous code, received bit-identical inputs in both
+runs of the only metamorphic test aimed at them. **No test in the milestone ever
+varied a knot value.** That is why a bug in the coefficient denominator survived
+549 tests.
+
+§12.3 already said one family of shapes finds one family of bugs. What M1 adds is
+that a generator can be varied in the dimension you are thinking about and
+constant in the one that matters: the nets were random, wide-ranging and
+carefully conditioned, and the knots were `0, 1, 2, 3` every single time. **Ask
+of each generator not "is this varied?" but "which argument of the dangerous
+function does this never change?"**
+
+The repair is measurable. Knots now span 48 orders of magnitude, and scaling the
+*knot vector* by `2^k` is a second oracle down a genuinely different path — the
+point may not move one bit, the tangent must come back divided by exactly `2^k`.
+Mutation confirms it: a de Boor nudge that only bites above `1e6` passes the
+entire suite as it stood at review time, and fails all four of the new scaling
+tests.
+
+**What this says about §13 rule 6.** Rule 6 caps work in flight because review is
+the constraint, not authoring. Both milestones now have the same evidence, and it
+is stronger than the rule states: review did not merely find *more* than the
+suite, it found things the suite was structurally incapable of finding. Budget it
+as a phase with its own findings, not as a pass over finished work.
