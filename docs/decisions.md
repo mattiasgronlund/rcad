@@ -639,6 +639,20 @@ expires there rather than at M4. `rkyv`, `cargo-fuzz` and `rayon` stay at M2:
 all three are gated on tessellation and a settled format, and M2.5 changes
 neither.
 
+**Amended 2026-08-30, while planning M2.5.** The bump-arena row moves back out
+to M4, and the paragraph above is wrong. It reasoned from the allocating end —
+the fuse allocates, therefore the arena has arrived — and never named anything
+inside M2.5 that would consume a `Bump` or any figure the arena would have to
+beat. §1.7's eight exit criteria are what M2.5 is judged on and not one of them
+mentions allocation, so the criteria win over the amended table. §13 rule 3 is
+the general form: no named consumer inside the current milestone, no build, and
+a viral `'bump` lifetime threaded through every fuse signature for a win nobody
+has a target for is the largest possible version of the mistake that rule
+exists to stop. M4 is where the consumer appears — a fuse over curved
+intersections, run over the many-tool batches roadmap §7.2 is written for, is
+the first scratch big enough for §1.4's "measure rather than assume" to come
+back with a number instead of noise.
+
 ---
 
 ## 12. What M0 actually cost, recorded 2026-08-30
@@ -1266,6 +1280,19 @@ relocation and nothing more, since `rcad-topo` already depends on `rcad-geom`.
 Recorded so that move reads as planned rather than as a layering mistake being
 corrected.
 
+**Amended 2026-08-30, while planning M2.5.** "Fills in nothing else" is half
+wrong, and as written it would have someone wire the endpoint enclosure to
+zero. The `Approximation` — how far the computed curve strays from the true
+one — really is zero for two planes and stays zero forever: the meet of two
+planes is a straight line and the plane pair *is* that line, with nothing
+approximated about it. M3's marcher is its first producer, exactly as this
+section says. **The endpoint enclosure is a different field and it is not zero
+and never will be**, because `Plane::meet_of_three` solves by Cramer's rule and
+Cramer divides. Every end of a planar face meet is therefore a constructed
+point with a real box around it — §2.5's case, which §17.1 turns from the
+exotic path into the only path. So the planar producer populates the enclosure
+on every meet it returns, and it is only the fidelity that stays at zero.
+
 ### 15.8 "Refusal rate" and "deserved refusal" are two different numbers
 
 §1.7's exit criterion 8 wants a refusal rate. §14.7 wants an acceptance oracle —
@@ -1324,3 +1351,410 @@ between them only makes the builds wait on each other's lock.
 §13 rule 5 is satisfied without anyone arranging it: M1 generates knot vectors
 and control nets, M2.5 generates extruded polygons and the §7.4 catalogue. The
 two suites cannot go green together for the same wrong reason.
+
+**Amended 2026-08-30, while planning M2.5.** The table's `rcad-geom` row
+predicts "a two-plane meet beside `meet_of_three`". **That is a deliberate
+non-addition: M2.5 will not write one.** The plane *pair* is the line already,
+exactly and for free — `{A, B}` names it with no arithmetic at all — and every
+question the splitter actually asks is a meet of three planes, which exists.
+Turning the pair into a point plus a direction would normalize a cross product
+and divide, replacing an exact object with a rounded one before anything used
+it, and that is §15.5's mistake arriving by a different road: the fuse
+manufacturing the undecidability §1.7 exists to measure.
+
+What `rcad-geom` gets instead is one added predicate,
+`Plane::agreement_with`, which answers whether two planes describe the same
+plane by exact proportionality of their coefficient 4-vectors, and which way
+each faces (§17.4). And `rcad-predicates`, which this table freezes, gets
+exactly one additive change: `Cause::ConstructedPoint` (§17.2). It is taken
+*before* M1's worktree opens rather than during the window, so the freeze in
+the table is real rather than aspirational — the row means nobody may change
+that crate while two fans are running, and running M2.5 alone until the change
+has landed costs a day and satisfies it literally.
+
+---
+
+## 17. The planar fuse
+
+*Recorded 2026-08-30, before M2.5 starts.*
+
+§16 is M1's reserved number and is not written yet. §15.9's last table hands
+M1 §16 and M2.5 §17 precisely so the two milestones can append to this file at
+the same time without colliding, and M2.5 got here first. Nothing is missing
+between §15 and this section.
+
+§1.7 inserts M2.5 and lists its eight exit criteria, §14.8 adds three more
+oracles, and §15 settles the meanings M1 and M2.5 would otherwise settle twice.
+This section is what a planning pass over all of that concluded. Everything
+here is settled; the fuse gets built to it.
+
+### 17.1 A face *is* its plane
+
+A face carries a `Surface::Plane` and a ring of corner vertices, and those are
+two different geometries that agree only to roundoff.
+`Plane::from_point_and_normal` normalizes, so the normal of a side face of an
+extruded polygon is irrational in general and what we store is the nearest
+`f64` triple to it; `Model::validate` correspondingly asks only that a corner
+sit within `allowed_wobble` of its own face's plane, not that it sit on it. A
+fuse has to pick one of the two as the truth, because it is going to emit
+coordinates that are not in the input and it has to be able to say what they
+are coordinates *of*.
+
+**Settled: `Surface::Plane` is authoritative, and the stored corners are cached
+samples of it.** At fuse entry every input vertex is re-derived as the meet of
+the planes of the faces around it — a constructed point with its enclosure, not
+an `f64` triple read out of the arena. A vertex where four or more faces meet
+is over-determined: we derive it from three well-conditioned planes and then
+check that each remaining plane agrees with the result inside its enclosure,
+refusing when one does not. That check is worth having on its own, because a
+solid whose fourth plane misses the corner by more than the corner's own box is
+not the solid the user thinks they built.
+
+The deciding argument is drift across chained fuses, and it only shows up in
+the third or fourth boolean. A split face inherits its parent's plane bit for
+bit, so however long the chain the planes in the model stay the planes the user
+built, undegraded. Vertices are re-derived from those planes on every fuse, so
+the rounding in a vertex is the rounding of one Cramer solve — never a sum over
+the operation history.
+
+Rejected: vertex-authoritative geometry, with each face's plane fitted to its
+corners. It is the obvious choice, since the corners are what the user typed
+and what gets serialized, and it is a slow leak: every fuse re-rounds every
+vertex, every re-rounded vertex moves the next fitted plane, and the error
+compounds along the chain. It is also the version that passes the tests you
+would think to write first — one fuse against a hand-checked answer shows
+nothing at all. §14.8's associativity oracle,
+`fuse([A,B,C]) ≡ fuse([fuse([A,B]),C])`, is exactly what catches it, by
+failing, some weeks after the choice has become load-bearing.
+
+One of §1.7's own guards then falls out instead of having to be arranged. It
+asks that "the path where a split vertex is known only as an interval" be live
+in the planar world, and worries that a generator will have to be coaxed into
+producing it. With the plane authoritative that path is live for *every*
+vertex, including the ones that came straight from the user's profile, so it is
+the ordinary case and not a case anyone has to remember to test.
+
+### 17.2 Two kinds of wobble, and only one of them refuses
+
+We have two quantities, both lengths in the model's own unit per §15.2, and
+they were one careless sentence away from sharing a name.
+
+| | Where it comes from | Where it lives | Judged by |
+|---|---|---|---|
+| Unproved-decision wobble | a predicate could not decide and a tolerant policy accepted the enclosure anyway | written by `resolve_under_policy` into the `ProvenanceLog`, folded by `ProvenanceLog::worst_wobble(working_size)` | exit criterion 7, against `Policy::max_wobble()` |
+| Representation wobble | the distance from a true meet to the nearest `f64` — present even when every decision was *proved* | tagged on the entity as an `Approximation`, visible in `Model::worst_approximation` | nothing. It is reported, never refused on |
+
+**Settled: exit criterion 7 is a statement about unproved-decision wobble
+alone.**
+
+`Policy::certified().max_wobble()` is exactly `0.0`, and that is what makes the
+distinction load-bearing rather than pedantic. Reading criterion 7 as covering
+both quantities would make a certified fuse refuse every input whose corners
+are not exactly representable — which is every part that is not axis-aligned on
+a lattice, so very nearly every part — and exit criterion 8 would then be
+reporting how well `f64` represents a rotated cube rather than how often our
+filters give up. That is §14.7's warning one milestone on, and §15.5 is the same
+warning about projection. The log makes the split easy to keep hold of: §5
+emits detailed records only on non-certified outcomes, so a `ProvenanceLog`
+never contains a proved decision at all, and `worst_wobble` therefore already
+computes the first quantity and nothing else. Criterion 7 is self-consistent as
+a statement about it alone.
+
+Rejected: wiring criterion 7 to `Model::worst_approximation()` instead of
+`ProvenanceLog::worst_wobble()`. This is not a straw man — it is the shorter
+line of code, it reads as the more thorough choice, both are an `f64` in the
+same unit since §15.2, and the wrong one compiles. Naming it here is most of
+the guard; the test that a certified fuse over an already-tagged input succeeds
+is the rest.
+
+That last is the same answer one level up, and it needs saying because it looks
+like a contradiction: **a certified fuse over an already-tagged input succeeds,
+and carries the input's tag through to its outputs.** A tag on an imported
+vertex is a statement about how that vertex got into the model, not about
+anything this operation did, and a certified policy is a promise about this
+operation's decisions. Refusing on an inherited tag would make
+`Policy::certified()` useless on exactly the models roadmap §9.1's STEP
+importer will produce, since an exporter's rounding arrives as
+`Cause::ImportedUncertainty` on the first vertex.
+
+Representation wobble gets its own cause, additively, in `rcad-predicates`:
+
+```rust
+pub enum Cause {
+    UndecidableResolved,
+    TolerantFallback,
+    ConstructedPoint,
+    ImportedUncertainty,
+}
+```
+
+Rejected: reusing `TolerantFallback` and saving the variant. Representation
+wobble happens under a *certified* policy, where by definition no fallback
+took place, so the tag would claim a tolerant policy accepted something about a
+decision that was proved exactly. The causes exist to be diagnostic, and that
+reuse blinds them precisely where the diagnosis matters — a model full of
+`TolerantFallback` tags that a certified run produced.
+
+### 17.3 Placement is baked in at fuse entry
+
+§3.2 composes locations from day one, so the same face can appear at two
+placements and a `FaceRef` carries the `Isometry` that says which. The fuse
+cannot decide anything about two solids until their coordinates are in one
+frame, so one of them has to move.
+
+**Settled: the fuse bakes placement into world coordinates at entry, and the
+transform's rounding is representation wobble, tagged as such.** Rotating a
+point is multiplications and additions in `f64`, so an exact vertex under a
+general rotation lands near, not at, its true image. Nobody failed to prove
+anything there; it is §17.2's second kind, and it does not refuse. §3.2 already
+offers power-of-two translation snapping as a named constructor for callers who
+want the rounding to be zero, and declines to enforce it, which is the same
+judgement made earlier.
+
+This is a debt being paid rather than a detail being noted. `classify.rs`
+already hands rotation-rounded coordinates to `orient3d` wrapped as
+`Point::Exact` and tags nothing. The wrapper is not lying about the arithmetic
+that follows — it really is exact on those coordinates — but the coordinates
+handed in have already lost something and nothing in the model says so. §12.5
+records the visible half of the same gap, that classification's enclosure and
+provenance fields "carry no signal today ... and cannot until classification
+meets constructed points". M2.5 is where they meet, so M2.5 is where the
+tagging becomes honest.
+
+### 17.4 The rest, settled
+
+The signature first, since several rows below are about what it means:
+
+```rust
+pub fn fuse(
+    &mut self,
+    arguments: &[SolidKey],
+    tools: &[SolidKey],
+    rule: Rule,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Fused>
+```
+
+`A` is the union of the arguments and `B` the union of the tools, per roadmap
+§7.2's insistence that both sides are sets from the start. `Rule::Union` is
+`A ∪ B`, `Rule::Intersection` is `A ∩ B`, `Rule::Difference` is `A \ B`. An
+empty result is a success, not an error — two solids that do not touch have an
+empty intersection and the caller asked a well-formed question.
+
+| Question | Settled | Why |
+|---|---|---|
+| A non-manifold result | Refuse with `Error::ResultIsNotManifold` | `check_touched_edge` asserts exactly two coedges on an edge; relaxing that changes what a `Model` *is*, everywhere, and that is not work a boolean gets to do on its way past |
+| Atomicity | Build the whole result in scratch and commit once. Any `Err` leaves the model byte-identical | A half-applied boolean is the corrupt solid §4.1 would rather crash than emit, and here we can have neither |
+| `Rule` | `#[non_exhaustive]` | Imprint and symmetric difference are the obvious next two, so it is an enum that grows — §3.6's rule, and the contrast with §3.7's deliberately exhaustive `Orientation` is the whole test: there is no fourth way round a face, there are plenty more selection rules |
+| History maps | One image map per entity kind. Generated, modified and deleted are **derived** from it, not stored | Three stored lists can disagree with each other and with the model; one map cannot. "Deleted" means an input key with no image, so input keys stay valid for asking |
+| BVH broad phase | Out | Roadmap §7.1 opens with it, but a broad phase changes no answer — it only skips pairs that would have produced nothing. §1.7's criteria are about answers, M2.5 has no performance target to beat, and it goes to M4 with the bump arena (§11) |
+| ON classification | `Plane::agreement_with`: exact proportionality of the two planes' coefficient 4-vectors, six 2×2 minors of degree 2, each decided through the cascade, and it reports which way each plane faces | A deliberate improvement on roadmap §7.3's "normal comparison": comparing normals needs a tolerance, which is the model §1.2 declines to build, and it also cannot see the offset — two parallel planes a millimetre apart have identical normals and are not the same plane. Same way against opposite way is what the ON columns of the selection table need |
+| Self-intersecting input | Falls out of the decomposition as `Error::ArgumentIntersectsItself`, and is deliberately **not** added to `Model::validate` | The decomposition already computes every face-pair meet, so a meet between two faces of the same solid that is not along their shared edge is free to notice. Putting it in `validate` would make validation quadratic in face count, which §4.3 spent a section refusing |
+| Reassembly | Group surviving pieces into shells by edge adjacency, nest shells into solids with `classify_point`, orient by signed volume — outer positive, voids negative | The manifold check of the first row lands in the adjacency walk, where an edge with three claimants is discovered rather than searched for. An undecidable sign on the volume refuses: an inside-out solid is worse than no solid |
+| Validating the output | Full `Model::validate()` on the committed result, in debug builds | §4.3 puts full sweeps at test and import boundaries and local checks after mutations, and a fuse is not really a mutation — it invents topology that was in no input, which puts it nearer an import |
+
+**Selection is one table read as data, and one `match` on `Rule` that picks the
+row.** §1.7's first criterion says one decomposition and three selection rules,
+not three algorithms, and three `match` arms each walking the pieces their own
+way is three algorithms wearing one signature.
+
+| `Rule` | Argument piece IN `B` | Argument piece OUT of `B` | Tool piece IN `A` | Tool piece OUT of `A` | ON, same direction | ON, opposite |
+|---|---|---|---|---|---|---|
+| `Union` | drop | keep | drop | keep | keep once | drop |
+| `Intersection` | keep | drop | keep | drop | keep once | drop |
+| `Difference` | drop | keep | keep, reversed | drop | drop | keep once |
+
+**Splitting is one arrangement per face against all of that face's cut lines at
+once, never a sequence of pairwise splits.** Splitting by one line, then
+splitting the pieces by the next, gives output that depends on the order the
+lines arrived in, and the order the lines arrived in depends on the order of the
+arguments. §14.8's commutativity oracle and its associativity oracle would then
+fail by construction — not because of a bug we could find and fix, but because
+the algorithm genuinely computes a different partition for `fuse(A, B)` than for
+`fuse(B, A)`. Rejected: pairwise-sequential splitting, which is easier to write
+and easier to debug one line at a time, and which cannot be made to satisfy the
+two oracles we most want.
+
+A cut line is always a *pair of planes*, and never a point plus a direction
+(§15.9). Two faces whose planes are not parallel contribute the pair
+`{plane(A), plane(B)}`. Two coplanar faces contribute one line per edge of `B`,
+each as `{plane(A), plane(B')}` where `B'` is the face on the other side of that
+edge — the boundary of `B` is what cuts `A`, and each boundary edge already lies
+on two planes. The difference between the two cases lives entirely in the
+gathering step, so the arrangement itself sees one uniform kind of input and has
+no coplanarity special case in it.
+
+Ordering points along a cut line is an interval comparison on the line
+direction's dominant axis, and needs no new predicate — which matters, because
+§15.9 freezes `rcad-predicates` and a new predicate would reopen that gate and
+stop both fans. Two points whose intervals on that axis overlap are
+undecidable, and that is not a gap: an overlap is exactly the coincidence case,
+and the coincidence case is the one that gets merged rather than ordered.
+
+Degenerate pieces are prevented, not filtered out afterwards. A decided
+coincidence merges its two points into one rather than creating an edge of no
+length, so the zero-length edge never exists to be swept up. A zero-area face
+surviving to the commit is therefore a broken internal invariant and **panics**,
+per §4.1 — filtering it would be hiding the evidence that the splitter is
+wrong. Slivers that are certifiably non-zero are **kept**: §12.3 is what happens
+when a valid sliver gets refused, and it took an exhaustive search over 160,179
+rings to find out.
+
+Finally, determinism. **No `HashMap` or `HashSet` anywhere in the fuse's working
+state** — `BTreeMap` and `BTreeSet` keyed by slot, or a `Vec` with an explicit
+sort. Iteration order over a hashed container varies per process, that order
+decides the order pieces are inserted into the arena, and arena order is
+visible in every serialized byte. §9.2's bit-identical criterion, §14.8's
+oracles and criterion 8's reruns all compare one run against another, and every
+one of them would start failing intermittently. The test is cheap and nothing
+else in the suite would notice: run the same fuse twice in one process and
+assert the serialized results are equal.
+
+### 17.5 What this milestone owes to earlier sections
+
+Four corrections, all amended in place where they belong so a reader of that
+section is not left with the old claim, and listed here so a reader of this one
+knows the ledger is settled.
+
+§15.7 is half wrong: its `Approximation` is genuinely zero for planes and stays
+so, but the endpoint enclosure is not zero and never will be, because Cramer
+divides. §15.9's predicted two-plane meet in `rcad-geom` is a deliberate
+non-addition, since the plane pair is already the line and constructing a point
+on it would round. §11's bump-arena row moves back out of M2.5 to M4, where a
+consumer for it exists. And §12.6's first gap closes: `Policy::max_wobble` and
+`wobble_is_acceptable` get their caller, which is the fuse, judging
+`ProvenanceLog::worst_wobble` under exit criterion 7 (§17.2) — a field
+specified in §2.6, implemented in M0 and called by nothing since.
+
+### 17.6 The work breakdown and its oracles
+
+§13 rule 1 makes the oracle list and the work breakdown the same document: a
+piece can be worked on independently exactly when the property that decides it
+is correct can be written down before the work starts. §13 rule 2 shapes a
+milestone gate, fan, gate. So this is both.
+
+M2.5 runs **alone** until the opening gate has landed, because the gate changes
+`rcad-predicates`, which §15.9 freezes for the parallel window. Opening M1's
+worktree afterwards costs nothing.
+
+| Piece | Shape | What decides it is correct |
+|---|---|---|
+| 1. `Cause::ConstructedPoint` | opening gate | Additive to a `#[non_exhaustive]` enum; a certified fuse over a rotated input tags its vertices and names this cause (§17.2) |
+| 2. `Plane::agreement_with` in `rcad-geom` | opening gate | Exactly true: proportional 4-vectors agree, non-proportional ones do not, and the cascade decides both. M2.5's only point of contact with the crate M1 owns, closed on day one rather than mid-window |
+| 3. This section | opening gate | — |
+| 4. Scratch types in `crates/rcad-topo/src/fuse/` | opening gate | The shapes below, plus the commit-once structure §17.4 requires |
+| 5. The splitter | core, one head | Exactly true and needing no bound (§14.1 question 1): the areas of a face's pieces sum to the parent's area, and every piece's boundary closes |
+| 6. Classification and selection | core, one head | Roadmap §11.2's decomposition-invariant list against dense point sampling |
+| 7. The catalogue, nine planar entries | alongside, test-only | Each named case passes or refuses with a recorded reason (§1.7 criterion 5) |
+| 8. The metamorphic suite | alongside, test-only | Roadmap §11.2's properties plus §14.8's three, and bit-exact invariance under *exactly representable* isometries |
+| 9. Shell reassembly | closing gate | Euler characteristic and shell counts on the assembled result; the manifold refusal of §17.4 |
+| 10. Bounded transform invariance under general rotations | closing gate | The bound, published beside the expression it bounds (§15.6) |
+| 11. Measure and record criterion 8 | closing gate | §17.7 |
+
+Pieces 5 and 6 stay in one head because §13's own table files "boolean
+classification and shell assembly — graph traversal" under *does not split*, and
+rule 6 caps work in flight inside a single crate. Pieces 7 and 8 run alongside
+because they touch no shared code at all.
+
+The scratch types being decided are these, and they are §15.7's intersection
+result type made concrete:
+
+```rust
+struct FaceMeet {
+    carried_by: [Plane; 2],
+    ends: [MeetPoint; 2],
+    approximation: Approximation,
+}
+
+enum MeetPoint {
+    Existing(VertexKey),
+    OfThreePlanes([Plane; 3]),
+}
+```
+
+`carried_by` is §17.4's pair-of-planes cut line, and `MeetPoint` is why no
+two-plane meet is needed: an end is either a vertex that already exists or three
+planes that have not been solved yet, and solving is `Plane::meet_of_three`.
+
+Piece 6 generalizes `SolidView::classify_point` to accept a `PredicatePoint`,
+keeping today's `Point` entry as a thin wrapper over it. §1.7's third criterion
+says classification is *reused, not reimplemented*, and this is the strongest
+reading available of that word: one body, two entry points, rather than a second
+ray caster that agrees with the first until it does not.
+
+**The schedule risk is piece 6, not piece 7.** §1.7 names the catalogue, and
+adds in the same breath that §12.1's lesson is that cost lands on the part that
+looks done — which here is classification. Both halves are in §1.7; this
+sharpens which one to believe. Point classification is shipped, benchmarked,
+and about to be handed constructed points for the first time in its life, and
+§12.5 already records that its enclosure and provenance fields carry no signal
+today. The catalogue is visible work that attracts attention. Classification
+looks finished.
+
+Four of roadmap §7.4's thirteen catalogue entries are deferred, and the reason
+is recorded here so a reader can tell "out of scope" from "forgotten":
+
+| Deferred entry | Until | Why |
+|---|---|---|
+| Tangent spheres | M4 | Needs two curved surfaces to be tangent along something; M2.5 has planes |
+| Tangent cylinder–plane | M4 | Same — the tangency is a curve on a curved surface, and no such surface participates in a planar fuse |
+| Seam-crossing intersections | M4 | A seam is where a periodic surface's parameter domain joins up. A plane has no seam |
+| Closed periodic surfaces | M4 | A plane is neither closed nor periodic |
+
+The other nine — coplanar faces, coincident edges, vertex-on-face,
+vertex-on-edge, zero-length edges, sliver faces, fully-contained solids,
+touching-but-not-overlapping, and self-intersecting inputs — are all reachable
+with planes and are all in M2.5, which is most of §1.7's argument for building
+the fuse this early.
+
+### 17.7 Criterion 8 — the refusal rate
+
+§1.7's eighth exit criterion wants a measured refusal rate under
+`Policy::certified()`, and §15.8 already settles what it counts: the share of
+*fuse operations* over the corpus that come back `Error::Undecidable`, per
+operation, because that is the unit a user experiences a refusal in.
+
+The numbers are not measured yet.
+
+`TODO(criterion 8): measured refusal rates go here once the suite runs.`
+
+What the measurement has to look like *is* settled now, though, because it is a
+decision and not a result — a single averaged percentage would be a worse
+number than no number, since it would blend a control that must never refuse
+with a family built to be refused on.
+
+**Three families, reported separately, never as one number.**
+
+| Family | What it is | What its number means |
+|---|---|---|
+| The §7.4 catalogue | the nine planar entries, hand-written | a pass/refuse **table**, not a rate. Nine cases is not a sample, and each one refusing is either right or a bug on its own terms |
+| Lattice-aligned pairs | integer grid, axis-aligned | the **control**. Every meet is exactly representable, so the expected refusal rate is zero and any refusal at all is a bug in our filters, not a fact about geometry |
+| Rotated pairs | the same shapes under general rotations | the **headline rate**, asserted below a threshold recorded here |
+
+The control is the row that earns its keep. §14.7's worry is that a refusal
+might be undeserved — a timid filter rather than genuine undecidability — and
+on the rotated family there is no way to tell the two apart from the rate
+alone. On the lattice-aligned family there is: the answer is exactly
+computable, so a certified policy must decide it, and one refusal is one bug.
+
+All three are machine-checked and asserted, in the ordinary test suite. §12.5
+had to record that criterion 10's ≥0.8× half "is not machine-checked; it is a
+`criterion` run a human reads", and that caveat should not need writing twice.
+
+The generators are three configuration families and not M0's extruded-polygon
+configurations reused wholesale. M0's generator supplies *shapes*, and we take
+it whole for that; what we do not take is its configurations, because §12.3 is
+the section where one family of shapes found one family of bugs and a 335-test
+suite could not see a right triangle. Two of the three families above are new
+configurations of old shapes, which is the cheapest form §13 rule 5 takes.
+
+The degenerate configurations are built by **sharing coordinates between the two
+solids**, so the degeneracy is exact: the same corner value appears in both
+inputs, and the coplanarity or the vertex-on-face is true rather than nearly
+true. Rejected: nudging a valid pair by 1e-9 to walk into the dangerous band,
+which is what roadmap §11.3 recommends and which is right for fuzzing. It
+generates the *near* case and never the *on* case, and the on case is what the
+catalogue is about — coplanar faces means coplanar, not coplanar to within a
+nanometre. We take §11.3's instruction and note that our dangerous band has a
+boundary we can land on exactly, so we construct it instead of approaching it.
