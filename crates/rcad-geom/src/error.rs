@@ -105,6 +105,22 @@ pub enum Error {
         at: usize,
     },
 
+    /// The first and last knot are so far apart that subtracting one from the
+    /// other overflows.
+    ///
+    /// Every difference the de Boor recursion forms is between two of the
+    /// stored knots, so none of them is wider than this one. A range that
+    /// overflows makes every de Boor coefficient come out as zero, and the
+    /// published evaluation bound certifies the wrong point that follows,
+    /// because its derivation assumes the subtractions did not overflow.
+    #[error("the knots run from {lo} to {hi}, which is too far apart to subtract in f64")]
+    KnotsTooFarApart {
+        /// The first knot.
+        lo: f64,
+        /// The last knot.
+        hi: f64,
+    },
+
     /// The first or last knot is not repeated enough times to pin the curve to
     /// its end control point.
     #[error(

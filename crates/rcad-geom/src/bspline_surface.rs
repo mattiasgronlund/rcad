@@ -159,6 +159,10 @@ impl BSplineSurface {
     ///
     /// [`Error::ParameterOutsideDomain`], as [`BSplineSurface::evaluate`].
     ///
+    /// [`Error::NotFinite`] if the derivative cannot be worked out in `f64`,
+    /// for the reason
+    /// [`BSplineCurve::tangent`](crate::BSplineCurve::tangent) gives.
+    ///
     /// # Panics
     ///
     /// For the same broken invariant [`BSplineSurface::evaluate`] panics on.
@@ -169,7 +173,7 @@ impl BSplineSurface {
 
         let rate = self.derivative_across(self.u_knots.knots(), u_span, u, &rows[..=degree]);
         let value = self.homogeneous_evaluate(u, v)?;
-        Ok(rational_derivative(value, rate))
+        rational_derivative(value, rate)
     }
 
     /// The first derivative of the surface along `v`.
@@ -182,6 +186,10 @@ impl BSplineSurface {
     ///
     /// [`Error::ParameterOutsideDomain`], as [`BSplineSurface::evaluate`].
     ///
+    /// [`Error::NotFinite`] if the derivative cannot be worked out in `f64`,
+    /// for the reason
+    /// [`BSplineCurve::tangent`](crate::BSplineCurve::tangent) gives.
+    ///
     /// # Panics
     ///
     /// For the same broken invariant [`BSplineSurface::evaluate`] panics on.
@@ -192,7 +200,7 @@ impl BSplineSurface {
 
         let rate = self.derivative_across(self.v_knots.knots(), v_span, v, &columns[..=degree]);
         let value = self.homogeneous_evaluate(u, v)?;
-        Ok(rational_derivative(value, rate))
+        rational_derivative(value, rate)
     }
 
     /// A box the true point at `(u, v)` is somewhere inside, ready for the

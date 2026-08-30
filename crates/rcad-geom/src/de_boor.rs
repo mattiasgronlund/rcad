@@ -24,6 +24,7 @@ use rcad_predicates::{Interval, Point as PredicatePoint, product_is_normal};
 
 use crate::knot_vector::MAX_DEGREE;
 use crate::point::{Point, Vector};
+use crate::{Error, Result};
 
 /// How much of the largest control coordinate one de Boor pass can lose to
 /// rounding, as a fraction of it.
@@ -81,10 +82,24 @@ use crate::point::{Point, Vector};
 /// # The precondition, which is not optional
 ///
 /// Every step of the argument above is *relative*, so it holds only while
-/// nothing overflows and `M` is a normal number. [`roundoff_of_a_divided_point`]
-/// checks that and hands back `None` rather than certify a bound whose model
-/// does not hold — the same shape as `product_is_normal` guarding the level-1
-/// filters, and for the same reason (`docs/decisions.md` §12.2).
+/// nothing overflows and `M` is a normal number. There are three places that
+/// can fail and all three are checked, which is the whole of
+/// `docs/decisions.md` §12.2's lesson — a hypothesis guarded in two of the
+/// three places it is needed is not guarded.
+///
+/// 1. The control coordinates. [`roundoff_of_a_divided_point`] checks that `M`
+///    is normal and hands back `None` rather than certify a bound whose model
+///    does not hold — the same shape as `product_is_normal` guarding the
+///    level-1 filters.
+/// 2. The weight the divide is by. Same function, same `None`.
+/// 3. **The knots.** `a` is `(x − knots[left]) / (knots[right] − knots[left])`,
+///    and the claim that it lands in `[0, 1]` with a relative error of `3u`
+///    fails outright if either subtraction overflows: the coefficient comes out
+///    as zero, every stage collapses to the control point below it, and the
+///    bound goes on certifying the answer. Nothing at evaluation time can see
+///    this, so [`KnotVector::new`](crate::KnotVector::new) refuses a knot
+///    vector whose first and last knot cannot be subtracted, and every
+///    difference either recursion forms sits between those two.
 ///
 /// Subnormal *intermediates* need no separate guard, and that is worth saying
 /// because it is not obvious. A product landing in the subnormals is wrong by
@@ -203,6 +218,25 @@ pub(crate) fn de_boor<C: Coefficient>(
 /// Evaluating `out` needs degree `degree − 1`, the knots with both ends
 /// dropped, and span `span − 1`.
 ///
+/// # Divide before scaling, subtract before either
+///
+/// `Q` is worked out as `((P[i+1] − P[i]) / width) · p`, and the order is the
+/// only one that survives both ends of the `f64` range. Scaling first —
+/// `p · (P[i+1] − P[i])` — overflows on a wide span whose `Q` is small, which
+/// is `tangent` handing back a `NaN` for an answer that fits comfortably.
+/// Dividing each control coordinate by `width` before subtracting would fix
+/// even more, but it overflows on a span a single `f64` step wide, and a hair
+/// of a span under ordinary coordinates is a case this kernel meets all the
+/// time.
+///
+/// What is left is the subtraction. `P[i+1] − P[i]` overflows when two
+/// neighbouring homogeneous control coordinates are more than the whole `f64`
+/// range apart, and no ordering of the remaining two operations gets that back
+/// — the true `Q` may well be an ordinary number and there is no way to reach
+/// it from here. The result is not finite, and the callers turn that into
+/// [`Error::NotFinite`](crate::Error::NotFinite) rather than hand a `NaN` out;
+/// see [`rational_derivative`].
+///
 /// **The caller must not build a [`KnotVector`](crate::KnotVector) for that.**
 /// A degree-1 curve derives to degree 0, and `KnotVector::new` refuses degree
 /// zero — rightly, since a degree-0 vector describes no curve. The derived net
@@ -247,7 +281,7 @@ pub(crate) fn derived_points<C: Coefficient>(
         );
         let width = C::exactly(above) - C::exactly(below);
         *derived = core::array::from_fn(|axis| {
-            (rise * (active[j + 1][axis] - active[j][axis])).divided_by(width)
+            (active[j + 1][axis] - active[j][axis]).divided_by(width) * rise
         });
     }
 }
@@ -317,19 +351,45 @@ pub(crate) fn enclosed(homogeneous: [Interval; 4]) -> PredicatePoint {
 /// derivative of the numerator and quietly drop the `w'·C` term, which is zero
 /// only when every weight is the same.
 ///
+/// # Why a derivative that does not fit is an `Err` and not a panic
+///
+/// [`derived_points`] says where a non-finite derivative comes from: two
+/// neighbouring homogeneous control coordinates more than the whole `f64` range
+/// apart, or a `w'·C` term that overflows on the way through here. Neither is a
+/// broken invariant — construction checked every stored number and accepted
+/// them — so this is the caller's data, and bad caller input is an `Err`
+/// (`docs/decisions.md` §4.1). Panicking would kill a program over data the
+/// kernel said yes to; handing back a `NaN` would be the silent corrupt value
+/// §4.1 ranks below a crash.
+///
+/// The refusal is honest rather than complete. The true derivative is sometimes
+/// an ordinary number even so, and this says only that `f64` could not reach it
+/// by this route.
+///
+/// # Errors
+///
+/// [`Error::NotFinite`] if a coordinate of the derivative is not a finite
+/// number.
+///
 /// # Panics
 ///
 /// If the weight is not above zero, for the reason [`divided`] gives.
-pub(crate) fn rational_derivative(value: [f64; 4], derivative: [f64; 4]) -> Vector {
+pub(crate) fn rational_derivative(value: [f64; 4], derivative: [f64; 4]) -> Result<Vector> {
     let point = divided(value);
     let weight = value[3];
     let weight_rate = derivative[3];
     let [x, y, z] = point.coordinates();
-    Vector::new(
+    let rate = Vector::new(
         (derivative[0] - weight_rate * x) / weight,
         (derivative[1] - weight_rate * y) / weight,
         (derivative[2] - weight_rate * z) / weight,
-    )
+    );
+    if !rate.is_finite() {
+        return Err(Error::NotFinite {
+            what: "spline derivative",
+        });
+    }
+    Ok(rate)
 }
 
 /// How far a divided point can be from the true one, per coordinate, or `None`

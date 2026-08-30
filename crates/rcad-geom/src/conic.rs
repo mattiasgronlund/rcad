@@ -88,8 +88,22 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// [`Error::RadiusNotPositive`] if `radius` is zero, negative, or not a
-    /// finite number, and [`Error::NotFinite`] if the centre and the radius are
-    /// each finite but adding them overflows.
+    /// finite number.
+    ///
+    /// [`Error::NotFinite`] two different ways, and the second is the one that
+    /// surprises. A centre and a radius that are each finite can add to
+    /// something that is not, and that refusal names the
+    /// `"spline control point"`. But the nine weights climb to sixteen and the
+    /// net is stored weighted, so a radius above about `f64::MAX / 16`
+    /// overflows on the way into storage even with the centre at the origin,
+    /// and that refusal names the `"weighted spline control point"`.
+    /// [`BSplineCurve::quarter_arc`] takes radii this refuses, because its
+    /// weights stop at two.
+    ///
+    /// Where that limit falls is left to [`BSplineCurve::new`] rather than
+    /// checked up front. It is the same check either way, and a second copy of
+    /// it here would be a second thing to keep in step with how the net is
+    /// stored.
     pub fn circle(axis: Axis, radius: f64) -> Result<Self> {
         let (to_start, a_quarter_on) = two_radii_at_right_angles(axis, radius)?;
         let centre = axis.origin();
@@ -121,7 +135,9 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// The same two [`BSplineCurve::circle`] has.
+    /// The same two [`BSplineCurve::circle`] has, except that the weights here
+    /// stop at two rather than climbing to sixteen, so this accepts radii the
+    /// whole circle refuses.
     pub fn quarter_arc(axis: Axis, radius: f64) -> Result<Self> {
         let (to_start, a_quarter_on) = two_radii_at_right_angles(axis, radius)?;
         let centre = axis.origin();
@@ -249,6 +265,27 @@ mod tests {
                 what: "spline control point"
             })
         );
+    }
+
+    /// The centre is the origin, so nothing is added to anything and the
+    /// overflow the doc comment used to blame — a centre plus a radius — cannot
+    /// be what happens. What overflows is the ninth control point, which is
+    /// stored weighted and so is `16 · radius`. The quarter arc's weights stop
+    /// at two and it takes the same radius, which is the cleanest way to show
+    /// the weights are the cause.
+    #[test]
+    fn a_radius_the_quarter_arc_takes_can_still_be_too_big_for_the_whole_circles_weights() {
+        let radius = 2e307;
+        assert_eq!(
+            BSplineCurve::circle(Axis::z(), radius),
+            Err(Error::NotFinite {
+                what: "weighted spline control point"
+            })
+        );
+
+        let arc = BSplineCurve::quarter_arc(Axis::z(), radius)
+            .expect("weights of one, one and two leave room");
+        assert_eq!(arc.control_point(0), Point::new(radius, 0.0, 0.0));
     }
 
     #[test]

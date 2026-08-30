@@ -58,14 +58,32 @@ impl KnotVector {
     /// clamping rules have nothing to say about a vector too short to hold two
     /// clamps.
     ///
+    /// # The knots also have to be close enough together to subtract
+    ///
+    /// This is not a seventh invariant of what a knot vector *is*. It is a
+    /// limit on what this kernel can evaluate, the same kind of thing as the
+    /// degree cap: a de Boor coefficient is one knot difference divided by
+    /// another, and if `knots[last] - knots[0]` overflows then so can the
+    /// differences below it. When it does, every coefficient comes out as zero,
+    /// every stage collapses to the control point below it, and
+    /// [`EVALUATION_ROUNDOFF`](crate::EVALUATION_ROUNDOFF) goes on certifying
+    /// the answer — its derivation assumes the subtractions did not overflow,
+    /// and nothing at evaluation time checks that. A knot vector this kernel
+    /// cannot evaluate on is bad caller input, so it is refused here
+    /// (`docs/decisions.md` §4.1).
+    ///
+    /// It is checked after the first two of the six rather than with the degree
+    /// cap, because a difference of knots says nothing until the knots are
+    /// known to be finite and in order.
+    ///
     /// # Errors
     ///
     /// [`Error::DegreeNotSupported`] for degree zero or above [`MAX_DEGREE`],
     /// [`Error::TooFewKnots`] for fewer than `2 * (degree + 1)` knots,
     /// [`Error::NotFinite`] for a knot that is not a finite number,
-    /// [`Error::KnotsGoBackwards`], [`Error::KnotVectorNotClamped`],
-    /// [`Error::KnotRepeatedTooOften`] and [`Error::KnotVectorHasNoSpan`] for
-    /// the rest.
+    /// [`Error::KnotsGoBackwards`], [`Error::KnotsTooFarApart`],
+    /// [`Error::KnotVectorNotClamped`], [`Error::KnotRepeatedTooOften`] and
+    /// [`Error::KnotVectorHasNoSpan`] for the rest.
     pub fn new(degree: usize, knots: Vec<f64>) -> Result<Self> {
         if !(1..=MAX_DEGREE).contains(&degree) {
             return Err(Error::DegreeNotSupported { degree });
@@ -84,6 +102,13 @@ impl KnotVector {
         }
 
         let last = knots.len() - 1;
+        if !(knots[last] - knots[0]).is_finite() {
+            return Err(Error::KnotsTooFarApart {
+                lo: knots[0],
+                hi: knots[last],
+            });
+        }
+
         let start_is_clamped = knots[..=degree].iter().all(|knot| *knot == knots[0]);
         let end_is_clamped = knots[last - degree..]
             .iter()
@@ -302,6 +327,52 @@ mod tests {
                 degree: 2
             })
         );
+    }
+
+    /// A de Boor coefficient divides `(u − below)` by `(above − below)`, and
+    /// with the two clamps this far apart that denominator overflows. Every
+    /// share came out as zero, every stage collapsed to the control point
+    /// below it, and a curve through `(0,0,0)`, `(1,0,0)`, `(2,0,0)`, `(3,0,0)`
+    /// read back `(0,0,0)` everywhere where the truth at the start of the
+    /// domain is `(1.5, 0, 0)`.
+    ///
+    /// What makes it worth refusing at construction rather than living with is
+    /// the certificate: `evaluation_roundoff_at` published a bound of `4e-14`
+    /// on that answer. Its derivation assumes each subtraction is the truth
+    /// times `(1 + δ)`, which overflow breaks, and nothing at evaluation time
+    /// can see that the hypothesis has gone. So the check is here, where the
+    /// knots arrive.
+    #[test]
+    fn a_knot_vector_too_wide_to_subtract_is_refused() {
+        assert_eq!(
+            KnotVector::new(
+                3,
+                vec![-9e307, -9e307, -9e307, -9e307, 9e307, 9e307, 9e307, 9e307]
+            ),
+            Err(Error::KnotsTooFarApart {
+                lo: -9e307,
+                hi: 9e307
+            })
+        );
+    }
+
+    /// The refusal above is exactly the range `f64` cannot subtract and not a
+    /// hair more. These two clamps are the widest pair whose difference is
+    /// still a number, and the kernel goes on evaluating over them.
+    #[test]
+    fn a_knot_vector_as_wide_as_f64_can_still_subtract_is_accepted() {
+        let half_the_range = f64::MAX / 2.0;
+        let widest = KnotVector::new(
+            1,
+            vec![
+                -half_the_range,
+                -half_the_range,
+                half_the_range,
+                half_the_range,
+            ],
+        )
+        .expect("the two ends subtract to exactly f64::MAX, which is a number");
+        assert_eq!(widest.domain(), (-half_the_range, half_the_range));
     }
 
     #[test]

@@ -218,12 +218,21 @@ impl BSplineCurve {
     ///
     /// [`Error::ParameterOutsideDomain`], as [`BSplineCurve::evaluate`].
     ///
+    /// [`Error::NotFinite`] if the derivative cannot be worked out in `f64`,
+    /// which needs two neighbouring homogeneous control coordinates more than
+    /// the whole `f64` range apart. The derived net subtracts them, and no
+    /// ordering of the arithmetic gets that back — see the note on
+    /// `de_boor::derived_points`. The true tangent may be an ordinary number
+    /// even so; a refusal here says `f64` could not reach it, not that it does
+    /// not exist. Handing back the `NaN` instead would be the silent corrupt
+    /// value `docs/decisions.md` §4.1 ranks below a crash.
+    ///
     /// # Panics
     ///
     /// For the same broken invariant [`BSplineCurve::evaluate`] panics on.
     pub fn tangent(&self, u: f64) -> Result<Vector> {
         let (value, rate) = self.homogeneous_value_and_derivative(u)?;
-        Ok(rational_derivative(value, rate))
+        rational_derivative(value, rate)
     }
 
     /// A box the true point at `u` is somewhere inside, ready for the predicate
@@ -1028,6 +1037,110 @@ mod tests {
         );
         assert_eq!(z.width(), 0.0, "a flat arc has an exact z");
         assert_eq!(z.lo(), 0.0);
+    }
+
+    /// `KnotVector::new` refuses a vector whose first and last knot cannot be
+    /// subtracted, and the argument that one check is enough is that every
+    /// difference either recursion forms lies between those two knots — de
+    /// Boor's `knots[right] − knots[left]` and `u − knots[left]`, and the
+    /// derived net's `knots[i+p+1] − knots[i+1]`. The knots rise, so each of
+    /// those differences is no wider in truth than the whole range, and
+    /// rounding to nearest keeps the order.
+    ///
+    /// This is that argument made to run. The knots here are the widest pair
+    /// the kernel accepts — they subtract to exactly `f64::MAX` — and both
+    /// recursions are driven across them. The clamp is the sharp part: with the
+    /// coefficients collapsing to zero, *every* parameter read back as control
+    /// point 0, so the top of the domain coming back as control point 3 is the
+    /// assertion the overflow could not have passed.
+    #[test]
+    fn the_widest_knot_vector_the_kernel_takes_still_evaluates_and_differentiates() {
+        let half_the_range = f64::MAX / 2.0;
+        let knots = KnotVector::new(
+            2,
+            vec![
+                -half_the_range,
+                -half_the_range,
+                -half_the_range,
+                0.0,
+                half_the_range,
+                half_the_range,
+                half_the_range,
+            ],
+        )
+        .expect("clamped, rising, one interior knot, and a range f64 can subtract");
+        let corners: Vec<Point> = (0..4).map(|i| Point::new(f64::from(i), 0.0, 0.0)).collect();
+        let curve = BSplineCurve::new(knots, &corners, &[1.0; 4]).expect("four small points");
+
+        let (lo, hi) = curve.domain();
+        assert_eq!(curve.evaluate(lo).unwrap(), Point::new(0.0, 0.0, 0.0));
+        assert_eq!(curve.evaluate(hi).unwrap(), Point::new(3.0, 0.0, 0.0));
+
+        let middle = curve.evaluate(0.0).unwrap().x();
+        assert!(
+            0.0 < middle && middle < 3.0,
+            "the interior point {middle} is outside the control net it is a blend of"
+        );
+        assert!(curve.tangent(0.0).unwrap().is_finite());
+    }
+
+    /// A span `1e300` wide under control coordinates around `5e307`. The
+    /// derived point is `p · (P[i+1] − P[i]) / width`, and forming the product
+    /// first overflowed while the answer itself, `2e8`, fits in an `f64` three
+    /// hundred orders of magnitude over. `tangent` handed back a `NaN` from a
+    /// method that documents one failure and does not panic — a silent corrupt
+    /// value, which `docs/decisions.md` §4.1 ranks below a crash.
+    ///
+    /// Dividing before scaling is what makes this exact rather than merely
+    /// finite: `1e308 / 1e300` is `1e8` with nothing rounded, and the de Boor
+    /// coefficient at this parameter is exactly a quarter.
+    #[test]
+    fn a_tangent_across_a_span_too_wide_to_scale_before_dividing_is_exact() {
+        let knots = KnotVector::new(2, vec![0.0, 0.0, 0.0, 1e300, 1e300, 1e300])
+            .expect("a clamped single-span quadratic");
+        let corners = [
+            Point::new(-5e307, 0.0, 0.0),
+            Point::new(5e307, 0.0, 0.0),
+            Point::new(-5e307, 0.0, 0.0),
+        ];
+        let curve = BSplineCurve::new(knots, &corners, &[1.0; 3]).expect("three finite points");
+
+        let a_quarter_along = 2.5e299;
+        assert_eq!(
+            curve.evaluate(a_quarter_along).unwrap(),
+            Point::new(-1.25e307, 0.0, 0.0)
+        );
+        assert_eq!(
+            curve.tangent(a_quarter_along).unwrap(),
+            Vector::new(1e8, 0.0, 0.0)
+        );
+    }
+
+    /// What dividing before scaling does not fix, said out loud rather than
+    /// left to be found. The two control points are a whole `f64` range apart,
+    /// so `P[1] − P[0]` overflows before any division can help — and no
+    /// ordering of the three operations avoids it, because dividing each
+    /// coordinate first would overflow on a hair-wide span instead, which is
+    /// the ordinary case.
+    ///
+    /// The true tangent is `5e307` and would fit. The old code handed back an
+    /// infinity for it. A refusal is the honest answer, and it is an `Err`
+    /// rather than a panic because this net is caller data the kernel looked at
+    /// and accepted — the point below shows it still evaluates perfectly well
+    /// (`docs/decisions.md` §4.1).
+    #[test]
+    fn a_curve_whose_two_control_points_are_a_whole_f64_range_apart_has_no_tangent_in_f64() {
+        let knots = KnotVector::new(1, vec![0.0, 0.0, 4.0, 4.0]).expect("one straight span");
+        let ends = [Point::new(-1e308, 0.0, 0.0), Point::new(1e308, 0.0, 0.0)];
+        let curve = BSplineCurve::new(knots, &ends, &[1.0; 2]).expect("two finite points");
+
+        assert_eq!(curve.evaluate(2.0).unwrap(), Point::origin());
+        assert_eq!(
+            curve.tangent(2.0),
+            Err(Error::NotFinite {
+                what: "spline derivative"
+            })
+        );
     }
 
     /// Knots `[0, 0, 1, 2, 2]`, so inserting at a half blends the first two
