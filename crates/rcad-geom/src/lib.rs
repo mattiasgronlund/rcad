@@ -60,6 +60,7 @@
 
 mod bspline_curve;
 mod bspline_surface;
+mod conic;
 mod cylinder;
 mod de_boor;
 mod error;

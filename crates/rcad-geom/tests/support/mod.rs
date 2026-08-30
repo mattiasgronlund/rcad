@@ -26,7 +26,7 @@
 use core::ops::Range;
 
 use proptest::prelude::*;
-use rcad_geom::{BSplineCurve, BSplineSurface, KnotVector, Point};
+use rcad_geom::{Axis, BSplineCurve, BSplineSurface, KnotVector, Point};
 use rcad_predicates::{Interval, Point as PredicatePoint};
 
 /// Family 1: uniform clamped knots, a control net scattered about the origin,
@@ -109,15 +109,14 @@ pub fn a_curve_spanning_a_wide_range_of_sizes() -> impl Strategy<Value = BSpline
 /// and neither of them an `f64`. That is what makes it the case
 /// `docs/decisions.md` §14.7 asks for — a point provably on a surface that no
 /// `f64` can name.
+///
+/// This was written out by hand until `BSplineCurve::quarter_arc` arrived, and
+/// the constructor reproduces it in all four homogeneous coordinates, so there
+/// is one definition of it rather than two.
+/// `a_circle_built_from_dyadic_weights_is_exactly_a_circle.rs` is where that net
+/// is still asserted by hand.
 pub fn the_quarter_circle() -> BSplineCurve {
-    let knots = KnotVector::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
-        .expect("a clamped single-span quadratic");
-    let corners = [
-        Point::new(1.0, 0.0, 0.0),
-        Point::new(1.0, 1.0, 0.0),
-        Point::new(0.0, 1.0, 0.0),
-    ];
-    curve_through(knots, &corners, &[1.0, 1.0, 2.0])
+    BSplineCurve::quarter_arc(Axis::z(), 1.0).expect("a radius of one about the z axis")
 }
 
 /// Family 5: [`the_quarter_circle`] pulled one unit along `z`.
@@ -126,20 +125,28 @@ pub fn the_quarter_circle() -> BSplineCurve {
 /// exactly one unit from the `z` axis, which is what `Cylinder::side_of` is
 /// asked about.
 pub fn the_quarter_circle_extruded_one_unit_in_z() -> BSplineSurface {
-    let arc = the_quarter_circle();
+    extruded_one_unit_in_z(&the_quarter_circle())
+}
+
+/// Any curve about the `z` axis pulled one unit along it.
+///
+/// The weights come across untouched and each control point is used twice, so a
+/// curve whose net is exact gives a patch whose net is exact — the extrusion
+/// adds one to `z` and rounds nothing else.
+pub fn extruded_one_unit_in_z(curve: &BSplineCurve) -> BSplineSurface {
     let up = KnotVector::new(1, vec![0.0, 0.0, 1.0, 1.0]).expect("one straight span");
 
     let mut corners = Vec::new();
     let mut weights = Vec::new();
-    for i in 0..arc.control_point_count() {
-        let bottom = arc.control_point(i);
+    for i in 0..curve.control_point_count() {
+        let bottom = curve.control_point(i);
         corners.push(bottom);
         corners.push(Point::new(bottom.x(), bottom.y(), bottom.z() + 1.0));
-        weights.push(arc.weight(i));
-        weights.push(arc.weight(i));
+        weights.push(curve.weight(i));
+        weights.push(curve.weight(i));
     }
 
-    BSplineSurface::new(arc.knots().clone(), up, &corners, &weights)
+    BSplineSurface::new(curve.knots().clone(), up, &corners, &weights)
         .expect("a valid curve swept along a straight span is a valid surface")
 }
 
