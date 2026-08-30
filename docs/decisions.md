@@ -1324,3 +1324,298 @@ between them only makes the builds wait on each other's lock.
 §13 rule 5 is satisfied without anyone arranging it: M1 generates knot vectors
 and control nets, M2.5 generates extruded polygons and the §7.4 catalogue. The
 two suites cannot go green together for the same wrong reason.
+
+---
+
+## 16. What M1 actually cost, recorded 2026-08-30
+
+*Written by M1, per §15.9's reservation of this number.*
+
+`rcad-geom` can now represent, evaluate and subdivide NURBS curves and surfaces,
+and can hand a NURBS point to the predicate cascade **carrying an enclosure** —
+the seam §13 rule 2 named as M1's closing gate. The suite went from 404 to 549.
+
+`rcad-predicates` was not touched, so §15.9's freeze held. No `Decision` variant
+was added, so §15.4 held. §12.6's fifth gap is closed: `Interval` is re-exported
+from the facade, because callers now take `PredicatePoint::enclosure()` apart and
+a type the rustdoc names has to be one the facade exports.
+
+### 16.1 The schedule risk was named twice and landed in neither place
+
+§12.1's lesson was that the risk is not the part that looks hard, so the M1 plan
+named two candidates: the enclosure width, and — because it is textbook and
+finished-looking — the de Boor evaluator. Neither failed.
+
+On shapes of a stated working size the enclosure came in at **2 to 20 `f64`
+steps of that size**, flat across working sizes from 1 to a million and across
+degrees 1 to 5.
+
+| | curve, well conditioned | curve, wide range | patch, well conditioned | patch, wide range |
+|---|---|---|---|---|
+| steps of the working size | 2–11 | 2.5–14 | 5–14 | 4–20 |
+
+**The answer for M3 is conditional, and the condition is the interesting half.**
+For well-conditioned input this settles it: tens of steps, not thousands, and
+certified marching works. But the first version of this figure was measured with
+every knot vector drawn from the same six small whole numbers — the monoculture
+§16.9 records — and once the generators put a span of a million steps next to a
+span of one, the tail moved. Over a million draws of the six-decades-of-weight
+family: **median 15 steps, 99.9th percentile 986, worst 66,120.** That is a
+parameter landing a hair below a knot in a span a million times wider than its
+neighbour, which is the curve being ill-conditioned rather than the arithmetic
+being sloppy — the box is honest about it, which is the whole point of having
+one. **M3 will need centred forms for that case**, and it now knows which case,
+eighteen months before it would otherwise have found out.
+
+That family is therefore held to a scale-free ceiling — the enclosure's
+half-width against the published `f64` bound, worst measured 0.145 — because a
+ceiling in steps of the working size would have to sit near a million to stop
+flickering, and a ceiling that loose asserts nothing.
+
+Where the cost actually went was neither algorithm. It went to **defining the
+numbers before measuring them** — §16.2 and §16.3 below, and the ceiling above.
+All three are the same mistake in different clothes: a quantity that is
+meaningless until you say what it is measured against.
+
+### 16.2 An enclosure width has to be measured against the right thing
+
+Reported in steps *of the coordinate*, degree-5 patches came back at 2·10⁷ and
+looked exactly like the schedule risk landing. They were not. The worst case is a
+coordinate of −1.2·10⁻⁷ with an absolute width of 5.6·10⁻¹⁶, which is five steps
+of the control net that produced it. Dividing a scale-free width by a coordinate
+that crosses zero says nothing about the arithmetic and everything about where
+the curve happens to pass near an axis.
+
+This is the same trap `EVALUATION_ROUNDOFF`'s own derivation opens with, and it
+was walked into anyway, one file apart. The bound is stated in terms of the
+largest control coordinate the evaluation touches *because* nothing relative to
+the answer survives a de Boor result near zero — and then the width was reported
+relative to the answer.
+
+Both readings are now reported. The ceiling is on the second, and it is
+machine-checked in the normal suite rather than read off a `criterion` run,
+because §12.5 was honest that nobody notices one of those regressing.
+
+### 16.3 A bound's operation count is not its rounding count
+
+`EVALUATION_ROUNDOFF` charges **nine roundings per de Boor stage.** Counting the
+operations gives seven, and seven is wrong. Two of the roundings form the
+coefficient `a`, and their error is not carried down one chain — it is charged at
+full size against the running values, because `|δa|·|d[j]|` does not shrink when
+`a` is small.
+
+§15.6 said a published bound needs a test that could fail, not a paragraph, and
+M1 is the second run of that experiment. The test — the same recursion in exact
+rational arithmetic, subtracted — is in the tree and it works. It is also **not
+sufficient, measurably**: of about fifteen deliberate mutations of the evaluator,
+every algorithmic one was caught, and one survived. Dropping the `w'` term from
+the rational divide is worth about a factor of two, and the exact-arithmetic test
+carries roughly 300× slack, so it only fails below about a five-hundredth of the
+published constant.
+
+That is not a defect in the test; it is §15.6's own claim arriving with a number
+on it. **The derivation is what makes it a bound. The test is what stops the
+expression drifting out from under the derivation.** Neither substitutes for the
+other, and now we know the size of the gap between them.
+
+### 16.4 A frozen crate is a design constraint, not only a process one
+
+The M1 plan claimed no change to `rcad-predicates` was required, because
+`Point::Constructed` and `Interval` are already public. That was very nearly
+right and missed one thing: **`Interval` has no public division.** Interval de
+Boor divides — at every knot difference and at the perspective divide — so the
+enclosure could not be built from the frozen API as it stood.
+
+It was built locally in `rcad-geom` instead, from `Interval::new`, `lo` and `hi`:
+IEEE division rounds to nearest, so the true quotient lies between `q.next_down()`
+and `q.next_up()`, and the four corner quotients widened by a step each way
+enclose. It costs a couple of steps of width over a directed-rounding divide.
+
+Recorded because the outcome was better than the shortcut would have been — the
+soundness argument is local, written down and tested — but the freeze was **not
+free**, and a future gate should not assume a frozen crate's public surface is
+sufficient just because the types are public. Check the operations.
+
+When `rcad-predicates` next opens, moving the divide down to `Interval` is a
+relocation and nothing more.
+
+### 16.5 The acceptance oracle could not be built first, and that is worth saying
+
+§14.7 says build it first, not last, and §15.8 says it is per case, pass or fail,
+never a rate. Both held. "First" did not, and could not have.
+
+The oracle's subject is the *enclosure*, and the enclosure is the last thing M1
+builds. What was built first is its other half: the exhaustive check that
+`KnotVector::new` accepts exactly what an independent transcription of the six
+rules accepts — every non-decreasing sequence over the whole numbers 0 to 7 for
+degrees 1 to 3, **182,595 of them, enumerated rather than sampled**, zero wrongly
+refused and zero wrongly accepted.
+
+So §14.7's instruction resolves into two: the *acceptance half of every
+constructor* goes first and can, and the *acceptance half of the cascade* goes
+with the thing it judges. Only the second was what §14.7 had in mind, and only
+the first is schedulable early. A milestone that reads §14.7 as one instruction
+will either build it late or build the wrong one.
+
+What it bought, when it did land: the quarter circle with weights `(1, 1, 2)` is
+the unit circle exactly and reaches `(3/5, 4/5)` at `u = 1/2`, which is not an
+`f64`. Handed to `Sphere::side_of` as an exact triple, that point is **certified
+`Pos`** — off a circle it is exactly on. Handed over as a box it is
+`Undecidable`. Neither assertion needs a tolerance, and the contrast is the whole
+argument for the seam.
+
+The acceptance half is asserted too, and it is the half §14.7 exists for: the
+same points *are* certified against spheres of half and twice the radius, at both
+clamped ends, on the extruded pipe and on a flat patch's plane. A timid filter
+passes every other oracle on the list by refusing everything.
+
+The quarter-sphere patch the plan called a stretch goal worked: the dyadic
+weights do survive the revolution, giving `1,1,2,1,1,2,2,2,4`, and the octant
+point at `u = v = ½` is `(9/25, 12/25, 4/5)`, whose squares sum to exactly one.
+
+### 16.6 Rule 3 removes exactly the pieces rule 2 promised would fan
+
+§13 rule 2 says a milestone is shaped gate, fan, gate, and named M1's algorithms
+as the fan. §13 rule 3 says a part with no named consumer is deferred. Applied to
+roadmap §4, rule 3 cut about half of it — and **it cut the fan.**
+
+M1 did not fan wide. What survived is evaluation for curve and surface,
+derivatives, the interval path, insertion, splitting and conics, and four of
+those are the same body of de Boor code reached through different doors. The work
+ran as a gate and one long sequenced line, with two small pieces at the end.
+
+This is a general finding, not an M1 detail. Rule 3 removes the independent,
+textbook-oracled pieces — degree elevation, the Oslo algorithm, curvature and the
+fundamental forms, arc-length parametrization — precisely because their consumers
+are in later milestones. Those are exactly the pieces that were going to fan.
+**Rule 2 currently reads as though this will not happen. It will happen at every
+milestone.** Expect gate-plus-line, and treat a genuine wide fan as the exception
+that needs arguing for.
+
+### 16.7 The departures this milestone made
+
+1. **No enum arm, and the `Copy` cost with it.** `BSplineCurve` and
+   `BSplineSurface` are concrete types. There is no `Curve` enum and no
+   `Surface::BSpline`. The arm is the seam to topology, its consumer is M2, and
+   it costs `Surface: Copy` (`surface.rs`), which `FaceView::surface` consumes —
+   rippling into the crate M2.5 holds for the duration. Deferred to M2.
+2. **Clamped and non-periodic only, until M5.** Invariants 3 and 4 enforce it.
+   Every periodic surface mechanical CAD cares about is analytic and stays
+   analytic (roadmap §4.1); periodic NURBS first arrive with a STEP file, and the
+   refusal message says so.
+3. **One always-rational type, which vacates one of §14.5's oracles.** Dividing
+   by exactly `1.0` is exact, so the non-rational case costs nothing and there is
+   no second variant. That makes "all weights equal reproduces the non-rational
+   B-spline" a statement about nothing. A deliberate loss, recorded rather than
+   quietly dropped.
+4. **§4.1 beats roadmap §4.5 on panics.** `evaluate` has exactly one failure
+   mode — a parameter outside the domain or not finite — and returns `Err` for
+   it. A zero denominator during evaluation means a validated curve carried a bad
+   weight, which is a broken invariant, and it panics. Roadmap §4.5 says never
+   panic; §4.1's three tiers win, because a corrupt point is worse than a crash.
+5. **`publish = false` past M1.** §3.6 says "until M1", which now reads as
+   optimistic rather than as a forgotten TODO. Nothing here is shaped for a
+   stranger yet: `MAX_DEGREE`, the two roundoff constants and the conic
+   constructors are all still finding their consumers.
+6. **Rule 3 shrinks the fan rule 2 promises** — §16.6.
+
+### 16.8 Known gaps carried into M2 and M3
+
+- **Surface refinement does not exist.** Insertion, splitting and Bézier
+  extraction are curves only. Nothing in M1 consumes the surface versions, and
+  rule 3 says wait for the consumer. Roadmap §6.3's surface–surface marching is
+  it.
+- **General-angle arcs are not exact and were not built.** `cos θ` is an `f64`
+  for almost no angle, so a general arc constructor cannot be exact, and an
+  inexact one had no consumer this milestone. `circle` and `quarter_arc` are what
+  shipped.
+- **Conic exactness stops in two places, and the tests claim it only where it
+  holds.** The in-plane frame is a cross product and a normalize, exact only when
+  the axis is a coordinate direction; and a control point is `centre ± radius`,
+  which rounds away from the origin. Both are documented at the constructor.
+- **An enclosure costs 12× the `f64` evaluation for a degree-1 curve and 83× for
+  a degree-5 surface** (332 ns against 27.7 µs). No consumer has asked for speed,
+  so nothing was optimised. The first saving available is that the local interval
+  divide computes four corner quotients where both operands are usually single
+  numbers; it was left alone deliberately, because it is a correctness-critical
+  divide and M3 is the first caller that will care.
+- **The published `f64` bound is much wider than the enclosure it is tested
+  against.** Across every family the enclosure's half-width never passed 0.145 of
+  the bound, so the bound is at worst about seven times looser and usually far
+  more. That is the honest behaviour of a bound stated over the homogeneous net
+  when the net can be five hundred times the affine one, and it is another reason
+  the bound is not a second enclosure source. It also means the ratio makes a
+  usable scale-free ceiling where a count of `f64` steps does not — §16.1.
+
+### 16.9 Review found what the suite did not, again
+
+*Added after the milestone's adversarial review, which ran before the merge.*
+
+§12.1 recorded that M0 shipped three bugs through a green 335-test suite and
+that every one was found by review. **M1 did the same thing.** The suite was 549
+green and `just` passed when the review started. It found seven defects, two of
+them serious, and this section exists so the pattern is recorded twice rather
+than rediscovered a third time.
+
+**A certified wrong answer.** A de Boor coefficient's denominator overflows when
+the knot range passes `f64::MAX`, every share collapses to zero, and evaluation
+returns control point 0. On a degree-3 curve spanning `-9e307` to `9e307` that is
+`0.0` where the truth is `1.5` — and `evaluation_roundoff_at` certified it with a
+bound of `4.5e-14`.
+
+This is **§12.2 in its third location**, and the shape is now unmistakable.
+`EVALUATION_ROUNDOFF` is relative throughout, so it holds only while its
+hypothesis does, and the hypothesis was enforced on the control coordinates and
+on the weight but not on the knots. §12.2's own words were that we already knew
+and guarded one of the three places the hazard appears; M1's plan called itself
+the second; this was the third, in the same milestone, in a bound written by
+someone who had read §12.2. **Enumerate every input a relative bound depends on,
+and guard each one, or the count will keep going up.** The fix refuses such a
+knot vector at construction, and the bound's doc comment now numbers all three
+places rather than two.
+
+The interval path was sound throughout and returned a box that does contain the
+true point. That is the seam working exactly as designed, and it is the strongest
+evidence in the milestone that making the enclosure the only enclosure — never
+intersecting it with the `f64` bound — was the right call. Had they been
+intersected, this bug would have produced a confidently wrong box.
+
+**A silent NaN.** `tangent` returned `NaN` where the true derivative was exactly
+`1e8`, because the derived net scaled before dividing. §4.1 ranks a silent
+corrupt value below a crash, and this was one.
+
+**Three oracles that could not fail.** The knot-insertion oracle — §14.3's *first*
+exactly-true relation — asserted nothing on about half of every family's draws,
+because the helper choosing untouched control points returns an empty list on
+short curves and only one of four tests checked. The split oracle's "two routes
+to one answer" was one route: the by-hand raising loop was character for
+character `split_at`'s own. Both are §14.1 question 2 answered "yes" by tests
+that could not have said "no".
+
+**And the cause of all of it: one generator family.** Every strategy drew its
+knots from the same six small whole numbers, and the scaling oracle cloned the
+knot vector unchanged while scaling only the control net — so the de Boor
+coefficients, which are the dangerous code, received bit-identical inputs in both
+runs of the only metamorphic test aimed at them. **No test in the milestone ever
+varied a knot value.** That is why a bug in the coefficient denominator survived
+549 tests.
+
+§12.3 already said one family of shapes finds one family of bugs. What M1 adds is
+that a generator can be varied in the dimension you are thinking about and
+constant in the one that matters: the nets were random, wide-ranging and
+carefully conditioned, and the knots were `0, 1, 2, 3` every single time. **Ask
+of each generator not "is this varied?" but "which argument of the dangerous
+function does this never change?"**
+
+The repair is measurable. Knots now span 48 orders of magnitude, and scaling the
+*knot vector* by `2^k` is a second oracle down a genuinely different path — the
+point may not move one bit, the tangent must come back divided by exactly `2^k`.
+Mutation confirms it: a de Boor nudge that only bites above `1e6` passes the
+entire suite as it stood at review time, and fails all four of the new scaling
+tests.
+
+**What this says about §13 rule 6.** Rule 6 caps work in flight because review is
+the constraint, not authoring. Both milestones now have the same evidence, and it
+is stronger than the rule states: review did not merely find *more* than the
+suite, it found things the suite was structurally incapable of finding. Budget it
+as a phase with its own findings, not as a pass over finished work.

@@ -9,8 +9,8 @@
 use core::f64::consts::FRAC_PI_3;
 
 use rcad_geom::{
-    Axis, Cylinder, Isometry, Orientation, Plane, Point, Scale, Segment, Sphere, Surface, Unit,
-    Vector,
+    Axis, BSplineCurve, BSplineSurface, Cylinder, Isometry, KnotVector, Orientation, Plane, Point,
+    Scale, Segment, Sphere, Surface, Unit, Vector,
 };
 
 fn there_and_back<T>(value: T) -> T
@@ -168,6 +168,126 @@ fn an_edge_stored_with_both_ends_in_the_same_place_is_refused_on_the_way_in() {
 fn a_scale_stored_with_no_size_is_refused_on_the_way_in() {
     let bytes = postcard::to_allocvec(&(Unit::Millimetre, 0.0f64)).unwrap();
     assert!(postcard::from_bytes::<Scale>(&bytes).is_err());
+}
+
+/// Splines are the one place where the round trip has to be bit for bit rather
+/// than close enough: they are stored in the same homogeneous coordinates they
+/// are worked in, so nothing is scaled on the way in or out.
+#[test]
+fn a_knot_vector_comes_back_knot_for_knot() {
+    let knots = KnotVector::new(
+        3,
+        vec![0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.2, 1.0, 1.0, 1.0, 1.0],
+    )
+    .unwrap();
+    let recovered = there_and_back(knots.clone());
+    assert_eq!(recovered, knots);
+    assert_eq!(recovered.knots(), knots.knots());
+}
+
+#[test]
+fn a_spline_curve_comes_back_with_every_stored_number_untouched() {
+    let curve = a_weighted_arc();
+    let recovered = there_and_back(curve.clone());
+    assert_eq!(recovered, curve);
+    for i in 0..curve.control_point_count() {
+        assert_eq!(
+            recovered.homogeneous_control_point(i),
+            curve.homogeneous_control_point(i)
+        );
+    }
+}
+
+#[test]
+fn a_spline_surface_comes_back_with_every_stored_number_untouched() {
+    let surface = a_weighted_wall();
+    let recovered = there_and_back(surface.clone());
+    assert_eq!(recovered, surface);
+    for i in 0..3 {
+        for j in 0..2 {
+            assert_eq!(
+                recovered.homogeneous_control_point(i, j),
+                surface.homogeneous_control_point(i, j)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_knot_vector_stored_without_its_clamps_is_refused_on_the_way_in() {
+    let bytes = postcard::to_allocvec(&(2usize, vec![0.0f64, 0.0, 0.5, 1.0, 1.0, 1.0])).unwrap();
+    assert!(postcard::from_bytes::<KnotVector>(&bytes).is_err());
+}
+
+#[test]
+fn a_knot_vector_stored_with_its_knots_out_of_order_is_refused_on_the_way_in() {
+    let bytes = postcard::to_allocvec(&(1usize, vec![0.0f64, 0.0, 2.0, 1.0, 3.0, 3.0])).unwrap();
+    assert!(postcard::from_bytes::<KnotVector>(&bytes).is_err());
+}
+
+#[test]
+fn a_knot_vector_stored_at_a_degree_this_kernel_does_not_carry_is_refused_on_the_way_in() {
+    let bytes = postcard::to_allocvec(&(0usize, vec![0.0f64, 1.0])).unwrap();
+    assert!(postcard::from_bytes::<KnotVector>(&bytes).is_err());
+}
+
+/// The stored net is homogeneous, so a weight of zero is a control point that
+/// cannot be divided back out — and a stored curve carrying one would panic
+/// during evaluation instead of failing here.
+#[test]
+fn a_curve_stored_with_a_weight_of_zero_is_refused_on_the_way_in() {
+    let knots = KnotVector::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+    let net = vec![
+        [1.0f64, 0.0, 0.0, 1.0],
+        [0.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 1.0],
+    ];
+    let bytes = postcard::to_allocvec(&(knots, net)).unwrap();
+    assert!(postcard::from_bytes::<BSplineCurve>(&bytes).is_err());
+}
+
+#[test]
+fn a_curve_stored_with_the_wrong_number_of_control_points_is_refused_on_the_way_in() {
+    let knots = KnotVector::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+    let net = vec![[1.0f64, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]];
+    let bytes = postcard::to_allocvec(&(knots, net)).unwrap();
+    assert!(postcard::from_bytes::<BSplineCurve>(&bytes).is_err());
+}
+
+#[test]
+fn a_surface_stored_with_the_wrong_sized_grid_is_refused_on_the_way_in() {
+    let surface = a_weighted_wall();
+    let (u_knots, v_knots, mut net) = <(KnotVector, KnotVector, Vec<[f64; 4]>)>::from(surface);
+    net.pop();
+    let bytes = postcard::to_allocvec(&(u_knots, v_knots, net)).unwrap();
+    assert!(postcard::from_bytes::<BSplineSurface>(&bytes).is_err());
+}
+
+/// Weights that are not one, and coordinates that do not survive being
+/// multiplied by them and divided back out.
+fn a_weighted_arc() -> BSplineCurve {
+    let knots = KnotVector::new(2, vec![0.0, 0.0, 0.0, 0.25, 1.0, 1.0, 1.0]).unwrap();
+    let corners = [
+        Point::new(0.1, 0.0, 0.0),
+        Point::new(1.0, 1.0, 0.0),
+        Point::new(0.0, 1.0, 0.3),
+        Point::new(-2.0, 1.0, 0.0),
+    ];
+    BSplineCurve::new(knots, &corners, &[1.0, 3.0, 0.5, 7.0]).unwrap()
+}
+
+fn a_weighted_wall() -> BSplineSurface {
+    let u_knots = KnotVector::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+    let v_knots = KnotVector::new(1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+    let corners = [
+        Point::new(1.0, 0.0, 0.0),
+        Point::new(1.0, 0.0, 1.0),
+        Point::new(1.0, 1.0, 0.0),
+        Point::new(1.0, 1.0, 1.0),
+        Point::new(0.0, 1.0, 0.0),
+        Point::new(0.0, 1.0, 1.0),
+    ];
+    BSplineSurface::new(u_knots, v_knots, &corners, &[1.0, 1.0, 3.0, 3.0, 2.0, 2.0]).unwrap()
 }
 
 #[test]
