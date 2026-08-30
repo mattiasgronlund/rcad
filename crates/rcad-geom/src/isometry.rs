@@ -25,6 +25,61 @@ use crate::{Error, Result};
 pub struct Isometry(na::Isometry3<f64>);
 
 impl Isometry {
+    /// How far a moved point can land from where this movement's own
+    /// arithmetic, done without rounding, would put it — per unit of `L`, the
+    /// largest coordinate magnitude of the point being moved and of the
+    /// movement's shift.
+    ///
+    /// # Where the 18 comes from
+    ///
+    /// [`Isometry::apply_to_point`] is not a matrix multiply. A rotation is
+    /// stored as a quaternion `(w, v)` and Rodrigues' form of it is what runs:
+    ///
+    /// ```text
+    /// c = v × p        t = 2c        k = v × t        moved = ((t·w + k) + p) + shift
+    /// ```
+    ///
+    /// Counting halves of an ulp per operation does not give the answer,
+    /// because a rounding costs half an ulp of the *running value*, which is
+    /// bigger than any one term. Charge each term for every rounding it passes
+    /// through instead. Write `u = f64::EPSILON / 2`, and use twice over the
+    /// fact that two different components of a unit vector satisfy
+    /// `|v_a| + |v_c| ≤ √2`:
+    ///
+    /// - `c` is two products and a subtraction per component, over terms
+    ///   summing to at most `√2·L`. So `|c_i| ≤ √2·L`, and each term meets two
+    ///   roundings: `2u·√2·L`.
+    /// - `t = 2c` is exact. `|t_i| ≤ 2√2·L` and the error doubles to `4√2·u·L`.
+    /// - `k` is two products and a subtraction again. It carries in
+    ///   `(|v_a| + |v_c|)·4√2·u·L ≤ 8u·L`, and adds two roundings of its own on
+    ///   terms summing to at most `4L`, another `8u·L`. So `|k_i| ≤ 4L` and its
+    ///   error is `16u·L`.
+    /// - The last line is a product and two additions. It carries in
+    ///   `|w|·4√2·u·L + 16u·L`. The product rounds on `|t_i·w| ≤ 2√2·L`; the
+    ///   first addition on `|t_i·w + k_i| ≤ (2√2 + 4)·L`; the second on the
+    ///   turned point itself, and a turn does not change a length, so that is
+    ///   at most `√3·L`. Adding the shift rounds on `(√3 + 1)·L`.
+    ///
+    /// Added up, `(8√2 + 21 + 2√3)·u·L ≈ 35.78·u·L`, which is under
+    /// `18 · f64::EPSILON · L`. The 0.6% left over covers the second-order
+    /// terms — a rounding is a relative slip of the *computed* value, not of
+    /// the true one — and the fact that a stored rotation has length one only
+    /// to within rounding.
+    ///
+    /// Every step of that is a relative argument, so it holds only while
+    /// nothing overflows and nothing falls into the subnormals.
+    ///
+    /// # What this bounds, and what it does not
+    ///
+    /// The arithmetic, given the numbers this movement holds. It says nothing
+    /// about how well those numbers match the movement a caller asked for:
+    /// `cos(π/2)` in `f64` is `6.1e-17` rather than zero, so even a quarter turn
+    /// arrives a rounding away from the turn that was named. A caller deciding
+    /// how far apart two differently routed movements of the same point may
+    /// land wants this times a slack factor of its own, and that factor belongs
+    /// at the caller with its own reason (`docs/decisions.md` §15.6).
+    pub const POINT_ROUNDOFF: f64 = 18.0 * f64::EPSILON;
+
     /// The movement that changes nothing.
     #[must_use]
     pub fn identity() -> Self {
@@ -214,6 +269,8 @@ impl From<Isometry> for na::Isometry3<f64> {
 mod tests {
     use core::f64::consts::FRAC_PI_2;
 
+    use rcad_predicates::expansion::{expansion_sum, product_is_exact, scale_expansion};
+
     use super::*;
 
     fn quarter_turn_about_z() -> Isometry {
@@ -318,5 +375,198 @@ mod tests {
             .compose(&Isometry::translation(Vector::new(1.0, 2.0, 3.0)).unwrap());
         let stored: ([f64; 3], [f64; 4]) = movement.into();
         assert_eq!(Isometry::try_from(stored).unwrap(), movement);
+    }
+
+    /// The test [`Isometry::POINT_ROUNDOFF`]'s derivation would otherwise be
+    /// without.
+    ///
+    /// `docs/decisions.md` §15.6 was amended because a bound that had a
+    /// derivation written next to it was wrong anyway: nothing executed the
+    /// derivation. So this runs the same expression a second time in exact
+    /// expansion arithmetic, where no step rounds, and subtracts.
+    ///
+    /// **It cannot show the bound is tight.** Roundings cancel, so it passes at
+    /// a smaller figure too: the worst of the 3072 coordinates checked here
+    /// uses an eighth of the bound, and a sweep a thousand times longer only
+    /// reaches a quarter of it. That is why the worst case is printed rather
+    /// than asserted against. The derivation is what makes 18 a bound; this is
+    /// what stops [`Isometry::apply_to_point`] drifting out from under it.
+    ///
+    /// The points run from a thousandth up to a million, because the bound is
+    /// stated per unit of the largest coordinate and a bound only ever asked
+    /// about coordinates near one is not being asked.
+    #[test]
+    fn a_moved_point_lands_inside_the_published_roundoff_of_the_exact_answer() {
+        let mut worst = 0.0f64;
+        let mut cases = 0;
+
+        let mut numbers = Numbers::seeded();
+        for _ in 0..64 {
+            let movement = numbers.a_movement();
+            for _ in 0..16 {
+                let point = numbers.a_point();
+                let largest = point
+                    .largest_coordinate_magnitude()
+                    .max(largest_of(movement.translation_part().components()));
+
+                let computed = movement.apply_to_point(point).coordinates();
+                let exact = moved_without_rounding(&movement, point);
+                for axis in 0..3 {
+                    let slipped = magnitude_of(&sum(&exact[axis], &entry(-computed[axis])));
+                    assert!(
+                        slipped <= Isometry::POINT_ROUNDOFF * largest,
+                        "moving {point:?} slipped {slipped} on axis {axis}, \
+                         which is past {} times the largest coordinate {largest}",
+                        Isometry::POINT_ROUNDOFF
+                    );
+                    worst = worst.max(slipped / (Isometry::POINT_ROUNDOFF * largest));
+                    cases += 1;
+                }
+            }
+        }
+
+        println!(
+            "worst of {cases} coordinates used {:.1}% of the bound",
+            worst * 100.0
+        );
+    }
+
+    /// [`Isometry::apply_to_point`]'s expression with nothing rounded away, one
+    /// expansion per coordinate.
+    ///
+    /// Term for term the same as `nalgebra`'s `UnitQuaternion * Point3`
+    /// followed by `Translation * Point3`, which is what the derivation
+    /// describes and what the bound is a bound on.
+    fn moved_without_rounding(movement: &Isometry, point: Point) -> [Vec<f64>; 3] {
+        let [w, i, j, k] = movement.rotation_quaternion();
+        let turn = [i, j, k];
+        let shift = movement.translation_part().components();
+        let at = point.coordinates().map(entry);
+
+        let across = cross(turn, &at);
+        let twice_across = across.map(|component| scaled(&component, 2.0));
+        let twisted = cross(turn, &twice_across);
+
+        [0, 1, 2].map(|axis| {
+            let leaning = scaled(&twice_across[axis], w);
+            let turned = sum(&sum(&leaning, &twisted[axis]), &at[axis]);
+            sum(&turned, &entry(shift[axis]))
+        })
+    }
+
+    /// `left × right`, with `left` three plain numbers and `right` three
+    /// expansions.
+    fn cross(left: [f64; 3], right: &[Vec<f64>; 3]) -> [Vec<f64>; 3] {
+        [[1, 2], [2, 0], [0, 1]].map(|[first, second]| {
+            let forwards = scaled(&right[second], left[first]);
+            let backwards = scaled(&right[first], left[second]);
+            sum(&forwards, &negated(&backwards))
+        })
+    }
+
+    /// One `f64` as an expansion. An exact zero carries no information and is
+    /// dropped, which is what the rest of the expansion code does too.
+    fn entry(value: f64) -> Vec<f64> {
+        if value == 0.0 { vec![] } else { vec![value] }
+    }
+
+    /// The exact product of an expansion and a plain number.
+    ///
+    /// The exactness has a precondition — a product whose roundoff term falls
+    /// into the subnormals cannot hold its own bits — and `product_is_exact` is
+    /// where the expansion code states it. Asserted rather than assumed, so an
+    /// oracle that has quietly stopped being exact fails loudly.
+    fn scaled(expansion: &[f64], factor: f64) -> Vec<f64> {
+        assert!(
+            expansion.iter().all(|&e| product_is_exact(e, factor)),
+            "the oracle only stays exact while its products do"
+        );
+        let mut out = vec![0.0; 2 * expansion.len()];
+        let used = scale_expansion(expansion, factor, &mut out);
+        out.truncate(used);
+        out
+    }
+
+    fn sum(left: &[f64], right: &[f64]) -> Vec<f64> {
+        let mut out = vec![0.0; left.len() + right.len()];
+        let used = expansion_sum(left, right, &mut out);
+        out.truncate(used);
+        out
+    }
+
+    fn negated(expansion: &[f64]) -> Vec<f64> {
+        expansion.iter().map(|entry| -entry).collect()
+    }
+
+    /// At least as much as the expansion is worth.
+    ///
+    /// The entries can be of either sign, so adding their magnitudes can only
+    /// over-estimate — the safe direction both for a bound check and for the
+    /// worst case it prints.
+    fn magnitude_of(expansion: &[f64]) -> f64 {
+        expansion.iter().map(|entry| entry.abs()).sum()
+    }
+
+    fn largest_of(components: [f64; 3]) -> f64 {
+        components.into_iter().map(f64::abs).fold(0.0, f64::max)
+    }
+
+    /// The same movements and points every run, so the worst case this prints
+    /// is a number that can be compared with the last one.
+    struct Numbers(u64);
+
+    impl Numbers {
+        fn seeded() -> Self {
+            Self(0x2545_f491_4f6c_dd1d)
+        }
+
+        /// A turn about an arbitrary axis, through an arbitrary point, followed
+        /// by an arbitrary shift.
+        fn a_movement(&mut self) -> Isometry {
+            let direction = Vector::new(
+                self.between_minus_one_and_one(),
+                self.between_minus_one_and_one(),
+                self.between_minus_one_and_one(),
+            );
+            let axis = Axis::new(self.a_point(), direction)
+                .expect("three numbers from a fixed seed are not all exactly zero");
+            let turn = Isometry::rotation(
+                &axis,
+                core::f64::consts::PI * self.between_minus_one_and_one(),
+            )
+            .expect("a finite angle about a finite axis");
+            let shift = Isometry::translation(Vector::new(
+                self.a_size() * self.between_minus_one_and_one(),
+                self.a_size() * self.between_minus_one_and_one(),
+                self.a_size() * self.between_minus_one_and_one(),
+            ))
+            .expect("a finite shift");
+            shift.compose(&turn)
+        }
+
+        fn a_point(&mut self) -> Point {
+            let size = self.a_size();
+            Point::new(
+                size * self.between_minus_one_and_one(),
+                size * self.between_minus_one_and_one(),
+                size * self.between_minus_one_and_one(),
+            )
+        }
+
+        fn a_size(&mut self) -> f64 {
+            [1e-3, 1.0, 1e3, 1e6][(self.next() >> 60) as usize % 4]
+        }
+
+        fn between_minus_one_and_one(&mut self) -> f64 {
+            (self.next() >> 11) as f64 / (1u64 << 52) as f64 * 2.0 - 1.0
+        }
+
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.0
+        }
     }
 }
