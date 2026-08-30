@@ -49,6 +49,7 @@
 mod bspline_curve;
 mod bspline_surface;
 mod cylinder;
+mod de_boor;
 mod error;
 mod exact;
 mod isometry;
@@ -64,6 +65,7 @@ mod surface;
 pub use crate::bspline_curve::BSplineCurve;
 pub use crate::bspline_surface::BSplineSurface;
 pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
+pub use crate::de_boor::EVALUATION_ROUNDOFF;
 pub use crate::error::{Error, Result};
 pub use crate::isometry::Isometry;
 pub use crate::knot_vector::{KnotVector, MAX_DEGREE};
