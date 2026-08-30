@@ -720,6 +720,7 @@ dependencies = [
 name = "rcad-geom"
 version = "0.0.0"
 dependencies = [
+ "criterion",
  "nalgebra",
  "postcard",
  "proptest",
