@@ -1611,6 +1611,55 @@ one of them would start failing intermittently. The test is cheap and nothing
 else in the suite would notice: run the same fuse twice in one process and
 assert the serialized results are equal.
 
+**Amended 2026-08-30, while implementing.** Splitting all-at-once is not on its
+own enough to make the answer a function of the two *sets*, and the metamorphic
+suite found the hole on its first run. Two coplanar faces that overlap are cut
+by *different* sets of lines — a face never sees the lines that only its own
+solid's corners put on the other one — so the region they share comes out
+partitioned two different ways, and "keep once" keeps whichever came first.
+Swapping the two sides of the fuse therefore changed the answer: two ells flush
+against each other united into twenty-three faces one way round and twenty-six
+the other, the same solid both times. **Settled: at the commit, two faces of the
+result that lie on one plane facing one way with an edge between them are joined
+into one face, and any corner that stops being a corner when they are — a point
+with two faces round it, sitting in the middle of a straight edge — is dropped,
+its two edges becoming one.** `Plane::agreement_with` decides "one plane facing
+one way" exactly, the rings that come out are sorted into an outline and holes by
+the same swept-area sign `Model::validate` judges a face by, and the joined face
+takes the smallest of its pieces' planes read as four numbers, so nothing about
+the answer depends on the order the pieces arrived in. The two ells now come out
+as the eight faces the shape has, whichever way round they are asked for.
+
+This is not only about commutativity, and that is what makes it the fix rather
+than a tidy-up. §17.1 re-derives every corner as the meet of three planes at the
+next fuse's entry, and a corner with two coplanar faces on each side of it has
+**two** planes round it, not three — Cramer's determinant is exactly zero and
+there is no other triple to try. So the unjoined answer was a solid this kernel
+could write and then could not read: uniting two boxes that overlap along one
+axis and uniting the result with a third refused outright. Joining also drops
+the cuts a plane leaves where the solid it belongs to is nowhere near, which is
+what a cut by a *plane* costs and what §17.4's splitter had no way to undo: a
+cube in the middle of another cube united into fifty-four faces, and now unites
+into six.
+
+Rejected: letting `bake` tolerate a coplanar neighbour by solving the corner from
+some other triple of planes. There is no other triple — the planes round such a
+corner are two planes, however many faces carry them — so the only version of
+that fix is to stop re-deriving the corner and read its stored coordinates
+instead, which gives up §17.1 for exactly the corners a chain of fuses passes
+through most often. It also leaves the partition order-dependent, so §14.8's
+commutativity oracle would still fail.
+
+One consequence for the error tiers, settled here because it is the same bug
+seen from the other end. `Plane::meet_of_three` divides by the determinant of
+three normals and has only an interval filter to bound it — there is no exact
+level to fall back on, because the answer is a point and not a sign. A
+determinant it cannot tell from zero is therefore a decision the cascade did not
+settle, and the operation is left with nothing to return: that is
+`Error::Undecidable` with a record naming the predicate, not
+`Error::Geometry(PlanesDoNotMeetInAPoint)`. The old tier put a refusal somewhere
+§17.7's breakdown of what gave up could not see it.
+
 ### 17.5 What this milestone owes to earlier sections
 
 Four corrections, all amended in place where they belong so a reader of that

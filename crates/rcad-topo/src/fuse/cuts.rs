@@ -209,7 +209,7 @@ mod tests {
             other,
             &Isometry::translation(shift).expect("a finite shift"),
         );
-        bake(&model, &[one, other]).expect("two cubes bake")
+        bake(&model, &[one, other], &mut ProvenanceLog::new()).expect("two cubes bake")
     }
 
     fn facing(solid: &BakedSolid, way: Vector) -> &BakedFace {
@@ -329,7 +329,7 @@ mod tests {
         );
         let crossed = both_solids_as_one(&mut model, one, other);
 
-        let mut solids = bake(&model, &[crossed]).expect("it bakes");
+        let mut solids = bake(&model, &[crossed], &mut ProvenanceLog::new()).expect("it bakes");
         let refusal = gather(&mut solids, &policy, &mut log);
 
         assert!(

@@ -410,12 +410,19 @@ const MEASURING_SLACK: f64 = 16.0;
 /// product overflows or falls into the subnormals, which is what the
 /// dynamic-range check exists to reject (decisions.md §3.5).
 fn winding_of(wire: WireView<'_>, normal: Vector) -> Result<Decision> {
+    let corners: Vec<[f64; 3]> = wire.points().map(|corner| corner.coordinates()).collect();
+    winding_round(&corners, normal.components())
+}
+
+/// The same question asked of a ring of corners that is not in the model yet.
+///
+/// The fuse joins coplanar pieces into one face before it commits anything, and
+/// then has to say which of the rings it ended up with is the outline and which
+/// are holes. That is this decision, on corners the model has never seen.
+pub(crate) fn winding_round(corners: &[[f64; 3]], normal: [f64; 3]) -> Result<Decision> {
     let swept = AreaSweptRoundTheNormal {
-        corners: wire
-            .points()
-            .map(|corner| corner.coordinates())
-            .collect::<Vec<_>>(),
-        normal: normal.components(),
+        corners: corners.to_vec(),
+        normal,
     };
     let (decision, level) = decide(&swept);
     match decision {

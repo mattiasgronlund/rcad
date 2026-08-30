@@ -21,6 +21,17 @@
 //! lands here because this is where an edge with three claimants is *discovered*
 //! rather than searched for.
 //!
+//! # Two pieces on one plane are one face
+//!
+//! Selection can keep two pieces that lie on the same plane facing the same way
+//! with an edge between them — one cut from each input's face where the two
+//! inputs are flush against each other. [`Assembly::join_up_what_is_one_face`]
+//! folds every such run into one face and drops the corners that stop being
+//! corners when it does. §17.4's amendment of 2026-08-30 says why, and the short
+//! of it is that anything else hands back a solid §17.1 cannot read: a corner in
+//! the middle of a straight edge has two planes round it, not three, so the next
+//! fuse cannot re-derive it.
+//!
 //! # Which shell is a void of which
 //!
 //! Nesting asks whether a point on one shell is inside another, and the thing
@@ -29,18 +40,20 @@
 //! solid each, and asked there. The real model sees the finished answer or
 //! nothing at all.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use rcad_geom::{Isometry, Orientation, Plane, Point, Surface};
+use rcad_geom::{Isometry, Orientation, Plane, PlaneAgreement, Point, Surface};
 use rcad_predicates::{
-    Approximation, Cause, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
+    Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
 };
 use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse};
+use crate::validate::winding_round;
 use crate::{Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, VertexKey};
 
+use super::arrange::agreement_of_two_planes;
 use super::select::Chosen;
 use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
 
@@ -62,6 +75,7 @@ pub(crate) fn assemble(
     log: &mut ProvenanceLog,
 ) -> Result<Assembly> {
     let mut assembly = Assembly::from_the_pieces(model, scratch, chosen);
+    assembly.join_up_what_is_one_face(log)?;
     assembly.shells = assembly.group_into_shells()?;
     assembly.solids = assembly.nest_the_shells(model, policy, log)?;
     Ok(assembly)
@@ -77,16 +91,23 @@ pub(crate) struct Assembly {
 }
 
 impl Assembly {
-    /// The input face each face of the result was cut out of, in the order
+    /// The input faces each face of the result was cut out of, in the order
     /// [`Assembly::write_into`] writes them.
-    pub(crate) fn face_ancestors(&self) -> impl Iterator<Item = FaceKey> + '_ {
-        self.faces.iter().map(|face| face.ancestor)
+    ///
+    /// More than one when pieces of two input faces turned out to be one flat
+    /// region and were joined into a single face.
+    pub(crate) fn face_ancestors(&self) -> impl Iterator<Item = &[FaceKey]> + '_ {
+        self.faces.iter().map(|face| face.ancestors.as_slice())
     }
 
-    /// The input edge each edge of the result is a piece of, where it is a piece
-    /// of one, in the order [`Assembly::write_into`] writes them.
-    pub(crate) fn edge_ancestors(&self) -> impl Iterator<Item = Option<EdgeKey>> + '_ {
-        self.edges.iter().map(|edge| edge.from)
+    /// The input edges each edge of the result is a piece of, in the order
+    /// [`Assembly::write_into`] writes them.
+    ///
+    /// Empty for boundary the result invents, and more than one where joining
+    /// two faces left a corner with nothing to be a corner of and the edges
+    /// either side of it became one.
+    pub(crate) fn edge_ancestors(&self) -> impl Iterator<Item = &[EdgeKey]> + '_ {
+        self.edges.iter().map(|edge| edge.from.as_slice())
     }
 
     /// The input vertex each corner of the result is, where it is one, in the
@@ -147,7 +168,7 @@ impl Assembly {
                 .map(|wire| sides_of(wire, turned_round, model, &mut corners, &mut edges))
                 .collect();
             faces.push(Face {
-                ancestor: piece.ancestor,
+                ancestors: vec![piece.ancestor],
                 plane: if turned_round {
                     piece.plane.reversed()
                 } else {
@@ -165,8 +186,58 @@ impl Assembly {
         }
     }
 
-    /// Gather the faces into lumps joined by edges, refusing a result that is
-    /// not a manifold.
+    /// Fold every run of faces that is really one flat region into one face.
+    ///
+    /// Two faces of the result with an edge between them, lying on the same
+    /// plane and facing the same way, are two halves of one face and the edge
+    /// between them is not boundary at all. Selection produces them whenever two
+    /// inputs are flush against each other: the flush region is cut out of both
+    /// faces and kept once, while what is left of each face round it is kept
+    /// too, so the answer comes back in three pieces where it has one face.
+    ///
+    /// Leaving them apart costs two things. The partition then depends on which
+    /// side of the fuse each input was on, because the two coincident pieces are
+    /// cut by different sets of lines and "keep once" picks whichever came first
+    /// — which is §14.8's commutativity oracle failing. And the corner where two
+    /// such pieces meet has only two planes round it, so §17.1 cannot re-derive
+    /// it and the *next* fuse over the answer refuses.
+    ///
+    /// So the edge goes, and with it any corner that stops being a corner: a
+    /// point with two faces round it sits in the middle of a straight edge and
+    /// the two edges either side of it become one.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
+    /// faces, and [`Error::Undecidable`] when two planes cannot be told apart at
+    /// all.
+    ///
+    /// # Panics
+    ///
+    /// If a joined face comes out with two outlines, which is the answer
+    /// pinching to a point at a corner, or with a ring of fewer than three
+    /// sides. Both are broken internal invariants and a corrupt solid is worse
+    /// than a crash (§4.1).
+    fn join_up_what_is_one_face(&mut self, log: &mut ProvenanceLog) -> Result<()> {
+        let along = self.darts_along_each_edge()?;
+        let dissolved = self.edges_with_one_face_on_both_sides(&along, log)?;
+
+        let mut same = Sameness::of(self.faces.len());
+        for (edge, [one, other]) in along.iter().enumerate() {
+            if dissolved[edge] {
+                same.join(one.face, other.face);
+            }
+        }
+        if !same.joined_anything() {
+            return Ok(());
+        }
+
+        let joined = self.rings_of_each_joined_face(&same, &along, &dissolved)?;
+        self.rebuild_from(&joined, &along, &dissolved);
+        Ok(())
+    }
+
+    /// The two darts along each edge, refusing a result that is not a manifold.
     ///
     /// # Errors
     ///
@@ -174,22 +245,404 @@ impl Assembly {
     /// faces. `Model` means an edge is used by exactly two coedges everywhere,
     /// and relaxing that changes what a model *is* rather than what one boolean
     /// does (§17.4).
-    fn group_into_shells(&self) -> Result<Vec<Vec<usize>>> {
-        let mut claimants: Vec<Vec<usize>> = vec![Vec::new(); self.edges.len()];
-        for (index, face) in self.faces.iter().enumerate() {
-            for side in face.wires.iter().flatten() {
-                claimants[side.edge].push(index);
+    fn darts_along_each_edge(&self) -> Result<Vec<[Dart; 2]>> {
+        let mut claimants: Vec<Vec<Dart>> = vec![Vec::new(); self.edges.len()];
+        for (face, walked) in self.faces.iter().enumerate() {
+            for (wire, ring) in walked.wires.iter().enumerate() {
+                for (position, side) in ring.iter().enumerate() {
+                    claimants[side.edge].push(Dart {
+                        face,
+                        wire,
+                        position,
+                    });
+                }
             }
         }
-        if let Some(claimed) = claimants.iter().find(|by| by.len() != 2) {
-            return Err(Error::ResultIsNotManifold {
-                count: claimed.len(),
-            });
+        claimants
+            .into_iter()
+            .map(|by| {
+                <[Dart; 2]>::try_from(by.as_slice())
+                    .map_err(|_| Error::ResultIsNotManifold { count: by.len() })
+            })
+            .collect()
+    }
+
+    /// Which edges have the same flat region on both sides of them.
+    ///
+    /// [`Plane::agreement_with`] decides it exactly, with no tolerance anywhere
+    /// (§17.4). An edge whose two darts belong to one face stays: a face that
+    /// runs up against itself is still bounded there.
+    fn edges_with_one_face_on_both_sides(
+        &self,
+        along: &[[Dart; 2]],
+        log: &mut ProvenanceLog,
+    ) -> Result<Vec<bool>> {
+        along
+            .iter()
+            .map(|[one, other]| {
+                if one.face == other.face {
+                    return Ok(false);
+                }
+                let agreement = agreement_of_two_planes(
+                    &self.faces[one.face].plane,
+                    &self.faces[other.face].plane,
+                    log,
+                )?;
+                Ok(agreement == PlaneAgreement::SameWay)
+            })
+            .collect()
+    }
+
+    /// The rings bounding each face once the joined ones are one face.
+    ///
+    /// A face nothing was joined to keeps the rings it already had. For the
+    /// rest, every dart on an edge that is staying is walked, and where the walk
+    /// runs into a dissolved edge it steps across into the neighbouring face and
+    /// carries on — so the rings that come out are the boundary of the joined
+    /// region and nothing inside it. Which ring is the outline and which are
+    /// holes is then the way each one winds, decided exactly by the same sweep
+    /// [`Model::validate`] judges a face by.
+    fn rings_of_each_joined_face(
+        &self,
+        same: &Sameness,
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> Result<Vec<JoinedFace>> {
+        let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for face in 0..self.faces.len() {
+            groups.entry(same.leader(face)).or_default().push(face);
         }
 
+        let mut joined = Vec::new();
+        for members in groups.into_values() {
+            if let [only] = members[..] {
+                joined.push(JoinedFace {
+                    plane: self.faces[only].plane,
+                    rings: (0..self.faces[only].wires.len())
+                        .map(|wire| self.whole_ring(only, wire))
+                        .collect(),
+                    members,
+                });
+                continue;
+            }
+            let plane = plane_of_the_joined_face(&members, &self.faces);
+            let rings = self.rings_round(&members, along, dissolved, plane)?;
+            joined.push(JoinedFace {
+                members,
+                plane,
+                rings,
+            });
+        }
+        Ok(joined)
+    }
+
+    fn whole_ring(&self, face: usize, wire: usize) -> Vec<Dart> {
+        (0..self.faces[face].wires[wire].len())
+            .map(|position| Dart {
+                face,
+                wire,
+                position,
+            })
+            .collect()
+    }
+
+    /// # Panics
+    ///
+    /// If more than one ring winds with the plane's normal. Two outlines means
+    /// the joined region touches itself at a corner, which is a solid this
+    /// kernel cannot hold.
+    fn rings_round(
+        &self,
+        members: &[usize],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+        plane: Plane,
+    ) -> Result<Vec<Vec<Dart>>> {
+        let mut walked: BTreeSet<Dart> = BTreeSet::new();
+        let mut outline: Option<Vec<Dart>> = None;
+        let mut holes = Vec::new();
+        for &face in members {
+            for wire in 0..self.faces[face].wires.len() {
+                for start in self.whole_ring(face, wire) {
+                    if dissolved[self.edge_of(start)] || !walked.insert(start) {
+                        continue;
+                    }
+                    let ring = self.ring_from(start, along, dissolved, &mut walked);
+                    let corners: Vec<[f64; 3]> = ring
+                        .iter()
+                        .map(|&dart| self.corners[self.starts_at(dart)].point.coordinates())
+                        .collect();
+                    match winding_round(&corners, plane.normal().components())? {
+                        Decision::Pos => {
+                            assert!(
+                                outline.is_none(),
+                                "a face joined out of coplanar pieces has one outline, and this \
+                                 one has two, so the answer touches itself at a corner"
+                            );
+                            outline = Some(ring);
+                        }
+                        Decision::Neg => holes.push(ring),
+                        other => panic!(
+                            "a ring of a joined face came back winding neither way: {other:?}"
+                        ),
+                    }
+                }
+            }
+        }
+        let outline = outline.expect("a joined face has an outline");
+        Ok(core::iter::once(outline).chain(holes).collect())
+    }
+
+    /// # Panics
+    ///
+    /// If a walk round a corner of the joined region never reaches an edge that
+    /// is staying. Every corner a walk arrives at is on an edge that is staying,
+    /// so it has one to leave by.
+    fn ring_from(
+        &self,
+        start: Dart,
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+        walked: &mut BTreeSet<Dart>,
+    ) -> Vec<Dart> {
+        let mut ring = vec![start];
+        let mut at = start;
+        loop {
+            at = self.onwards(at, along, dissolved);
+            if at == start {
+                return ring;
+            }
+            assert!(
+                walked.insert(at),
+                "a ring of a joined face runs into one that is already walked"
+            );
+            ring.push(at);
+        }
+    }
+
+    fn onwards(&self, dart: Dart, along: &[[Dart; 2]], dissolved: &[bool]) -> Dart {
+        let mut at = self.next_round_the_ring(dart);
+        for _ in 0..=self.edges.len() {
+            let edge = self.edge_of(at);
+            if !dissolved[edge] {
+                return at;
+            }
+            at = self.next_round_the_ring(across(at, along, edge));
+        }
+        panic!("a corner of a joined face has no edge leaving it that is staying");
+    }
+
+    fn next_round_the_ring(&self, dart: Dart) -> Dart {
+        Dart {
+            position: (dart.position + 1) % self.faces[dart.face].wires[dart.wire].len(),
+            ..dart
+        }
+    }
+
+    fn edge_of(&self, dart: Dart) -> usize {
+        self.side_of(dart).edge
+    }
+
+    /// The corner a dart leaves.
+    fn starts_at(&self, dart: Dart) -> usize {
+        let side = self.side_of(dart);
+        self.edges[side.edge].ends[usize::from(!side.forward)]
+    }
+
+    fn side_of(&self, dart: Dart) -> &Side {
+        &self.faces[dart.face].wires[dart.wire][dart.position]
+    }
+
+    /// Write the corners, edges and faces out again with the joined faces in
+    /// place of their pieces and the corners that stopped being corners gone.
+    ///
+    /// Everything keeps the order it was in, so an answer that joined nothing
+    /// comes out of here byte for byte the answer that went in.
+    ///
+    /// # Panics
+    ///
+    /// If a ring comes out with fewer than three sides, or if a run of edges
+    /// that became one edge does not have exactly two ends left. Both mean the
+    /// joining above is wrong.
+    fn rebuild_from(&mut self, joined: &[JoinedFace], along: &[[Dart; 2]], dissolved: &[bool]) {
+        let renumbered = self.what_is_left(joined, along, dissolved);
+        let edges = self.edges_after_joining(&renumbered);
+
+        let faces = joined
+            .iter()
+            .map(|face| Face {
+                ancestors: each_one_once(
+                    face.members
+                        .iter()
+                        .flat_map(|&member| self.faces[member].ancestors.iter().copied()),
+                ),
+                plane: face.plane,
+                wires: face
+                    .rings
+                    .iter()
+                    .map(|ring| self.sides_of(ring, &renumbered, &edges))
+                    .collect(),
+            })
+            .collect();
+
+        self.corners = core::mem::take(&mut self.corners)
+            .into_iter()
+            .zip(&renumbered.corner_now)
+            .filter_map(|(corner, now)| now.map(|_| corner))
+            .collect();
+        self.edges = edges;
+        self.faces = faces;
+    }
+
+    /// Which corners and edges the joining leaves, and what they are called now.
+    ///
+    /// Everything is asked one lump of joined faces at a time, and that is not
+    /// pedantry: two solids that touch along a line have an edge each between the
+    /// same two corners, and a corner sitting in the middle of one of them can be
+    /// a real corner of the other. A corner stops being a corner for the lump it
+    /// runs straight through and stays one for the lump it does not.
+    fn what_is_left(
+        &self,
+        joined: &[JoinedFace],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> Renumbered {
+        let mut lump_of_face = vec![0usize; self.faces.len()];
+        for (index, face) in joined.iter().enumerate() {
+            for &member in &face.members {
+                lump_of_face[member] = index;
+            }
+        }
+        let mut lumps = Sameness::of(joined.len());
+        for (edge, [one, other]) in along.iter().enumerate() {
+            if !dissolved[edge] {
+                lumps.join(lump_of_face[one.face], lump_of_face[other.face]);
+            }
+        }
+        let lump_of_edge: Vec<Option<usize>> = (0..self.edges.len())
+            .map(|edge| (!dissolved[edge]).then(|| lumps.leader(lump_of_face[along[edge][0].face])))
+            .collect();
+
+        let mut leaving: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
+        for (edge, lump) in lump_of_edge.iter().enumerate() {
+            let Some(lump) = *lump else { continue };
+            for end in self.edges[edge].ends {
+                leaving.entry((lump, end)).or_default().push(edge);
+            }
+        }
+
+        let mut runs = Sameness::of(self.edges.len());
+        let mut straight_through: BTreeSet<(usize, usize)> = BTreeSet::new();
+        let mut still_a_corner = vec![false; self.corners.len()];
+        for (&(lump, corner), by) in &leaving {
+            if let [one, other] = by[..] {
+                runs.join(one, other);
+                straight_through.insert((lump, corner));
+            } else {
+                still_a_corner[corner] = true;
+            }
+        }
+
+        let corner_now = numbered(still_a_corner.into_iter());
+        let edge_now = numbered(
+            (0..self.edges.len())
+                .map(|edge| lump_of_edge[edge].is_some() && runs.leader(edge) == edge),
+        );
+        Renumbered {
+            lump_of_edge,
+            straight_through,
+            runs,
+            corner_now,
+            edge_now,
+        }
+    }
+
+    fn edges_after_joining(&self, renumbered: &Renumbered) -> Vec<Edge> {
+        let mut made: Vec<Edge> = Vec::new();
+        for (leader, now) in renumbered.edge_now.iter().enumerate() {
+            if now.is_none() {
+                continue;
+            }
+            let lump = renumbered.lump_of_edge[leader].expect("an edge that stays is in a lump");
+            let mut ends = Vec::new();
+            let mut from = Vec::new();
+            for (edge, along) in self.edges.iter().enumerate() {
+                if renumbered.lump_of_edge[edge].is_none() || renumbered.runs.leader(edge) != leader
+                {
+                    continue;
+                }
+                ends.extend(
+                    along
+                        .ends
+                        .iter()
+                        .filter(|&&end| !renumbered.straight_through.contains(&(lump, end)))
+                        .map(|&end| renumbered.corner_now[end].expect("an end is still a corner")),
+                );
+                from.extend(along.from.iter().copied());
+            }
+            let ends = <[usize; 2]>::try_from(ends.as_slice())
+                .expect("a run of edges that became one edge has two ends left");
+            assert!(
+                ends[0] != ends[1],
+                "a piece of a face has a side with no length"
+            );
+            made.push(Edge {
+                ends,
+                from: each_one_once(from.into_iter()),
+            });
+        }
+        made
+    }
+
+    fn sides_of(&self, ring: &[Dart], renumbered: &Renumbered, edges: &[Edge]) -> Vec<Side> {
+        let lump = renumbered.lump_of_edge[self.edge_of(ring[0])]
+            .expect("a ring is walked along edges that stay");
+        let opens = ring
+            .iter()
+            .position(|&dart| {
+                !renumbered
+                    .straight_through
+                    .contains(&(lump, self.starts_at(dart)))
+            })
+            .expect("a ring of a face has a corner on it");
+
+        let mut sides: Vec<Side> = Vec::new();
+        let mut carrying: Option<usize> = None;
+        for step in 0..ring.len() {
+            let dart = ring[(opens + step) % ring.len()];
+            let edge = renumbered.runs.leader(self.edge_of(dart));
+            if carrying == Some(edge) {
+                continue;
+            }
+            carrying = Some(edge);
+            let edge = renumbered.edge_now[edge].expect("a run of edges that stays becomes one");
+            let from = renumbered.corner_now[self.starts_at(dart)]
+                .expect("a run of edges starts at a corner");
+            sides.push(Side {
+                edge,
+                forward: edges[edge].ends[0] == from,
+            });
+        }
+        assert!(
+            sides.len() >= 3,
+            "a face has at least three sides, this one has {}",
+            sides.len()
+        );
+        sides
+    }
+
+    /// Gather the faces into lumps joined by edges, refusing a result that is
+    /// not a manifold.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
+    /// faces.
+    fn group_into_shells(&self) -> Result<Vec<Vec<usize>>> {
+        let along = self.darts_along_each_edge()?;
         let mut same = Sameness::of(self.faces.len());
-        for by in &claimants {
-            same.join(by[0], by[1]);
+        for [one, other] in &along {
+            same.join(one.face, other.face);
         }
         let mut shells: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for face in 0..self.faces.len() {
@@ -473,15 +926,17 @@ struct Corner {
 /// One edge of the result.
 struct Edge {
     ends: [usize; 2],
-    /// The input edge this is a piece of, when it is one.
-    from: Option<EdgeKey>,
+    /// The input edges this is a piece of. Empty for boundary the result
+    /// invents.
+    from: Vec<EdgeKey>,
 }
 
 /// One face of the result.
 struct Face {
-    /// The input face it was cut out of. Every face of the result has exactly
-    /// one, because nothing in the fuse invents geometry with no ancestor.
-    ancestor: FaceKey,
+    /// The input faces it was cut out of. Every face of the result has at least
+    /// one, because nothing in the fuse invents geometry with no ancestor, and
+    /// more than one where coplanar pieces were joined.
+    ancestors: Vec<FaceKey>,
     /// The plane, already turned round if the rule turned the face round.
     plane: Plane,
     wires: Vec<Vec<Side>>,
@@ -491,6 +946,103 @@ struct Face {
 struct Side {
     edge: usize,
     forward: bool,
+}
+
+/// Where one face walks along one edge: the face, the ring, and how far round
+/// it.
+///
+/// Ordered so that a set of them can be kept in a [`BTreeSet`] — §17.4 keeps
+/// hashed containers out of the fuse's working state, because their iteration
+/// order would decide arena order and arena order is visible in every
+/// serialized byte.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Dart {
+    face: usize,
+    wire: usize,
+    position: usize,
+}
+
+/// What the joining left of every corner and every edge, and what each of them
+/// is called now.
+struct Renumbered {
+    /// Which lump of joined faces each edge belongs to. `None` for an edge that
+    /// had the same flat region on both sides of it and is gone.
+    lump_of_edge: Vec<Option<usize>>,
+    /// The corners a lump walks straight through, as lump and corner. Straight
+    /// through means two edges of that lump meet there and nothing else does.
+    straight_through: BTreeSet<(usize, usize)>,
+    /// Which run of edges each edge is part of. A run becomes one edge.
+    runs: Sameness,
+    /// What each corner is called now, or `None` if it is gone.
+    corner_now: Vec<Option<usize>>,
+    /// What the first edge of each run is called now, or `None` if this edge is
+    /// not the first of its run or is gone.
+    edge_now: Vec<Option<usize>>,
+}
+
+/// One face of the result while it is being put back together out of the pieces
+/// that turned out to be one flat region.
+struct JoinedFace {
+    /// The faces it was made of, in the order they were built.
+    members: Vec<usize>,
+    plane: Plane,
+    /// The outline first, then one ring per hole.
+    rings: Vec<Vec<Dart>>,
+}
+
+/// The other dart along the same edge.
+fn across(dart: Dart, along: &[[Dart; 2]], edge: usize) -> Dart {
+    let [one, other] = along[edge];
+    if one == dart { other } else { one }
+}
+
+/// The plane a joined face sits on: the smallest of its pieces' planes, read as
+/// four numbers.
+///
+/// The pieces all sit on the same plane and face the same way, but two solids
+/// that are flush against each other worked their planes out separately and the
+/// last bits may differ. Picking the smallest depends on the set of planes and
+/// not on the order the pieces arrived in, which is what keeps the answer the
+/// same when the two sides of the fuse are swapped.
+fn plane_of_the_joined_face(members: &[usize], faces: &[Face]) -> Plane {
+    members
+        .iter()
+        .map(|&member| faces[member].plane)
+        .min_by(|one, other| {
+            let (one, other) = (one.coefficients(), other.coefficients());
+            (0..4)
+                .map(|index| one[index].total_cmp(&other[index]))
+                .find(|order| order.is_ne())
+                .unwrap_or(core::cmp::Ordering::Equal)
+        })
+        .expect("a joined face is made of at least one piece")
+}
+
+/// The keys in the order they arrive, with the repeats dropped.
+///
+/// The nine pieces one face was cut into all name that one face, and the answer
+/// they were joined back into is one image of it, not nine.
+fn each_one_once<K: Copy + PartialEq>(keys: impl Iterator<Item = K>) -> Vec<K> {
+    let mut once: Vec<K> = Vec::new();
+    for key in keys {
+        if !once.contains(&key) {
+            once.push(key);
+        }
+    }
+    once
+}
+
+/// Number the things that are staying, in the order they are in.
+fn numbered(staying: impl Iterator<Item = bool>) -> Vec<Option<usize>> {
+    let mut next = 0;
+    staying
+        .map(|stays| {
+            stays.then(|| {
+                next += 1;
+                next - 1
+            })
+        })
+        .collect()
 }
 
 /// The corners built so far, and the two ways to find one again.
@@ -599,7 +1151,7 @@ impl Edges {
         let edge = *self.between.entry(named).or_insert_with(|| {
             self.made.push(Edge {
                 ends: named,
-                from: along,
+                from: along.into_iter().collect(),
             });
             self.made.len() - 1
         });

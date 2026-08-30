@@ -50,7 +50,8 @@ use crate::{EdgeKey, FaceKey, Invalid, Result, VertexKey};
 
 use super::bake::BakedFace;
 use super::{
-    FaceMeet, MeetPoint, Sameness, as_exact_as_it_is, gave_up, must_decide, the_other_way,
+    FaceMeet, MeetPoint, Sameness, WHERE_THREE_PLANES_MEET, as_exact_as_it_is, gave_up,
+    must_decide, the_other_way,
 };
 
 /// Cut one face into the pieces its cut lines leave behind.
@@ -320,7 +321,7 @@ impl<'f> Arrangement<'f> {
                 continue;
             }
             let hole = self.the_cycle_of_the_lump_that_is_wound_once(lump);
-            let piece = self.piece_around(lump, log)?;
+            let piece = self.piece_around(lump, outer_lump, log)?;
             let holder = wires_of
                 .iter_mut()
                 .find(|(cycle, _)| *cycle == piece)
@@ -481,19 +482,23 @@ impl<'f> Arrangement<'f> {
                 let LineRelation::CrossSomewhere = relation else {
                     continue;
                 };
-                let point = Plane::meet_of_three(
-                    &self.plane,
-                    &self.lines[first].partner,
-                    &self.lines[second].partner,
-                )?;
+                let planes = in_a_fixed_order([
+                    self.plane,
+                    self.lines[first].partner,
+                    self.lines[second].partner,
+                ]);
+                let Ok(point) = Plane::meet_of_three(&planes[0], &planes[1], &planes[2]) else {
+                    return Err(gave_up(
+                        WHERE_THREE_PLANES_MEET,
+                        &planes.map(|plane| PredicatePoint::from(plane.normal().components())),
+                        Measures::Volume,
+                        log,
+                    ));
+                };
                 self.nodes.push(Node {
                     point: as_exact_as_it_is(point),
                     vertex: None,
-                    planes: [
-                        self.plane,
-                        self.lines[first].partner,
-                        self.lines[second].partner,
-                    ],
+                    planes,
                     lines: vec![first, second],
                 });
             }
@@ -1018,6 +1023,16 @@ impl<'f> Arrangement<'f> {
     /// started in, and which side of that arc we came from says which cell that
     /// is.
     ///
+    /// Every node of the lump is tried, not just the first. The whole lump is
+    /// inside one cell of the rest of the drawing, so every node of it gives the
+    /// same answer, and a corner where every ray runs into the end of an arc is
+    /// no reason to give up while another corner has a ray that does not.
+    ///
+    /// Only the arcs of the lump the outer wire is in are looked at. Another
+    /// hole that no cut line touches is inside the same cell we are, so running
+    /// into its ring says nothing about which cell that is — and taking it as
+    /// the answer would hand back a cycle that is no piece at all.
+    ///
     /// # Errors
     ///
     /// [`Error::Undecidable`](crate::Error::Undecidable) when no line through the lump gives an answer.
@@ -1033,44 +1048,84 @@ impl<'f> Arrangement<'f> {
     ///
     /// If the cell the ray lands in is not a piece. A hole of a face is inside
     /// that face, so the cell round it is always one.
-    fn piece_around(&self, lump: usize, log: &mut ProvenanceLog) -> Result<usize> {
-        let from = (0..self.arcs.len())
-            .find(|&arc| self.lump_of[self.cycle_of[2 * arc]] == lump)
-            .map(|arc| self.arcs[arc].ends[0])
-            .expect("a lump has an arc in it");
-        for line in self.nodes[from].lines.clone() {
-            for forward in [true, false] {
-                if let Some(cycle) = self.first_arc_met(from, Direction { line, forward }, lump) {
-                    return Ok(cycle);
+    fn piece_around(
+        &self,
+        lump: usize,
+        outer_lump: usize,
+        log: &mut ProvenanceLog,
+    ) -> Result<usize> {
+        let mut corners: Vec<usize> = (0..self.arcs.len())
+            .filter(|&arc| self.lump_of[self.cycle_of[2 * arc]] == lump)
+            .flat_map(|arc| self.arcs[arc].ends)
+            .collect();
+        corners.sort_unstable();
+        corners.dedup();
+        assert!(!corners.is_empty(), "a lump has an arc in it");
+
+        for &from in &corners {
+            for line in self.nodes[from].lines.clone() {
+                for forward in [true, false] {
+                    if let Some(cycle) =
+                        self.first_arc_met(from, Direction { line, forward }, outer_lump)
+                    {
+                        return Ok(cycle);
+                    }
                 }
             }
         }
         Err(gave_up(
             AROUND_A_HOLE,
-            &[self.nodes[from].point],
+            &[self.nodes[corners[0]].point],
             Measures::Length,
             log,
         ))
     }
 
-    /// The cell a ray from `from` along `direction` starts in, or `None` when
-    /// this ray cannot say.
-    fn first_arc_met(&self, from: usize, direction: Direction, skip: usize) -> Option<usize> {
+    /// The cell of `outer_lump`'s drawing that a ray from `from` along
+    /// `direction` starts in, or `None` when this ray cannot say.
+    fn first_arc_met(&self, from: usize, direction: Direction, outer_lump: usize) -> Option<usize> {
         let axis = self.lines[direction.line].axis;
         let climbs = self.lines[direction.line].forward_climbs_the_axis == direction.forward;
         let onwards = |from_here: Interval| if climbs { from_here } else { -from_here };
 
         let mut nearest: Option<(Interval, usize)> = None;
         for arc in 0..self.arcs.len() {
-            if self.lump_of[self.cycle_of[2 * arc]] == skip {
+            // Asked of every arc, the lump's own included: a ray that runs
+            // along an arc cannot say which side of it we are on, and one of
+            // the lump's own arcs is as much in the way as anybody else's. An
+            // arc that only touches the ray at the corner it starts from, and
+            // otherwise lies behind, is not in the way at all — and it is the
+            // ordinary case, because the corner a ray starts from is a corner of
+            // the ring the ray is trying to place.
+            if self.arcs[arc].line == direction.line {
+                let not_behind_us = |end: usize| {
+                    end != from
+                        && onwards(
+                            self.nodes[end].point.enclosure()[axis]
+                                - self.nodes[from].point.enclosure()[axis],
+                        )
+                        .sign()
+                            != Decision::Neg
+                };
+                if self.arcs[arc].ends.iter().copied().any(not_behind_us) {
+                    return None;
+                }
                 continue;
             }
-            if self.arcs[arc].line == direction.line {
-                return None;
+            if self.lump_of[self.cycle_of[2 * arc]] != outer_lump {
+                continue;
             }
             let at = match self.crossing_of(direction.line, arc) {
                 Crossing::Misses => continue,
-                Crossing::AtAnEnd => return None,
+                // Touching an arc's end says nothing about which side of it we
+                // are on — but only where the touch is ahead of us. An arc the
+                // ray's line grazes behind our back is out of the story.
+                Crossing::AtAnEnd(at) => {
+                    match onwards(at - self.nodes[from].point.enclosure()[axis]).sign() {
+                        Decision::Neg => continue,
+                        _ => return None,
+                    }
+                }
                 Crossing::At(at) => at,
             };
             match onwards(at - self.nodes[from].point.enclosure()[axis]).sign() {
@@ -1132,7 +1187,7 @@ impl<'f> Arrangement<'f> {
                 Crossing::At(at.enclosure()[self.lines[line].axis])
             }
             (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => Crossing::Misses,
-            _ => Crossing::AtAnEnd,
+            _ => Crossing::AtAnEnd(at.enclosure()[self.lines[line].axis]),
         }
     }
 
@@ -1258,6 +1313,21 @@ impl<'f> Arrangement<'f> {
     }
 }
 
+/// Three planes sorted on their coefficients, so that whichever face asks for
+/// their meeting point asks for it the same way round.
+///
+/// Cramer's rule rounds differently when its rows are permuted, so a corner
+/// solved as `meet(p, q, r)` by one face and as `meet(q, p, r)` by the face next
+/// to it comes out a bit apart and the two faces stop agreeing about where their
+/// shared corner is. Which face gets there first depends on which side of the
+/// fuse its solid was on, so this is §14.8's commutativity oracle again. The
+/// order is the one [`Corners::of`](super::assemble) already names the corner
+/// by, so the name and the numbers are settled the same way.
+fn in_a_fixed_order(mut planes: [Plane; 3]) -> [Plane; 3] {
+    planes.sort_unstable_by_key(|plane| plane.coefficients().map(f64::to_bits));
+    planes
+}
+
 /// The name the ordering of two points along a line goes by in provenance
 /// records.
 const ALONG_A_LINE: &str = "order along a line";
@@ -1272,8 +1342,9 @@ enum Crossing {
     Misses,
     /// At this coordinate on the line's own axis.
     At(Interval),
-    /// At one of the arc's ends, or too close to one to say.
-    AtAnEnd,
+    /// At one of the arc's ends, or too close to one to say. Carries where, on
+    /// the line's own axis.
+    AtAnEnd(Interval),
 }
 
 fn at_in(order: &[usize], node: usize) -> usize {
@@ -1508,7 +1579,7 @@ mod tests {
     /// The top of the cube: the square from `(0, 0, 2)` to `(2, 2, 2)`, facing
     /// up.
     fn the_top_of_a_cube(model: &Model, cube: SolidKey) -> BakedFace {
-        let baked = bake(model, &[cube]).expect("a cube bakes");
+        let baked = bake(model, &[cube], &mut ProvenanceLog::new()).expect("a cube bakes");
         baked
             .into_iter()
             .next()
@@ -1528,7 +1599,7 @@ mod tests {
         let solid = model
             .add_extrusion(&profile, 1.0, &Isometry::identity())
             .expect("an extrusion");
-        bake(&model, &[solid])
+        bake(&model, &[solid], &mut ProvenanceLog::new())
             .expect("it bakes")
             .swap_remove(0)
             .faces
@@ -1778,7 +1849,7 @@ mod tests {
         let solid = model
             .add_extrusion(&plate, 1.0, &Isometry::identity())
             .expect("an extrusion");
-        let top = bake(&model, &[solid])
+        let top = bake(&model, &[solid], &mut ProvenanceLog::new())
             .expect("the plate bakes")
             .swap_remove(0)
             .faces

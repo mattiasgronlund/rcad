@@ -155,15 +155,17 @@ pub(crate) fn history_of(
         }
     }
 
-    for (index, ancestor) in assembly.face_ancestors().enumerate() {
-        fused
-            .faces
-            .entry(ancestor.slot_in(id))
-            .or_default()
-            .push(FaceKey::new(written.faces[index], id));
+    for (index, ancestors) in assembly.face_ancestors().enumerate() {
+        for ancestor in ancestors {
+            fused
+                .faces
+                .entry(ancestor.slot_in(id))
+                .or_default()
+                .push(FaceKey::new(written.faces[index], id));
+        }
     }
-    for (index, ancestor) in assembly.edge_ancestors().enumerate() {
-        if let Some(ancestor) = ancestor {
+    for (index, ancestors) in assembly.edge_ancestors().enumerate() {
+        for ancestor in ancestors {
             fused
                 .edges
                 .entry(ancestor.slot_in(id))

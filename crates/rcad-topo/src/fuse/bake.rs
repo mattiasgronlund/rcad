@@ -6,37 +6,41 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{Orientation, Plane, Point};
-use rcad_predicates::{Decision, Point as PredicatePoint};
+use rcad_predicates::{Decision, Measures, Point as PredicatePoint, ProvenanceLog};
 
 use crate::key::{FaceSlot, VertexSlot};
-use crate::{
-    EdgeKey, Error, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey,
-};
+use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
 
-use super::{as_exact_as_it_is, middle_of};
+use super::{WHERE_THREE_PLANES_MEET, as_exact_as_it_is, gave_up, middle_of};
 
 /// Move every solid in `solids` into world coordinates.
 ///
-/// Nothing here makes a decision a policy could soften: a corner is refused only
-/// when a plane around it *proves* it is somewhere else, so baking never writes
-/// to a [`ProvenanceLog`](rcad_predicates::ProvenanceLog) and has no policy to
-/// take.
+/// No policy is taken, because nothing here is a decision a budget could
+/// soften: a corner is refused only when a plane around it *proves* it is
+/// somewhere else, or when nothing can bound where the planes round it meet at
+/// all. The log is written to only in the second case, which leaves the
+/// operation with nothing to return.
 ///
 /// # Errors
 ///
-/// [`Error::Invalid`] when a corner's own faces disagree about where it is by
-/// more than its box, and [`Error::Geometry`] when no three planes around a
-/// corner are far enough from sharing a line to place it.
+/// [`Error::Invalid`](crate::Error::Invalid) when a corner's own faces disagree
+/// about where it is by more than its box, and
+/// [`Error::Undecidable`](crate::Error::Undecidable) when no three planes around
+/// a corner could be shown to meet at a point.
 ///
 /// # Panics
 ///
 /// If a solid is broken in a way [`Model::validate`] rejects: a face used at two
 /// placements, a corner with fewer than three faces round it, or an edge with
 /// only one face along it.
-pub(crate) fn bake(model: &Model, solids: &[SolidKey]) -> Result<Vec<BakedSolid>> {
+pub(crate) fn bake(
+    model: &Model,
+    solids: &[SolidKey],
+    log: &mut ProvenanceLog,
+) -> Result<Vec<BakedSolid>> {
     solids
         .iter()
-        .map(|&solid| bake_one_solid(model, solid))
+        .map(|&solid| bake_one_solid(model, solid, log))
         .collect()
 }
 
@@ -149,10 +153,10 @@ impl Bounds {
     }
 }
 
-fn bake_one_solid(model: &Model, key: SolidKey) -> Result<BakedSolid> {
+fn bake_one_solid(model: &Model, key: SolidKey, log: &mut ProvenanceLog) -> Result<BakedSolid> {
     let solid = model.solid(key);
     let planes = plane_of_every_face(model, solid);
-    let corners = corner_of_every_vertex(model, solid, &planes)?;
+    let corners = corner_of_every_vertex(model, solid, &planes, log)?;
 
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
@@ -188,6 +192,7 @@ fn corner_of_every_vertex(
     model: &Model,
     solid: SolidView<'_>,
     planes: &BTreeMap<FaceSlot, Plane>,
+    log: &mut ProvenanceLog,
 ) -> Result<BTreeMap<VertexSlot, BakedCorner>> {
     let mut corners = BTreeMap::new();
     for face in solid.faces() {
@@ -199,7 +204,7 @@ fn corner_of_every_vertex(
                     continue;
                 }
                 let around = planes_around_a_vertex(model, vertex, planes);
-                corners.insert(slot, derive_a_corner(vertex, around)?);
+                corners.insert(slot, derive_a_corner(vertex, around, log)?);
             }
         }
     }
@@ -247,28 +252,43 @@ fn planes_around_a_vertex(
 /// disagree by more than roundoff. [`Decision::Undecidable`] is agreement, not a
 /// failure: the plane passes through the corner's box, which is as much as
 /// anything can say about a point that had to be built.
-fn derive_a_corner(vertex: VertexKey, around: Vec<Plane>) -> Result<BakedCorner> {
+///
+/// Every triple failing is not a geometry error: it is a corner nothing can
+/// place, which leaves the operation with nothing to return, so it is
+/// [`Error::Undecidable`](crate::Error::Undecidable) with a record naming
+/// [`WHERE_THREE_PLANES_MEET`]. The corner of a solid this fuse itself built
+/// always has three different planes round it — §17.4's amendment of
+/// 2026-08-30 is what makes that true — so reaching here means the solid came
+/// from somewhere else.
+fn derive_a_corner(
+    vertex: VertexKey,
+    around: Vec<Plane>,
+    log: &mut ProvenanceLog,
+) -> Result<BakedCorner> {
     let mut best: Option<([Plane; 3], PredicatePoint)> = None;
-    let mut refusal = None;
     for first in 0..around.len() {
         for second in (first + 1)..around.len() {
             for third in (second + 1)..around.len() {
                 let triple = [around[first], around[second], around[third]];
-                match Plane::meet_of_three(&triple[0], &triple[1], &triple[2]) {
-                    Ok(point) => {
-                        let point = as_exact_as_it_is(point);
-                        if best.is_none_or(|(_, best)| point.uncertainty() < best.uncertainty()) {
-                            best = Some((triple, point));
-                        }
+                if let Ok(point) = Plane::meet_of_three(&triple[0], &triple[1], &triple[2]) {
+                    let point = as_exact_as_it_is(point);
+                    if best.is_none_or(|(_, best)| point.uncertainty() < best.uncertainty()) {
+                        best = Some((triple, point));
                     }
-                    Err(why) => refusal = Some(why),
                 }
             }
         }
     }
     let Some((planes, point)) = best else {
-        return Err(Error::Geometry(
-            refusal.expect("three planes that do not meet always say why"),
+        let normals: Vec<PredicatePoint> = around
+            .iter()
+            .map(|plane| PredicatePoint::from(plane.normal().components()))
+            .collect();
+        return Err(gave_up(
+            WHERE_THREE_PLANES_MEET,
+            &normals,
+            Measures::Volume,
+            log,
         ));
     };
 
@@ -408,7 +428,7 @@ mod tests {
         let (model, cube) = a_cube_of_side_two();
         let log = ProvenanceLog::new();
         let corners = corners_as_stored(&model, cube);
-        let baked = bake(&model, &[cube]).expect("a cube bakes");
+        let baked = bake(&model, &[cube], &mut ProvenanceLog::new()).expect("a cube bakes");
 
         for face in &baked[0].faces {
             for wire in &face.wires {
@@ -438,7 +458,7 @@ mod tests {
         let (mut model, cube) = a_cube_of_side_two();
         model.place_solid(cube, &a_turn());
         let corners = corners_as_stored(&model, cube);
-        let baked = bake(&model, &[cube]).expect("a turned cube bakes");
+        let baked = bake(&model, &[cube], &mut ProvenanceLog::new()).expect("a turned cube bakes");
 
         let mut anything_was_built = false;
         for face in &baked[0].faces {
@@ -475,7 +495,8 @@ mod tests {
         model.place_solid(cube, &a_turn());
         let log = ProvenanceLog::new();
 
-        bake(&model, &[cube]).expect("a turned cube bakes under a certified policy");
+        bake(&model, &[cube], &mut ProvenanceLog::new())
+            .expect("a turned cube bakes under a certified policy");
 
         assert!(log.is_empty());
         assert_eq!(log.worst_wobble(100.0), 0.0);
@@ -484,7 +505,7 @@ mod tests {
     #[test]
     fn a_box_round_a_cube_holds_the_cube_and_misses_one_beside_it() {
         let (model, cube) = a_cube_of_side_two();
-        let baked = bake(&model, &[cube]).expect("a cube bakes");
+        let baked = bake(&model, &[cube], &mut ProvenanceLog::new()).expect("a cube bakes");
         let far_away = Bounds {
             low: [10.0, 10.0, 10.0],
             high: [12.0, 12.0, 12.0],

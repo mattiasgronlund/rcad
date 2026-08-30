@@ -258,9 +258,9 @@ impl Scratch {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
-        let mut solids = bake(model, arguments)?;
+        let mut solids = bake(model, arguments, log)?;
         let group_splits_here = solids.len();
-        solids.extend(bake(model, tools)?);
+        solids.extend(bake(model, tools, log)?);
         cuts::gather(&mut solids, policy, log)?;
         let tools = solids.split_off(group_splits_here);
         let arguments = solids;
@@ -329,6 +329,17 @@ impl MeetPoint {
         }
     }
 }
+
+/// The name a corner that could not be placed goes by in provenance records.
+///
+/// [`Plane::meet_of_three`] divides by the determinant of the three normals and
+/// has only an interval filter to bound it with — no exact level to fall back
+/// on, because the answer is a point and not a sign. So a determinant it cannot
+/// tell from zero is a decision the cascade did not settle, and the fuse is left
+/// with nothing to return: [`Error::Undecidable`] and a record, not
+/// [`Error::Geometry`]. The two tiers read very differently in §17.7's
+/// breakdown of what gave up, and only one of them is true.
+pub(crate) const WHERE_THREE_PLANES_MEET: &str = "where three planes meet";
 
 /// Give up on a decision nothing can bound, recording that it was asked.
 ///

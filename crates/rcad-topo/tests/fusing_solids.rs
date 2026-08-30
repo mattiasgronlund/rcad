@@ -322,15 +322,18 @@ fn the_input_keys_still_work_and_a_face_nothing_reaches_comes_through_once() {
     assert_eq!(fused.modified_faces().count(), 12);
 }
 
-/// A face that is cut comes through as the pieces it was cut into, and every
-/// face of the answer is one of them.
+/// Every face of the answer says which input face it was cut out of, and every
+/// input face that survived says which faces of the answer it became.
 ///
 /// The block's faces are cut by the bubble's six planes, which reach past the
 /// bubble itself — a cut is by a plane, not by the patch of it a face covers.
-/// The bubble's own faces are cut by nothing, since none of the block's planes
-/// passes through the middle of the block where the bubble sits.
+/// Nothing on any of those sides is dropped, though, so the nine pieces each
+/// side comes apart into are joined straight back into the one face they were
+/// cut from (§17.4, amended 2026-08-30), and each side of the block has one
+/// image. The bubble's own faces are cut by nothing, since none of the block's
+/// planes passes through the middle of the block where the bubble sits.
 #[test]
-fn a_face_that_is_cut_comes_through_as_the_pieces_it_was_cut_into() {
+fn every_face_of_an_answer_names_the_input_face_it_was_cut_from() {
     let mut model = a_model();
     let block = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
     let bubble = cube(&mut model, 2.0, Vector::new(1.0, 1.0, 1.0));
@@ -348,7 +351,10 @@ fn a_face_that_is_cut_comes_through_as_the_pieces_it_was_cut_into() {
     let mut images = 0;
     for face in model.solid(block).faces() {
         let mine = fused.images_of_face(face.key()).len();
-        assert!(mine > 1, "the bubble's planes cut every side of the block");
+        assert_eq!(
+            mine, 1,
+            "the pieces the bubble's planes cut this side into are all still one face"
+        );
         images += mine;
     }
     for face in model.solid(bubble).faces() {
@@ -592,4 +598,237 @@ fn a_turned_solid_with_a_bit_identical_copy_taken_away_leaves_nothing() {
         "a solid with itself taken away leaves nothing, got {} solids",
         nothing.solids().len()
     );
+}
+
+/// Two ells flush against each other along their whole thickness, united both
+/// ways round.
+///
+/// The tops and the bottoms of the two are coplanar and overlap, so the region
+/// they share is cut out of both and kept once. Which of the two copies is kept
+/// is whichever came first, and the two are cut by different sets of lines —
+/// the argument's face never sees the lines the tool's own corners put on it —
+/// so keeping one rather than the other used to give a different partition each
+/// way round: twenty-three faces for `A ∪ B` and twenty-six for `B ∪ A`, both of
+/// them the same solid.
+///
+/// Joining the coplanar pieces back into one face is what settles it. The answer
+/// is then the eight faces the shape has, whichever way round it was asked for.
+#[test]
+fn uniting_two_ells_flush_against_each_other_gives_the_same_faces_either_way_round() {
+    let (mut model, one, other) = two_ells();
+    let forwards = fuse(&mut model, &[one], &[other], Rule::Union);
+    assert_eq!(forwards.len(), 1);
+    assert_eq!(
+        model.solid(forwards[0]).faces().count(),
+        8,
+        "an ell of one thickness has a top, a bottom and six walls"
+    );
+    let forwards = faces_of(&model, &forwards);
+
+    let (mut model, one, other) = two_ells();
+    let united = fuse(&mut model, &[other], &[one], Rule::Union);
+    let backwards = faces_of(&model, &united);
+
+    assert_eq!(
+        forwards, backwards,
+        "which side of the fuse a solid is on does not change the answer"
+    );
+}
+
+/// An ell of two by three with a one by one bite out of its far corner, one
+/// thick, and the same shape again one further along `y`.
+fn two_ells() -> (Model, SolidKey, SolidKey) {
+    let mut model = a_model();
+    let one = ell(&mut model, [0.0, 0.0, 0.0], 1.0);
+    let other = ell(&mut model, [0.0, 1.0, 0.0], 1.0);
+    (model, one, other)
+}
+
+/// An ell of two by three, one thick, with a one by `bite_depth` bite out of its
+/// far corner, put down at `at`.
+fn ell(model: &mut Model, at: [f64; 3], bite_depth: f64) -> SolidKey {
+    let outline = [
+        [0.0, 0.0],
+        [2.0, 0.0],
+        [2.0, 3.0 - bite_depth],
+        [1.0, 3.0 - bite_depth],
+        [1.0, 3.0],
+        [0.0, 3.0],
+    ]
+    .map(|[x, y]| [x + at[0], y + at[1]])
+    .to_vec();
+    let profile = ProfileBuilder::new(outline)
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a sound outline");
+    let lift = Vector::new(0.0, 0.0, at[2]);
+    model
+        .add_extrusion(
+            &profile,
+            1.0,
+            &Isometry::translation(lift).expect("a finite lift"),
+        )
+        .expect("an ell extrudes")
+}
+
+/// One face written out: the four numbers of its plane, then its rings of
+/// corners, every number as its bits.
+type WrittenFace = (Vec<u64>, Vec<Vec<[u64; 3]>>);
+
+/// Every face of an answer, written out so that two answers can be compared
+/// whatever order the arena put them in.
+fn faces_of(model: &Model, solids: &[SolidKey]) -> Vec<WrittenFace> {
+    let mut written: Vec<WrittenFace> = solids
+        .iter()
+        .flat_map(|&solid| model.solid(solid).faces())
+        .map(|face| {
+            let plane = face
+                .plane()
+                .coefficients()
+                .iter()
+                .map(|&it| it.to_bits())
+                .collect();
+            let mut wires: Vec<Vec<[u64; 3]>> = face
+                .wires()
+                .map(|wire| {
+                    let mut ring: Vec<[u64; 3]> = wire
+                        .points()
+                        .map(|at| at.coordinates().map(f64::to_bits))
+                        .collect();
+                    let smallest = ring
+                        .iter()
+                        .enumerate()
+                        .min_by_key(|(_, corner)| **corner)
+                        .map_or(0, |(position, _)| position);
+                    ring.rotate_left(smallest);
+                    ring
+                })
+                .collect();
+            wires.sort_unstable();
+            (plane, wires)
+        })
+        .collect();
+    written.sort_unstable();
+    written
+}
+
+/// The answer to a fuse can be fused again, which it could not when two of its
+/// faces sat on one plane.
+///
+/// Three boxes of side two: the first at the origin, the second overlapping it
+/// along `x`, the third overlapping what the two of them make. Uniting the first
+/// two leaves a three by two by two box, and the corners at `x = 1` and `x = 2`
+/// along its bottom edges used to have four faces round them and only two
+/// planes — a top and a bottom cut into halves that were never joined back up.
+/// §17.1 re-derives every corner as the meet of three planes at the next fuse's
+/// entry, so those corners could not be placed and the second union came back
+/// `PlanesDoNotMeetInAPoint` with a determinant of exactly zero.
+#[test]
+fn a_union_can_be_united_again_because_every_corner_of_it_still_has_three_planes() {
+    let mut model = a_model();
+    let one = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 0.0));
+    let other = cube(&mut model, 2.0, Vector::new(1.0, 0.0, 0.0));
+    let third = cube(&mut model, 2.0, Vector::new(1.0, 1.0, 1.0));
+
+    let first = fuse(&mut model, &[one], &[other], Rule::Union);
+    assert_eq!(volume_of(&model, &first), 12.0);
+
+    let again = fuse(&mut model, &first, &[third], Rule::Union);
+    assert_eq!(
+        model.solid(first[0]).faces().count(),
+        6,
+        "two boxes overlapping along one axis unite into a box"
+    );
+    assert_eq!(again.len(), 1);
+    assert_eq!(volume_of(&model, &again), 12.0 + 8.0 - 2.0);
+}
+
+/// A hole of a face that no cut line touches has to be put in the piece that
+/// surrounds it, and one corner of it having nothing to see is not the end of
+/// the search.
+///
+/// A frame three by five with a one by three hole, an ell standing on top of one
+/// side of it, and a block a long way above that touches neither. Uniting the
+/// frame and the ell joins their tops into one face, and that face still has the
+/// frame's hole in it. The block is far enough away that nothing cuts that face,
+/// so the hole is a ring the drawing does not join to anything and the piece
+/// round it has to be found by shooting a ray. From the first corner of the hole
+/// every ray runs into the end of an arc and says nothing; from another corner
+/// of the same hole one of them answers straight away.
+#[test]
+fn a_hole_nothing_cuts_is_placed_from_whichever_of_its_corners_can_see_out() {
+    let mut model = a_model();
+    let frame = frame(&mut model, 3.0, 5.0, 2.0);
+    let ell = ell(&mut model, [2.0, 3.0, 1.0], 2.0);
+    let far_away = cube(&mut model, 1.0, Vector::new(0.0, 0.0, 3.0));
+
+    let with_the_ell = fuse(&mut model, &[frame], &[ell], Rule::Union);
+    let frame_and_ell = 24.0 + 4.0 - 2.0;
+    assert_eq!(volume_of(&model, &with_the_ell), frame_and_ell);
+
+    let with_the_block = fuse(&mut model, &with_the_ell, &[far_away], Rule::Union);
+    assert_eq!(
+        with_the_block.len(),
+        2,
+        "the block touches nothing, so it stays a solid of its own"
+    );
+    assert_eq!(volume_of(&model, &with_the_block), frame_and_ell + 1.0);
+}
+
+/// A ray looking for the piece a hole sits in is stopped by an arc it grazes
+/// the end of, but only by one that is ahead of it.
+///
+/// Two combs of three teeth, the second turned so its teeth point at the first
+/// one's base and slid so two of them land on it. The gap between those two
+/// teeth is then closed off on all four sides, so the top and bottom of the
+/// answer each have a hole in them that no cut line touches. Uniting that with a
+/// block sitting well above it — which cuts nothing and touches nothing — has to
+/// place the hole in the piece around it, and the only ray that can do it grazes
+/// the corner of a tooth two rows behind where it starts.
+#[test]
+fn a_hole_is_placed_by_a_ray_that_grazes_an_arc_behind_it() {
+    let mut model = a_model();
+    let one = comb(&mut model, [0.0, 0.0]);
+    let other = comb(&mut model, [-2.0, -2.0]);
+    let far_away = cube(&mut model, 1.0, Vector::new(0.0, 0.0, 2.0));
+
+    let meshed = fuse(&mut model, &[one, other], &[], Rule::Union);
+    assert_eq!(meshed.len(), 1, "two teeth of one comb land on the other");
+
+    let with_the_block = fuse(&mut model, &[meshed[0], far_away], &[], Rule::Union);
+    assert_eq!(
+        with_the_block.len(),
+        2,
+        "the block touches nothing, so it stays a solid of its own"
+    );
+    assert_eq!(
+        volume_of(&model, &with_the_block),
+        volume_of(&model, &meshed) + 1.0
+    );
+}
+
+/// Three square teeth one high standing on a base one thick, five across,
+/// extruded by one and put down at `at`.
+fn comb(model: &mut Model, at: [f64; 2]) -> SolidKey {
+    let outline = [
+        [0.0, 0.0],
+        [5.0, 0.0],
+        [5.0, 2.0],
+        [4.0, 2.0],
+        [4.0, 1.0],
+        [3.0, 1.0],
+        [3.0, 2.0],
+        [2.0, 2.0],
+        [2.0, 1.0],
+        [1.0, 1.0],
+        [1.0, 2.0],
+        [0.0, 2.0],
+    ]
+    .map(|[x, y]| [x + at[0], y + at[1]])
+    .to_vec();
+    let profile = ProfileBuilder::new(outline)
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a sound comb");
+    model
+        .add_extrusion(&profile, 1.0, &Isometry::identity())
+        .expect("a comb extrudes")
 }
