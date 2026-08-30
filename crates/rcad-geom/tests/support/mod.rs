@@ -270,6 +270,92 @@ pub fn a_surface_with_a_wide_dynamic_range(degree: usize, working_size: f64) -> 
         .expect("a square grid of finite points and positive weights")
 }
 
+/// Every parameter this curve will take one more copy of.
+///
+/// The interior knots that have not yet reached the degree, and the middle of
+/// every span with room in it. A curve with no interior knots still has the
+/// middle of its one span, so this is never empty.
+pub fn parameters_a_knot_can_be_inserted_at(curve: &BSplineCurve) -> Vec<f64> {
+    let degree = curve.degree();
+    let knots = curve.knots();
+    let all = knots.knots();
+
+    let mut candidates: Vec<f64> = all[degree + 1..all.len() - degree - 1].to_vec();
+    for span in degree..all.len() - degree - 1 {
+        if all[span] < all[span + 1] {
+            candidates.push(all[span] + (all[span + 1] - all[span]) / 2.0);
+        }
+    }
+    candidates.retain(|u| knots.contains(*u) && knots.multiplicity_of(*u) < degree);
+    candidates
+}
+
+/// Every parameter this curve can be cut at: anywhere strictly inside its
+/// domain, which is where both halves have a curve in them.
+pub fn parameters_a_curve_can_be_split_at(curve: &BSplineCurve) -> Vec<f64> {
+    let degree = curve.degree();
+    let all = curve.knots().knots();
+    let (lo, hi) = curve.domain();
+
+    let mut candidates: Vec<f64> = all[degree + 1..all.len() - degree - 1].to_vec();
+    for span in degree..all.len() - degree - 1 {
+        if all[span] < all[span + 1] {
+            candidates.push(all[span] + (all[span + 1] - all[span]) / 2.0);
+        }
+    }
+    candidates.retain(|u| lo < *u && *u < hi);
+    candidates
+}
+
+/// A point's three coordinates as the bits they are stored in.
+///
+/// Comparing points with `==` would call `+0.0` and `-0.0` the same number.
+/// The refinement oracles claim more than that — that untouched numbers are
+/// *copied* — so they compare what is actually stored.
+pub fn coordinate_bits(point: Point) -> [u64; 3] {
+    point.coordinates().map(f64::to_bits)
+}
+
+/// Whether two curves are the same curve down to the last bit: the same
+/// degree, the same knots, and the same weighted control net.
+pub fn the_same_curve_to_the_last_bit(one: &BSplineCurve, other: &BSplineCurve) -> bool {
+    let same_knots = one.degree() == other.degree()
+        && one.knots().knots().len() == other.knots().knots().len()
+        && core::iter::zip(one.knots().knots(), other.knots().knots())
+            .all(|(a, b)| a.to_bits() == b.to_bits());
+
+    same_knots
+        && one.control_point_count() == other.control_point_count()
+        && (0..one.control_point_count()).all(|i| {
+            core::iter::zip(
+                one.homogeneous_control_point(i),
+                other.homogeneous_control_point(i),
+            )
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+        })
+}
+
+/// Whether the checking constructors would build this curve from scratch.
+///
+/// The knot vector goes back through [`KnotVector::new`] and the net through
+/// [`BSplineCurve::new`], which takes affine points and weights and is
+/// therefore a genuinely different way in than the one refinement used. A
+/// refinement that produces a curve the kernel would refuse to build is a bug,
+/// and this is the half of the suite that can see it
+/// (`docs/decisions.md` §14.7).
+pub fn the_kernel_would_build_this_curve_again(curve: &BSplineCurve) -> bool {
+    let Ok(knots) = KnotVector::new(curve.knots().degree(), curve.knots().knots().to_vec()) else {
+        return false;
+    };
+    let points: Vec<Point> = (0..curve.control_point_count())
+        .map(|i| curve.control_point(i))
+        .collect();
+    let weights: Vec<f64> = (0..curve.control_point_count())
+        .map(|i| curve.weight(i))
+        .collect();
+    BSplineCurve::new(knots, &points, &weights).is_ok()
+}
+
 /// The widest enclosure something hands back anywhere across its domain, read
 /// two ways.
 ///

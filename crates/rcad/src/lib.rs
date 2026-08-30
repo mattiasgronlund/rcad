@@ -246,7 +246,8 @@ pub use rcad_topo::Error as TopologyError;
 
 pub use rcad_geom::{
     Axis, BSplineCurve, BSplineSurface, Cylinder, EVALUATION_ROUNDOFF, Isometry, KnotVector,
-    MAX_DEGREE, Orientation, Plane, Point, Scale, Segment, Sphere, Surface, Unit, Vector,
+    MAX_DEGREE, Orientation, Plane, Point, REFINEMENT_ROUNDOFF, Scale, Segment, Sphere, Surface,
+    Unit, Vector,
 };
 pub use rcad_predicates::{
     Approximation, Cause, Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D,

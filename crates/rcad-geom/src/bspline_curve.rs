@@ -4,8 +4,8 @@ use rcad_predicates::Point as PredicatePoint;
 use serde::{Deserialize, Serialize};
 
 use crate::de_boor::{
-    Coefficient, EVALUATION_ROUNDOFF, de_boor, derived_points, divided, enclosed,
-    rational_derivative, roundoff_of_a_divided_point,
+    Coefficient, EVALUATION_ROUNDOFF, after_two_passes, blended, de_boor, derived_points, divided,
+    enclosed, rational_derivative, roundoff_of_a_divided_point,
 };
 use crate::knot_vector::{KnotVector, MAX_DEGREE};
 use crate::point::{Point, Vector};
@@ -44,6 +44,45 @@ pub struct BSplineCurve {
     knots: KnotVector,
     net: Vec<[f64; 4]>,
 }
+
+/// How far evaluating a refined curve can be from the true point of the curve
+/// it was refined from, as a fraction of the largest homogeneous control
+/// coordinate of the original net.
+///
+/// # Where the number comes from
+///
+/// Refining and then evaluating is two de Boor passes one after the other, so
+/// it is the same composition a surface makes along `v` and then along `u`, and
+/// it reuses the same step.
+///
+/// One Boehm stage replaces two stored points by `(1 − a)·P + a·Q`, with the
+/// same coefficient shape and the same three roundings as one de Boor stage —
+/// they share the code that does it — so [`EVALUATION_ROUNDOFF`]'s count of
+/// nine roundings per stage covers an insertion stage too. A control point of
+/// the refined net is at most `degree` stages deep, and `degree` is capped at
+/// [`MAX_DEGREE`], so the refined net sits within `K·M` of the exact refined
+/// net, where `K` is [`EVALUATION_ROUNDOFF`] and `M` is the largest magnitude
+/// among the four homogeneous coordinates of the original net.
+///
+/// Every stage is a convex combination, so the refined points lie inside the
+/// original net's convex hull and are no bigger than `M` in truth. Evaluating
+/// them is a second pass starting from numbers already `K·M` off, worth
+/// `K·M·(1 + K) + K·M = M·(2K + K²)`.
+///
+/// # The precondition, which is not optional
+///
+/// `M` is taken over the **whole** original net rather than the span the
+/// evaluation touches. A refined control point is a blend of original ones from
+/// a wider stretch than the span it ends up serving, so charging the narrower
+/// figure would give a number that is not a bound.
+///
+/// The stage count assumes at most [`MAX_DEGREE`] insertions.
+/// [`BSplineCurve::with_knot_inserted`] does one and
+/// [`BSplineCurve::split_at`] does at most `degree`, so both satisfy it by
+/// construction. [`BSplineCurve::bezier_segments`] does not: a curve with many
+/// interior knots blends deeper than the cap, and this constant says nothing
+/// about it.
+pub const REFINEMENT_ROUNDOFF: f64 = after_two_passes(EVALUATION_ROUNDOFF);
 
 impl BSplineCurve {
     /// The curve through the given control net.
@@ -242,6 +281,201 @@ impl BSplineCurve {
         ))
     }
 
+    /// The same curve with one more copy of `u` in its knot vector.
+    ///
+    /// Boehm's algorithm. The span `u` falls in reaches `degree + 1` control
+    /// points; they are replaced by blends of consecutive pairs, and **every
+    /// other control point is copied**. The curve is the same shape as before —
+    /// what changes is how it is written down, and there is one more control
+    /// point to write it with.
+    ///
+    /// # Why this runs on the stored homogeneous net
+    ///
+    /// A blend here is an affine combination of the stored numbers
+    /// `[w*x, w*y, w*z, w]`, so a control point outside the affected span is
+    /// copied rather than recomputed and comes out bit-identical in all four
+    /// coordinates — by construction, not by a special case that checks for it.
+    /// Going through affine points and weights instead would divide each weight
+    /// out and multiply it back in, rounding twice and throwing that property
+    /// away. It is the whole reason this crate stores the weighted net.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ParameterOutsideDomain`] if `u` is not a finite number inside
+    /// [`BSplineCurve::domain`], the same refusal
+    /// [`BSplineCurve::evaluate`] makes. [`Error::CannotRepeatKnotAgain`] if
+    /// `u` already appears `degree` times or more — one more copy would leave a
+    /// control point with no basis function of its own, and
+    /// [`KnotVector::new`] would refuse the result. Both ends of the domain
+    /// appear `degree + 1` times, so inserting at an end is refused this way.
+    ///
+    /// [`Error::WeightNotPositive`] if a blend of two weights underflows to
+    /// zero. That needs weights down in the subnormals, and a curve carrying
+    /// them cannot be refined into one this kernel would accept.
+    pub fn with_knot_inserted(&self, u: f64) -> Result<Self> {
+        let span = self.span_of(u)?;
+        let degree = self.degree();
+        let times = self.knots.multiplicity_of(u);
+        if times >= degree {
+            return Err(Error::CannotRepeatKnotAgain {
+                knot: u,
+                times,
+                degree,
+            });
+        }
+
+        let knots = self.knots.knots();
+        let mut grown = Vec::with_capacity(knots.len() + 1);
+        grown.extend_from_slice(&knots[..=span]);
+        grown.push(u);
+        grown.extend_from_slice(&knots[span + 1..]);
+
+        let mut net = Vec::with_capacity(self.net.len() + 1);
+        net.extend_from_slice(&self.net[..=span - degree]);
+        for i in span - degree + 1..=span - times {
+            let below = knots[i];
+            let above = knots[i + degree];
+            assert!(
+                below < above,
+                "the insertion span from {below} to {above} is shut, which the knot vector's own \
+                 invariants rule out"
+            );
+            let share = (u - below) / (above - below);
+            net.push(blended(1.0 - share, self.net[i - 1], share, self.net[i]));
+        }
+        net.extend_from_slice(&self.net[span - times..]);
+
+        let grown = KnotVector::new(degree, grown).expect(
+            "one more copy of an interior knot still below the degree keeps every invariant",
+        );
+        Self::from_homogeneous_net(grown, net)
+    }
+
+    /// The two halves of the curve on either side of `u`, each a curve in its
+    /// own right.
+    ///
+    /// `u` is raised to a multiplicity of `degree` by repeated insertion and
+    /// the curve is cut there. At that multiplicity the curve passes exactly
+    /// through one control point, and the two halves share it — the same four
+    /// stored numbers, copied into both, so the seam matches bit for bit rather
+    /// than to within something.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ParameterOutsideDomain`] if `u` is not a finite number inside
+    /// [`BSplineCurve::domain`].
+    ///
+    /// [`Error::NothingOnOneSideOfTheSplit`] at either end of the domain. An
+    /// empty half is not a curve: it would need a knot vector whose every span
+    /// is shut, which [`KnotVector::new`] refuses and should. Returning the
+    /// whole curve and a nothing, or the whole curve twice, would both be
+    /// answers to a question the caller did not ask.
+    ///
+    /// [`Error::WeightNotPositive`], for the reason
+    /// [`BSplineCurve::with_knot_inserted`] gives.
+    pub fn split_at(&self, u: f64) -> Result<(Self, Self)> {
+        self.span_of(u)?;
+        let (lo, hi) = self.domain();
+        if u == lo || u == hi {
+            return Err(Error::NothingOnOneSideOfTheSplit {
+                parameter: u,
+                lo,
+                hi,
+            });
+        }
+
+        let degree = self.degree();
+        let mut raised = self.clone();
+        while raised.knots.multiplicity_of(u) < degree {
+            raised = raised.with_knot_inserted(u)?;
+        }
+        Ok(raised.cut_at(u))
+    }
+
+    /// One Bezier curve per span of positive width, in order.
+    ///
+    /// Every interior knot is raised to a multiplicity of `degree`, which
+    /// leaves the net as one run of `degree + 1` control points per span with
+    /// neighbouring runs sharing an end. Each run is handed out over the knot
+    /// vector `[a, …, a, b, …, b]`, so the last control point of one segment
+    /// and the first of the next are the same four stored numbers and the
+    /// segments join bit for bit.
+    ///
+    /// A curve that is already a single Bezier has no interior knots, so
+    /// nothing is inserted and the one segment that comes back is this curve
+    /// unchanged.
+    ///
+    /// Roadmap §6.2's Bezier clipping is what this is for.
+    ///
+    /// # Panics
+    ///
+    /// If a knot the curve already carries cannot be inserted into it. Every
+    /// interior knot is inside the domain and appears fewer than `degree` times
+    /// until this raises it, so that is a broken invariant rather than bad
+    /// caller input.
+    #[must_use]
+    pub fn bezier_segments(&self) -> Vec<Self> {
+        let degree = self.degree();
+        let interior = self.distinct_interior_knots();
+
+        let mut refined = self.clone();
+        for &knot in &interior {
+            while refined.knots.multiplicity_of(knot) < degree {
+                refined = refined
+                    .with_knot_inserted(knot)
+                    .expect("an interior knot below full multiplicity can always take one more");
+            }
+        }
+
+        let (lo, hi) = self.domain();
+        let mut breaks = Vec::with_capacity(interior.len() + 2);
+        breaks.push(lo);
+        breaks.extend_from_slice(&interior);
+        breaks.push(hi);
+
+        assert_eq!(
+            refined.net.len(),
+            degree + 1 + interior.len() * degree,
+            "a fully refined curve holds one run of {} control points per span, sharing ends",
+            degree + 1
+        );
+
+        breaks
+            .windows(2)
+            .enumerate()
+            .map(|(segment, ends)| {
+                let mut knots = vec![ends[0]; degree + 1];
+                knots.extend(core::iter::repeat_n(ends[1], degree + 1));
+                let start = segment * degree;
+                Self::a_piece(degree, knots, &refined.net[start..=start + degree])
+            })
+            .collect()
+    }
+
+    /// How far [`BSplineCurve::evaluate`] on this curve can be from the true
+    /// point of the curve it was refined from, per coordinate.
+    ///
+    /// `self` is a curve that came out of [`BSplineCurve::with_knot_inserted`]
+    /// or [`BSplineCurve::split_at`] and `original` is what it came from. See
+    /// [`REFINEMENT_ROUNDOFF`] for what that costs and for the one case it does
+    /// not cover.
+    ///
+    /// `None` when the precondition does not hold, exactly as
+    /// [`BSplineCurve::evaluation_roundoff_at`] returns `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ParameterOutsideDomain`] if `u` is outside **this** curve's
+    /// domain — a half of a split covers only half of the original.
+    pub fn refinement_roundoff_at(&self, original: &Self, u: f64) -> Result<Option<f64>> {
+        let homogeneous = self.homogeneous_evaluate(u)?;
+        Ok(roundoff_of_a_divided_point(
+            REFINEMENT_ROUNDOFF,
+            largest_coordinates(&original.net),
+            homogeneous,
+        ))
+    }
+
     /// The point at `u` before the weight is divided back out, in whichever
     /// arithmetic the caller asked for.
     ///
@@ -317,13 +551,63 @@ impl BSplineCurve {
     /// The biggest magnitude in each of the four homogeneous coordinates,
     /// across the control points the span reaches.
     fn largest_active_coordinates(&self, span: usize) -> [f64; 4] {
-        let mut largest = [0.0f64; 4];
-        for point in &self.net[span - self.degree()..=span] {
-            for (biggest, coordinate) in largest.iter_mut().zip(point) {
-                *biggest = biggest.max(coordinate.abs());
+        largest_coordinates(&self.net[span - self.degree()..=span])
+    }
+
+    /// The two halves of a curve whose seam already appears `degree` times.
+    ///
+    /// The seam's `degree` copies sit at `first ..= first + degree - 1`. The
+    /// lower half keeps the knots before them and clamps with `degree + 1`
+    /// copies of its own; the upper half opens with `degree + 1` copies and
+    /// keeps the knots after them. Control point `first - 1` goes to both, and
+    /// it is the point the curve passes exactly through.
+    fn cut_at(&self, seam: f64) -> (Self, Self) {
+        let degree = self.degree();
+        let knots = self.knots.knots();
+        let first = knots
+            .iter()
+            .position(|knot| *knot == seam)
+            .expect("the seam was raised to a multiplicity of degree before the cut");
+
+        let mut below = knots[..first].to_vec();
+        below.extend(core::iter::repeat_n(seam, degree + 1));
+        let mut above = vec![seam; degree + 1];
+        above.extend_from_slice(&knots[first + degree..]);
+
+        (
+            Self::a_piece(degree, below, &self.net[..first]),
+            Self::a_piece(degree, above, &self.net[first - 1..]),
+        )
+    }
+
+    /// The interior knot values, each once, in order.
+    fn distinct_interior_knots(&self) -> Vec<f64> {
+        let degree = self.degree();
+        let knots = self.knots.knots();
+        let mut distinct: Vec<f64> = Vec::new();
+        for &knot in &knots[degree + 1..knots.len() - degree - 1] {
+            if distinct.last() != Some(&knot) {
+                distinct.push(knot);
             }
         }
-        largest
+        distinct
+    }
+
+    /// A stretch cut out of a refined curve, checked the way any other curve is.
+    ///
+    /// # Panics
+    ///
+    /// If the kernel would not accept it. Every piece cut here is clamped at
+    /// both ends by construction, carries knots that already rose, repeats no
+    /// interior knot more often than it did in the curve it came from, and has
+    /// a span of positive width because the cut is never at an end of the
+    /// domain. Its control points are copied from a net whose weights were
+    /// already checked. A refusal is a broken invariant, not bad caller input.
+    fn a_piece(degree: usize, knots: Vec<f64>, net: &[[f64; 4]]) -> Self {
+        let knots = KnotVector::new(degree, knots)
+            .expect("a piece of a refined curve is clamped, rising, and has a span of its own");
+        Self::from_homogeneous_net(knots, net.to_vec())
+            .expect("the piece carries control points the whole curve already had")
     }
 
     /// The curve from a net that is already weighted, checking everything a
@@ -352,6 +636,18 @@ impl BSplineCurve {
         }
         Ok(Self { knots, net })
     }
+}
+
+/// The biggest magnitude in each of the four homogeneous coordinates, across
+/// the given control points.
+fn largest_coordinates(net: &[[f64; 4]]) -> [f64; 4] {
+    let mut largest = [0.0f64; 4];
+    for point in net {
+        for (biggest, coordinate) in largest.iter_mut().zip(point) {
+            *biggest = biggest.max(coordinate.abs());
+        }
+    }
+    largest
 }
 
 /// A control point moved into homogeneous coordinates.
@@ -734,6 +1030,169 @@ mod tests {
         assert_eq!(z.lo(), 0.0);
     }
 
+    /// Knots `[0, 0, 1, 2, 2]`, so inserting at a half blends the first two
+    /// control points in equal shares — an exact answer with nothing rounded,
+    /// and every other point copied.
+    #[test]
+    fn inserting_a_knot_halfway_along_a_straight_run_is_the_midpoint_and_three_copies() {
+        let refined = a_straight_run().with_knot_inserted(0.5).unwrap();
+
+        assert_eq!(refined.knots().knots(), &[0.0, 0.0, 0.5, 1.0, 2.0, 2.0]);
+        assert_eq!(refined.control_point_count(), 4);
+        assert_eq!(refined.control_point(0), Point::new(0.0, 0.0, 0.0));
+        assert_eq!(refined.control_point(1), Point::new(1.0, 2.0, 4.0));
+        assert_eq!(refined.control_point(2), Point::new(2.0, 4.0, 8.0));
+        assert_eq!(refined.control_point(3), Point::new(6.0, 0.0, -4.0));
+    }
+
+    /// A quadratic whose last three spans are single `f64` steps apart, so the
+    /// knot differences an insertion divides by are as small as `f64` allows
+    /// without shutting.
+    ///
+    /// The tail clamp sits two steps above the interior knots, which is what
+    /// makes the coefficient's denominator two steps wide.
+    fn a_curve_whose_spans_are_a_hair_wide() -> BSplineCurve {
+        let half = 0.5f64;
+        let step_up = half.next_up();
+        let two_steps_up = step_up.next_up();
+        let knots = KnotVector::new(
+            2,
+            vec![
+                0.0,
+                0.0,
+                0.0,
+                half,
+                half,
+                step_up,
+                two_steps_up,
+                two_steps_up,
+                two_steps_up,
+            ],
+        )
+        .expect("rising, clamped, and no interior knot past multiplicity two");
+
+        let points: Vec<Point> = (0..6)
+            .map(|i| Point::new(i as f64, 2.0 * i as f64, 4.0 * i as f64))
+            .collect();
+        BSplineCurve::new(knots, &points, &[1.0; 6]).expect("six dyadic points, six weights")
+    }
+
+    /// The case a reviewer looks for: a span so narrow that a de Boor
+    /// coefficient might go to `0/0` or run away. It does neither, and this
+    /// says what it does instead rather than that it is fine.
+    ///
+    /// Inserting the middle interior knot divides `(u − knots[i])` by
+    /// `(knots[i+2] − knots[i])`. Both are one and two `f64` steps of a half,
+    /// and both subtractions are exact — the two numbers are within a factor of
+    /// two of each other, so nothing is lost. The quotient of `2⁻⁵³` by `2⁻⁵²`
+    /// is exactly a half, so the new control point is the exact midpoint of the
+    /// two it came from, with nothing rounded anywhere.
+    ///
+    /// The denominator can never be zero: the two knots it subtracts always sit
+    /// on opposite sides of a span of positive width, which is what the
+    /// assertion inside the insertion states.
+    #[test]
+    fn inserting_into_a_span_two_f64_steps_wide_lands_on_the_exact_midpoint() {
+        let curve = a_curve_whose_spans_are_a_hair_wide();
+        let barely_above_a_half = 0.5f64.next_up();
+        let refined = curve.with_knot_inserted(barely_above_a_half).unwrap();
+
+        assert_eq!(refined.control_point_count(), 7);
+        assert_eq!(
+            refined.homogeneous_control_point(4),
+            [3.5, 7.0, 14.0, 1.0],
+            "a coefficient of exactly a half puts the new point halfway between points 3 and 4"
+        );
+        for i in 0..4 {
+            assert_eq!(
+                refined.homogeneous_control_point(i),
+                curve.homogeneous_control_point(i)
+            );
+        }
+        for i in 5..7 {
+            assert_eq!(
+                refined.homogeneous_control_point(i),
+                curve.homogeneous_control_point(i - 1)
+            );
+        }
+    }
+
+    /// Splitting the same curve at the same hair-wide knot has to give two
+    /// curves the kernel accepts, and it is the case where a coefficient of
+    /// exactly one and a coefficient of exactly zero both turn up.
+    #[test]
+    fn a_curve_whose_spans_are_a_hair_wide_still_splits_into_two_curves() {
+        let curve = a_curve_whose_spans_are_a_hair_wide();
+        let barely_above_a_half = 0.5f64.next_up();
+        let (below, above) = curve.split_at(barely_above_a_half).unwrap();
+
+        assert_eq!(below.domain(), (0.0, barely_above_a_half));
+        assert_eq!(
+            above.domain(),
+            (barely_above_a_half, 0.5f64.next_up().next_up())
+        );
+        assert_eq!(
+            below.homogeneous_control_point(below.control_point_count() - 1),
+            above.homogeneous_control_point(0)
+        );
+    }
+
+    #[test]
+    fn inserting_a_knot_at_either_end_of_the_domain_is_refused() {
+        let curve = the_quarter_circle();
+        for u in [0.0, 1.0] {
+            assert_eq!(
+                curve.with_knot_inserted(u),
+                Err(Error::CannotRepeatKnotAgain {
+                    knot: u,
+                    times: 3,
+                    degree: 2
+                }),
+                "a clamped end already appears one more time than the degree"
+            );
+        }
+    }
+
+    #[test]
+    fn inserting_an_interior_knot_that_already_repeats_as_often_as_the_degree_is_refused() {
+        let knots = KnotVector::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+            .expect("an interior knot at multiplicity two is allowed at degree two");
+        let points: Vec<Point> = (0..5).map(|i| Point::new(i as f64, 0.0, 0.0)).collect();
+        let curve = BSplineCurve::new(knots, &points, &[1.0; 5]).unwrap();
+
+        assert_eq!(
+            curve.with_knot_inserted(1.0),
+            Err(Error::CannotRepeatKnotAgain {
+                knot: 1.0,
+                times: 2,
+                degree: 2
+            })
+        );
+    }
+
+    #[test]
+    fn splitting_at_either_end_of_the_domain_leaves_nothing_on_one_side() {
+        let curve = the_quarter_circle();
+        for u in [0.0, 1.0] {
+            assert_eq!(
+                curve.split_at(u),
+                Err(Error::NothingOnOneSideOfTheSplit {
+                    parameter: u,
+                    lo: 0.0,
+                    hi: 1.0
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn a_curve_that_is_already_one_bezier_gives_back_itself_and_nothing_else() {
+        let curve = the_quarter_circle();
+        let segments = curve.bezier_segments();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0], curve);
+    }
+
     #[test]
     fn a_parameter_off_the_curve_is_refused_by_everything_that_takes_one() {
         let curve = the_quarter_circle();
@@ -743,6 +1202,8 @@ mod tests {
                 curve.tangent(u).err(),
                 curve.evaluate_with_enclosure(u).err(),
                 curve.evaluation_roundoff_at(u).err(),
+                curve.with_knot_inserted(u).err(),
+                curve.split_at(u).err(),
             ];
             for refusal in refusals {
                 match refusal {

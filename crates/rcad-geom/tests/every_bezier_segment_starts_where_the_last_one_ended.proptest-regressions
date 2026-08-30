@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 471f3cb4609760d89e2440cf665f9377cdbb68739f28b132c3583bc4eb90e7f1 # shrinks to curve = BSplineCurve { knots: KnotVector { degree: 2, knots: [0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0] }, net: [[0.0, 3.0, 0.5, 1.0], [0.5, 4.0, 0.6666666666666666, 2.0], [1.5, 3.0, 0.75, 3.0], [0.75, 0.0, 0.2, 1.0]] }

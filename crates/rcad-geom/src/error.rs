@@ -159,6 +159,40 @@ pub enum Error {
         hi: f64,
     },
 
+    /// A knot was asked to be inserted where it already repeats as often as the
+    /// degree allows.
+    ///
+    /// One more copy would leave a control point with no basis function of its
+    /// own, which is the same thing [`Error::KnotRepeatedTooOften`] refuses at
+    /// construction. It is a separate variant because the caller here did not
+    /// hand over a bad knot vector — it handed over a good one and asked for a
+    /// refinement of it that does not exist.
+    #[error(
+        "the knot {knot} already appears {times} times, and a degree {degree} spline allows no more"
+    )]
+    CannotRepeatKnotAgain {
+        /// The knot the caller asked to insert.
+        knot: f64,
+        /// How many times it already appears.
+        times: usize,
+        /// The degree it was measured against.
+        degree: usize,
+    },
+
+    /// A curve was asked to be split at one end of its own domain, where one of
+    /// the two halves would be no curve at all.
+    #[error(
+        "splitting at {parameter} leaves nothing on one side; the domain runs from {lo} to {hi}"
+    )]
+    NothingOnOneSideOfTheSplit {
+        /// What the caller asked for.
+        parameter: f64,
+        /// The bottom of the domain.
+        lo: f64,
+        /// The top of the domain.
+        hi: f64,
+    },
+
     /// A predicate refused the input it was handed — three planes with no
     /// single meeting point, for instance.
     #[error(transparent)]

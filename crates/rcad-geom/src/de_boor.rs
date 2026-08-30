@@ -423,12 +423,16 @@ pub(crate) fn roundoff_of_a_divided_point(
 /// bigger than `M` in truth, so `E ≤ K·M·(1 + K) + K·M = M·(2K + K²)`. Written
 /// as `2K + K²` rather than `(1 + K)² − 1` because the second form cancels away
 /// the `K²` term it is there to keep.
-pub(crate) fn after_two_passes(one_pass: f64) -> f64 {
+pub(crate) const fn after_two_passes(one_pass: f64) -> f64 {
     (2.0 * one_pass + one_pass * one_pass) * (1.0 + f64::EPSILON)
 }
 
 /// `rest·before + share·after`, on all four homogeneous coordinates.
-fn blended<C: Coefficient>(rest: C, before: [C; 4], share: C, after: [C; 4]) -> [C; 4] {
+///
+/// Boehm's knot insertion runs the same three roundings on the same shape, so
+/// it shares this rather than writing the blend out again — which is what lets
+/// [`EVALUATION_ROUNDOFF`]'s per-stage count stand for an insertion stage too.
+pub(crate) fn blended<C: Coefficient>(rest: C, before: [C; 4], share: C, after: [C; 4]) -> [C; 4] {
     core::array::from_fn(|axis| rest * before[axis] + share * after[axis])
 }
 

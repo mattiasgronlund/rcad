@@ -74,7 +74,7 @@ mod segment;
 mod sphere;
 mod surface;
 
-pub use crate::bspline_curve::BSplineCurve;
+pub use crate::bspline_curve::{BSplineCurve, REFINEMENT_ROUNDOFF};
 pub use crate::bspline_surface::BSplineSurface;
 pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
 pub use crate::de_boor::EVALUATION_ROUNDOFF;
