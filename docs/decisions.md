@@ -143,6 +143,10 @@ Rejected: a throwaway boolean prototype instead. Throwaway code does not carry
 the local invariant checks of §4.3, and a finding from code without invariants
 does not transfer to code with them.
 
+**Amended 2026-08-30.** M2.5 does not wait for M2 either, and runs alongside M1
+rather than after it. §15.1 has the dependency argument and §15.9 has the terms
+it runs under.
+
 **M2.5 exit criteria.**
 
 1. One decomposition and three selection rules — union, difference,
@@ -803,6 +807,10 @@ moment a second predicate took constructed input.
 The second and fourth of these are the same kind of mistake — a meaning settled
 in one place and not carried to the other. §13 rule 4 is the general form.
 
+**Amended 2026-08-30.** The first, second and fourth are settled in §15 —
+§15.3, §15.2 and §15.6 respectively — because M1 and M2.5 both push on them and
+two heads settling them separately is how §12.4 happened.
+
 ---
 
 ## 13. How work is decomposed
@@ -986,3 +994,284 @@ union and intersection, which catches argument-order dependence — the defect
 `A ∪ A ≡ A`, `A ∩ A ≡ A`, `A \ A ≡ ∅`, `A ∪ (A ∩ B) ≡ A`. And
 `fuse([A,B,C]) ≡ fuse([fuse([A,B]), C])`, which takes genuinely different paths
 and tests the whole reason roadmap §7.2 exists.
+
+---
+
+## 15. Shared meanings, settled before M1 and M2.5 fan out
+
+*Recorded 2026-08-30, before either milestone starts.*
+
+§13 rule 2 says a milestone is shaped gate, fan, gate. §13 rule 4 says the
+shared meanings get settled in the gate, in writing, because two people making
+the same decision independently make it twice, differently — §12.4 is what that
+looks like afterwards.
+
+M1 and M2.5 are going to run side by side (§15.1). That makes one gate serve two
+milestones, so this section is it. Everything here is a meaning that both would
+otherwise have to decide, and every one of them is decided here rather than in
+either milestone.
+
+### 15.1 M1 and M2.5 do not depend on each other, and M2.5 does not need M2
+
+`rcad-topo` depends on `rcad-geom` and never the other way round (§7.2). M1 is
+work inside `rcad-geom`; the M2.5 fuse is work inside `rcad-topo`. Neither
+consumes anything the other produces:
+
+- The planar fuse needs `Plane` — including `basis`, `plane_coordinates_of`,
+  `point_at` and `meet_of_three` — plus `Segment`, `Point`, `Isometry` and
+  `Surface::as_plane`. All of that shipped in M0. Nothing in a knot vector or a
+  control net reaches it. Edges do not even store a curve (§3.1), so M1's
+  `Curve` never appears in the fuse's path.
+- M1 consumes nothing from topology. That is the whole point of §7.2, and it is
+  what makes "ship M1 standalone" possible at all.
+
+**M2.5 also does not need M2.** M2 is tessellation and rendering on curved
+geometry, and curved geometry is M1's output. Building a planar solid and
+validating it landed in M0 instead (§3.1), and classification already
+triangulates faces to cast rays through. So the fuse's inputs are all present.
+
+This is recorded as a departure in the §1 sense: the numbering says M1, M2, M2.5
+in that order and the dependencies do not. Running M2.5 alongside M1 serves
+§1.7's own argument, which is that the refusal rate is worth having early — it
+arrives earlier still. A later reader who finds the two milestones landing
+together should read this, not the numbering.
+
+**What that costs, and the honest counter-argument.** §13 rule 6: review is the
+constraint, not authoring, and two milestones in flight is more code per unit of
+review. §12.1 is the evidence — three bugs shipped through a green 335-test
+suite and were found only by review. Rule 6 permits going wider across a crate
+boundary that is already a stable contract, and this one is, for planar work.
+Permits, not recommends. If review starts slipping, the milestone to pause is
+M2.5, because M1 is on the critical path to M2, M3 and everything after.
+
+### 15.2 An `Approximation` magnitude is a length
+
+**Settled: the magnitude on an entity is how far a point could be out of place,
+in the model's own unit. Never the raw value of a predicate.**
+
+§12.4 fixed the budget end of this and left the tagging end alone; §12.6's
+second gap is the leftover. Today `resolve_under_policy` is handed the
+`Measures` of the predicate that gave up, uses it to pick a budget, and then
+stores the raw enclosure in the tag and throws the units away. So an
+`Approximation` off `orient2d` is an area, off `orient3d` a volume, and off the
+dynamic-range check a length — three different quantities in one `f64` field
+with one name.
+
+The conversion is already written down, in `Measures`' own doc comment: move a
+corner by `w` at working size `s` and a predicate of that degree moves by about
+`w · s^(degree−1)`. Turn it round:
+
+```
+wobble = enclosure ÷ working_size^(degree − 1)
+```
+
+Length divides by one and passes through unchanged, which is why the
+dynamic-range check was already right. Area divides by `s`, volume by `s²`.
+
+**What was already right, and what this adds.** Since
+`max_slop = 64·ε·s^degree`, the wobble a tolerant policy permits already comes
+to `64·ε·s` whatever the predicate degree — §12.4 got that far when it made the
+budget carry units. What it did not do is put the *tag* in those terms, so the
+number stored on an entity is still in the units of whichever predicate happened
+to produce it. This rule finishes the job: budget and tag measure the same
+thing, which is what lets §15.3 compare them and §5.4 order them.
+
+The uniform `64·ε·s` is worth a test either way, because it is the property that
+breaks first if a degree is ever added to `Measures` without its conversion.
+
+**Which working size.** The one the tolerant policy already carries, since the
+conversion happens inside `resolve_under_policy`'s tolerant branch and nothing
+outside it produces a tag from an enclosure. No new plumbing. That the model's
+`Scale::nominal_size` is a second copy of the same number is a seam worth
+watching, not one to fix here.
+
+**This is an accounting figure, not a bound, and that has to be said out loud.**
+The true sensitivity of a predicate to a moved corner is its gradient at the
+configuration in hand, and a sliver triangle has a small one — the same
+enclosure there means a larger real wobble than `s^(degree−1)` suggests. What
+the rule buys is a number that can be compared between two entities and summed
+across an operation, which is the only thing a stored magnitude is for.
+
+Rejected: use the actual gradient. More faithful, and it gives up the one
+property that makes the number worth storing — the tag would depend on where the
+part sits and what shape the triangle is, so two tags could no longer be
+compared, and §5.4's ordering check would be comparing noise. It also costs a
+gradient evaluation on every non-certified decision. Noted as the escape hatch
+if the stand-in ever proves too loose to act on.
+
+**The named consumer**, per §13 rule 3, already exists:
+`check_approximation_ordering` in `validate.rs` compares vertex against edge
+against face, and §5.4's `tol(vertex) ≥ tol(edge) ≥ tol(face)` is only a
+statement about anything once all three are lengths.
+
+### 15.3 An operation judges a wobble, and the field is named for it
+
+`Policy::max_enclosure` and `enclosure_is_acceptable` still have no caller
+(§12.6, first gap); §1.7's exit criterion 7 gives them one. Before that caller
+is written, two things get settled.
+
+**The operation judges in lengths.** Once §15.2 makes every tag a wobble, the
+operation-level question — is this solid's worst slop small enough to hand
+back — is a question about a length. So `max_enclosure`'s `Measures` argument is
+not a choice the caller gets to make; there is exactly one right answer to pass,
+and an argument with one right answer is a way to get it wrong.
+
+**So the names change**, while there is still no caller to break:
+
+| Was | Is | Means |
+|---|---|---|
+| `Policy::max_enclosure(Measures)` | `Policy::max_wobble()` | the widest a point may be out of place, `64·ε·working_size` |
+| `Policy::enclosure_is_acceptable(f64, Measures)` | `Policy::wobble_is_acceptable(f64)` | judged against the above |
+| `ProvenanceLog::worst_enclosure()` | `ProvenanceLog::worst_wobble(working_size)` | the worst wobble in the log |
+
+`Record::enclosure()` stays as it is and keeps returning the raw value in the
+predicate's own units — it is the honest record of what the cascade saw, and
+that is what a record is for. `Record` grows a `measures()` so the units are no
+longer lost at the moment the record is made.
+
+`ProvenanceLog::worst_enclosure` is the one that has to go rather than merely
+being renamed. It folds a maximum over records whose values need not share a
+degree. No operation in the tree mixes degrees into one log yet — the profile
+builder records only `orient2d` areas, classification only `orient3d` volumes,
+`Model::validate` only the dynamic-range check's length, and the swept-area
+check builds a fresh log inside the error it returns. Nothing stops the mixing
+though: a caller may hand the same log to two operations, and `drain_into`
+exists precisely so one operation's log can be folded into another's. The fuse
+is the first thing that will mix degrees on purpose. That is §12.4 one level up,
+waiting for a caller.
+
+§2.6 lists these as fields of `Policy` and it still does. This renames them, and
+records that the old names were the invitation: a field called `max_enclosure`
+asks to be compared against a raw enclosure, which is the units bug it exists to
+prevent.
+
+### 15.4 `Decision` does not grow during the parallel window
+
+§3.6 says `Decision` is `#[non_exhaustive]` because it grows at every milestone,
+and §2.1 says every call site matches all its cases on purpose. Both are still
+true. Together they mean a new variant landing in one worktree breaks every
+match in the other — and the matches that do not break are worse, because
+`classify.rs` and `validate.rs` handle an unknown variant by panicking, which
+turns a merge into a runtime failure somewhere else.
+
+**Neither M1 nor M2.5 adds a variant.** Nothing either needs one for: a NURBS
+point that cannot be placed is `Undecidable`, which is what `Undecidable` is.
+If one of them turns out to need one anyway, that is not a change to make inside
+a fan piece — it stops the fan, reopens this gate, and gets written down here.
+
+### 15.5 No decision is taken on projected coordinates
+
+**Settled: the fuse decides in 3D, on stored coordinates, through `orient3d`.
+`orient2d` keeps taking exact `[f64; 2]` and nothing else.**
+
+Projecting into a face's plane is tempting, because splitting a planar face is a
+2D problem and `plane_coordinates_of` is right there. It is also a way to throw
+away exactness for free: `Plane::basis` normalizes, so projecting a vertex whose
+3D coordinates are exact produces 2D coordinates that are not. Every projected
+point is a constructed point, level 3 of the cascade can no longer run on it
+(§2.5), and the fuse would be manufacturing the undecidability §1.7 exists to
+measure. Exit criterion 8 would then report a number about our projection, not
+about the geometry — §14.7's warning, arriving by a different road.
+
+`orient2d`'s only caller today is the profile builder, whose input is `[f64; 2]`
+from the caller and genuinely exact. That stays true.
+
+If the fuse turns out to need a 2D predicate on constructed input, growing
+`orient2d` to take a point that may be exact or constructed is gate work, not
+fan work: it is a change to `rcad-predicates`, which §15.9 freezes.
+
+### 15.6 A bound lives beside the expression it bounds; a safety factor lives beside its consumer
+
+§12.6's fourth gap is `Model::validate`'s `allowed_wobble`, whose `64·ε` is a
+guess where a rigorous `3·ε` exists. It is half fixed: `MEASURING_ROUNDOFF` now
+derives the `3·ε` in its doc comment and says plainly that the twentyfold on top
+is not derived. What it does not do is live in the same crate as
+`Plane::signed_distance_to`, the expression it is a bound on.
+
+M1 is about to write a great many bounds — partition of unity over p+1 terms,
+evaluation, derivatives — so the rule matters more than the one case:
+
+1. **A bound on an expression is a named public constant in the same module as
+   the expression**, with its derivation in its doc comment. `ORIENT3D_ERROR_BOUND`
+   is the pattern.
+2. **A safety factor is a separate named constant at the consumer**, with its
+   own reason. Multiplying a derived bound by twenty is a judgement about how
+   much slack a caller wants, and it is not part of the bound.
+
+Applied to the open case: the `3·ε` moves to `rcad-geom` next to
+`signed_distance_to`; the twentyfold stays in `validate.rs` under its own name.
+This is why the fix lands before the fork — it touches `rcad-geom`, which M1
+owns from then on.
+
+### 15.7 The intersection result type lives in `rcad-topo`
+
+§1.7 requires the fuse to consume an intersection *result* that carries an
+enclosure and an `Approximation` from its first line, so that M3's curved
+intersector is a new producer rather than a new contract.
+
+**It goes in `rcad-topo`.** §13 rule 3: its only consumer is the fuse, and the
+fuse is there. Putting it in `rcad-geom` where M3's producer will eventually
+live builds a thing with no consumer in the milestone that builds it — the
+mistake §12.6's first gap records — and it would put the one type the two
+milestones share into the crate M1 is rewriting.
+
+Its `Approximation` is a length, per §15.2. The planar producer leaves it at
+zero and fills in nothing else; that it is never populated in M2.5 is the point.
+
+When M3 gives it a second producer, moving it down to `rcad-geom` is a
+relocation and nothing more, since `rcad-topo` already depends on `rcad-geom`.
+Recorded so that move reads as planned rather than as a layering mistake being
+corrected.
+
+### 15.8 "Refusal rate" and "deserved refusal" are two different numbers
+
+§1.7's exit criterion 8 wants a refusal rate. §14.7 wants an acceptance oracle —
+proof that a refusal was deserved rather than a timid filter. They are the same
+worry from two sides, and left alone the two milestones would produce two
+numbers with one name.
+
+- **Refusal rate (M2.5, criterion 8)** is counted **per operation**: the share
+  of fuse operations over the §1.7 corpus that come back `Error::Undecidable`
+  under `Policy::certified()`. Per operation, because that is the unit a user
+  experiences a refusal in, and because §1.7's risk is about whether the kernel
+  is usable.
+- **The acceptance oracle (M1, §14.7)** is **per case, pass or fail, not a
+  rate**: cases whose answer is exactly computable, which `Policy::certified()`
+  must decide. A single one failing is a bug, not a percentage going up.
+
+Both get written down; neither gets called "the refusal rate" except the first.
+
+### 15.9 What lands before the fork, and who owns what after
+
+**Before either worktree opens.** Each of these needs a test that fails without
+it, per `CLAUDE.md`:
+
+1. `Record` carries its `Measures` and can report a wobble (§15.2, §15.3).
+2. `resolve_under_policy` tags a wobble rather than a raw enclosure (§15.2).
+   The test worth having is the falls-out property: one tolerant policy permits
+   `64·ε·working_size` of wobble whatever the predicate degree.
+3. `ProvenanceLog::worst_enclosure` becomes `worst_wobble(working_size)`; the
+   `Policy` pair is renamed (§15.3).
+4. The `3·ε` bound moves next to `Plane::signed_distance_to`, and the safety
+   factor stays at its consumer under its own name (§15.6).
+
+Items 1–3 are in `rcad-predicates` and item 4 is in `rcad-geom` — both crates
+the fork would otherwise contend for, which is why all four land first. None is
+large. Doing them afterwards means doing them twice.
+
+**After the fork.**
+
+| Crate | Owner during the window | Rule |
+|---|---|---|
+| `rcad-geom` | M1 | M2.5 may **add** items — a two-plane meet beside `meet_of_three` is the expected one. It may not change what anything already there means. |
+| `rcad-topo` | M2.5 | M1 has no business here. |
+| `rcad-predicates` | nobody | Frozen. A change reopens this gate and stops both fans. |
+| `rcad` facade | both | Re-export lists only. A textual conflict, never a semantic one. |
+| `docs/decisions.md` | both | Append only. M1 writes §16, M2.5 writes §17; those numbers are reserved now so the two never collide. |
+
+Two worktrees, and each gets its own `target/`. Sharing `CARGO_TARGET_DIR`
+between them only makes the builds wait on each other's lock.
+
+§13 rule 5 is satisfied without anyone arranging it: M1 generates knot vectors
+and control nets, M2.5 generates extruded polygons and the §7.4 catalogue. The
+two suites cannot go green together for the same wrong reason.
