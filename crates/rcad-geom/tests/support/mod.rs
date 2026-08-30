@@ -13,15 +13,35 @@
 //! that caught `ProfileBuilder` turning away a right triangle
 //! (`docs/decisions.md` §12.3).
 //!
+//! # The knots are not all small whole numbers
+//!
+//! They used to be — `0, 1, 2, 3` and `[0, 1]`, in every family. The de Boor
+//! coefficients are worked out from the knots and from nothing else, so a suite
+//! whose knots are always the same handful of numbers runs the same
+//! coefficients over and over however wild its control nets are. That is
+//! `docs/decisions.md` §12.3's one family of shapes finding one family of bugs,
+//! aimed at the arithmetic this milestone is actually made of.
+//!
+//! So each family draws a [`WhereTheKnotsGo`] and lays its knots down there:
+//! wildly different sizes, offsets far from zero, and spans whose widths differ
+//! by six orders of magnitude within one curve. The placement keeps every knot
+//! a whole multiple of a power of two, which is what makes the result valid **by
+//! construction** rather than by a filter — see [`WhereTheKnotsGo`] for the
+//! argument, and [`spans_enough_for_an_untouched_one`] for why every family
+//! carries the number of spans it does.
+//!
 //! Below the families are the shapes the enclosure measurement is taken on —
 //! sized by working size rather than drawn at random, so a figure written down
 //! in one run means the same thing in the next — and the reading itself,
-//! [`WidestEnclosure`].
+//! [`WidestEnclosure`]. Beside them, in [`rational`], is the exact answer the
+//! suites that need one check themselves against.
 
 // Every test binary that includes this module compiles all of it and uses a
 // subset, so most of what is here is dead code from any one of their points of
 // view.
 #![allow(dead_code)]
+
+pub mod rational;
 
 use core::ops::Range;
 
@@ -29,12 +49,16 @@ use proptest::prelude::*;
 use rcad_geom::{Axis, BSplineCurve, BSplineSurface, KnotVector, Point};
 use rcad_predicates::{Interval, Point as PredicatePoint};
 
-/// Family 1: uniform clamped knots, a control net scattered about the origin,
-/// every weight exactly one — the polynomial baseline.
+/// Family 1: knots of one width all the way along, a control net scattered
+/// about the origin, every weight exactly one — the polynomial baseline.
+///
+/// Uniform is about the spans being equal to each other, not about them being
+/// one unit wide: the whole run sits wherever [`WhereTheKnotsGo`] puts it.
 pub fn a_uniform_polynomial_curve() -> impl Strategy<Value = BSplineCurve> {
-    (1usize..=5, 1usize..=6)
-        .prop_flat_map(|(degree, spans)| {
-            let knots = uniform_clamped_knots(degree, spans);
+    (1usize..=5, 0usize..=2, where_the_knots_go())
+        .prop_flat_map(|(degree, more_spans, place)| {
+            let spans = spans_enough_for_an_untouched_one(degree) + more_spans;
+            let knots = clamped_knots(degree, place, &vec![1; spans], &vec![1; spans - 1]);
             let net = a_control_net(knots.control_point_count(), -100.0..100.0);
             (Just(knots), net)
         })
@@ -44,16 +68,19 @@ pub fn a_uniform_polynomial_curve() -> impl Strategy<Value = BSplineCurve> {
         })
 }
 
-/// Family 2: interior knots repeated anywhere from once up to `degree` times —
-/// the kinks, and the seam a split lands on.
+/// Family 2: interior knots repeated anywhere from once up to `degree` times,
+/// on spans whose widths differ by six orders of magnitude — the kinks, and the
+/// seam a split lands on.
 pub fn a_curve_with_repeated_interior_knots() -> impl Strategy<Value = BSplineCurve> {
-    (2usize..=5, 2usize..=5)
-        .prop_flat_map(|(degree, spans)| {
+    (2usize..=5, 0usize..=2, where_the_knots_go())
+        .prop_flat_map(|(degree, more_spans, place)| {
+            let spans = spans_enough_for_an_untouched_one(degree) + more_spans;
+            let widths = proptest::collection::vec(a_span_width(), spans);
             let multiplicities = proptest::collection::vec(1usize..=degree, spans - 1);
-            (Just(degree), Just(spans), multiplicities)
+            (Just(degree), Just(place), widths, multiplicities)
         })
-        .prop_flat_map(|(degree, spans, multiplicities)| {
-            let knots = clamped_knots_repeating(degree, spans, &multiplicities);
+        .prop_flat_map(|(degree, place, widths, multiplicities)| {
+            let knots = clamped_knots(degree, place, &widths, &multiplicities);
             let net = a_control_net(knots.control_point_count(), -100.0..100.0);
             (Just(knots), net)
         })
@@ -65,10 +92,14 @@ pub fn a_curve_with_repeated_interior_knots() -> impl Strategy<Value = BSplineCu
 
 /// Family 3: interior knots one `f64` apart and control points sitting on top
 /// of one another — spans too narrow to see, which nothing may snap shut.
+///
+/// A hair is measured from wherever the block of narrow knots sits, so the same
+/// shape turns up at a micron and at `2^80`.
 pub fn a_curve_with_spans_too_narrow_to_see() -> impl Strategy<Value = BSplineCurve> {
-    (1usize..=4, 2usize..=4)
-        .prop_flat_map(|(degree, narrow_knots)| {
-            let knots = clamped_knots_a_hair_apart(degree, narrow_knots);
+    (1usize..=4, 0usize..=2, a_base_to_measure_a_hair_from())
+        .prop_flat_map(|(degree, more_spans, base)| {
+            let narrow_knots = spans_enough_for_an_untouched_one(degree) - 1 + more_spans;
+            let knots = clamped_knots_a_hair_apart(degree, narrow_knots, base);
             let net = a_control_net(knots.control_point_count(), -10.0..10.0);
             (Just(knots), net)
         })
@@ -83,9 +114,14 @@ pub fn a_curve_with_spans_too_narrow_to_see() -> impl Strategy<Value = BSplineCu
 /// six orders of magnitude, aimed straight at the precondition the published
 /// evaluation bound rests on.
 pub fn a_curve_spanning_a_wide_range_of_sizes() -> impl Strategy<Value = BSplineCurve> {
-    (1usize..=4, 1usize..=4)
-        .prop_flat_map(|(degree, spans)| {
-            let knots = uniform_clamped_knots(degree, spans);
+    (1usize..=4, 0usize..=2, where_the_knots_go())
+        .prop_flat_map(|(degree, more_spans, place)| {
+            let spans = spans_enough_for_an_untouched_one(degree) + more_spans;
+            let widths = proptest::collection::vec(a_span_width(), spans);
+            (Just(degree), Just(place), widths)
+        })
+        .prop_flat_map(|(degree, place, widths)| {
+            let knots = clamped_knots(degree, place, &widths, &vec![1; widths.len() - 1]);
             let count = knots.control_point_count();
             let coordinates = proptest::collection::vec(a_coordinate_of_any_size(), count * 3);
             let weights = proptest::collection::vec(a_size(-3..3), count);
@@ -208,7 +244,7 @@ pub const THE_DISTANCE_ONLY_EXACT_ARITHMETIC_CAN_PLACE: f64 = 198_489_546.0;
 /// A curve of `degree` whose control points fill a box `working_size` across,
 /// with every weight one — the well-behaved shape, for measuring against.
 pub fn a_well_conditioned_curve(degree: usize, working_size: f64) -> BSplineCurve {
-    let knots = uniform_clamped_knots(degree, 3);
+    let knots = knots_at_whole_numbers(degree, 3);
     let count = knots.control_point_count();
     let points: Vec<Point> = (0..count)
         .map(|i| {
@@ -225,7 +261,7 @@ pub fn a_well_conditioned_curve(degree: usize, working_size: f64) -> BSplineCurv
 /// A curve of `degree` whose control points run from `working_size` down to a
 /// millionth of it and whose weights cover six orders of magnitude.
 pub fn a_curve_with_a_wide_dynamic_range(degree: usize, working_size: f64) -> BSplineCurve {
-    let knots = uniform_clamped_knots(degree, 3);
+    let knots = knots_at_whole_numbers(degree, 3);
     let count = knots.control_point_count();
     let points: Vec<Point> = (0..count)
         .map(|i| {
@@ -242,7 +278,7 @@ pub fn a_curve_with_a_wide_dynamic_range(degree: usize, working_size: f64) -> BS
 
 /// The tensor-product patch of two [`a_well_conditioned_curve`] nets.
 pub fn a_well_conditioned_surface(degree: usize, working_size: f64) -> BSplineSurface {
-    let knots = uniform_clamped_knots(degree, 3);
+    let knots = knots_at_whole_numbers(degree, 3);
     let count = knots.control_point_count();
     let points: Vec<Point> = (0..count * count)
         .map(|i| {
@@ -259,7 +295,7 @@ pub fn a_well_conditioned_surface(degree: usize, working_size: f64) -> BSplineSu
 
 /// The patch version of [`a_curve_with_a_wide_dynamic_range`].
 pub fn a_surface_with_a_wide_dynamic_range(degree: usize, working_size: f64) -> BSplineSurface {
-    let knots = uniform_clamped_knots(degree, 3);
+    let knots = knots_at_whole_numbers(degree, 3);
     let count = knots.control_point_count();
     let points: Vec<Point> = (0..count * count)
         .map(|i| {
@@ -470,48 +506,150 @@ pub fn width_in_ulps(side: Interval) -> f64 {
     side.width() / (magnitude.next_up() - magnitude)
 }
 
-/// Clamped knots with `spans` interior spans, all of the same width.
+/// The fewest spans a curve needs for a knot inserted anywhere in it to leave a
+/// whole span alone.
 ///
-/// `[0]*(p+1) ++ [1, 2, …, spans-1] ++ [spans]*(p+1)`: every knot is finite, the
-/// sequence rises, both clamps are exactly `p + 1` long, every interior knot
-/// appears once, and every span has width one.
-fn uniform_clamped_knots(degree: usize, spans: usize) -> KnotVector {
-    clamped_knots_repeating(degree, spans, &vec![1; spans - 1])
+/// Boehm rewrites control points `span − degree + 1 … span` and adds a knot, so
+/// an evaluation is untouched by it only in a span `degree` clear of the
+/// insertion on one side or the other. Number the spans of positive width
+/// `s₁ … s_S` by their knot index; consecutive ones are at least one index
+/// apart, `s₁` is `degree` and `s_S` is the last span index. For the insertion
+/// span `s_t` either `t − 1 ≥ degree`, and then `s₁` is at least `degree` below
+/// it, or `t ≤ degree`, and then with `S ≥ 2·degree` there are `degree` spans
+/// left above it and `s_S` is at least `degree` above. So `2·degree` spans is
+/// enough whatever the multiplicities are, and it is what every family here
+/// carries.
+///
+/// A curve with fewer spans than this is not a curve to skip — it is a
+/// different claim, and
+/// `inserting_a_knot_does_not_move_the_far_end.rs` states it separately.
+fn spans_enough_for_an_untouched_one(degree: usize) -> usize {
+    2 * degree
 }
 
-/// Clamped knots where the `k`th interior knot is repeated
-/// `multiplicities[k]` times.
+/// Where a family lays its knots down: a step and how many steps along the
+/// first one sits.
 ///
-/// Every multiplicity has to be between 1 and `degree`, which is the most an
-/// interior knot may repeat.
-fn clamped_knots_repeating(degree: usize, spans: usize, multiplicities: &[usize]) -> KnotVector {
-    assert_eq!(multiplicities.len(), spans - 1);
-    let mut knots = vec![0.0; degree + 1];
-    for (interior, &times) in multiplicities.iter().enumerate() {
+/// Knot `n` steps along is `step · (from + n)`, with `step` a power of two and
+/// `from` and `n` whole numbers well under `2^53`. Both operations are exact —
+/// a sum of two whole numbers that size is exact, and multiplying by a power of
+/// two only moves an exponent — so the knots are exactly the numbers the family
+/// asked for. Nothing can round two distinct knots together, shut a span, or
+/// turn `degree` copies of a knot into `degree + 1`, which is what makes every
+/// family valid **by construction** and not by a filter.
+///
+/// The step reaches `2^±80`, so knots turn up anywhere across 48 orders of
+/// magnitude; and `from` reaches a million steps away from zero, so a span one
+/// step wide can sit thirty million steps from the origin — seven orders of
+/// magnitude between a span's own width and how far out it is. That is the case
+/// where `u − knots[i]` loses most of its bits, and no generator here used to
+/// make it.
+#[derive(Clone, Copy, Debug)]
+pub struct WhereTheKnotsGo {
+    step: f64,
+    from: f64,
+}
+
+impl WhereTheKnotsGo {
+    /// The knot `steps_along` steps past the first one.
+    fn at(self, steps_along: u64) -> f64 {
+        self.step * (self.from + steps_along as f64)
+    }
+}
+
+/// Knots at whole multiples of anything from `2^-80` to `2^80`, starting
+/// anywhere from the origin to a million steps either side of it.
+///
+/// The range is held well inside what [`KnotVector::new`] takes: the widest
+/// vector this can build runs from its first knot to its last about `2^105`,
+/// where the refusal for knots too far apart to subtract starts at `f64::MAX`.
+fn where_the_knots_go() -> impl Strategy<Value = WhereTheKnotsGo> {
+    let starts = prop_oneof![
+        Just(0i64),
+        -8i64..=8,
+        -1_000i64..=1_000,
+        -1_000_000i64..=1_000_000,
+    ];
+    (-80i32..=80, starts).prop_map(|(exponent, from)| WhereTheKnotsGo {
+        step: 2f64.powi(exponent),
+        from: from as f64,
+    })
+}
+
+/// How many steps wide one span is: a handful, a thousand, or a million.
+///
+/// Neighbouring spans drawn from this differ by up to six orders of magnitude,
+/// which is the ratio a de Boor coefficient divides by.
+fn a_span_width() -> impl Strategy<Value = u64> {
+    prop_oneof![1u64..=8, 1_000u64..=2_000, 1_000_000u64..=2_000_000]
+}
+
+/// Clamped knots at `place`, with one entry of `widths` per span and one entry
+/// of `multiplicities` per interior knot.
+///
+/// Every width is at least one step, so every span has width; every
+/// multiplicity is between one and `degree`, which is the most an interior knot
+/// may repeat.
+fn clamped_knots(
+    degree: usize,
+    place: WhereTheKnotsGo,
+    widths: &[u64],
+    multiplicities: &[usize],
+) -> KnotVector {
+    assert_eq!(multiplicities.len(), widths.len() - 1);
+    let mut steps_along = 0;
+    let mut knots = vec![place.at(steps_along); degree + 1];
+    for (&width, &times) in widths.iter().zip(multiplicities) {
+        assert!(width >= 1, "a span of no steps is a span of no width");
         assert!(
             (1..=degree).contains(&times),
             "an interior knot may repeat up to the degree, not {times} times"
         );
-        knots.extend(core::iter::repeat_n(interior as f64 + 1.0, times));
+        steps_along += width;
+        knots.extend(core::iter::repeat_n(place.at(steps_along), times));
     }
-    knots.extend(core::iter::repeat_n(spans as f64, degree + 1));
+    steps_along += widths[widths.len() - 1];
+    knots.extend(core::iter::repeat_n(place.at(steps_along), degree + 1));
 
     KnotVector::new(degree, knots).expect("clamped at both ends, rising, and no repeat past degree")
 }
 
-/// Clamped knots over `[0, 1]` whose interior knots are consecutive `f64`,
-/// starting at a half.
+/// Clamped knots at whole numbers one apart, `spans` of them.
 ///
-/// The span from 0 to a half carries all the width there is; the ones after it
-/// are as narrow as `f64` can make them without shutting.
-fn clamped_knots_a_hair_apart(degree: usize, narrow_knots: usize) -> KnotVector {
-    let mut knots = vec![0.0; degree + 1];
-    let mut interior = 0.5f64;
+/// Where the sized shapes above put their knots. They are laid out rather than
+/// drawn so that a width measured in one run means the same thing in the next,
+/// and their knots are held fixed for the same reason.
+fn knots_at_whole_numbers(degree: usize, spans: usize) -> KnotVector {
+    let place = WhereTheKnotsGo {
+        step: 1.0,
+        from: 0.0,
+    };
+    clamped_knots(degree, place, &vec![1; spans], &vec![1; spans - 1])
+}
+
+/// A number anywhere from `2^-80` to `2^80` to measure a hair from.
+///
+/// The mantissa stops short of `1.5` so that a handful of `next_up`s cannot
+/// carry the block of narrow knots into the next binade, which would make the
+/// hairs there twice as wide as the ones below them.
+fn a_base_to_measure_a_hair_from() -> impl Strategy<Value = f64> {
+    (-80i32..=80, 1.0f64..1.5).prop_map(|(exponent, mantissa)| mantissa * 2f64.powi(exponent))
+}
+
+/// Clamped knots from `base / 2` up, whose interior knots are consecutive
+/// `f64` starting at `base`.
+///
+/// The span from `base / 2` to `base` carries all the width there is; the ones
+/// after it are as narrow as `f64` can make them without shutting, and the top
+/// clamp sits one more step above the last of them.
+fn clamped_knots_a_hair_apart(degree: usize, narrow_knots: usize, base: f64) -> KnotVector {
+    let mut knots = vec![base / 2.0; degree + 1];
+    let mut interior = base;
     for _ in 0..narrow_knots {
         knots.push(interior);
         interior = interior.next_up();
     }
-    knots.extend(core::iter::repeat_n(1.0, degree + 1));
+    knots.extend(core::iter::repeat_n(interior, degree + 1));
 
     KnotVector::new(degree, knots)
         .expect("consecutive f64 are distinct, so every interior knot appears once")

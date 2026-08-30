@@ -10,6 +10,14 @@
 //! is something a human reads, and `docs/decisions.md` §12.5 was honest that
 //! nobody notices one of those regressing. The bench is where the figure comes
 //! from; this is what fails CI when it drifts.
+//!
+//! It is read two ways, because one reading stopped covering everything. Steps
+//! of the model's working size is the figure a person asks for, and it is held
+//! to a tight ceiling on the shapes where it means something. On a curve whose
+//! weights span six orders of magnitude over knots spaced a million to one it
+//! measures the curve's own conditioning rather than the arithmetic, so that
+//! family is held to the share of the published bound the box uses up instead.
+//! Both constants below say what was measured and over how many draws.
 
 #![forbid(unsafe_code)]
 
@@ -44,24 +52,52 @@ use support::{
 /// degree 5 would show up here at once.
 const WIDEST_ENCLOSURE_AT_AN_ORDINARY_WORKING_SIZE: f64 = 64.0;
 
-/// The same for a randomly generated curve, where the weights alone can span
-/// six orders of magnitude.
+/// The same for a generated curve whose weights are all one — families 1 to 3.
 ///
-/// Wider on purpose, and the reason is family 4: a curve whose weights run from
-/// a thousandth to a thousand has homogeneous control points five hundred times
-/// larger than its affine ones, and the box is measured against the affine size
-/// a caller thinks in. Over a hundred thousand draws of that family the worst
-/// was 157 steps, three in a hundred thousand went past 128, and none reached
-/// 256. Families 1 to 3 never passed 41.
+/// **Measured over a hundred thousand draws of each**: the worst was 32 steps
+/// for family 1, 55 for family 2 and 46 for family 3, with 99th percentiles of
+/// 26, 50 and 34. The tail is thin, so this is a little over twice the worst,
+/// rounded to a power of two — the same shape of safety factor as the constant
+/// above and tight enough that a doubling of the width shows up here at once.
 ///
-/// So: three times the worst of a hundred thousand draws, rounded to a power of
-/// two. Loose enough that a normal run cannot trip it by luck, tight enough
-/// that a tenfold widening cannot hide behind it.
+/// If it fails, the answer is not a bigger number. It is a real widening to
+/// find, or it is the news that M3's certified marching needs centred forms —
+/// which is the thing these figures were measured to decide.
+const WIDEST_ENCLOSURE_FROM_A_CURVE_OF_PLAIN_WEIGHTS: f64 = 128.0;
+
+/// What a curve whose weights span six orders of magnitude is held to instead:
+/// how much of the published bound the box uses up.
 ///
-/// If either ceiling fails, the answer is not a bigger number. It is a real
-/// widening to find, or it is the news that M3's certified marching needs
-/// centred forms — which is the thing these figures were measured to decide.
-const WIDEST_ENCLOSURE_FROM_A_GENERATED_CURVE: f64 = 512.0;
+/// # Why family 4 gets a different reading
+///
+/// A width in steps of the working size stopped meaning what it meant. The old
+/// figure — worst 157 over a hundred thousand draws — was measured on knots
+/// that were always `0, 1, 2, 3`, where an evenly spaced sweep lands at tidy
+/// fractions of every span. The generators now put spans of a million steps
+/// next to spans of one, so a parameter can land a hair below a knot in a span
+/// a million times wider than its neighbour. There the de Boor coefficient
+/// comes out a hair under one, `1 − share` is a tiny number carrying the
+/// coefficient's own half-ulp, and against control weights in a ratio of tens
+/// of thousands the point is genuinely that uncertain. **Measured over a
+/// million draws of family 4**: median 15 steps, 99.9th 986, worst 66,120.
+///
+/// That is the curve being ill-conditioned, not the arithmetic being sloppy,
+/// and the box is honest about it. A ceiling in steps of the size would have to
+/// be near a million to stop flickering, which would assert nothing. It is
+/// worth knowing on its own account: certified marching along a rational curve
+/// of six decades of weight, on knots spaced like that, is the case M3 will
+/// need centred forms for.
+///
+/// So the ceiling for that family is scale-free instead. The box is compared
+/// with [`rcad_geom::EVALUATION_ROUNDOFF`]'s published bound at the same
+/// parameter, which carries the weights and the knots with it. **Measured over
+/// two hundred thousand draws of each family**: the box's half-width never
+/// passed 0.082 of the bound in family 1, 0.145 in family 2, 0.121 in family 3
+/// or 0.107 in family 4. This is a little over three times the worst of those.
+///
+/// The bound is a yardstick here and nowhere else — nothing intersects it with
+/// the enclosure at runtime, for the reason the test below its name gives.
+const WIDEST_SHARE_OF_THE_PUBLISHED_BOUND: f64 = 0.5;
 
 proptest! {
     /// The cross-check that `EVALUATION_ROUNDOFF` is deliberately not used for.
@@ -146,9 +182,31 @@ proptest! {
         }
     }
 
-    /// The ceiling, over everything the generated families can build.
+    /// The ceiling in steps of the working size, over the families whose
+    /// weights are all one.
     #[test]
-    fn no_generated_curve_has_an_enclosure_wider_than_the_ceiling(
+    fn no_generated_curve_of_plain_weights_has_an_enclosure_wider_than_the_ceiling(
+        curve in prop_oneof![
+            a_uniform_polynomial_curve(),
+            a_curve_with_repeated_interior_knots(),
+            a_curve_with_spans_too_narrow_to_see(),
+        ]
+    ) {
+        let widest = widest_enclosure_of_a_curve(&curve).in_ulps_of_the_size;
+        prop_assert!(
+            widest <= WIDEST_ENCLOSURE_FROM_A_CURVE_OF_PLAIN_WEIGHTS,
+            "a degree {} curve encloses its point in {widest} f64 steps of its own size",
+            curve.degree()
+        );
+    }
+
+    /// The scale-free ceiling, over all four families: the box never uses up
+    /// more than a fraction of what the published bound allows.
+    ///
+    /// This is the one family 4 is judged by, and the constant's note says why
+    /// steps of the working size stopped being the right reading for it.
+    #[test]
+    fn no_generated_curve_encloses_its_point_more_loosely_than_the_published_bound(
         curve in prop_oneof![
             a_uniform_polynomial_curve(),
             a_curve_with_repeated_interior_knots(),
@@ -156,12 +214,24 @@ proptest! {
             a_curve_spanning_a_wide_range_of_sizes(),
         ]
     ) {
-        let widest = widest_enclosure_of_a_curve(&curve).in_ulps_of_the_size;
-        prop_assert!(
-            widest <= WIDEST_ENCLOSURE_FROM_A_GENERATED_CURVE,
-            "a degree {} curve encloses its point in {widest} f64 steps of its own size",
-            curve.degree()
-        );
+        for u in parameters_across(curve.domain(), 65) {
+            // A `None` is the bound's precondition failing, which is a real
+            // answer about the input and not something to assert against.
+            let Some(allowed) = curve.evaluation_roundoff_at(u).unwrap() else {
+                continue;
+            };
+            for side in curve.evaluate_with_enclosure(u).unwrap().enclosure() {
+                // Half the box either side of the point is what the bound —
+                // a distance from the true point — is comparable with.
+                let share = side.width() / 2.0 / allowed;
+                prop_assert!(
+                    share <= WIDEST_SHARE_OF_THE_PUBLISHED_BOUND,
+                    "at {u} a degree {} curve encloses its point in {share} of the {allowed} \
+                     the published bound allows",
+                    curve.degree()
+                );
+            }
+        }
     }
 }
 

@@ -87,13 +87,17 @@ proptest! {
 
         // The narrow spans are still there: nothing merged them, and the two
         // control points sitting on top of each other are still two points.
+        // A hair is one `f64` step measured where the narrow knots sit, which
+        // is why the width is read off the first of them rather than written
+        // down as a number.
         let knots = curve.knots().knots();
         let narrowest = knots
             .windows(2)
             .map(|pair| pair[1] - pair[0])
             .filter(|width| *width > 0.0)
             .fold(f64::INFINITY, f64::min);
-        prop_assert_eq!(narrowest, 0.5f64.next_up() - 0.5);
+        let first_narrow_knot = knots[curve.degree() + 1];
+        prop_assert_eq!(narrowest, first_narrow_knot.next_up() - first_narrow_knot);
         prop_assert_eq!(curve.control_point(0), curve.control_point(1));
     }
 

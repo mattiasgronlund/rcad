@@ -33,8 +33,33 @@
 //!
 //! Every interior knot repeats exactly `degree` times, so each span reaches only
 //! its own three control points, and on each span the three weights are a
-//! multiple of `1, 1, 2`. The climb to sixteen is how the parametrization is
-//! written, not a loss of accuracy.
+//! multiple of `1, 1, 2`.
+//!
+//! # The climb costs no accuracy, and it does change the speed
+//!
+//! The point set is exactly the circle — checked at three thousand parameters
+//! in exact rational arithmetic with zero error, in
+//! `a_circle_built_from_dyadic_weights_is_exactly_a_circle.rs`. So the climb to
+//! sixteen takes nothing away from *where* the curve is.
+//!
+//! It is not free in *how fast* the curve is traced, and that is worth saying
+//! plainly because a caller can be caught by it. Span `k` carries the weights
+//! `2^k · (1, 1, 2)`, and a span whose weights are twice its neighbour's is
+//! traced at twice the parameter speed. So each quarter starts at twice the
+//! speed the one before it finished:
+//!
+//! - for a circle of radius 3, `|C'|` is 3 just below `u = 1` and 6 at it, and
+//!   the same doubling happens at `u = 2` and `u = 3`;
+//! - across the closure, `C'(0)` is `(0, 6, 0)` where `C'(4)` is `(0, 3, 0)` —
+//!   the same direction, twice the length.
+//!
+//! The curve is therefore **G1 and not C1**: the tangent direction is
+//! continuous everywhere, its magnitude is not. Anything that reads the
+//! derivative as a rate — arc length, offsetting, marching at a fixed step —
+//! has to take the speed from the curve rather than assume it is steady, and
+//! anything that only reads the direction is unaffected.
+//! `the_exact_circle_is_traced_twice_as_fast_after_every_quarter_join` pins the
+//! doubling so it cannot change unnoticed.
 //!
 //! # It is not periodic, and must not be built as if it were
 //!
@@ -160,10 +185,10 @@ impl BSplineCurve {
 /// gives the axis direction back.
 ///
 /// Which direction the circle starts in is this function's to choose, and it
-/// chooses so that the common cases cost nothing. The coordinate direction the
-/// axis leans on least is crossed into the axis and the result scaled to length
-/// one; for an axis along `z` that is `+x` and `+y`, along `x` it is `+y` and
-/// `+z`, and along `y` it is `+x` and `−z`. In each of those the cross product
+/// chooses so that the common cases cost nothing. The axis is crossed into the
+/// coordinate direction it leans on least and the result scaled to length one;
+/// for an axis along `z` that is `+x` and `+y`, along `x` it is `+y` and `+z`,
+/// and along `y` it is `+x` and `−z`. In each of those the cross product
 /// already has length exactly one, so the scaling divides by `1.0` and rounds
 /// nothing.
 ///
@@ -362,6 +387,57 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The whole circle is one point set traced at four different speeds, and
+    /// the module note says why.
+    ///
+    /// Splitting at a quarter join inserts nothing — the knot there already
+    /// repeats as often as the degree — so each half carries the stored net
+    /// unchanged and both one-sided tangents are exact. That is what lets this
+    /// be an `assert_eq` on whole numbers rather than a comparison against a
+    /// tolerance.
+    #[test]
+    fn the_exact_circle_is_traced_twice_as_fast_after_every_quarter_join() {
+        let radius = 3.0;
+        let circle = BSplineCurve::circle(Axis::z(), radius).unwrap();
+
+        assert_eq!(
+            circle.tangent(0.0).unwrap(),
+            Vector::new(0.0, 2.0 * radius, 0.0)
+        );
+        assert_eq!(
+            circle.tangent(4.0).unwrap(),
+            Vector::new(0.0, radius, 0.0),
+            "the curve comes back to where it started, going the same way at half the speed"
+        );
+
+        for join in [1.0, 2.0, 3.0] {
+            let (arriving, leaving) = circle.split_at(join).unwrap();
+            let before = arriving.tangent(join).unwrap();
+            let after = leaving.tangent(join).unwrap();
+
+            assert_eq!(
+                arriving.evaluate(join).unwrap(),
+                leaving.evaluate(join).unwrap(),
+                "the two quarters meet at the join, whatever the speed does"
+            );
+            assert_eq!(
+                after,
+                before * 2.0,
+                "at {join} the circle arrives at {before:?} and leaves at {after:?}"
+            );
+        }
+
+        let (first_quarter, _) = circle.split_at(1.0).unwrap();
+        assert_eq!(
+            first_quarter.tangent(1.0).unwrap(),
+            Vector::new(-radius, 0.0, 0.0)
+        );
+        assert_eq!(
+            circle.tangent(1.0).unwrap(),
+            Vector::new(-2.0 * radius, 0.0, 0.0)
+        );
     }
 
     /// The circle runs the way a right hand does about the axis: out to the

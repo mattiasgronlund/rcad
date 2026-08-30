@@ -26,9 +26,33 @@
 //! The scaled curve is built from the stored homogeneous net rather than from
 //! `control_point`, which divides the weight back out and rounds. Scaling the
 //! stored numbers is exact; scaling what comes back out of a divide is not.
+//!
+//! # Scaling the knots is the other half, and it is the half that bites
+//!
+//! Scaling the control net leaves the **knot vector bit-identical in both
+//! runs**, so every de Boor coefficient in the second run is the same number as
+//! in the first. The coefficients are where the knots are used, and they are
+//! the dangerous code: a scaling oracle that never varies them is a scaling
+//! oracle that never reaches them.
+//!
+//! So the knots are scaled too, by a power of two, with the net left alone. It
+//! is exactly true for the same reason and says something different:
+//!
+//! - a coefficient is `(u − knots[i]) / (knots[j] − knots[i])`, and both
+//!   subtractions scale by exactly `2^k`, so the coefficient is unchanged bit
+//!   for bit and **the point does not move at all**;
+//! - the derived net divides by a knot difference, so every derivative is the
+//!   old one divided by exactly `2^k`.
+//!
+//! The two runs are as different as they get: the same answer through
+//! coefficients formed from knots at a different size, and a tangent that has
+//! to come back scaled the other way from the thing that was scaled. Anything
+//! in the coefficients that looks at the size of a knot — a tolerance, a snap,
+//! a comparison against a fixed number — moves the point and fails here, and
+//! passes the net-scaling oracle above without a murmur.
 
 use proptest::prelude::*;
-use rcad_geom::{BSplineCurve, BSplineSurface};
+use rcad_geom::{BSplineCurve, BSplineSurface, KnotVector};
 
 #[path = "support/mod.rs"]
 mod support;
@@ -41,6 +65,7 @@ proptest! {
         along in 0.0f64..=1.0,
     ) {
         every_answer_scales(&curve, exponent, along)?;
+        every_answer_scales_when_the_knots_do(&curve, exponent, along)?;
     }
 
     #[test]
@@ -50,6 +75,7 @@ proptest! {
         along in 0.0f64..=1.0,
     ) {
         every_answer_scales(&curve, exponent, along)?;
+        every_answer_scales_when_the_knots_do(&curve, exponent, along)?;
     }
 
     /// Spans one `f64` wide make the derived net enormous. Scaling it must
@@ -61,6 +87,7 @@ proptest! {
         along in 0.0f64..=1.0,
     ) {
         every_answer_scales(&curve, exponent, along)?;
+        every_answer_scales_when_the_knots_do(&curve, exponent, along)?;
     }
 
     /// The family that reaches furthest towards the ends of the `f64` range,
@@ -72,6 +99,7 @@ proptest! {
         along in 0.0f64..=1.0,
     ) {
         every_answer_scales(&curve, exponent, along)?;
+        every_answer_scales_when_the_knots_do(&curve, exponent, along)?;
     }
 }
 
@@ -152,6 +180,56 @@ fn every_answer_scales(
     Ok(())
 }
 
+/// The same net read over knots stretched by `2^exponent`: the point does not
+/// move at all, and the tangent comes back divided by exactly that.
+///
+/// The parameter is stretched with the knots, because `u` names a place in the
+/// knots and not a length in space. `u · 2^k` is exact, so the two runs are
+/// asked about the same place on the same curve.
+fn every_answer_scales_when_the_knots_do(
+    curve: &BSplineCurve,
+    exponent: i32,
+    along: f64,
+) -> Result<(), TestCaseError> {
+    let factor = 2f64.powi(exponent);
+    let stretched = curve_with_knots_scaled_by(curve, factor);
+
+    let (lo, hi) = curve.domain();
+    let u = (lo + (hi - lo) * along).min(hi);
+    let stretched_u = u * factor;
+
+    let here = curve.evaluate(u)?.coordinates();
+    let there = stretched.evaluate(stretched_u)?.coordinates();
+    for axis in 0..3 {
+        prop_assert_eq!(
+            there[axis].to_bits(),
+            here[axis].to_bits(),
+            "stretching the knots by {} moved the point at {}, axis {}: {} against {}",
+            factor,
+            u,
+            axis,
+            there[axis],
+            here[axis]
+        );
+    }
+
+    let slope = curve.tangent(u)?.components();
+    let gentler = stretched.tangent(stretched_u)?.components();
+    for axis in 0..3 {
+        prop_assert_eq!(
+            gentler[axis].to_bits(),
+            (slope[axis] / factor).to_bits(),
+            "the tangent at {} over knots stretched by {}, axis {}: {} against {}",
+            u,
+            factor,
+            axis,
+            gentler[axis],
+            slope[axis] / factor
+        );
+    }
+    Ok(())
+}
+
 fn same_bits(here: [f64; 3], there: [f64; 3], factor: f64, what: &str) {
     for axis in 0..3 {
         assert_eq!(
@@ -172,6 +250,24 @@ fn curve_scaled_by(curve: &BSplineCurve, factor: f64) -> BSplineCurve {
         .collect();
     BSplineCurve::try_from((curve.knots().clone(), net))
         .expect("a power of two changes an exponent and nothing else")
+}
+
+/// The same curve over knots `factor` further apart, with the control net left
+/// exactly as it was.
+fn curve_with_knots_scaled_by(curve: &BSplineCurve, factor: f64) -> BSplineCurve {
+    let stretched: Vec<f64> = curve
+        .knots()
+        .knots()
+        .iter()
+        .map(|knot| knot * factor)
+        .collect();
+    let knots = KnotVector::new(curve.degree(), stretched)
+        .expect("a power of two moves every knot's exponent and leaves the order alone");
+
+    let net = (0..curve.control_point_count())
+        .map(|i| curve.homogeneous_control_point(i))
+        .collect();
+    BSplineCurve::try_from((knots, net)).expect("the net is the one the curve already carried")
 }
 
 fn surface_scaled_by(surface: &BSplineSurface, factor: f64) -> BSplineSurface {

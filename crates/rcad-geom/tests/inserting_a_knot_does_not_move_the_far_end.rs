@@ -25,9 +25,28 @@
 //!    here also asserts the refined curve is one the checking constructors
 //!    accept, so a refinement that quietly produced something unbuildable
 //!    cannot pass.
+//!
+//! # Every case compares something, and says so
+//!
+//! The second claim is about a span the insertion cannot reach, and a curve
+//! with too few spans has no such span — the comparison loop then runs zero
+//! times and the case asserts nothing at all. That is worse than no test: it
+//! reports green and buys nothing. Measured over 3000 draws per family on the
+//! generators as they were: 1523, 597, 770 and 1890 draws where the whole curve
+//! compared nothing, and about half of all 64,000 insertions compared nothing.
+//! The same measurement now: **zero** of either, in any family.
+//!
+//! Two things stop it now. The generators carry
+//! `spans_enough_for_an_untouched_one` spans, which is the counting argument
+//! written down beside them; and **every insertion in every case** asserts it
+//! had a span clear of the insertion to compare in, so a family that stopped
+//! producing them fails here rather than going quiet. A curve too small for the
+//! claim is not skipped:
+//! [`a_curve_too_small_to_have_an_untouched_span_still_copies_both_of_its_ends`]
+//! says what is true there instead.
 
 use proptest::prelude::*;
-use rcad_geom::BSplineCurve;
+use rcad_geom::{BSplineCurve, KnotVector, Point};
 
 #[path = "support/mod.rs"]
 mod support;
@@ -36,7 +55,7 @@ mod support;
 fn nothing_outside_the_affected_span_moves(
     curve: &BSplineCurve,
     u: f64,
-) -> Result<usize, TestCaseError> {
+) -> Result<(), TestCaseError> {
     let degree = curve.degree();
     let span = curve.knots().span_containing(u);
     let refined = curve
@@ -71,6 +90,14 @@ fn nothing_outside_the_affected_span_moves(
     }
 
     let untouched = parameters_the_insertion_cannot_reach(curve, span);
+    prop_assert!(
+        !untouched.is_empty(),
+        "inserting at {} into a degree {} curve over {} knots left no span clear of the \
+         insertion, so the second half of this claim compared nothing",
+        u,
+        degree,
+        curve.knots().knots().len()
+    );
     for at in &untouched {
         prop_assert_eq!(
             support::coordinate_bits(curve.evaluate(*at)?),
@@ -80,7 +107,7 @@ fn nothing_outside_the_affected_span_moves(
         );
     }
 
-    Ok(untouched.len())
+    Ok(())
 }
 
 /// Parameters whose whole de Boor window sits clear of the inserted knot.
@@ -112,17 +139,21 @@ fn parameters_the_insertion_cannot_reach(curve: &BSplineCurve, span: usize) -> V
 
 /// One curve, every parameter it will take, so a family is not judged on a
 /// single lucky insertion point.
-fn every_insertion_leaves_the_far_end_alone(curve: &BSplineCurve) -> Result<usize, TestCaseError> {
+///
+/// Every insertion has to leave a span clear on one side or the other, and the
+/// claim above asserts that rather than hoping for it: a curve out of any
+/// family here carries enough spans for one to exist, so an insertion with
+/// nowhere clear to look is a broken generator and not a curve to skip.
+fn every_insertion_leaves_the_far_end_alone(curve: &BSplineCurve) -> Result<(), TestCaseError> {
     let candidates = support::parameters_a_knot_can_be_inserted_at(curve);
     prop_assert!(
         !candidates.is_empty(),
         "every curve has at least one span with room in the middle of it"
     );
-    let mut checked = 0;
     for u in candidates {
-        checked += nothing_outside_the_affected_span_moves(curve, u)?;
+        nothing_outside_the_affected_span_moves(curve, u)?;
     }
-    Ok(checked)
+    Ok(())
 }
 
 proptest! {
@@ -130,17 +161,7 @@ proptest! {
     fn a_uniform_polynomial_curve_keeps_every_control_point_boehm_did_not_touch(
         curve in support::a_uniform_polynomial_curve()
     ) {
-        let checked = every_insertion_leaves_the_far_end_alone(&curve)?;
-
-        // Every span in this family has width, so the span indices below count
-        // spans that can actually be evaluated in. With at least twice the
-        // degree of them, every insertion leaves one clear on one side or the
-        // other — so a run that compared nothing would be a bug in the test
-        // rather than a curve with nowhere to look.
-        let spans = curve.knots().knots().len() - 2 * curve.degree() - 1;
-        if spans >= 2 * curve.degree() {
-            prop_assert!(checked > 0);
-        }
+        every_insertion_leaves_the_far_end_alone(&curve)?;
     }
 
     #[test]
@@ -168,6 +189,65 @@ proptest! {
     ) {
         every_insertion_leaves_the_far_end_alone(&curve)?;
     }
+}
+
+/// The small curves the property above cannot be asked about, and what is true
+/// of them instead.
+///
+/// One Bezier span at each degree from 1 to 5. The insertion reaches every
+/// control point but the first and the last, so no span is clear of it and
+/// [`parameters_the_insertion_cannot_reach`] comes back empty — which this
+/// asserts, rather than leaving it to be discovered by a property test quietly
+/// comparing nothing. What survives with no clear span anywhere is the part
+/// that never needed one: the two end control points are copied bit for bit,
+/// and a clamped curve is exactly its end control point at either end of the
+/// domain, so it reads back the same bits before and after.
+#[test]
+fn a_curve_too_small_to_have_an_untouched_span_still_copies_both_of_its_ends() {
+    for degree in 1..=5 {
+        let curve = one_bezier_span(degree);
+        let middle = 0.5;
+        let span = curve.knots().span_containing(middle);
+        assert!(
+            parameters_the_insertion_cannot_reach(&curve, span).is_empty(),
+            "a degree {degree} curve of one span has no room for an untouched one"
+        );
+
+        let refined = curve
+            .with_knot_inserted(middle)
+            .expect("the middle of the one span");
+        assert!(support::the_kernel_would_build_this_curve_again(&refined));
+        assert_eq!(
+            refined.homogeneous_control_point(0),
+            curve.homogeneous_control_point(0)
+        );
+        assert_eq!(
+            refined.homogeneous_control_point(refined.control_point_count() - 1),
+            curve.homogeneous_control_point(curve.control_point_count() - 1)
+        );
+        for at in [0.0, 1.0] {
+            assert_eq!(
+                support::coordinate_bits(curve.evaluate(at).unwrap()),
+                support::coordinate_bits(refined.evaluate(at).unwrap()),
+                "a degree {degree} curve moved at {at}, where it is its own end control point"
+            );
+        }
+    }
+}
+
+/// One clamped span over `[0, 1]`, with weights that are not all one so the
+/// blend has something to do.
+fn one_bezier_span(degree: usize) -> BSplineCurve {
+    let mut knots = vec![0.0; degree + 1];
+    knots.extend(core::iter::repeat_n(1.0, degree + 1));
+    let knots = KnotVector::new(degree, knots).expect("a clamped single-span curve");
+
+    let count = knots.control_point_count();
+    let points: Vec<Point> = (0..count)
+        .map(|i| Point::new(i as f64 * 0.25, 3.0 - i as f64, 1.0 / (i as f64 + 2.0)))
+        .collect();
+    let weights: Vec<f64> = (0..count).map(|i| 1.0 + (i % 3) as f64).collect();
+    BSplineCurve::new(knots, &points, &weights).expect("finite points and positive weights")
 }
 
 /// The exact conic, refined at the middle: an insertion that has to keep both

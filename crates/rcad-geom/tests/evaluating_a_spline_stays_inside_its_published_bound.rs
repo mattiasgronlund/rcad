@@ -23,7 +23,8 @@
 //! term in the perspective divide is worth about a factor of two, so this file
 //! does not see it at all.
 //!
-//! The exact side is a rational number on `i128`, reduced by `gcd` at every
+//! The exact side is `support::rational`: a rational number on `i128`, reduced
+//! by `gcd` at every
 //! step, running the identical de Boor recursion over curves whose knots,
 //! control coordinates and weights are small whole numbers, read at parameters
 //! that are exact `f64` fractions. Every operation is checked, so a case that
@@ -35,6 +36,8 @@ use rcad_geom::{BSplineCurve, KnotVector, Point};
 
 #[path = "support/mod.rs"]
 mod support;
+
+use support::rational::{Exact, exact_de_boor};
 
 /// The nets the exact comparison runs over: degrees 1, 2 and 3 with uniform
 /// spans and a repeated interior knot, and one degree-5 case built to cancel.
@@ -228,160 +231,6 @@ fn eighths_of(curve: &BSplineCurve) -> Vec<(f64, Exact)> {
         .into_iter()
         .map(|u| (u, Exact::from_f64(u)))
         .collect()
-}
-
-/// The de Boor recursion again, in arithmetic that does not round.
-fn exact_de_boor(curve: &BSplineCurve, at: Exact, span: usize) -> [Exact; 4] {
-    let degree = curve.degree();
-    let knots: Vec<Exact> = curve
-        .knots()
-        .knots()
-        .iter()
-        .map(|knot| Exact::from_f64(*knot))
-        .collect();
-    let mut points: Vec<[Exact; 4]> = (0..=degree)
-        .map(|j| {
-            curve
-                .homogeneous_control_point(j + span - degree)
-                .map(Exact::from_f64)
-        })
-        .collect();
-
-    let one = Exact::whole(1);
-    for round in 1..=degree {
-        for j in (round..=degree).rev() {
-            let below = knots[j + span - degree];
-            let above = knots[j + 1 + span - round];
-            let share = at.minus(below).over(above.minus(below));
-            let rest = one.minus(share);
-            let blended: [Exact; 4] = core::array::from_fn(|axis| {
-                rest.times(points[j - 1][axis])
-                    .plus(share.times(points[j][axis]))
-            });
-            points[j] = blended;
-        }
-    }
-    points[degree]
-}
-
-/// A rational number on `i128`, always reduced and always with a positive
-/// bottom.
-///
-/// Every operation is checked. A case that outgrows `i128` is a case to make
-/// smaller, not an assertion to loosen.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Exact {
-    top: i128,
-    bottom: i128,
-}
-
-impl Exact {
-    fn whole(value: i128) -> Self {
-        Self {
-            top: value,
-            bottom: 1,
-        }
-    }
-
-    fn new(top: i128, bottom: i128) -> Self {
-        assert!(bottom != 0, "a rational cannot be over zero");
-        let shared = gcd(top.unsigned_abs(), bottom.unsigned_abs()).max(1) as i128;
-        let sign = if bottom < 0 { -1 } else { 1 };
-        Self {
-            top: sign * (top / shared),
-            bottom: sign * (bottom / shared),
-        }
-    }
-
-    /// The exact value of an `f64`: mantissa over a power of two.
-    fn from_f64(value: f64) -> Self {
-        assert!(
-            value.is_finite(),
-            "{value} is not a number to be exact about"
-        );
-        if value == 0.0 {
-            return Self::whole(0);
-        }
-        let bits = value.to_bits();
-        let sign = if bits >> 63 == 1 { -1i128 } else { 1 };
-        let raw_exponent = ((bits >> 52) & 0x7ff) as i32;
-        let raw_mantissa = i128::from(bits & ((1u64 << 52) - 1));
-        let (mantissa, exponent) = if raw_exponent == 0 {
-            (raw_mantissa, -1074)
-        } else {
-            (raw_mantissa | (1i128 << 52), raw_exponent - 1075)
-        };
-
-        if exponent >= 0 {
-            Self::new(sign * mantissa * two_to_the(exponent), 1)
-        } else {
-            Self::new(sign * mantissa, two_to_the(-exponent))
-        }
-    }
-
-    fn plus(self, other: Self) -> Self {
-        let left = checked(self.top, other.bottom, "adding");
-        let right = checked(other.top, self.bottom, "adding");
-        Self::new(
-            left.checked_add(right).expect("a sum too big for i128"),
-            checked(self.bottom, other.bottom, "adding"),
-        )
-    }
-
-    fn minus(self, other: Self) -> Self {
-        self.plus(Self {
-            top: -other.top,
-            bottom: other.bottom,
-        })
-    }
-
-    fn times(self, other: Self) -> Self {
-        let left = Self::new(self.top, other.bottom);
-        let right = Self::new(other.top, self.bottom);
-        Self::new(
-            checked(left.top, right.top, "multiplying"),
-            checked(left.bottom, right.bottom, "multiplying"),
-        )
-    }
-
-    fn over(self, other: Self) -> Self {
-        assert!(other.top != 0, "an exact division by zero");
-        self.times(Self::new(other.bottom, other.top))
-    }
-
-    fn abs(self) -> Self {
-        Self {
-            top: self.top.abs(),
-            bottom: self.bottom,
-        }
-    }
-
-    /// The nearest `f64`, which is only ever used to compare a difference
-    /// against a bound many orders of magnitude larger than the conversion.
-    fn to_f64(self) -> f64 {
-        self.top as f64 / self.bottom as f64
-    }
-}
-
-fn checked(left: i128, right: i128, what: &str) -> i128 {
-    left.checked_mul(right)
-        .unwrap_or_else(|| panic!("{what} {left} and {right} outgrew i128; make the case smaller"))
-}
-
-fn two_to_the(exponent: i32) -> i128 {
-    assert!(
-        (0..127).contains(&exponent),
-        "2^{exponent} does not fit in an i128"
-    );
-    1i128 << exponent
-}
-
-fn gcd(left: u128, right: u128) -> u128 {
-    if right == 0 {
-        left
-    } else {
-        gcd(right, left % right)
-    }
 }
 
 /// A curve from whole numbers, so nothing rounds on the way in.
