@@ -373,6 +373,16 @@ fn place_the_piece(
 /// solid's skin only if it is coincident with a whole face of it. So a boundary
 /// answer with no coincident face to go with it abandons this candidate rather
 /// than being read as `ON`.
+///
+/// An undecided answer asks the same question rather than giving up on the
+/// spot, and that is what settles `A \ A` on a turned solid. Every corner there
+/// is a box, so a candidate inside a piece is a box too, and a box sitting on
+/// the very plane it was solved from straddles that plane: no ray can be
+/// trusted and classification honestly says so. The ray was never what settles
+/// `ON`. §17.1 makes the stored plane authoritative, [`coincident_face`] proves
+/// two planes are the same plane from their coefficients alone, and the winding
+/// proves the point is within the face's outline — neither of which cares how
+/// wide the box is.
 #[expect(
     clippy::too_many_arguments,
     reason = "same list as `place_the_piece`, one point further in"
@@ -390,10 +400,19 @@ fn settle_against_each(
     let mut on = None;
     for &index in against {
         let solid: SolidView<'_> = model.solid(solids[index].key);
-        match solid.classify_uncertain_point(point, policy, log) {
+        let mut ray = ProvenanceLog::new();
+        let placed = solid.classify_uncertain_point(point, policy, &mut ray);
+        // A classification nobody could make is not a decision anybody took, so
+        // it says nothing in the log (§5) — and criterion 7 would otherwise read
+        // it as slop this fuse had accepted, which is exactly the conflation
+        // §17.2 spends a section keeping apart.
+        if !matches!(placed, Containment::Undecidable { .. }) {
+            ray.drain_into(log);
+        }
+        match placed {
             Containment::Inside => return Ok(Some(Placement::Inside)),
             Containment::Outside => (),
-            Containment::OnBoundary => {
+            Containment::OnBoundary | Containment::Undecidable { .. } => {
                 let Some(face) = coincident_face(solids[index], in_plane, facing, point, log)?
                 else {
                     return Ok(None);
@@ -405,7 +424,6 @@ fn settle_against_each(
                     });
                 }
             }
-            Containment::Undecidable { .. } => return Ok(None),
         }
     }
     Ok(Some(on.unwrap_or(Placement::Outside)))

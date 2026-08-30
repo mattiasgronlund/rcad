@@ -35,7 +35,7 @@ use rcad_predicates::{
     Decision, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
 };
 
-use crate::SolidView;
+use crate::{FaceView, SolidView};
 
 /// Where a point sits relative to a solid.
 ///
@@ -100,8 +100,12 @@ impl SolidView<'_> {
     /// and zero outside. Every test on the way is an exact predicate from the
     /// cascade — no tolerances, no epsilon.
     ///
-    /// A triangle whose plane holds `point`, with the point inside the
-    /// triangle, means the point is on the boundary and that answer wins.
+    /// A face whose plane holds `point` is asked separately whether its
+    /// material holds it too, and a face that says yes puts the point on the
+    /// boundary and that answer wins. One triangle of the fan holding the point
+    /// is not that question: the fan overlaps itself and covers a hole twice
+    /// over, once each way, so only the whole outline can say (see
+    /// [`face_holds_the_point`]).
     ///
     /// The three corners of a triangle are coordinates stored in the model and
     /// stay exact. The ray's far target is picked from the solid's bounding box
@@ -178,17 +182,25 @@ impl SolidView<'_> {
     ) -> Crossings {
         let mut tally = Crossings::default();
         for face in self.faces() {
+            let mut on_the_plane = false;
             face.for_each_triangle(|corners| {
                 match look_at_triangle(corners, point, target, policy, log) {
                     Hit::Missed => {}
                     Hit::WentThrough { leaving } => tally.winding += leaving,
-                    Hit::PointIsOnIt => tally.on_boundary = true,
+                    Hit::StartsOnThePlane => on_the_plane = true,
                     Hit::Grazed { enclosure } => {
                         tally.grazed_something = true;
                         tally.worst_enclosure = tally.worst_enclosure.max(enclosure);
                     }
                 }
             });
+            if on_the_plane {
+                match face_holds_the_point(face, point, target, policy, log) {
+                    Some(true) => tally.on_boundary = true,
+                    Some(false) => (),
+                    None => tally.grazed_something = true,
+                }
+            }
         }
         tally
     }
@@ -261,8 +273,11 @@ enum Hit {
     /// The ray passes through it. `+1` on the way out of the material, `-1` on
     /// the way in.
     WentThrough { leaving: i64 },
-    /// The point being classified lies on this triangle.
-    PointIsOnIt,
+    /// The point being classified lies on this triangle's plane, so the ray
+    /// meets that plane only where it starts and crosses nothing here. Whether
+    /// the point is on the *face* is a question about the whole outline, and
+    /// [`face_holds_the_point`] is what answers it.
+    StartsOnThePlane,
     /// The ray met an edge or a corner of the triangle, or a predicate could
     /// not decide. Nothing this ray says can be trusted.
     Grazed { enclosure: f64 },
@@ -316,7 +331,7 @@ fn look_at_triangle(
 
     let side_of_the_plane = decide(a, b, c, point, policy, log);
     match side_of_the_plane {
-        Decision::Zero => Hit::PointIsOnIt,
+        Decision::Zero => Hit::StartsOnThePlane,
         Decision::Pos | Decision::Neg => {
             if zeros > 0 {
                 Hit::Grazed { enclosure: 0.0 }
@@ -327,6 +342,125 @@ fn look_at_triangle(
             }
         }
         Decision::Undecidable { enclosure } => Hit::Grazed { enclosure },
+        other => panic!("orient3d came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
+/// Whether the material of `face` holds `point`, which lies on the face's
+/// plane, or `None` when a predicate could not settle it.
+///
+/// [`FaceView::for_each_triangle`] cannot answer this. Its triangles overlap
+/// wherever the face is not convex and its spokes are edges of nothing, so one
+/// triangle holding the point says nothing about the face: the fan over a frame
+/// covers the frame's own hole twice, once each way, and the two only cancel
+/// once they are added up.
+///
+/// So the outline itself is walked. A half-line is run from `point` towards the
+/// first corner and the edges crossing it are counted, `+1` for one way round
+/// and `-1` for the other; a hole subtracts itself because it runs the other
+/// way, and the count is non-zero exactly on the material. Which side of that
+/// half-line's line each corner falls is read as a half-open range — a corner
+/// exactly on the line counts as below it — and that is what leaves no tie to
+/// break and no second try to make. The one case a crossing count cannot see is
+/// the point sitting on an edge, and that is looked for as we go.
+///
+/// Every test is an [`orient3d`](orient3d_tolerantly) against `target`, which
+/// the caller has already shown is off the face's plane: had it been on the
+/// plane, every edge test in [`look_at_triangle`] would have come out zero and
+/// no triangle would have reported [`Hit::StartsOnThePlane`]. Three points on a
+/// plane turn one way about its normal exactly when they turn that way about a
+/// fourth point off it, so nothing is projected into the plane's own two
+/// coordinates (decisions.md §15.5).
+fn face_holds_the_point(
+    face: FaceView<'_>,
+    point: PredicatePoint,
+    target: Point,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<bool> {
+    let wires: Vec<Vec<Point>> = face.wires().map(|wire| wire.points().collect()).collect();
+    let aim = *wires.first()?.first()?;
+
+    let mut winding = 0i64;
+    for wire in &wires {
+        let sides: Vec<Decision> = wire
+            .iter()
+            .map(|&corner| decide(corner, aim, target, point, policy, log))
+            .collect();
+        for (index, &from) in wire.iter().enumerate() {
+            let next = (index + 1) % wire.len();
+            let along = decide(from, wire[next], target, point, policy, log);
+            match along {
+                Decision::Zero => {
+                    if lies_between(from, wire[next], point)? {
+                        return Some(true);
+                    }
+                }
+                Decision::Pos | Decision::Neg => (),
+                Decision::Undecidable { .. } => return None,
+                other => {
+                    panic!("orient3d came back with a decision nothing here knows: {other:?}")
+                }
+            }
+            winding += crossing(sides[index], sides[next], along)?;
+        }
+    }
+    Some(winding != 0)
+}
+
+/// Whether `point`, already shown to be on the line through `from` and `to`, is
+/// on the segment between them. `None` when its box straddles an end.
+///
+/// The comparison runs along whichever axis the segment reaches furthest, which
+/// is decisions.md §17.4's rule for ordering points along a line and needs no
+/// predicate of its own.
+fn lies_between(from: Point, to: Point, point: PredicatePoint) -> Option<bool> {
+    let (from, to) = (from.coordinates(), to.coordinates());
+    let axis = (0..3)
+        .max_by(|&one, &other| {
+            (to[one] - from[one])
+                .abs()
+                .total_cmp(&(to[other] - from[other]).abs())
+        })
+        .expect("three axes");
+    let (low, high) = (from[axis].min(to[axis]), from[axis].max(to[axis]));
+    let span = point.enclosure()[axis];
+    if span.lo() >= low && span.hi() <= high {
+        Some(true)
+    } else if span.hi() < low || span.lo() > high {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// `1` or `-1` when the edge crosses the half-line, signed by which way it
+/// crosses, and `0` when it does not.
+///
+/// `from_side` and `to_side` say which side of the half-line's line each end of
+/// the edge falls on, and `along` says which side of the edge the point falls
+/// on — which is what tells a crossing ahead of the point from one behind it.
+fn crossing(from_side: Decision, to_side: Decision, along: Decision) -> Option<i64> {
+    Some(
+        match (above_the_line(from_side)?, above_the_line(to_side)?, along) {
+            (false, true, Decision::Pos) => 1,
+            (true, false, Decision::Neg) => -1,
+            _ => 0,
+        },
+    )
+}
+
+/// Whether a corner is above the half-line's line, counting a corner exactly on
+/// it as below.
+///
+/// Half-open on purpose. It is what gives every edge two ends on definite sides
+/// and leaves the crossing count with no tie to break, however many corners the
+/// line happens to run through.
+fn above_the_line(side: Decision) -> Option<bool> {
+    match side {
+        Decision::Pos => Some(true),
+        Decision::Neg | Decision::Zero => Some(false),
+        Decision::Undecidable { .. } => None,
         other => panic!("orient3d came back with a decision nothing here knows: {other:?}"),
     }
 }

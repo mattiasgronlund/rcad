@@ -484,3 +484,112 @@ fn a_fuse_that_needs_a_decision_nothing_can_prove_refuses() {
         other => panic!("nothing in f64 can settle that pair: {other:?}"),
     }
 }
+
+/// A frame, and a plug that fills one corner of its hole (§17.7's control).
+///
+/// Every coordinate here is a whole number, so a certified fuse has to decide
+/// it. It did not. The plug's bottom face lies in the very plane the frame's
+/// bottom face lies in, but over the frame's *hole*, where the frame has no
+/// material — and classification read one triangle of that face's fan as proof
+/// the point was on the face. The fan overlaps itself and covers the hole twice,
+/// once each way, so only the whole outline can say; the outer half alone always
+/// says yes. Every point of this piece is over the hole, so no choice of
+/// candidate could have got round it.
+#[test]
+fn a_plug_filling_the_corner_of_a_frames_hole_unites_with_the_frame() {
+    let mut model = a_model();
+    let frame = frame(&mut model, 4.0, 5.0, 1.0);
+    let plug = plug(&mut model, Vector::new(1.0, 1.0, 0.0));
+
+    let mut log = ProvenanceLog::new();
+    let united = model
+        .fuse(
+            &[frame],
+            &[plug],
+            Rule::Union,
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("every corner of a frame and a plug on the integer grid is exactly representable");
+
+    assert!(log.is_empty(), "nothing here needed a policy to accept it");
+    assert_eq!(united.solids().len(), 1);
+    assert_eq!(
+        volume_of(&model, united.solids()),
+        4.0 * 5.0 - 2.0 * 3.0 + 1.0,
+        "the frame's walls plus the plug that fills a corner of its hole"
+    );
+}
+
+/// A frame with a rectangular hole one wall thick, extruded.
+fn frame(model: &mut Model, width: f64, depth: f64, height: f64) -> SolidKey {
+    let profile = ProfileBuilder::new(vec![[0.0, 0.0], [width, 0.0], [width, depth], [0.0, depth]])
+        .with_hole(vec![
+            [1.0, 1.0],
+            [width - 1.0, 1.0],
+            [width - 1.0, depth - 1.0],
+            [1.0, depth - 1.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a frame");
+    model
+        .add_extrusion(
+            &profile,
+            height,
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a finite placement"),
+        )
+        .expect("a frame extrudes")
+}
+
+/// A one by one by one block, put down at `at`.
+fn plug(model: &mut Model, at: Vector) -> SolidKey {
+    let profile = ProfileBuilder::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a unit square");
+    model
+        .add_extrusion(
+            &profile,
+            1.0,
+            &Isometry::translation(at).expect("a finite placement"),
+        )
+        .expect("a plug extrudes")
+}
+
+/// A turned solid with a bit-identical copy of itself taken away.
+///
+/// `A \ A = ∅` is not a hard question and §17.1 makes it an easy one on purpose:
+/// both solids are built from the same numbers and placed by the same
+/// `Isometry`, so their stored planes agree bit for bit however the rotation
+/// rounded. What used to refuse was the *ray*. Turned, every corner the fuse
+/// solves for is a box, so a candidate inside a piece is a box too, and a box
+/// sitting on the plane it was solved from straddles that plane — no ray can be
+/// cast from it and classification honestly says so. The ray was never what
+/// settles `ON`: two coincident faces are proved coincident from their planes'
+/// coefficients, which no box widens.
+#[test]
+fn a_turned_solid_with_a_bit_identical_copy_taken_away_leaves_nothing() {
+    let mut model = a_model();
+    let one = plug(&mut model, Vector::new(0.0, 0.0, 0.0));
+    let other = plug(&mut model, Vector::new(0.0, 0.0, 0.0));
+    let axis =
+        Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction with length");
+    let turn = Isometry::rotation(&axis, core::f64::consts::TAU / 64.0).expect("a rotation");
+    model.place_solid(one, &turn);
+    model.place_solid(other, &turn);
+
+    let nothing = model
+        .fuse(
+            &[one],
+            &[other],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a solid and a copy of it share every plane, turned or not");
+
+    assert!(
+        nothing.solids().is_empty(),
+        "a solid with itself taken away leaves nothing, got {} solids",
+        nothing.solids().len()
+    );
+}

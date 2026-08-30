@@ -131,6 +131,42 @@ fn a_point_in_the_hole_of_a_plate_is_outside_the_plate() {
     );
 }
 
+/// The same hole, but level with the face the hole is cut in.
+///
+/// A point on a face's plane is the one place the triangles a face is fanned
+/// into cannot be read one at a time. The fan runs every wire from one corner of
+/// the outline, so it covers the hole twice — once from the outline, once from
+/// the hole wound the other way — and only the sum of the two is the face. Read
+/// one triangle at a time, the middle of this hole is on the plate's skin, which
+/// is what a certified fuse of a frame and a plug refused over.
+#[test]
+fn a_point_in_the_hole_of_a_plate_but_level_with_its_face_is_still_outside_it() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+        .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a hole");
+    let solid = model
+        .add_extrusion(&plate, 3.0, &Isometry::identity())
+        .expect("a plate three thick");
+
+    for level in [0.0, 3.0] {
+        assert_eq!(
+            classify(&model, solid, Point::new(5.0, 5.0, level)),
+            Containment::Outside
+        );
+        assert_eq!(
+            classify(&model, solid, Point::new(4.0, 5.0, level)),
+            Containment::OnBoundary,
+            "the wall of the hole is still the plate's skin"
+        );
+        assert_eq!(
+            classify(&model, solid, Point::new(2.0, 2.0, level)),
+            Containment::OnBoundary
+        );
+    }
+}
+
 #[test]
 fn a_point_in_the_notch_of_an_l_shape_is_outside_it() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
