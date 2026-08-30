@@ -3,6 +3,7 @@
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Filtered, Interval, Point as PredicatePoint, Predicate, SideOfSurface, decide,
+    product_is_normal,
 };
 use serde::{Deserialize, Serialize};
 
@@ -114,11 +115,20 @@ impl Predicate for HowFarFromTheSkin {
         let point = self.point.exact_coordinates()?;
         let centre = self.sphere.centre.coordinates();
 
-        let squares = [0, 1, 2].map(|axis| {
-            let gap = point[axis] - centre[axis];
-            gap * gap
-        });
-        let radius_squared = self.sphere.radius * self.sphere.radius;
+        let gaps = [0, 1, 2].map(|axis| point[axis] - centre[axis]);
+        let radius = self.sphere.radius;
+
+        // The bound below is a fraction of the permanent, which only bounds
+        // anything while every product keeps its relative accuracy. One of them
+        // in the subnormals and this level certifies a wrong sign.
+        if !(gaps.iter().all(|&gap| product_is_normal(gap, gap))
+            && product_is_normal(radius, radius))
+        {
+            return None;
+        }
+
+        let squares = gaps.map(|gap| gap * gap);
+        let radius_squared = radius * radius;
 
         // Every square is positive, so the only cancellation is the final
         // subtraction. The permanent is therefore the plain sum of the four
@@ -200,9 +210,11 @@ impl Predicate for HowFarFromTheSkin {
 /// higher-order terms and the rounding of the permanent itself, with room to
 /// spare: what it has to beat is about `15*epsilon`.
 ///
-/// Like every bound of this shape it holds only while nothing overflows or
-/// falls into the subnormals. Overflow makes `permanent` infinite, which
-/// certifies nothing, and level 3 then reports that it cannot run either.
+/// Every step of that argument is a *relative* one, so like every bound of this
+/// shape it holds only while nothing overflows or falls into the subnormals.
+/// [`HowFarFromTheSkin::on_floats`] enforces the bottom end product by product
+/// through [`product_is_normal`], and `decide` the top end by refusing a bound
+/// that is not itself a normal number.
 const SIDE_OF_SPHERE_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (6.0 + 48.0 * epsilon) * epsilon
@@ -341,6 +353,56 @@ mod tests {
             Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
             other => panic!("unhandled decision: {other:?}"),
         }
+    }
+
+    /// A point just outside a tiny ball, and level 1 used to place it inside.
+    ///
+    /// With `g = 2^-538` and a radius of `3 * 2^-539 = 1.5 * g`, the point
+    /// `(g, g, g)` is `sqrt(3) * g` from the centre against a radius of
+    /// `1.5 * g`, and `sqrt(3) > 1.5`, so it is outside. Exactly:
+    ///
+    /// ```text
+    /// 3*g² - (1.5*g)² = (3 - 2.25) * 2^-1076 = 0.75 * 2^-1076 = 3/16 of a u,
+    /// ```
+    ///
+    /// where `u = 2^-1074` is the smallest number `f64` has. The truthful
+    /// answer is [`Decision::Pos`].
+    ///
+    /// Every one of those products is a fraction of one `u`, so `f64` rounds
+    /// each to a whole number of them: the three squares `0.25u` each go to
+    /// `0`, and the squared radius `0.5625u` goes to `1u`. That leaves
+    /// `0 - 1u`, negative where the truth is positive. The permanent is `1u`,
+    /// and the bound `6.7e-16 * 1u` rounds to zero, so `1u > 0` certifies.
+    #[test]
+    fn a_point_whose_squares_fall_off_the_bottom_of_the_range_is_not_certified() {
+        let gap = 2f64.powi(-538);
+        let ball = Sphere::new(Point::origin(), 3.0 * 2f64.powi(-539)).unwrap();
+
+        let decision = ball.side_of(PredicatePoint::from([gap, gap, gap]));
+        match decision {
+            Decision::Neg => panic!("this point is outside the ball, not inside it"),
+            Decision::Pos | Decision::Zero => panic!("nothing here can prove a sign: {decision:?}"),
+            Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
+            other => panic!("unhandled decision: {other:?}"),
+        }
+    }
+
+    /// The same ball and point scaled up by `2^600`, as an oracle for the test
+    /// above.
+    ///
+    /// The centre is the origin, so scaling the radius and the point together
+    /// by a positive number multiplies `|point|² - radius²` by the square of
+    /// it — positive, so the sign is untouched. At `2^600` the squares are
+    /// ordinary normal numbers and the answer is the [`Decision::Pos`] the
+    /// test above cannot prove.
+    #[test]
+    fn the_same_ball_and_point_scaled_up_to_fit_put_the_point_outside() {
+        let gap = 2f64.powi(-538 + 600);
+        let ball = Sphere::new(Point::origin(), 3.0 * 2f64.powi(-539 + 600)).unwrap();
+        assert_eq!(
+            ball.side_of(PredicatePoint::from([gap, gap, gap])),
+            Decision::Pos
+        );
     }
 
     #[test]

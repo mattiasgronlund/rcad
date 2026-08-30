@@ -35,6 +35,7 @@ fn a_cube_comes_back_sound_and_measuring_the_same() {
     assert_eq!(after.vertex_count(), model.vertex_count());
     assert_eq!(after.edge_count(), model.edge_count());
     assert_eq!(after.face_count(), model.face_count());
+    assert_eq!(after.worst_approximation(), model.worst_approximation());
 }
 
 #[test]
@@ -109,6 +110,7 @@ fn approximation_tags_come_back_with_the_model() {
     after
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("still sound");
+    assert_eq!(after.worst_approximation(), model.worst_approximation());
     assert_eq!(after.worst_approximation(), 2.5e-9);
     let tagged = after
         .edges()
@@ -126,6 +128,33 @@ fn approximation_tags_come_back_with_the_model() {
     );
 }
 
+/// A model reading back with *less* slop than it had is the shape of the bug
+/// this guards: the figure the model reports has to be the largest tag on any
+/// entity, which is what a fresh read computes, and not a mark that only ever
+/// rose while the model was being edited.
+#[test]
+fn a_tag_taken_back_down_survives_the_round_trip() {
+    let mut model = empty_model();
+    model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
+    let corner = model.vertices().next().expect("a cube has corners").key();
+    model
+        .set_vertex_approximation(corner, Approximation::new(1e-6, Cause::ImportedUncertainty))
+        .expect("a vertex may carry slop");
+    model
+        .set_vertex_approximation(
+            corner,
+            Approximation::new(1e-12, Cause::ImportedUncertainty),
+        )
+        .expect("and may be tagged again with less");
+
+    let after = round_tripped(&model);
+
+    assert_eq!(model.worst_approximation(), 1e-12);
+    assert_eq!(after.worst_approximation(), model.worst_approximation());
+}
+
 #[test]
 fn a_model_written_by_a_different_version_of_the_format_is_refused() {
     let mut model = empty_model();
@@ -140,7 +169,13 @@ fn a_model_written_by_a_different_version_of_the_format_is_refused() {
     );
     bytes[0] = FORMAT_VERSION as u8 + 1;
 
-    assert!(postcard::from_bytes::<Model>(&bytes).is_err());
+    // `SerdeDeCustom` rather than any other postcard error, because that is the
+    // one the format check raises. A bare "it failed" would also be happy with
+    // the bytes falling apart somewhere else and prove nothing about the check.
+    assert_eq!(
+        postcard::from_bytes::<Model>(&bytes).expect_err("a stale version is refused"),
+        postcard::Error::SerdeDeCustom
+    );
 }
 
 #[test]

@@ -5,6 +5,7 @@ use rcad_predicates::expansion::{
 };
 use rcad_predicates::{
     Decision, Filtered, Interval, Point as PredicatePoint, Predicate, SideOfSurface, decide,
+    product_is_normal,
 };
 use serde::{Deserialize, Serialize};
 
@@ -122,13 +123,27 @@ impl Predicate for HowFarFromTheSkin {
         let direction = self.cylinder.axis.direction().components();
 
         let from_origin = [0, 1, 2].map(|axis| point[axis] - origin[axis]);
-        let halves = cross_product_halves(from_origin, direction);
-        let radius_squared = self.cylinder.radius * self.cylinder.radius;
+        let radius = self.cylinder.radius;
 
-        let squares = halves.map(|(left, right)| {
-            let component = left - right;
-            component * component
-        });
+        // The bound below is a fraction of the permanent, which only bounds
+        // anything while every product keeps its relative accuracy. One of them
+        // in the subnormals and this level certifies a wrong sign.
+        //
+        // The permanent squares `|left| + |right|` where the value squares
+        // `left - right`, and the first is never below the second, so checking
+        // the components here covers the permanent's squares too.
+        let halves = cross_product_halves_if_normal(from_origin, direction)?;
+        let components = halves.map(|(left, right)| left - right);
+        let stays_accurate = components
+            .iter()
+            .all(|&component| product_is_normal(component, component))
+            && product_is_normal(radius, radius);
+        if !stays_accurate {
+            return None;
+        }
+
+        let radius_squared = radius * radius;
+        let squares = components.map(|component| component * component);
 
         // Each cross-product component is a difference, so it can cancel and
         // its own magnitude says nothing about the rounding it carries. The
@@ -213,6 +228,23 @@ impl Predicate for HowFarFromTheSkin {
     }
 }
 
+/// [`cross_product_halves`] in `f64`, or `None` when one of the six products
+/// fell into the subnormals and stopped being relatively accurate.
+fn cross_product_halves_if_normal(
+    from_origin: [f64; 3],
+    along: [f64; 3],
+) -> Option<[(f64, f64); 3]> {
+    for axis in 0..3 {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        if !product_is_normal(from_origin[next], along[after])
+            || !product_is_normal(from_origin[after], along[next])
+        {
+            return None;
+        }
+    }
+    Some(cross_product_halves(from_origin, along))
+}
+
 /// The two halves of each component of `from_origin × along`, left half first.
 ///
 /// Kept apart rather than subtracted so that level 1 can size its error bound
@@ -279,8 +311,11 @@ fn cross_component(
 /// `80*epsilon^2` covers the higher-order terms and the rounding of the
 /// permanent itself; what it has to beat is about `45*epsilon`.
 ///
-/// As with every bound of this shape it holds only while nothing overflows or
-/// falls into the subnormals.
+/// Every step of that argument is a *relative* one, so as with every bound of
+/// this shape it holds only while nothing overflows or falls into the
+/// subnormals. [`HowFarFromTheSkin::on_floats`] enforces the bottom end product
+/// by product through [`product_is_normal`], and `decide` the top end by
+/// refusing a bound that is not itself a normal number.
 const SIDE_OF_CYLINDER_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (10.0 + 80.0 * epsilon) * epsilon
@@ -407,6 +442,58 @@ mod tests {
             Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
             other => panic!("unhandled decision: {other:?}"),
         }
+    }
+
+    /// A point just outside a very thin pipe, and level 1 used to place it
+    /// inside.
+    ///
+    /// With `g = 1.25 * 2^-538` and a radius of `3 * 2^-539 = 1.5 * 2^-538`,
+    /// the point `(g, g, 0)` is `sqrt(2) * g = 1.7678 * 2^-538` from the z
+    /// axis against a radius of `1.5 * 2^-538`, so it is outside. Exactly:
+    ///
+    /// ```text
+    /// 2*g² - (1.5 * 2^-538)² = (3.125 - 2.25) * 2^-1076 = 7/32 of a u,
+    /// ```
+    ///
+    /// where `u = 2^-1074` is the smallest number `f64` has. The truthful
+    /// answer is [`Decision::Pos`].
+    ///
+    /// Both squared cross-product components and the squared radius are
+    /// fractions of one `u`, so `f64` rounds each to a whole number of them:
+    /// the two squares `0.390625u` each go to `0`, and the squared radius
+    /// `0.5625u` goes to `1u`. That leaves `0 - 1u`, negative where the truth
+    /// is positive, and the bound `1.1e-15 * 1u` rounds to zero, so it
+    /// certifies.
+    #[test]
+    fn a_point_whose_squares_fall_off_the_bottom_of_the_range_is_not_certified() {
+        let across = 1.25 * 2f64.powi(-538);
+        let pipe = Cylinder::new(Axis::z(), 3.0 * 2f64.powi(-539)).unwrap();
+
+        let decision = pipe.side_of(PredicatePoint::from([across, across, 0.0]));
+        match decision {
+            Decision::Neg => panic!("this point is outside the pipe, not inside it"),
+            Decision::Pos | Decision::Zero => panic!("nothing here can prove a sign: {decision:?}"),
+            Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
+            other => panic!("unhandled decision: {other:?}"),
+        }
+    }
+
+    /// The same pipe and point scaled up by `2^600`, as an oracle for the test
+    /// above.
+    ///
+    /// The axis runs through the origin, so scaling the radius and the point
+    /// together by a positive number multiplies the whole value by the square
+    /// of it — positive, so the sign is untouched. At `2^600` the squares are
+    /// ordinary normal numbers and the answer is the [`Decision::Pos`] the
+    /// test above cannot prove.
+    #[test]
+    fn the_same_pipe_and_point_scaled_up_to_fit_put_the_point_outside() {
+        let across = 1.25 * 2f64.powi(-538 + 600);
+        let pipe = Cylinder::new(Axis::z(), 3.0 * 2f64.powi(-539 + 600)).unwrap();
+        assert_eq!(
+            pipe.side_of(PredicatePoint::from([across, across, 0.0])),
+            Decision::Pos
+        );
     }
 
     #[test]

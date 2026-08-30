@@ -1,7 +1,7 @@
 use crate::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use crate::{
-    Decision, Filtered, Interval, Level, Point, Policy, Predicate, ProvenanceLog, Record, decide,
-    resolve_under_policy,
+    Decision, Filtered, Interval, Level, Measures, Point, Policy, Predicate, ProvenanceLog, Record,
+    decide, resolve_under_policy,
 };
 
 /// The name this predicate goes by in provenance records.
@@ -65,7 +65,7 @@ pub fn orient2d_tolerantly(
     // has no third coordinate to report, so its inputs go in at height zero.
     let inputs = [at_height_zero(a), at_height_zero(b), at_height_zero(c)];
     let record = Record::new(ORIENT2D, &inputs, level, decision);
-    resolve_under_policy(record, policy, log)
+    resolve_under_policy(record, Measures::Area, policy, log)
 }
 
 fn at_height_zero(point: [f64; 2]) -> Point {
@@ -90,6 +90,10 @@ impl Predicate for Orient2d {
         let forwards = acx * bcy;
         let backwards = acy * bcx;
 
+        // Alone among the predicates here, this one needs no check that the two
+        // products stayed out of the subnormals — see the note on
+        // [`ORIENT2D_ERROR_BOUND`].
+        //
         // The bound has to allow for the two products cancelling, so it sums
         // their magnitudes rather than taking the magnitude of the difference.
         // Shewchuk calls this the permanent of the matrix.
@@ -143,9 +147,30 @@ impl Predicate for Orient2d {
 /// Floating-Point Arithmetic and Fast Robust Geometric Predicates" (1997) §4.3
 /// and the `exactinit` routine of his `predicates.c`.
 ///
-/// The bound holds only when nothing overflows or falls into the subnormals.
-/// Overflow makes the permanent infinite, which certifies nothing, and level 3
-/// then reports that it cannot run either.
+/// # Why this one needs no subnormal guard
+///
+/// Every other predicate in the cascade checks that its products stayed out of
+/// the subnormals, because a bound of this shape is *relative* and rounding
+/// down there is not (see [`product_is_normal`](crate::product_is_normal)).
+/// This one does not need to, because its *sign* cannot go wrong even when the
+/// bound does.
+///
+/// The whole value is `fl(fl(f) - fl(b))` for two exact products `f` and `b`.
+/// Rounding to nearest never reorders two numbers: if `f > b` then
+/// `fl(f) >= fl(b)`, subnormals and flushes to zero included. Subtracting two
+/// `f64` cannot reorder them either, and gives exactly zero only when they are
+/// equal. So the sign of the value is either the true sign or zero — never the
+/// opposite sign. A wrong bound can therefore only make this filter certify a
+/// sign that happens to be right, and a value of zero clears no bound at all,
+/// since the bound is never negative.
+///
+/// That argument turns on there being exactly one subtraction at the end. It
+/// does not survive a third term: `orient3d` adds three such differences after
+/// scaling each by a different height, and one of those scalings can swamp
+/// another, which is exactly how it used to certify wrong signs.
+///
+/// The bound itself still holds only while nothing overflows or falls into the
+/// subnormals, and [`decide`] refuses a bound that is not a normal number.
 const ORIENT2D_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (3.0 + 16.0 * epsilon) * epsilon

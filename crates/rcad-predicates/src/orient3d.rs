@@ -3,8 +3,8 @@ use crate::expansion::{
 };
 use crate::interval::determinant;
 use crate::{
-    Decision, Filtered, Interval, Level, Point, Policy, Predicate, ProvenanceLog, Record, decide,
-    resolve_under_policy,
+    Decision, Filtered, Interval, Level, Measures, Point, Policy, Predicate, ProvenanceLog, Record,
+    decide, product_is_normal, resolve_under_policy,
 };
 
 /// The name this predicate goes by in provenance records.
@@ -76,7 +76,7 @@ pub fn orient3d_tolerantly(
         return decision;
     }
     let record = Record::new(ORIENT3D, &[a, b, c, d], level, decision);
-    resolve_under_policy(record, policy, log)
+    resolve_under_policy(record, Measures::Volume, policy, log)
 }
 
 struct Orient3d {
@@ -105,7 +105,29 @@ impl Predicate for Orient3d {
         let adxbdy = adx * bdy;
         let bdxady = bdx * ady;
 
-        let value = adz * (bdxcdy - cdxbdy) + bdz * (cdxady - adxcdy) + cdz * (adxbdy - bdxady);
+        let (first, second, third) = (bdxcdy - cdxbdy, cdxady - adxcdy, adxbdy - bdxady);
+
+        // The bound below is a fraction of the permanent, which only bounds
+        // anything while every product keeps its relative accuracy. One of them
+        // in the subnormals and this level certifies a wrong sign.
+        //
+        // The permanent's own three products are each at least as large as the
+        // matching one here — `|x| + |y|` is never below `|x - y|` — so
+        // checking these nine covers the permanent too.
+        let stays_accurate = product_is_normal(bdx, cdy)
+            && product_is_normal(cdx, bdy)
+            && product_is_normal(cdx, ady)
+            && product_is_normal(adx, cdy)
+            && product_is_normal(adx, bdy)
+            && product_is_normal(bdx, ady)
+            && product_is_normal(adz, first)
+            && product_is_normal(bdz, second)
+            && product_is_normal(cdz, third);
+        if !stays_accurate {
+            return None;
+        }
+
+        let value = adz * first + bdz * second + cdz * third;
 
         // The bound has to allow for cancellation inside each 2x2 minor, so it
         // sums the magnitudes of the two products rather than the magnitude of
@@ -180,9 +202,12 @@ impl Orient3d {
 /// carries the same constant, which is one more reason the differential test
 /// is worth having.
 ///
-/// The bound holds only when nothing overflows or falls into the subnormals.
-/// Overflow makes `permanent` infinite, which certifies nothing, and level 3
-/// then reports that it cannot run either.
+/// Every step of that argument is a *relative* one, so the whole bound holds
+/// only while nothing overflows or falls into the subnormals.
+/// [`Orient3d::on_floats`] enforces the bottom end product by product through
+/// [`product_is_normal`], and [`decide`] the top end by refusing a bound that
+/// is not itself a normal number. Without those two the filter certifies wrong
+/// signs, which is what `robust` does with the same constant.
 const ORIENT3D_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (7.0 + 56.0 * epsilon) * epsilon
@@ -439,5 +464,71 @@ mod tests {
                 enclosure: f64::INFINITY
             }
         );
+    }
+
+    /// The true determinant here is `-2^-76`, and level 1 used to certify it
+    /// as positive.
+    ///
+    /// Work it out by hand. With `s = 2^-538` and `d` at the origin the rows
+    /// are `a`, `b`, `c` themselves, and only two of the six products are
+    /// non-zero, so
+    ///
+    /// ```text
+    /// det = adz * (bdx*cdy - cdx*bdy) + cdz * (adx*bdy)
+    ///     = 2^1000 * (11 - 9) * 2^-1076  +  2^462 * (-3 * 2^-538)
+    ///     = 2^-75 - 3 * 2^-76
+    ///     = -2^-76
+    /// ```
+    ///
+    /// In `f64` the two products land in the subnormals: `11*2^-1076` is
+    /// `2.75 * 2^-1074` and rounds to `3 * 2^-1074`, and `9*2^-1076` is
+    /// `2.25 * 2^-1074` and rounds to `2 * 2^-1074`. Their difference comes
+    /// out `1 * 2^-1074` where the truth is `0.5 * 2^-1074` — twice too big —
+    /// so the first term becomes `2^-74` instead of `2^-75` and the sum flips
+    /// to `+2^-76`. The permanent is built from those same rounded products,
+    /// so the level 1 bound comes to a perfectly ordinary `2.4e-37` and
+    /// happily certifies the wrong sign.
+    ///
+    /// Nothing in `f64` can prove the true sign — level 3 needs the roundoff
+    /// term of each product to be normal, and here the products themselves are
+    /// not — so [`Decision::Undecidable`] is the whole of the right answer.
+    #[test]
+    fn a_determinant_whose_products_fall_off_the_bottom_of_the_range_is_not_certified() {
+        let s = 2f64.powi(-538);
+        let decision = orient3d(
+            [-3.0, 0.0, 2f64.powi(1000)],
+            [11.0 * s, s, 0.0],
+            [9.0 * s, s, 2f64.powi(462)],
+            [0.0, 0.0, 0.0],
+        );
+        match decision {
+            Decision::Pos => panic!("the true determinant is -2^-76, so this is a wrong sign"),
+            Decision::Neg | Decision::Zero => panic!("nothing here can prove a sign: {decision:?}"),
+            Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
+        }
+    }
+
+    /// The same determinant, rescaled until it fits, as an oracle for the sign
+    /// the test above cannot prove.
+    ///
+    /// `d` is the origin, so the rows of the determinant are `b` and `c`
+    /// themselves. Multiplying a row by a positive number multiplies the
+    /// determinant by that same positive number, so the sign survives. `b`
+    /// goes up by `2^600` and `c` by `2^300` — different factors because `c`
+    /// already carries a `2^462` that must not overflow — which multiplies the
+    /// determinant by `2^900` and leaves `-2^-76 * 2^900 = -2^824`.
+    ///
+    /// That scaling lifts both products clear of the subnormals, so every
+    /// level of the cascade means what it says here, and the answer is
+    /// [`Decision::Neg`].
+    #[test]
+    fn the_same_determinant_rescaled_to_fit_comes_out_negative() {
+        let decision = orient3d(
+            [-3.0, 0.0, 2f64.powi(1000)],
+            [11.0 * 2f64.powi(62), 2f64.powi(62), 0.0],
+            [9.0 * 2f64.powi(-238), 2f64.powi(-238), 2f64.powi(762)],
+            [0.0, 0.0, 0.0],
+        );
+        assert_eq!(decision, Decision::Neg);
     }
 }

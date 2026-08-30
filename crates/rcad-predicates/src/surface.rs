@@ -23,7 +23,7 @@ mod tests {
     use crate::expansion::{
         expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_diff, two_product,
     };
-    use crate::{Decision, Filtered, Interval, Level, Point, Predicate, decide};
+    use crate::{Decision, Filtered, Interval, Level, Point, Predicate, decide, product_is_normal};
 
     /// A sphere, standing in for the quadrics `rcad-geom` will bring. Here to
     /// show a second predicate joining the cascade by supplying three
@@ -57,11 +57,19 @@ mod tests {
 
         fn on_floats(&self) -> Option<Filtered> {
             let point = self.point.exact_coordinates()?;
-            let squares = [0, 1, 2].map(|axis| {
-                let gap = point[axis] - self.sphere.centre[axis];
-                gap * gap
-            });
-            let radius_squared = self.sphere.radius * self.sphere.radius;
+            let gaps = [0, 1, 2].map(|axis| point[axis] - self.sphere.centre[axis]);
+            let radius = self.sphere.radius;
+
+            // A relative bound says nothing about a product that fell into the
+            // subnormals, so this level declines rather than certify one.
+            if !(gaps.iter().all(|&gap| product_is_normal(gap, gap))
+                && product_is_normal(radius, radius))
+            {
+                return None;
+            }
+
+            let squares = gaps.map(|gap| gap * gap);
+            let radius_squared = radius * radius;
 
             // Deliberately looser than the six roundings this actually takes.
             // Too large a bound only costs level 1 hits; too small a one costs

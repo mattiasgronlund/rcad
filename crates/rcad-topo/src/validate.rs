@@ -1,5 +1,11 @@
-use rcad_geom::{DynamicRange, Isometry, Orientation, Point, Vector};
-use rcad_predicates::{Approximation, Policy, ProvenanceLog};
+use rcad_geom::{DynamicRange, Isometry, Orientation, Vector};
+use rcad_predicates::expansion::{
+    expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
+};
+use rcad_predicates::{
+    Approximation, Decision, Filtered, Interval, Point as PredicatePoint, Policy, Predicate,
+    ProvenanceLog, Record, decide,
+};
 use slotmap::SecondaryMap;
 
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
@@ -43,8 +49,11 @@ impl Model {
     /// # Errors
     ///
     /// [`Error::Invalid`](crate::Error::Invalid) naming the first invariant
-    /// that does not hold, or [`Error::Geometry`](crate::Error::Geometry) if
-    /// the coordinate range could not even be measured.
+    /// that does not hold, [`Error::Geometry`](crate::Error::Geometry) if the
+    /// coordinate range could not even be measured, or
+    /// [`Error::Undecidable`](crate::Error::Undecidable) if a face's wire is
+    /// wound so far past what `f64` can hold that the cascade cannot say which
+    /// way round it goes.
     pub fn validate(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         self.check_vertices()?;
         self.check_edges()?;
@@ -210,11 +219,11 @@ impl Model {
                 }
             }
             for (position, wire) in view.wires().enumerate() {
-                let with_the_normal = vector_area(wire).dot(plane.normal());
-                if position == 0 && with_the_normal <= 0.0 {
+                let winding = winding_of(wire, plane.normal())?;
+                if position == 0 && winding != Decision::Pos {
                     return Err(Invalid::OuterWireWindsAgainstTheNormal.into());
                 }
-                if position > 0 && with_the_normal >= 0.0 {
+                if position > 0 && winding != Decision::Neg {
                     return Err(Invalid::HoleWindsWithTheOuterWire.into());
                 }
             }
@@ -347,8 +356,12 @@ impl Model {
 
     /// How far off its own plane a face's corner is allowed to sit.
     ///
-    /// A face built here is exactly planar in the model's own frame, so this is
-    /// only ever taking up the slack in fitting a plane through the corners.
+    /// Two separate things added together. The first is how far off the model
+    /// itself is allowed to be — a face built here is exactly planar in the
+    /// model's own frame, so this is only taking up the slack in fitting a
+    /// plane through corners that arrived from somewhere else. The second is
+    /// how far off our own *measurement* of it could be, which is
+    /// [`MEASURING_ROUNDOFF`] times the largest coordinate in the model.
     fn allowed_wobble(&self) -> f64 {
         let largest = self
             .data()
@@ -356,30 +369,587 @@ impl Model {
             .values()
             .map(|vertex| vertex.point.largest_coordinate_magnitude())
             .fold(0.0, f64::max);
-        self.scale().default_linear_tolerance() + 64.0 * f64::EPSILON * largest
+        self.scale().default_linear_tolerance() + MEASURING_ROUNDOFF * largest
     }
 }
 
-/// Twice the area the wire sweeps out, as a vector along the wire's own normal.
+/// What reading a distance off a plane can cost in rounding, per unit of the
+/// largest coordinate involved.
 ///
-/// Fanned from the wire's first corner, which telescopes: the extra triangles
-/// on a wire that is not convex cancel exactly, so this is right whatever shape
-/// the wire is.
-fn vector_area(wire: WireView<'_>) -> Vector {
-    let mut total = Vector::zero();
-    let mut corner: Option<Point> = None;
-    let mut previous: Option<Point> = None;
-    for point in wire.points() {
-        if let (Some(apex), Some(start)) = (corner, previous) {
-            total = total + (start - apex).cross(point - apex);
-        } else {
-            corner = Some(point);
+/// `Plane::signed_distance_to` is `normal · (point − origin) − offset`: three
+/// products, two additions and a subtraction, so six roundings, each at most
+/// half an ulp of a term no larger than the biggest coordinate. That comes to
+/// `3 * f64::EPSILON`, and 64 is a little over twenty times that.
+///
+/// The twentyfold is the part that is not derived, and it is here rather
+/// than in `rcad-geom` where the arithmetic it bounds actually lives. The right
+/// home is a bound published next to `Plane::signed_distance_to` itself, the
+/// way the cascade's level 1 bounds sit next to the expressions they bound;
+/// then this line would read "the model's own tolerance plus what the plane
+/// says its own arithmetic costs" and neither half would be a guess.
+const MEASURING_ROUNDOFF: f64 = 64.0 * f64::EPSILON;
+
+/// Which way `wire` winds round `normal`.
+///
+/// [`Decision::Pos`] with it, [`Decision::Neg`] against it, [`Decision::Zero`]
+/// when the wire sweeps out no area at all, which no sound face has.
+///
+/// The quantity decided is the wire's vector area dotted with the normal. That
+/// sum cancels — a wire far from the origin adds and subtracts numbers far
+/// larger than the area they are measuring — so reading the sign off an `f64`
+/// total is a coin toss near the point where the sign turns over. A sweep that
+/// got this wrong would pass a solid with its material on the wrong side, or
+/// refuse a sound one, so it goes through the cascade like every other
+/// geometric decision here (decisions.md §2.1).
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when the cascade cannot settle the sign. For the
+/// exact `f64` coordinates a model stores that only happens when a coordinate
+/// product overflows or falls into the subnormals, which is what the
+/// dynamic-range check exists to reject (decisions.md §3.5).
+fn winding_of(wire: WireView<'_>, normal: Vector) -> Result<Decision> {
+    let swept = AreaSweptRoundTheNormal {
+        corners: wire
+            .points()
+            .map(|corner| corner.coordinates())
+            .collect::<Vec<_>>(),
+        normal: normal.components(),
+    };
+    let (decision, level) = decide(&swept);
+    match decision {
+        Decision::Neg | Decision::Zero | Decision::Pos => Ok(decision),
+        Decision::Undecidable { .. } => {
+            let corners: Vec<PredicatePoint> = swept
+                .corners
+                .iter()
+                .map(|&corner| PredicatePoint::from(corner))
+                .collect();
+            let mut records = ProvenanceLog::new();
+            records.push(Record::new(SWEPT_AREA, &corners, level, decision));
+            Err(crate::Error::Undecidable { records })
         }
-        previous = Some(point);
+        // `Decision` grows a variant at every milestone. Whatever the new one
+        // means, guessing is worse than stopping.
+        other => panic!("the swept area came back with a decision nothing here knows: {other:?}"),
     }
-    total * 0.5
+}
+
+/// The name this predicate goes by in provenance records.
+const SWEPT_AREA: &str = "area swept by a wire round a normal";
+
+/// Twice the area a closed wire sweeps out, dotted with a normal.
+///
+/// Summed as `Σ (p × q) · n` over the wire's edges rather than fanned from one
+/// corner. Both telescope, so both are right whatever shape the wire is, but
+/// this one is a sum of plain products of stored coordinates — which is what
+/// lets level 3 work in exact arithmetic over the numbers the model actually
+/// holds, instead of over differences it would have to round first.
+struct AreaSweptRoundTheNormal {
+    corners: Vec<[f64; 3]>,
+    normal: [f64; 3],
+}
+
+/// Which two coordinates each component of a cross product is built from.
+///
+/// `(u × v)_x = u_y*v_z − u_z*v_y`, and the other two follow it round.
+const CROSS_PRODUCT_AXES: [(usize, usize); 3] = [(1, 2), (2, 0), (0, 1)];
+
+impl Predicate for AreaSweptRoundTheNormal {
+    fn name(&self) -> &'static str {
+        SWEPT_AREA
+    }
+
+    /// There is no `f64` filter for this one.
+    ///
+    /// A forward error bound has to be derived for a fixed expression, and this
+    /// expression grows with the wire: the number of roundings depends on how
+    /// many corners there are. Writing a bound that holds for every wire length
+    /// means writing one that is loose for short wires and easy to get wrong,
+    /// and a bound that is wrong certifies the wrong sign. Level 2 is rigorous
+    /// by construction and settles everything a filter would have, so the
+    /// filter buys speed this sweep does not need.
+    fn on_floats(&self) -> Option<Filtered> {
+        None
+    }
+
+    fn on_intervals(&self) -> Interval {
+        let mut total = Interval::exactly(0.0);
+        for (start, end) in self.edges() {
+            for (axis, (first, second)) in CROSS_PRODUCT_AXES.into_iter().enumerate() {
+                let minor = Interval::exactly(start[first]) * Interval::exactly(end[second])
+                    - Interval::exactly(start[second]) * Interval::exactly(end[first]);
+                total = total + Interval::exactly(self.normal[axis]) * minor;
+            }
+        }
+        total
+    }
+
+    fn exactly(&self) -> Option<Decision> {
+        let mut total: Vec<f64> = Vec::new();
+        let mut merged: Vec<f64> = Vec::new();
+        let mut scaled = [0.0f64; 8];
+
+        for (start, end) in self.edges() {
+            for (axis, (first, second)) in CROSS_PRODUCT_AXES.into_iter().enumerate() {
+                let along_the_normal = self.normal[axis];
+                let (minor, minor_length) =
+                    exact_minor(start[first], end[second], start[second], end[first])?;
+                let minor = &minor[..minor_length];
+                if !minor
+                    .iter()
+                    .all(|&entry| product_is_exact(entry, along_the_normal))
+                {
+                    return None;
+                }
+                let scaled_length = scale_expansion(minor, along_the_normal, &mut scaled);
+                merged.resize(total.len() + scaled_length, 0.0);
+                let total_length = expansion_sum(&total, &scaled[..scaled_length], &mut merged);
+                merged.truncate(total_length);
+                core::mem::swap(&mut total, &mut merged);
+            }
+        }
+
+        match expansion_sign(&total) {
+            Decision::Neg => Some(Decision::Neg),
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Pos => Some(Decision::Pos),
+            // A product overflowed. Exact arithmetic that is not exact has
+            // nothing to offer, so this level cannot run.
+            Decision::Undecidable { .. } => None,
+            other => {
+                panic!("an expansion came back with a decision nothing here knows: {other:?}")
+            }
+        }
+    }
+}
+
+impl AreaSweptRoundTheNormal {
+    /// Every corner paired with the one after it, the last with the first.
+    fn edges(&self) -> impl Iterator<Item = ([f64; 3], [f64; 3])> + '_ {
+        let count = self.corners.len();
+        (0..count).map(move |index| (self.corners[index], self.corners[(index + 1) % count]))
+    }
+}
+
+/// `first * second - third * fourth`, exactly.
+///
+/// `None` when either product is small enough that its own roundoff term would
+/// be subnormal, because then [`two_product`] cannot hand the term back whole
+/// and the result stops being exact.
+fn exact_minor(first: f64, second: f64, third: f64, fourth: f64) -> Option<([f64; 4], usize)> {
+    if !product_is_exact(first, second) || !product_is_exact(third, fourth) {
+        return None;
+    }
+    let (forwards, forwards_roundoff) = two_product(first, second);
+    let (backwards, backwards_roundoff) = two_product(third, fourth);
+    let mut out = [0.0; 4];
+    let length = expansion_sum(
+        &[forwards_roundoff, forwards],
+        &[-backwards_roundoff, -backwards],
+        &mut out,
+    );
+    Some((out, length))
 }
 
 fn magnitude_of(tag: Option<Approximation>) -> f64 {
     tag.map_or(0.0, Approximation::magnitude)
+}
+
+#[cfg(test)]
+mod tests {
+    use rcad_geom::{Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
+    use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
+    use smallvec::SmallVec;
+
+    use super::{Decision, winding_of};
+    use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
+    use crate::{Error, FaceView, Invalid, Model, WireView};
+
+    fn an_empty_model() -> Model {
+        Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
+    }
+
+    fn a_cube() -> Model {
+        let mut model = an_empty_model();
+        model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube of side two");
+        model
+    }
+
+    fn a_plate_with_a_hole() -> Model {
+        let mut model = an_empty_model();
+        let plate =
+            crate::ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+                .with_hole(vec![[3.0, 3.0], [6.0, 3.0], [6.0, 6.0], [3.0, 6.0]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a plate with a hole");
+        model
+            .add_extrusion(&plate, 2.0, &Isometry::identity())
+            .expect("a plate two thick");
+        model
+    }
+
+    /// The plane `z = 0`, facing up.
+    fn the_ground() -> Plane {
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal")
+    }
+
+    fn a_clean_sweep(model: &Model) {
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("this model is sound");
+    }
+
+    /// The one invariant the sweep refused this model for.
+    fn refusal(model: &Model) -> Invalid {
+        match model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
+            Err(Error::Invalid(broken)) => broken,
+            other => panic!("the sweep should have refused this model, and gave {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_edge_naming_a_corner_that_is_gone_is_caught() {
+        let mut model = a_cube();
+        let corner = model
+            .data()
+            .vertices
+            .keys()
+            .next()
+            .expect("a cube has corners");
+        model.data_mut().vertices.remove(corner);
+
+        assert_eq!(refusal(&model), Invalid::DanglingKey { entity: "vertex" });
+    }
+
+    #[test]
+    fn a_corner_at_a_coordinate_that_is_not_a_number_is_caught() {
+        let mut model = a_cube();
+        model
+            .data_mut()
+            .vertices
+            .values_mut()
+            .next()
+            .expect("a cube has corners")
+            .point = Point::new(f64::NAN, 0.0, 0.0);
+
+        assert_eq!(refusal(&model), Invalid::VertexNotFinite);
+    }
+
+    #[test]
+    fn an_edge_that_starts_and_ends_at_the_same_corner_is_caught() {
+        let mut model = a_cube();
+        let edge = model.data().edges.keys().next().expect("a cube has edges");
+        let start = model.data().edges[edge].start;
+        model.data_mut().edges[edge].end = start;
+
+        assert_eq!(refusal(&model), Invalid::EdgeHasNoLength);
+    }
+
+    #[test]
+    fn an_edge_that_has_grown_a_third_coedge_is_caught() {
+        let mut model = a_cube();
+        let edge = model.data().edges.keys().next().expect("a cube has edges");
+        model.add_coedge(edge, Orientation::Forward);
+
+        assert_eq!(refusal(&model), Invalid::EdgeCoedgeCount { count: 3 });
+    }
+
+    #[test]
+    fn both_coedges_of_an_edge_running_the_same_way_is_caught() {
+        let mut model = a_cube();
+        let edge = model.data().edges.keys().next().expect("a cube has edges");
+        let coedge = model.index().coedges_of_edge(edge)[0];
+        let turned = model.data().coedges[coedge].orientation.reversed();
+        model.data_mut().coedges[coedge].orientation = turned;
+
+        assert_eq!(refusal(&model), Invalid::CoedgesRunTheSameWay);
+    }
+
+    #[test]
+    fn a_wire_whose_coedges_no_longer_join_up_is_caught() {
+        let mut model = a_cube();
+        let wire = model.data().wires.keys().next().expect("a cube has wires");
+        model.data_mut().wires[wire].coedges.swap(0, 1);
+
+        assert_eq!(refusal(&model), Invalid::WireDoesNotClose { position: 1 });
+    }
+
+    #[test]
+    fn a_corner_no_edge_uses_is_caught() {
+        let mut model = a_cube();
+        model.add_vertex(Point::new(9.0, 9.0, 9.0));
+
+        assert_eq!(refusal(&model), Invalid::Orphan { entity: "vertex" });
+    }
+
+    #[test]
+    fn a_shell_that_lists_the_same_face_twice_is_caught() {
+        let mut model = a_cube();
+        let shell = model
+            .data()
+            .shells
+            .keys()
+            .next()
+            .expect("a cube has a shell");
+        let again = model.data().shells[shell].faces[0];
+        model.data_mut().shells[shell].faces.push(again);
+
+        assert_eq!(
+            refusal(&model),
+            Invalid::UsedMoreThanOnce {
+                entity: "face",
+                count: 2
+            }
+        );
+    }
+
+    #[test]
+    fn a_face_that_is_not_on_a_plane_is_caught() {
+        let mut model = a_cube();
+        let ball = Sphere::new(Point::origin(), 1.0).expect("a ball of radius one");
+        model
+            .data_mut()
+            .faces
+            .values_mut()
+            .next()
+            .expect("a cube has faces")
+            .surface = Surface::Sphere(ball);
+
+        assert_eq!(refusal(&model), Invalid::FaceIsNotPlanar);
+    }
+
+    #[test]
+    fn a_face_whose_outer_wire_winds_against_its_normal_is_caught() {
+        let mut model = a_cube();
+        let face = model
+            .data_mut()
+            .faces
+            .values_mut()
+            .next()
+            .expect("a cube has faces");
+        let plane = *face
+            .surface
+            .as_plane()
+            .expect("a cube's faces sit on planes");
+        face.surface = Surface::Plane(plane.reversed());
+
+        assert_eq!(refusal(&model), Invalid::OuterWireWindsAgainstTheNormal);
+    }
+
+    #[test]
+    fn a_solid_turned_inside_out_is_caught() {
+        let mut model = a_cube();
+        for shell in model.data_mut().shells.values_mut() {
+            for used in &mut shell.faces {
+                used.orient = used.orient.reversed();
+            }
+        }
+
+        assert!(matches!(
+            refusal(&model),
+            Invalid::VolumeIsNotPositive { .. }
+        ));
+    }
+
+    #[test]
+    fn an_edge_carrying_more_slop_than_its_corners_is_caught() {
+        let mut model = a_cube();
+        model
+            .data_mut()
+            .edges
+            .values_mut()
+            .next()
+            .expect("a cube has edges")
+            .approximation = Some(Approximation::new(1e-6, Cause::ImportedUncertainty));
+
+        assert!(matches!(
+            refusal(&model),
+            Invalid::ApproximationOrdering { .. }
+        ));
+    }
+
+    /// Lift the corner the first face's wire starts from straight up.
+    ///
+    /// Straight up, because the walls of an extrusion stand on vertical planes:
+    /// moving a corner along `z` takes it off the cap it sits on and leaves it
+    /// exactly on every wall that meets there, so the cap is the only thing
+    /// this can break.
+    fn lift_the_first_corner(model: &mut Model, by: f64) {
+        let corner = model
+            .data_mut()
+            .vertices
+            .values_mut()
+            .next()
+            .expect("a cube has corners");
+        corner.point = Point::new(corner.point.x(), corner.point.y(), corner.point.z() + by);
+    }
+
+    #[test]
+    fn a_corner_within_the_allowed_wobble_of_its_face_plane_is_let_through() {
+        let mut model = a_cube();
+        let allowed = model.allowed_wobble();
+        lift_the_first_corner(&mut model, allowed / 2.0);
+
+        a_clean_sweep(&model);
+    }
+
+    #[test]
+    fn a_corner_further_off_its_face_plane_than_that_is_caught() {
+        let mut model = a_cube();
+        let allowed = model.allowed_wobble();
+        lift_the_first_corner(&mut model, allowed * 2.0);
+
+        match refusal(&model) {
+            Invalid::VertexOffItsFacePlane { distance } => {
+                assert!(distance > allowed, "{distance} should be over {allowed}");
+            }
+            other => panic!("expected a corner off its plane, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_wire_of_only_two_coedges_is_caught() {
+        let mut model = an_empty_model();
+        let start = model.add_vertex(Point::new(0.0, 0.0, 0.0));
+        let end = model.add_vertex(Point::new(1.0, 0.0, 0.0));
+        let edge = model.add_edge(start, end);
+        let there = model.add_coedge(edge, Orientation::Forward);
+        let back = model.add_coedge(edge, Orientation::Reversed);
+        let wire = model.add_wire([there, back].into_iter().collect());
+        model.add_face(Surface::Plane(the_ground()), SmallVec::from_buf([wire]));
+
+        assert_eq!(refusal(&model), Invalid::WireTooShort { count: 2 });
+    }
+
+    #[test]
+    fn a_face_with_no_wires_at_all_is_caught() {
+        let mut model = an_empty_model();
+        model.add_face(Surface::Plane(the_ground()), SmallVec::new());
+
+        assert_eq!(refusal(&model), Invalid::FaceHasNoWires);
+    }
+
+    /// A triangle in the ground plane and its mirror image, as two wires.
+    ///
+    /// The mirror runs the same edges the other way round, which is what gives
+    /// every edge the two coedges running opposite ways that the sweep insists
+    /// on. Hand it back so a face can hold both.
+    fn a_triangle_and_its_mirror(
+        model: &mut Model,
+        corners: [[f64; 2]; 3],
+    ) -> (WireSlot, WireSlot) {
+        let vertices: Vec<VertexSlot> = corners
+            .iter()
+            .map(|corner| model.add_vertex(Point::new(corner[0], corner[1], 0.0)))
+            .collect();
+        let edges: Vec<EdgeSlot> = (0..3)
+            .map(|index| model.add_edge(vertices[index], vertices[(index + 1) % 3]))
+            .collect();
+        let anticlockwise: SmallVec<[CoedgeSlot; 4]> = edges
+            .iter()
+            .map(|&edge| model.add_coedge(edge, Orientation::Forward))
+            .collect();
+        let clockwise: SmallVec<[CoedgeSlot; 4]> = edges
+            .iter()
+            .rev()
+            .map(|&edge| model.add_coedge(edge, Orientation::Reversed))
+            .collect();
+        (model.add_wire(anticlockwise), model.add_wire(clockwise))
+    }
+
+    #[test]
+    fn a_hole_winding_the_same_way_as_the_wire_round_it_is_caught() {
+        let mut model = an_empty_model();
+        let outline = a_triangle_and_its_mirror(&mut model, [[0.0, 0.0], [4.0, 0.0], [0.0, 4.0]]);
+        let hole = a_triangle_and_its_mirror(&mut model, [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]);
+        model.add_face(
+            Surface::Plane(the_ground()),
+            // The outline anticlockwise and then the hole *also* anticlockwise,
+            // which is the one thing wrong here. The two mirrors ride along at
+            // the back so every edge still has its second coedge.
+            [outline.0, hole.0, outline.1, hole.1].into_iter().collect(),
+        );
+
+        assert_eq!(refusal(&model), Invalid::HoleWindsWithTheOuterWire);
+    }
+
+    /// A triangle of area one half, sitting where `f64` cannot see it.
+    ///
+    /// Both cross products come to `10000000200000001` and `10000000200000000`,
+    /// and the first of those is one above a number `f64` can hold at that size,
+    /// so it rounds down onto the second. The difference an `f64` sum reports is
+    /// zero; the difference is one.
+    fn a_sliver_triangle_f64_cannot_measure(model: &mut Model) -> FaceSlot {
+        let corners = [
+            [0.0, 0.0],
+            [100_000_001.0, 100_000_000.0],
+            [100_000_002.0, 100_000_001.0],
+        ];
+        let (anticlockwise, clockwise) = a_triangle_and_its_mirror(model, corners);
+        model.add_face(
+            Surface::Plane(the_ground()),
+            [anticlockwise, clockwise].into_iter().collect(),
+        )
+    }
+
+    /// The `f64` fan the sweep used to read this sign off, kept here so a test
+    /// can show it getting the answer wrong.
+    fn fanned_in_f64(wire: WireView<'_>, normal: Vector) -> f64 {
+        let mut total = Vector::zero();
+        let mut fan_from: Option<Point> = None;
+        let mut previous: Option<Point> = None;
+        for point in wire.points() {
+            if let (Some(apex), Some(start)) = (fan_from, previous) {
+                total = total + (start - apex).cross(point - apex);
+            } else {
+                fan_from = Some(point);
+            }
+            previous = Some(point);
+        }
+        (total * 0.5).dot(normal)
+    }
+
+    #[test]
+    fn a_sliver_winds_with_its_normal_even_where_adding_its_area_up_in_f64_says_it_does_not() {
+        let mut model = an_empty_model();
+        let face = a_sliver_triangle_f64_cannot_measure(&mut model);
+        let view = FaceView::new(&model, face, Isometry::identity(), Orientation::Forward);
+
+        assert_eq!(
+            fanned_in_f64(view.outer_wire(), the_ground().normal()),
+            0.0,
+            "the f64 fan has to lose this sign for the test to mean anything"
+        );
+        assert_eq!(
+            winding_of(view.outer_wire(), the_ground().normal()).expect("the cascade settles this"),
+            Decision::Pos,
+            "the exact sign is there to be had, and a zero would have the sweep \
+             refuse this face for winding the wrong way"
+        );
+    }
+
+    #[test]
+    fn a_hole_in_a_plate_winds_against_the_face_it_is_cut_from() {
+        let model = a_plate_with_a_hole();
+        a_clean_sweep(&model);
+
+        let cap = model.faces().next().expect("a plate has caps");
+        let mut wires = cap.wires();
+        let outline = wires.next().expect("the outline");
+        let hole = wires.next().expect("and the hole");
+        let normal = cap.plane().normal();
+
+        assert_eq!(
+            winding_of(outline, normal).expect("the cascade settles this"),
+            Decision::Pos
+        );
+        assert_eq!(
+            winding_of(hole, normal).expect("the cascade settles this"),
+            Decision::Neg
+        );
+    }
 }

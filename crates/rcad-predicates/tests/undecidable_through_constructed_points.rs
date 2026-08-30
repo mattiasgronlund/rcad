@@ -9,7 +9,7 @@
 //! question.
 
 use rcad_predicates::{
-    Approximation, Cause, Decision, Level, Point, Policy, ProvenanceLog, Strictness,
+    Approximation, Cause, Decision, Level, Measures, Point, Policy, ProvenanceLog,
     meet_of_three_planes, orient3d_reporting_level, orient3d_tolerantly,
 };
 
@@ -151,12 +151,11 @@ fn a_tolerant_policy_reads_the_undecided_answer_as_coplanar_and_tags_it() {
 #[test]
 fn a_tolerant_policy_for_a_much_smaller_model_refuses_the_same_slop() {
     let [a, b, c] = the_plane_through_the_meeting_point();
-    // Slop scales with the cube of the working size, so a model a thousand
-    // times smaller has a budget a billion times smaller.
+    // `orient3d` measures a volume, so its budget scales with the cube of the
+    // working size: a model a thousand times smaller has a budget a billion
+    // times smaller.
     let policy = Policy::tolerant(1e-3);
-    let Strictness::TolerantFallback { max_slop } = policy.strictness() else {
-        panic!("a tolerant policy carries a slop budget");
-    };
+    let max_slop = policy.max_slop(Measures::Volume);
     let mut log = ProvenanceLog::new();
 
     let decision = orient3d_tolerantly(a, b, c, the_meeting_point(), &policy, &mut log);

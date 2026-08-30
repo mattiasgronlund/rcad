@@ -23,8 +23,42 @@ pub struct Filtered {
     /// The value the predicate polynomial came to in `f64`.
     pub value: f64,
     /// The most `value` can differ from the true value. The sign of `value` is
-    /// certain exactly when its magnitude is above this.
+    /// proved when its magnitude is above this — and only while this is itself
+    /// a normal number, which is what [`decide`] checks before believing it.
     pub error_bound: f64,
+}
+
+/// Whether multiplying `a` by `b` keeps full relative accuracy.
+///
+/// Every level 1 error bound is a *relative* one — a small multiple of the
+/// permanent — and the analysis behind it assumes each rounding costs at most a
+/// fixed fraction of the number being rounded. For `+` and `-` that holds for
+/// any two `f64`. For `*` it holds only while the product stays out of the
+/// subnormals: down there products are rounded onto a fixed grid, so what a
+/// product loses is an *absolute* amount, up to half of `2^-1074`, and that can
+/// be the whole of its value. Feed such a product into a relative bound and the
+/// filter certifies a sign it has not earned — sometimes the wrong one. That is
+/// the failure the `robust` crate has, and the reason
+/// [`Predicate::on_floats`] must return `None` when this comes back `false`.
+///
+/// A product of exactly zero only counts as accurate when one of the factors is
+/// zero. Two small factors whose product falls off the bottom of the range also
+/// give zero, and that zero is wrong by everything the product was worth — so
+/// the factors are what gets asked about, not the answer.
+///
+/// [`product_is_exact`](crate::expansion::product_is_exact) is the stricter
+/// test level 3 needs: exact arithmetic wants the *roundoff term* to be normal,
+/// which starts a hundred binades higher up.
+///
+/// ```
+/// # use rcad_predicates::product_is_normal;
+/// assert!(product_is_normal(1.5, 2.5));
+/// assert!(product_is_normal(0.0, 3.5e-323));
+/// assert!(!product_is_normal(2f64.powi(-538), 2f64.powi(-538)));
+/// ```
+#[must_use]
+pub fn product_is_normal(a: f64, b: f64) -> bool {
+    a == 0.0 || b == 0.0 || (a * b).abs() >= f64::MIN_POSITIVE
 }
 
 /// The three ways to evaluate one predicate, cheapest first.
@@ -38,8 +72,15 @@ pub trait Predicate {
     /// Name for provenance records. Plain words, not a type path.
     fn name(&self) -> &'static str;
 
-    /// Level 1. `None` when an input is not an exact `f64`, because a forward
-    /// error bound derived for exact inputs says nothing about uncertain ones.
+    /// Level 1. `None` when this level cannot be trusted to run, which is two
+    /// things:
+    ///
+    /// - an input is not an exact `f64`, because a forward error bound derived
+    ///   for exact inputs says nothing about uncertain ones; and
+    /// - one of the multiplications on the way to `value` or to the permanent
+    ///   landed in the subnormals, because the bound is relative and down there
+    ///   rounding stops being relative. Every implementation checks its own
+    ///   products through [`product_is_normal`].
     fn on_floats(&self) -> Option<Filtered>;
 
     /// Level 2. A range that is guaranteed to contain the true value.
@@ -58,21 +99,29 @@ pub trait Predicate {
 ///
 /// The one case that comes back [`Decision::Undecidable`] is an interval that
 /// straddles zero when level 3 cannot run. For exact `f64` inputs that never
-/// happens, short of an intermediate overflow: level 3 always decides.
+/// happens, short of an intermediate product overflowing or falling into the
+/// subnormals: level 3 always decides.
 pub fn decide<P: Predicate + ?Sized>(predicate: &P) -> (Decision, Level) {
     if let Some(Filtered { value, error_bound }) = predicate.on_floats() {
-        // A bound that is not a number means the predicate's own magnitudes
-        // overflowed; that certifies nothing, and the comparisons below are
-        // false, which is exactly right. A negative bound is a bug.
         assert!(
             error_bound.is_nan() || error_bound >= 0.0,
             "a forward error bound cannot be negative, got {error_bound}"
         );
-        if value > error_bound {
-            return (Decision::Pos, Level::Float);
-        }
-        if -value > error_bound {
-            return (Decision::Neg, Level::Float);
+        // The bound only bounds anything while it is a normal number of its
+        // own. Infinite or not-a-number means the predicate's magnitudes
+        // overflowed. Subnormal means the bound was itself rounded onto the
+        // grid at the bottom of the range, which can shave far more off it than
+        // the slack the constants carry, so the comparison would be against a
+        // number smaller than the error it stands for. Zero says the same thing
+        // in the limit. Levels 2 and 3 are built to say "cannot tell"; this
+        // level is not, so it hands over.
+        if error_bound.is_normal() {
+            if value > error_bound {
+                return (Decision::Pos, Level::Float);
+            }
+            if -value > error_bound {
+                return (Decision::Neg, Level::Float);
+            }
         }
     }
 
@@ -102,7 +151,7 @@ pub fn decide<P: Predicate + ?Sized>(predicate: &P) -> (Decision, Level) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Filtered, Level, Predicate, decide};
+    use super::{Filtered, Level, Predicate, decide, product_is_normal};
     use crate::{Decision, Interval};
 
     /// A predicate that answers whatever the test told it to, so the level
@@ -189,6 +238,71 @@ mod tests {
             exact: Some(Decision::Undecidable { enclosure: 2.0 }),
         };
         let _ = decide(&predicate);
+    }
+
+    /// A bound this small has been rounded onto the grid at the bottom of the
+    /// `f64` range, so it no longer stands for the error it was derived to
+    /// stand for. Level 1 has to hand over even though the value clears it.
+    #[test]
+    fn a_bound_too_small_to_be_a_normal_number_certifies_nothing() {
+        let predicate = Scripted {
+            floats: Some(Filtered {
+                value: 5e-322,
+                error_bound: 1e-322,
+            }),
+            interval: Interval::new(-1.0, 1.0).unwrap(),
+            exact: Some(Decision::Neg),
+        };
+        assert_eq!(decide(&predicate), (Decision::Neg, Level::Exact));
+    }
+
+    /// The same for a bound that came out exactly zero, which is what a
+    /// permanent built entirely from underflowed products comes to.
+    #[test]
+    fn a_bound_of_zero_certifies_nothing() {
+        let predicate = Scripted {
+            floats: Some(Filtered {
+                value: 5e-324,
+                error_bound: 0.0,
+            }),
+            interval: Interval::new(-1.0, 1.0).unwrap(),
+            exact: Some(Decision::Neg),
+        };
+        assert_eq!(decide(&predicate), (Decision::Neg, Level::Exact));
+    }
+
+    #[test]
+    fn a_bound_that_overflowed_certifies_nothing() {
+        for error_bound in [f64::INFINITY, f64::NAN] {
+            let predicate = Scripted {
+                floats: Some(Filtered {
+                    value: 1e300,
+                    error_bound,
+                }),
+                interval: Interval::new(-1.0, 1.0).unwrap(),
+                exact: Some(Decision::Zero),
+            };
+            assert_eq!(decide(&predicate), (Decision::Zero, Level::Exact));
+        }
+    }
+
+    #[test]
+    fn a_product_that_stays_normal_is_accurate_and_one_that_underflows_is_not() {
+        assert!(product_is_normal(1.5, 2.5));
+        assert!(product_is_normal(f64::MIN_POSITIVE, 1.0));
+        assert!(!product_is_normal(f64::MIN_POSITIVE, 0.5));
+    }
+
+    /// Two numbers that multiply out to less than the smallest `f64` give zero,
+    /// and that zero is wrong by the whole of what the product was worth. Only
+    /// a factor that is itself zero makes a trustworthy zero.
+    #[test]
+    fn a_product_that_underflows_all_the_way_to_zero_is_not_accurate() {
+        let tiny = 2f64.powi(-700);
+        assert_eq!(tiny * tiny, 0.0);
+        assert!(!product_is_normal(tiny, tiny));
+        assert!(product_is_normal(0.0, tiny));
+        assert!(product_is_normal(tiny, 0.0));
     }
 
     #[test]

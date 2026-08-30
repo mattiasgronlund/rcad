@@ -60,6 +60,12 @@ impl Model {
     /// The largest [`Approximation`] anywhere in the model, or zero if nothing
     /// is approximate.
     ///
+    /// This is the true maximum over the entities, not a high-water mark: tag
+    /// the only approximate vertex in a model down to a smaller number and this
+    /// comes down with it. A mark that only ever rose would disagree with the
+    /// same model written out and read back, and it would hand every later
+    /// growth check a baseline more permissive than the model deserves.
+    ///
     /// Every mutation checks this has not grown, in release builds as well as
     /// debug. Tolerance inflation is the failure mode that turns into a week of
     /// bisection if it is noticed downstream instead of where it happened
@@ -250,6 +256,8 @@ impl Model {
     /// broken.
     pub fn place_solid(&mut self, key: SolidKey, movement: &Isometry) {
         let slot = key.slot_in(self.id);
+        let approximation_before = self.worst_approximation;
+
         let solid = self
             .data
             .solids
@@ -259,7 +267,6 @@ impl Model {
             used.loc = movement.compose(&used.loc);
         }
 
-        let approximation_before = self.worst_approximation;
         self.check_touched_solid(slot);
         self.assert_approximation_did_not_grow(approximation_before);
     }
@@ -283,8 +290,8 @@ impl Model {
                 return Err(ordering_broken("edge", on_edge, "vertex", tag.magnitude()));
             }
         }
-        self.data.vertices[slot].approximation = Some(tag);
-        self.record_approximation(tag);
+        let replaced = self.data.vertices[slot].approximation.replace(tag);
+        self.record_approximation(replaced, tag);
         Ok(())
     }
 
@@ -319,8 +326,8 @@ impl Model {
                 return Err(ordering_broken("face", on_face, "edge", tag.magnitude()));
             }
         }
-        self.data.edges[slot].approximation = Some(tag);
-        self.record_approximation(tag);
+        let replaced = self.data.edges[slot].approximation.replace(tag);
+        self.record_approximation(replaced, tag);
         Ok(())
     }
 
@@ -342,8 +349,8 @@ impl Model {
                 return Err(ordering_broken("face", tag.magnitude(), "edge", on_edge));
             }
         }
-        self.data.faces[slot].approximation = Some(tag);
-        self.record_approximation(tag);
+        let replaced = self.data.faces[slot].approximation.replace(tag);
+        self.record_approximation(replaced, tag);
         Ok(())
     }
 
@@ -357,6 +364,18 @@ impl Model {
 
     pub(crate) fn index(&self) -> &Index {
         &self.index
+    }
+
+    /// The stored arena, so a test can break exactly one invariant and watch
+    /// the sweep catch it.
+    ///
+    /// Test-only on purpose. Writing here goes round the methods that keep
+    /// [`Index`] and the recorded worst approximation in step with the data,
+    /// which is the whole point when the test wants a broken model and is a bug
+    /// anywhere else.
+    #[cfg(test)]
+    pub(crate) fn data_mut(&mut self) -> &mut ModelData {
+        &mut self.data
     }
 
     pub(crate) fn from_parts(data: ModelData) -> Self {
@@ -526,16 +545,34 @@ impl Model {
 
     /// The check that runs in release builds too (decisions.md §4.3).
     ///
+    /// An operation that meant to leave slop behind passes the amount its
+    /// provenance accounts for. What this catches is slop that appeared with
+    /// nothing accounting for it.
+    ///
+    /// The comparison is only worth making if the number being compared is
+    /// still the truth, so in debug builds this first walks the arena and
+    /// checks it. That walk is the half that can catch a mistake made *inside*
+    /// this crate: an entity written to directly instead of through
+    /// [`Model::set_vertex_approximation`] and its siblings leaves the recorded
+    /// figure stale, and a stale figure would be compared against a budget
+    /// derived from it and agree with itself. The walk costs a pass over every
+    /// entity, which is why it does not run in release — §4.3 budgets one
+    /// comparison there, and a pass per operation is what makes a test suite
+    /// quadratic.
+    ///
     /// # Panics
     ///
-    /// If the model's worst approximation ended up above `before`. An operation
-    /// that meant to leave slop behind passes the amount it recorded in its
-    /// provenance, so what this catches is slop that appeared with nothing
-    /// accounting for it.
-    pub(crate) fn assert_approximation_did_not_grow(&self, before: f64) {
+    /// If the model's worst approximation ended up above `allowed`, or if the
+    /// recorded figure no longer matches the entities.
+    pub(crate) fn assert_approximation_did_not_grow(&self, allowed: f64) {
+        debug_assert_eq!(
+            self.worst_approximation,
+            self.data.worst_approximation(),
+            "slop was written into an entity without being recorded on the model"
+        );
         assert!(
-            self.worst_approximation <= before,
-            "this operation inflated the model's worst approximation from {before} to {}",
+            self.worst_approximation <= allowed,
+            "this operation left {} of slop behind and only {allowed} was accounted for",
             self.worst_approximation
         );
     }
@@ -567,8 +604,18 @@ impl Model {
             .collect()
     }
 
-    fn record_approximation(&mut self, tag: Approximation) {
-        self.worst_approximation = self.worst_approximation.max(tag.magnitude());
+    /// Bring [`Model::worst_approximation`] back in step after one entity's tag
+    /// changed from `replaced` to `tag`.
+    ///
+    /// Taking the larger of the two is only right while tags go up. A tag that
+    /// comes down may have been the one holding the maximum, and then the only
+    /// way to know the new maximum is to look, so that case walks the arena.
+    fn record_approximation(&mut self, replaced: Option<Approximation>, tag: Approximation) {
+        if magnitude_of(replaced) > tag.magnitude() {
+            self.worst_approximation = self.data.worst_approximation();
+        } else {
+            self.worst_approximation = self.worst_approximation.max(tag.magnitude());
+        }
     }
 }
 
@@ -779,7 +826,7 @@ pub(crate) struct ShellUse {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Orientation, Point, Scale, Surface, Vector};
+    use rcad_geom::{Axis, Orientation, Point, Scale, Vector};
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
 
     use super::Model;
@@ -991,7 +1038,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "inflated")]
+    #[should_panic(expected = "only 0 was accounted for")]
     fn an_operation_that_leaves_more_slop_behind_than_it_found_is_a_bug() {
         let (mut model, _) = a_cube();
         let vertex = model.vertices().next().expect("a cube has corners").key();
@@ -1004,81 +1051,60 @@ mod tests {
     }
 
     #[test]
-    fn the_sweep_notices_a_solid_turned_inside_out() {
-        let (mut model, _) = a_cube();
-        for shell in model.data.shells.values_mut() {
-            for used in &mut shell.faces {
-                used.orient = used.orient.reversed();
-            }
-        }
-
-        let refused = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-
-        assert!(matches!(
-            refused,
-            Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
-        ));
-    }
-
-    #[test]
-    fn the_sweep_notices_a_face_whose_wire_winds_against_its_normal() {
-        let (mut model, _) = a_cube();
-        let face = model
-            .data
-            .faces
-            .values_mut()
-            .next()
-            .expect("a cube has faces");
-        let plane = *face
-            .surface
-            .as_plane()
-            .expect("a cube's faces sit on planes");
-        face.surface = Surface::Plane(plane.reversed());
-
-        let refused = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-
-        assert!(matches!(
-            refused,
-            Err(Error::Invalid(Invalid::OuterWireWindsAgainstTheNormal))
-        ));
-    }
-
-    #[test]
-    fn the_sweep_notices_a_face_that_is_not_on_a_plane() {
-        let (mut model, _) = a_cube();
-        let ball = rcad_geom::Sphere::new(Point::origin(), 1.0).expect("a ball of radius one");
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "without being recorded")]
+    fn slop_written_straight_into_an_entity_is_caught_by_the_next_operation() {
+        let (mut model, cube) = a_cube();
         model
             .data
-            .faces
+            .vertices
             .values_mut()
             .next()
-            .expect("a cube has faces")
-            .surface = Surface::Sphere(ball);
-
-        let refused = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-
-        assert!(matches!(
-            refused,
-            Err(Error::Invalid(Invalid::FaceIsNotPlanar))
-        ));
-    }
-
-    #[test]
-    fn the_sweep_notices_an_edge_carrying_more_slop_than_its_corners() {
-        let (mut model, _) = a_cube();
-        model
-            .data
-            .edges
-            .values_mut()
-            .next()
-            .expect("a cube has edges")
+            .expect("a cube has corners")
             .approximation = Some(Approximation::new(1e-6, Cause::ImportedUncertainty));
 
-        let refused = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+        model.place_solid(cube, &a_movement());
+    }
 
-        assert!(matches!(
-            refused,
-            Err(Error::Invalid(Invalid::ApproximationOrdering { .. }))
-        ));
+    #[test]
+    fn tagging_a_vertex_back_down_brings_the_model_s_worst_slop_down_with_it() {
+        let (mut model, _) = a_cube();
+        let vertex = model.vertices().next().expect("a cube has corners").key();
+        model
+            .set_vertex_approximation(vertex, Approximation::new(1e-6, Cause::ImportedUncertainty))
+            .expect("a vertex may carry slop");
+        assert_eq!(model.worst_approximation(), 1e-6);
+
+        model
+            .set_vertex_approximation(
+                vertex,
+                Approximation::new(1e-12, Cause::ImportedUncertainty),
+            )
+            .expect("and may be tagged again with less");
+
+        assert_eq!(model.worst_approximation(), 1e-12);
+    }
+
+    #[test]
+    fn one_corner_coming_down_leaves_the_worst_slop_where_the_other_corners_are() {
+        let (mut model, _) = a_cube();
+        let corners: Vec<_> = model.vertices().map(|vertex| vertex.key()).collect();
+        for &corner in &corners {
+            model
+                .set_vertex_approximation(
+                    corner,
+                    Approximation::new(1e-6, Cause::ImportedUncertainty),
+                )
+                .expect("a vertex may carry slop");
+        }
+
+        model
+            .set_vertex_approximation(
+                corners[0],
+                Approximation::new(1e-12, Cause::ImportedUncertainty),
+            )
+            .expect("and may be tagged again with less");
+
+        assert_eq!(model.worst_approximation(), 1e-6);
     }
 }

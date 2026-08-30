@@ -3,6 +3,7 @@
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Filtered, Interval, Point as PredicatePoint, Predicate, decide, meet_of_three_planes,
+    product_is_normal,
 };
 use serde::{Deserialize, Serialize};
 
@@ -334,6 +335,13 @@ impl Predicate for SideOfPlane {
         let point = self.point.exact_coordinates()?;
         let normal = self.plane.normal.components();
 
+        // The bound below is a fraction of the permanent, which only bounds
+        // anything while every product keeps its relative accuracy. One of them
+        // in the subnormals and this level certifies a wrong sign.
+        if !(0..3).all(|axis| product_is_normal(normal[axis], point[axis])) {
+            return None;
+        }
+
         let terms = [0, 1, 2].map(|axis| normal[axis] * point[axis]);
         let offset = self.plane.offset;
 
@@ -399,6 +407,12 @@ impl Predicate for SideOfPlane {
 /// The offset itself travels only the last of those, so the four covers it. The
 /// `32*epsilon^2` covers the higher-order terms and the rounding of the
 /// permanent; what it has to beat is about `6*epsilon`.
+///
+/// Every step of that argument is a *relative* one, so the bound holds only
+/// while nothing overflows or falls into the subnormals.
+/// [`SideOfPlane::on_floats`] enforces the bottom end product by product
+/// through [`product_is_normal`], and `decide` the top end by refusing a bound
+/// that is not itself a normal number.
 const SIDE_OF_PLANE_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (4.0 + 32.0 * epsilon) * epsilon
@@ -642,6 +656,64 @@ mod tests {
                 "the three defining points say what is true about {corner:?}"
             );
         }
+    }
+
+    /// A point that is exactly on the plane, and level 1 used to place it in
+    /// front.
+    ///
+    /// The stored normal is `(1, 2, 7)` divided by `sqrt(54)`, and that
+    /// division happens to leave `n1` exactly `2 * n0` and `n2` exactly
+    /// `7 * n0` in `f64` — the test asserts it, because the rest only follows
+    /// if it holds. The offset is zero, so for the point `(-3u, -9u, 3u)` the
+    /// value is
+    ///
+    /// ```text
+    /// n0*(-3u) + n1*(-9u) + n2*(3u) = n0 * u * (-3 - 18 + 21) = 0
+    /// ```
+    ///
+    /// exactly, whatever `n0` and `u` are. The truthful answer is
+    /// [`Decision::Zero`].
+    ///
+    /// `u` is the smallest number `f64` has, so each of the three products is
+    /// a fraction of one `u` and gets rounded to a whole number of them:
+    /// `-0.409u` to `-0`, `-1.23u` to `-1u`, and `2.86u` to `3u`. Those sum to
+    /// `+2u` where the truth is zero. The permanent is built from the same
+    /// three rounded products, so the bound is `4.4e-16 * 4u`, which is far
+    /// below one `u` and rounds to zero — and `2u > 0` certifies.
+    #[test]
+    fn a_point_whose_products_fall_off_the_bottom_of_the_range_is_not_certified() {
+        let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 2.0, 7.0))
+            .expect("a normal of length sqrt(54) is a fine normal");
+        let [n0, n1, n2] = plane.normal().components();
+        assert_eq!(n1, 2.0 * n0, "the rest of this test rests on this");
+        assert_eq!(n2, 7.0 * n0, "the rest of this test rests on this");
+
+        let u = f64::from_bits(1);
+        let decision = plane.side_of_point(PredicatePoint::from([-3.0 * u, -9.0 * u, 3.0 * u]));
+        match decision {
+            Decision::Pos => panic!("this point is exactly on the plane, not in front of it"),
+            Decision::Neg | Decision::Zero => panic!("nothing here can prove a sign: {decision:?}"),
+            Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
+            other => panic!("unhandled decision: {other:?}"),
+        }
+    }
+
+    /// The same point scaled up by `2^600`, as an oracle for the test above.
+    ///
+    /// The plane passes through the origin, so `normal · point - 0` is linear
+    /// in the point: multiplying the point by a positive number multiplies the
+    /// value by it and leaves the sign alone. At `2^600` the three products
+    /// are ordinary normal numbers, the exact cancellation is visible, and the
+    /// answer is the [`Decision::Zero`] the test above cannot prove.
+    #[test]
+    fn the_same_point_scaled_up_to_fit_comes_out_exactly_on_the_plane() {
+        let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 2.0, 7.0))
+            .expect("a normal of length sqrt(54) is a fine normal");
+        let big = f64::from_bits(1) * 2f64.powi(600);
+        assert_eq!(
+            plane.side_of_point(PredicatePoint::from([-3.0 * big, -9.0 * big, 3.0 * big])),
+            Decision::Zero
+        );
     }
 
     #[test]

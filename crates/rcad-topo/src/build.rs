@@ -98,8 +98,8 @@ impl ProfileBuilder {
     ///
     /// [`Error::TooFewPoints`], [`Error::PointNotFinite`],
     /// [`Error::RepeatedPoint`], [`Error::ProfileCrossesItself`],
-    /// [`Error::ProfileEnclosesNoArea`], [`Error::HoleNotInsideOutline`] or
-    /// [`Error::HoleInsideAnotherHole`] when the loops are not a sound profile,
+    /// [`Error::HoleNotInsideOutline`] or [`Error::HoleInsideAnotherHole`]
+    /// when the loops are not a sound profile,
     /// and [`Error::Undecidable`] when a turn could not be settled under
     /// `policy`. That last one carries the records itself and leaves `log`
     /// alone, so no decision is reported in two places at once.
@@ -303,8 +303,18 @@ fn check_holes_sit_inside(
 ///
 /// # Errors
 ///
-/// [`Error::ProfileEnclosesNoArea`] if that corner is straight, which a simple
-/// ring cannot manage. [`Error::Undecidable`] if the turn cannot be decided.
+/// [`Error::Undecidable`] if the turn cannot be decided.
+///
+/// # Panics
+///
+/// If that corner turns out straight. [`check_nothing_crosses`] has already
+/// run, and it makes that impossible: both neighbours of the lowest, leftmost
+/// corner sit at or above it, so three points on one line have to leave both
+/// neighbours on the *same* ray out of the corner — one of them between the
+/// corner and the other — which is the fold
+/// [`check_the_corner_does_not_double_back`] refuses as
+/// [`Error::ProfileCrossesItself`]. Reaching here means one of those two
+/// checks stopped agreeing with the other.
 fn ring_runs_anticlockwise(
     ring: &[[f64; 2]],
     policy: &Policy,
@@ -323,7 +333,11 @@ fn ring_runs_anticlockwise(
     match turn_of(before, ring[lowest], after, policy, log)? {
         Turn::Left => Ok(true),
         Turn::Right => Ok(false),
-        Turn::Straight => Err(Error::ProfileEnclosesNoArea),
+        Turn::Straight => unreachable!(
+            "the lowest, leftmost corner of a ring that does not cross itself cannot be straight, \
+             and this one is: {before:?} {:?} {after:?}",
+            ring[lowest]
+        ),
     }
 }
 

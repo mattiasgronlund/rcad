@@ -55,10 +55,6 @@ pub enum Error {
         hole: usize,
     },
 
-    /// A profile loop doubles back on itself and covers no area.
-    #[error("a profile loop encloses no area")]
-    ProfileEnclosesNoArea,
-
     /// An extrusion was asked for with a height of zero or less.
     #[error("an extrusion needs a positive finite height, got {height}")]
     HeightNotPositive {

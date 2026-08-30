@@ -92,6 +92,88 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
+//! # Asking a predicate on its own
+//!
+//! Everything above decides through the predicate cascade, and the cascade is
+//! callable directly too. [`orient2d`] says which way three points turn,
+//! [`orient3d`] which side of the plane through three points a fourth one falls
+//! on, and [`SideOfSurface::side_of`] whether a point is in, on or out of a
+//! [`Sphere`] or a [`Cylinder`]. Each answers with a [`Decision`], so there is
+//! no threshold anywhere for a caller to pick. [`orient2d_tolerantly`] and
+//! [`orient3d_tolerantly`] are the same questions asked under a [`Policy`], and
+//! they are separately named so nobody reaches one by accident
+//! (`docs/decisions.md` §2.1).
+//!
+//! *How* the cascade reaches an answer — the interval type, the expansion
+//! arithmetic, asking which tier settled a certified answer — is deliberately
+//! not out here. That is how the answer is built, not what it says
+//! (`docs/decisions.md` §3.6). The one place a tier is worth knowing is when
+//! one gave up, and that is on the [`Record`] in the log, as a [`Level`].
+//!
+//! ## Two kinds of point, and they are not the same thing
+//!
+//! [`Point`] is a place: three coordinates in the model's unit. It is what
+//! shapes are built out of and what [`SolidView::classify_point`] takes.
+//!
+//! [`PredicatePoint`] is what a predicate is asked *about*, and it comes two
+//! ways. [`PredicatePoint::Exact`] is three `f64` read straight off a shape;
+//! every [`Point`] turns into one with `.into()`.
+//! [`PredicatePoint::Constructed`] is a point nobody can write down — where
+//! three planes meet, say — and all that is known of it is a box it lies
+//! somewhere inside.
+//!
+//! That second kind is the whole reason [`Decision::Undecidable`] exists.
+//! Exact coordinates always get a certified answer. A box that straddles the
+//! thing being asked about cannot, and no amount of precision recovers what was
+//! never there (`docs/decisions.md` §2.5).
+//!
+//! ## A certified answer is about the numbers you named
+//!
+//! [`Plane::side_of_point`] gives the exact sign of `normal · point - offset`
+//! for the four numbers that plane holds. Building a plane scales its normal to
+//! length one, and that division rounds, so the stored plane sits a rounding
+//! away from the one that was asked for — and the predicate will then say `Pos`
+//! or `Neg`, with total confidence, about the very points the plane was built
+//! through.
+//!
+//! To ask about the plane you *named*, hand [`orient3d`] the three points that
+//! defined it. It never divides, so it is certified about the geometry the
+//! caller actually gave it. [`orient3d_of_points`] is the same question where
+//! any of the four points may be a constructed one.
+//!
+//! [`Plane::meet_of_three`] is where a constructed point comes from, and this
+//! is the case `docs/decisions.md` §2.5 asks M0 to reach: three planes cross at
+//! a point that is not an `f64`, and a fourth plane through it that nothing can
+//! prove the point is on.
+//!
+//! ```
+//! use rcad::{Decision, Plane, Point, orient3d_of_points};
+//!
+//! // x + y + z = 1, x = y and y = z, crossing at (1/3, 1/3, 1/3).
+//! let meet = Plane::meet_of_three(
+//!     &Plane::from_coefficients([1.0, 1.0, 1.0, -1.0])?,
+//!     &Plane::from_coefficients([1.0, -1.0, 0.0, 0.0])?,
+//!     &Plane::from_coefficients([0.0, 1.0, -1.0, 0.0])?,
+//! )?;
+//! assert!(meet.exact_coordinates().is_none(), "a third is not an f64");
+//!
+//! // These three points span x + y + z = 1, which runs through the meet.
+//! match orient3d_of_points(
+//!     Point::new(1.0, 0.0, 0.0).into(),
+//!     Point::new(0.0, 1.0, 0.0).into(),
+//!     Point::new(0.0, 0.0, 1.0).into(),
+//!     meet,
+//! ) {
+//!     Decision::Neg | Decision::Pos => panic!("the box is on both sides at once"),
+//!     Decision::Zero => panic!("nothing here can prove the point is on the plane"),
+//!     Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
+//!     // `Decision` gains variants at every milestone. Guessing what a new one
+//!     // means is worse than stopping.
+//!     other => panic!("unhandled decision: {other:?}"),
+//! }
+//! # Ok::<(), rcad::Error>(())
+//! ```
+//!
 //! # What M0 can do
 //!
 //! **Build.** [`Model::new`] takes a [`Scale`], which says what the numbers
@@ -100,8 +182,8 @@
 //! [`Model::add_extrusion`] turns that into a solid and places it with an
 //! [`Isometry`]. [`Model::add_cube`] is the short way to the obvious case.
 //! M0's geometry is planar: [`Plane`] and straight edges
-//! (`docs/decisions.md` §3.1). [`Sphere`] and [`Cylinder`] exist as types with
-//! sign predicates but do not carry a face yet.
+//! (`docs/decisions.md` §3.1). [`Sphere`] and [`Cylinder`] exist as types that
+//! answer [`SideOfSurface::side_of`] but do not carry a face yet.
 //!
 //! **Look.** Every accessor hands back a *view* — [`SolidView`], [`FaceView`],
 //! [`EdgeView`], [`VertexView`] and the rest — which carries the borrow
@@ -121,6 +203,12 @@
 //!
 //! **Classify.** [`SolidView::classify_point`] returns a [`Containment`],
 //! decided by exact predicates with no tolerance anywhere in the loop.
+//!
+//! **Ask.** The predicates those answers are built from are callable on their
+//! own: [`orient2d`], [`orient3d`], [`orient3d_of_points`],
+//! [`Plane::side_of_point`] and [`SideOfSurface::side_of`] on a [`Sphere`] or a
+//! [`Cylinder`]. See *Asking a predicate on its own* above for which of them
+//! answers which question.
 //!
 //! **Check.** [`Model::validate`] is the full sweep over every invariant, meant
 //! for test boundaries and for data arriving from outside. Cheap per-entity
@@ -161,7 +249,9 @@ pub use rcad_geom::{
     Vector,
 };
 pub use rcad_predicates::{
-    Approximation, Cause, Decision, Level, Policy, ProvenanceLog, Record, Severity, Strictness,
+    Approximation, Cause, Decision, Level, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint,
+    Policy, ProvenanceLog, Record, Severity, SideOfSurface, Strictness, orient2d,
+    orient2d_tolerantly, orient3d, orient3d_of_points, orient3d_tolerantly,
 };
 pub use rcad_topo::{
     CoedgeKey, CoedgeView, Containment, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef,

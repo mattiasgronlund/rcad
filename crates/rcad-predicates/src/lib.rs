@@ -73,7 +73,7 @@ mod surface;
 
 pub mod expansion;
 
-pub use cascade::{Filtered, Level, Predicate, decide};
+pub use cascade::{Filtered, Level, Predicate, decide, product_is_normal};
 pub use decision::Decision;
 pub use error::Error;
 pub use interval::Interval;
@@ -83,6 +83,6 @@ pub use orient3d::{
 };
 pub use planes::meet_of_three_planes;
 pub use point::Point;
-pub use policy::{Policy, Severity, Strictness, resolve_under_policy};
+pub use policy::{Measures, Policy, Severity, Strictness, resolve_under_policy};
 pub use provenance::{Approximation, Cause, ProvenanceLog, Record};
 pub use surface::SideOfSurface;

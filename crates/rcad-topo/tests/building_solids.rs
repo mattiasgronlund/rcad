@@ -303,6 +303,62 @@ fn a_profile_that_doubles_back_along_itself_is_refused() {
     assert!(matches!(refused, Err(Error::ProfileCrossesItself)));
 }
 
+/// The corner a ring's direction is read off — the lowest point, leftmost of
+/// those — is never straight, and `ring_runs_anticlockwise` says so with
+/// `unreachable!`. It is never straight because both its neighbours sit at or
+/// above it, so three of them on one line puts both neighbours on the same ray
+/// out of the corner, with one between the corner and the other. That is a
+/// fold, and the crossing check has already refused it by the time the
+/// direction is read.
+#[test]
+fn a_profile_lying_flat_at_its_lowest_leftmost_corner_is_refused_as_a_crossing() {
+    let refused = ProfileBuilder::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 0.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
+
+    assert!(matches!(refused, Err(Error::ProfileCrossesItself)));
+}
+
+/// Every short ring on a small grid, which is where collinear corners are thick
+/// on the ground. None of them may reach that `unreachable!`, and none of them
+/// may come back with anything other than a sound profile or one of the two
+/// refusals a ring of grid points can earn.
+#[test]
+fn no_short_ring_of_grid_points_reaches_a_flat_lowest_leftmost_corner() {
+    let grid: Vec<[f64; 2]> = (0..4)
+        .flat_map(|x| (0..4).map(move |y| [f64::from(x), f64::from(y)]))
+        .collect();
+    let policy = Policy::certified();
+
+    let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
+    for first in &grid {
+        for second in &grid {
+            for third in &grid {
+                rings.push(vec![*first, *second, *third]);
+                for fourth in &grid {
+                    rings.push(vec![*first, *second, *third, *fourth]);
+                }
+            }
+        }
+    }
+
+    // A sound profile is one whose direction was read, so counting them counts
+    // the times the corner in question was actually looked at. Without this the
+    // sweep could pass by never getting that far.
+    let mut directions_read = 0;
+    for ring in rings {
+        match ProfileBuilder::new(ring).build(&policy, &mut ProvenanceLog::new()) {
+            Ok(_) => directions_read += 1,
+            Err(Error::ProfileCrossesItself | Error::RepeatedPoint { .. }) => {}
+            other => panic!("a ring of grid points came back with {other:?}"),
+        }
+    }
+
+    assert!(
+        directions_read > 1000,
+        "only {directions_read} rings held up"
+    );
+}
+
 #[test]
 fn a_profile_pinched_against_itself_is_refused() {
     let refused = ProfileBuilder::new(vec![
