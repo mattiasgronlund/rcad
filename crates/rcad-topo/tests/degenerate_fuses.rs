@@ -41,7 +41,9 @@
 //! `crates/rcad-topo/src/fuse/mod.rs`. Nothing in the public API can build a
 //! solid that runs through itself — `ProfileBuilder` refuses a profile that
 //! crosses itself and an extrusion of a sound profile never does — so the input
-//! has to be wired together from two cubes inside the crate.
+//! has to be wired together from two cubes inside the crate. It still gets a row
+//! in [`the_nine_planar_entries_as_a_table`], naming where it is discharged, so
+//! that the table is nine entries and not eight.
 
 use rcad_geom::{Isometry, PlaneAgreement, Point, Scale, Segment, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -73,6 +75,17 @@ fn block(model: &mut Model, [along_x, along_y, along_z]: [f64; 3], at: Vector) -
             &Isometry::translation(at).expect("a finite placement"),
         )
         .expect("building a box needs no decision")
+}
+
+/// The two sides of a fuse: what is being cut, and what is cutting it.
+///
+/// Every entry of the catalogue is built by one of these, and both the case's
+/// own test and [`the_nine_planar_entries_as_a_table`] go through it. So the
+/// table §17.7 carries cannot describe a pair different from the one the
+/// assertions are about.
+struct Pair {
+    arguments: Vec<SolidKey>,
+    tools: Vec<SolidKey>,
 }
 
 /// Fuse under a certified policy and insist nothing had to be approximated.
@@ -236,7 +249,13 @@ fn no_face_of_it_is_half_of_another(model: &Model, solids: &[SolidKey]) {
 
 /// Two cubes of side two, one straight on top of the other. The face they share
 /// is the same square in both inputs, corner for corner.
-///
+fn two_cubes_sharing_a_whole_face(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 2.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![cube(model, 2.0, Vector::new(0.0, 0.0, 2.0))],
+    }
+}
+
 /// The tops and bottoms that meet point opposite ways, so the union drops both
 /// and the answer is a plain 2×2×4 box. Each of its four walls arrives in two
 /// halves, one from each cube, and the two halves are one plane facing one way
@@ -246,10 +265,9 @@ fn no_face_of_it_is_half_of_another(model: &Model, solids: &[SolidKey]) {
 #[test]
 fn two_cubes_sharing_a_whole_face_unite_into_one_box() {
     let mut model = a_model();
-    let lower = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 0.0));
-    let upper = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 2.0));
+    let pair = two_cubes_sharing_a_whole_face(&mut model);
 
-    let united = fused(&mut model, &[lower], &[upper], Rule::Union);
+    let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
 
     assert_eq!(united.solids().len(), 1);
     let solid = united.solids()[0];
@@ -272,10 +290,9 @@ fn two_cubes_sharing_a_whole_face_unite_into_one_box() {
 #[test]
 fn two_cubes_sharing_a_whole_face_have_nothing_in_both() {
     let mut model = a_model();
-    let lower = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 0.0));
-    let upper = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 2.0));
+    let pair = two_cubes_sharing_a_whole_face(&mut model);
 
-    let shared = fused(&mut model, &[lower], &[upper], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
 
     assert!(shared.solids().is_empty());
 }
@@ -286,10 +303,9 @@ fn two_cubes_sharing_a_whole_face_have_nothing_in_both() {
 #[test]
 fn taking_a_cube_off_the_face_of_another_takes_nothing_away() {
     let mut model = a_model();
-    let lower = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 0.0));
-    let upper = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 2.0));
+    let pair = two_cubes_sharing_a_whole_face(&mut model);
 
-    let bitten = fused(&mut model, &[lower], &[upper], Rule::Difference);
+    let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
 
     assert_eq!(bitten.solids().len(), 1);
     assert_eq!(model.solid(bitten.solids()[0]).faces().count(), 6);
@@ -301,13 +317,19 @@ fn taking_a_cube_off_the_face_of_another_takes_nothing_away() {
 /// Two 4×4×2 slabs, the upper one slid halfway along. The faces that meet are
 /// on the same plane and share only the strip `2 ≤ x ≤ 4`: the rest of each
 /// stays on the outside of the answer.
+fn two_slabs_whose_faces_half_overlap(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![block(model, [4.0, 4.0, 2.0], Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![block(model, [4.0, 4.0, 2.0], Vector::new(2.0, 0.0, 2.0))],
+    }
+}
+
 #[test]
 fn two_slabs_whose_faces_are_coplanar_and_half_overlap_unite() {
     let mut model = a_model();
-    let lower = block(&mut model, [4.0, 4.0, 2.0], Vector::new(0.0, 0.0, 0.0));
-    let upper = block(&mut model, [4.0, 4.0, 2.0], Vector::new(2.0, 0.0, 2.0));
+    let pair = two_slabs_whose_faces_half_overlap(&mut model);
 
-    let united = fused(&mut model, &[lower], &[upper], Rule::Union);
+    let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
 
     assert_eq!(united.solids().len(), 1);
     let solid = model.solid(united.solids()[0]);
@@ -320,20 +342,27 @@ fn two_slabs_whose_faces_are_coplanar_and_half_overlap_unite() {
 #[test]
 fn two_slabs_that_only_share_part_of_a_face_have_nothing_in_both() {
     let mut model = a_model();
-    let lower = block(&mut model, [4.0, 4.0, 2.0], Vector::new(0.0, 0.0, 0.0));
-    let upper = block(&mut model, [4.0, 4.0, 2.0], Vector::new(2.0, 0.0, 2.0));
+    let pair = two_slabs_whose_faces_half_overlap(&mut model);
 
-    let shared = fused(&mut model, &[lower], &[upper], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
 
     assert!(shared.solids().is_empty());
-    let bitten = fused(&mut model, &[lower], &[upper], Rule::Difference);
+    let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(volume_of(&model, bitten.solids()), 32.0);
 }
 
 // 2. Coincident edges.
 
 /// Two cubes catty-corner from each other, sharing one whole edge and nothing
-/// else. Four faces would run along that edge in the union, and a `Model` means
+/// else.
+fn two_cubes_sharing_one_whole_edge(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 2.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![cube(model, 2.0, Vector::new(2.0, 2.0, 0.0))],
+    }
+}
+
+/// Four faces would run along that shared edge in the union, and a `Model` means
 /// an edge is used by exactly two — relaxing that changes what a model *is*,
 /// which is not work a boolean gets to do on its way past (§17.4).
 ///
@@ -342,10 +371,9 @@ fn two_slabs_that_only_share_part_of_a_face_have_nothing_in_both() {
 #[test]
 fn two_cubes_sharing_one_whole_edge_cannot_be_united() {
     let mut model = a_model();
-    let one = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 0.0));
-    let other = cube(&mut model, 2.0, Vector::new(2.0, 2.0, 0.0));
+    let pair = two_cubes_sharing_one_whole_edge(&mut model);
 
-    match refusal(&mut model, &[one], &[other], Rule::Union) {
+    match refusal(&mut model, &pair.arguments, &pair.tools, Rule::Union) {
         Error::ResultIsNotManifold { count } => {
             assert_eq!(count, 4, "both cubes claim that edge with two faces each")
         }
@@ -359,13 +387,12 @@ fn two_cubes_sharing_one_whole_edge_cannot_be_united() {
 #[test]
 fn two_cubes_sharing_one_whole_edge_still_intersect_and_subtract() {
     let mut model = a_model();
-    let one = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 0.0));
-    let other = cube(&mut model, 2.0, Vector::new(2.0, 2.0, 0.0));
+    let pair = two_cubes_sharing_one_whole_edge(&mut model);
 
-    let shared = fused(&mut model, &[one], &[other], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
     assert!(shared.solids().is_empty());
 
-    let bitten = fused(&mut model, &[one], &[other], Rule::Difference);
+    let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(bitten.solids().len(), 1);
     assert_eq!(model.solid(bitten.solids()[0]).faces().count(), 6);
     assert_eq!(volume_of(&model, bitten.solids()), 8.0);
@@ -377,7 +404,13 @@ fn two_cubes_sharing_one_whole_edge_still_intersect_and_subtract() {
 /// corners `(2, 2, 0)` and `(2, 2, 4)` of the second land exactly in the middle
 /// of the first one's bottom and top faces — not on an edge of them, in the
 /// interior.
-///
+fn two_cubes_offset_by_a_corner(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 4.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![cube(model, 4.0, Vector::new(2.0, 2.0, 0.0))],
+    }
+}
+
 /// Whether the fuse *copes* with that is the catalogue entry; whether the point
 /// stays a corner is a different question, and the answer to it is no. Under
 /// §17.1 a face is its plane, and the two bottom squares are one flat region
@@ -394,10 +427,9 @@ fn two_cubes_sharing_one_whole_edge_still_intersect_and_subtract() {
 #[test]
 fn a_corner_landing_inside_a_face_is_absorbed_into_that_face() {
     let mut model = a_model();
-    let one = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
-    let other = cube(&mut model, 4.0, Vector::new(2.0, 2.0, 0.0));
+    let pair = two_cubes_offset_by_a_corner(&mut model);
 
-    let united = fused(&mut model, &[one], &[other], Rule::Union);
+    let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
 
     assert_eq!(united.solids().len(), 1);
     let solid = united.solids()[0];
@@ -436,10 +468,9 @@ fn a_corner_landing_inside_a_face_is_absorbed_into_that_face() {
 #[test]
 fn what_two_cubes_offset_by_a_corner_share_is_the_column_under_it() {
     let mut model = a_model();
-    let one = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
-    let other = cube(&mut model, 4.0, Vector::new(2.0, 2.0, 0.0));
+    let pair = two_cubes_offset_by_a_corner(&mut model);
 
-    let shared = fused(&mut model, &[one], &[other], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
 
     assert_eq!(shared.solids().len(), 1);
     let solid = model.solid(shared.solids()[0]);
@@ -447,7 +478,7 @@ fn what_two_cubes_offset_by_a_corner_share_is_the_column_under_it() {
     assert_eq!(solid.faces().count(), 6, "the shared part is a box");
     assert_eq!(volume_of(&model, shared.solids()), 16.0);
 
-    let bitten = fused(&mut model, &[one], &[other], Rule::Difference);
+    let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(volume_of(&model, bitten.solids()), 48.0);
 }
 
@@ -456,7 +487,13 @@ fn what_two_cubes_offset_by_a_corner_share_is_the_column_under_it() {
 /// A 3×3×4 box sitting in the corner of a cube of side four and poking out
 /// through the top. Its corner `(4, 4, 2)` lands exactly partway along the
 /// cube's vertical edge at `x = y = 4`.
-///
+fn a_box_poking_out_of_the_top_of_a_cube(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 4.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![block(model, [3.0, 3.0, 4.0], Vector::new(1.0, 1.0, 2.0))],
+    }
+}
+
 /// The two solids are flush on `x = 4` and flush again on `y = 4`, so each of
 /// those two pairs of pieces is one plane facing one way and joins into one
 /// face. The edge between the two joined faces then runs the whole way from
@@ -470,10 +507,9 @@ fn what_two_cubes_offset_by_a_corner_share_is_the_column_under_it() {
 #[test]
 fn a_corner_landing_partway_along_an_edge_is_absorbed_into_one_straight_edge() {
     let mut model = a_model();
-    let one = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
-    let other = block(&mut model, [3.0, 3.0, 4.0], Vector::new(1.0, 1.0, 2.0));
+    let pair = a_box_poking_out_of_the_top_of_a_cube(&mut model);
 
-    let united = fused(&mut model, &[one], &[other], Rule::Union);
+    let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
 
     assert_eq!(united.solids().len(), 1);
     let solid = united.solids()[0];
@@ -514,14 +550,13 @@ fn a_corner_landing_partway_along_an_edge_is_absorbed_into_one_straight_edge() {
 #[test]
 fn a_corner_on_an_edge_still_intersects_and_subtracts() {
     let mut model = a_model();
-    let one = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
-    let other = block(&mut model, [3.0, 3.0, 4.0], Vector::new(1.0, 1.0, 2.0));
+    let pair = a_box_poking_out_of_the_top_of_a_cube(&mut model);
 
-    let shared = fused(&mut model, &[one], &[other], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
     assert_eq!(shared.solids().len(), 1);
     assert_eq!(volume_of(&model, shared.solids()), 18.0);
 
-    let bitten = fused(&mut model, &[one], &[other], Rule::Difference);
+    let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(bitten.solids().len(), 1);
     assert_eq!(volume_of(&model, bitten.solids()), 46.0);
 }
@@ -531,7 +566,16 @@ fn a_corner_on_an_edge_still_intersects_and_subtracts() {
 /// Two tools with walls on the very same planes, cutting one cube. Every face
 /// of the cube is handed the plane `x = 3` twice over, once from each tool, and
 /// the same for `x = 7`, `y = 1` and `y = 3`.
-///
+fn a_cube_and_two_bars_on_the_same_planes(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 6.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![
+            block(model, [4.0, 2.0, 1.0], Vector::new(3.0, 1.0, 1.0)),
+            block(model, [4.0, 2.0, 1.0], Vector::new(3.0, 1.0, 4.0)),
+        ],
+    }
+}
+
 /// A splitter that cut by each line in turn would put two corners at the same
 /// point on every one of those faces and join them with an edge of no length.
 /// §17.4 settles that this is prevented rather than filtered: the coincidence is
@@ -541,11 +585,9 @@ fn a_corner_on_an_edge_still_intersects_and_subtracts() {
 #[test]
 fn two_tools_cutting_along_the_same_planes_merge_instead_of_making_an_edge_of_no_length() {
     let mut model = a_model();
-    let cut = cube(&mut model, 6.0, Vector::new(0.0, 0.0, 0.0));
-    let lower = block(&mut model, [4.0, 2.0, 1.0], Vector::new(3.0, 1.0, 1.0));
-    let upper = block(&mut model, [4.0, 2.0, 1.0], Vector::new(3.0, 1.0, 4.0));
+    let pair = a_cube_and_two_bars_on_the_same_planes(&mut model);
 
-    let united = fused(&mut model, &[cut], &[lower, upper], Rule::Union);
+    let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
 
     assert_eq!(united.solids().len(), 1);
     assert_eq!(
@@ -558,13 +600,26 @@ fn two_tools_cutting_along_the_same_planes_merge_instead_of_making_an_edge_of_no
 
 // 6. Sliver faces.
 
-/// A cut a millionth of a millimetre in from a face of a cube of side four.
-/// What is left in both is a slab 2⁻²⁰ thick, and four of its six faces are
-/// slivers 2⁻²⁰ across and four long.
+/// How thick the slab a sliver cut leaves is.
 ///
 /// A power of two, so the thin coordinate is exactly representable and the
 /// answer stays a lattice case: this is a sliver, not a rounding.
-///
+const A_SLIVER: f64 = 1.0 / (1 << 20) as f64;
+
+/// A cut a millionth of a millimetre in from a face of a cube of side four.
+/// What is left in both is a slab [`A_SLIVER`] thick, and four of its six faces
+/// are slivers that thin and four long.
+fn a_cube_and_a_knife_a_sliver_in(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 4.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![block(
+            model,
+            [4.0, 6.0, 6.0],
+            Vector::new(4.0 - A_SLIVER, -1.0, -1.0),
+        )],
+    }
+}
+
 /// §12.3 is what this is here to stop happening again: M0 twice refused a
 /// sliver that was certifiably not degenerate, and it took an exhaustive search
 /// over 160,179 rings to find out. So this asserts the slivers are **kept** and
@@ -572,31 +627,25 @@ fn two_tools_cutting_along_the_same_planes_merge_instead_of_making_an_edge_of_no
 /// cleaned up.
 #[test]
 fn a_cut_a_millionth_of_the_way_in_keeps_the_sliver_it_leaves() {
-    let a_sliver = 2.0f64.powi(-20);
     let mut model = a_model();
-    let solid = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
-    let knife = block(
-        &mut model,
-        [4.0, 6.0, 6.0],
-        Vector::new(4.0 - a_sliver, -1.0, -1.0),
-    );
+    let pair = a_cube_and_a_knife_a_sliver_in(&mut model);
 
-    let shared = fused(&mut model, &[solid], &[knife], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
 
     assert_eq!(shared.solids().len(), 1);
     let slab = shared.solids()[0];
     assert_eq!(model.solid(slab).faces().count(), 6);
-    assert_eq!(volume_of(&model, shared.solids()), 16.0 * a_sliver);
+    assert_eq!(volume_of(&model, shared.solids()), 16.0 * A_SLIVER);
 
     let mut areas = areas_of(&model, slab);
     areas.sort_by(f64::total_cmp);
     assert_eq!(
         areas,
         vec![
-            4.0 * a_sliver,
-            4.0 * a_sliver,
-            4.0 * a_sliver,
-            4.0 * a_sliver,
+            4.0 * A_SLIVER,
+            4.0 * A_SLIVER,
+            4.0 * A_SLIVER,
+            4.0 * A_SLIVER,
             16.0,
             16.0
         ],
@@ -607,17 +656,23 @@ fn a_cut_a_millionth_of_the_way_in_keeps_the_sliver_it_leaves() {
 
 // 7. Fully contained solids.
 
-/// A cube of side two in the middle of a cube of side four, under all three
-/// rules. The union is the outer cube and the inner one's faces have no image
-/// at all; the intersection is the inner cube; the difference is the outer one
-/// with a bubble in it, which is one solid with two shells.
+/// A cube of side two in the middle of a cube of side four.
+fn a_cube_wholly_inside_another(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 4.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![cube(model, 2.0, Vector::new(1.0, 1.0, 1.0))],
+    }
+}
+
+/// The union is the outer cube and the inner one's faces have no image at all;
+/// the intersection is the inner cube; the difference is the outer one with a
+/// bubble in it, which is one solid with two shells.
 #[test]
 fn a_cube_wholly_inside_another_under_all_three_rules() {
     let mut model = a_model();
-    let outer = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
-    let inner = cube(&mut model, 2.0, Vector::new(1.0, 1.0, 1.0));
+    let pair = a_cube_wholly_inside_another(&mut model);
 
-    let united = fused(&mut model, &[outer], &[inner], Rule::Union);
+    let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
     assert_eq!(united.solids().len(), 1);
     assert_eq!(model.solid(united.solids()[0]).shells().count(), 1);
     assert_eq!(
@@ -639,13 +694,13 @@ fn a_cube_wholly_inside_another_under_all_three_rules() {
         "every face of the inner cube is swallowed"
     );
 
-    let shared = fused(&mut model, &[outer], &[inner], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
     assert_eq!(shared.solids().len(), 1);
     assert_eq!(model.solid(shared.solids()[0]).shells().count(), 1);
     assert_eq!(model.solid(shared.solids()[0]).faces().count(), 6);
     assert_eq!(volume_of(&model, shared.solids()), 8.0);
 
-    let hollow = fused(&mut model, &[outer], &[inner], Rule::Difference);
+    let hollow = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(hollow.solids().len(), 1);
     assert_eq!(
         model.solid(hollow.solids()[0]).shells().count(),
@@ -661,10 +716,9 @@ fn a_cube_wholly_inside_another_under_all_three_rules() {
 #[test]
 fn taking_a_block_away_from_a_cube_inside_it_leaves_nothing() {
     let mut model = a_model();
-    let outer = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
-    let inner = cube(&mut model, 2.0, Vector::new(1.0, 1.0, 1.0));
+    let pair = a_cube_wholly_inside_another(&mut model);
 
-    let nothing = fused(&mut model, &[inner], &[outer], Rule::Difference);
+    let nothing = fused(&mut model, &pair.tools, &pair.arguments, Rule::Difference);
 
     assert!(nothing.solids().is_empty());
 }
@@ -673,13 +727,19 @@ fn taking_a_block_away_from_a_cube_inside_it_leaves_nothing() {
 
 /// A small cube standing on the top face of a big one, its whole footprint
 /// inside that face. They share skin and no space.
+fn two_cubes_touching_on_a_face(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 4.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![cube(model, 2.0, Vector::new(1.0, 1.0, 4.0))],
+    }
+}
+
 #[test]
 fn two_cubes_that_only_touch_on_a_face() {
     let mut model = a_model();
-    let big = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
-    let small = cube(&mut model, 2.0, Vector::new(1.0, 1.0, 4.0));
+    let pair = two_cubes_touching_on_a_face(&mut model);
 
-    let united = fused(&mut model, &[big], &[small], Rule::Union);
+    let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
     assert_eq!(
         united.solids().len(),
         1,
@@ -689,47 +749,61 @@ fn two_cubes_that_only_touch_on_a_face() {
     assert_eq!(volume_of(&model, united.solids()), 72.0);
     nothing_in_it_is_degenerate(&model, united.solids());
 
-    let shared = fused(&mut model, &[big], &[small], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
     assert!(shared.solids().is_empty());
 
-    let bitten = fused(&mut model, &[big], &[small], Rule::Difference);
+    let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(volume_of(&model, bitten.solids()), 64.0);
 }
 
 /// A small cube touching a big one along part of one vertical edge, and nowhere
-/// else. Four faces run along that stretch, so the union is refused for the
-/// same reason as the two catty-corner cubes above — and this time the shared
-/// stretch is only part of the big cube's edge, so the refusal does not depend
-/// on the two edges being the same edge.
+/// else.
+fn two_cubes_touching_along_part_of_an_edge(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 4.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![cube(model, 2.0, Vector::new(4.0, 4.0, 1.0))],
+    }
+}
+
+/// Four faces run along that stretch, so the union is refused for the same
+/// reason as the two catty-corner cubes above — and this time the shared stretch
+/// is only part of the big cube's edge, so the refusal does not depend on the
+/// two edges being the same edge.
 #[test]
 fn two_cubes_that_only_touch_along_part_of_an_edge() {
     let mut model = a_model();
-    let big = cube(&mut model, 4.0, Vector::new(0.0, 0.0, 0.0));
-    let small = cube(&mut model, 2.0, Vector::new(4.0, 4.0, 1.0));
+    let pair = two_cubes_touching_along_part_of_an_edge(&mut model);
 
-    match refusal(&mut model, &[big], &[small], Rule::Union) {
+    match refusal(&mut model, &pair.arguments, &pair.tools, Rule::Union) {
         Error::ResultIsNotManifold { count } => assert_eq!(count, 4),
         other => panic!("two solids joined along an edge are not one solid: {other:?}"),
     }
 
-    let shared = fused(&mut model, &[big], &[small], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
     assert!(shared.solids().is_empty());
 
-    let bitten = fused(&mut model, &[big], &[small], Rule::Difference);
+    let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(volume_of(&model, bitten.solids()), 64.0);
 }
 
-/// Two cubes that meet at exactly one point. No edge of either is claimed more
-/// than twice, so the manifold check has nothing to say; the two never share an
-/// edge either, so the walk that groups faces into shells never joins them, and
-/// the answer is two solids that happen to touch.
+/// Two cubes that meet at exactly one point.
+fn two_cubes_touching_at_a_corner(model: &mut Model) -> Pair {
+    Pair {
+        arguments: vec![cube(model, 2.0, Vector::new(0.0, 0.0, 0.0))],
+        tools: vec![cube(model, 2.0, Vector::new(2.0, 2.0, 2.0))],
+    }
+}
+
+/// No edge of either is claimed more than twice, so the manifold check has
+/// nothing to say; the two never share an edge either, so the walk that groups
+/// faces into shells never joins them, and the answer is two solids that happen
+/// to touch.
 #[test]
 fn two_cubes_that_only_touch_at_a_corner() {
     let mut model = a_model();
-    let one = cube(&mut model, 2.0, Vector::new(0.0, 0.0, 0.0));
-    let other = cube(&mut model, 2.0, Vector::new(2.0, 2.0, 2.0));
+    let pair = two_cubes_touching_at_a_corner(&mut model);
 
-    let united = fused(&mut model, &[one], &[other], Rule::Union);
+    let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
     assert_eq!(
         united.solids().len(),
         2,
@@ -738,9 +812,253 @@ fn two_cubes_that_only_touch_at_a_corner() {
     assert_eq!(volume_of(&model, united.solids()), 16.0);
     nothing_in_it_is_degenerate(&model, united.solids());
 
-    let shared = fused(&mut model, &[one], &[other], Rule::Intersection);
+    let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
     assert!(shared.solids().is_empty());
 
-    let bitten = fused(&mut model, &[one], &[other], Rule::Difference);
+    let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(volume_of(&model, bitten.solids()), 8.0);
+}
+
+// §17.7's catalogue family, gathered into the one thing it can honestly be
+// reported as.
+
+/// The nine planar entries, side by side, as the table §17.7 carries.
+///
+/// Nine hand-written cases are not a sample, so this family gets a table and not
+/// a rate: each entry either passes or refuses, and a refusal is right or wrong
+/// on its own terms rather than by how many of them there are. The rest of this
+/// file asserts each entry's volumes, counts and areas; what this adds is the
+/// summary, checked as it is printed, so the record in §17.7 cannot drift away
+/// from what the kernel does without something going red.
+///
+/// The pairs are the very ones the assertions above are about, because both go
+/// through the same builder.
+#[test]
+fn the_nine_planar_entries_as_a_table() {
+    println!("| §7.4 entry | the pair | rule | outcome |");
+    println!("|---|---|---|---|");
+    for entry in catalogue() {
+        let said = match entry.case {
+            Case::Fused {
+                build,
+                rule,
+                outcome,
+            } => {
+                assert_eq!(
+                    what_happened(build, rule),
+                    outcome,
+                    "{}, {}: the catalogue table in §17.7 says otherwise",
+                    entry.degeneracy,
+                    entry.pair
+                );
+                format!("{rule:?} | {}", outcome.said())
+            }
+            Case::InsideTheCrate {
+                rule,
+                refusal,
+                test,
+            } => format!("{rule:?} | refused, `{refusal}`, by `{test}`"),
+        };
+        println!("| {} | {} | {said} |", entry.degeneracy, entry.pair);
+    }
+}
+
+/// One row of the catalogue table.
+struct Entry {
+    /// Which of roadmap §7.4's nine planar degeneracies this is a case of.
+    degeneracy: &'static str,
+    /// The pair, in a few words.
+    pair: &'static str,
+    case: Case,
+}
+
+/// How a row is discharged.
+enum Case {
+    /// Build the pair here and ask `rule` of it.
+    Fused {
+        build: fn(&mut Model) -> Pair,
+        rule: Rule,
+        outcome: Outcome,
+    },
+    /// Nothing in the public API can build the input, so the case lives inside
+    /// the crate and the row only names what discharges it.
+    InsideTheCrate {
+        rule: Rule,
+        /// The `Error` variant it comes back with.
+        refusal: &'static str,
+        /// The test that asserts it, in `crates/rcad-topo/src/fuse/mod.rs`.
+        test: &'static str,
+    },
+}
+
+/// What a certified fuse of a catalogue pair came back with.
+///
+/// There is deliberately no variant for `Error::Undecidable`. Every pair here is
+/// exactly representable, so a certified policy has to decide all of it, and one
+/// arriving would be §17.7's control claim broken rather than a row of the table
+/// reading differently.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Outcome {
+    /// An answer, with every decision in it proved.
+    Answered,
+    /// A refusal, because the answer would use an edge more than twice and is
+    /// not a solid a `Model` can hold. Right rather than a bug (§17.4).
+    NotManifold,
+}
+
+impl Outcome {
+    fn said(self) -> &'static str {
+        match self {
+            Outcome::Answered => "answered",
+            Outcome::NotManifold => "refused, `ResultIsNotManifold`",
+        }
+    }
+}
+
+fn catalogue() -> Vec<Entry> {
+    vec![
+        Entry {
+            degeneracy: "1. coplanar faces",
+            pair: "two cubes sharing a whole face",
+            case: Case::Fused {
+                build: two_cubes_sharing_a_whole_face,
+                rule: Rule::Union,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "1. coplanar faces",
+            pair: "two slabs whose faces half overlap",
+            case: Case::Fused {
+                build: two_slabs_whose_faces_half_overlap,
+                rule: Rule::Union,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "2. coincident edges",
+            pair: "two cubes catty-corner, sharing one whole edge",
+            case: Case::Fused {
+                build: two_cubes_sharing_one_whole_edge,
+                rule: Rule::Union,
+                outcome: Outcome::NotManifold,
+            },
+        },
+        Entry {
+            degeneracy: "2. coincident edges",
+            pair: "the same two, asked what they share",
+            case: Case::Fused {
+                build: two_cubes_sharing_one_whole_edge,
+                rule: Rule::Intersection,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "3. vertex on face",
+            pair: "two cubes offset by a corner",
+            case: Case::Fused {
+                build: two_cubes_offset_by_a_corner,
+                rule: Rule::Union,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "4. vertex on edge",
+            pair: "a box poking out of the top of a cube",
+            case: Case::Fused {
+                build: a_box_poking_out_of_the_top_of_a_cube,
+                rule: Rule::Union,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "5. zero-length edges",
+            pair: "a cube and two bars whose walls are on the same planes",
+            case: Case::Fused {
+                build: a_cube_and_two_bars_on_the_same_planes,
+                rule: Rule::Union,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "6. sliver faces",
+            pair: "a cube and a knife a millionth of the way in",
+            case: Case::Fused {
+                build: a_cube_and_a_knife_a_sliver_in,
+                rule: Rule::Intersection,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "7. fully contained solids",
+            pair: "a cube in the middle of another, hollowed out",
+            case: Case::Fused {
+                build: a_cube_wholly_inside_another,
+                rule: Rule::Difference,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "8. touching, not overlapping",
+            pair: "two cubes touching on a face",
+            case: Case::Fused {
+                build: two_cubes_touching_on_a_face,
+                rule: Rule::Union,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "8. touching, not overlapping",
+            pair: "two cubes touching along part of an edge",
+            case: Case::Fused {
+                build: two_cubes_touching_along_part_of_an_edge,
+                rule: Rule::Union,
+                outcome: Outcome::NotManifold,
+            },
+        },
+        Entry {
+            degeneracy: "8. touching, not overlapping",
+            pair: "two cubes touching at a corner",
+            case: Case::Fused {
+                build: two_cubes_touching_at_a_corner,
+                rule: Rule::Union,
+                outcome: Outcome::Answered,
+            },
+        },
+        Entry {
+            degeneracy: "9. self-intersecting input",
+            pair: "two cubes wired into one solid that runs through itself",
+            case: Case::InsideTheCrate {
+                rule: Rule::Union,
+                refusal: "ArgumentIntersectsItself",
+                test: "a_solid_that_runs_through_itself_cannot_be_fused",
+            },
+        },
+    ]
+}
+
+/// Build a catalogue pair, fuse it under a certified policy, and say what came
+/// back.
+fn what_happened(build: fn(&mut Model) -> Pair, rule: Rule) -> Outcome {
+    let mut model = a_model();
+    let pair = build(&mut model);
+    let mut log = ProvenanceLog::new();
+
+    match model.fuse(
+        &pair.arguments,
+        &pair.tools,
+        rule,
+        &Policy::certified(),
+        &mut log,
+    ) {
+        Ok(_) => {
+            assert!(
+                log.is_empty(),
+                "a certified fuse of an exactly representable pair records nothing at all"
+            );
+            Outcome::Answered
+        }
+        Err(Error::ResultIsNotManifold { .. }) => Outcome::NotManifold,
+        Err(why) => panic!("a lattice-aligned {rule:?} is decided by proof alone: {why}"),
+    }
 }

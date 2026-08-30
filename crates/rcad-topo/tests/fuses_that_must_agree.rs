@@ -104,18 +104,21 @@ const LONGER_CASES: u32 = 24;
 /// to an end, and they run on a fixed seed so the number is the same every time.
 const MEASURED_CASES: u32 = 128;
 
-/// How much of the turned family a certified fuse has to be able to answer.
+/// How much of the turned family a certified fuse is allowed to refuse.
 ///
-/// **Not the criterion 8 threshold.** §17.7 wants the headline rate asserted
-/// below a number recorded in that section, and that number is still its
-/// `TODO(criterion 8)`; inventing one here would put the threshold in the wrong
-/// file and make it a target rather than a measurement. What this asserts is the
-/// other half, §14.7's: that valid input is *accepted*. A certified fuse that
-/// refused most of a family it can plainly answer would pass every property in
-/// this file, because a property only ever looks at the fuses that came back.
-/// The number to read is the one
-/// [`how_often_a_certified_fuse_of_a_turned_pair_refuses`] prints.
-const MOST_TURNED_FUSES_MUST_BE_DECIDED: f64 = 0.5;
+/// **This is §17.7's criterion 8 threshold**, recorded in that section and
+/// asserted by [`how_often_a_certified_fuse_of_a_turned_pair_refuses`]. It is
+/// also §14.7's other half — that valid input is *accepted* — because a
+/// certified fuse that refused most of a family it can plainly answer would pass
+/// every property in this file, a property only ever looking at the fuses that
+/// came back.
+///
+/// Thirty-two per cent, chosen from measurement rather than from taste. The
+/// fixed-seed rate is 25.4%, and over fourteen fresh seeds the same corpus ran
+/// from 19.6% to 28.3%, so no seed reaches this. It sits just under 32.8%, which
+/// is what the rate was before the two undeserved refusals of §14.7 were fixed,
+/// so either of those coming back trips it.
+const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.32;
 
 #[test]
 fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
@@ -507,19 +510,20 @@ fn every_certified_fuse_of_a_pair_sharing_coordinates_is_decided() {
 /// rather than a check.
 ///
 /// It runs on a fixed seed so that the number is the same every time it is
-/// asked for; the properties above run on a fresh seed every time, because their
-/// job is to find inputs nobody has thought of.
+/// asked for and the figure written into §17.7 reproduces; the properties above
+/// run on a fresh seed every time, because their job is to find inputs nobody
+/// has thought of and a frozen seed would stop them finding any.
 ///
 /// The refusals are broken down by which predicate gave up, because the rate on
-/// its own cannot tell a timid filter from genuine undecidability (§14.7). One
-/// thing that breakdown makes plain is worth carrying to criterion 8: this family
-/// is the lattice family turned, and the lattice family contains a great many
-/// configurations that are *exactly* degenerate — faces flush against each other,
-/// corners on faces. Turning those leaves them geometrically degenerate while
-/// their two stored planes stop agreeing in the last bits, which is where most of
-/// the refusals come from. So the rate is as much a statement about how
-/// degenerate the corpus is as about the filters, and the two families have to be
-/// read together.
+/// its own cannot tell a timid filter from genuine undecidability (§14.7), and
+/// the breakdown is the half anybody could act on. One thing it makes plain is
+/// worth carrying to criterion 8: this family is the lattice family turned, and
+/// the lattice family contains a great many configurations that are *exactly*
+/// degenerate — faces flush against each other, corners on faces. Turning those
+/// leaves them geometrically degenerate while their two stored planes stop
+/// agreeing in the last bits, which is where most of the refusals come from. So
+/// the rate is as much a statement about how degenerate the corpus is as about
+/// the filters, and the two families have to be read together.
 #[test]
 fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
     let tally = measured(a_turned_pair(), |configuration, tally| {
@@ -528,9 +532,11 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
     tally.report("§17.7 headline: turned pairs, every rule");
     let refused = tally.refused.get() as f64 / tally.fuses.get() as f64;
     assert!(
-        1.0 - refused > MOST_TURNED_FUSES_MUST_BE_DECIDED,
-        "{:.1}% of turned fuses refused, which is not a kernel anybody could use",
-        refused * 100.0
+        refused < TURNED_REFUSALS_MUST_STAY_BELOW,
+        "{:.1}% of {} turned fuses refused, over the {:.0}% §17.7 records",
+        refused * 100.0,
+        tally.fuses.get(),
+        TURNED_REFUSALS_MUST_STAY_BELOW * 100.0
     );
 }
 
@@ -686,14 +692,18 @@ struct Tally {
 
 impl Tally {
     fn report(&self, what: &str) {
+        let fuses = self.fuses.get();
         println!(
-            "{what}: {} fuses, {} refused, {} not a solid",
-            self.fuses.get(),
+            "{what}: {fuses} fuses, {} refused ({:.1}%), {} not a solid",
             self.refused.get(),
+            100.0 * self.refused.get() as f64 / fuses as f64,
             self.not_a_solid.get()
         );
         for (predicate, count) in self.gave_up.borrow().iter() {
-            println!("    {count} refusals named \"{predicate}\"");
+            println!(
+                "    {count} ({:.1}% of all fuses) named \"{predicate}\"",
+                100.0 * *count as f64 / fuses as f64
+            );
         }
     }
 }

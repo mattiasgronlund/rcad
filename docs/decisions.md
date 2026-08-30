@@ -1660,6 +1660,19 @@ settle, and the operation is left with nothing to return: that is
 `Error::Geometry(PlanesDoNotMeetInAPoint)`. The old tier put a refusal somewhere
 §17.7's breakdown of what gave up could not see it.
 
+**Amended 2026-08-31.** The ON-classification row above says
+`Plane::agreement_with` decides exact proportionality through the cascade, which
+reads as though it always answers. It does not, and `PlaneAgreement` has a
+fourth variant, `CannotTell`. Each of the six minors is one `orient2d`, and
+`orient2d` can come back `Undecidable` when a product underflows out of the
+range where `f64` multiplication can be undone — a normal tilted by roughly
+`1e-300` reaches it. Answering `Different` there would be a confident lie about
+a plane and its own reverse, which is what the test that found it asks. §3.5's
+dynamic-range check is what keeps models like that out; a caller who has one
+anyway gets told that nothing here can tell. This is the ordinary shape of the
+rule in `CLAUDE.md`: a predicate returns a `Decision` and `Undecidable` is one
+of the answers, so anything built out of predicates inherits the case.
+
 ### 17.5 What this milestone owes to earlier sections
 
 Four corrections, all amended in place where they belong so a reader of that
@@ -1757,6 +1770,27 @@ touching-but-not-overlapping, and self-intersecting inputs — are all reachable
 with planes and are all in M2.5, which is most of §1.7's argument for building
 the fuse this early.
 
+**Amended 2026-08-31, with what two of the pieces turned into.** Piece 6 shipped
+as the table says: `SolidView::classify_uncertain_point` is the one body, and
+`classify_point` is that function called with an exact point and nothing else.
+What the table could not know is that the generalization was not where the cost
+was — §17.8 has that — and that the bug it uncovered was in the old body rather
+than the new entry. `FaceView::for_each_triangle` fans a face from one corner of
+its outline, so the triangles overlap and a hole is covered twice, once each
+way. Asking one triangle at a time whether it holds the point therefore put
+every point over a hole on the solid's skin. The boundary question is now asked
+of the whole outline: a half-line from the point, edges counted as they cross
+it, corners on the line read as a half-open range so there is no tie to break.
+
+Piece 10's bound is `Isometry::POINT_ROUNDOFF`, `18·ε` per unit of the largest
+coordinate, published beside `apply_to_point` as §15.6 rule 1 requires and
+checked by evaluating the same quaternion sandwich a second time in exact
+expansion arithmetic and subtracting. `turning_a_fuse.rs` propagates it into
+bounds on volume, area and centroid, with the slack factor a separate named
+constant at the consumer per §15.6 rule 2. Nothing about that was a surprise,
+and it is recorded because it is the only place in M2.5 where a test had to
+wait on a derivation.
+
 ### 17.7 Criterion 8 — the refusal rate
 
 §1.7's eighth exit criterion wants a measured refusal rate under
@@ -1764,14 +1798,9 @@ the fuse this early.
 *fuse operations* over the corpus that come back `Error::Undecidable`, per
 operation, because that is the unit a user experiences a refusal in.
 
-The numbers are not measured yet.
-
-`TODO(criterion 8): measured refusal rates go here once the suite runs.`
-
-What the measurement has to look like *is* settled now, though, because it is a
-decision and not a result — a single averaged percentage would be a worse
-number than no number, since it would blend a control that must never refuse
-with a family built to be refused on.
+The shape of the measurement is a decision and not a result — a single averaged
+percentage would be a worse number than no number, since it would blend a
+control that must never refuse with a family built to be refused on.
 
 **Three families, reported separately, never as one number.**
 
@@ -1791,6 +1820,112 @@ All three are machine-checked and asserted, in the ordinary test suite. §12.5
 had to record that criterion 10's ≥0.8× half "is not machine-checked; it is a
 `criterion` run a human reads", and that caveat should not need writing twice.
 
+**Measured 2026-08-31.** The generated families run from a fixed seed, so the
+figures below reproduce; the properties beside them run from a fresh seed every
+time, because their job is to find inputs nobody has thought of and a frozen
+seed would stop them finding any.
+
+| Family | Corpus | Refused | Rate | Where |
+|---|---|---|---|---|
+| The §7.4 catalogue | 13 cases over nine entries | 3: two `ResultIsNotManifold`, one `ArgumentIntersectsItself` | table, not a rate | `the_nine_planar_entries_as_a_table` |
+| Lattice-aligned pairs | 138 configurations × 3 rules = 414 fuses | **0** | 0% | `every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing` |
+| The same, built to share coordinates | 138 × 3 = 414 fuses | **0** | 0% | `every_certified_fuse_of_a_pair_sharing_coordinates_is_decided` |
+| Rotated pairs | 138 × 3 = 414 fuses | 105 | **25.4%** | `how_often_a_certified_fuse_of_a_turned_pair_refuses` |
+
+A corpus is 128 generated configurations plus the ten seeds `proptest` has kept
+from past failures, each asked all three rules. The same shapes, the same
+shifts and the same count appear in all three generated rows, so the only thing
+between the control and the headline is the rotation — which is what makes the
+comparison say anything. The control is measured twice because there are two
+ways for an exactly representable pair to be hard: ordinary overlaps, and the
+deliberately degenerate configurations of the last paragraph of this section,
+where the same corner value appears in both solids. Neither refuses once.
+
+None of the catalogue's three refusals is an `Error::Undecidable`, so none of
+them is a refusal in criterion 8's sense at all. Two are what §17.4's first row
+settles is right: two cubes meeting along a whole edge, and a small cube
+touching a big one along part of one. Four faces would run along that edge and a
+`Model` means an edge is used by exactly two, so the union of those solids is
+not something this kernel can hold. The third is the ninth entry, an input that
+runs through itself, which is a bad argument and refuses as one.
+
+| §7.4 entry | the pair | rule | outcome |
+|---|---|---|---|
+| 1. coplanar faces | two cubes sharing a whole face | Union | answered |
+| 1. coplanar faces | two slabs whose faces half overlap | Union | answered |
+| 2. coincident edges | two cubes catty-corner, sharing one whole edge | Union | refused, `ResultIsNotManifold` |
+| 2. coincident edges | the same two, asked what they share | Intersection | answered |
+| 3. vertex on face | two cubes offset by a corner | Union | answered |
+| 4. vertex on edge | a box poking out of the top of a cube | Union | answered |
+| 5. zero-length edges | a cube and two bars whose walls are on the same planes | Union | answered |
+| 6. sliver faces | a cube and a knife a millionth of the way in | Intersection | answered |
+| 7. fully contained solids | a cube in the middle of another, hollowed out | Difference | answered |
+| 8. touching, not overlapping | two cubes touching on a face | Union | answered |
+| 8. touching, not overlapping | two cubes touching along part of an edge | Union | refused, `ResultIsNotManifold` |
+| 8. touching, not overlapping | two cubes touching at a corner | Union | answered |
+| 9. self-intersecting input | two cubes wired into one solid that runs through itself | Union | refused, `ArgumentIntersectsItself` |
+
+**The headline rate broken down by which predicate could not decide is the half
+of criterion 8 anybody can act on.** The rate alone says how often the kernel
+gives up; only the breakdown says on what, and §14.7's whole worry is that a
+refusal might be undeserved.
+
+| What could not be decided | Refusals | Share of the 414 |
+|---|---|---|
+| `"side of plane"` | 105 | 25.4% |
+| `"a point inside a piece of a face"` | 0 | 0% |
+| everything else | 0 | 0% |
+
+Every one of the 105 comes from one question: whether a corner the fuse
+re-derived lies exactly on a cut line's plane. Under §17.1 a corner is the meet
+of three planes and so a box, and a box sitting on a plane it was solved from
+straddles it however much precision is spent, so the splitter cannot tell
+whether that line runs through that corner. Fourteen fresh seeds over the same
+corpus put the rate between 19.6% and 28.3%, and no run of them has ever named a
+third cause; `"a point inside a piece of a face"` still turns up on some seeds,
+at most twelve out of about a hundred.
+
+That second cause has already earned its keep. Before the two fixes below it was
+a much larger share, and having it named separately is what showed that those
+refusals were **undeserved** rather than genuinely undecidable. A face was read
+one triangle of its own fan at a time, and the fan is a signed overlapping one,
+so a hole is covered twice and a point over it came back `OnBoundary`; and ON
+was being settled by casting a ray, when §17.1 makes it a question about two
+planes' coefficients, which no box widens. Fixing both took the rate from 32.8%
+to 25.8% and took `A \ A` over a turned solid from every case refused to none.
+Neither would have been visible in the total on its own.
+
+The threshold is **32%**, asserted by
+`how_often_a_certified_fuse_of_a_turned_pair_refuses` in
+`crates/rcad-topo/tests/fuses_that_must_agree.rs`. It is chosen from
+measurement rather than from taste: no fresh seed reaches it, and it sits just
+under the 32.8% the rate stood at before those two undeserved refusals were
+fixed, so either of them coming back trips it. A threshold is not a target —
+what is recorded is the measurement, and the assertion is only there so the
+measurement cannot drift without somebody noticing.
+
+**The headline family and the degenerate family have to be read together, and a
+reader who takes 25.4% on its own will misread it.** The turned family is the
+lattice family rotated, and the lattice family is full of configurations that
+are *exactly* degenerate: faces flush against each other, corners landing on
+faces, solids offset by a whole extent. Turning those leaves them geometrically
+degenerate while their two stored planes stop agreeing in the last bits, which
+is precisely the question the 105 refusals could not answer. So a large share of
+the headline number is a statement about how degenerate the corpus is, not only
+about how timid the filters are — and the fact that the very same
+configurations refuse zero times when they are not turned is what shows the
+filters are not the whole story.
+
+What the number does not say is anything about real models. It is measured over
+*this* corpus: four rectilinear outlines, small integer coordinates, two solids
+placed within a few units of each other and deliberately steered into
+coincidence. Roadmap §13's second risk — "certified approach refuses too much to
+be usable" — is about parts people draw, which are mostly not degenerate and
+mostly do not have two faces a rounding apart. A quarter of *this* corpus
+refusing is therefore evidence and not a verdict: it bounds how bad the answer
+can be on a corpus chosen to be hard, and the honest reading is that the risk is
+still open and now has a number attached to it instead of nothing.
+
 The generators are three configuration families and not M0's extruded-polygon
 configurations reused wholesale. M0's generator supplies *shapes*, and we take
 it whole for that; what we do not take is its configurations, because §12.3 is
@@ -1807,3 +1942,105 @@ generates the *near* case and never the *on* case, and the on case is what the
 catalogue is about — coplanar faces means coplanar, not coplanar to within a
 nanometre. We take §11.3's instruction and note that our dangerous band has a
 boundary we can land on exactly, so we construct it instead of approaching it.
+
+### 17.8 What M2.5 actually cost, recorded 2026-08-31
+
+M2.5 is complete. §12 did this for M0; this is the same for the fuse, and it is
+here rather than in a new top-level section because the milestone's record
+should read in one piece.
+
+**The schedule risk was where §17.6 put it and not where §1.7 did.** §1.7 named
+item 5, the catalogue, "where the roadmap says booleans actually cost". §17.6
+disagreed in the same file and named piece 6, classification — "shipped,
+benchmarked, and about to be handed constructed points for the first time in its
+life". §17.6 was right, and the evidence is three separate things.
+
+The catalogue cost about what it looked like. Writing it turned up two
+coincidences the fuse could not see, and both were the same function giving up
+on something it could have decided: `coincident_face` asked for a winding of
+exactly `+1` about the piece's own normal, so every `OppositeWay` coincidence —
+which is most of them — came back as no coincidence at all; and the winding
+count fanned from one fixed corner and gave up whenever the point sat on a chord
+of that fan, which every candidate a rectangular piece can offer does. Both fixes
+are inside one function. Four entries later had to have their asserted counts
+restated, and that was fallout from a fix elsewhere rather than catalogue work.
+
+Classification cost more, and it cost it twice, both times in exactly the part
+§12.5 had already recorded as carrying no signal. `FaceView::for_each_triangle`
+fans a face from one corner of its outline, so its triangles overlap and a hole
+is covered twice, once each way; reading one triangle at a time therefore put
+every point over a hole on the solid's skin, and a frame united with a plug
+filling one corner of its hole refused. That pair is lattice-aligned, so it is
+§17.7's control family, where a refusal is a bug by definition. Separately, ON
+was being settled by casting a ray, which cannot work when the point is a box
+sitting on the very plane it was solved from — §17.1 makes ON a question about
+two planes' coefficients, which no box widens. Together those two took the
+headline rate from 32.8% to 25.8% and took `A \ A` over a turned solid from
+every case refused to none.
+
+Neither of those was found by the catalogue, and neither was found by review.
+**Every defect that mattered in M2.5 was found by a metamorphic property, not by
+a hand-written case.** Commutativity found the coplanar-partition hole on its
+first run: two ells flush against each other united into twenty-three faces one
+way round and twenty-six the other, the same solid both times. Associativity and
+`A \ (A \ B)` found the other half of the same hole, that a corner between two
+coplanar faces has two planes round it and not three, so the *next* fuse over
+such an answer divides by a determinant of exactly zero. §17.4's amendment is the
+one fix for both. §12.2 preferred "a property the answer must satisfy over an
+authority to compare against" on the strength of one bug; it now has a second and
+much larger data point, and the two together are the general form: the risk is
+the part that looks done, and the oracle that finds it is a property rather than
+a case. The catalogue is the part everyone looks at, which is why the bugs were
+not in it.
+
+One place the cost went that neither prediction named is the closing gate's
+bound. §15.6 settles that a published bound needs a test that could fail, and a
+bounded relation is worth nothing until the bound exists, so `turning_a_fuse.rs`
+could not be written at all until `Isometry::POINT_ROUNDOFF` had been derived —
+a page of arithmetic charging each term of the quaternion sandwich for every
+rounding it passes through. That is not much work, but it cannot be done
+alongside the test that needs it, which is §13 rule 1 seen from an angle that
+section does not cover: a piece whose oracle has to be *derived* first is one
+piece and not two, however separable the code looks.
+
+**All eight of §1.7's exit criteria are met, and so are §14.8's three extra
+oracles.** One at a time, against the shipped code:
+
+| §1.7 criterion | The test that discharges it |
+|---|---|
+| 1. One decomposition and three selection rules over sets of arguments and tools, not three algorithms | `fuse/select.rs` is one table read as data and one `match` on `Rule` in `row_for`; `every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing` asks all three rules of every configuration, `two_cubes_in_one_group_cut_each_other_the_same_as_two_in_opposite_groups` pins the set semantics, `two_tools_cutting_along_the_same_planes_merge_instead_of_making_an_edge_of_no_length` hands it two tools and `uniting_three_at_once_is_uniting_two_and_then_the_third` three arguments |
+| 2. Face and edge splitting at intersections, with image maps | `the_pieces_of_a_face_add_up_to_the_area_it_started_with`, `every_side_of_a_piece_is_walked_once_and_a_shared_one_once_each_way`, `every_face_of_an_answer_names_the_input_face_it_was_cut_from` |
+| 3. Classification reused, not reimplemented | `classify_point` is `classify_uncertain_point` called with an exact point and nothing else; `the_exact_way_in_and_the_general_one_give_the_same_answers` |
+| 4. History maps returned per operation | `the_input_keys_still_work_and_a_face_nothing_reaches_comes_through_once`, `a_face_that_is_swallowed_whole_has_no_image`, `every_face_of_the_answer_has_exactly_one_input_face_behind_it` |
+| 5. The catalogue as hand-written cases, each passing or refusing with a reason | `the_nine_planar_entries_as_a_table` and the eighteen per-entry tests beside it in `degenerate_fuses.rs`; `a_solid_that_runs_through_itself_cannot_be_fused` for the ninth entry, which no public API can build |
+| 6. The §11.2 metamorphic properties as a `proptest` suite | `what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up`, `uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the_first`, `taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_share`, and transform invariance in both halves — `turning_a_pair_a_quarter_turn_and_moving_it_a_whole_number_changes_not_one_bit` exactly, `turning_the_answer_to_a_fuse_agrees_with_fusing_the_turned_inputs` within the bound |
+| 7. `Policy::max_wobble` has a caller, judged against `ProvenanceLog::worst_wobble` | `Model::fuse` judges it after assembly and before the commit; `a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_prove` and `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` are the two halves, and `a_certified_fuse_over_a_tagged_input_succeeds_and_the_answer_keeps_the_tag` is §17.2's guard against reading the wrong quantity |
+| 8. A measured refusal rate under `Policy::certified()`, recorded in this file | §17.7, asserted by `how_often_a_certified_fuse_of_a_turned_pair_refuses` with `every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing` and `every_certified_fuse_of_a_pair_sharing_coordinates_is_decided` as its controls |
+
+| §14.8 oracle | The test that discharges it |
+|---|---|
+| Commutativity of union and intersection | `swapping_the_two_sides_of_a_lattice_pair_changes_not_one_bit`, and the same for turned pairs and for pairs sharing coordinates, all comparing the answer's faces bit for bit; `uniting_two_ells_flush_against_each_other_gives_the_same_faces_either_way_round` is the case that first failed |
+| Idempotence and absorption | `a_solid_united_with_a_copy_of_itself_is_itself` for `A ∪ A` and `A ∩ A`, `a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all` for `A \ A` over both a lattice solid and a turned one, `a_solid_united_with_what_it_shares_with_another_is_itself` for `A ∪ (A ∩ B)` |
+| `fuse([A,B,C]) ≡ fuse([fuse([A,B]), C])` | `uniting_three_at_once_is_uniting_two_and_then_the_third`, with `uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the_first` beside it for the order the three arrive in |
+
+Two things §17.6 promised that did **not** ship, recorded rather than claimed.
+Its ninth piece names "Euler characteristic and shell counts on the assembled
+result" as what decides shell reassembly is correct. Shell counts are checked, by
+name, in `a_cube_wholly_inside_another_under_all_three_rules` and
+`a_cube_with_a_smaller_one_taken_out_of_the_middle_is_one_solid_with_a_void`, and
+compared between two runs by every property that goes through `invariants_of`.
+The Euler characteristic is checked nowhere. What stands in for it is
+`Model::validate` over the whole committed result in debug builds, which asks
+that every edge is used by exactly two coedges and every wire closes — from which
+χ follows rather than being an independent check on it. That is less than the
+piece promised.
+
+And inclusion and exclusion is asserted on lattice pairs only. On turned pairs
+each of its four volumes is a rounded sum over a solid whose corners are already
+a rounding away from the planes they were solved from, and bounding the sum needs
+a bound on how badly conditioned those plane triples are, which nothing in this
+tree has. `Isometry::POINT_ROUNDOFF` does not reach it: that bound covers turning
+an answer that has already been computed, not the fuse's own arithmetic in the
+turned frame. Guessing a tolerance instead would make the test measure the
+tolerance (§14.1 question 1), so the property is not run there and the gap is
+written down at the top of `fuses_that_must_agree.rs` as well as here.
