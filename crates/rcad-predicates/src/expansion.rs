@@ -219,16 +219,30 @@ pub fn two_product(a: f64, b: f64) -> (f64, f64) {
 
 /// Whether [`two_product`] on `a` and `b` is exact.
 ///
-/// It is exact when the roundoff term is itself a normal number, and it is not
-/// when the product is small enough to push that term into the subnormals,
-/// because then the term cannot hold all its own bits. Shewchuk's predicates
-/// state this as a precondition and leave it to the caller; the `robust` crate
-/// takes it for granted and returns a confidently wrong sign on coordinates
-/// near the bottom of the `f64` range. A CAD kernel cannot afford that, so
-/// check.
+/// A product can miss at both ends of the range, and this rejects both.
 ///
-/// The threshold is `2^-969`, which is the smallest product whose half-ulp —
-/// the largest the roundoff term can be — is still normal.
+/// **At the bottom**, it is exact when the roundoff term is itself a normal
+/// number, and it is not when the product is small enough to push that term
+/// into the subnormals, because then the term cannot hold all its own bits.
+/// Shewchuk's predicates state this as a precondition and leave it to the
+/// caller; the `robust` crate takes it for granted and returns a confidently
+/// wrong sign on coordinates near the bottom of the `f64` range. A CAD kernel
+/// cannot afford that, so check. The threshold is `2^-969`, the smallest
+/// product whose half-ulp — the largest the roundoff term can be — is still
+/// normal.
+///
+/// **At the top**, an overflowed product is not exact either, and this used to
+/// answer `true` for `1e200` squared. The doc was accurate about what the
+/// function tested and the name was not: at twenty-seven call sites
+/// `product_is_exact` reads as the gate that keeps unrepresentable products out
+/// of the expansion arithmetic, and it only ever guarded one end. Nothing was
+/// wrong downstream — an infinity reaches [`expansion_sign`], which refuses to
+/// name a sign for it, and that is still the backstop. But a gate that lets
+/// through the case its name promises to catch is one nobody can read.
+///
+/// The zero test is on the arguments and not on the product, and has to be:
+/// `1e-200` squared underflows to zero without either argument being zero, and
+/// that is the bottom-end case above rather than an exact one.
 ///
 /// [`two_sum`] and [`two_diff`] need no such check: they are exact for every
 /// pair of `f64` that does not overflow, subnormals included.
@@ -238,15 +252,24 @@ pub fn two_product(a: f64, b: f64) -> (f64, f64) {
 /// assert!(product_is_exact(1.5, 2.5));
 /// assert!(product_is_exact(0.0, 3.5e-323));
 /// assert!(!product_is_exact(1.5, 3.5e-323));
+/// assert!(!product_is_exact(1e200, 1e200));
+/// assert!(!product_is_exact(1e-200, 1e-200));
 /// ```
 pub fn product_is_exact(a: f64, b: f64) -> bool {
     const SMALLEST_EXACT_PRODUCT: f64 = f64::MIN_POSITIVE * 9007199254740992.0;
-    a == 0.0 || b == 0.0 || (a * b).abs() >= SMALLEST_EXACT_PRODUCT
+    let product = a * b;
+    if !product.is_finite() {
+        return false;
+    }
+    a == 0.0 || b == 0.0 || product.abs() >= SMALLEST_EXACT_PRODUCT
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{expansion_sign, expansion_sum, scale_expansion, two_diff, two_product, two_sum};
+    use super::{
+        expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_diff, two_product,
+        two_sum,
+    };
     use crate::Decision;
 
     #[test]
@@ -422,5 +445,53 @@ mod tests {
         }
         let exact: f64 = total[..total_len].iter().sum();
         assert_eq!(exact, 0.96875);
+    }
+    /// The overflow end of the gate, which used to be open.
+    ///
+    /// `1e200` squared is `1e400`, and `product_is_exact` answered `true` for
+    /// it. Nothing downstream was wrong — the next test says why — but the name
+    /// promised a check that half existed.
+    #[test]
+    fn a_product_that_overflows_is_not_exact() {
+        assert!(!product_is_exact(1e200, 1e200));
+        assert!(!product_is_exact(f64::MAX, 2.0));
+        assert!(!product_is_exact(0.0, f64::INFINITY));
+        assert!(!product_is_exact(f64::NAN, 1.0));
+    }
+
+    /// The zero test has to be on the arguments, not on the product.
+    ///
+    /// `1e-200` squared underflows to zero with neither argument zero. Reading
+    /// the zero off the product instead would call that exact, which is the
+    /// subnormal end of the gate failing open — the end that was already
+    /// closed, and the `robust` crate's wrong-sign bug.
+    #[test]
+    fn a_product_that_underflows_to_zero_is_not_exact_though_the_product_is_zero() {
+        assert_eq!(1e-200 * 1e-200, 0.0);
+        assert!(!product_is_exact(1e-200, 1e-200));
+        assert!(product_is_exact(0.0, 1e-200));
+    }
+
+    /// Why closing the gate changes no answer: the backstop was already there.
+    ///
+    /// The pair `product_is_exact` now rejects is exactly the pair that used to
+    /// go through and be refused one level down.
+    /// `a_non_finite_entry_cannot_be_dropped_on_its_way_to_a_sign` is the
+    /// general invariant; this is the overflow case of it, reached through
+    /// [`two_product`] rather than [`two_diff`], and it is what makes this
+    /// change legibility rather than a fix.
+    #[test]
+    fn an_overflowed_product_was_already_refused_by_the_sign() {
+        assert!(!product_is_exact(1e200, 1e200));
+
+        let (product, roundoff) = two_product(1e200, 1e200);
+        let mut scaled = [0.0f64; 4];
+        let len = scale_expansion(&[roundoff, product], 1.0, &mut scaled);
+        assert_eq!(
+            expansion_sign(&scaled[..len]),
+            Decision::Undecidable {
+                enclosure: f64::INFINITY
+            }
+        );
     }
 }
