@@ -125,7 +125,13 @@ fn refusal(model: &mut Model, arguments: &[SolidKey], tools: &[SolidKey], rule: 
 fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
     solids
         .iter()
-        .map(|&solid| model.solid(solid).measure().volume())
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .measure()
+                .expect("a solid this size measures")
+                .volume()
+        })
         .sum()
 }
 

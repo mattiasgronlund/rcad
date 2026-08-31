@@ -10,7 +10,7 @@ use slotmap::SecondaryMap;
 
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
 use crate::view::{FaceView, SolidView, WireView};
-use crate::{EdgeView, Invalid, Model, Result};
+use crate::{EdgeView, Error, Invalid, Model, Result};
 
 impl Model {
     /// Check every invariant in the model, from top to bottom.
@@ -279,7 +279,10 @@ impl Model {
             }
             let volume = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward)
                 .signed_volume();
-            if !(volume.is_finite() && volume > 0.0) {
+            if !volume.is_finite() {
+                return Err(Error::VolumeTooLargeToMeasure);
+            }
+            if volume <= 0.0 {
                 return Err(Invalid::VolumeIsNotPositive { volume }.into());
             }
         }

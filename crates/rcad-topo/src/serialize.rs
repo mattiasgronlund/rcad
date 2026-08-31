@@ -16,14 +16,14 @@
 //!
 //! let mut model = Model::new(Scale::millimetres(100.0)?);
 //! let cube = model.add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())?;
-//! let before = model.solid(cube).measure();
+//! let before = model.solid(cube).measure()?;
 //!
 //! let bytes = postcard::to_allocvec(&model)?;
 //! let read_back: Model = postcard::from_bytes(&bytes)?;
 //!
 //! read_back.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
 //! let solid = read_back.solids().next().expect("the cube came back");
-//! assert_eq!(solid.measure(), before);
+//! assert_eq!(solid.measure()?, before);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!

@@ -62,6 +62,25 @@ pub enum Error {
         height: f64,
     },
 
+    /// A solid encloses more space than an `f64` can hold.
+    ///
+    /// Not a broken model. A cube of side `1e300` has its faces pointing
+    /// outwards and classifies points correctly; what it does not have is a
+    /// volume of `1e900` that fits in the type it would be returned in. The
+    /// answer does not exist here, which makes this a *limit* and not a §16.10
+    /// gap: no ordering and no rescaling of the arithmetic reaches a number
+    /// `f64` cannot represent.
+    #[error("this solid encloses more space than an f64 can hold")]
+    VolumeTooLargeToMeasure,
+
+    /// A solid has more skin than an `f64` can hold.
+    ///
+    /// Reachable without [`Error::VolumeTooLargeToMeasure`], because area and
+    /// volume grow at different rates: a slab that is wide and thin can run out
+    /// of room for its area while its volume still fits.
+    #[error("this solid has more surface area than an f64 can hold")]
+    SurfaceAreaTooLargeToMeasure,
+
     /// The model breaks one of the invariants [`validate`] checks.
     ///
     /// [`validate`]: crate::Model::validate

@@ -481,7 +481,7 @@ impl Totals {
 
         for &solid in solids {
             let solid = model.solid(solid);
-            let measure = solid.measure();
+            let measure = solid.measure().expect("a solid this size measures");
             volume += measure.volume();
             area += measure.surface_area();
             let middle = measure.centroid().coordinates();

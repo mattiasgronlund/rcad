@@ -24,13 +24,15 @@
 //! which reports an enclosure of zero. Both fields are carried and neither
 //! says anything.
 //!
-//! That qualification is not decoration. It was missing, and on a `1e140` cube
-//! the same call returns `Undecidable` with an enclosure of infinity and
-//! thirty-six records in the log — the products overflow and level 3 has
-//! nothing to offer. `Model::validate` refuses that model, so a caller who
-//! validates never sees it, but `add_cube` returns `Ok` for it first. The
-//! dynamic-range check does not catch it either, being a ratio test blind to
-//! absolute magnitude; `docs/decisions.md` §16.11 carries the question.
+//! That qualification is not decoration, but the example that used to be here
+//! was wrong twice over and is worth keeping as a correction. It said a `1e140`
+//! cube returns `Undecidable` with an enclosure of infinity and thirty-six
+//! records, because the ray target overflowed. Measured: it returns `Inside`
+//! with an **empty log**, and has since `a23d73d` taught the predicates to
+//! rescale; the ray target does not overflow until a side of `7.7e307`, and
+//! what overflowed at `1e140` was inside `orient3d`. `docs/decisions.md` §20.7
+//! records both mistakes rather than quietly dropping them, and §16.11 — which
+//! carries the same wrong cause — is corrected in place.
 //!
 //! Ask about a point that is only known to lie inside a box and both start
 //! meaning something. Exact arithmetic cannot run on a coordinate nobody has,

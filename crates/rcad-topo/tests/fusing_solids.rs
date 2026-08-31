@@ -53,7 +53,13 @@ fn two_cubes(shift: Vector) -> (Model, SolidKey, SolidKey) {
 fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
     solids
         .iter()
-        .map(|&solid| model.solid(solid).measure().volume())
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .measure()
+                .expect("a solid this size measures")
+                .volume()
+        })
         .sum()
 }
 
@@ -135,7 +141,13 @@ fn a_cube_with_a_smaller_one_taken_out_of_the_middle_is_one_solid_with_a_void() 
         2,
         "the outside of the block and the skin of the hole it now has"
     );
-    assert_eq!(solid.measure().volume(), 64.0 - 8.0);
+    assert_eq!(
+        solid
+            .measure()
+            .expect("a solid this size measures")
+            .volume(),
+        64.0 - 8.0
+    );
 }
 
 /// `A` is the union of the arguments, so two solids handed over on the same

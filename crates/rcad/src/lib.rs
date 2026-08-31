@@ -62,7 +62,7 @@
 //! model.validate(&Policy::certified(), &mut log)?;
 //! assert!(log.is_empty(), "a clean sweep records nothing at all");
 //!
-//! let measured = model.solid(cube).measure();
+//! let measured = model.solid(cube).measure()?;
 //! assert_eq!(measured.volume(), 1000.0);
 //! assert_eq!(measured.surface_area(), 600.0);
 //! assert_eq!(measured.centroid(), Point::new(5.0, 5.0, 5.0));
@@ -88,7 +88,7 @@
 //! let read_back: Model = postcard::from_bytes(&bytes)?;
 //! read_back.validate(&Policy::certified(), &mut log)?;
 //! let same_cube = read_back.solids().next().expect("the cube came back");
-//! assert_eq!(same_cube.measure(), measured);
+//! assert_eq!(same_cube.measure()?, measured);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!

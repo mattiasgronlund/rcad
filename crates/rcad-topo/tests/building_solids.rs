@@ -22,7 +22,10 @@ fn a_cube_of_side_two_holds_eight_of_space_and_twentyfour_of_skin() {
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube of side two");
 
-    let measured = model.solid(cube).measure();
+    let measured = model
+        .solid(cube)
+        .measure()
+        .expect("a solid this size measures");
 
     assert_eq!(measured.volume(), 8.0);
     assert_eq!(measured.surface_area(), 24.0);
@@ -68,7 +71,11 @@ fn every_face_of_a_cube_points_away_from_the_middle_of_it() {
     let cube = model
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube of side two");
-    let middle = model.solid(cube).measure().centroid();
+    let middle = model
+        .solid(cube)
+        .measure()
+        .expect("a solid this size measures")
+        .centroid();
 
     for face in model.solid(cube).faces() {
         let corner = face
@@ -108,7 +115,10 @@ fn a_plate_with_a_square_hole_has_the_hole_missing_from_its_volume() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a sound plate");
 
-    let measured = model.solid(solid).measure();
+    let measured = model
+        .solid(solid)
+        .measure()
+        .expect("a solid this size measures");
     assert_eq!(measured.volume(), (100.0 - 4.0) * 3.0);
     assert_eq!(
         measured.surface_area(),
@@ -133,7 +143,14 @@ fn a_plate_with_two_holes_still_has_two_coedges_on_every_edge() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a sound plate");
 
-    assert_eq!(model.solid(solid).measure().volume(), (100.0 - 8.0) * 2.0);
+    assert_eq!(
+        model
+            .solid(solid)
+            .measure()
+            .expect("a solid this size measures")
+            .volume(),
+        (100.0 - 8.0) * 2.0
+    );
     for edge in model.edges() {
         assert_eq!(edge.coedges().count(), 2);
     }
@@ -151,7 +168,14 @@ fn a_right_triangle_is_a_perfectly_good_profile() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a sound prism");
 
-    assert_eq!(model.solid(solid).measure().volume(), 1.0);
+    assert_eq!(
+        model
+            .solid(solid)
+            .measure()
+            .expect("a solid this size measures")
+            .volume(),
+        1.0
+    );
 }
 
 #[test]
@@ -166,7 +190,14 @@ fn a_parallelogram_is_a_perfectly_good_profile() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a sound block");
 
-    assert_eq!(model.solid(solid).measure().volume(), 3.0);
+    assert_eq!(
+        model
+            .solid(solid)
+            .measure()
+            .expect("a solid this size measures")
+            .volume(),
+        3.0
+    );
 }
 
 #[test]
@@ -184,7 +215,14 @@ fn a_triangular_hole_in_a_square_outline_is_a_perfectly_good_profile() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a sound plate");
 
-    assert_eq!(model.solid(solid).measure().volume(), (100.0 - 2.0) * 3.0);
+    assert_eq!(
+        model
+            .solid(solid)
+            .measure()
+            .expect("a solid this size measures")
+            .volume(),
+        (100.0 - 2.0) * 3.0
+    );
 }
 
 /// A corner can be as sharp as it likes as long as the two edges only share
@@ -217,7 +255,10 @@ fn an_l_shape_is_measured_right_even_though_it_is_not_convex() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a sound L");
 
-    let measured = model.solid(solid).measure();
+    let measured = model
+        .solid(solid)
+        .measure()
+        .expect("a solid this size measures");
     assert_eq!(measured.volume(), 3.0);
     assert!((measured.centroid().x() - 2.5 / 3.0).abs() < 1e-12);
     assert!((measured.centroid().y() - 2.5 / 3.0).abs() < 1e-12);
@@ -236,7 +277,14 @@ fn a_profile_given_clockwise_is_turned_the_right_way_round() {
     let solid = model
         .add_extrusion(&clockwise, 1.0, &Isometry::identity())
         .expect("a block");
-    assert_eq!(model.solid(solid).measure().volume(), 4.0);
+    assert_eq!(
+        model
+            .solid(solid)
+            .measure()
+            .expect("a solid this size measures")
+            .volume(),
+        4.0
+    );
 }
 
 /// Twice the area a ring sweeps out. Positive when it runs anticlockwise.

@@ -21,7 +21,7 @@
 //! `pairs/mod.rs` bound the generated family's own range, and carry a
 //! measurement each.
 
-use rcad_geom::{Isometry, Scale, Vector};
+use rcad_geom::{Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -66,7 +66,7 @@ fn frame(model: &mut Model, side: f64, wall: f64, at: Vector) -> SolidKey {
 }
 
 /// A cube fuses with a copy of itself at every size `f64` can hold the answer
-/// at, up to and including `2^340`.
+/// at, up to and including `2^341`.
 ///
 /// It could not past about `2^72`. `fuse/select.rs`'s `InPlane::of` needs a
 /// point it can *prove* is off a face's plane, and it looked for one by stepping
@@ -82,15 +82,25 @@ fn frame(model: &mut Model, side: f64, wall: f64, at: Vector) -> SolidKey {
 /// times. The reach is now a fraction of the plane's own offset, so there is no
 /// size at which it vanishes.
 ///
-/// **Where the range ends now, and why that end is a limit.** `2^341`, and the
-/// fuse has nothing to do with it: a cube that big encloses `2^1023` of space,
-/// six times which is past the largest `f64`, so `signed_volume` overflows and
-/// `Model::validate` refuses an infinite volume. The answer does not exist in
-/// the number type, which is what makes it a limit rather than a gap
+/// **Where the range ends now, and why that end is a limit.** `2^342`, and the
+/// fuse has nothing to do with it: a cube that big encloses `2^1026` of space,
+/// which is past the largest `f64`. The answer does not exist in the number
+/// type, which is what makes it a limit rather than a gap
 /// (`docs/decisions.md` §16.10).
+///
+/// **This paragraph used to say `2^341`, and called that a limit too.** The
+/// reason it gave — "a cube that big encloses `2^1023` of space, *six times
+/// which* is past the largest `f64`" — is the gap test failing on its own
+/// evidence. `2^1023` is a perfectly ordinary `f64`; only the `6 ×` on the way
+/// to it was not, because `signed_volume` scaled its sum back up in one
+/// multiplication. The answer existed and the arithmetic could not reach it,
+/// which is §16.10's definition of a gap, written down two lines under a
+/// sentence calling it a limit. `SolidView::measure` now undoes its rescale one
+/// factor at a time and `2^341` measures, so the range is one binade wider and
+/// the end of it is real.
 #[test]
 fn a_cube_a_long_way_from_the_origin_fuses_with_a_copy_of_itself() {
-    for exponent in [0, 36, 71, 72, 73, 100, 200, 340] {
+    for exponent in [0, 36, 71, 72, 73, 100, 200, 340, 341] {
         let far = two_to_the(exponent);
         let mut model = Model::new(Scale::millimetres(100.0 * far).expect("a working size"));
         let one = block(&mut model, [far, far, far], Vector::zero());
@@ -114,12 +124,17 @@ fn a_cube_a_long_way_from_the_origin_fuses_with_a_copy_of_itself() {
 /// The end of that range, and what ends it.
 ///
 /// A published bound needs a test (`docs/decisions.md` §15.6). The one above
-/// says `2^341` is out of reach because six times the volume overflows rather
+/// says `2^342` is out of reach because the volume itself does not fit rather
 /// than because anything in the fuse gave up, so this is the sentence that would
 /// have to change if the fuse ever became the reason again.
+///
+/// **The refusal is not `Invalid`.** A cube of side `2^342` has its faces
+/// pointing outwards and classifies points correctly; what it does not have is
+/// a volume `f64` can hold. Calling that a broken model, which this test used
+/// to assert, said something false about the solid.
 #[test]
 fn the_first_cube_too_big_to_fuse_is_the_first_whose_volume_overflows() {
-    let far = two_to_the(341);
+    let far = two_to_the(342);
     let mut model = Model::new(Scale::millimetres(100.0 * far).expect("a working size"));
     let one = block(&mut model, [far, far, far], Vector::zero());
     let copy = block(&mut model, [far, far, far], Vector::zero());
@@ -132,13 +147,32 @@ fn the_first_cube_too_big_to_fuse_is_the_first_whose_volume_overflows() {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
-        .expect_err("a cube of 2^1023 units of space is past what an f64 volume holds");
+        .expect_err("a cube of 2^1026 units of space is past what an f64 volume holds");
     assert!(
-        matches!(
-            refusal,
-            Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume.is_infinite()
-        ),
+        matches!(refusal, Error::VolumeTooLargeToMeasure),
         "the fuse decided everything it was asked; the volume is what overflowed: {refusal:?}"
+    );
+}
+
+/// The largest cube that still measures, and all three answers for it.
+///
+/// The binade below the bound above, and the one the old arithmetic could not
+/// reach. All three numbers are exact: `2^1023`, `6 × 2^682`, and half the side.
+#[test]
+fn the_largest_cube_that_fits_measures_its_volume_area_and_middle() {
+    let side = two_to_the(341);
+    let mut model = Model::new(Scale::millimetres(100.0 * side).expect("a working size"));
+    let cube = block(&mut model, [side, side, side], Vector::zero());
+
+    let measured = model
+        .solid(cube)
+        .measure()
+        .expect("a cube of 2^1023 units of space is the largest that fits");
+    assert_eq!(measured.volume(), two_to_the(1023));
+    assert_eq!(measured.surface_area(), 6.0 * two_to_the(682));
+    assert_eq!(
+        measured.centroid(),
+        Point::new(side / 2.0, side / 2.0, side / 2.0)
     );
 }
 
@@ -194,7 +228,13 @@ fn a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses() {
         let volume: f64 = united
             .solids()
             .iter()
-            .map(|&solid| model.solid(solid).measure().volume())
+            .map(|&solid| {
+                model
+                    .solid(solid)
+                    .measure()
+                    .expect("a solid this size measures")
+                    .volume()
+            })
             .sum();
         assert_eq!(
             volume, 8.0,

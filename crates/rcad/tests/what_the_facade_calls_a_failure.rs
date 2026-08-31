@@ -26,7 +26,7 @@ fn one_question_mark_works_on_all_three_layers_underneath() {
         let mut model = Model::new(scale);
         let cube = model.add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())?;
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
-        Ok(model.solid(cube).measure().volume())
+        Ok(model.solid(cube).measure()?.volume())
     }
 
     assert_eq!(

@@ -53,7 +53,10 @@ fn a_cube_turned_a_quarter_of_the_way_round_the_z_axis_is_still_the_same_cube() 
     let cube = model
         .add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube of side ten");
-    let before = model.solid(cube).measure();
+    let before = model
+        .solid(cube)
+        .measure()
+        .expect("a solid this size measures");
     assert_eq!(before.volume(), 1000.0);
 
     let quarter = Isometry::rotation(&Axis::z(), FRAC_PI_2).expect("a quarter turn");
@@ -61,7 +64,10 @@ fn a_cube_turned_a_quarter_of_the_way_round_the_z_axis_is_still_the_same_cube() 
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("turning a cube leaves it a cube");
-    let after = model.solid(cube).measure();
+    let after = model
+        .solid(cube)
+        .measure()
+        .expect("a solid this size measures");
 
     assert_eq!(after.volume(), before.volume());
     assert_eq!(after.surface_area(), before.surface_area());
@@ -81,11 +87,11 @@ proptest! {
         movement in an_arbitrary_movement(),
     ) {
         let (mut model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure();
+        let before = model.solid(solid).measure().expect("a solid this size measures");
 
         model.place_solid(solid, &movement);
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
-        let after = model.solid(solid).measure();
+        let after = model.solid(solid).measure().expect("a solid this size measures");
 
         prop_assert!(
             drift(after.volume(), before.volume()) <= SLACK_AFTER_A_GENERAL_TURN,
@@ -108,10 +114,10 @@ proptest! {
         movement in an_arbitrary_movement(),
     ) {
         let (mut model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure().centroid();
+        let before = model.solid(solid).measure().expect("a solid this size measures").centroid();
 
         model.place_solid(solid, &movement);
-        let after = model.solid(solid).measure().centroid();
+        let after = model.solid(solid).measure().expect("a solid this size measures").centroid();
 
         // The centroid is a moment divided by the volume, so it carries the
         // volume's relative error, and it is a position rather than a ratio —
@@ -137,11 +143,11 @@ proptest! {
             .expect("a whole number of quarter turns");
 
         let (mut model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure();
+        let before = model.solid(solid).measure().expect("a solid this size measures");
 
         model.place_solid(solid, &turn);
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
-        let after = model.solid(solid).measure();
+        let after = model.solid(solid).measure().expect("a solid this size measures");
 
         prop_assert!(
             drift(after.volume(), before.volume()) <= SLACK_AFTER_A_QUARTER_TURN,

@@ -1385,7 +1385,13 @@ fn configured(cases: u32) -> Config {
 fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
     solids
         .iter()
-        .map(|&solid| model.solid(solid).measure().volume())
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .measure()
+                .expect("a solid this size measures")
+                .volume()
+        })
         .sum()
 }
 
@@ -1398,7 +1404,7 @@ fn invariants_of(model: &Model, solids: &[SolidKey]) -> Vec<Measured> {
         .iter()
         .map(|&solid| {
             let solid = model.solid(solid);
-            let measure = solid.measure();
+            let measure = solid.measure().expect("a solid this size measures");
             Measured {
                 volume: measure.volume(),
                 surface_area: measure.surface_area(),

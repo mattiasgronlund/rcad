@@ -860,7 +860,10 @@ impl Assembly {
         let mut volumes = Vec::new();
         for &solid in &written.solids {
             let volume = apart.solid(apart.key_for_solid(solid)).signed_volume();
-            if !volume.is_finite() || volume == 0.0 {
+            if !volume.is_finite() {
+                return Err(Error::VolumeTooLargeToMeasure);
+            }
+            if volume == 0.0 {
                 return Err(Invalid::VolumeIsNotPositive { volume }.into());
             }
             volumes.push(volume);

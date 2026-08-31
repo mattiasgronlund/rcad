@@ -23,7 +23,10 @@ fn a_cube_comes_back_sound_and_measuring_the_same() {
     let cube = model
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube of side two");
-    let before = model.solid(cube).measure();
+    let before = model
+        .solid(cube)
+        .measure()
+        .expect("a solid this size measures");
 
     let after = round_tripped(&model);
 
@@ -31,7 +34,7 @@ fn a_cube_comes_back_sound_and_measuring_the_same() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("still sound");
     let solid = after.solids().next().expect("the cube came back");
-    assert_eq!(solid.measure(), before);
+    assert_eq!(solid.measure().expect("a solid this size measures"), before);
     assert_eq!(after.vertex_count(), model.vertex_count());
     assert_eq!(after.edge_count(), model.edge_count());
     assert_eq!(after.face_count(), model.face_count());
@@ -49,7 +52,10 @@ fn a_plate_with_two_holes_comes_back_sound_and_measuring_the_same() {
     let solid = model
         .add_extrusion(&plate, 2.0, &Isometry::identity())
         .expect("a plate two thick");
-    let before = model.solid(solid).measure();
+    let before = model
+        .solid(solid)
+        .measure()
+        .expect("a solid this size measures");
 
     let after = round_tripped(&model);
 
@@ -61,7 +67,8 @@ fn a_plate_with_two_holes_comes_back_sound_and_measuring_the_same() {
             .solids()
             .next()
             .expect("the plate came back")
-            .measure(),
+            .measure()
+            .expect("a solid this size measures"),
         before
     );
 }
@@ -76,12 +83,20 @@ fn a_placed_solid_comes_back_where_it_was_put() {
         cube,
         &Isometry::translation(Vector::new(30.0, -5.0, 7.0)).expect("a finite shift"),
     );
-    let before = model.solid(cube).measure();
+    let before = model
+        .solid(cube)
+        .measure()
+        .expect("a solid this size measures");
 
     let after = round_tripped(&model);
 
     assert_eq!(
-        after.solids().next().expect("the cube came back").measure(),
+        after
+            .solids()
+            .next()
+            .expect("the cube came back")
+            .measure()
+            .expect("a solid this size measures"),
         before
     );
 }

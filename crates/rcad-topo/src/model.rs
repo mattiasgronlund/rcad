@@ -907,6 +907,24 @@ mod tests {
         assert_eq!(model.solid(cube).signed_volume(), -volume);
     }
 
+    /// The half of `measure`'s old assert that is still an assert.
+    ///
+    /// That assert was doing two jobs: refusing an overflowed sum and refusing
+    /// a solid whose faces point inwards. Only the second is its own. Splitting
+    /// the first off into an `Err` must not take this one with it — a solid
+    /// enclosing negative space is corrupt, and a crash beats a corruption.
+    #[test]
+    #[should_panic(expected = "a solid must enclose a positive amount of space")]
+    fn a_solid_whose_faces_point_inwards_still_panics_rather_than_measuring() {
+        let (mut model, cube) = a_cube();
+        for shell in model.data.shells.values_mut() {
+            for used in &mut shell.faces {
+                used.orient = used.orient.reversed();
+            }
+        }
+        let _ = model.solid(cube).measure();
+    }
+
     #[test]
     fn a_face_used_the_other_way_round_walks_its_wires_the_other_way() {
         let (mut model, cube) = a_cube();

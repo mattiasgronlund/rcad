@@ -37,7 +37,7 @@
 //! model.validate(&Policy::certified(), &mut log)?;
 //! assert!(log.is_empty(), "a clean sweep records nothing at all");
 //!
-//! let measured = model.solid(cube).measure();
+//! let measured = model.solid(cube).measure()?;
 //! assert_eq!(measured.volume(), 8.0);
 //! assert_eq!(measured.surface_area(), 24.0);
 //! assert_eq!(measured.centroid(), Point::new(1.0, 1.0, 1.0));
