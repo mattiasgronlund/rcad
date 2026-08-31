@@ -231,12 +231,14 @@ impl BSplineCurve {
     /// halved first and the factor comes back in the scale — see the note on
     /// `de_boor::derived_points`.
     ///
-    /// One narrower case is *not* covered, and is written down rather than left
-    /// to be found. `rational_derivative` forms `(A' − w'·C) / w`, and `w'·C`
-    /// can overflow while the quotient would fit, which needs a huge weight
-    /// derivative against huge coordinates and a huge weight together. Nothing
-    /// in the kernel builds that; it is reachable only by handing
-    /// [`BSplineCurve::new`] a net near the ends of the `f64` range on purpose.
+    /// `rational_derivative`'s `(A' − w'·C) / w` is covered too: `w'·C` can
+    /// overflow while the quotient would fit, and when it does the same
+    /// expression is formed again dividing first, which is safe on exactly the
+    /// inputs the plain form is not.
+    ///
+    /// Neither of those is a proof that every representable tangent comes back,
+    /// and none is claimed. Both enlarge the set of inputs that get an answer,
+    /// and whatever is left refuses rather than returning a `NaN`.
     ///
     /// # Panics
     ///
@@ -1144,6 +1146,34 @@ mod tests {
 
         assert_eq!(curve.evaluate(2.0).unwrap(), Point::origin());
         assert_eq!(curve.tangent(2.0).unwrap(), Vector::new(5e307, 0.0, 0.0));
+    }
+
+    /// The rational combination `(A' − w'·C) / w` overflows at `w'·C` here
+    /// while the answer fits easily, because the weight is large enough to
+    /// bring the product back.
+    ///
+    /// Homogeneous `A` is the same `2^664` at both control points, so `A'` is
+    /// exactly zero and the whole tangent is the `w'·C` term. `w'` is `2^500`
+    /// against a point at about `2^600`, so their product passes `2^1024` and
+    /// is lost — but divided by the weight first, `w'/w` is `2^400` and
+    /// nothing leaves the range. The true tangent is `-4.76226047638341e300`,
+    /// which exact rational arithmetic confirms to every digit `f64` carries.
+    #[test]
+    fn a_weight_derivative_that_overflows_against_the_point_still_gives_a_tangent() {
+        let knots = KnotVector::new(1, vec![0.0, 0.0, 2f64.powi(-400), 2f64.powi(-400)])
+            .expect("one very narrow span");
+        let ends = [
+            Point::new(2f64.powi(600), 0.0, 0.0),
+            Point::new(2f64.powi(599), 0.0, 0.0),
+        ];
+        let weights = [2f64.powi(100), 2f64.powi(101)];
+        let curve = BSplineCurve::new(knots, &ends, &weights).expect("two finite points");
+
+        let halfway = 2f64.powi(-401);
+        assert_eq!(
+            curve.tangent(halfway).unwrap(),
+            Vector::new(-4.762_260_476_383_41e300, 0.0, 0.0)
+        );
     }
 
     /// The refusal that is left, and it is about the numbers asked for rather

@@ -423,9 +423,9 @@ pub(crate) fn rational_derivative(value: [f64; 4], derivative: [f64; 4]) -> Resu
     let weight_rate = derivative[3];
     let [x, y, z] = point.coordinates();
     let rate = Vector::new(
-        (derivative[0] - weight_rate * x) / weight,
-        (derivative[1] - weight_rate * y) / weight,
-        (derivative[2] - weight_rate * z) / weight,
+        one_axis_of_the_rate(derivative[0], weight_rate, x, weight),
+        one_axis_of_the_rate(derivative[1], weight_rate, y, weight),
+        one_axis_of_the_rate(derivative[2], weight_rate, z, weight),
     );
     if !rate.is_finite() {
         return Err(Error::NotFinite {
@@ -433,6 +433,50 @@ pub(crate) fn rational_derivative(value: [f64; 4], derivative: [f64; 4]) -> Resu
         });
     }
     Ok(rate)
+}
+
+/// `(A' − w'·C) / w` on one axis, by whichever of two spellings reaches an
+/// answer.
+///
+/// The plain spelling is the one to want. It subtracts before it divides, so
+/// when the two terms very nearly cancel — which is every curve whose weights
+/// barely change, meaning most of them — the cancellation happens at full size
+/// and only one rounding follows it.
+///
+/// What it cannot do is carry `w'·C` past the end of the range. That product
+/// overflows while the answer still fits whenever `w` is large enough to bring
+/// it back, and `w` large is exactly when the second spelling is safe: dividing
+/// first makes both `A'/w` and `w'/w` *smaller*, so neither can overflow where
+/// the plain one did.
+///
+/// The two are equal in exact arithmetic and fail on opposite inputs, which is
+/// why this tries rather than chooses. Trying costs nothing on the path that
+/// works, and choosing would mean picking a threshold on `w` — a tuned number
+/// standing where a plain question about the answer will do.
+///
+/// Neither spelling is a proof of totality and this does not claim one. It
+/// answers strictly more inputs than the plain form alone, and what is left
+/// over comes back as [`Error::NotFinite`](crate::Error::NotFinite) rather than
+/// as a `NaN`.
+///
+/// The second spelling divides before it subtracts, so where the two terms
+/// nearly cancel it keeps fewer digits than the first would have. That is not a
+/// choice between a good answer and a worse one — the first produced no answer
+/// at all on these inputs — but it is a reason not to reach for it otherwise.
+/// A tangent is ordinary `f64` either way, with no published bound and nothing
+/// entitled to branch on it near a decision; the enclosure is where a
+/// trustworthy answer comes from.
+fn one_axis_of_the_rate(
+    numerator_rate: f64,
+    weight_rate: f64,
+    coordinate: f64,
+    weight: f64,
+) -> f64 {
+    let subtracting_first = (numerator_rate - weight_rate * coordinate) / weight;
+    if subtracting_first.is_finite() {
+        return subtracting_first;
+    }
+    numerator_rate / weight - (weight_rate / weight) * coordinate
 }
 
 /// How far a divided point can be from the true one, per coordinate, or `None`

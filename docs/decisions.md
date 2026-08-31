@@ -1649,12 +1649,34 @@ the same function, because it arrived carrying its own impossibility argument �
 and an argument for why something cannot be done is exactly the kind of claim a
 reviewer is least likely to re-derive.
 
-What is left is a genuine limit rather than a gap, and the two are now
-distinguished in the doc comment: a knot span one `f64` step wide under ordinary
-coordinates has a true derivative past `f64::MAX`. `KnotVector::new` accepts such
-a span on purpose, so the refusal is about the numbers asked for and not about
-the arithmetic used — which is what makes `Error::NotFinite` reachable enough to
-deserve handling at all.
+**And once more, one layer down.** The same amendment left a second case
+written down as a limit: `rational_derivative` forms `(A' − w'·C) / w`, and
+`w'·C` can leave the range while the quotient would fit. Reaching it needs a net
+built near the ends of `f64` on purpose, so it was recorded rather than fixed.
+That was the same misjudgement a second time — "no consumer will hit this" is a
+statement about today's callers, while a representable answer being refused is a
+statement about the code. It is fixed the same way: when the product overflows,
+`w` is by construction large enough to have brought it back, so the expression is
+formed again dividing first, where `A'/w` and `w'/w` are both *smaller* than the
+terms that overflowed. The two spellings are equal in exact arithmetic and fail
+on opposite inputs, so the code tries rather than chooses — choosing would mean a
+tuned threshold on `w` standing where a plain question about the answer does.
+
+A curve whose true tangent is `-4.76e300` was being refused and now comes back,
+matching exact rational arithmetic to every digit `f64` carries.
+
+**What separates the two cases is worth stating, because it is the rule.** A
+refusal is a *limit* when the answer does not exist in `f64` and a *gap* when it
+does and the arithmetic could not reach it. A knot span one `f64` step wide under
+ordinary coordinates has a true derivative past `f64::MAX` — that is a limit, and
+`KnotVector::new` accepts such a span on purpose, so §4.1 makes it an `Err` about
+the numbers asked for. Everything else was a gap. Neither fix claims totality and
+the doc comments say so; what they claim is that the set of inputs answered is
+strictly larger, and that the remainder refuses rather than handing back a `NaN`.
+
+Both gaps were found by being asked about, not by the review and not by the
+suite — which is the third time in this milestone that the thing carrying an
+explanation of why it was fine turned out not to be.
 
 **Three oracles that could not fail.** The knot-insertion oracle — §14.3's *first*
 exactly-true relation — asserted nothing on about half of every family's draws,
