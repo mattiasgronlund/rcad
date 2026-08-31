@@ -78,6 +78,10 @@ impl Plane {
 
     /// The plane through `point` at right angles to `normal`.
     ///
+    /// Only the direction of `normal` is read. Two vectors along the same line
+    /// give the same coefficients bit for bit however long each one is — see
+    /// [`Plane::reduced_by_largest_component`].
+    ///
     /// # Errors
     ///
     /// [`Error::NotFinite`] if `point` is not made of finite numbers or if the
@@ -89,7 +93,8 @@ impl Plane {
                 what: "point on a plane",
             });
         }
-        let normal = normal.normalized_as("plane normal")?;
+        let (reduced, _) = Self::reduced_by_largest_component(normal, "plane normal")?;
+        let normal = reduced.normalized_as("plane normal")?;
         let offset = normal.dot(point - Point::origin());
         if !offset.is_finite() {
             return Err(Error::NotFinite {
@@ -131,7 +136,10 @@ impl Plane {
     /// The plane `a * x + b * y + c * z + d = 0`, from `[a, b, c, d]`.
     ///
     /// The coefficients are scaled so the normal has length one, which changes
-    /// the numbers but not the plane.
+    /// the numbers but not the plane. All four are divided by the largest of
+    /// `|a|`, `|b|`, `|c|` first, so any two proportional coefficient sets give
+    /// the same plane bit for bit — see
+    /// [`Plane::reduced_by_largest_component`].
     ///
     /// # Errors
     ///
@@ -144,16 +152,59 @@ impl Plane {
                 what: "plane coefficient",
             });
         }
-        let direction = Vector::new(a, b, c);
-        let length = direction.length();
-        let normal = direction.normalized_as("plane normal")?;
-        let offset = -d / length;
+        let (reduced, scale) =
+            Self::reduced_by_largest_component(Vector::new(a, b, c), "plane normal")?;
+        let length = reduced.length();
+        let normal = reduced.normalized_as("plane normal")?;
+        let offset = -(d / scale) / length;
         if !offset.is_finite() {
             return Err(Error::NotFinite {
                 what: "distance from the origin to a plane",
             });
         }
         Ok(Self { normal, offset })
+    }
+
+    /// `direction` divided by its largest-magnitude component, and the positive
+    /// number it was divided by.
+    ///
+    /// Every plane in the kernel comes through here, and the reason is that a
+    /// face *is* its plane (`docs/decisions.md` §17.1): two walls that describe
+    /// the same plane have to carry the same four numbers, or the fuse keeps
+    /// whichever belonged to whichever argument came first. Normalizing alone
+    /// does not give that. `(1, 1, 0)` and `(3, 3, 0)` are the same direction
+    /// and their lengths round differently, so they used to store coefficients
+    /// an ulp apart (§22.6).
+    ///
+    /// Dividing by the largest component first removes it. Division is
+    /// correctly rounded, so `a/|m|` and `sa/|sm|` are the same real number and
+    /// therefore the same `f64`, whatever `s` is. What comes out depends on the
+    /// ratios between the components and on nothing else.
+    ///
+    /// It also widens what can be answered at all, in both directions, because
+    /// every component that comes out is in `[-1, 1]` and the largest is
+    /// exactly `±1`. The length that follows cannot overflow on a vector near
+    /// [`f64::MAX`], and cannot underflow to zero on a subnormal one. Both were
+    /// refused before, and both are §16.10 *gaps* rather than limits — the
+    /// answer existed and this arithmetic reaches it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if any component is infinite or not a number, and
+    /// [`Error::ZeroLength`] if every component is exactly zero.
+    fn reduced_by_largest_component(
+        direction: Vector,
+        what: &'static str,
+    ) -> Result<(Vector, f64)> {
+        if !direction.is_finite() {
+            return Err(Error::NotFinite { what });
+        }
+        let [x, y, z] = direction.components();
+        let scale = x.abs().max(y.abs()).max(z.abs());
+        if scale == 0.0 {
+            return Err(Error::ZeroLength { what });
+        }
+        Ok((Vector::new(x / scale, y / scale, z / scale), scale))
     }
 
     /// Which way the plane faces. Scaled to length one when the plane was built.
@@ -629,6 +680,100 @@ mod tests {
                 what: "plane normal"
             })
         );
+    }
+
+    /// §22.6, from the other side: the defect was that these differed.
+    ///
+    /// Four vectors along one line, none of them a power-of-two multiple of the
+    /// next, and the plane has to be the same four numbers every time.
+    #[test]
+    fn a_plane_is_the_same_however_long_the_normal_naming_it_was() {
+        let plane_of = |x: f64, y: f64| {
+            Plane::from_point_and_normal(Point::origin(), Vector::new(x, y, 0.0))
+                .expect("a diagonal normal has length")
+                .coefficients()
+        };
+
+        for length in [2.0, 3.0, 7.0, 1e17, 1e-17] {
+            assert_eq!(
+                plane_of(1.0, 1.0),
+                plane_of(length, length),
+                "a diagonal wall standing on an edge {length} long"
+            );
+        }
+
+        for multiple in [2.0, 3.0, 5.0, 11.0] {
+            assert_eq!(
+                plane_of(3.0, 7.0),
+                plane_of(3.0 * multiple, 7.0 * multiple),
+                "the ratio 3:7, named {multiple} times over"
+            );
+        }
+    }
+
+    /// The same, for the coefficient form, where the fourth number scales too.
+    #[test]
+    fn proportional_coefficients_describe_the_same_plane_bit_for_bit() {
+        let plane_of = |scale: f64| {
+            Plane::from_coefficients([3.0 * scale, 7.0 * scale, 0.0, 5.0 * scale])
+                .expect("a diagonal normal has length")
+                .coefficients()
+        };
+
+        for scale in [2.0, 3.0, 11.0] {
+            assert_eq!(
+                plane_of(1.0),
+                plane_of(scale),
+                "every coefficient × {scale}"
+            );
+        }
+    }
+
+    /// What the unfixed path does to a normal near the top of the range, kept
+    /// as the evidence for the claim on
+    /// [`Plane::reduced_by_largest_component`] that dividing first widens what
+    /// can be answered.
+    ///
+    /// [`Vector::normalized`] is the arithmetic the plane constructors used to
+    /// run: the length overflows, every component is divided by infinity, and
+    /// what comes back is a direction of length zero. Not an error — a silent
+    /// wrong answer, which §4.1 ranks below a crash.
+    #[test]
+    fn normalizing_a_huge_vector_gives_back_no_direction_at_all() {
+        let huge = Vector::new(1e308, 1e308, 0.0);
+        assert!(huge.is_finite());
+        assert_eq!(huge.length(), f64::INFINITY);
+        assert_eq!(huge.normalized(), Ok(Vector::zero()));
+    }
+
+    /// And the plane built from that same normal is a real plane.
+    #[test]
+    fn a_normal_near_the_top_of_the_range_still_names_its_plane() {
+        let huge = Plane::from_point_and_normal(Point::origin(), Vector::new(1e308, 1e308, 0.0))
+            .expect("the ratio 1:1 says which way this faces");
+        let ordinary = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 1.0, 0.0))
+            .expect("a diagonal normal has length");
+        assert_eq!(huge.coefficients(), ordinary.coefficients());
+    }
+
+    /// The bottom of the range, where the length underflows to zero and the old
+    /// path refused outright.
+    #[test]
+    fn a_normal_deep_in_the_subnormals_still_names_its_plane() {
+        let tiny = Vector::new(5e-324, 5e-324, 0.0);
+        assert!(tiny.is_finite());
+        assert_eq!(tiny.length(), 0.0);
+        assert_eq!(
+            tiny.normalized(),
+            Err(Error::ZeroLength { what: "vector" }),
+            "the arithmetic the plane constructors used to run"
+        );
+
+        let plane = Plane::from_point_and_normal(Point::origin(), tiny)
+            .expect("the ratio 1:1 says which way this faces");
+        let ordinary = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 1.0, 0.0))
+            .expect("a diagonal normal has length");
+        assert_eq!(plane.coefficients(), ordinary.coefficients());
     }
 
     #[test]
