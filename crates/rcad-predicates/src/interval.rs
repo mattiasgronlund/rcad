@@ -19,8 +19,17 @@ impl Interval {
     /// The single value `value`.
     ///
     /// A value that is not finite is not a point on the real line, so it gets
-    /// [`Interval::ENTIRE`]. That is always sound — an enclosure of everything
-    /// can never certify a sign — and it keeps the hot path free of a `Result`.
+    /// [`Interval::ENTIRE`], which keeps the hot path free of a `Result` and is
+    /// sound as an *enclosure*: everything is a superset of anything.
+    ///
+    /// This used to add "an enclosure of everything can never certify a sign",
+    /// and that does not follow. A coefficient of zero annihilates it —
+    /// `ENTIRE * [0, 0]` is `[0, 0]` — so the unknown drops out of the sum and
+    /// the rest of the expression certifies a sign as though the not-a-number
+    /// had never been passed in. Sound, and still a confident answer about a
+    /// point that is not a point.
+    /// [`is_a_real_point`](crate::is_a_real_point) is what stops that now, at
+    /// each predicate's entry point and before the cascade runs.
     ///
     /// ```
     /// # use rcad_predicates::Interval;

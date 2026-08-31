@@ -3,8 +3,8 @@ use crate::expansion::{
 };
 use crate::interval::determinant;
 use crate::{
-    Decision, Filtered, Interval, Level, Measures, Point, Policy, Predicate, ProvenanceLog, Record,
-    decide, product_is_normal, resolve_under_policy,
+    Decision, Filtered, Interval, Level, Measures, NOTHING_IS_KNOWN, Point, Policy, Predicate,
+    ProvenanceLog, Record, decide, is_a_real_point, product_is_normal, resolve_under_policy,
 };
 
 /// The name this predicate goes by in provenance records.
@@ -24,6 +24,9 @@ pub const ORIENT3D: &str = "orient3d";
 /// arithmetic stops being exact and the answer is [`Decision::Undecidable`]
 /// rather than a guess. Coordinates that far apart in magnitude are what
 /// decisions.md §3.5's dynamic-range check exists to reject.
+///
+/// A coordinate that is not a real number at all gets [`NOTHING_IS_KNOWN`]
+/// before any of that runs. [`is_a_real_point`] says why.
 ///
 /// ```
 /// # use rcad_predicates::{orient3d, Decision};
@@ -49,7 +52,15 @@ pub fn orient3d_of_points(a: Point, b: Point, c: Point, d: Point) -> Decision {
 ///
 /// A diagnostic. Tests and benchmarks use it to check that the cheap levels
 /// are carrying the load they are supposed to.
+///
+/// The guard reports [`Level::Interval`] because that is the level a coordinate
+/// that is not a real number would have reached — it arrives there as
+/// [`Interval::ENTIRE`] — and it is the level the cascade already reports for
+/// the refusals it works out for itself.
 pub fn orient3d_reporting_level(a: Point, b: Point, c: Point, d: Point) -> (Decision, Level) {
+    if ![a, b, c, d].into_iter().all(is_a_real_point) {
+        return (NOTHING_IS_KNOWN, Level::Interval);
+    }
     decide(&Orient3d { a, b, c, d })
 }
 
@@ -309,7 +320,8 @@ fn minor(u: [f64; 3], v: [f64; 3]) -> Option<([f64; 4], usize)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ORIENT3D, orient3d, orient3d_exactly, orient3d_reporting_level, orient3d_tolerantly,
+        ORIENT3D, orient3d, orient3d_exactly, orient3d_of_points, orient3d_reporting_level,
+        orient3d_tolerantly,
     };
     use crate::{Decision, Interval, Level, Point, Policy, ProvenanceLog};
 
@@ -530,5 +542,94 @@ mod tests {
             [0.0, 0.0, 0.0],
         );
         assert_eq!(decision, Decision::Neg);
+    }
+
+    /// The `x` of the first point is not a number, so there is no first point,
+    /// and there is no fact about which side of a plane it falls on.
+    ///
+    /// Before the guard this came back [`Decision::Neg`] at
+    /// [`Level::Interval`]: the not-a-number arrives at level 2 as
+    /// [`Interval::ENTIRE`], both places it appears are multiplied by zero, and
+    /// what survives is `-1`. Every other axis of the same point is checked
+    /// too, so a guard that only looked at one coordinate would fail here.
+    #[test]
+    fn a_point_with_a_coordinate_that_is_not_a_number_gets_no_answer() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for axis in 0..3 {
+                let mut broken = [0.0, 1.0, 0.0];
+                broken[axis] = bad;
+                assert_eq!(
+                    orient3d_reporting_level(
+                        Point::from(broken),
+                        Point::from([1.0, 0.0, 1.0]),
+                        Point::from([2.0, 0.0, 3.0]),
+                        Point::from([0.0, 0.0, 0.0]),
+                    ),
+                    (
+                        Decision::Undecidable {
+                            enclosure: f64::INFINITY
+                        },
+                        Level::Interval
+                    ),
+                    "{bad} on axis {axis}"
+                );
+            }
+        }
+    }
+
+    /// Whichever of the four it is, and however far down the argument list.
+    #[test]
+    fn any_of_the_four_points_being_no_point_stops_the_answer() {
+        let good = [
+            Point::from([0.0, 1.0, 0.0]),
+            Point::from([1.0, 0.0, 1.0]),
+            Point::from([2.0, 0.0, 3.0]),
+            Point::from([0.0, 0.0, 0.0]),
+        ];
+        for spoiled in 0..4 {
+            let mut points = good;
+            points[spoiled] = Point::from([f64::NAN, 0.0, 0.0]);
+            assert!(
+                !orient3d_of_points(points[0], points[1], points[2], points[3]).is_certified(),
+                "point {spoiled}"
+            );
+        }
+        assert!(orient3d_of_points(good[0], good[1], good[2], good[3]).is_certified());
+    }
+
+    /// The tolerant entry point must not launder the refusal into a `Zero`.
+    /// An enclosure of infinity is wider than any working size a policy can
+    /// carry, so the fallback has nothing to fall back on and says so.
+    #[test]
+    fn a_tolerant_policy_still_refuses_a_point_that_is_not_a_point() {
+        let mut log = ProvenanceLog::new();
+        let decision = orient3d_tolerantly(
+            Point::from([f64::NAN, 1.0, 0.0]),
+            Point::from([1.0, 0.0, 1.0]),
+            Point::from([2.0, 0.0, 3.0]),
+            Point::from([0.0, 0.0, 0.0]),
+            &Policy::tolerant(1.0),
+            &mut log,
+        );
+        assert!(!decision.is_certified());
+        assert!(!log.is_empty(), "a refusal has to leave a record behind");
+    }
+
+    /// A box is a set of real numbers however wide it is, so a sign proved over
+    /// the whole of it is proved for every point in it. That is a theorem, not
+    /// the defect above, and the guard leaves it alone.
+    #[test]
+    fn a_constructed_point_whose_box_is_everything_can_still_be_placed() {
+        let (decision, level) = orient3d_reporting_level(
+            Point::Constructed([
+                Interval::ENTIRE,
+                Interval::exactly(1.0),
+                Interval::exactly(0.0),
+            ]),
+            Point::from([1.0, 0.0, 1.0]),
+            Point::from([2.0, 0.0, 3.0]),
+            Point::from([0.0, 0.0, 0.0]),
+        );
+        assert_eq!((decision, level), (Decision::Neg, Level::Interval));
     }
 }

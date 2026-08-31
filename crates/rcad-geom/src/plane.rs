@@ -2,8 +2,8 @@
 
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
-    Decision, Filtered, Interval, Point as PredicatePoint, Predicate, decide, meet_of_three_planes,
-    orient2d, product_is_normal,
+    Decision, Filtered, Interval, NOTHING_IS_KNOWN, Point as PredicatePoint, Predicate,
+    are_real_numbers, decide, is_a_real_point, meet_of_three_planes, orient2d, product_is_normal,
 };
 use serde::{Deserialize, Serialize};
 
@@ -311,8 +311,28 @@ impl Plane {
     /// [`Plane::signed_distance_to`], [`Plane::project`] and every other
     /// accessor on this type, because they all use the same stored numbers. Use
     /// it to classify against a plane, not to rediscover a point that built one.
+    ///
+    /// # Input that is not made of real numbers
+    ///
+    /// Refused with [`NOTHING_IS_KNOWN`]. A point coordinate that is not a real
+    /// number reached a certified answer, because it enters the expression only
+    /// multiplied by the matching normal component, and an axis-aligned plane
+    /// has two of those at zero.
+    ///
+    /// The plane's own four numbers go through the guard too.
+    /// [`Plane::transformed`] cannot fail and can overflow the offset, so a
+    /// plane built from finite numbers can be holding an infinite one. An
+    /// infinite offset happens to reach the same refusal without help, because
+    /// nothing multiplies the offset by zero — but working out which of the
+    /// four numbers is safe from which direction is the kind of claim that
+    /// rots, so all four are checked.
     #[must_use]
     pub fn side_of_point(&self, point: PredicatePoint) -> Decision {
+        let plane_is_real =
+            are_real_numbers(self.normal.components()) && are_real_numbers([self.offset]);
+        if !(is_a_real_point(point) && plane_is_real) {
+            return NOTHING_IS_KNOWN;
+        }
         decide(&SideOfPlane {
             plane: *self,
             point,
@@ -1069,5 +1089,68 @@ mod tests {
                 < 1e-14
         );
         assert!((moved.normal() - Vector::new(0.0, -1.0, 0.0)).length() < 1e-15);
+    }
+
+    /// A point that is not a point is on neither side of a plane.
+    ///
+    /// Before the guard, the plane at height two answered [`Decision::Pos`] for
+    /// a point whose `x` was not a number: `x` enters only multiplied by the
+    /// normal's `x` component, which is zero here, so the unknown was
+    /// multiplied away and the height certified the sign on its own.
+    #[test]
+    fn a_point_that_is_not_a_point_is_on_neither_side() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for axis in 0..3 {
+                let mut broken = [0.0, 0.0, 5.0];
+                broken[axis] = bad;
+                assert_eq!(
+                    plane_at_height_two().side_of_point(PredicatePoint::from(broken)),
+                    Decision::Undecidable {
+                        enclosure: f64::INFINITY
+                    },
+                    "{bad} on axis {axis}"
+                );
+            }
+        }
+    }
+
+    /// [`Plane::transformed`] cannot fail and can overflow, so a plane built
+    /// from finite numbers can be holding an infinite offset. It then describes
+    /// no plane, and nothing is on either side of it.
+    #[test]
+    fn a_plane_shoved_past_the_end_of_the_number_line_has_no_sides() {
+        let far = 1e308;
+        let shove = Isometry::translation(Vector::new(far, 0.0, 0.0)).unwrap();
+        let shoved =
+            Plane::from_point_and_normal(Point::new(far, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .unwrap()
+                .transformed(&shove);
+
+        assert!(!shoved.offset().is_finite(), "the offset overflowed");
+        assert_eq!(
+            shoved.side_of_point(PredicatePoint::from([0.0, 5.0, 0.0])),
+            Decision::Undecidable {
+                enclosure: f64::INFINITY
+            }
+        );
+    }
+
+    /// [`Plane::agreement_with`] runs six `orient2d` calls over the two sets of
+    /// coefficients, so the guard there is what keeps a broken plane from being
+    /// declared the same as, or different from, a sound one.
+    #[test]
+    fn a_plane_that_is_not_a_plane_cannot_be_compared_with_one_that_is() {
+        let far = 1e308;
+        let shove = Isometry::translation(Vector::new(far, 0.0, 0.0)).unwrap();
+        let shoved =
+            Plane::from_point_and_normal(Point::new(far, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .unwrap()
+                .transformed(&shove);
+        let sound =
+            Plane::from_point_and_normal(Point::new(1.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .unwrap();
+
+        assert_eq!(shoved.agreement_with(&sound), PlaneAgreement::CannotTell);
+        assert_eq!(sound.agreement_with(&shoved), PlaneAgreement::CannotTell);
     }
 }

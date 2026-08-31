@@ -69,6 +69,7 @@ mod planes;
 mod point;
 mod policy;
 mod provenance;
+mod real_numbers;
 mod surface;
 
 pub mod expansion;
@@ -85,4 +86,5 @@ pub use planes::meet_of_three_planes;
 pub use point::Point;
 pub use policy::{Measures, Policy, Severity, Strictness, resolve_under_policy};
 pub use provenance::{Approximation, Cause, ProvenanceLog, Record};
+pub use real_numbers::{NOTHING_IS_KNOWN, are_real_numbers, is_a_real_point};
 pub use surface::SideOfSurface;

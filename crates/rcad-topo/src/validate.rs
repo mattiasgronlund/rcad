@@ -3,8 +3,8 @@ use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
 };
 use rcad_predicates::{
-    Approximation, Decision, Filtered, Interval, Measures, Point as PredicatePoint, Policy,
-    Predicate, ProvenanceLog, Record, decide,
+    Approximation, Decision, Filtered, Interval, Level, Measures, NOTHING_IS_KNOWN,
+    Point as PredicatePoint, Policy, Predicate, ProvenanceLog, Record, are_real_numbers, decide,
 };
 use slotmap::SecondaryMap;
 
@@ -425,12 +425,25 @@ fn winding_of(wire: WireView<'_>, normal: Vector) -> Result<Decision> {
 /// The fuse joins coplanar pieces into one face before it commits anything, and
 /// then has to say which of the rings it ended up with is the outline and which
 /// are holes. That is this decision, on corners the model has never seen.
+///
+/// A corner or a normal component that is not a real number is refused before
+/// the cascade runs, and comes back as [`Error::Undecidable`] like any other
+/// refusal. Without that, a corner whose height is not a number still reached a
+/// certified winding: an axis-aligned normal has two zero components, and a
+/// zero coefficient multiplies the unknown clean out of the sum.
+///
+/// [`Error::Undecidable`]: crate::Error::Undecidable
 pub(crate) fn winding_round(corners: &[[f64; 3]], normal: [f64; 3]) -> Result<Decision> {
     let swept = AreaSweptRoundTheNormal {
         corners: corners.to_vec(),
         normal,
     };
-    let (decision, level) = decide(&swept);
+    let every_number_is_real = are_real_numbers(corners.iter().flatten().copied().chain(normal));
+    let (decision, level) = if every_number_is_real {
+        decide(&swept)
+    } else {
+        (NOTHING_IS_KNOWN, Level::Interval)
+    };
     match decision {
         Decision::Neg | Decision::Zero | Decision::Pos => Ok(decision),
         Decision::Undecidable { .. } => {
@@ -582,7 +595,7 @@ mod tests {
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
-    use super::{Decision, winding_of};
+    use super::{Decision, winding_of, winding_round};
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::{Error, FaceView, Invalid, Model, WireView};
 
@@ -970,6 +983,54 @@ mod tests {
         assert_eq!(
             winding_of(hole, normal).expect("the cascade settles this"),
             Decision::Neg
+        );
+    }
+
+    /// A ring with a corner that is not a corner does not wind either way.
+    ///
+    /// Before the guard this came back `Ok(Decision::Pos)`. The normal points
+    /// straight up, so its other two components are zero, and the two minors
+    /// that the broken height appears in were multiplied away — leaving the
+    /// flat square to certify a winding for a ring that has no fourth corner.
+    #[test]
+    fn a_ring_with_a_corner_that_is_not_a_corner_does_not_wind() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for axis in 0..3 {
+                let mut broken = [0.0, 0.0, 0.0];
+                broken[axis] = bad;
+                let ring = [broken, [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+                assert!(
+                    winding_round(&ring, [0.0, 0.0, 1.0]).is_err(),
+                    "{bad} on axis {axis}"
+                );
+            }
+        }
+    }
+
+    /// The normal is the other half of the input, and it reached the same
+    /// wrong answer: a component that is not a number sits beside a minor that
+    /// the sound components decide on their own.
+    #[test]
+    fn a_ring_measured_round_a_normal_that_is_not_a_normal_does_not_wind() {
+        let square = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for axis in 0..3 {
+                let mut normal = [0.0, 0.0, 1.0];
+                normal[axis] = bad;
+                assert!(
+                    winding_round(&square, normal).is_err(),
+                    "{bad} on axis {axis}"
+                );
+            }
+        }
+        assert_eq!(
+            winding_round(&square, [0.0, 0.0, 1.0]).expect("a flat square winds"),
+            Decision::Pos
         );
     }
 }

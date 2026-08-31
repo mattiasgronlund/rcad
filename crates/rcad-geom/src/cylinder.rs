@@ -4,8 +4,8 @@ use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
 };
 use rcad_predicates::{
-    Decision, Filtered, Interval, Point as PredicatePoint, Predicate, SideOfSurface, decide,
-    product_is_normal,
+    Decision, Filtered, Interval, NOTHING_IS_KNOWN, Point as PredicatePoint, Predicate,
+    SideOfSurface, are_real_numbers, decide, is_a_real_point, product_is_normal,
 };
 use serde::{Deserialize, Serialize};
 
@@ -96,8 +96,25 @@ impl Cylinder {
 /// exact about the numbers as stored. It is not exact about the pipe those
 /// numbers were rounded from. The same caveat, for the same reason, applies to
 /// [`Plane::side_of_point`](crate::Plane::side_of_point).
+///
+/// # Input that is not made of real numbers
+///
+/// Refused with [`NOTHING_IS_KNOWN`], and both halves of the input can need it.
+/// A point whose coordinate along the axis is not a real number reached a
+/// certified answer, because that coordinate only ever enters the cross product
+/// multiplied by a direction component, and for an axis-aligned pipe two of
+/// those are zero. So did a pipe whose own axis origin had overflowed —
+/// [`Cylinder::transformed`] cannot fail and can overflow, so a cylinder built
+/// from finite numbers can be holding an infinite origin by the time it gets
+/// here.
 impl SideOfSurface for Cylinder {
     fn side_of(&self, point: PredicatePoint) -> Decision {
+        let pipe_is_real = are_real_numbers(self.axis.origin().coordinates())
+            && are_real_numbers(self.axis.direction().components())
+            && are_real_numbers([self.radius]);
+        if !(is_a_real_point(point) && pipe_is_real) {
+            return NOTHING_IS_KNOWN;
+        }
         decide(&HowFarFromTheSkin {
             cylinder: *self,
             point,
@@ -525,6 +542,53 @@ mod tests {
             pipe.side_of(PredicatePoint::from([1.0, 1.0, 0.0])),
             Decision::Neg,
             "this point is on the axis itself"
+        );
+    }
+
+    /// A point that is not a point is neither in the pipe nor out of it.
+    ///
+    /// Before the guard, a pipe about the `z` axis answered [`Decision::Pos`]
+    /// for a point whose height was not a number: the height only enters the
+    /// cross product multiplied by a direction component, and this direction
+    /// has two of those at zero, so the unknown was multiplied away.
+    #[test]
+    fn a_point_that_is_not_a_point_is_neither_in_nor_out() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for axis in 0..3 {
+                let mut broken = [5.0, 0.0, 0.0];
+                broken[axis] = bad;
+                assert_eq!(
+                    unit_pipe_about_z().side_of(PredicatePoint::from(broken)),
+                    Decision::Undecidable {
+                        enclosure: f64::INFINITY
+                    },
+                    "{bad} on axis {axis}"
+                );
+            }
+        }
+    }
+
+    /// [`Cylinder::transformed`] cannot fail and can overflow, so a pipe built
+    /// from finite numbers can be holding an infinite axis origin. Before the
+    /// guard such a pipe answered [`Decision::Pos`] about a perfectly ordinary
+    /// point, which is a confident answer about a surface that is not a
+    /// surface.
+    #[test]
+    fn a_pipe_shoved_past_the_end_of_the_number_line_has_no_inside() {
+        let far = 1e308;
+        let shove = Isometry::translation(Vector::new(far, 0.0, 0.0)).unwrap();
+        let axis = Axis::new(Point::new(far, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0)).unwrap();
+        let shoved = Cylinder::new(axis, 1.0).unwrap().transformed(&shove);
+
+        assert!(
+            !shoved.axis().origin().is_finite(),
+            "the axis origin overflowed"
+        );
+        assert_eq!(
+            shoved.side_of(PredicatePoint::from([0.0, 5.0, 0.0])),
+            Decision::Undecidable {
+                enclosure: f64::INFINITY
+            }
         );
     }
 }

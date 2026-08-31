@@ -1,7 +1,7 @@
 use crate::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use crate::{
-    Decision, Filtered, Interval, Level, Measures, Point, Policy, Predicate, ProvenanceLog, Record,
-    decide, resolve_under_policy,
+    Decision, Filtered, Interval, Level, Measures, NOTHING_IS_KNOWN, Point, Policy, Predicate,
+    ProvenanceLog, Record, are_real_numbers, decide, resolve_under_policy,
 };
 
 /// The name this predicate goes by in provenance records.
@@ -22,6 +22,9 @@ pub const ORIENT2D: &str = "orient2d";
 /// guess. Coordinates that far apart in magnitude are what decisions.md §3.5's
 /// dynamic-range check exists to reject.
 ///
+/// A coordinate that is not a real number at all gets [`NOTHING_IS_KNOWN`]
+/// before any of that runs. [`are_real_numbers`] says why.
+///
 /// ```
 /// # use rcad_predicates::{orient2d, Decision};
 /// let anticlockwise = orient2d([0.0, 0.0], [1.0, 0.0], [0.0, 1.0]);
@@ -36,7 +39,15 @@ pub fn orient2d(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Decision {
 ///
 /// A diagnostic. Tests and benchmarks use it to check that the cheap levels are
 /// carrying the load they are supposed to.
+///
+/// The guard reports [`Level::Interval`] because that is the level a coordinate
+/// that is not a real number would have reached — it arrives there as
+/// [`Interval::ENTIRE`] — and it is the level the cascade already reports for
+/// the refusals it works out for itself.
 pub fn orient2d_reporting_level(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> (Decision, Level) {
+    if !are_real_numbers(a.into_iter().chain(b).chain(c)) {
+        return (NOTHING_IS_KNOWN, Level::Interval);
+    }
     decide(&Orient2d { a, b, c })
 }
 
@@ -371,5 +382,63 @@ mod tests {
             Level::Interval,
             "exact arithmetic must decline to run"
         );
+    }
+
+    /// Three points, one of which is not a point, do not turn any particular
+    /// way.
+    ///
+    /// Before the guard this came back [`Decision::Neg`] at
+    /// [`Level::Interval`]: the not-a-number reaches level 2 as an enclosure of
+    /// everything, `b`'s and `c`'s heights are equal so it is multiplied by
+    /// zero, and the other half of the determinant certifies the sign on its
+    /// own.
+    #[test]
+    fn a_corner_that_is_not_a_number_gets_no_answer() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for axis in 0..2 {
+                let mut broken = [0.0, 1.0];
+                broken[axis] = bad;
+                assert_eq!(
+                    orient2d_reporting_level(broken, [1.0, 0.0], [0.0, 0.0]),
+                    (
+                        Decision::Undecidable {
+                            enclosure: f64::INFINITY
+                        },
+                        Level::Interval
+                    ),
+                    "{bad} on axis {axis}"
+                );
+            }
+        }
+    }
+
+    /// Whichever of the three it is.
+    #[test]
+    fn any_of_the_three_corners_being_no_corner_stops_the_answer() {
+        let good = [[0.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+        for spoiled in 0..3 {
+            let mut corners = good;
+            corners[spoiled] = [f64::NAN, 0.0];
+            assert!(
+                !orient2d(corners[0], corners[1], corners[2]).is_certified(),
+                "corner {spoiled}"
+            );
+        }
+        assert!(orient2d(good[0], good[1], good[2]).is_certified());
+    }
+
+    /// The tolerant entry point must not launder the refusal into a `Zero`.
+    #[test]
+    fn a_tolerant_policy_still_refuses_a_corner_that_is_not_a_corner() {
+        let mut log = ProvenanceLog::new();
+        let decision = orient2d_tolerantly(
+            [f64::NAN, 1.0],
+            [1.0, 0.0],
+            [0.0, 0.0],
+            &Policy::tolerant(1.0),
+            &mut log,
+        );
+        assert!(!decision.is_certified());
+        assert!(!log.is_empty(), "a refusal has to leave a record behind");
     }
 }

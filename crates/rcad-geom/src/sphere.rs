@@ -2,8 +2,8 @@
 
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
-    Decision, Filtered, Interval, Point as PredicatePoint, Predicate, SideOfSurface, decide,
-    product_is_normal,
+    Decision, Filtered, Interval, NOTHING_IS_KNOWN, Point as PredicatePoint, Predicate,
+    SideOfSurface, are_real_numbers, decide, is_a_real_point, product_is_normal,
 };
 use serde::{Deserialize, Serialize};
 
@@ -90,8 +90,30 @@ impl Sphere {
 /// The radius is taken as written. A sphere whose radius came from a
 /// calculation carries whatever rounding that calculation left in it, and this
 /// predicate answers about the sphere it was handed, not the one that was meant.
+///
+/// A point or a sphere that is not made of real numbers gets
+/// [`NOTHING_IS_KNOWN`] before the cascade runs. [`Sphere::transformed`] cannot
+/// fail and can overflow, so a sphere built from finite numbers can be holding
+/// an infinite centre by the time it reaches here.
+///
+/// Alone among the six predicates in this kernel, this one already refused such
+/// input on its own, at all three levels. Level 2 works out
+/// `Σ (pointᵢ − centreᵢ)² − radius²`, so a coordinate that is not a real number
+/// enters only as a square inside a sum, with no zero coefficient anywhere to
+/// multiply it away: the sum comes out as an enclosure of everything and the
+/// honest `Undecidable` falls out of it. Level 1 hands over because its error
+/// bound is then not a normal number, and level 3 because
+/// [`expansion_sign`] refuses an expansion that is not finite. So the guard
+/// changes no answer here today. It is here so all six refuse the same input
+/// the same way, and so a later change to that expression cannot quietly
+/// reopen the hole.
 impl SideOfSurface for Sphere {
     fn side_of(&self, point: PredicatePoint) -> Decision {
+        let sphere_is_real =
+            are_real_numbers(self.centre.coordinates()) && are_real_numbers([self.radius]);
+        if !(is_a_real_point(point) && sphere_is_real) {
+            return NOTHING_IS_KNOWN;
+        }
         decide(&HowFarFromTheSkin {
             sphere: *self,
             point,
@@ -418,5 +440,48 @@ mod tests {
             Decision::Neg => (),
             other => panic!("a box around (1/3, 1/3, 1/3) is inside the unit ball: {other:?}"),
         }
+    }
+
+    /// A point that is not a point is neither in the ball nor out of it.
+    ///
+    /// This one predicate reached the same refusal on its own before the guard
+    /// existed — see the note on the `impl` — so the test pins behaviour rather
+    /// than catching a regression. What it does catch is the guard answering
+    /// something *different* from what the cascade used to work out.
+    #[test]
+    fn a_point_that_is_not_a_point_is_neither_in_nor_out() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for axis in 0..3 {
+                let mut broken = [0.0, 0.0, 5.0];
+                broken[axis] = bad;
+                assert_eq!(
+                    unit_sphere().side_of(PredicatePoint::from(broken)),
+                    Decision::Undecidable {
+                        enclosure: f64::INFINITY
+                    },
+                    "{bad} on axis {axis}"
+                );
+            }
+        }
+    }
+
+    /// [`Sphere::transformed`] cannot fail and can overflow, so a ball built
+    /// from finite numbers can be holding an infinite centre. It is then no
+    /// longer a ball, and has no inside.
+    #[test]
+    fn a_ball_shoved_past_the_end_of_the_number_line_has_no_inside() {
+        let far = 1e308;
+        let shove = Isometry::translation(Vector::new(far, 0.0, 0.0)).unwrap();
+        let shoved = Sphere::new(Point::new(far, 0.0, 0.0), 1.0)
+            .unwrap()
+            .transformed(&shove);
+
+        assert!(!shoved.centre().is_finite(), "the centre overflowed");
+        assert_eq!(
+            shoved.side_of(PredicatePoint::from([0.0, 5.0, 0.0])),
+            Decision::Undecidable {
+                enclosure: f64::INFINITY
+            }
+        );
     }
 }
