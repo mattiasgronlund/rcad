@@ -180,28 +180,26 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 /// every property in this file, a property only ever looking at the fuses that
 /// came back.
 ///
-/// Twenty-eight per cent, chosen from measurement rather than from taste, and
-/// it is a threshold on a **deterministic** number: [`measured`] runs from a
-/// fixed seed, so the shipped corpus of 414 turned fuses refuses 105 of them,
-/// 25.36%, every run on every machine. There is no sampling noise for the
-/// threshold to have to clear, so what it has to clear instead is ordinary
-/// drift — 2.6 points is eleven fuses — and what it has to catch is a
-/// regression. Either of the two undeserved refusals §17.7 records is worth
-/// about 3.5 points at this corpus, which puts the rate at 28.9%, so either
-/// coming back on its own trips this. At the 3,030-fuse corpus that was briefly
-/// shipped, 30% did the same job; at 414 fuses 30% would catch neither of them
-/// alone, which is the power the shorter run costs and the reason this number
-/// moved down rather than staying put.
+/// Twenty-four per cent, chosen from measurement rather than from taste, and it
+/// is a threshold on a **deterministic** number: [`measured`] runs from a fixed
+/// seed, so the shipped corpus of 420 turned fuses refuses 87 of them, 20.71%,
+/// every run on every machine. There is no sampling noise for the threshold to
+/// have to clear, so what it has to clear instead is ordinary drift — 3.3 points
+/// is fourteen fuses — and what it has to catch is a regression. The three
+/// undeserved refusals recorded so far are each worth enough to trip it on their
+/// own: the two §17.7 names are about 3.5 points apiece, and §19.1's plane
+/// reader was worth 4.4, which is what took this number from 28 to 24 when it
+/// was fixed.
 ///
 /// **It is judged on the shipped corpus only** — see
 /// [`this_is_the_shipped_corpus`]. A soak is a different measurement with a
 /// different distribution: six fresh seeds at ten times the corpus came out at
-/// 27.0%, 27.1%, 27.2%, 27.2%, 28.1% and 28.4%, so two of the six sit above this
+/// 22.6%, 23.0%, 23.7%, 24.1%, 24.1% and 24.4%, so two of the six sit above this
 /// number with nothing wrong. Judging them by the shipped corpus's threshold
 /// would be treating two different numbers as one, which is the thing §17.7 is
 /// at pains not to do. A threshold is not a target — the measurement is what is
 /// recorded, and this is only here so it cannot drift unnoticed.
-const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.28;
+const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 
 /// How many of the comparisons a property set out to make it has to have made.
 ///
