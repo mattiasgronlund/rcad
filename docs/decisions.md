@@ -3183,13 +3183,26 @@ plainly answer. The doc comment on that function spelled out its own
 counterexample — "a bigger reach only helps when the plane's own offset is large
 enough to swallow a smaller one" — and then hard-coded three reaches anyway.
 
-The reach is a fraction of the plane's own offset now, which is the only length
-in sight that scales with the plane. **The ladder descends rather than climbs**:
-the first reach is already enormous next to the spacing, and what a second try
-is for is a plane so far out that stepping a whole offset off it overflows.
-There are two tries and not three, and the second one is demonstrated rather
-than assumed — with only the first, the `1e308` towers stop reaching the
-arithmetic at all.
+The reach is a fraction of the plane's own offset now — the only length in sight
+that scales with the plane — with a floor of one. **Both halves of that sentence
+were measured rather than reasoned, and one of them was a surprise.** Dropping
+the floor and stepping off a plane `0.05` from the origin by `0.05` leaves the
+reference point so close to the face that the in-plane winding fan cannot be
+decided, and the headline refusal rate goes from 20.7% to 37.9%: 72 more fuses
+that could not place a point inside a piece of a face. The reference point has
+to be off the plane *and* far enough off it to be worth measuring turns against,
+and only the first of those is obvious.
+
+The second try is the same distance the other way, and it is what a plane out at
+`1e308` needs, where stepping further from the origin overflows and stepping
+towards it cannot. Stepping towards the origin *first* was measured as well: it
+is the same 37.9%, because a face far from the origin then gets a reference point
+a whole offset away from it and the fan degenerates again. **This is why there is
+no limit claim here.** The obvious sentence to write was that past about
+`f64::MAX` both steps overflow and the point being looked for does not exist —
+and the fix family that sentence would have hidden is the one now used as the
+second try, which CLAUDE.md's rule about impossibility claims exists to make
+somebody go and look for.
 
 `signed_volume` and `measure` hung their tetrahedra from the world origin, so a
 solid `2^m` out summed terms of size `2^{3m}` to reach a volume of order one and

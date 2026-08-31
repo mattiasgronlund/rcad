@@ -541,34 +541,31 @@ impl InPlane {
     /// A reference point off `plane`, or `None` when none of the tries could be
     /// proved to be off it.
     ///
-    /// **The reach is a fraction of where the plane is, not a distance.** A step
-    /// of a fixed size vanishes into a plane far enough out — past an offset of
-    /// about `2^72` the `f64` spacing there is wider than a step of `2^20`, so
-    /// every candidate lands back exactly on the plane and a perfectly ordinary
-    /// fuse has no answer. The plane's own offset is the only length in sight
-    /// that scales with it, so that is what a reach is measured in, and a plane
-    /// through the origin has no such length and takes one instead.
+    /// **The reach is a length that scales with the plane, and never shorter
+    /// than one.** A step of a fixed size vanishes into a plane far enough out —
+    /// past an offset of about `2^72` the `f64` spacing there is wider than a
+    /// step of `2^20`, so every candidate lands back exactly on the plane and a
+    /// perfectly ordinary fuse has no answer. The plane's own offset is the only
+    /// length in sight that scales with it. The floor of one is not tidiness:
+    /// dropping it and stepping off a plane `0.05` from the origin by `0.05`
+    /// leaves the reference point so close to the face that the winding fan
+    /// cannot be decided, and §17.7's headline refusal rate goes from 20.7% to
+    /// 37.9% — 72 fuses that could not place a point inside a piece of a face.
     ///
-    /// Both reaches are only tries: each is *proved* to be on one side or
-    /// abandoned, so which one lands decides nothing. The second is smaller
-    /// rather than larger, because the first is already enormous next to the
-    /// spacing — `2^-52` of the offset would clear it — and what a second try is
-    /// for is a plane so far out that stepping a whole offset off it overflows.
-    /// A plane at `1e308` is the case, and
-    /// `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` is where it runs:
-    /// the fuse there refuses naming `orient3d`, which it only reaches by having
-    /// found a point off the plane first.
-    ///
-    /// There is no third try. Past about `f64::MAX * (1 - 2^-20)` both steps
-    /// overflow and this returns `None` — but a plane whose offset is that far
-    /// out has no solid around it either, since a corner one unit further along
-    /// the normal is already infinite. That is a limit and not a gap (§16.10):
-    /// the point being looked for does not exist in `f64`.
+    /// The two reaches are only tries: each is *proved* to be on one side or
+    /// abandoned, so which one lands decides nothing. **The second is the same
+    /// distance the other way**, and it is what a plane out at `1e308` needs,
+    /// where stepping further from the origin overflows and stepping towards it
+    /// cannot. `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` is where
+    /// that runs: with only the first try the fuse there stops before reaching
+    /// any arithmetic. Stepping towards the origin *first* was measured too, and
+    /// it is the 37.9% again — a face far from the origin ends up with a
+    /// reference point a whole offset away from it, and the fan degenerates.
     fn of(plane: &Plane) -> Option<Self> {
         let origin = plane.origin().coordinates();
         let normal = plane.normal().components();
         let out_here = plane.offset().abs().max(1.0);
-        for reach in [out_here, out_here / 1_048_576.0] {
+        for reach in [out_here, -out_here] {
             let from = PredicatePoint::from([
                 origin[0] + normal[0] * reach,
                 origin[1] + normal[1] * reach,

@@ -504,8 +504,8 @@ fn a_fuse_that_needs_a_decision_nothing_can_prove_refuses() {
                     .iter()
                     .all(|record| record.predicate() != "a point off a face's plane"),
                 "the fuse got as far as the arithmetic: a plane at 1e308 is what \
-                 `InPlane::of`'s second, smaller reach is for, and this is where it runs \
-                 — {records:?}"
+                 `InPlane::of`'s second reach — the same distance towards the origin \
+                 instead of away from it — is for, and this is where it runs: {records:?}"
             );
         }
         other => panic!("nothing in f64 can settle that pair: {other:?}"),
