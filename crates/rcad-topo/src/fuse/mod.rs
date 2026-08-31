@@ -149,6 +149,17 @@ impl Model {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Fused> {
+        // Over every input before a single pair is looked at. Refusing lazily,
+        // when the splitter first met a curved face, would make *which* answer
+        // came back depend on the order the pairs happened to be walked — and
+        // the commutativity and associativity properties compare answers across
+        // exactly that reordering.
+        for &solid in arguments.iter().chain(tools) {
+            if !self.solid(solid).is_wholly_flat() {
+                return Err(Error::FuseNeedsFlatFaces);
+            }
+        }
+
         let mut mine = ProvenanceLog::new();
         let fused = self.fused_under(arguments, tools, rule, policy, &mut mine);
         mine.drain_into(log);

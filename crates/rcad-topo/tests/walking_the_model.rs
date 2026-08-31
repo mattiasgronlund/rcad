@@ -88,7 +88,7 @@ fn every_edge_of_a_cube_of_side_two_is_two_long() {
     let (model, _) = a_cube_of_side_two();
 
     for edge in model.edges() {
-        assert_eq!(edge.length(), 2.0);
+        assert_eq!(edge.distance_between_its_ends(), 2.0);
         assert_eq!(edge.segment().length(), 2.0);
         assert_eq!(edge.segment().start(), edge.start().point());
         assert_eq!(edge.segment().end(), edge.end().point());

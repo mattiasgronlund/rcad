@@ -2,7 +2,9 @@ use rcad_geom::{Isometry, Orientation, Plane, Point, Segment, Surface, Vector};
 use rcad_predicates::Approximation;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
-use crate::model::{CoedgeData, EdgeData, FaceData, ShellData, SolidData, VertexData, WireData};
+use crate::model::{
+    CoedgeData, EdgeData, EdgeRun, FaceData, ShellData, SolidData, VertexData, WireData,
+};
 use crate::{CoedgeKey, EdgeKey, FaceKey, Model, ShellKey, SolidKey, VertexKey, WireKey};
 
 /// A solid, with the location and orientation it is being looked at through.
@@ -75,6 +77,23 @@ impl<'m> SolidView<'m> {
     /// Every face of every shell, already located and oriented.
     pub fn faces(self) -> impl Iterator<Item = FaceView<'m>> {
         self.shells().flat_map(ShellView::faces)
+    }
+
+    /// Whether every face of this solid sits on a plane.
+    ///
+    /// The one question every operation that only knows how to handle flat
+    /// faces asks first, and it is one function rather than one per operation
+    /// on purpose: two independently written guards is the seam between two
+    /// units that `docs/decisions.md` §13 is about, and the fuse and the
+    /// classifier are two doors into the same assumption.
+    ///
+    /// Asked over **every** face before anything is examined, so which answer a
+    /// caller gets cannot depend on the order the faces happened to be walked.
+    /// The commutativity properties compare answers across exactly that
+    /// reordering.
+    #[must_use]
+    pub fn is_wholly_flat(self) -> bool {
+        self.faces().all(|face| face.surface().as_plane().is_some())
     }
 
     /// The smallest axis-aligned box holding every vertex of this solid.
@@ -277,15 +296,21 @@ impl<'m> FaceView<'m> {
     ///
     /// # Panics
     ///
-    /// If the face sits on something other than a plane. M0 builds planar
-    /// solids only (decisions.md §3.1) and [`Model::validate`] rejects anything
-    /// else, so reaching this means the model was already broken.
+    /// If the face sits on something other than a plane.
+    ///
+    /// `validate` used to be what made that unreachable, and **it is not any
+    /// more**: a curved face is a sound face now, and `add_round_bar` builds
+    /// one. What keeps this sound is [`SolidView::is_wholly_flat`], asked by
+    /// every operation that only handles flat faces before it walks anything.
+    /// So reaching this means an operation skipped that check, which is a bug
+    /// in this crate rather than bad input. Use [`FaceView::surface`] when the
+    /// face might be curved.
     #[must_use]
     pub fn plane(self) -> Plane {
-        *self
-            .surface()
-            .as_plane()
-            .expect("M0 faces sit on planes; validate() refuses anything else")
+        *self.surface().as_plane().expect(
+            "this face is curved, and whichever operation asked for its plane \
+             did not check is_wholly_flat() first",
+        )
     }
 
     /// The direction pointing out of the material at this face.
@@ -437,6 +462,16 @@ impl<'m> WireView<'m> {
     #[must_use]
     pub fn coedge_count(self) -> usize {
         self.data().coedges.len()
+    }
+
+    /// Whether this is one coedge on an edge that already comes back to where
+    /// it started — a round cap's boundary, which is one whole circle.
+    ///
+    /// Such a wire has one corner and no polygon at all, so anything that reads
+    /// its corners as a ring of straight sides has to ask this first.
+    #[must_use]
+    pub fn closes_on_one_edge(self) -> bool {
+        self.model.wire_closes_on_one_edge(self.data())
     }
 
     /// The chain of coedges, in the order this wire is being used.
@@ -634,9 +669,26 @@ impl<'m> EdgeView<'m> {
             .expect("an edge of a valid model has two different ends")
     }
 
-    /// How long the edge is.
+    /// Whether this edge comes back to the corner it left, because it runs
+    /// right round a closed curve.
+    ///
+    /// A round cap's boundary is one of these. Anything that reads an edge as a
+    /// straight side between two different corners has to ask this first.
     #[must_use]
-    pub fn length(self) -> f64 {
+    pub fn is_closed(self) -> bool {
+        self.data().run == EdgeRun::RightRoundWhereItsFacesCross
+    }
+
+    /// The straight-line distance between the edge's two ends.
+    ///
+    /// **Not the length of the edge**, and the difference is the whole reason
+    /// this is not called that. For a straight edge the two are the same
+    /// number. For a closed edge the two ends are one corner, so this is
+    /// exactly zero while the edge itself is a whole circle — and a caller that
+    /// read the zero as a length would conclude the circle was not there.
+    /// [`EdgeView::is_closed`] is how to tell.
+    #[must_use]
+    pub fn distance_between_its_ends(self) -> f64 {
         self.start().point().distance_to(self.end().point())
     }
 

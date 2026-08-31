@@ -72,6 +72,15 @@ pub enum Containment {
         /// tells us nothing.
         enclosure: f64,
     },
+    /// The solid has a curved face, and casting a ray at one is not something
+    /// this does yet.
+    ///
+    /// Deliberately not [`Containment::Undecidable`]. That one means every
+    /// predicate was asked and none could prove an answer; this means the
+    /// question was never put. Reading the second as the first would let a
+    /// caller loosen a policy and expect it to help, and nothing here would get
+    /// better for it (`docs/decisions.md` §4.2 keeps the two apart).
+    NeedsFlatFaces,
 }
 
 impl SolidView<'_> {
@@ -157,6 +166,9 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Containment {
+        if !self.is_wholly_flat() {
+            return Containment::NeedsFlatFaces;
+        }
         let Some((low, high)) = self.bounding_box() else {
             return Containment::Outside;
         };

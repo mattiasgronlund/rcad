@@ -414,6 +414,11 @@ fn settle_against_each(
         match placed {
             Containment::Inside => return Ok(Some(Placement::Inside)),
             Containment::Outside => (),
+            // `Model::fuse` refuses a curved solid before any pair is looked at,
+            // so reaching here is a broken invariant inside this crate.
+            Containment::NeedsFlatFaces => {
+                unreachable!("the fuse refuses curved solids at entry")
+            }
             Containment::OnBoundary | Containment::Undecidable { .. } => {
                 let Some(face) = coincident_face(solids[index], in_plane, facing, point, log)?
                 else {

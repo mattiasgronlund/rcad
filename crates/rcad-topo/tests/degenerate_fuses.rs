@@ -204,7 +204,7 @@ fn nothing_in_it_is_degenerate(model: &Model, solids: &[SolidKey]) {
                 for coedge in wire.coedges() {
                     let edge = coedge.edge();
                     assert!(
-                        edge.length() > 0.0,
+                        edge.distance_between_its_ends() > 0.0,
                         "an edge from {:?} to {:?} has no length",
                         edge.start().point(),
                         edge.end().point()

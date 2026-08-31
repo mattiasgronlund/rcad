@@ -120,6 +120,18 @@ pub enum Error {
         count: usize,
     },
 
+    /// The fuse was handed a solid with a curved face.
+    ///
+    /// The fuse cuts faces along the lines where their planes cross, and a
+    /// cylinder has no plane to cross. Extending it to curved crossings is M4
+    /// (decisions.md §1.7); until then this is a refusal and not a failure —
+    /// the input is a sound solid and the operation is the thing that is not
+    /// ready for it.
+    ///
+    /// Deliberately not [`Error::Undecidable`]. Nothing was in doubt here.
+    #[error("the fuse needs every face to be flat, and one of these solids has a curved one")]
+    FuseNeedsFlatFaces,
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the
@@ -151,9 +163,23 @@ pub enum Invalid {
     #[error("a vertex is not at a finite point")]
     VertexNotFinite,
 
-    /// An edge starts and ends in the same place.
+    /// A straight edge starts and ends in the same place.
+    ///
+    /// A closed edge is not this: it comes back to where it started because it
+    /// is a whole circle, which is what its
+    /// [`EdgeRun`](crate::model::EdgeRun) says.
     #[error("an edge starts and ends at the same point")]
     EdgeHasNoLength,
+
+    /// A corner of a curved face is certified to be off the surface that face
+    /// sits on.
+    ///
+    /// There is no distance in this one, and that is the point. A flat face
+    /// reports how far off its plane a corner sits, because a plane has a
+    /// signed distance to be near. A curved face asks a sign predicate, which
+    /// says which side and never how far.
+    #[error("a corner of a curved face is not on the surface that face sits on")]
+    VertexOffItsFaceSurface,
 
     /// An edge is not used by exactly two coedges.
     #[error("an edge is used by {count} coedges; a closed solid uses every edge exactly twice")]
@@ -182,11 +208,6 @@ pub enum Invalid {
         /// Which coedge in the wire breaks the chain.
         position: usize,
     },
-
-    /// A face sits on something other than a plane. M0 is planar only
-    /// (decisions.md §3.1).
-    #[error("a face does not sit on a plane, and M0 is planar only")]
-    FaceIsNotPlanar,
 
     /// A face's vertices are not on the face's own plane.
     #[error("a vertex of a face is {distance} away from the face's plane")]

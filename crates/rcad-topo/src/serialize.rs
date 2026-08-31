@@ -46,7 +46,7 @@ use crate::model::{Model, ModelData};
 /// Reading anything else fails with
 /// [`Error::WrongFormatVersion`](crate::Error::WrongFormatVersion). It goes up
 /// whenever the stored shape changes, which in M0 and M1 means often.
-pub const FORMAT_VERSION: u32 = 0;
+pub const FORMAT_VERSION: u32 = 1;
 
 impl Serialize for Model {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

@@ -124,7 +124,7 @@ fn a_square_with_one_hair_thin_edge() -> Model {
 fn range_of(model: &Model) -> f64 {
     let smallest_feature = model
         .edges()
-        .map(|edge| edge.length())
+        .map(|edge| edge.distance_between_its_ends())
         .fold(f64::INFINITY, f64::min);
     assert!(smallest_feature.is_finite(), "a model needs edges");
     largest_coordinate_of(model) / smallest_feature

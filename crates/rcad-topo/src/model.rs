@@ -399,14 +399,27 @@ impl Model {
     }
 
     pub(crate) fn add_edge(&mut self, start: VertexSlot, end: VertexSlot) -> EdgeSlot {
+        self.add_edge_running(start, end, EdgeRun::Straight)
+    }
+
+    /// An edge right round the closed curve where its two faces cross, starting
+    /// and ending at `vertex`.
+    pub(crate) fn add_closed_edge(&mut self, vertex: VertexSlot) -> EdgeSlot {
+        self.add_edge_running(vertex, vertex, EdgeRun::RightRoundWhereItsFacesCross)
+    }
+
+    fn add_edge_running(&mut self, start: VertexSlot, end: VertexSlot, run: EdgeRun) -> EdgeSlot {
         let slot = self.data.edges.insert(EdgeData {
             start,
             end,
+            run,
             approximation: None,
         });
         self.index.coedges_of_edge.insert(slot, SmallVec::new());
         self.index.edges_of_vertex[start].push(slot);
-        self.index.edges_of_vertex[end].push(slot);
+        if end != start {
+            self.index.edges_of_vertex[end].push(slot);
+        }
         slot
     }
 
@@ -499,8 +512,9 @@ impl Model {
         }
         let wire = self.data.wires.get(slot).expect("touched wire is gone");
         assert!(
-            wire.coedges.len() >= 3,
-            "a closed wire needs at least three coedges, this one has {}",
+            wire.coedges.len() >= 3 || self.wire_closes_on_one_edge(wire),
+            "a closed wire needs at least three coedges unless its one edge is \
+             closed already, this one has {}",
             wire.coedges.len()
         );
         let mut previous_end = None;
@@ -519,6 +533,15 @@ impl Model {
             previous_end == first_start,
             "a touched wire does not close back to where it started"
         );
+    }
+
+    /// Whether this wire is one coedge on an edge that already comes back to
+    /// where it started — a round cap's boundary, which is one whole circle.
+    pub(crate) fn wire_closes_on_one_edge(&self, wire: &WireData) -> bool {
+        let [only] = wire.coedges[..] else {
+            return false;
+        };
+        self.data.edges[self.data.coedges[only].edge].run == EdgeRun::RightRoundWhereItsFacesCross
     }
 
     pub(crate) fn check_touched_edge(&self, slot: EdgeSlot) {
@@ -757,16 +780,40 @@ pub(crate) struct VertexData {
     pub approximation: Option<Approximation>,
 }
 
-/// A straight edge between two vertices.
+/// An edge between two vertices, and what it runs along between them.
 ///
-/// There is no curve stored here. M0's edges are straight (decisions.md §3.1),
-/// so the geometry is exactly the two endpoints and storing it twice would only
-/// create a way for the two copies to disagree.
+/// No curve is stored, and that is the decision rather than an omission
+/// (decisions.md §22, Q7/Q18). A curve here would be a second authority on
+/// where the edge is, sitting beside the surfaces of the faces either side of
+/// it, and the first time the two disagreed by an ulp there would be no way to
+/// say which was right. What an edge carries instead is its two ends and a
+/// [`EdgeRun`] naming *which* of the things those surfaces describe it is.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct EdgeData {
     pub start: VertexSlot,
     pub end: VertexSlot,
+    pub run: EdgeRun,
     pub approximation: Option<Approximation>,
+}
+
+/// What an edge runs along between its two ends.
+///
+/// The two faces either side of an edge each sit on a surface, and those two
+/// surfaces name where the edge is with no arithmetic at all — the same
+/// argument decisions.md §15.9 makes for a pair of planes naming their line.
+/// What the pair does *not* say is which piece of the crossing this edge is,
+/// and that is the whole of what this enum adds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum EdgeRun {
+    /// Straight between its two ends, which are the whole of it.
+    Straight,
+    /// Right round the closed curve where the faces either side of it cross,
+    /// so it starts and ends at the same vertex.
+    ///
+    /// A cap of a round bar is this: the cylinder crosses the cap's plane in
+    /// one circle, and the edge is the whole of that circle. There is nothing
+    /// to disambiguate, which is why this variant carries nothing.
+    RightRoundWhereItsFacesCross,
 }
 
 /// One use of an edge by one wire, running one way round.

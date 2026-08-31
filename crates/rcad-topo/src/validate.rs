@@ -1,14 +1,18 @@
-use rcad_geom::{DynamicRange, Isometry, Orientation, Plane, Vector};
+use rcad_geom::{
+    DynamicRange, Isometry, Orientation, Plane, SIDE_OF_CYLINDER, SIDE_OF_SPHERE, Surface, Vector,
+};
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
 };
 use rcad_predicates::{
     Approximation, Decision, Filtered, Interval, Level, Measures, NOTHING_IS_KNOWN,
-    Point as PredicatePoint, Policy, Predicate, ProvenanceLog, Record, are_real_numbers, decide,
+    Point as PredicatePoint, Policy, Predicate, ProvenanceLog, Record, SideOfSurface,
+    are_real_numbers, decide,
 };
 use slotmap::SecondaryMap;
 
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
+use crate::model::EdgeRun;
 use crate::view::{FaceView, SolidView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
 
@@ -85,7 +89,11 @@ impl Model {
             ) else {
                 return Err(Invalid::DanglingKey { entity: "vertex" }.into());
             };
-            if edge.start == edge.end || start.point == end.point {
+            // A closed edge is *supposed* to come back to where it started, so
+            // its two ends being one vertex says it is a whole circle and not
+            // that it has no length. Only a straight edge is refused for it.
+            if edge.run == EdgeRun::Straight && (edge.start == edge.end || start.point == end.point)
+            {
                 return Err(Invalid::EdgeHasNoLength.into());
             }
 
@@ -103,6 +111,19 @@ impl Model {
             }
         }
         Ok(())
+    }
+
+    /// Whether every face of this solid sits on a plane.
+    ///
+    /// The checks that sum over triangles mean a polyhedron, and only a wholly
+    /// flat solid is one.
+    fn solid_is_wholly_flat(&self, slot: crate::key::SolidSlot) -> bool {
+        self.data().solids[slot].shells.iter().all(|used| {
+            self.data().shells[used.shell]
+                .faces
+                .iter()
+                .all(|face| self.data().faces[face.face].surface.as_plane().is_some())
+        })
     }
 
     fn check_coedges(&self) -> Result<()> {
@@ -143,7 +164,7 @@ impl Model {
             }
         }
         for (slot, wire) in &self.data().wires {
-            if wire.coedges.len() < 3 {
+            if wire.coedges.len() < 3 && !self.wire_closes_on_one_edge(wire) {
                 return Err(Invalid::WireTooShort {
                     count: wire.coedges.len(),
                 }
@@ -197,9 +218,6 @@ impl Model {
         }
         let allowed_wobble = self.allowed_wobble();
         for (slot, face) in &self.data().faces {
-            let Some(plane) = face.surface.as_plane() else {
-                return Err(Invalid::FaceIsNotPlanar.into());
-            };
             if face.wires.is_empty() {
                 return Err(Invalid::FaceHasNoWires.into());
             }
@@ -210,22 +228,9 @@ impl Model {
             }
 
             let view = FaceView::new(self, slot, Isometry::identity(), Orientation::Forward);
-            for wire in view.wires() {
-                for point in wire.points() {
-                    let distance = plane.signed_distance_to(point).abs();
-                    if distance > allowed_wobble {
-                        return Err(Invalid::VertexOffItsFacePlane { distance }.into());
-                    }
-                }
-            }
-            for (position, wire) in view.wires().enumerate() {
-                let winding = winding_of(wire, plane.normal())?;
-                if position == 0 && winding != Decision::Pos {
-                    return Err(Invalid::OuterWireWindsAgainstTheNormal.into());
-                }
-                if position > 0 && winding != Decision::Neg {
-                    return Err(Invalid::HoleWindsWithTheOuterWire.into());
-                }
+            match &face.surface {
+                Surface::Plane(plane) => check_flat_face(view, plane, allowed_wobble)?,
+                curved => check_curved_face(view, curved)?,
             }
 
             match used.get(slot).copied().unwrap_or(0) {
@@ -276,6 +281,18 @@ impl Model {
                 if !self.data().shells.contains_key(shell.shell) {
                     return Err(Invalid::DanglingKey { entity: "shell" }.into());
                 }
+            }
+            // A curved solid has no polyhedral volume, and `signed_volume` sums
+            // over triangles. Running it here would compare a number about a
+            // shape this solid is not against zero, so the check waits for the
+            // mesh that can give it a real one.
+            //
+            // **This is a gap and not a limit.** Nothing yet says a round bar's
+            // faces point outwards. The oracle exists — the mesh has triangles
+            // and they have a signed volume — it is the mesh that does not,
+            // and it is the first thing to run here when it lands.
+            if !self.solid_is_wholly_flat(slot) {
+                continue;
             }
             let volume = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward)
                 .signed_volume();
@@ -348,10 +365,28 @@ impl Model {
             .flat_map(|wire| wire.points())
             .map(|corner| corner.largest_coordinate_magnitude())
             .fold(0.0, f64::max);
-        let smallest_feature = self
+        // A closed edge is skipped rather than measured, because the distance
+        // between its two ends is zero and that is not how small it is — it is
+        // a whole circle. What stands in for it is the radius of the curved
+        // surface it runs round, taken from the faces below, which is the
+        // smallest thing about such an edge that anything here can name.
+        let smallest_chord = self
             .edges()
-            .map(EdgeView::length)
+            .filter(|edge| !edge.is_closed())
+            .map(EdgeView::distance_between_its_ends)
             .fold(f64::INFINITY, f64::min);
+        let smallest_radius = self
+            .data()
+            .faces
+            .values()
+            .filter_map(|face| match face.surface {
+                Surface::Plane(_) => None,
+                Surface::Sphere(ball) => Some(ball.radius()),
+                Surface::Cylinder(pipe) => Some(pipe.radius()),
+                _ => None,
+            })
+            .fold(f64::INFINITY, f64::min);
+        let smallest_feature = smallest_chord.min(smallest_radius);
         if !smallest_feature.is_finite() || largest == 0.0 {
             return Ok(());
         }
@@ -407,6 +442,104 @@ impl Model {
 /// enough that ordinary construction never trips the check and narrow enough
 /// that a corner genuinely off its plane still does.
 const MEASURING_SLACK: f64 = 16.0;
+
+/// Every corner on the plane, the outer wire winding with the normal and the
+/// holes against it, so the material is on one consistent side.
+fn check_flat_face(view: FaceView<'_>, plane: &Plane, allowed_wobble: f64) -> Result<()> {
+    for wire in view.wires() {
+        for point in wire.points() {
+            let distance = plane.signed_distance_to(point).abs();
+            if distance > allowed_wobble {
+                return Err(Invalid::VertexOffItsFacePlane { distance }.into());
+            }
+        }
+    }
+    for (position, wire) in view.wires().enumerate() {
+        // A round cap's boundary is one closed edge and one corner, so there is
+        // no polygon to wind. Which way it goes is a fact about the circle and
+        // not about the corners, and the corners are all this can see.
+        //
+        // **A gap, named.** Nothing yet says a round cap faces outwards. What
+        // will is the mesh: a tessellated cap has a polygon, and this same
+        // function then has something to ask.
+        if wire.closes_on_one_edge() {
+            continue;
+        }
+        let winding = winding_of(wire, plane.normal())?;
+        if position == 0 && winding != Decision::Pos {
+            return Err(Invalid::OuterWireWindsAgainstTheNormal.into());
+        }
+        if position > 0 && winding != Decision::Neg {
+            return Err(Invalid::HoleWindsWithTheOuterWire.into());
+        }
+    }
+    Ok(())
+}
+
+/// Every corner **certified** on the surface the face sits on.
+///
+/// This is the curved twin of the two checks above, and it is one check rather
+/// than two because a curved face has no `signed_distance_to` to be near and no
+/// single normal to wind about. What it has instead is a sign predicate, so the
+/// question is not "how far off is this corner" but "can anything prove this
+/// corner is off" — and a corner that is genuinely on the surface answers
+/// [`Decision::Zero`] exactly.
+///
+/// That is a stronger check than the flat one and it is affordable here for a
+/// reason worth writing down: the builders this milestone ships put corners at
+/// quarter-turn positions on an axis-aligned surface, where the coordinates are
+/// exact and `x² + y² − r²` cancels to exactly zero. The day it starts coming
+/// back [`Decision::Undecidable`] is the day a general-angle arc arrives, and
+/// that is information rather than an obstacle (`docs/decisions.md` §16.8 on
+/// why general-angle arcs were not built).
+///
+/// The points come from a view built on [`Isometry::identity`], so they are in
+/// the face's own frame. That is not an accident: reading them through a
+/// composed location walks a coordinate an ulp per read (§19.1), and this would
+/// then refuse a sound model for a defect in the accessor.
+///
+/// # Errors
+///
+/// [`Invalid::VertexOffItsFaceSurface`] when a corner is certified off the
+/// surface, and [`Error::Undecidable`] when nothing can prove either way.
+fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
+    let (named, side_of): (_, &dyn Fn(PredicatePoint) -> Decision) = match surface {
+        Surface::Plane(_) => unreachable!("a flat face is checked by check_flat_face"),
+        Surface::Sphere(ball) => (SIDE_OF_SPHERE, &|point| ball.side_of(point)),
+        Surface::Cylinder(pipe) => (SIDE_OF_CYLINDER, &|point| pipe.side_of(point)),
+        // `Surface` grows a variant at every milestone. A face on one nothing
+        // here can ask about would be checked by not being checked.
+        other => panic!("a face sits on a surface nothing here can ask about: {other:?}"),
+    };
+
+    for wire in view.wires() {
+        for corner in wire.points() {
+            let point = PredicatePoint::from(corner.coordinates());
+            let decision = side_of(point);
+            match decision {
+                Decision::Zero => {}
+                Decision::Pos | Decision::Neg => {
+                    return Err(Invalid::VertexOffItsFaceSurface.into());
+                }
+                Decision::Undecidable { .. } => {
+                    let mut records = ProvenanceLog::new();
+                    records.push(Record::new(
+                        named,
+                        &[point],
+                        Level::Exact,
+                        decision,
+                        Measures::Area,
+                    ));
+                    return Err(Error::Undecidable { records });
+                }
+                // `Decision` grows a variant at every milestone. Whatever the
+                // new one means, guessing is worse than stopping.
+                other => panic!("a corner came back with a decision nothing here knows: {other:?}"),
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Which way `wire` winds round `normal`.
 ///
@@ -758,8 +891,18 @@ mod tests {
         );
     }
 
+    /// The refusing half of the curved-face check.
+    ///
+    /// A face is no longer refused for being curved — `add_round_bar` builds
+    /// one and the sweep accepts it, which is the other half of this and lives
+    /// in `tests/a_solid_with_a_curved_face.rs` (§14.7 wants both halves). What
+    /// is refused is a curved face whose corners are not on the surface, and a
+    /// cube's corners hung on a unit ball are as far off as it gets.
+    ///
+    /// Note what does *not* appear: a distance. A sign predicate says which
+    /// side and never how far, so there is no tolerance here to tune.
     #[test]
-    fn a_face_that_is_not_on_a_plane_is_caught() {
+    fn a_corner_that_is_not_on_its_faces_curved_surface_is_caught() {
         let mut model = a_cube();
         let ball = Sphere::new(Point::origin(), 1.0).expect("a ball of radius one");
         model
@@ -770,7 +913,7 @@ mod tests {
             .expect("a cube has faces")
             .surface = Surface::Sphere(ball);
 
-        assert_eq!(refusal(&model), Invalid::FaceIsNotPlanar);
+        assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
     }
 
     #[test]

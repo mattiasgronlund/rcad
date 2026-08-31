@@ -1,4 +1,4 @@
-use rcad_geom::{Isometry, Orientation, Plane, Point, Surface, Vector};
+use rcad_geom::{Axis, Cylinder, Isometry, Orientation, Plane, Point, Surface, Vector};
 use rcad_predicates::{
     Approximation, Decision, Policy, ProvenanceLog, Record, orient2d_tolerantly,
 };
@@ -582,6 +582,102 @@ impl Model {
                 self.assert_approximation_did_not_grow(approximation_before.max(tag.magnitude()));
             }
         }
+        Ok(self.key_for_solid(solid))
+    }
+
+    /// A round bar of `radius` standing `height` tall on the origin, placed
+    /// with `placement`.
+    ///
+    /// The first solid in this kernel with a curved face, and it is built the
+    /// way it is because of what it has to force into existence rather than
+    /// because a bar is useful. It has:
+    ///
+    /// - a **curved face**, the wall, which no planar check can look at;
+    /// - a **seam**, the ruling up the wall where the surface wraps round, used
+    ///   *twice by the same face* — roadmap §5.3 calls this the source of most
+    ///   subtle bugs, and nothing here could reach it before;
+    /// - two **closed edges**, the cap circles, which start and end at one
+    ///   vertex and so are the whole of the curve they run along.
+    ///
+    /// Two vertices and three edges is the whole of it, which is the point: a
+    /// bar this small has every structure and no arithmetic to hide behind.
+    ///
+    /// The seam sits at `x = radius, y = 0`, so both vertices are exact for any
+    /// radius `f64` can hold, and both are certified onto the cylinder by
+    /// `x² + y² − r²` cancelling to exactly zero. `Model::validate` asks that of
+    /// every corner of every curved face, and this is the builder that has to
+    /// pass it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::HeightNotPositive`] if `height` is not a positive finite
+    /// number, and whatever [`Cylinder::new`] makes of the radius.
+    ///
+    /// # Panics
+    ///
+    /// If the solid it just built breaks one of the invariants checked on
+    /// touched entities. That is a bug here, not bad input.
+    pub fn add_round_bar(
+        &mut self,
+        radius: f64,
+        height: f64,
+        placement: &Isometry,
+    ) -> Result<SolidKey> {
+        if !(height.is_finite() && height > 0.0) {
+            return Err(Error::HeightNotPositive { height });
+        }
+        let wall = Cylinder::new(Axis::z(), radius)?;
+        let approximation_before = self.worst_approximation();
+
+        let bottom_corner = self.add_vertex(Point::new(radius, 0.0, 0.0));
+        let top_corner = self.add_vertex(Point::new(radius, 0.0, height));
+        let seam = self.add_edge(bottom_corner, top_corner);
+        let bottom_circle = self.add_closed_edge(bottom_corner);
+        let top_circle = self.add_closed_edge(top_corner);
+
+        let cap = |model: &mut Self, z: f64, outward: f64, edge, turn| {
+            let plane = Plane::from_point_and_normal(
+                Point::new(0.0, 0.0, z),
+                Vector::new(0.0, 0.0, outward),
+            )
+            .expect("the z axis is a unit normal");
+            let coedge = model.add_coedge(edge, turn);
+            let wire = model.add_wire(smallvec::smallvec![coedge]);
+            model.add_face(Surface::Plane(plane), SmallVec::from_buf([wire]))
+        };
+        let bottom = cap(self, 0.0, -1.0, bottom_circle, Orientation::Reversed);
+        let top = cap(self, height, 1.0, top_circle, Orientation::Forward);
+
+        // Round the bottom circle, up the seam, back round the top circle, and
+        // down the seam again. The seam's two coedges are both in this one
+        // wire, which is what makes it a seam rather than an ordinary edge.
+        let round_the_wall: SmallVec<[CoedgeSlot; 4]> = SmallVec::from_buf([
+            self.add_coedge(bottom_circle, Orientation::Forward),
+            self.add_coedge(seam, Orientation::Forward),
+            self.add_coedge(top_circle, Orientation::Reversed),
+            self.add_coedge(seam, Orientation::Reversed),
+        ]);
+        let wire = self.add_wire(round_the_wall);
+        let side = self.add_face(Surface::Cylinder(wall), SmallVec::from_buf([wire]));
+
+        let shell = self.add_shell(
+            [bottom, top, side]
+                .into_iter()
+                .map(|face| FaceUse {
+                    face,
+                    loc: Isometry::identity(),
+                    orient: Orientation::Forward,
+                })
+                .collect(),
+        );
+        let solid = self.add_solid(SmallVec::from_buf([ShellUse {
+            shell,
+            loc: *placement,
+            orient: Orientation::Forward,
+        }]));
+
+        self.check_touched_solid(solid);
+        self.assert_approximation_did_not_grow(approximation_before);
         Ok(self.key_for_solid(solid))
     }
 

@@ -936,6 +936,12 @@ impl Assembly {
                         return Ok(false);
                     }
                     Containment::OnBoundary | Containment::Undecidable { .. } => (),
+                    // `Model::fuse` refuses a curved solid before any pair is
+                    // looked at, so a face reaching here is a broken
+                    // invariant inside this crate and not bad input.
+                    Containment::NeedsFlatFaces => {
+                        unreachable!("the fuse refuses curved solids at entry")
+                    }
                 }
             }
         }
