@@ -129,6 +129,38 @@ impl Cylinder {
             + (u * round.cos() + v * round.sin()) * self.radius
             + self.axis.direction() * along
     }
+
+    /// Which angle round and how far along `point` sits at —
+    /// [`Cylinder::point_at`] the other way round.
+    ///
+    /// Only the *direction* across the pipe is read, so a point off the skin
+    /// gets the coordinates of the point on the skin nearest it. How far from
+    /// the axis it was is thrown away; how far along the axis it sits is not,
+    /// and comes back the same for a point off the skin as for the one on it.
+    ///
+    /// The angle comes back on `atan2`'s branch, `(-π, π]`, and how close it
+    /// gets is [`Surface::ROUND_TRIP_ROUNDOFF`](crate::Surface::ROUND_TRIP_ROUNDOFF).
+    ///
+    /// **A point exactly on the seam has one answer here and not two.** The
+    /// seam is where [`Cylinder::basis`] puts `u = 0`, and a point on it comes
+    /// back `0` and never `2π`, because `atan2(+0, positive)` is `+0`. A wire
+    /// that goes all the way round wants its far seam corner at `2π`, and
+    /// putting it there is the job of whoever knows the wire is a loop —
+    /// carrying a previous angle in here would make a pipe's answer depend on
+    /// the order it was asked in (`docs/decisions.md` §25.2).
+    ///
+    /// A point on the axis has no nearest point on the skin, and its angle is
+    /// not determined by the geometry at all. Zero is what `atan2(0, 0)` hands
+    /// over, without a branch.
+    #[must_use]
+    pub fn coordinates_of(&self, point: Point) -> (f64, f64) {
+        let (across, and) = self.basis();
+        let from_origin = point - self.axis.origin();
+        (
+            from_origin.dot(and).atan2(from_origin.dot(across)),
+            from_origin.dot(self.axis.direction()),
+        )
+    }
 }
 
 /// Inside, on, or outside, decided through the cascade.
