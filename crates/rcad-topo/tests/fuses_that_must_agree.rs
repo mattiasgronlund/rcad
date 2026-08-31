@@ -88,7 +88,7 @@
 //!
 //! # §17.1, checked rather than argued
 //!
-//! Every fuse over an exactly representable family also runs
+//! Every fuse in this file, of every family, also runs
 //! [`every_plane_of_the_answer_is_a_plane_of_an_input`], which is the deciding
 //! argument for plane-authoritative geometry stated as an assertion. It runs
 //! inside [`fused`], so it costs no wall clock at all.
@@ -778,46 +778,60 @@ fn uniting_four_at_once_is_uniting_them_one_at_a_time() {
     tally.report_what_it_compared("fuse([A,B,C,D]) = uniting them one at a time, lattice chains");
 }
 
-/// Uniting a turned solid with bit-identical copies of itself has to give back
-/// the very same solid at every step, and does not.
+/// Uniting a turned solid with bit-identical copies of itself moves nothing
+/// after the first union, however many copies follow.
 ///
 /// **The one property in this file that is exactly true under a general
 /// rotation.** Every copy is built from the same numbers by the same code, so
 /// every copy carries bit-identical planes and bit-identical corners; the fuse
-/// has nothing to round differently between them. `A ∪ A` is `A`, and it is `A`
-/// bit for bit — which is §17.1's claim stated as sharply as it can be, and it
-/// is why this is the shape of the test rather than a volume comparison.
+/// has nothing to round differently between them. That makes `A ∪ A ∪ A ∪ …` a
+/// bit-for-bit claim rather than one needing a tolerance, which is why this is
+/// the shape of the test rather than a volume comparison.
 ///
-/// **It fails on the first step, and the failure is a defect.**
-/// `FaceView::plane` is `surface.transformed(&location)`, and
-/// `Plane::transformed` moves a plane's offset one ulp even for
-/// `Isometry::identity()` — `rcad-geom`'s
-/// `moving_a_plane_by_the_identity_walks_its_offset_one_ulp_further_every_time`
-/// is the two-line reproduction. So a plane read out of a model is not the plane
-/// that was put in, the fuse reads its inputs through that accessor, and every
-/// fuse in a chain therefore moves every non-axis-aligned plane one more ulp.
-/// That is precisely the slow leak §17.1 rejected vertex-authoritative geometry
-/// to avoid: "however long the chain the planes in the model stay the planes the
-/// user built, undegraded". They do not.
+/// **Why it is measured from the first union and not from `A`.** §17.1 says the
+/// plane is authoritative and a stored corner is a cached sample of it, so the
+/// first fuse re-derives every corner as the meet of the planes around it and is
+/// entitled to land an ulp away from the corner the input had cached. Measured
+/// on a unit block turned one sixty-fourth of a turn: the input caches the far
+/// corner's `y` as `1.0932018670017576`, the meet of that corner's three stored
+/// planes is `1.09320186700175740…`, and the fuse stores the `f64` nearest that,
+/// which is `1.0932018670017574`. The input's cached corner is the ulp that is
+/// wrong, and correcting it is the whole point of re-deriving. What §17.1 forbids
+/// is that correction *repeating*: "the rounding in a vertex is the rounding of
+/// one Cramer solve — never a sum over the operation history". So the second
+/// union and every union after it has to change nothing at all, and that is what
+/// this asserts.
 ///
-/// **What is not wrong.** The fuse itself inherits exactly. The plane the answer
-/// *stores* is the input's plane bit for bit — reading the answer back gives one
-/// ulp more, and reading it back twice gives two, which is only consistent with
-/// the arena holding the undegraded value. The leak is in the accessor, and it
-/// is a gap rather than a limit: the identity has an exact answer and
-/// `Plane::transformed` does not take it.
+/// The other half of the claim — that the planes never move, at any step, from
+/// the ones the input carried — is [`every_plane_of_the_answer_is_a_plane_of_an_input`],
+/// which runs inside [`fused`] on all of these fuses. It could not until
+/// `Plane::transformed` stopped re-deriving a moved plane's offset through a
+/// point on it: `FaceView::plane` is `surface.transformed(&location)`, so that
+/// ulp was charged on every read and a chain of fuses walked every
+/// non-axis-aligned plane one more ulp per fuse. `rcad-geom`'s
+/// `moving_a_plane_by_the_identity_twenty_times_leaves_every_coefficient_alone`
+/// is the two-line version of the same statement.
 #[test]
-#[ignore = "a gap: FaceView::plane re-derives the offset through Plane::transformed, so a chain of fuses walks every turned plane one ulp per fuse"]
-fn uniting_a_turned_solid_with_copies_of_itself_never_moves_a_plane() {
+fn uniting_a_turned_solid_with_more_copies_of_itself_settles_after_the_first_union() {
     let tally = over(
         LONGER_CASES,
         a_turned_solid_and_several_copies(),
         |configuration, tally| {
             let (model, keys) = configuration.build();
-            let itself = answer_of(&model, &[keys[0]]);
+            let Some(mut so_far) = fused(
+                tally,
+                Coordinates::AreUnderAGeneralRotation,
+                &model,
+                &[keys[0]],
+                &[keys[1]],
+                Rule::Union,
+            )?
+            else {
+                return Ok(());
+            };
+            let settled = answer_of(&so_far.0, &so_far.1);
 
-            let mut so_far = (model, vec![keys[0]]);
-            for &copy in &keys[1..] {
+            for &copy in &keys[2..] {
                 tally.meaning_to_compare();
                 let Some(wider) = fused(
                     tally,
@@ -832,10 +846,10 @@ fn uniting_a_turned_solid_with_copies_of_itself_never_moves_a_plane() {
                 };
                 tally.comparing();
                 same_answer(
-                    &itself,
+                    &settled,
                     &answer_of(&wider.0, &wider.1),
                     Rule::Union,
-                    "uniting a turned solid with a bit-identical copy of itself",
+                    "uniting a turned solid with another bit-identical copy of itself",
                 )?;
                 so_far = wider;
             }
@@ -1037,10 +1051,10 @@ fn united_in_turn(
 /// a solid this kernel can hold, or was refused where refusals are expected —
 /// both counted, neither swept away.
 ///
-/// Every answer over exactly representable coordinates goes through
+/// Every answer goes through
 /// [`every_plane_of_the_answer_is_a_plane_of_an_input`], so §17.1's deciding
-/// argument is checked by most of the fuses in this file rather than by a test
-/// of its own. Why "most" and not "all" is at that function.
+/// argument is checked by every fuse in this file rather than by a test of its
+/// own.
 fn fused(
     tally: &Tally,
     coordinates: Coordinates,
@@ -1062,14 +1076,12 @@ fn fused(
                     log.len()
                 )));
             }
-            if coordinates == Coordinates::AreExactlyRepresentable {
-                every_plane_of_the_answer_is_a_plane_of_an_input(
-                    &model,
-                    &[arguments, tools].concat(),
-                    &solids,
-                    rule,
-                )?;
-            }
+            every_plane_of_the_answer_is_a_plane_of_an_input(
+                &model,
+                &[arguments, tools].concat(),
+                &solids,
+                rule,
+            )?;
             Ok(Some((model, solids)))
         }
         Err(Error::Undecidable { records }) => {
@@ -1116,25 +1128,17 @@ fn fused(
 /// It runs inside [`fused`] rather than as a test of its own, so every fuse this
 /// file already performs checks it and the wall clock does not move.
 ///
-/// # Why it does not run on turned pairs
+/// # Why it runs on turned pairs too
 ///
-/// Because there it would be asking about the reader rather than about the fuse.
-/// `FaceView::plane` is `surface.transformed(&location)`, and
-/// `Plane::transformed` is **not the identity for `Isometry::identity()`**: it
-/// rebuilds the offset as `normal · (normal · offset)`, and for a normal whose
-/// squared length rounds to just over one that walks the offset one ulp further
-/// out on every read, without bound. A turned input is read at its placement and
-/// the answer is read at the identity, so the two sides have been through
-/// different arithmetic and a mismatch says nothing about what the fuse stored.
-///
-/// That is a defect and not a fact about `f64`, it is recorded as one, and it is
-/// not fixed here: `rcad-geom`'s
-/// `moving_a_plane_by_the_identity_walks_its_offset_one_ulp_further_every_time`
-/// is the minimal reproduction and
-/// [`uniting_a_turned_solid_with_copies_of_itself_never_moves_a_plane`] is what
-/// it costs a chain of fuses. On the exactly representable families every normal
-/// is a signed unit axis, its squared length is exactly one, and the read is
-/// exact — which is why the oracle runs there and means what it says.
+/// It could not until `Plane::transformed` stopped re-deriving a moved plane's
+/// offset through a point on it. `FaceView::plane` is
+/// `surface.transformed(&location)`, so a turned input read at its placement had
+/// been through arithmetic the answer read at the identity had not, and a
+/// mismatch said nothing about what the fuse stored. A read is a read now, at
+/// any placement, so the turned families are held to the same bit-for-bit
+/// statement as the rectilinear ones — which is where it bites, because a
+/// turned normal is not a signed unit axis and nothing about it is exact by
+/// construction.
 fn every_plane_of_the_answer_is_a_plane_of_an_input(
     model: &Model,
     inputs: &[SolidKey],
@@ -1164,17 +1168,12 @@ fn every_plane_of_the_answer_is_a_plane_of_an_input(
     Ok(())
 }
 
-/// What kind of numbers the configuration is made of.
-///
-/// Two things follow from this one fact, which is why it is one value and not
-/// two flags: whether a refusal is an outcome to count or a test failure, and
-/// whether [`every_plane_of_the_answer_is_a_plane_of_an_input`] is asking about
-/// the fuse or about the reader.
+/// What kind of numbers the configuration is made of, and so whether a refusal
+/// is an outcome to count or a test failure.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Coordinates {
-    /// Rectilinear on the integer grid. A certified policy has to decide every
-    /// fuse (§17.7's control row), and a plane read back out of the model is the
-    /// plane that went in.
+    /// Rectilinear on the integer grid, where a certified policy has to decide
+    /// every fuse (§17.7's control row).
     AreExactlyRepresentable,
     /// Under a general rotation, where a refusal is the thing being measured.
     AreUnderAGeneralRotation,

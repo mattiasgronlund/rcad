@@ -407,9 +407,11 @@ pub fn a_chain_of_fuses() -> impl Strategy<Value = Configuration> {
 /// same place.
 ///
 /// Every copy carries bit-identical planes, so uniting them one at a time has to
-/// come back bit-identical at every step — exactly true even under a general
-/// rotation, because no arithmetic anywhere has two different numbers to
-/// disagree about.
+/// come back bit-identical from the second union on — exactly true even under a
+/// general rotation, because no arithmetic anywhere has two different numbers to
+/// disagree about. The first union is where the corners a solid cached get
+/// re-derived from the planes they are samples of, which `docs/decisions.md`
+/// §17.1 asks for and which is allowed to move them an ulp.
 pub fn a_turned_solid_and_several_copies() -> impl Strategy<Value = Configuration> {
     (a_shape(), 1u32..=3, 2usize..=4, a_turn()).prop_map(|(shape, height, copies, turn)| {
         let placed = Placed {

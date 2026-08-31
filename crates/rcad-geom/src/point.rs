@@ -343,9 +343,11 @@ impl From<Vector> for na::Vector3<f64> {
 
 /// A straight line through a point, with a direction along it.
 ///
-/// The direction always has length one; the constructor scales it and rejects
-/// what it cannot scale. Serializes as `(origin, direction)` and is re-checked
-/// on the way back in, so a file cannot hand us an axis without a direction.
+/// The constructor scales the direction to length one and rejects what it
+/// cannot scale; [`Axis::transformed`] turns it without scaling it again, so a
+/// moved axis points along a direction of length one to within the rounding of
+/// the turn. Serializes as `(origin, direction)` and is re-checked on the way
+/// back in, so a file cannot hand us an axis without a direction.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "(Point, Vector)", into = "(Point, Vector)")]
 pub struct Axis {
@@ -406,7 +408,7 @@ impl Axis {
         self.origin
     }
 
-    /// Which way the line points. Always has length one.
+    /// Which way the line points. Scaled to length one when the axis was built.
     #[must_use]
     pub fn direction(&self) -> Vector {
         self.direction
@@ -435,18 +437,19 @@ impl Axis {
 
     /// The same line after `movement` is applied.
     ///
-    /// # Panics
-    ///
-    /// If the moved direction no longer has any length. A rotation cannot do
-    /// that, so reaching this means the axis or the isometry was already broken.
+    /// The moved direction is not scaled back to unit length. It arrived unit
+    /// from [`Axis::new`] and a turn does not change a length, so scaling it
+    /// again is the second scaling of an already-scaled vector — and a stored
+    /// direction whose computed length is `0.9999999999999999` would grow a
+    /// little on every read. `Cylinder::transformed` is how a pipe is read out
+    /// of a model, at whatever location the face carries, so a read that moves
+    /// bits is a read nobody can do twice. `Plane::transformed` says the same
+    /// thing at more length.
     #[must_use]
     pub fn transformed(&self, movement: &Isometry) -> Self {
         Self {
             origin: movement.apply_to_point(self.origin),
-            direction: movement
-                .apply_to_vector(self.direction)
-                .normalized_as("moved axis direction")
-                .expect("a rotation cannot turn a direction into a zero-length vector"),
+            direction: movement.apply_to_vector(self.direction),
         }
     }
 }

@@ -16,8 +16,11 @@ pub const SIDE_OF_PLANE: &str = "side of plane";
 
 /// A flat surface: every point `p` on it satisfies `normal · p = offset`.
 ///
-/// The normal always has length one, so [`Plane::signed_distance_to`] is a real
-/// distance and not a scaled one.
+/// Every constructor scales the normal to length one, so
+/// [`Plane::signed_distance_to`] is a real distance and not a scaled one.
+/// [`Plane::transformed`] turns a normal without scaling it again — a read of a
+/// plane has to give back the plane that was stored — so a moved plane's normal
+/// has length one to within the rounding of the turn.
 ///
 /// This is the only surface that takes part in topology in M0
 /// (`docs/decisions.md` §3.1): a real cube, with volume, area and centroid
@@ -153,7 +156,7 @@ impl Plane {
         Ok(Self { normal, offset })
     }
 
-    /// Which way the plane faces. Always has length one.
+    /// Which way the plane faces. Scaled to length one when the plane was built.
     #[must_use]
     pub fn normal(&self) -> Vector {
         self.normal
@@ -260,20 +263,32 @@ impl Plane {
 
     /// The same plane after `movement` is applied.
     ///
-    /// # Panics
+    /// **Moving a plane by [`Isometry::identity`] gives back the same four
+    /// numbers, and this is the only line in the crate that has to arrange it.**
+    /// `FaceView::plane` in `rcad-topo` is this function applied to a face's
+    /// composed location whatever that location is, so anything here that moves a
+    /// bit is charged on every read of every face, and a chain of fuses pays it
+    /// once per fuse. `docs/decisions.md` §17.1 rejected vertex-authoritative
+    /// geometry to avoid exactly that leak; §17.9 is what it cost when it arrived
+    /// through the accessor instead.
     ///
-    /// If the moved normal no longer has any length. A rotation cannot do that,
-    /// so reaching this means the plane or the movement was already broken.
+    /// Two things follow, and neither is an optimisation:
+    ///
+    /// - **The offset is carried over, not re-derived.** A turn leaves
+    ///   `normal · point` alone, so all the shift can do is move the plane along
+    ///   its own moved normal. Rebuilding it as `moved_normal · movement(origin())`
+    ///   multiplies the offset by `nx² + ny² + nz²`, which is only *nearly* one.
+    /// - **The moved normal is not scaled back to unit length.** It arrived unit
+    ///   from a constructor and a turn does not change a length; scaling it again
+    ///   is the second scaling of an already-scaled vector, which the note on
+    ///   [`Plane`] says moves the last bit or two. A stored normal whose computed
+    ///   length is `0.9999999999999999` — an ordinary one — grew on every read.
     #[must_use]
     pub fn transformed(&self, movement: &Isometry) -> Self {
-        let normal = movement
-            .apply_to_vector(self.normal)
-            .normalized_as("moved plane normal")
-            .expect("a rotation cannot turn a normal into a zero-length vector");
-        let on_the_plane = movement.apply_to_point(self.origin());
+        let normal = movement.apply_to_vector(self.normal);
         Self {
             normal,
-            offset: normal.dot(on_the_plane - Point::origin()),
+            offset: self.offset + normal.dot(movement.translation_part()),
         }
     }
 

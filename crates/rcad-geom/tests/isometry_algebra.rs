@@ -146,50 +146,103 @@ proptest! {
     }
 }
 
-/// Moving a plane by the movement that does nothing has to leave the plane
-/// alone, and does not.
+/// Moving a plane by the movement that does nothing leaves the plane alone,
+/// however many times it is done.
 ///
-/// **A defect, recorded and not fixed.** [`Plane::transformed`] rebuilds the
-/// offset as `normal · movement(origin())`, and `origin()` is `normal * offset`,
-/// so the round trip computes `offset * (nx² + ny² + nz²)`. For a normal that is
-/// only as close to unit length as `f64` allows, that squared length is not
-/// exactly one, and the offset comes back one ulp further out. Applied again it
-/// moves again: over twenty reads the plane below walks from
-/// `-1.0000000000000002` to `-1.0000000000000047`, monotonically, with nothing
-/// to stop it.
+/// It did not until [`Plane::transformed`] stopped rebuilding the offset as
+/// `normal · movement(origin())`. `origin()` is `normal * offset`, so that round
+/// trip computed `offset * (nx² + ny² + nz²)`, and for a normal only as close to
+/// unit length as `f64` allows that squared length is not exactly one. The plane
+/// below used to walk from `-1.0000000000000002` to `-1.0000000000000047` over
+/// twenty reads, monotonically, with nothing to stop it.
 ///
-/// **Why it matters more than an ulp.** `FaceView::plane` in `rcad-topo` is
-/// `surface.transformed(&location)` and applies it whatever the location is, so
-/// **reading a plane out of a model is not a pure read**. The fuse reads its
-/// inputs' planes through exactly that accessor, so a chain of fuses moves every
-/// non-axis-aligned plane one ulp per fuse — which is the slow leak
-/// `docs/decisions.md` §17.1 rejected vertex-authoritative geometry in order to
-/// avoid, arriving through the accessor instead of through the geometry.
+/// **Why twenty reads and not one.** `FaceView::plane` in `rcad-topo` is
+/// `surface.transformed(&location)` whatever the location is, so **reading a
+/// plane out of a model must be a pure read**. The fuse reads its inputs' planes
+/// through exactly that accessor, and one ulp per read is one ulp per fuse in a
+/// chain — the slow leak `docs/decisions.md` §17.1 rejected
+/// vertex-authoritative geometry in order to avoid, arriving through the
+/// accessor instead of through the geometry.
 /// `rcad-topo`'s `uniting_a_turned_solid_with_copies_of_itself_never_moves_a_plane`
-/// is what it costs a chain, and it is `#[ignore]`d for the same reason.
-///
-/// **Why it is a gap and not a limit.** The answer exists and is one line away:
-/// the identity leaves both the normal and the offset alone, and a rotation that
-/// has already been applied to the normal does not need the offset re-derived
-/// through a point at all. Nothing about `f64` requires the round trip.
+/// is the same statement about a chain of fuses.
 #[test]
-#[ignore = "a gap: Plane::transformed re-derives the offset through a point, so the identity moves it one ulp"]
-fn moving_a_plane_by_the_identity_walks_its_offset_one_ulp_further_every_time() {
-    let plane = Plane::from_coefficients([
+fn moving_a_plane_by_the_identity_twenty_times_leaves_every_coefficient_alone() {
+    for plane in [
+        a_plane_whose_normal_is_not_quite_unit_length(),
+        a_plane_whose_normal_is_not_a_fixed_point_of_scaling(),
+    ] {
+        let mut read_back = plane;
+        for read in 1..=20 {
+            read_back = read_back.transformed(&Isometry::identity());
+            assert_eq!(
+                read_back.coefficients(),
+                plane.coefficients(),
+                "reading a plane back {read} times moved it"
+            );
+        }
+    }
+}
+
+/// The same for the line down the middle of a pipe, which `Cylinder` carries and
+/// reads back out through the same accessor a face's plane goes through.
+#[test]
+fn moving_an_axis_by_the_identity_twenty_times_leaves_its_direction_alone() {
+    let axis = Axis::new(Point::new(1.0, 2.0, 3.0), Vector::new(6.0, 3.0, 7.0))
+        .expect("a direction with length");
+
+    let mut read_back = axis;
+    for read in 1..=20 {
+        read_back = read_back.transformed(&Isometry::identity());
+        assert_eq!(
+            read_back.direction().components(),
+            axis.direction().components(),
+            "reading an axis back {read} times turned it"
+        );
+    }
+}
+
+/// Sliding a plane along a direction that lies in it leaves it where it was.
+///
+/// The shift is along `z` and the normal has no `z` component, so the shift
+/// contributes exactly zero and the answer is the plane that went in. This is
+/// the identity read again with a movement that actually does something: what
+/// used to move the offset was the round trip through a point on the plane, not
+/// the shift.
+#[test]
+fn sliding_a_plane_along_a_direction_that_lies_in_it_leaves_every_coefficient_alone() {
+    let plane = a_plane_whose_normal_is_not_quite_unit_length();
+    let slide = Isometry::translation(Vector::new(0.0, 0.0, 5.0)).expect("a finite shift");
+
+    assert_eq!(
+        plane.transformed(&slide).coefficients(),
+        plane.coefficients()
+    );
+}
+
+/// A plane the round trip through a point could not leave alone.
+///
+/// Its normal is as close to length one as these two numbers get: the squared
+/// length is `1.0000000000000002`, whose square root is exactly `1.0`, so the
+/// normal survives being scaled and only the offset was ever moved.
+fn a_plane_whose_normal_is_not_quite_unit_length() -> Plane {
+    Plane::from_coefficients([
         -0.634_393_284_163_645_5,
         0.773_010_453_362_737_1,
         0.0,
         -1.000_000_000_000_000_2,
     ])
-    .expect("four coefficients that describe a plane");
+    .expect("four coefficients that describe a plane")
+}
 
-    let mut read_back = plane;
-    for read in 1..=20 {
-        read_back = read_back.transformed(&Isometry::identity());
-        assert_eq!(
-            read_back.coefficients(),
-            plane.coefficients(),
-            "reading a plane back {read} times moved it"
-        );
-    }
+/// A plane that scaling the normal a second time could not leave alone.
+///
+/// Scaling a vector to unit length does not always give a vector whose length
+/// reads back as exactly one, and a direction as plain as `(6, 3, 7)` is one
+/// where it does not: the stored normal's length is `0.9999999999999999`, so
+/// dividing by it again grows all three components. That is why
+/// [`Plane::transformed`] does not scale a moved normal — it was scaled once,
+/// where the plane was built.
+fn a_plane_whose_normal_is_not_a_fixed_point_of_scaling() -> Plane {
+    Plane::from_point_and_normal(Point::new(1.0, 2.0, 3.0), Vector::new(6.0, 3.0, 7.0))
+        .expect("a point and a direction with length")
 }
