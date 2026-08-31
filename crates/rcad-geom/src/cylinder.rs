@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::exact::{difference, square_of_expansion};
 use crate::isometry::Isometry;
-use crate::point::Axis;
+use crate::point::{Axis, Point, Vector};
 use crate::{Error, Result};
 
 /// The name the cylinder's sign predicate goes by in provenance records.
@@ -72,6 +72,62 @@ impl Cylinder {
             axis: self.axis.transformed(movement),
             radius: self.radius,
         }
+    }
+
+    /// Two directions across the pipe, at right angles to each other and to the
+    /// axis, with the first crossed into the second giving the axis back.
+    ///
+    /// The choice is arbitrary but fixed, so the same pipe always gives the
+    /// same pair. The first one is where `u = 0` sits, and for a pipe on the
+    /// `z` axis it is `+x` — which is where a round bar puts its seam, so that
+    /// face's `(u, v)` rectangle has the seam down its edge rather than
+    /// somewhere across the middle of it.
+    ///
+    /// Exact when the axis is a coordinate direction, which is what every
+    /// generator in this milestone draws. Off-axis it is a normalize like any
+    /// other and rounds (`docs/decisions.md` §16.8).
+    ///
+    /// # Panics
+    ///
+    /// If the stored axis direction has no length. The constructors do not
+    /// allow that.
+    #[must_use]
+    pub fn basis(&self) -> (Vector, Vector) {
+        let along = self.axis.direction();
+        let [x, y, z] = along.components().map(f64::abs);
+        let least_aligned_axis = if x <= y && x <= z {
+            Vector::new(1.0, 0.0, 0.0)
+        } else if y <= z {
+            Vector::new(0.0, 1.0, 0.0)
+        } else {
+            Vector::new(0.0, 0.0, 1.0)
+        };
+        // Taking the part of that axis lying across the pipe, rather than
+        // crossing with it, is what puts `u = 0` on `+x` for a pipe on `z`. A
+        // cross product would land it on `+y`, and then the seam of a bar would
+        // not be on the edge of its own rectangle.
+        let across = least_aligned_axis - along * along.dot(least_aligned_axis);
+        let u = across
+            .normalized_as("direction across a cylinder")
+            .expect("a unit axis is never parallel to its least aligned coordinate axis");
+        (u, along.cross(u))
+    }
+
+    /// The point at angle `round` radians from [`Cylinder::basis`]'s first
+    /// direction, `along` up the axis from its origin.
+    ///
+    /// Only exactly on the pipe where the sine and cosine are exact, which in
+    /// practice means `round = 0`. Everywhere else this is a point *near* the
+    /// surface, which is why no corner of a face is ever made this way —
+    /// corners come from exact constructions and get certified. This is for
+    /// filling in a mesh between them, where being near is the whole idea and
+    /// the deviation is what gets bounded.
+    #[must_use]
+    pub fn point_at(&self, round: f64, along: f64) -> Point {
+        let (u, v) = self.basis();
+        self.axis.origin()
+            + (u * round.cos() + v * round.sin()) * self.radius
+            + self.axis.direction() * along
     }
 }
 

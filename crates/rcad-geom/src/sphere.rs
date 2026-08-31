@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::exact::square_of_expansion;
 use crate::isometry::Isometry;
-use crate::point::Point;
+use crate::point::{Point, Vector};
 use crate::{Error, Result};
 
 /// The name the sphere's sign predicate goes by in provenance records.
@@ -73,6 +73,33 @@ impl Sphere {
             centre: movement.apply_to_point(self.centre),
             radius: self.radius,
         }
+    }
+
+    /// The point at longitude `round` and latitude `up`, both in radians.
+    ///
+    /// `round` is measured from `+x` towards `+y` and `up` from the equator
+    /// towards `+z`, so `(0, 0)` is on `+x` and `up = ±π/2` are the poles.
+    ///
+    /// A ball has no axis of its own to take a frame from — it is the same ball
+    /// however it is turned — so the frame is the world's, fixed. One
+    /// consequence is worth stating because it looks like a bug otherwise:
+    /// turning a ball does **not** turn its parameterization, since there is
+    /// nothing about the ball for the turn to act on.
+    ///
+    /// Only exactly on the skin where the sines and cosines are exact, which in
+    /// practice means `(0, 0)`. **Not even at the poles**, where `cos(π/2)` is
+    /// `6.1e-17` rather than zero and this lands a hair off. A ball's poles are
+    /// stored exactly instead, and a mesher takes them from the wire's pole
+    /// steps rather than from here.
+    #[must_use]
+    pub fn point_at(&self, round: f64, up: f64) -> Point {
+        let ring = up.cos() * self.radius;
+        self.centre
+            + Vector::new(
+                ring * round.cos(),
+                ring * round.sin(),
+                up.sin() * self.radius,
+            )
     }
 }
 
