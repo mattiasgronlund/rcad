@@ -3699,8 +3699,63 @@ wrong, and only the grid could tell. §16.10's shape again: a locally valid
 argument answering a subtly different question than the measurement asks. Two
 of those in one section, counting §22.3.
 
-### 22.6 What this does not settle
+### 22.6 The family found a defect on its first full run
 
+`swapping_the_two_sides_of_a_skew_pair` failed the second time the whole suite
+ran, and the cause is one line of arithmetic that every family before this one
+was safe from by luck.
+
+`Plane::from_point_and_normal` normalizes the vector it is handed, so what it
+stores depends on that vector's **length** and not only on its direction:
+
+```text
+normal (1, 1, 0)  ->  0.7071067811865475
+normal (2, 2, 0)  ->  0.7071067811865475
+normal (3, 3, 0)  ->  0.7071067811865476
+normal (6, 6, 0)  ->  0.7071067811865476
+```
+
+`build_side_face` takes a wall normal as `(along_y, -along_x, 0)` straight off
+the profile, so the length is whatever that outline's edge happened to be. **Two
+walls that are the same plane get coefficients an ulp apart when they stand on
+edges of different lengths.** §17.1 makes a face *be* its plane, so those are two
+different planes to this kernel, and a fuse over such a pair keeps whichever
+belonged to the argument — which makes the answer depend on which side is which.
+An Ell and a Comb, both leaned by `-1`, both at the origin, intersected: same
+solid, same twelve faces, same corners to the bit, and one face on a plane
+differing in the last place.
+
+Every rectilinear family is safe from this and none of them is safe *by design*.
+An axis-aligned normal of any length normalizes exactly — dividing `(0, 3, 0)` by
+`3` is exact — and the turned families rotate both solids by one isometry, so
+coplanar walls stay bit-identical however long their edges. Tilting a wall is
+what breaks it, and until now nothing here could tilt one.
+
+**A gap and not a limit** (§16.10). The answer exists and the arithmetic can
+reach it: dividing the normal by its largest-magnitude component before
+normalizing makes the result depend on the ratios alone, and the ratios of two
+scalar multiples are the same real number and so round the same way. That is a
+change to every plane this kernel stores, which is why it is recorded here and
+not made here.
+
+Two things stand in for the fix. `the_same_wall_built_from_a_longer_edge_is_a_different_plane`
+pins the arithmetic and is written the way §19 writes them — it asserts what the
+code does, so fixing the defect fails it loudly with the fix in hand. And the
+commutativity property over skew pairs compares **the corners only**, which is
+not much of a retreat: the partition is what §17.4's argument is about, a
+splitter that ordered its cuts differently would move a corner, and what is given
+up is the last bit of a coefficient nobody disagrees about geometrically. When
+the plane is canonical the comparison goes back to every last bit, and the diff
+is one word.
+
+Worth saying plainly, because §17.8 predicted it and put a price on it: **the
+family found this on its first full run of the suite, after three million fuses
+over the old generators had found nothing.**
+
+### 22.7 What this does not settle
+
+- **§22.6's plane defect is recorded and not fixed.** It is a gap, the fix is
+  named, and it touches every plane in the kernel.
 - **Whether the `"order along a line"` refusals are deserved.** §14.7's worry
   applies here exactly as it does to the turned family, and a rate cannot tell a
   timid filter from a genuine tie. What would tell is a hand-written pair with
