@@ -109,8 +109,9 @@ use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{
     Configuration, Movement, Rigid, a_chain_of_fuses, a_flush_pair, a_lattice_pair, a_lattice_trio,
-    a_pair_somewhere_else, a_rigid_movement, a_solid_and_its_copy, a_turned_pair,
-    a_turned_solid_and_its_copy, a_turned_solid_and_several_copies,
+    a_pair_leaning_the_same_way, a_pair_somewhere_else, a_rigid_movement, a_skew_pair,
+    a_solid_and_its_copy, a_turned_pair, a_turned_solid_and_its_copy,
+    a_turned_solid_and_several_copies,
 };
 
 /// How many configurations a property that runs two fuses per case sees.
@@ -201,6 +202,24 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 /// recorded, and this is only here so it cannot drift unnoticed.
 const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 
+/// How much of the skew family a certified fuse is allowed to refuse.
+///
+/// **§22's threshold**, and the same kind of number as
+/// [`TURNED_REFUSALS_MUST_STAY_BELOW`] in every respect: deterministic, judged
+/// on the shipped corpus only, and there so the measurement cannot drift
+/// unnoticed rather than as a target.
+///
+/// Eighteen per cent. [`measured`] runs from a fixed seed, so the shipped corpus
+/// of 420 skew fuses refuses 60 of them, 14.29%, every run on every machine.
+/// There is no sampling noise to clear, so what the gap has to allow is ordinary
+/// drift — 3.7 points is fifteen fuses, the same headroom
+/// [`TURNED_REFUSALS_MUST_STAY_BELOW`] leaves — and what it has to catch is a
+/// regression in the one family that reaches a branch nothing else does.
+///
+/// **Judged on the shipped corpus only**, for the reason
+/// [`this_is_the_shipped_corpus`] gives. SKEW_SOAK_PROSE
+const SKEW_REFUSALS_MUST_STAY_BELOW: f64 = 0.18;
+
 /// How many of the comparisons a property set out to make it has to have made.
 ///
 /// §14.7's half of it, and the same idea and the same shape as
@@ -262,6 +281,29 @@ const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.02..=0.10;
 /// rotation of, because a quarter of that family's fuses refuse before they get
 /// far enough to find out whether the answer is a solid.
 const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.015..=0.09;
+
+/// The same for the family whose outlines lean over.
+///
+/// Measured at 1.2% over the shipped corpus — 5 of 420 — which is a *quarter*
+/// of the lattice family's 4.8%, and the reason is the point of the family. An
+/// answer is not a solid here almost always because two solids meet along a
+/// whole edge and four faces would run along it, and that needs the two edges to
+/// be the same edge exactly. Leaning the two solids by different amounts is
+/// precisely what stops them sharing an edge.
+const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.005..=0.03;
+
+/// The same for its control, where both solids lean the same way.
+///
+/// Measured at 3.1% — 13 of 420 — and it is the lattice family's 4.8% rather
+/// than the skew family's 1.2%, which is the arithmetic saying what the control
+/// claims. Leaning both solids by the same amount is an affine map of the whole
+/// pair, and an affine map preserves incidence exactly, so the edges that
+/// coincided still coincide and the answers that were not solids still are not.
+/// It does not land on 4.8% exactly because this family draws one more number
+/// per case, so the two corpora are not the same 128 configurations — the same
+/// caveat [`A_PAIR_ELSEWHERE_IS_NOT_A_SOLID`] carries — and because a fuse that
+/// refuses never gets far enough to find out whether its answer was a solid.
+const A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.012..=0.08;
 
 #[test]
 fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
@@ -956,6 +998,90 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
     }
 }
 
+/// §22's headline: the one family whose two solids are not square to each other.
+///
+/// The tilt and the arrangement are two different costs and this row is both of
+/// them added together, which is why it is never read without
+/// [`how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses`] beside
+/// it. That row holds the arrangement fixed and prices the tilt alone; the
+/// difference is what leaning the two solids *differently* costs.
+///
+/// The breakdown is the half anybody can act on (§14.7), and here it says
+/// something the total cannot. §17.7 records that every refusal the turned
+/// family has ever produced named `"side of plane"`, with
+/// `"a point inside a piece of a face"` turning up rarely and no seed ever
+/// naming a third. This family's leading cause is `"order along a line"`, which
+/// that corpus essentially never reaches — and reaching it is the point. Three
+/// cut lines through one point put two intersections at the same place on a
+/// line, and an ordering that is a tie is not a comparison any amount of
+/// precision settles.
+#[test]
+fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
+    let tally = measured(a_skew_pair(), |configuration, tally| {
+        every_rule(tally, Coordinates::SitOnTiltedWalls, configuration)
+    });
+    tally.report("§22 headline: skew pairs, every rule");
+    tally.share_of_answers_that_were_not_solids_must_be_within(A_SKEW_PAIR_IS_NOT_A_SOLID);
+
+    let refused = tally.refused.get() as f64 / tally.fuses.get() as f64;
+    if this_is_the_shipped_corpus() {
+        assert!(
+            refused < SKEW_REFUSALS_MUST_STAY_BELOW,
+            "{:.1}% of {} skew fuses refused, over the {:.0}% §22 records",
+            refused * 100.0,
+            tally.fuses.get(),
+            SKEW_REFUSALS_MUST_STAY_BELOW * 100.0
+        );
+        tally.the_cause_named_most_often_is(ORDER_ALONG_A_LINE);
+    }
+}
+
+/// §22's control, and the row that makes the headline mean anything.
+///
+/// Both solids lean the same way, so the pair is an affine image of a lattice
+/// pair: the same shapes overlapping in the same way, the same cut lines on
+/// every face in the same order. The lattice row decides all of it and refuses
+/// zero. The only thing left between the two rows is that the walls are on
+/// tilted planes, whose unit normals are rounded and cannot be otherwise.
+///
+/// So this is not asserted to be zero, and it should not be. What it is for is
+/// the subtraction: whatever this row costs is the price of the tilt, and the
+/// headline row minus this one is the price of the arrangement.
+#[test]
+fn how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses() {
+    let tally = measured(a_pair_leaning_the_same_way(), |configuration, tally| {
+        every_rule(tally, Coordinates::SitOnTiltedWalls, configuration)
+    });
+    tally.report("§22 control: both leaning alike, every rule");
+    tally.share_of_answers_that_were_not_solids_must_be_within(A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID);
+}
+
+/// Commutativity over the one family that can put three cut lines through a
+/// point.
+///
+/// The sharpest question in the file (§17.4) asked of the arrangement that has
+/// never been asked it. A splitter that cut a face by one line and then cut the
+/// pieces by the next computes a different partition depending on which line it
+/// took first — and where three lines are concurrent, "which first" is a tie
+/// rather than a comparison, so the two ways round are as far apart as this
+/// suite can push them. Both runs build the same model from the same whole
+/// numbers, so the comparison stays bit for bit with no tolerance, exactly as it
+/// is everywhere else here.
+#[test]
+fn swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit() {
+    let tally = over(CASES, a_skew_pair(), |configuration, tally| {
+        both_ways_round(tally, Coordinates::SitOnTiltedWalls, configuration)
+    });
+    tally.report_what_it_compared("A ∪ B against B ∪ A, skew pairs");
+}
+
+/// The predicate that settles which of two points on a line comes first.
+///
+/// Named here because [`how_often_a_certified_fuse_of_a_skew_pair_refuses`]
+/// asserts on it rather than only printing it, and a bare string in an
+/// assertion is a thing that goes stale silently.
+const ORDER_ALONG_A_LINE: &str = "order along a line";
+
 /// Whether this run is the shipped measurement rather than a soak.
 ///
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] is a statement about one deterministic
@@ -1092,7 +1218,7 @@ fn fused(
                     .or_default() += 1;
             }
             match coordinates {
-                Coordinates::AreUnderAGeneralRotation => Ok(None),
+                Coordinates::AreUnderAGeneralRotation | Coordinates::SitOnTiltedWalls => Ok(None),
                 Coordinates::AreExactlyRepresentable => Err(TestCaseError::fail(format!(
                     "a {rule:?} over exactly representable coordinates refused, with {} records",
                     records.len()
@@ -1175,6 +1301,9 @@ enum Coordinates {
     AreExactlyRepresentable,
     /// Under a general rotation, where a refusal is the thing being measured.
     AreUnderAGeneralRotation,
+    /// Whole-number corners standing on walls that are not axis-aligned, where
+    /// a refusal is again an outcome to count rather than a failure.
+    SitOnTiltedWalls,
 }
 
 /// What every fuse a property ran came back with.
@@ -1260,6 +1389,35 @@ impl Tally {
             "{what}: only {} of {meant_to} comparisons had an answer on both sides, \
              so this property barely asserted anything",
             self.compared.get()
+        );
+    }
+
+    /// Insist `predicate` is the one the most refusals named.
+    ///
+    /// A rate says how often the kernel gives up and the breakdown says on
+    /// what, and for one family the breakdown is the claim. §22's skew pairs
+    /// exist to reach an arrangement no other family can draw — three cut lines
+    /// through one point, where putting two intersections in order along a line
+    /// is a tie rather than a comparison. If that ever stops being what this
+    /// family mostly refuses on, the family has quietly become its own control
+    /// and its headline number is measuring the tilt over again.
+    ///
+    /// Judged on the shipped corpus only, for the same reason the thresholds
+    /// are: this is deterministic there — 30 naming it against 21 naming
+    /// `"side of plane"` — while a soak is a different corpus with a spread of
+    /// its own. Four soaked seeds put the margin far wider than the shipped one
+    /// rather than narrower, so this is the conservative place to judge it.
+    fn the_cause_named_most_often_is(&self, predicate: &str) {
+        let gave_up = self.gave_up.borrow();
+        let most = gave_up
+            .iter()
+            .max_by_key(|&(_, count)| *count)
+            .map(|(name, _)| *name);
+        assert_eq!(
+            most,
+            Some(predicate),
+            "the refusals mostly named {most:?} and not {predicate:?}, so this family \
+             has stopped reaching the branch it was built for: {gave_up:?}"
         );
     }
 

@@ -31,8 +31,12 @@
 //!   handed an answer three fuses old — which is the only place a corner with
 //!   four or more planes round it, or a face joined out of coplanar pieces, ever
 //!   turns up as an *input*.
+//! - [`a_skew_pair`] is the **only pair that is not square to itself**. Each
+//!   solid is leaned over by its own whole-number shear, so the corners stay
+//!   exact while the walls stop being parallel between the two solids — which is
+//!   the one way to put three cut lines through one point on a face.
 //!
-//! Each of the last two answers §14.1's four questions at its own strategy.
+//! Each of the last three answers §14.1's four questions at its own strategy.
 //!
 //! # Why these shapes
 //!
@@ -140,6 +144,16 @@ const LARGEST_SCALE: i32 = 280;
 /// this constant used to record is closed.
 const FURTHEST_SHIFT_EXPONENT: u32 = 30;
 
+/// How far [`a_skew_pair`] may lean an outline over.
+///
+/// Two, and the ceiling is what the lean does to a wall one thick. A lean of two
+/// is the matrix `[[1, 2], [0, 1]]`, whose singular values are `2.414` and
+/// `0.414`, so a [`Shape::Frame`]'s one-thick wall comes out about two fifths as
+/// thick in the squeezed direction. That is still a wall — the determinant is
+/// one, so nothing ever collapses — and it is deliberately near the sliver of
+/// §7.4's sixth catalogue entry without being one.
+const SHARPEST_SKEW: i32 = 2;
+
 /// How many steps a whole turn is generated in.
 ///
 /// Sixty-four so that a quarter turn is reachable — the angle whose cosine is
@@ -185,15 +199,61 @@ pub enum Shape {
     },
 }
 
-/// One solid: an outline, how far it is extruded, and where it is put down.
+/// One solid: an outline, how the outline is leaned over, how far it is
+/// extruded, and where it is put down.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Placed {
     /// What it is cut from.
     pub shape: Shape,
+    /// How far the outline leans over before it is extruded.
+    pub skew: Skew,
     /// How far it is extruded along `z`.
     pub height: u32,
     /// Where the outline's own origin ends up.
     pub at: [i32; 3],
+}
+
+/// How far an outline leans over, in whole numbers, in its own plane.
+///
+/// One slide: a corner moves along `x` by [`Skew::x_per_y`] for every step it
+/// stands along `y`. As a matrix that is `[[1, x_per_y], [0, 1]]`, whose
+/// determinant is `1` for every whole number, and a determinant of one is three
+/// things at once:
+///
+/// - **The outline stays an outline.** An affine map takes a simple polygon to a
+///   simple polygon, and a positive determinant keeps it anticlockwise, so a
+///   leaning [`Shape`] never needs checking and never gets filtered. A hole
+///   stays strictly inside its outline for the same reason.
+/// - **Every corner stays a whole number.** Whole numbers in, whole numbers
+///   out — which is what separates this family from [`a_turned_pair`], where the
+///   very first coordinate is already irrational.
+/// - **The volume does not change.** Leaning an extrusion over shears the prism,
+///   so the answer encloses exactly what the lattice configuration it came from
+///   encloses.
+///
+/// # Why one slide and not two
+///
+/// A second slide the other way — `y` by so much per step of `x` — was written,
+/// measured and taken out again. It is the only way to leave a solid with *no*
+/// wall along `(1, 0)`, so on paper it is the only way for two solids to share
+/// no wall direction at all, which sounds like exactly what this family wants.
+///
+/// Measured, it does not do that. It squeezes. Composing the two slides gives
+/// `[[1, a], [b, 1 + ab]]`, and at `a = b = 2` the singular values are `5.83`
+/// and `0.17` — a squeeze of 34 to 1, against 5.83 to 1 for one slide of two.
+/// A grid of refusal rates over every pair of leans settles which of the two
+/// effects the number is reporting: a solid leaned `[1, 1]` against a flat one
+/// refuses 39.6% of the time, and against *another leaned exactly the same way*
+/// — which is a pair square to itself, an affine image of a lattice pair —
+/// 41.7%. The same number. **The second slide measures how badly one solid is
+/// squeezed and not how the two sit against each other**, so it would have
+/// bought a headline rate that mostly reports slivers.
+///
+/// [`Skew::none`] is the identity, which is what every other family uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Skew {
+    /// How far a corner slides along `x` for each step along `y`.
+    pub x_per_y: i32,
 }
 
 /// A quarter turn about the `z` axis and a whole-number shift.
@@ -308,6 +368,125 @@ pub fn a_turned_pair() -> impl Strategy<Value = Configuration> {
     })
 }
 
+/// The lattice pairs, each solid leaned over by its own whole-number shear.
+///
+/// The **only family in which the two solids are not axis-aligned to each
+/// other**. Every other family turns both solids by the same rotation, so
+/// whatever the world coordinates look like the pair stays as square to itself
+/// as the lattice configuration it came from. Here the two shears differ, and
+/// that is the whole point.
+///
+/// # What no other family can express
+///
+/// A face of an answer is cut by lines: where the other solid's planes meet the
+/// face, and the face's own boundary. In every family that exists today both
+/// solids' wall planes have normals drawn from **one** set of three orthogonal
+/// directions — the axes, or the axes under the one shared rotation. A wall
+/// plane meets a face plane in a line, and with three orthogonal normals in play
+/// the lines on any one face come in at most **two** directions.
+///
+/// Three distinct lines through one point need three distinct directions, so
+/// **no configuration in the corpus has ever put three concurrent cut lines on a
+/// face.** A leaning solid keeps its walls along `(1, 0)` and tilts the rest to
+/// `(x_per_y, 1)`, so a pair leaning by two different amounts has walls in three
+/// directions instead of two. That reaches the arrangement the others
+/// structurally cannot: the vertex where three cut lines meet, which is where a
+/// face's arrangement has to settle an ordering that is a tie rather than a
+/// comparison.
+///
+/// # §14.1's four questions
+///
+/// 1. **Exactly true, or needing a bound?** Exactly true for what is asserted,
+///    and the reason is worth being precise about, because this family sits
+///    between the two kinds the file already has.
+///
+///    Every **corner** that goes in is a whole number: [`Skew::corner`] is whole
+///    numbers to whole numbers, and so are `at`, the quarter turn and the lift.
+///    Every **horizontal** plane is exact too — a cap's normal is `(0, 0, ±1)`
+///    and its offset a small whole number.
+///
+///    Every **tilted wall** plane is not, and cannot be. `build_side_face` takes
+///    the wall normal as `(along_y, -along_x, 0)` and
+///    `Plane::from_point_and_normal` normalizes it, and the only exactly
+///    representable unit normals are the signed axis directions. That is a
+///    proof and not a hope: an `f64` is a dyadic rational, so a unit normal with
+///    `f64` components gives whole numbers with `p₁² + p₂² + p₃² = 4^k`; squares
+///    are `0` or `1` mod `4`, so all three have to be even, so every solution
+///    descends to one of `4^{k-1}`, and the descent bottoms out at
+///    `1 = 1 + 0 + 0`. Only `(±2^k, 0, 0)` and its permutations survive.
+///
+///    So what runs here is what is exactly true whatever the coefficients are:
+///    the two runs of one question agreeing bit for bit, and every plane of an
+///    answer being a plane of an input. **Inclusion and exclusion is not
+///    asserted**, for the same reason §17.8 gives for turned pairs — the corners
+///    the fuse invents are meets of tilted planes and a bound on the sum of the
+///    four volumes needs a bound on how badly conditioned those triples are,
+///    which nothing in this tree has. **Neither is transform invariance**, and
+///    that one is specific to this family: [`Movement::plane`] slides a plane
+///    along its own normal by `n · t`, which is exact when `n` is a signed unit
+///    axis and a rounding otherwise, so the property would be comparing the
+///    generator's arithmetic against the kernel's rather than the kernel against
+///    itself.
+/// 2. **Do the two runs take different paths?** Yes, and further apart than
+///    swapping the sides usually manages. The lines cutting a face arrive in
+///    three or four directions instead of two, so the order the splitter meets
+///    them in differs between the two runs at every concurrent vertex — which is
+///    exactly the tie a partition can resolve two ways and still be right about
+///    the solid. §17.4 settles that a splitter which cut by one line and then
+///    cut the pieces by the next would compute a genuinely different partition
+///    each way round; until now no generated input could make three lines meet
+///    to test it.
+/// 3. **What family of inputs?** The lattice configurations, one shear per
+///    solid, drawn after them so the shapes are the shapes. Nothing is added to
+///    [`a_shape`] — §17.7's recorded figures run a fixed seed over it, and the
+///    handoff rule is that new shapes go in new strategies with rows of their
+///    own.
+/// 4. **Which gap would this have caught?** §17.8's headline lesson with the
+///    numbers on it: three million fuses over the shipped generators found
+///    nothing in 934 seconds, and one new shape family found a defect in 0.02
+///    seconds and under forty fuses. That section names the mechanism —
+///    "the corpus that has already run is worth almost nothing; the shape nobody
+///    has drawn yet is worth almost everything" — and names the family of
+///    arrangement the corpus could not draw. This is the cheapest shape that
+///    changes the *arrangement* rather than the numbers: one integer shear per
+///    solid, no new outline, no new arithmetic on the way in.
+pub fn a_skew_pair() -> impl Strategy<Value = Configuration> {
+    (lattice_solids(2), a_skew(), a_skew()).prop_map(|(solids, first, second)| Configuration {
+        solids: solids
+            .into_iter()
+            .zip([first, second])
+            .map(|(placed, skew)| Placed { skew, ..placed })
+            .collect(),
+        turn: None,
+        elsewhere: Elsewhere::here(),
+    })
+}
+
+/// The same pairs with both solids leaning the *same* way, which is
+/// [`a_skew_pair`]'s control.
+///
+/// A shear is affine, so leaning both solids of a lattice pair over by the same
+/// amount is an affine image of that pair: same shapes, same overlaps, same
+/// touchings, same arrangement of cut lines on every face, corner for corner.
+/// The lattice family decides all of that and refuses **zero**. What is left
+/// between the two rows is one thing and one thing only — the walls are on
+/// tilted planes, whose unit normals are rounded rather than exact.
+///
+/// So this row prices the tilt on its own, and [`a_skew_pair`]'s row minus this
+/// one is what the *arrangement* costs. §17.7's control row exists to make
+/// exactly that subtraction, and without it the skew family's number would be
+/// two effects added together with no way to tell which is which.
+pub fn a_pair_leaning_the_same_way() -> impl Strategy<Value = Configuration> {
+    (lattice_solids(2), a_skew()).prop_map(|(solids, skew)| Configuration {
+        solids: solids
+            .into_iter()
+            .map(|placed| Placed { skew, ..placed })
+            .collect(),
+        turn: None,
+        elsewhere: Elsewhere::here(),
+    })
+}
+
 /// Two solids of the same shape, the second offset by a whole number of that
 /// shape's own extents.
 ///
@@ -328,10 +507,16 @@ pub fn a_flush_pair() -> impl Strategy<Value = Configuration> {
             solids: vec![
                 Placed {
                     shape,
+                    skew: Skew::none(),
                     height,
                     at: [0, 0, 0],
                 },
-                Placed { shape, height, at },
+                Placed {
+                    shape,
+                    skew: Skew::none(),
+                    height,
+                    at,
+                },
             ],
             turn: None,
             elsewhere: Elsewhere::here(),
@@ -413,6 +598,7 @@ pub fn a_turned_solid_and_several_copies() -> impl Strategy<Value = Configuratio
     (a_shape(), 1u32..=3, 2usize..=4, a_turn()).prop_map(|(shape, height, copies, turn)| {
         let placed = Placed {
             shape,
+            skew: Skew::none(),
             height,
             at: [0, 0, 0],
         };
@@ -541,14 +727,29 @@ impl Placed {
     /// world-coordinate movement a quarter turn and a shift of `2^scale` times
     /// a whole number rather than something with the shift's own image in it.
     /// [`Rigid::in_the_world_of`] is the other half of that arrangement.
+    ///
+    /// The [`Skew`] goes on before all of it, and it goes on **after `at`**
+    /// rather than to the outline's own corners. That ordering is what makes
+    /// [`a_pair_leaning_the_same_way`] a control: leaning a solid's outline and
+    /// then putting it down somewhere is `S(ring) + at`, which is not the image
+    /// of anything, while leaning the solid where it stands is
+    /// `S(ring + at) = S(ring) + S(at)` — so two solids leaning by the same
+    /// amount are the one affine image `S` of the whole lattice pair, corner for
+    /// corner. Get it the wrong way round and the control still runs, still
+    /// reports a number, and no longer prices what it says it prices.
+    ///
+    /// Every step here is whole numbers to whole numbers, so the corners that
+    /// reach [`ProfileBuilder`] are exact however far the outline leans, and a
+    /// shrink toward [`Skew::none`] lands on the very lattice configuration the
+    /// case came from.
     fn built_after(&self, movement: &Rigid, elsewhere: Elsewhere, model: &mut Model) -> SolidKey {
         let rings = self.shape.rings();
         let away = elsewhere.shift_along_each_axis();
         let flat = |ring: &[[i32; 2]]| -> Vec<[f64; 2]> {
             ring.iter()
                 .map(|&[x, y]| {
-                    let [x, y, _] =
-                        movement.whole_point([x + self.at[0] + away, y + self.at[1] + away, 0]);
+                    let [x, y] = self.skew.corner([x + self.at[0], y + self.at[1]]);
+                    let [x, y, _] = movement.whole_point([x + away, y + away, 0]);
                     [elsewhere.scaled(x), elsewhere.scaled(y)]
                 })
                 .collect()
@@ -572,6 +773,26 @@ impl Placed {
                 &Isometry::translation(lift).expect("a whole-number lift"),
             )
             .expect("every generated profile extrudes")
+    }
+}
+
+impl Skew {
+    /// The shear that leaves an outline where it is.
+    #[must_use]
+    pub fn none() -> Self {
+        Self { x_per_y: 0 }
+    }
+
+    /// Whether this shear leaves the outline alone.
+    #[must_use]
+    pub fn is_none(self) -> bool {
+        self == Self::none()
+    }
+
+    /// Where a whole-number corner ends up, still a whole number.
+    #[must_use]
+    pub fn corner(self, [x, y]: [i32; 2]) -> [i32; 2] {
+        [x + self.x_per_y * y, y]
     }
 }
 
@@ -825,6 +1046,7 @@ fn lattice_solids(count: usize) -> impl Strategy<Value = Vec<Placed>> {
             .enumerate()
             .map(|(index, (shape, height, at))| Placed {
                 shape,
+                skew: Skew::none(),
                 height,
                 at: if index == 0 { [0, 0, 0] } else { at },
             })
@@ -837,6 +1059,7 @@ fn a_copied_solid() -> impl Strategy<Value = Vec<Placed>> {
     (a_shape(), 1u32..=3).prop_map(|(shape, height)| {
         let placed = Placed {
             shape,
+            skew: Skew::none(),
             height,
             at: [0, 0, 0],
         };
@@ -884,6 +1107,14 @@ fn a_turn() -> impl Strategy<Value = Turn> {
         },
         steps,
     })
+}
+
+/// How far one outline leans over, shrinking toward not leaning at all.
+///
+/// So a failing case shrinks to "this lattice configuration, with one solid
+/// leaned over by one", which is a thing a person can draw.
+fn a_skew() -> impl Strategy<Value = Skew> {
+    (-SHARPEST_SKEW..=SHARPEST_SKEW).prop_map(|x_per_y| Skew { x_per_y })
 }
 
 /// Where the second solid of a degenerate pair sits along one axis.
