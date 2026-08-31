@@ -1631,6 +1631,31 @@ intersected, this bug would have produced a confidently wrong box.
 `1e8`, because the derived net scaled before dividing. §4.1 ranks a silent
 corrupt value below a crash, and this was one.
 
+**Amended, after the fix was questioned.** Dividing before scaling left a
+narrower case still refused — control coordinates more than the whole `f64`
+range apart, whose true tangent may be an ordinary number — and it was written
+down as a limit that *no ordering of the arithmetic could fix*. That was true,
+and it was the wrong frame. Reordering cannot help, because every route to a
+derived point needs the same subtraction; **scaling can**, and one halving
+always suffices, since two coordinates each at most `f64::MAX` have halves at
+most `f64::MAX` apart. The factor of two returns in the final scale. A tangent
+of exactly `5e307` that had been refused now comes back exact.
+
+The general lesson is worth more than the case: **a proof that no member of a
+family of fixes works is not a proof that the thing cannot be fixed.** The
+correct reading of "no ordering helps" was that ordering was the wrong family to
+be searching. The gap survived a review that had already found two real bugs in
+the same function, because it arrived carrying its own impossibility argument —
+and an argument for why something cannot be done is exactly the kind of claim a
+reviewer is least likely to re-derive.
+
+What is left is a genuine limit rather than a gap, and the two are now
+distinguished in the doc comment: a knot span one `f64` step wide under ordinary
+coordinates has a true derivative past `f64::MAX`. `KnotVector::new` accepts such
+a span on purpose, so the refusal is about the numbers asked for and not about
+the arithmetic used — which is what makes `Error::NotFinite` reachable enough to
+deserve handling at all.
+
 **Three oracles that could not fail.** The knot-insertion oracle — §14.3's *first*
 exactly-true relation — asserted nothing on about half of every family's draws,
 because the helper choosing untouched control points returns an empty list on
