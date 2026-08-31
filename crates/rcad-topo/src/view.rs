@@ -1,5 +1,6 @@
 use rcad_geom::{Isometry, Orientation, Plane, Point, Segment, Surface, Vector};
 use rcad_predicates::Approximation;
+use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{
@@ -458,10 +459,20 @@ impl<'m> WireView<'m> {
         self.orient
     }
 
-    /// How many coedges the chain has.
+    /// How many coedges the chain has, not counting poles.
     #[must_use]
     pub fn coedge_count(self) -> usize {
-        self.data().coedges.len()
+        self.data().coedges().count()
+    }
+
+    /// How many steps the chain has, counting poles.
+    ///
+    /// Different from [`WireView::coedge_count`] only for a wire round a
+    /// surface that pinches to a point — a ball's one face has four steps and
+    /// two coedges, because two of the four go nowhere.
+    #[must_use]
+    pub fn step_count(self) -> usize {
+        self.data().steps.len()
     }
 
     /// Whether this is one coedge on an edge that already comes back to where
@@ -480,9 +491,11 @@ impl<'m> WireView<'m> {
     /// other way round, so following it always keeps the material on the same
     /// side. That is the whole point of orientation living on the reference
     /// rather than the node (roadmap §5.2).
+    /// Poles are skipped, because a pole is not a use of an edge. Use
+    /// [`WireView::step_count`] when the difference matters.
     pub fn coedges(self) -> impl Iterator<Item = CoedgeView<'m>> {
         let (model, loc, orient) = (self.model, self.loc, self.orient);
-        let coedges = &self.data().coedges;
+        let coedges: SmallVec<[CoedgeSlot; 4]> = self.data().coedges().collect();
         let count = coedges.len();
         (0..count).map(move |step| {
             let position = if orient.is_reversed() {
@@ -498,6 +511,9 @@ impl<'m> WireView<'m> {
     ///
     /// One point per coedge: the point that coedge starts at. Following them
     /// round and back to the first one traces the wire.
+    ///
+    /// A pole adds no point of its own, because it stands still on the corner
+    /// the coedge either side of it already named.
     pub fn points(self) -> impl Iterator<Item = Point> {
         self.coedges().map(|coedge| coedge.start().point())
     }

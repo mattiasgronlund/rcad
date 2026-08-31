@@ -181,6 +181,16 @@ pub enum Invalid {
     #[error("a corner of a curved face is not on the surface that face sits on")]
     VertexOffItsFaceSurface,
 
+    /// An edge named as part of a crossing sits outside a half-space that was
+    /// meant to pick which part.
+    ///
+    /// A crossing of two surfaces can have more than one piece — a plane cuts a
+    /// sphere in a circle, and two points on a circle leave two arcs — so an
+    /// edge names the half-spaces it lies in. If an end of the edge is outside
+    /// one of them, the name picks a piece the edge is not.
+    #[error("an end of an edge is outside a half-space that was meant to pick it out")]
+    EdgeOutsideWhatPickedIt,
+
     /// An edge is not used by exactly two coedges.
     #[error("an edge is used by {count} coedges; a closed solid uses every edge exactly twice")]
     EdgeCoedgeCount {

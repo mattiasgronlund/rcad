@@ -1,11 +1,11 @@
-use rcad_geom::{Axis, Cylinder, Isometry, Orientation, Plane, Point, Surface, Vector};
+use rcad_geom::{Axis, Cylinder, Isometry, Orientation, Plane, Point, Sphere, Surface, Vector};
 use rcad_predicates::{
     Approximation, Decision, Policy, ProvenanceLog, Record, orient2d_tolerantly,
 };
 use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
-use crate::model::{FaceUse, ShellUse};
+use crate::model::{EdgeRun, FaceUse, ShellUse, WireStep};
 use crate::{EdgeKey, Error, FaceKey, Model, Result, SolidKey, VertexKey};
 
 /// A flat outline with holes in it, checked and ready to extrude.
@@ -670,6 +670,85 @@ impl Model {
                 })
                 .collect(),
         );
+        let solid = self.add_solid(SmallVec::from_buf([ShellUse {
+            shell,
+            loc: *placement,
+            orient: Orientation::Forward,
+        }]));
+
+        self.check_touched_solid(solid);
+        self.assert_approximation_did_not_grow(approximation_before);
+        Ok(self.key_for_solid(solid))
+    }
+
+    /// A ball of `radius` about the origin, placed with `placement`.
+    ///
+    /// **One face, one seam, two poles**, and the alternatives were rejected
+    /// for what they would fail to exercise. Two hemispheres joined at the
+    /// equator never puts a seam on one face; a six-patch cube-sphere has
+    /// neither a seam nor a pole. A ball whose whole purpose is to be the first
+    /// shape with both should not be built in the one arrangement that has
+    /// neither.
+    ///
+    /// So the boundary of the single face is a rectangle in `(u, v)` whose four
+    /// sides are: down the seam, the south pole, back up the seam, the north
+    /// pole. Two of those four steps go nowhere at all, which is what a
+    /// [`WireStep::Pole`] is.
+    ///
+    /// The seam is the edge that forced [`EdgeRun::PartOfWhereItCrosses`]. Both
+    /// its ends are the poles and both its sides are the same sphere, so
+    /// neither the faces nor the endpoints say which half of the meridian
+    /// circle it is — see that variant for why.
+    ///
+    /// Both poles sit at `(0, 0, ±radius)`, so `x² + y² + z² − r²` is
+    /// `r² − r²` and cancels to exactly zero: the corners are *certified* onto
+    /// the sphere for any radius `f64` can hold, which is what `Model::validate`
+    /// asks of every corner of every curved face.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Sphere::new`] makes of the radius.
+    ///
+    /// # Panics
+    ///
+    /// If the solid it just built breaks one of the invariants checked on
+    /// touched entities. That is a bug here, not bad input.
+    pub fn add_ball(&mut self, radius: f64, placement: &Isometry) -> Result<SolidKey> {
+        let skin = Sphere::new(Point::origin(), radius)?;
+        let approximation_before = self.worst_approximation();
+
+        let north = self.add_vertex(Point::new(0.0, 0.0, radius));
+        let south = self.add_vertex(Point::new(0.0, 0.0, -radius));
+
+        // The meridian lies in the plane `y = 0`, which crosses the sphere in
+        // one whole circle; the seam is the half of that circle with `x >= 0`.
+        let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+            .expect("the y axis is a unit normal");
+        let facing_x = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+            .expect("the x axis is a unit normal");
+        let seam = self.add_edge_running(
+            north,
+            south,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(meridian),
+                picked_by: smallvec::smallvec![facing_x],
+            },
+        );
+
+        let steps: SmallVec<[WireStep; 4]> = SmallVec::from_buf([
+            WireStep::Along(self.add_coedge(seam, Orientation::Forward)),
+            WireStep::Pole(south),
+            WireStep::Along(self.add_coedge(seam, Orientation::Reversed)),
+            WireStep::Pole(north),
+        ]);
+        let wire = self.add_wire_of_steps(steps);
+        let face = self.add_face(Surface::Sphere(skin), SmallVec::from_buf([wire]));
+
+        let shell = self.add_shell(vec![FaceUse {
+            face,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]);
         let solid = self.add_solid(SmallVec::from_buf([ShellUse {
             shell,
             loc: *placement,

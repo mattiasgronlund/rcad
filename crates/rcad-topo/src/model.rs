@@ -1,4 +1,4 @@
-use rcad_geom::{Isometry, Orientation, Point, Scale, Surface};
+use rcad_geom::{Isometry, Orientation, Plane, Point, Scale, Surface};
 use rcad_predicates::Approximation;
 use serde::{Deserialize, Serialize};
 use slotmap::{SecondaryMap, SlotMap};
@@ -408,7 +408,12 @@ impl Model {
         self.add_edge_running(vertex, vertex, EdgeRun::RightRoundWhereItsFacesCross)
     }
 
-    fn add_edge_running(&mut self, start: VertexSlot, end: VertexSlot, run: EdgeRun) -> EdgeSlot {
+    pub(crate) fn add_edge_running(
+        &mut self,
+        start: VertexSlot,
+        end: VertexSlot,
+        run: EdgeRun,
+    ) -> EdgeSlot {
         let slot = self.data.edges.insert(EdgeData {
             start,
             end,
@@ -430,11 +435,17 @@ impl Model {
     }
 
     pub(crate) fn add_wire(&mut self, coedges: SmallVec<[CoedgeSlot; 4]>) -> WireSlot {
+        self.add_wire_of_steps(coedges.into_iter().map(WireStep::Along).collect())
+    }
+
+    pub(crate) fn add_wire_of_steps(&mut self, steps: SmallVec<[WireStep; 4]>) -> WireSlot {
         let slot = self.data.wires.insert(WireData {
-            coedges: coedges.clone(),
+            steps: steps.clone(),
         });
-        for coedge in coedges {
-            self.index.wire_of_coedge.insert(coedge, slot);
+        for step in steps {
+            if let WireStep::Along(coedge) = step {
+                self.index.wire_of_coedge.insert(coedge, slot);
+            }
         }
         slot
     }
@@ -512,22 +523,24 @@ impl Model {
         }
         let wire = self.data.wires.get(slot).expect("touched wire is gone");
         assert!(
-            wire.coedges.len() >= 3 || self.wire_closes_on_one_edge(wire),
-            "a closed wire needs at least three coedges unless its one edge is \
+            wire.steps.len() >= 3 || self.wire_closes_on_one_edge(wire),
+            "a closed wire needs at least three steps unless its one edge is \
              closed already, this one has {}",
-            wire.coedges.len()
+            wire.steps.len()
         );
         let mut previous_end = None;
         let mut first_start = None;
-        for &coedge in &wire.coedges {
-            let (start, end) = self.coedge_ends(coedge);
+        for &step in &wire.steps {
+            let (start, end) = self.step_ends(step);
             if let Some(previous) = previous_end {
                 assert!(start == previous, "a touched wire does not close");
             } else {
                 first_start = Some(start);
             }
             previous_end = Some(end);
-            self.check_touched_edge(self.data.coedges[coedge].edge);
+            if let WireStep::Along(coedge) = step {
+                self.check_touched_edge(self.data.coedges[coedge].edge);
+            }
         }
         assert!(
             previous_end == first_start,
@@ -535,10 +548,21 @@ impl Model {
         );
     }
 
+    /// Where one step round a wire starts and where it leaves off.
+    ///
+    /// A pole starts and ends at its own vertex, because it goes nowhere: the
+    /// surface has pinched to a point and the boundary is standing on it.
+    pub(crate) fn step_ends(&self, step: WireStep) -> (VertexSlot, VertexSlot) {
+        match step {
+            WireStep::Along(coedge) => self.coedge_ends(coedge),
+            WireStep::Pole(vertex) => (vertex, vertex),
+        }
+    }
+
     /// Whether this wire is one coedge on an edge that already comes back to
     /// where it started — a round cap's boundary, which is one whole circle.
     pub(crate) fn wire_closes_on_one_edge(&self, wire: &WireData) -> bool {
-        let [only] = wire.coedges[..] else {
+        let [WireStep::Along(only)] = wire.steps[..] else {
             return false;
         };
         self.data.edges[self.data.coedges[only].edge].run == EdgeRun::RightRoundWhereItsFacesCross
@@ -622,8 +646,8 @@ impl Model {
         self.data.faces[face]
             .wires
             .iter()
-            .flat_map(|&wire| self.data.wires[wire].coedges.iter())
-            .map(|&coedge| self.data.coedges[coedge].edge)
+            .flat_map(|&wire| self.data.wires[wire].coedges())
+            .map(|coedge| self.data.coedges[coedge].edge)
             .collect()
     }
 
@@ -760,7 +784,7 @@ impl Index {
             }
         }
         for (slot, wire) in &data.wires {
-            for &coedge in &wire.coedges {
+            for coedge in wire.coedges() {
                 index.wire_of_coedge.insert(coedge, slot);
             }
         }
@@ -803,7 +827,7 @@ pub(crate) struct EdgeData {
 /// argument decisions.md §15.9 makes for a pair of planes naming their line.
 /// What the pair does *not* say is which piece of the crossing this edge is,
 /// and that is the whole of what this enum adds.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) enum EdgeRun {
     /// Straight between its two ends, which are the whole of it.
     Straight,
@@ -814,6 +838,30 @@ pub(crate) enum EdgeRun {
     /// one circle, and the edge is the whole of that circle. There is nothing
     /// to disambiguate, which is why this variant carries nothing.
     RightRoundWhereItsFacesCross,
+    /// Part of the curve where the face also crosses `and`, cut down to this
+    /// one piece by `picked_by`.
+    ///
+    /// A ball's seam is why this exists, and it is worth saying exactly why
+    /// neither simpler variant can hold it.
+    ///
+    /// The seam runs pole to pole down one meridian, so the faces either side
+    /// of it are the *same* sphere — and a sphere crossed with itself names
+    /// nothing at all. `and` is the missing second surface: the plane the
+    /// meridian lies in.
+    ///
+    /// The endpoints do not finish the job either, and this is the case that
+    /// forced the design. A plane crosses a sphere in one circle; cutting a
+    /// circle at two points leaves **two** arcs with the same two ends. So
+    /// naming the crossing and naming the ends still names two things.
+    /// `picked_by` settles it: half-spaces this edge lies in, each one exact,
+    /// each answering with a `Decision` rather than with a rounded witness
+    /// point somebody had to construct.
+    PartOfWhereItCrosses {
+        /// The second surface, when the faces either side do not name it.
+        and: Surface,
+        /// Half-spaces this edge lies in, enough of them to pick one piece.
+        picked_by: SmallVec<[Plane; 1]>,
+    },
 }
 
 /// One use of an edge by one wire, running one way round.
@@ -823,10 +871,43 @@ pub(crate) struct CoedgeData {
     pub orientation: Orientation,
 }
 
-/// A closed chain of coedges.
+/// A closed chain of steps round the boundary of a face.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WireData {
-    pub coedges: SmallVec<[CoedgeSlot; 4]>,
+    pub steps: SmallVec<[WireStep; 4]>,
+}
+
+impl WireData {
+    /// The coedges of this wire, skipping any poles.
+    pub fn coedges(&self) -> impl Iterator<Item = CoedgeSlot> + '_ {
+        self.steps.iter().filter_map(|step| match step {
+            WireStep::Along(coedge) => Some(*coedge),
+            WireStep::Pole(_) => None,
+        })
+    }
+}
+
+/// One step round a wire.
+///
+/// A wire is *almost* always a chain of coedges, and was only that until a ball
+/// arrived. What a ball adds is the pole: the top of a sphere is one point in
+/// space, and the whole top side of the face's `(u, v)` rectangle maps onto it.
+/// The boundary has to go somewhere between arriving at the pole and leaving
+/// it, and where it goes is nowhere at all.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub(crate) enum WireStep {
+    /// Along one use of an edge.
+    Along(CoedgeSlot),
+    /// Standing still at a pole, where the surface pinches to a point.
+    ///
+    /// **Deliberately not an edge of zero length.** Roadmap §7.4 lists
+    /// zero-length edges in the degeneracy catalogue as something to detect and
+    /// refuse, and OCCT's answer — a degenerate edge that is zero-long in space
+    /// and full-length in `(u, v)` — makes that entry unaskable, because the
+    /// check can no longer tell the good kind from the broken kind. Giving the
+    /// pole its own step keeps a zero-length edge unconditionally wrong
+    /// (decisions.md §19 of the M2 plan).
+    Pole(VertexSlot),
 }
 
 /// A patch of surface, trimmed by its wires.
@@ -1092,7 +1173,7 @@ mod tests {
             .values_mut()
             .next()
             .expect("a cube has wires")
-            .coedges
+            .steps
             .swap(0, 1);
 
         model.place_solid(cube, &a_movement());

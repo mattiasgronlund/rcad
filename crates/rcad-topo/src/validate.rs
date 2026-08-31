@@ -1,5 +1,6 @@
 use rcad_geom::{
-    DynamicRange, Isometry, Orientation, Plane, SIDE_OF_CYLINDER, SIDE_OF_SPHERE, Surface, Vector,
+    DynamicRange, Isometry, Orientation, Plane, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE,
+    Surface, Vector,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -109,6 +110,26 @@ impl Model {
             {
                 return Err(Invalid::CoedgesRunTheSameWay.into());
             }
+
+            // The other half of Q16's invariant, and the half that keeps an
+            // edge's *name* honest. An edge named by a crossing has to be on
+            // both surfaces of it, and inside every half-space that was used to
+            // pick which piece it is. Otherwise the name describes a curve this
+            // edge is not on, and nothing else in the kernel would notice.
+            if let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &edge.run {
+                for corner in [start.point, end.point] {
+                    let at = PredicatePoint::from(corner.coordinates());
+                    if side_of_surface(and, at) != Decision::Zero {
+                        return Err(Invalid::VertexOffItsFaceSurface.into());
+                    }
+                    if picked_by
+                        .iter()
+                        .any(|half_space| half_space.side_of_point(at) == Decision::Neg)
+                    {
+                        return Err(Invalid::EdgeOutsideWhatPickedIt.into());
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -129,7 +150,7 @@ impl Model {
     fn check_coedges(&self) -> Result<()> {
         let mut used: SecondaryMap<CoedgeSlot, usize> = SecondaryMap::new();
         for wire in self.data().wires.values() {
-            for &coedge in &wire.coedges {
+            for coedge in wire.coedges() {
                 if let Some(entry) = used.entry(coedge) {
                     *entry.or_insert(0) += 1;
                 }
@@ -164,30 +185,39 @@ impl Model {
             }
         }
         for (slot, wire) in &self.data().wires {
-            if wire.coedges.len() < 3 && !self.wire_closes_on_one_edge(wire) {
+            if wire.steps.len() < 3 && !self.wire_closes_on_one_edge(wire) {
                 return Err(Invalid::WireTooShort {
-                    count: wire.coedges.len(),
+                    count: wire.steps.len(),
                 }
                 .into());
             }
-            for &coedge in &wire.coedges {
+            for coedge in wire.coedges() {
                 if !self.data().coedges.contains_key(coedge) {
                     return Err(Invalid::DanglingKey { entity: "coedge" }.into());
                 }
             }
+            for &step in &wire.steps {
+                if let crate::model::WireStep::Pole(vertex) = step
+                    && !self.data().vertices.contains_key(vertex)
+                {
+                    return Err(Invalid::DanglingKey { entity: "vertex" }.into());
+                }
+            }
 
+            // A pole is walked like any other step and simply goes nowhere, so
+            // closure is one rule rather than two.
             let mut previous_end = None;
-            for (position, &coedge) in wire.coedges.iter().enumerate() {
-                let (start, end) = self.coedge_ends(coedge);
+            for (position, &step) in wire.steps.iter().enumerate() {
+                let (start, end) = self.step_ends(step);
                 if previous_end.is_some_and(|previous| previous != start) {
                     return Err(Invalid::WireDoesNotClose { position }.into());
                 }
                 previous_end = Some(end);
             }
-            let first_start = self.coedge_ends(wire.coedges[0]).0;
+            let first_start = self.step_ends(wire.steps[0]).0;
             if previous_end != Some(first_start) {
                 return Err(Invalid::WireDoesNotClose {
-                    position: wire.coedges.len(),
+                    position: wire.steps.len(),
                 }
                 .into());
             }
@@ -325,7 +355,7 @@ impl Model {
         for face in self.data().faces.values() {
             let on_face = magnitude_of(face.approximation);
             for &wire in &face.wires {
-                for &coedge in &self.data().wires[wire].coedges {
+                for coedge in self.data().wires[wire].coedges() {
                     let edge = self.data().coedges[coedge].edge;
                     let on_edge = magnitude_of(self.data().edges[edge].approximation);
                     if on_edge < on_face {
@@ -502,20 +532,43 @@ fn check_flat_face(view: FaceView<'_>, plane: &Plane, allowed_wobble: f64) -> Re
 ///
 /// [`Invalid::VertexOffItsFaceSurface`] when a corner is certified off the
 /// surface, and [`Error::Undecidable`] when nothing can prove either way.
+/// Which side of `surface` this point is on, for whichever surface it is.
+///
+/// One place, because two callers ask it — the corners of a curved face, and
+/// the ends of an edge named by a crossing — and two spellings of the same
+/// question is how they come to disagree.
+///
+/// # Panics
+///
+/// If `surface` is a kind nothing here can ask about. `Surface` grows a variant
+/// at every milestone, and a surface checked by not being checked is worse than
+/// a stop.
+fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decision {
+    match surface {
+        Surface::Plane(flat) => flat.side_of_point(point),
+        Surface::Sphere(ball) => ball.side_of(point),
+        Surface::Cylinder(pipe) => pipe.side_of(point),
+        other => panic!("a surface nothing here can ask about: {other:?}"),
+    }
+}
+
+/// What the predicate that decided a surface's sign goes by in a record.
+fn name_of_surface(surface: &Surface) -> &'static str {
+    match surface {
+        Surface::Plane(_) => SIDE_OF_PLANE,
+        Surface::Sphere(_) => SIDE_OF_SPHERE,
+        Surface::Cylinder(_) => SIDE_OF_CYLINDER,
+        other => panic!("a surface nothing here can ask about: {other:?}"),
+    }
+}
+
 fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
-    let (named, side_of): (_, &dyn Fn(PredicatePoint) -> Decision) = match surface {
-        Surface::Plane(_) => unreachable!("a flat face is checked by check_flat_face"),
-        Surface::Sphere(ball) => (SIDE_OF_SPHERE, &|point| ball.side_of(point)),
-        Surface::Cylinder(pipe) => (SIDE_OF_CYLINDER, &|point| pipe.side_of(point)),
-        // `Surface` grows a variant at every milestone. A face on one nothing
-        // here can ask about would be checked by not being checked.
-        other => panic!("a face sits on a surface nothing here can ask about: {other:?}"),
-    };
+    let named = name_of_surface(surface);
 
     for wire in view.wires() {
         for corner in wire.points() {
             let point = PredicatePoint::from(corner.coordinates());
-            let decision = side_of(point);
+            let decision = side_of_surface(surface, point);
             match decision {
                 Decision::Zero => {}
                 Decision::Pos | Decision::Neg => {
@@ -748,6 +801,7 @@ mod tests {
 
     use super::{Decision, winding_of, winding_round};
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
+    use crate::model::EdgeRun;
     use crate::{Error, FaceView, Invalid, Model, WireView};
 
     fn an_empty_model() -> Model {
@@ -857,7 +911,7 @@ mod tests {
     fn a_wire_whose_coedges_no_longer_join_up_is_caught() {
         let mut model = a_cube();
         let wire = model.data().wires.keys().next().expect("a cube has wires");
-        model.data_mut().wires[wire].coedges.swap(0, 1);
+        model.data_mut().wires[wire].steps.swap(0, 1);
 
         assert_eq!(refusal(&model), Invalid::WireDoesNotClose { position: 1 });
     }
@@ -901,6 +955,59 @@ mod tests {
     ///
     /// Note what does *not* appear: a distance. A sign predicate says which
     /// side and never how far, so there is no tolerance here to tune.
+    /// An edge named as part of a crossing has to be on **both** surfaces of
+    /// that crossing, not just the one its face sits on.
+    ///
+    /// Move the ball's seam plane so the poles are no longer in it, and the
+    /// name now describes a meridian this edge does not run along. Nothing else
+    /// in the kernel would notice: the face's own surface still certifies both
+    /// poles, the wire still closes, and every count is right.
+    #[test]
+    fn an_edge_named_by_a_crossing_it_is_not_on_is_caught() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+
+        let edge = model.data().edges.keys().next().expect("the seam");
+        let moved =
+            Plane::from_point_and_normal(Point::new(0.0, 1.0, 0.0), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal");
+        let EdgeRun::PartOfWhereItCrosses { and, .. } = &mut model.data_mut().edges[edge].run
+        else {
+            panic!("a ball's seam is named by a crossing")
+        };
+        *and = Surface::Plane(moved);
+
+        assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// And it has to be inside the half-spaces that picked which part it is.
+    ///
+    /// A plane crosses a sphere in one circle and the poles cut that circle
+    /// into two arcs, so without this the name says "one of those two" and
+    /// stops. Turn the half-space right round and the seam is on the wrong
+    /// side of it.
+    #[test]
+    fn an_edge_outside_the_half_space_that_picked_it_is_caught() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+
+        let edge = model.data().edges.keys().next().expect("the seam");
+        let elsewhere =
+            Plane::from_point_and_normal(Point::new(5.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .expect("the x axis is a unit normal");
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &mut model.data_mut().edges[edge].run
+        else {
+            panic!("a ball's seam is named by a crossing")
+        };
+        picked_by[0] = elsewhere;
+
+        assert_eq!(refusal(&model), Invalid::EdgeOutsideWhatPickedIt);
+    }
+
     #[test]
     fn a_corner_that_is_not_on_its_faces_curved_surface_is_caught() {
         let mut model = a_cube();

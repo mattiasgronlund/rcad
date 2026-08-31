@@ -189,6 +189,145 @@ fn a_bar_written_out_and_read_back_is_the_same_bar() {
     );
 }
 
+fn a_ball() -> Model {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    model
+        .add_ball(RADIUS, &Isometry::identity())
+        .expect("a ball of radius three");
+    model
+}
+
+#[test]
+fn a_ball_passes_the_full_sweep_with_nothing_approximated() {
+    let model = a_ball();
+    let mut log = ProvenanceLog::new();
+    model
+        .validate(&Policy::certified(), &mut log)
+        .expect("a ball is a sound solid");
+    assert!(
+        log.records().is_empty(),
+        "a ball about the origin needs nothing approximated, got {:?}",
+        log.records()
+    );
+}
+
+/// One face, one edge, two corners — and the two corners are the poles.
+#[test]
+fn a_ball_is_one_face_with_one_seam_between_two_poles() {
+    let model = a_ball();
+    assert_eq!(model.face_count(), 1, "one face wraps the whole ball");
+    assert_eq!(model.edge_count(), 1, "the seam, and nothing else");
+    assert_eq!(model.vertex_count(), 2, "the two poles");
+
+    let mut poles: Vec<Point> = model.vertices().map(|vertex| vertex.point()).collect();
+    poles.sort_by(|one, other| one.coordinates()[2].total_cmp(&other.coordinates()[2]));
+    assert_eq!(poles[0], Point::new(0.0, 0.0, -RADIUS));
+    assert_eq!(poles[1], Point::new(0.0, 0.0, RADIUS));
+}
+
+/// Roadmap §4.5's pole, and the reason Q19 gave it its own kind of step.
+///
+/// The wire has four steps and two coedges. The two that are not coedges are
+/// the poles, and they are **not** edges of zero length — that shape still
+/// means "broken" and nothing else, which is what keeps roadmap §7.4's
+/// catalogue entry for it worth checking.
+#[test]
+fn the_balls_boundary_stands_still_at_each_pole() {
+    let model = a_ball();
+    let face = model.faces().next().expect("the ball has a face");
+    let wire = face.wires().next().expect("and the face has a wire");
+
+    assert_eq!(wire.step_count(), 4, "down, pole, up, pole");
+    assert_eq!(wire.coedge_count(), 2, "and only two of those are edges");
+
+    assert!(
+        model.edges().all(|edge| !edge.is_closed()),
+        "the seam is half a circle, not a whole one"
+    );
+    assert!(
+        model
+            .edges()
+            .all(|edge| edge.distance_between_its_ends() > 0.0),
+        "no edge of a ball has its two ends in the same place"
+    );
+}
+
+/// The seam is used twice by the one face, as the bar's is — but here both
+/// ends are the same two corners, which is the case Q18 is about.
+#[test]
+fn the_balls_seam_is_used_twice_by_the_one_face() {
+    let model = a_ball();
+    let face = model.faces().next().expect("the ball has a face");
+
+    let mut walked: HashMap<_, usize> = HashMap::new();
+    for wire in face.wires() {
+        for coedge in wire.coedges() {
+            *walked.entry(coedge.edge().key()).or_default() += 1;
+        }
+    }
+    assert_eq!(walked.len(), 1, "one edge");
+    assert_eq!(walked.values().next(), Some(&2), "walked twice");
+}
+
+/// Both poles are certified onto the sphere, exactly.
+#[test]
+fn both_poles_are_certified_onto_the_ball() {
+    for radius in [RADIUS, 0.1, 1.0 / 3.0, 1e-8, 1e8] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(radius, &Isometry::identity())
+            .unwrap_or_else(|why| panic!("a ball of radius {radius}: {why}"));
+
+        let face = model.faces().next().expect("the ball has a face");
+        let Surface::Sphere(skin) = face.surface() else {
+            panic!("a ball's face sits on a sphere")
+        };
+        for corner in face.wires().flat_map(|wire| wire.points()) {
+            assert_eq!(
+                skin.side_of(corner.coordinates().into()),
+                Decision::Zero,
+                "the pole at {corner:?} on a ball of radius {radius}"
+            );
+        }
+
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("a ball of radius {radius} is sound: {why}"));
+    }
+}
+
+#[test]
+fn a_ball_written_out_and_read_back_is_the_same_ball() {
+    let model = a_ball();
+    let written = postcard::to_stdvec(&model).expect("a ball writes out");
+    let read_back: Model = postcard::from_bytes(&written).expect("and reads back");
+
+    read_back
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a ball that has been through the format is still a ball");
+
+    let wire = read_back
+        .faces()
+        .next()
+        .expect("still one face")
+        .wires()
+        .next()
+        .expect("still one wire");
+    assert_eq!(wire.step_count(), 4, "the poles survived the trip");
+    assert_eq!(wire.coedge_count(), 2);
+}
+
+#[test]
+fn a_ball_refuses_a_radius_that_is_not_a_positive_number() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    for radius in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            model.add_ball(radius, &Isometry::identity()).is_err(),
+            "a ball of radius {radius} is not a ball"
+        );
+    }
+}
+
 /// Q11 and Q21: every operation that only handles flat faces refuses, through
 /// one shared check, and says so rather than crashing or guessing.
 ///
@@ -202,35 +341,56 @@ fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
     let bar = model
         .add_round_bar(RADIUS, HEIGHT, &Isometry::identity())
         .expect("a bar");
+    let ball = model
+        .add_ball(RADIUS, &Isometry::identity())
+        .expect("a ball");
     let cube = model
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube of side two");
 
-    assert_eq!(
-        model.solid(bar).classify_point(
-            Point::origin(),
-            &Policy::certified(),
-            &mut ProvenanceLog::new()
-        ),
-        Containment::NeedsFlatFaces,
-        "the classifier casts rays at flat faces and says so"
-    );
-
-    for rule in [Rule::Union, Rule::Difference, Rule::Intersection] {
-        for (arguments, tools) in [([bar], [cube]), ([cube], [bar])] {
-            let refusal = model.fuse(
-                &arguments,
-                &tools,
-                rule,
+    for (curved, what) in [(bar, "bar"), (ball, "ball")] {
+        assert_eq!(
+            model.solid(curved).classify_point(
+                Point::origin(),
                 &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            );
-            assert!(
-                matches!(refusal, Err(Error::FuseNeedsFlatFaces)),
-                "{rule:?} with the bar on one side gave {refusal:?}"
-            );
+                &mut ProvenanceLog::new()
+            ),
+            Containment::NeedsFlatFaces,
+            "the classifier casts rays at flat faces, and a {what} has none"
+        );
+
+        for rule in [Rule::Union, Rule::Difference, Rule::Intersection] {
+            // Both ways round, because refusing lazily would make which answer
+            // comes back depend on which side was walked first.
+            for (arguments, tools) in [([curved], [cube]), ([cube], [curved])] {
+                let refusal = model.fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                assert!(
+                    matches!(refusal, Err(Error::FuseNeedsFlatFaces)),
+                    "{rule:?} with the {what} on one side gave {refusal:?}"
+                );
+            }
         }
     }
+
+    // And the control: the guard refuses curved solids, not every solid.
+    assert!(
+        model
+            .fuse(
+                &[cube],
+                &[cube],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
+            .is_ok(),
+        "two flat solids still fuse"
+    );
 }
 
 /// The corner of the bar is where the two caps' planes and the wall all meet,
