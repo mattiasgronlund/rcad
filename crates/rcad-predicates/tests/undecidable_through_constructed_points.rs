@@ -153,9 +153,11 @@ fn a_tolerant_policy_reads_the_undecided_answer_as_coplanar_and_tags_it() {
 
     // The tag is a distance; the record keeps the volume the cascade saw.
     assert_eq!(record.measures(), Measures::Volume);
+    // Divided once per dimension rather than by the square, because the square
+    // is not a finite number at every working size an f64 can hold.
     assert_eq!(
         tag.magnitude(),
-        record.enclosure() / (working_size * working_size)
+        record.enclosure() / working_size / working_size
     );
     assert_eq!(log.worst_wobble(working_size), tag.magnitude());
     assert!(policy.wobble_is_acceptable(tag.magnitude()));

@@ -4,8 +4,13 @@ use rcad_predicates::expansion::{expansion_sum, product_is_exact, scale_expansio
 
 /// `a - b` as a two-entry expansion, smallest first.
 ///
-/// Subtracting two `f64` is exact in two entries whatever they are, so unlike
-/// the products below this one never has to refuse.
+/// Exact in two entries whenever `a - b` is finite, which is why, unlike the
+/// products below, this one has no gate of its own. When the difference
+/// overflows the pair is infinite and `NaN` and stands for nothing, and nothing
+/// here says so — the non-finite entry travels on until
+/// [`square_of_expansion`]'s [`product_is_exact`] check refuses it, or, where a
+/// scaling by zero carries it past that check, until `expansion_sign` refuses
+/// to name a sign for it.
 pub(crate) fn difference(a: f64, b: f64) -> [f64; 2] {
     let (high, low) = two_diff(a, b);
     [low, high]
@@ -69,7 +74,7 @@ mod tests {
     use rcad_predicates::Decision;
     use rcad_predicates::expansion::{expansion_sign, two_sum};
 
-    use super::{LONGEST_SQUARE, square_of_expansion};
+    use super::{LONGEST_SQUARE, difference, square_of_expansion};
 
     #[test]
     fn squaring_a_single_number_gives_its_square() {
@@ -109,6 +114,19 @@ mod tests {
     fn a_product_too_small_to_be_exact_stops_the_exact_level() {
         let mut squared = [0.0; LONGEST_SQUARE];
         assert_eq!(square_of_expansion(&[2f64.powi(-600)], &mut squared), None);
+    }
+
+    /// [`difference`] has no gate of its own, and this is the demonstration
+    /// that it does not need one: an overflowed pair stops the exact level
+    /// instead of reaching a sign.
+    #[test]
+    fn a_difference_that_overflows_stops_the_exact_level() {
+        let gap = difference(f64::MAX, -f64::MAX);
+        assert!(gap[1].is_infinite());
+        assert!(gap[0].is_nan());
+
+        let mut squared = [0.0; LONGEST_SQUARE];
+        assert_eq!(square_of_expansion(&gap, &mut squared), None);
     }
 
     #[test]

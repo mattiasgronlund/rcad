@@ -24,11 +24,12 @@ impl Approximation {
     ///
     /// # Panics
     ///
-    /// If `magnitude` is negative or not a number. An approximation you cannot
-    /// compare is worse than none.
+    /// If `magnitude` is negative, infinite, or not a number. An approximation
+    /// you cannot compare is worse than none, and neither infinity nor `NaN` is
+    /// a length `rcad-topo`'s `check_approximation_ordering` can put in order.
     pub fn new(magnitude: f64, cause: Cause) -> Self {
         assert!(
-            magnitude >= 0.0,
+            magnitude.is_finite() && magnitude >= 0.0,
             "an approximation magnitude must be a real amount, got {magnitude}"
         );
         Self { magnitude, cause }
@@ -368,6 +369,15 @@ mod tests {
     #[should_panic(expected = "must be a real amount")]
     fn a_negative_approximation_is_a_bug() {
         let _ = Approximation::new(-1.0, Cause::ImportedUncertainty);
+    }
+
+    /// The field is a length, and infinity is not one. Letting it through would
+    /// put a number on an entity that no ordering check can act on, and it
+    /// would survive to disk.
+    #[test]
+    #[should_panic(expected = "must be a real amount")]
+    fn an_approximation_bigger_than_any_f64_is_a_bug() {
+        let _ = Approximation::new(f64::INFINITY, Cause::ImportedUncertainty);
     }
 
     /// Two logs carrying the same amount of slop for different reasons must

@@ -172,8 +172,14 @@ pub fn expansion_sign(expansion: &[f64]) -> Decision {
 
 /// `a + b` as a rounded sum plus the exact amount that rounding lost.
 ///
-/// The two returned values always add up to `a + b` exactly. Knuth's
-/// six-operation version, which needs no comparison between `a` and `b`.
+/// The two returned values add up to `a + b` exactly whenever that sum is
+/// finite — for finite `a` and `b`, whenever it does not overflow. Otherwise
+/// the roundoff term is worked out from a difference of infinities and comes
+/// back `NaN`, and the pair stands for nothing. Nothing here rejects that; see
+/// [`two_diff`] for what does.
+///
+/// Knuth's six-operation version, which needs no comparison between `a` and
+/// `b`.
 pub fn two_sum(a: f64, b: f64) -> (f64, f64) {
     let sum = a + b;
     let b_part = sum - a;
@@ -183,7 +189,16 @@ pub fn two_sum(a: f64, b: f64) -> (f64, f64) {
 
 /// `a - b` as a rounded difference plus the exact amount that rounding lost.
 ///
-/// The two returned values always add up to `a - b` exactly.
+/// The two returned values add up to `a - b` exactly whenever that difference
+/// is finite — for finite `a` and `b`, whenever it does not overflow. Otherwise
+/// the roundoff term comes back `NaN`, as in [`two_sum`], and the pair stands
+/// for nothing.
+///
+/// Neither routine rejects its own overflow, and it is [`expansion_sign`] that
+/// catches it downstream. That works because [`expansion_sum`] and
+/// [`scale_expansion`] drop an entry only when it compares equal to zero, and
+/// no infinity or `NaN` ever does — not even after being scaled by zero. So a
+/// non-finite entry always reaches the sign, which refuses to name one for it.
 pub fn two_diff(a: f64, b: f64) -> (f64, f64) {
     let difference = a - b;
     let b_part = a - difference;
@@ -333,6 +348,50 @@ mod tests {
                 enclosure: f64::INFINITY
             }
         );
+    }
+
+    /// The pair is exact only when its answer is finite, and this is what the
+    /// other side of that looks like. Pinned so the sentence on [`two_diff`]
+    /// cannot drift away from the code again.
+    #[test]
+    fn a_sum_or_difference_that_overflows_hands_back_a_pair_that_stands_for_nothing() {
+        let (difference, roundoff) = two_diff(f64::MAX, -f64::MAX);
+        assert_eq!(difference, f64::INFINITY);
+        assert!(roundoff.is_nan());
+
+        let (sum, roundoff) = two_sum(f64::MAX, f64::MAX);
+        assert_eq!(sum, f64::INFINITY);
+        assert!(roundoff.is_nan());
+
+        // A hair below the overflow and both entries are exact again, so it is
+        // the overflow doing this and not the size of the inputs.
+        let (difference, roundoff) = two_diff(f64::MAX, -f64::MIN_POSITIVE);
+        assert_eq!(difference, f64::MAX);
+        assert_eq!(roundoff, f64::MIN_POSITIVE);
+    }
+
+    /// The demonstration behind [`two_diff`]'s claim that an overflowed pair is
+    /// always caught further down.
+    ///
+    /// Both routines that could shorten an expansion drop an entry only when it
+    /// compares equal to zero. Scaling by zero is the strongest test of that: it
+    /// flattens every finite entry and still cannot make a non-finite one go
+    /// away.
+    #[test]
+    fn a_non_finite_entry_cannot_be_dropped_on_its_way_to_a_sign() {
+        let (difference, roundoff) = two_diff(f64::MAX, -f64::MAX);
+        let overflowed = [roundoff, difference];
+        let refused = Decision::Undecidable {
+            enclosure: f64::INFINITY,
+        };
+
+        let mut summed = [0.0; 4];
+        let len = expansion_sum(&overflowed, &[1.0, 2.0], &mut summed);
+        assert_eq!(expansion_sign(&summed[..len]), refused);
+
+        let mut scaled = [0.0; 4];
+        let len = scale_expansion(&overflowed, 0.0, &mut scaled);
+        assert_eq!(expansion_sign(&scaled[..len]), refused);
     }
 
     #[test]

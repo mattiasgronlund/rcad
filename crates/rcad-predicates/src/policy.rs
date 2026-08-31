@@ -186,6 +186,19 @@ impl Measures {
     /// assert_eq!(Measures::Length.wobble_of(1e-9, 100.0), 1e-9);
     /// ```
     ///
+    /// Divided once per dimension above a length, rather than once by the
+    /// working size raised to that power. Squaring the working size stops being
+    /// finite above about `1.34e154`, and dividing by an infinite divisor hands
+    /// back `0.0` — a magnitude saying nothing was approximated, which is the
+    /// one thing decisions.md §5 makes that number mean. Dividing step by step
+    /// never builds the divisor, so it has nothing to overflow.
+    ///
+    /// The answer is infinite when the true wobble is larger than any `f64`,
+    /// which takes a working size down among the subnormals. Nothing is ever
+    /// tagged with that: [`Policy::wobble_is_acceptable`] compares against a
+    /// budget that is finite whenever the working size is, and no infinity is
+    /// `<=` a finite number, so such a decision comes back undecided instead.
+    ///
     /// # Panics
     ///
     /// If `working_size` is not a positive finite number.
@@ -195,7 +208,11 @@ impl Measures {
             working_size.is_finite() && working_size > 0.0,
             "a wobble needs a positive working size, got {working_size}"
         );
-        value / self.value_per_wobble(working_size)
+        match self {
+            Measures::Length => value,
+            Measures::Area => value / working_size,
+            Measures::Volume => value / working_size / working_size,
+        }
     }
 
     /// How much a predicate's value moves when a corner moves by one, at a
@@ -203,7 +220,10 @@ impl Measures {
     ///
     /// The working size raised to one dimension fewer than this measures: a
     /// length moves with the corner, an area sweeps a side along with it, a
-    /// volume sweeps a face.
+    /// volume sweeps a face. The forward direction of [`Measures::wobble_of`],
+    /// and only the tests need it — going forwards means building the very
+    /// power that overflows, which is why nothing in the kernel does.
+    #[cfg(test)]
     fn value_per_wobble(self, working_size: f64) -> f64 {
         match self {
             Measures::Length => 1.0,
@@ -457,6 +477,72 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A working size whose square is not a finite number.
+    ///
+    /// The conversion used to build that square and divide by it, so the tag
+    /// came back `0.0` — the number decisions.md §5 reserves for "nothing was
+    /// approximated". The decision itself was never wrong here: the true wobble
+    /// is far inside a budget this wide. The stored number was.
+    #[test]
+    fn a_working_size_too_large_to_square_still_gives_an_honest_wobble() {
+        let working_size = 1e200f64;
+        assert!(
+            !(working_size * working_size).is_finite(),
+            "this working size has to be one whose square overflows"
+        );
+
+        let enclosure = 2e290;
+        let wobble = Measures::Volume.wobble_of(enclosure, working_size);
+        assert_eq!(wobble, enclosure / working_size / working_size);
+        assert!(
+            wobble > 0.0,
+            "the true wobble is not zero, so the tag is not"
+        );
+
+        let policy = Policy::tolerant(working_size);
+        let mut log = ProvenanceLog::new();
+        let outcome = resolve_under_policy(
+            record_measuring(enclosure, Measures::Volume),
+            &policy,
+            &mut log,
+        );
+
+        assert_eq!(outcome, Decision::Zero);
+        let tag = log.records()[0]
+            .approximation()
+            .expect("a resolved record carries an approximation");
+        assert_eq!(tag.magnitude(), wobble);
+        assert_eq!(log.worst_wobble(working_size), wobble);
+    }
+
+    /// The other end of the same conversion, and the demonstration behind
+    /// `wobble_of`'s claim that an infinite wobble is never tagged.
+    ///
+    /// A working size among the subnormals puts the true wobble past anything
+    /// an `f64` holds. Infinity is the honest answer, and the budget refuses it
+    /// rather than an entity carrying it.
+    #[test]
+    fn a_wobble_larger_than_any_f64_is_refused_instead_of_tagged() {
+        let working_size = 1e-200;
+        let enclosure = 1e300;
+        let wobble = Measures::Volume.wobble_of(enclosure, working_size);
+        assert!(wobble.is_infinite());
+
+        let policy = Policy::tolerant(working_size);
+        assert!(policy.max_wobble().is_finite());
+        assert!(!policy.wobble_is_acceptable(wobble));
+
+        let mut log = ProvenanceLog::new();
+        let outcome = resolve_under_policy(
+            record_measuring(enclosure, Measures::Volume),
+            &policy,
+            &mut log,
+        );
+
+        assert_eq!(outcome, Decision::Undecidable { enclosure });
+        assert_eq!(log.records()[0].approximation(), None);
     }
 
     #[test]
