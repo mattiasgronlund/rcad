@@ -1011,7 +1011,13 @@ mod tests {
         model.place_solid(cube, &a_movement());
     }
 
+    /// Only in debug, because the check this exercises is only there in debug.
+    /// [`Model::check_touched_wire`] returns at once without `debug_assertions`
+    /// — a full sweep per operation is what §4.3 keeps out of release — so in a
+    /// release profile the mutation below goes unnoticed and there is no panic
+    /// to expect.
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "does not close")]
     fn a_mutation_notices_a_wire_that_no_longer_closes() {
         let (mut model, cube) = a_cube();
@@ -1027,7 +1033,10 @@ mod tests {
         model.place_solid(cube, &a_movement());
     }
 
+    /// Debug only, for the reason
+    /// [`a_mutation_notices_a_wire_that_no_longer_closes`] gives.
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "exactly twice")]
     fn a_mutation_notices_an_edge_that_has_grown_a_third_coedge() {
         let (mut model, cube) = a_cube();
