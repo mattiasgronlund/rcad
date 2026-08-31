@@ -277,13 +277,29 @@ const ORIENT2D_ERROR_BOUND: f64 = {
 /// honest to report. Additions never need that check: they are exact for every
 /// pair of `f64` that does not overflow.
 fn orient2d_exactly(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Decision {
-    let cannot_be_done = Decision::Undecidable {
-        enclosure: f64::INFINITY,
-    };
+    let mut total = [0.0f64; DETERMINANT_ENTRIES];
+    match exact_determinant(a, b, c, &mut total) {
+        Some(total_len) => expansion_sign(&total[..total_len]),
+        None => Decision::Undecidable {
+            enclosure: f64::INFINITY,
+        },
+    }
+}
+
+/// The determinant itself, written into `total`, and how many entries it took.
+///
+/// `None` when a product overflowed or underflowed, which is the case
+/// [`orient2d_exactly`] has no honest sign for.
+fn exact_determinant(
+    a: [f64; 2],
+    b: [f64; 2],
+    c: [f64; 2],
+    total: &mut [f64; DETERMINANT_ENTRIES],
+) -> Option<usize> {
     let (Some((ab, ab_len)), Some((ac, ac_len)), Some((bc, bc_len))) =
         (cross(a, b), cross(a, c), cross(b, c))
     else {
-        return cannot_be_done;
+        return None;
     };
 
     let mut negated_ac = ac;
@@ -293,11 +309,15 @@ fn orient2d_exactly(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Decision {
 
     let mut without_bc = [0.0f64; 8];
     let without_bc_len = expansion_sum(&ab[..ab_len], &negated_ac[..ac_len], &mut without_bc);
-    let mut total = [0.0f64; 12];
-    let total_len = expansion_sum(&without_bc[..without_bc_len], &bc[..bc_len], &mut total);
-
-    expansion_sign(&total[..total_len])
+    Some(expansion_sum(
+        &without_bc[..without_bc_len],
+        &bc[..bc_len],
+        total,
+    ))
 }
+
+/// Three cross products of four entries each.
+const DETERMINANT_ENTRIES: usize = 12;
 
 /// `u.x * v.y - u.y * v.x`, exactly, or `None` if a product underflowed.
 fn cross(u: [f64; 2], v: [f64; 2]) -> Option<([f64; 4], usize)> {
@@ -318,10 +338,13 @@ fn cross(u: [f64; 2], v: [f64; 2]) -> Option<([f64; 4], usize)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ORIENT2D, Orient2d, orient2d, orient2d_exactly, orient2d_reporting_level,
-        orient2d_tolerantly, scaled_by_a_power_of_two,
+        DETERMINANT_ENTRIES, ORIENT2D, ORIENT2D_ERROR_BOUND, Orient2d, exact_determinant, orient2d,
+        orient2d_exactly, orient2d_reporting_level, orient2d_tolerantly, scaled_by_a_power_of_two,
     };
-    use crate::{Decision, Level, Policy, Predicate, ProvenanceLog};
+    use crate::expansion::{expansion_sum, two_diff};
+    use crate::{
+        Decision, Filtered, Level, Policy, Predicate, ProvenanceLog, decide, product_is_normal,
+    };
 
     /// The naive `f64` determinant. Exact when the coordinates are small
     /// integers, which is what makes it a usable oracle for the sign
@@ -619,5 +642,174 @@ mod tests {
         );
         assert!(!decision.is_certified());
         assert!(!log.is_empty(), "a refusal has to leave a record behind");
+    }
+
+    /// `ORIENT2D_ERROR_BOUND` promises that the two products together land
+    /// within `3*epsilon` of the permanent from the true determinant. Here that
+    /// promise is measured rather than argued, on triangles searched out for
+    /// making the gap as wide as they can.
+    ///
+    /// **The worst found comes to 2.96 epsilon of the permanent**, against the
+    /// 3 the constant carries, so this fails as soon as the constant is cut
+    /// below about 2.96 epsilon (decisions.md §15.6, §16.3).
+    ///
+    /// What is measured is `forwards - backwards` *before* the last rounding,
+    /// because that is the quantity the constant bounds and the whole of what
+    /// makes the filter sound. The value level 1 hands back is one rounding
+    /// further out and that rounding is deliberately not covered — see the test
+    /// below, which is why asserting on `value` here would assert something
+    /// false.
+    #[test]
+    fn the_two_products_stay_inside_the_error_bound_where_the_rounding_is_worst() {
+        let mut worst = 0.0f64;
+        for corners in triangles_whose_arithmetic_rounds_as_badly_as_it_can() {
+            let (products_error, _, filtered) = how_far_level_one_falls_from_the_truth(corners)
+                .expect("no product here leaves the range");
+            assert!(
+                products_error.abs() <= filtered.error_bound,
+                "the products came out {products_error:e} from the truth on {corners:?}, \
+                 past the {:e} promised",
+                filtered.error_bound
+            );
+            let permanent = filtered.error_bound / ORIENT2D_ERROR_BOUND;
+            worst = worst.max(products_error.abs() / permanent / (f64::EPSILON / 2.0));
+        }
+        assert!(
+            worst > 2.95,
+            "these used to reach 2.96 epsilon of the permanent and now reach only {worst}, \
+             so the net has gone slack and the search wants running again"
+        );
+    }
+
+    /// The note on [`ORIENT2D_ERROR_BOUND`] argues that the final subtraction
+    /// needs no epsilon of its own, because its error is a fraction of the
+    /// result rather than of the permanent and can only shrink a value that
+    /// already cleared the bound. That is a claim justifying an absence, so it
+    /// gets a check of its own (decisions.md §16.10).
+    ///
+    /// On this triangle `value` really does end up 3.36 epsilon of the
+    /// permanent from the truth — past the 3 the constant carries — while the
+    /// two products it was built from stay inside. So the constant is not a
+    /// bound on `value`, exactly as the note says, and level 1 certifies the
+    /// right sign from it regardless, which is what the note says makes that
+    /// safe.
+    #[test]
+    fn the_last_rounding_falls_outside_the_bound_and_the_sign_survives_it_anyway() {
+        let corners = [
+            [1.3214740756387775, -1.2097128315383816],
+            [-1.9135572424091511, 1.279523460954989],
+            [1.1972513460202028, 1.4140834091865018],
+        ];
+        let (products_error, value_error, filtered) =
+            how_far_level_one_falls_from_the_truth(corners).expect("no product leaves the range");
+
+        assert!(products_error.abs() <= filtered.error_bound);
+        assert!(
+            value_error.abs() > filtered.error_bound,
+            "this triangle is only worth keeping while the last rounding takes the value \
+             outside the constant, and it no longer does"
+        );
+
+        let [a, b, c] = corners;
+        assert_eq!(
+            orient2d_reporting_level(a, b, c),
+            (Decision::Neg, Level::Float),
+            "level 1 has to be what certifies this, and it has to get the sign right"
+        );
+    }
+
+    /// Level 1 has to be what answers these, or the measurement above is of an
+    /// expression nothing uses.
+    ///
+    /// [`decided_after_normalising`] runs only once [`decide`] has refused, and
+    /// [`decide`] certifies every one of these at [`Level::Float`] — so no
+    /// scaled copy is ever formed and no retry can be quietly supplying the
+    /// answer (decisions.md §16.9).
+    #[test]
+    fn the_worst_rounding_triangles_are_settled_by_level_one_itself() {
+        for corners in triangles_whose_arithmetic_rounds_as_badly_as_it_can() {
+            let [a, b, c] = corners;
+            let (decision, level) = decide(&Orient2d { a, b, c });
+            assert!(
+                decision.is_certified(),
+                "{corners:?} was not settled at all"
+            );
+            assert_eq!(level, Level::Float, "{corners:?}");
+        }
+    }
+
+    /// How far the two products together fall from the true determinant, how
+    /// far `value` falls once the final subtraction has rounded as well, and
+    /// the bound the constant promises for the first of those.
+    ///
+    /// The truth comes from [`exact_determinant`], which is level 3's own
+    /// arithmetic and throws nothing away. [`two_diff`] hands back what the
+    /// last subtraction lost, so adding that in recovers `forwards - backwards`
+    /// exactly and the two errors come out of the same subtraction.
+    ///
+    /// `None` when a product left the range, where a relative bound claims
+    /// nothing at all.
+    fn how_far_level_one_falls_from_the_truth(
+        corners: [[f64; 2]; 3],
+    ) -> Option<(f64, f64, Filtered)> {
+        let [a, b, c] = corners;
+        let (acx, acy) = (a[0] - c[0], a[1] - c[1]);
+        let (bcx, bcy) = (b[0] - c[0], b[1] - c[1]);
+        if !product_is_normal(acx, bcy) || !product_is_normal(acy, bcx) {
+            return None;
+        }
+        let filtered = Orient2d { a, b, c }.on_floats()?;
+        let (value, subtraction_roundoff) = two_diff(acx * bcy, acy * bcx);
+        assert_eq!(value, filtered.value, "the same expression, spelled twice");
+
+        let mut determinant = [0.0f64; DETERMINANT_ENTRIES];
+        let length = exact_determinant(a, b, c, &mut determinant)?;
+
+        let mut value_error = [0.0f64; DETERMINANT_ENTRIES + 1];
+        let value_error_length = expansion_sum(&determinant[..length], &[-value], &mut value_error);
+
+        let mut products_error = [0.0f64; DETERMINANT_ENTRIES + 2];
+        let products_error_length = expansion_sum(
+            &determinant[..length],
+            &[-subtraction_roundoff, -value],
+            &mut products_error,
+        );
+
+        Some((
+            products_error[..products_error_length].iter().sum(),
+            value_error[..value_error_length].iter().sum(),
+            filtered,
+        ))
+    }
+
+    /// The four the search kept coming back to, worst first. Their products
+    /// fall 2.96, 2.45, 2.40 and 2.39 epsilon of the permanent from the truth.
+    ///
+    /// They are kept as literals because that is what makes this a test rather
+    /// than a second search: the coordinates are the finding, and re-deriving
+    /// them on every run would cost minutes and prove nothing.
+    fn triangles_whose_arithmetic_rounds_as_badly_as_it_can() -> [[[f64; 2]; 3]; 4] {
+        [
+            [
+                [0.18202136112233935, -16.509565117185108],
+                [-0.2664687296518431, -0.25278305332298173],
+                [-4.289950494568721, -0.360491885299977],
+            ],
+            [
+                [8.858639129305297, 1.698983312928278],
+                [0.09737340948185011, 0.09945658874300996],
+                [0.09992273072931024, -0.1299712859920983],
+            ],
+            [
+                [1.919499316075261, 1.5232665278705688],
+                [7.718968216943509, -2.5003140165964743],
+                [-0.3354606432058729, -1.0544476559196],
+            ],
+            [
+                [59.21239135734716, -79.46432295359523],
+                [-0.32675796193138495, 10.834848102579858],
+                [71.01141229525142, -0.019631577874157813],
+            ],
+        ]
     }
 }

@@ -345,18 +345,35 @@ const ORIENT3D_ERROR_BOUND: f64 = {
 /// honest to report. Additions never need that check: they are exact for every
 /// pair of `f64` that does not overflow.
 fn orient3d_exactly(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> Decision {
-    let cannot_be_done = Decision::Undecidable {
-        enclosure: f64::INFINITY,
-    };
+    let mut total = [0.0f64; DETERMINANT_ENTRIES];
+    match exact_determinant(a, b, c, d, &mut total) {
+        Some(total_len) => expansion_sign(&total[..total_len]),
+        None => Decision::Undecidable {
+            enclosure: f64::INFINITY,
+        },
+    }
+}
+
+/// The determinant itself, written into `total`, and how many entries it took.
+///
+/// `None` when a product overflowed or underflowed, which is the case
+/// [`orient3d_exactly`] has no honest sign for.
+fn exact_determinant(
+    a: [f64; 3],
+    b: [f64; 3],
+    c: [f64; 3],
+    d: [f64; 3],
+    total: &mut [f64; DETERMINANT_ENTRIES],
+) -> Option<usize> {
     let (Some((ab, ab_len)), Some((ac, ac_len)), Some((ad, ad_len))) =
         (minor(a, b), minor(a, c), minor(a, d))
     else {
-        return cannot_be_done;
+        return None;
     };
     let (Some((bc, bc_len)), Some((bd, bd_len)), Some((cd, cd_len))) =
         (minor(b, c), minor(b, d), minor(c, d))
     else {
-        return cannot_be_done;
+        return None;
     };
 
     let terms: [(&[f64], f64); 12] = [
@@ -374,10 +391,8 @@ fn orient3d_exactly(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> Decis
         (&cd[..cd_len], -b[2]),
     ];
 
-    const CAPACITY: usize = 96;
-    let mut total = [0.0f64; CAPACITY];
     let mut total_len = 0;
-    let mut merged = [0.0f64; CAPACITY];
+    let mut merged = [0.0f64; DETERMINANT_ENTRIES];
     let mut term = [0.0f64; 8];
 
     for (two_by_two, scale) in terms {
@@ -385,15 +400,18 @@ fn orient3d_exactly(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> Decis
             .iter()
             .all(|&entry| product_is_exact(entry, scale))
         {
-            return cannot_be_done;
+            return None;
         }
         let term_len = scale_expansion(two_by_two, scale, &mut term);
         total_len = expansion_sum(&total[..total_len], &term[..term_len], &mut merged);
-        core::mem::swap(&mut total, &mut merged);
+        core::mem::swap(total, &mut merged);
     }
 
-    expansion_sign(&total[..total_len])
+    Some(total_len)
 }
+
+/// The twelve terms of the expansion above need at most eight entries each.
+const DETERMINANT_ENTRIES: usize = 96;
 
 /// `u.x * v.y - u.y * v.x`, exactly, or `None` if a product underflowed.
 fn minor(u: [f64; 3], v: [f64; 3]) -> Option<([f64; 4], usize)> {
@@ -414,10 +432,14 @@ fn minor(u: [f64; 3], v: [f64; 3]) -> Option<([f64; 4], usize)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ORIENT3D, Orient3d, orient3d, orient3d_exactly, orient3d_of_points,
-        orient3d_reporting_level, orient3d_tolerantly, scaled_by_a_power_of_two,
+        DETERMINANT_ENTRIES, ORIENT3D, ORIENT3D_ERROR_BOUND, Orient3d, exact_determinant, orient3d,
+        orient3d_exactly, orient3d_of_points, orient3d_reporting_level, orient3d_tolerantly,
+        scaled_by_a_power_of_two,
     };
-    use crate::{Decision, Interval, Level, Point, Policy, Predicate, ProvenanceLog};
+    use crate::expansion::expansion_sum;
+    use crate::{
+        Decision, Filtered, Interval, Level, Point, Policy, Predicate, ProvenanceLog, decide,
+    };
 
     /// The naive `f64` determinant. Exact when the coordinates are small
     /// integers, which is what makes it a usable oracle for the sign
@@ -853,5 +875,160 @@ mod tests {
             Point::from([0.0, 0.0, 0.0]),
         );
         assert_eq!((decision, level), (Decision::Neg, Level::Interval));
+    }
+
+    /// `ORIENT3D_ERROR_BOUND` promises that level 1's `value` never falls
+    /// further from the true determinant than `7*epsilon` of the permanent.
+    /// Here that promise is measured rather than argued, on tetrahedra searched
+    /// out for making the gap as wide as they can.
+    ///
+    /// **The worst found comes to 6.29 epsilon of the permanent**, against the
+    /// 7 the constant carries. So this fails as soon as the constant is cut
+    /// below about 6.29 epsilon, and it says nothing at all between there and
+    /// 7: a bound of `6.5*epsilon` would be false and everything here would
+    /// still pass. The derivation is what makes the constant a bound; this is
+    /// what stops [`Orient3d::on_floats`] drifting out from under the
+    /// derivation (decisions.md §15.6, §16.3).
+    ///
+    /// The tetrahedra came from random coordinates followed by hill climbing on
+    /// that ratio, over some hundred million candidates, and the best of them
+    /// would not improve under a further six million. The shape that rounds
+    /// worst is not a near-degenerate one — cancellation shrinks the error and
+    /// the permanent together — but an ordinary tetrahedron whose twelve
+    /// coordinates happen to round the same way at every step.
+    #[test]
+    fn level_one_stays_inside_its_error_bound_where_the_rounding_is_worst() {
+        let mut worst = 0.0f64;
+        for points in tetrahedra_whose_arithmetic_rounds_as_badly_as_it_can() {
+            let (error, filtered) = how_far_level_one_falls_from_the_truth(points)
+                .expect("no product here leaves the range");
+            assert!(
+                error.abs() <= filtered.error_bound,
+                "level 1 came out {error:e} from the truth on {points:?}, past the {:e} \
+                 it promised",
+                filtered.error_bound
+            );
+            let permanent = filtered.error_bound / ORIENT3D_ERROR_BOUND;
+            worst = worst.max(error.abs() / permanent / (f64::EPSILON / 2.0));
+        }
+        assert!(
+            worst > 6.25,
+            "these used to reach 6.29 epsilon of the permanent and now reach only {worst}, \
+             so the net has gone slack and the search wants running again"
+        );
+    }
+
+    /// Level 1 has to be what answers these, or the measurement above is of an
+    /// expression nothing uses.
+    ///
+    /// [`decided_after_normalising`] runs only once [`decide`] has refused, and
+    /// [`decide`] certifies every one of these at [`Level::Float`] — so no
+    /// scaled copy is ever formed and no retry can be quietly supplying the
+    /// answer (decisions.md §16.9).
+    #[test]
+    fn the_worst_rounding_tetrahedra_are_settled_by_level_one_itself() {
+        for points in tetrahedra_whose_arithmetic_rounds_as_badly_as_it_can() {
+            let [a, b, c, d] = points;
+            let (decision, level) = decide(&Orient3d {
+                a: a.into(),
+                b: b.into(),
+                c: c.into(),
+                d: d.into(),
+            });
+            assert!(decision.is_certified(), "{points:?} was not settled at all");
+            assert_eq!(level, Level::Float, "{points:?}");
+        }
+    }
+
+    /// How far level 1's `value` falls from the true determinant, and the bound
+    /// it promised to stay inside.
+    ///
+    /// The truth comes from [`exact_determinant`], which is level 3's own
+    /// arithmetic and throws nothing away, so subtracting `value` from it in
+    /// that same arithmetic leaves the rounding error and nothing else. Only
+    /// the final `sum` rounds, and it rounds a quantity the callers compare
+    /// against a bound many orders of magnitude larger.
+    ///
+    /// `None` when a product left the range, where a relative bound claims
+    /// nothing and level 1 declines to run anyway.
+    fn how_far_level_one_falls_from_the_truth(points: [[f64; 3]; 4]) -> Option<(f64, Filtered)> {
+        let [a, b, c, d] = points;
+        let filtered = Orient3d {
+            a: a.into(),
+            b: b.into(),
+            c: c.into(),
+            d: d.into(),
+        }
+        .on_floats()?;
+
+        let mut determinant = [0.0f64; DETERMINANT_ENTRIES];
+        let length = exact_determinant(a, b, c, d, &mut determinant)?;
+        let mut error = [0.0f64; DETERMINANT_ENTRIES + 1];
+        let error_length = expansion_sum(&determinant[..length], &[-filtered.value], &mut error);
+
+        Some((error[..error_length].iter().sum(), filtered))
+    }
+
+    /// The four the search kept coming back to, worst first. Their errors are
+    /// 6.29, 6.15, 5.99 and 5.60 epsilon of the permanent.
+    ///
+    /// They are kept as literals because that is what makes this a test rather
+    /// than a second search: the coordinates are the finding, and re-deriving
+    /// them on every run would cost minutes and prove nothing.
+    fn tetrahedra_whose_arithmetic_rounds_as_badly_as_it_can() -> [[[f64; 3]; 4]; 4] {
+        [
+            [
+                [-0.01787677771316376, 215.14081658155717, 2.2116568307902695],
+                [1.5854223489664379, -26.608260632339537, 216.38579693428494],
+                [82.33595501635082, 43.210471131708566, 4.62763999917739],
+                [
+                    -1.9079816382710177,
+                    -21.061093436043066,
+                    -0.9008993180197393,
+                ],
+            ],
+            [
+                [
+                    -0.00012008530581342215,
+                    8.793630593117996e-5,
+                    7.597255455493723e-5,
+                ],
+                [
+                    -68130.92238356236,
+                    0.00039377780730831405,
+                    -1.7605642836007228e-6,
+                ],
+                [
+                    0.13751870201048225,
+                    -306398.9613431073,
+                    0.010549140241096213,
+                ],
+                [-6.324454820867686, 1905.829219415685, -1804.7603652528232],
+            ],
+            [
+                [
+                    0.24257214066419674,
+                    -2.427681550466581e-5,
+                    0.0004490449705293907,
+                ],
+                [
+                    1.65255177808632e-6,
+                    -0.0018356836401014578,
+                    -297.8742145146856,
+                ],
+                [-0.0001490787451421975, 987948.3441143868, 294731.1906442909],
+                [
+                    -8.651997195832852,
+                    1.2201615793518594e-5,
+                    -0.00036001088861326025,
+                ],
+            ],
+            [
+                [1.1599817779136417, -1.7744964357133617, -1.065988351401675],
+                [-1.5668515693620335, -1.7966017740217959, 1.0353304930432294],
+                [-1.6301099710905995, 1.254301350558929, 1.5853495175344006],
+                [-1.9223785638829012, -1.9601812446295237, -1.162024325924673],
+            ],
+        ]
     }
 }
