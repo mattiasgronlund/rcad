@@ -316,9 +316,7 @@ fn check_holes_sit_inside(
 /// not that. It is whatever `orient2d_tolerantly` called
 /// [`Decision::Zero`](rcad_predicates::Decision::Zero), and under
 /// [`Strictness::TolerantFallback`](rcad_predicates::Strictness) that includes
-/// an enclosure the policy waved through without settling. A clean right-angled
-/// corner reads straight once its coordinates are small enough — an ordinary
-/// square of side `1e-170` did it — while
+/// an enclosure the policy waved through without settling, while
 /// [`check_the_corner_does_not_double_back`] passes, because that one asks an
 /// exact question the tolerant policy never touches.
 ///
@@ -326,6 +324,12 @@ fn check_holes_sit_inside(
 /// questions, and only one of them was the question the argument was about.
 /// A corner nobody could settle is exactly [`Error::Undecidable`], and this is
 /// caller input rather than a broken invariant (`docs/decisions.md` §4.1).
+///
+/// The input that showed this — an ordinary square of side `1e-170` — no
+/// longer reads straight, because `orient2d` now normalises uniformly small
+/// coordinates and settles that corner outright. Nothing here has an example
+/// left, and that is a reason to keep the arm rather than to drop it:
+/// unreachable was the claim that turned out to be wrong the first time.
 fn ring_runs_anticlockwise(
     ring: &[[f64; 2]],
     policy: &Policy,

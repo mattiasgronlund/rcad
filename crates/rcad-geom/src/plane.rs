@@ -445,11 +445,13 @@ pub enum PlaneAgreement {
     /// One of the six minors could not be given a sign, so the two planes
     /// cannot be told apart and cannot be shown to match either.
     ///
-    /// It takes coefficients whose product falls out of the range where `f64`
-    /// multiplication can be undone — a normal tilted by roughly `1e-300`, for
-    /// instance. `docs/decisions.md` §3.5's dynamic-range check is what keeps
-    /// models like that out; a caller reaching this has one anyway, and the
-    /// honest answer is that nothing here can tell.
+    /// It takes coefficients spread so wide that no single power of two brings
+    /// their products into the range where `f64` multiplication can be undone.
+    /// A normal tilted by roughly `1e-300` used to be one and is not any more:
+    /// [`orient2d`] normalises a uniformly tiny minor and decides it.
+    /// `docs/decisions.md` §3.5's dynamic-range check is what keeps a genuinely
+    /// spread model out; a caller reaching this has one anyway, and the honest
+    /// answer is that nothing here can tell.
     CannotTell,
 }
 
@@ -1056,11 +1058,13 @@ mod tests {
     ///
     /// The truthful answer is [`PlaneAgreement::OppositeWay`] — it is asked
     /// against its own reverse — and the `a * b` minor is `1e-300 * -2e-300`
-    /// against `2e-300 * -1e-300`, both of which underflow to zero. Neither
-    /// intervals nor exact arithmetic can prove that difference is zero, so
-    /// saying "different plane" would be a confident lie.
+    /// against `2e-300 * -1e-300`, both of which underflow to zero where they
+    /// are written. They are uniformly tiny rather than spread apart, so
+    /// [`orient2d`] lifts the whole minor into range by an exact power of two
+    /// and proves the difference is zero. This used to be
+    /// [`PlaneAgreement::CannotTell`], which was honest and was not the answer.
     #[test]
-    fn a_plane_tilted_by_a_hair_too_small_to_multiply_cannot_be_matched_to_itself() {
+    fn a_plane_tilted_by_a_hair_too_small_to_multiply_matches_its_own_reverse() {
         let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(1e-300, 2e-300, 1.0))
             .unwrap();
         assert_eq!(
@@ -1071,7 +1075,12 @@ mod tests {
 
         assert_eq!(
             plane.agreement_with(&plane.reversed()),
-            PlaneAgreement::CannotTell
+            PlaneAgreement::OppositeWay
+        );
+        assert_eq!(
+            plane.agreement_with(&plane),
+            PlaneAgreement::SameWay,
+            "and it is still the same plane as itself"
         );
     }
 

@@ -186,10 +186,15 @@ fn pushing_a_point_further_off_the_line_walks_back_down_the_cascade() {
 
 /// `robust` leaves out the underflow guard on purpose, so on a triple whose
 /// determinant is a positive number smaller than the smallest `f64` it answers
-/// zero — that is, it says three points that make a corner are in a line. We
-/// refuse instead.
+/// zero — that is, it says three points that make a corner are in a line.
+///
+/// This is where the two implementations part company for good, and it is the
+/// one place in this file where matching `robust` would be the wrong outcome.
+/// The corner is a perfectly ordinary right angle that happens to be written
+/// down in tiny numbers, so its sign is a fact: lift all six coordinates by an
+/// exact power of two and every level of the cascade can see it.
 #[test]
-fn coordinates_down_among_the_subnormals_are_refused_rather_than_guessed() {
+fn coordinates_down_among_the_subnormals_are_normalised_rather_than_guessed() {
     let a = [1e-200, 0.0];
     let b = [0.0, 1e-200];
     let c = [0.0, 0.0];
@@ -202,17 +207,21 @@ fn coordinates_down_among_the_subnormals_are_refused_rather_than_guessed() {
 
     let (ours, level) = orient2d_reporting_level(a, b, c);
     match ours {
-        Decision::Neg | Decision::Pos => {
-            panic!("no arithmetic here can prove a sign, so none may be claimed")
-        }
+        Decision::Pos => (),
         Decision::Zero => panic!("these three points are not in a line"),
-        Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
+        Decision::Neg => panic!("they turn the same way as the same corner at unit size"),
+        Decision::Undecidable { .. } => panic!("the sign exists and a power of two reaches it"),
         other => panic!("unhandled decision {other:?}"),
     }
     assert_eq!(
         level,
-        Level::Interval,
-        "exact arithmetic must decline to run"
+        Level::Float,
+        "once it is in range this is the cheapest kind of turn there is"
+    );
+    assert_eq!(
+        orient2d_reporting_level([1.0, 0.0], [0.0, 1.0], [0.0, 0.0]),
+        (ours, level),
+        "the same corner at a size f64 has no trouble with"
     );
 }
 

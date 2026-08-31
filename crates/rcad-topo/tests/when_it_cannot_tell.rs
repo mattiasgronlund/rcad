@@ -22,8 +22,15 @@ fn a_parallelogram(size: f64) -> Vec<[f64; 2]> {
     vec![[0.0, 0.0], [size, size], [size, 2.0 * size], [0.0, size]]
 }
 
+/// The same parallelogram at `1e200`, where every product of coordinates runs
+/// past what `f64` holds.
+///
+/// It used to be refused. Its coordinates are uniformly enormous rather than
+/// spread apart, so `orient2d` brings the whole shape into range by an exact
+/// power of two and reads the same turns off it — and a shape written a
+/// hundred octaves further out is still the same shape.
 #[test]
-fn a_profile_too_big_for_f64_to_multiply_is_refused_rather_than_guessed() {
+fn a_profile_too_big_for_f64_to_multiply_is_normalised_rather_than_refused() {
     let mut log = ProvenanceLog::new();
     let ordinary = ProfileBuilder::new(a_parallelogram(1.0))
         .build(&Policy::certified(), &mut log)
@@ -31,19 +38,16 @@ fn a_profile_too_big_for_f64_to_multiply_is_refused_rather_than_guessed() {
     assert!(log.is_empty(), "nothing about this needed approximating");
     assert_eq!(ordinary.approximation(), None);
 
-    let refused = ProfileBuilder::new(a_parallelogram(1e200)).build(&Policy::certified(), &mut log);
+    let enormous = ProfileBuilder::new(a_parallelogram(1e200))
+        .build(&Policy::certified(), &mut log)
+        .expect("size is not the problem it used to be");
 
-    match refused {
-        Err(Error::Undecidable { records }) => {
-            assert!(!records.is_empty(), "the records say which decision failed");
-            assert!(records.worst_wobble(1.0) > 0.0);
-        }
-        other => panic!("this cannot be settled in f64: {other:?}"),
-    }
-    assert!(
-        log.is_empty(),
-        "a failed build reports its records in the error, not in both places"
+    assert_eq!(
+        enormous.approximation(),
+        ordinary.approximation(),
+        "the two are the same shape, so neither needed approximating"
     );
+    assert!(log.is_empty(), "and a certified build records nothing");
 }
 
 /// A square with a spike so close to the origin that nothing in `f64` can say
@@ -225,8 +229,16 @@ fn extruding_an_approximated_profile_twice_does_not_inflate_the_slop() {
     assert_eq!(model.worst_approximation(), slop.magnitude());
 }
 
+/// A unit square extruded `1e200` high. Placing a point in it used to come
+/// back [`Containment::Undecidable`] with a full log — an operation reporting
+/// failure through the channel `docs/decisions.md` §12.5 says stays empty, and
+/// §16.11 named it as the symptom worth chasing.
+///
+/// The tower's coordinates are uniformly enormous, so the predicates normalise
+/// and the answers are ordinary. There is nothing subtle about where these
+/// three points are.
 #[test]
-fn a_solid_too_tall_for_f64_to_multiply_says_it_cannot_place_a_point() {
+fn a_solid_too_tall_for_f64_to_multiply_can_still_place_a_point() {
     let mut model = empty_model();
     let square = ProfileBuilder::new(a_unit_square())
         .build(&Policy::certified(), &mut ProvenanceLog::new())
@@ -235,21 +247,21 @@ fn a_solid_too_tall_for_f64_to_multiply_says_it_cannot_place_a_point() {
         .add_extrusion(&square, 1e200, &Isometry::identity())
         .expect("nothing about building it needs a decision");
 
-    let mut log = ProvenanceLog::new();
-    let answer = model.solid(tower).classify_point(
-        Point::new(0.5, 0.5, 1e199),
-        &Policy::certified(),
-        &mut log,
-    );
-
-    match answer {
-        Containment::Undecidable { enclosure } => assert!(enclosure > 0.0),
-        Containment::Inside | Containment::OnBoundary | Containment::Outside => {
-            panic!("nothing in f64 can settle this")
-        }
-        other => panic!("unhandled answer: {other:?}"),
+    for (point, expected) in [
+        (Point::new(0.5, 0.5, 1e199), Containment::Inside),
+        (Point::new(0.5, 0.5, -1.0), Containment::Outside),
+        (Point::new(2.0, 0.5, 1e199), Containment::Outside),
+    ] {
+        let mut log = ProvenanceLog::new();
+        let answer = model
+            .solid(tower)
+            .classify_point(point, &Policy::certified(), &mut log);
+        assert_eq!(answer, expected, "{point:?}");
+        assert!(
+            log.is_empty(),
+            "a certified classification records nothing at all"
+        );
     }
-    assert!(!log.is_empty(), "the log says what could not be settled");
 }
 
 /// A unit square stretched into a tower `1e30` high: the coordinates reach
@@ -319,60 +331,69 @@ fn a_policy_that_ignores_the_range_records_nothing_at_all() {
     assert!(log.is_empty(), "an ignored check has nothing to say");
 }
 
-/// An ordinary square, small enough that the tolerant policy stops being able
-/// to tell which way it turns.
+/// An ordinary square, small enough that `orient2d` used to be unable to tell
+/// which way it turns.
 ///
-/// This used to be an `unreachable!`. The argument for it was that
+/// The history is worth keeping because it is two mistakes deep. First the
+/// builder had an `unreachable!` here, on the argument that
 /// `check_nothing_crosses` runs first and rules out three points on one line at
 /// the lowest, leftmost corner — which is true, and is not what a straight turn
-/// means here. A straight turn is whatever `orient2d_tolerantly` called `Zero`,
-/// and under a tolerant policy that includes an enclosure it waved through
-/// without settling. At `1e-170` a clean right angle reads straight, and the
-/// builder panicked on input a caller could hand it.
+/// means. A straight turn is whatever `orient2d_tolerantly` called `Zero`, and
+/// under a tolerant policy that includes an enclosure it waved through without
+/// settling. At `1e-170` a clean right angle read straight, and the builder
+/// panicked on input a caller could hand it. That became
+/// `Error::Undecidable` (`docs/decisions.md` §4.2).
 ///
-/// A corner nobody could settle is exactly `Error::Undecidable`
-/// (`docs/decisions.md` §4.2), and `docs/decisions.md` §16.10 is why the claim
-/// was looked at at all.
+/// The second mistake was to stop there. A refusal is a *limit* when the answer
+/// does not exist and a *gap* when it does and the arithmetic could not reach
+/// it (§16.9), and this was always a gap — the test below said so out loud,
+/// by rescaling the same square by hand. `orient2d` does that rescaling itself
+/// now, so the square builds, certified, with nothing approximated.
 #[test]
-fn a_square_too_small_for_the_tolerant_policy_to_orient_is_undecidable_not_a_panic() {
+fn a_square_too_small_for_f64_to_multiply_is_normalised_and_built() {
     let side = 1e-170;
     let corners = vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]];
     let mut log = ProvenanceLog::new();
 
-    match ProfileBuilder::new(corners).build(&Policy::tolerant(1.0), &mut log) {
-        Err(Error::Undecidable { records }) => {
-            assert!(!records.is_empty(), "the refusal carries what caused it");
-        }
-        other => panic!("a corner the policy could not settle is undecidable: {other:?}"),
-    }
+    let built = ProfileBuilder::new(corners)
+        .build(&Policy::tolerant(1.0), &mut log)
+        .expect("a clean right angle has a turn whatever size it is written at");
+    assert_eq!(
+        built.approximation(),
+        None,
+        "nothing here was approximated, so nothing may be recorded as approximate"
+    );
+    assert!(log.is_empty(), "and a certified build records nothing");
 }
 
-/// The stricter policy was always right about the square above, and that is the
-/// part that made the panic worth chasing: the *permissive* policy crashed
-/// where the certified one returned an honest error, which is the safety
-/// ordering upside down.
+/// The certified policy used to refuse this square while the tolerant one
+/// crashed on it, which was the safety ordering upside down. Now neither has
+/// anything to argue about: no tolerance is involved in the answer at all.
 #[test]
-fn the_certified_policy_refuses_the_same_square_it_always_did() {
+fn the_certified_policy_builds_the_same_square_with_no_tolerance_at_all() {
     let side = 1e-170;
-    let corners = vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]];
-    let mut log = ProvenanceLog::new();
-    assert!(matches!(
-        ProfileBuilder::new(corners).build(&Policy::certified(), &mut log),
-        Err(Error::Undecidable { .. })
-    ));
-}
-
-/// And it is a gap rather than a limit: the answer exists, and an exact
-/// power-of-two rescaling reaches it. Nothing about the shape changed — every
-/// coordinate is the same bits with a different exponent.
-#[test]
-fn the_same_square_scaled_by_a_power_of_two_builds_perfectly_well() {
-    let side = 1e-170 * 2f64.powi(200);
     let corners = vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]];
     let mut log = ProvenanceLog::new();
     assert!(
         ProfileBuilder::new(corners)
-            .build(&Policy::tolerant(1.0), &mut log)
+            .build(&Policy::certified(), &mut log)
             .is_ok()
     );
+    assert!(log.is_empty());
+}
+
+/// The same square with every coordinate's exponent shifted by 200 — the same
+/// bits, a different size. It built before this change and it builds now, and
+/// that it now agrees with the unscaled square is the whole point: the answer
+/// never depended on where the shape was written.
+#[test]
+fn the_same_square_scaled_by_a_power_of_two_builds_to_the_same_answer() {
+    let side = 1e-170 * 2f64.powi(200);
+    let corners = vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]];
+    let mut log = ProvenanceLog::new();
+    let scaled = ProfileBuilder::new(corners)
+        .build(&Policy::tolerant(1.0), &mut log)
+        .expect("this one always built");
+    assert_eq!(scaled.approximation(), None);
+    assert!(log.is_empty());
 }

@@ -68,6 +68,7 @@ mod orient3d;
 mod planes;
 mod point;
 mod policy;
+mod power_of_two;
 mod provenance;
 mod real_numbers;
 mod surface;

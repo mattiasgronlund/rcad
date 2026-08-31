@@ -2,6 +2,7 @@ use crate::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
 };
 use crate::interval::determinant;
+use crate::power_of_two::{exponent_that_brings_into_range, scaled_by_a_power_of_two};
 use crate::{
     Decision, Filtered, Interval, Level, Measures, NOTHING_IS_KNOWN, Point, Policy, Predicate,
     ProvenanceLog, Record, decide, is_a_real_point, product_is_normal, resolve_under_policy,
@@ -18,12 +19,18 @@ pub const ORIENT3D: &str = "orient3d";
 /// sign convention as the `robust` crate, which the differential test relies
 /// on.
 ///
-/// Exact `f64` inputs always get a certified answer, as long as the products
-/// of coordinates stay inside the normal `f64` range. If one overflows, or if
-/// one is small enough that its roundoff term would be subnormal, exact
-/// arithmetic stops being exact and the answer is [`Decision::Undecidable`]
-/// rather than a guess. Coordinates that far apart in magnitude are what
-/// decisions.md §3.5's dynamic-range check exists to reject.
+/// Exact `f64` inputs get a certified answer whenever one exists. Coordinates
+/// that are uniformly tiny or uniformly enormous have their products fall off
+/// the bottom or the top of the `f64` range, and those are decided anyway: the
+/// whole input is moved into range by an exact power of two, which multiplies
+/// the determinant by a positive number and so leaves its sign alone
+/// ([`decided_after_normalising`]).
+///
+/// What is left as [`Decision::Undecidable`] is a genuine *spread* — a model
+/// whose coordinates sit far from the origin while its differences are far
+/// below it, so that no single scaling brings both into range at once. That is
+/// the case decisions.md §3.5's dynamic-range check is for, and being a ratio
+/// is exactly what lets it see this and not the uniform cases (§16.11).
 ///
 /// A coordinate that is not a real number at all gets [`NOTHING_IS_KNOWN`]
 /// before any of that runs. [`is_a_real_point`] says why.
@@ -57,11 +64,25 @@ pub fn orient3d_of_points(a: Point, b: Point, c: Point, d: Point) -> Decision {
 /// that is not a real number would have reached — it arrives there as
 /// [`Interval::ENTIRE`] — and it is the level the cascade already reports for
 /// the refusals it works out for itself.
+///
+/// A retry reports whichever level settled it, which is the level that did the
+/// work. Nothing marks the answer as having been normalised, because nothing
+/// about it is weaker: scaling by a power of two is exact, so a certified
+/// answer here is certified in the same sense as any other (decisions.md §5).
+///
+/// All three public entry points funnel through here, so all three get the
+/// retry.
 pub fn orient3d_reporting_level(a: Point, b: Point, c: Point, d: Point) -> (Decision, Level) {
     if ![a, b, c, d].into_iter().all(is_a_real_point) {
         return (NOTHING_IS_KNOWN, Level::Interval);
     }
-    decide(&Orient3d { a, b, c, d })
+    let refused = match decide(&Orient3d { a, b, c, d }) {
+        (Decision::Undecidable { enclosure }, level) => {
+            (Decision::Undecidable { enclosure }, level)
+        }
+        settled => return settled,
+    };
+    decided_after_normalising(a, b, c, d).unwrap_or(refused)
 }
 
 /// The tolerant entry point, separately named so nobody reaches it by accident.
@@ -88,6 +109,79 @@ pub fn orient3d_tolerantly(
     }
     let record = Record::new(ORIENT3D, &[a, b, c, d], level, decision, Measures::Volume);
     resolve_under_policy(record, policy, log)
+}
+
+/// One more run of the whole cascade, on a copy of the input moved into range
+/// by an exact power of two. `None` when there is no such copy, or when the
+/// copy could not be settled either.
+///
+/// This determinant is homogeneous of degree three in the coordinates, so
+/// scaling all twelve by `s > 0` multiplies it by `s^3` and leaves its sign
+/// alone. That is what the metamorphic test next door already trusts; here it
+/// is used as a technique rather than as an oracle.
+///
+/// A constructed point has no coordinates to scale, and its refusal is
+/// decisions.md §2.5's limit rather than a gap — no arithmetic recovers a
+/// number that was never there — so this stops at the first one it meets.
+///
+/// Only reached from an [`Decision::Undecidable`], so the path that already
+/// works pays nothing. The retry re-enters at the top rather than inside
+/// [`Orient3d::on_floats`] because all three levels fail together on these
+/// inputs: subnormal products at level 1, interval products that collapse to
+/// zero at level 2, and an expansion that declines to run at level 3.
+///
+/// # Why `ORIENT3D_ERROR_BOUND` carries over untouched
+///
+/// Rounding to nearest commutes with multiplication by an exact power of two:
+/// while nothing leaves the normal range, `fl(2^k * x) = 2^k * fl(x)`, because
+/// the two numbers have the same mantissa and the grid they round onto is the
+/// same grid scaled. So each difference in [`Orient3d::on_floats`] comes out as
+/// `s` times what it was, each 2x2 minor as `s^2`, each of the three terms as
+/// `s^3`, and `value` as `s^3` — the same mantissa bits throughout. The
+/// permanent is a sum of those same degree-three products, so it scales by
+/// `s^3` as well, and `value > ORIENT3D_ERROR_BOUND * permanent` compares two
+/// sides multiplied by the same positive number. Level 1 is therefore
+/// scale-invariant, which is why the bound needs no adjusting and gets none.
+///
+/// That argument is about not *losing* certifications. Soundness needs less
+/// than it: the scaled copy is an ordinary exact `f64` input, and
+/// `ORIENT3D_ERROR_BOUND` is a relative bound that holds for any such input
+/// whose products stay normal, so it holds here on its own terms.
+fn decided_after_normalising(a: Point, b: Point, c: Point, d: Point) -> Option<(Decision, Level)> {
+    let [a, b, c, d] = [a, b, c, d].map(Point::exact_coordinates);
+    let (a, b, c, d) = (a?, b?, c?, d?);
+
+    let exponent = exponent_that_brings_into_range([
+        a[0] - d[0],
+        a[1] - d[1],
+        a[2] - d[2],
+        b[0] - d[0],
+        b[1] - d[1],
+        b[2] - d[2],
+        c[0] - d[0],
+        c[1] - d[1],
+        c[2] - d[2],
+    ])?;
+    if exponent == 0 {
+        return None;
+    }
+
+    let a = scaled_by_a_power_of_two(a, exponent)?;
+    let b = scaled_by_a_power_of_two(b, exponent)?;
+    let c = scaled_by_a_power_of_two(c, exponent)?;
+    let d = scaled_by_a_power_of_two(d, exponent)?;
+
+    // An enclosure carries the units of the value it encloses (decisions.md
+    // §12.4), and this one would carry them scaled by `s^3`. A sign is
+    // dimensionless and survives; a width does not, so only a certified answer
+    // comes back from here.
+    let (decision, level) = decide(&Orient3d {
+        a: a.into(),
+        b: b.into(),
+        c: c.into(),
+        d: d.into(),
+    });
+    decision.is_certified().then_some((decision, level))
 }
 
 struct Orient3d {
@@ -320,10 +414,10 @@ fn minor(u: [f64; 3], v: [f64; 3]) -> Option<([f64; 4], usize)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ORIENT3D, orient3d, orient3d_exactly, orient3d_of_points, orient3d_reporting_level,
-        orient3d_tolerantly,
+        ORIENT3D, Orient3d, orient3d, orient3d_exactly, orient3d_of_points,
+        orient3d_reporting_level, orient3d_tolerantly, scaled_by_a_power_of_two,
     };
-    use crate::{Decision, Interval, Level, Point, Policy, ProvenanceLog};
+    use crate::{Decision, Interval, Level, Point, Policy, Predicate, ProvenanceLog};
 
     /// The naive `f64` determinant. Exact when the coordinates are small
     /// integers, which is what makes it a usable oracle for the sign
@@ -462,20 +556,123 @@ mod tests {
         assert_eq!(log.records()[0].level(), Level::Interval);
     }
 
+    /// Every product here overflows, and the four points still make an
+    /// ordinary tetrahedron. Bringing all twelve coordinates down settles it,
+    /// and settles it as the same tetrahedron at unit size does.
     #[test]
-    fn coordinates_big_enough_to_overflow_the_products_are_undecidable() {
-        let decision = orient3d(
-            [1e300, 0.0, 0.0],
-            [0.0, 1e300, 0.0],
-            [0.0, 0.0, 1e300],
-            [-1e300, -1e300, -1e300],
+    fn coordinates_big_enough_to_overflow_the_products_are_normalised_and_decided() {
+        assert_eq!(
+            orient3d(
+                [1e300, 0.0, 0.0],
+                [0.0, 1e300, 0.0],
+                [0.0, 0.0, 1e300],
+                [-1e300, -1e300, -1e300],
+            ),
+            Decision::Pos
         );
         assert_eq!(
-            decision,
-            Decision::Undecidable {
-                enclosure: f64::INFINITY
-            }
+            orient3d(
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [-1.0, -1.0, -1.0],
+            ),
+            Decision::Pos,
+            "the same four points at a size f64 has no trouble with"
         );
+    }
+
+    /// And the other end of the range, where every product falls off the
+    /// bottom instead.
+    #[test]
+    fn coordinates_small_enough_to_underflow_the_products_are_normalised_and_decided() {
+        assert_eq!(
+            orient3d_reporting_level(
+                Point::from([1e-200, 0.0, 0.0]),
+                Point::from([0.0, 1e-200, 0.0]),
+                Point::from([0.0, 0.0, 1e-200]),
+                Point::from([0.0, 0.0, 0.0]),
+            ),
+            (Decision::Pos, Level::Float)
+        );
+        assert_eq!(
+            orient3d_reporting_level(
+                Point::from([1.0, 0.0, 0.0]),
+                Point::from([0.0, 1.0, 0.0]),
+                Point::from([0.0, 0.0, 1.0]),
+                Point::from([0.0, 0.0, 0.0]),
+            ),
+            (Decision::Pos, Level::Float),
+            "the same four points at a size f64 has no trouble with"
+        );
+    }
+
+    /// The claim [`decided_after_normalising`] rests on, executed rather than
+    /// argued: an exact power of two multiplies level 1's value and its error
+    /// bound by the same `2^(3k)`, so the comparison between them comes out the
+    /// same way and `ORIENT3D_ERROR_BOUND` needs no adjusting.
+    #[test]
+    fn scaling_moves_level_one_and_its_error_bound_by_exactly_the_same_factor() {
+        let mut checked = 0;
+        for exponent in [-40, -7, 1, 13, 40] {
+            for [a, b, c, d] in awkward_tetrahedra() {
+                let here = Orient3d {
+                    a: a.into(),
+                    b: b.into(),
+                    c: c.into(),
+                    d: d.into(),
+                }
+                .on_floats()
+                .expect("nothing is subnormal");
+                let moved = Orient3d {
+                    a: moved_by(a, exponent),
+                    b: moved_by(b, exponent),
+                    c: moved_by(c, exponent),
+                    d: moved_by(d, exponent),
+                }
+                .on_floats()
+                .expect("nothing is subnormal");
+
+                let factor = 2f64.powi(3 * exponent);
+                assert_eq!(moved.value, here.value * factor, "{a:?} {b:?} {c:?} {d:?}");
+                assert_eq!(
+                    moved.error_bound,
+                    here.error_bound * factor,
+                    "{a:?} {b:?} {c:?} {d:?}"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 15);
+    }
+
+    fn moved_by(point: [f64; 3], exponent: i32) -> Point {
+        Point::from(scaled_by_a_power_of_two(point, exponent).expect("nothing leaves the range"))
+    }
+
+    /// Coordinates with mantissas full enough that the products round, which is
+    /// the only case where the claim above could come apart.
+    fn awkward_tetrahedra() -> [[[f64; 3]; 4]; 3] {
+        [
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.3, 0.3, -1.0],
+            ],
+            [
+                [0.5, 0.25, 0.125],
+                [3.0, -1.0, 2.0],
+                [-4.0, 7.0, 0.5],
+                [1.0, 1.0, 9.0],
+            ],
+            [
+                [1.0 / 3.0, 7.0 / 9.0, -2.0 / 11.0],
+                [2.0 / 7.0, 11.0 / 13.0, 5.0 / 17.0],
+                [-5.0 / 3.0, 1.0 / 11.0, 3.0 / 7.0],
+                [1.0 / 19.0, -4.0 / 23.0, 8.0 / 29.0],
+            ],
+        ]
     }
 
     /// The true determinant here is `-2^-76`, and level 1 used to certify it
@@ -501,9 +698,21 @@ mod tests {
     /// so the level 1 bound comes to a perfectly ordinary `2.4e-37` and
     /// happily certifies the wrong sign.
     ///
-    /// Nothing in `f64` can prove the true sign — level 3 needs the roundoff
-    /// term of each product to be normal, and here the products themselves are
-    /// not — so [`Decision::Undecidable`] is the whole of the right answer.
+    /// What must never come back is [`Decision::Pos`]. Level 3 needs the
+    /// roundoff term of each product to be normal and here the products
+    /// themselves are not, so it declines, and the two cheap levels have
+    /// nothing left to prove a sign with.
+    ///
+    /// [`decided_after_normalising`] does not rescue it either, and the reason
+    /// is worth being precise about, because it is a **narrower** claim than it
+    /// looks. The exponent is read off the largest difference, which is
+    /// `2^1000`, so the retry would divide by about that much — and that sends
+    /// `2^-538` below the smallest normal number, which the self-check refuses.
+    /// It is *not* true that no scaling reaches this sign: doubling every
+    /// coordinate once is enough for interval arithmetic to prove
+    /// [`Decision::Neg`], and the test below reaches the same sign by scaling
+    /// the two rows apart. One exponent read off the largest difference is what
+    /// this predicate tries, and this input is outside what that reaches.
     #[test]
     fn a_determinant_whose_products_fall_off_the_bottom_of_the_range_is_not_certified() {
         let s = 2f64.powi(-538);
@@ -515,9 +724,22 @@ mod tests {
         );
         match decision {
             Decision::Pos => panic!("the true determinant is -2^-76, so this is a wrong sign"),
-            Decision::Neg | Decision::Zero => panic!("nothing here can prove a sign: {decision:?}"),
+            Decision::Neg | Decision::Zero => {
+                panic!("one exponent off the largest difference cannot reach this: {decision:?}")
+            }
             Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
         }
+
+        assert_eq!(
+            orient3d(
+                [-6.0, 0.0, 2f64.powi(1001)],
+                [22.0 * s, 2.0 * s, 0.0],
+                [18.0 * s, 2.0 * s, 2f64.powi(463)],
+                [0.0, 0.0, 0.0],
+            ),
+            Decision::Neg,
+            "so the refusal above is what this rule reaches, not what f64 can prove"
+        );
     }
 
     /// The same determinant, rescaled until it fits, as an oracle for the sign

@@ -22,6 +22,23 @@
 //! run is the one Shewchuk's bounds were derived for, and the one the
 //! `robust` differential suites next door already check.
 //!
+//! # What keeps this from turning into a tautology
+//!
+//! decisions.md §14.1's second question: do the two runs take *different* paths
+//! through the dangerous code? Two runs down the same branch prove nothing,
+//! however pretty the algebra. Here the middle run evaluates level 1 with
+//! Shewchuk's hypotheses intact and the shifted run evaluates it with them
+//! broken, and that difference is the whole test.
+//!
+//! `orient2d` and `orient3d` now retry an [`Decision::Undecidable`] on a copy
+//! of the input rescaled by an exact power of two, which is a change of exactly
+//! the shape that could flatten those two paths into one. It does not — a
+//! retry only ever follows a refusal, and level 1 certifying a sign it has not
+//! earned is not a refusal — but "it does not" is a claim, so the counting
+//! below measures it rather than assuming it. A run has to find samples where
+//! level 1's products left the normal range in the shifted run and stayed
+//! inside it in the middle one, or it reports that it was not testing anything.
+//!
 //! The sample count is deliberately modest so this stays a test. Set
 //! `RCAD_SEARCH_SAMPLES` to run the same search as hard as you like:
 //! `RCAD_SEARCH_SAMPLES=10000000 cargo test --release -- --nocapture` prints
@@ -42,9 +59,22 @@ const SAMPLES: usize = 200_000;
 /// to scale the mistake back up into a number that clears the error bound.
 const INTO_THE_SUBNORMALS: core::ops::RangeInclusive<i32> = -580..=580;
 
-/// Far enough up that the products, and then the whole value, run past what
-/// `f64` can hold.
+/// Far enough up that `orient3d`'s products, and then the whole value, run past
+/// what `f64` can hold. It reaches infinity in the height that scales each
+/// minor rather than in the minor itself, which is why this range is enough
+/// even though no single product of two coordinates overflows in it.
 const UP_TOWARDS_INFINITY: core::ops::RangeInclusive<i32> = 300..=400;
+
+/// `orient2d` multiplies two coordinates and stops, so it has to be pushed
+/// nearly twice as far before anything leaves the range at all.
+///
+/// This is its own constant because sharing `UP_TOWARDS_INFINITY` meant the
+/// turn search never overflowed: a coordinate is at most `2^23` here, so at a
+/// shift of 400 the largest product is `2^846`, a perfectly ordinary number.
+/// The search reported a healthy count of certified samples for it and was
+/// checking nothing (decisions.md §14.1, question 2). The counting in [`Found`]
+/// is what turned that up.
+const A_TURN_UP_TOWARDS_INFINITY: core::ops::RangeInclusive<i32> = 480..=600;
 
 #[test]
 fn pushing_a_determinant_into_the_subnormals_does_not_change_its_sign() {
@@ -74,7 +104,7 @@ fn pushing_a_turn_into_the_subnormals_does_not_change_its_sign() {
 fn pushing_a_turn_up_towards_infinity_does_not_change_its_sign() {
     report(
         "orient2d, overflow",
-        search_orient2d(4, UP_TOWARDS_INFINITY),
+        search_orient2d(4, A_TURN_UP_TOWARDS_INFINITY),
     );
 }
 
@@ -105,8 +135,9 @@ fn the_determinant_this_search_was_written_for_is_in_the_family_it_covers() {
     }
 }
 
-/// Print what a run found, then insist that it found no disagreement and that
-/// it certified enough samples to have been looking at anything at all.
+/// Print what a run found, then insist that it found no disagreement, that it
+/// certified enough samples to have been looking at anything at all, and that
+/// enough of those really did take the two runs down different paths.
 fn report(what: &str, found: Found) {
     println!("{what}: {found:?} out of {} samples", samples());
     assert_eq!(
@@ -118,6 +149,11 @@ fn report(what: &str, found: Found) {
     assert!(
         found.certified > samples() / 100,
         "{what}: a search that certifies almost nothing is not testing the filter: {found:?}"
+    );
+    assert!(
+        found.down_different_paths > samples() / 1000,
+        "{what}: every certified sample evaluated the same arithmetic in both \
+         runs, so this search is a tautology and proves nothing: {found:?}"
     );
 }
 
@@ -136,6 +172,29 @@ struct Found {
     /// Of those, how many disagreed with the same geometry in the middle of the
     /// range. Must be zero.
     disagreements: usize,
+    /// Of those, how many had a level 1 product outside the normal range in the
+    /// shifted run and every one inside it in the middle run.
+    ///
+    /// These are the samples where the two runs genuinely evaluate different
+    /// arithmetic, which is the only reason the comparison is worth making
+    /// (decisions.md §14.1, question 2). A run that finds none of these has
+    /// stopped being a test.
+    ///
+    /// It counts both of the ways the shifted run can differ: certifying at
+    /// level 1 with the hypotheses broken, which is the failure being hunted,
+    /// and declining all the way down and settling a rescaled copy, which is
+    /// still a different path and still not the middle run's.
+    down_different_paths: usize,
+}
+
+/// Whether multiplying these two keeps the relative accuracy every level 1
+/// error bound assumes.
+///
+/// Stricter than [`rcad_predicates::product_is_normal`] at the top of the
+/// range, because infinity clears any comparison against a finite threshold and
+/// is exactly one of the two ways this search breaks the hypothesis.
+fn product_stays_in_range(a: f64, b: f64) -> bool {
+    a == 0.0 || b == 0.0 || (a * b).is_normal()
 }
 
 fn search_orient3d(seed: u64, shifts: core::ops::RangeInclusive<i32>) -> Found {
@@ -162,6 +221,11 @@ fn search_orient3d(seed: u64, shifts: core::ops::RangeInclusive<i32>) -> Found {
             continue;
         }
         found.certified += 1;
+        if !determinant_products_stay_in_range(shifted)
+            && determinant_products_stay_in_range(middle)
+        {
+            found.down_different_paths += 1;
+        }
 
         let truth = orient3d(middle[0], middle[1], middle[2], [0.0, 0.0, 0.0]);
         if truth != scaled {
@@ -169,6 +233,39 @@ fn search_orient3d(seed: u64, shifts: core::ops::RangeInclusive<i32>) -> Found {
         }
     }
     found
+}
+
+/// All nine products `orient3d`'s level 1 forms — the six inside its 2x2 minors
+/// and the three that scale each minor by a height — with the fourth point at
+/// the origin so the rows are the points themselves.
+///
+/// The last three matter as much as the first six and for the opposite reason.
+/// The minors are where a product falls off the bottom; the heights are where
+/// the whole term runs off the top, and `orient3d` reaches infinity there long
+/// before any minor does.
+fn determinant_products_stay_in_range(rows: [[f64; 3]; 3]) -> bool {
+    let [a, b, c] = rows;
+    let minors = [
+        (b[0], c[1]),
+        (c[0], b[1]),
+        (c[0], a[1]),
+        (a[0], c[1]),
+        (a[0], b[1]),
+        (b[0], a[1]),
+    ];
+    if !minors
+        .iter()
+        .all(|&(left, right)| product_stays_in_range(left, right))
+    {
+        return false;
+    }
+
+    let first = b[0] * c[1] - c[0] * b[1];
+    let second = c[0] * a[1] - a[0] * c[1];
+    let third = a[0] * b[1] - b[0] * a[1];
+    product_stays_in_range(a[2], first)
+        && product_stays_in_range(b[2], second)
+        && product_stays_in_range(c[2], third)
 }
 
 fn search_orient2d(seed: u64, shifts: core::ops::RangeInclusive<i32>) -> Found {
@@ -190,6 +287,9 @@ fn search_orient2d(seed: u64, shifts: core::ops::RangeInclusive<i32>) -> Found {
             continue;
         }
         found.certified += 1;
+        if !turn_products_stay_in_range(shifted) && turn_products_stay_in_range(middle) {
+            found.down_different_paths += 1;
+        }
 
         let (truth, _) = orient2d_reporting_level(middle[0], middle[1], [0.0, 0.0]);
         if truth != scaled {
@@ -197,6 +297,13 @@ fn search_orient2d(seed: u64, shifts: core::ops::RangeInclusive<i32>) -> Found {
         }
     }
     found
+}
+
+/// The two products `orient2d`'s level 1 takes the difference of, with the
+/// third point at the origin so the rows are the points themselves.
+fn turn_products_stay_in_range(rows: [[f64; 2]; 2]) -> bool {
+    let [a, b] = rows;
+    product_stays_in_range(a[0], b[1]) && product_stays_in_range(a[1], b[0])
 }
 
 fn is_certified(decision: Decision) -> bool {

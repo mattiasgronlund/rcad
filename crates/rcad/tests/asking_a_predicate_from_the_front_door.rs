@@ -243,17 +243,25 @@ fn a_turn_the_cascade_can_prove_costs_a_tolerant_policy_nothing() {
     assert!(log.is_empty(), "a certified answer records nothing at all");
 }
 
-/// Three points so close together that the products of their coordinates fall
-/// below the smallest `f64`. Exact arithmetic cannot run on numbers that have
-/// already been rounded away, so there is no honest sign to report — and the
-/// record says which predicate ran out of road.
+/// Three points whose coordinates run from `2^-600` to `2^1000`. The turn
+/// between them is decided by a difference of `2^-650`, and no single power of
+/// two brings that difference and those coordinates into range together, so
+/// there is no honest sign to report — and the record says which predicate ran
+/// out of road.
+///
+/// A triple that is merely *small* is not this. `orient2d` normalises those and
+/// answers, which is why the input here is spread rather than tiny.
 #[test]
-fn a_turn_too_small_for_f64_names_itself_in_the_log() {
+fn a_turn_spread_wider_than_f64_holds_at_once_names_itself_in_the_log() {
+    let near = 2f64.powi(-600);
+    let apart = 2f64.powi(-650);
+    let far = 2f64.powi(1000);
+
     let mut log = ProvenanceLog::new();
     let decision = orient2d_tolerantly(
-        [1e-200, 0.0],
-        [0.0, 1e-200],
-        [0.0, 0.0],
+        [near, near],
+        [near, near + apart],
+        [far, far],
         &Policy::certified(),
         &mut log,
     );
@@ -267,4 +275,18 @@ fn a_turn_too_small_for_f64_names_itself_in_the_log() {
 
     assert_eq!(log.len(), 1);
     assert_eq!(log.records()[0].predicate(), ORIENT2D);
+
+    let mut log = ProvenanceLog::new();
+    assert_eq!(
+        certified(orient2d_tolerantly(
+            [1e-200, 0.0],
+            [0.0, 1e-200],
+            [0.0, 0.0],
+            &Policy::certified(),
+            &mut log,
+        )),
+        Decision::Pos,
+        "a turn that is merely small is normalised and answered"
+    );
+    assert!(log.is_empty(), "and answering it approximated nothing");
 }
