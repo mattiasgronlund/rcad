@@ -72,6 +72,23 @@ pub enum Cause {
     /// The data arrived approximate — an imported file that did not close, or
     /// coordinates rounded by the exporter.
     ImportedUncertainty,
+    /// A flat triangle was put where a curved surface is, and the magnitude is
+    /// the furthest any point of it can be from that surface.
+    ///
+    /// Neither a fallback nor a resolution. Nothing failed and nothing was
+    /// guessed: the caller asked for exactly this when it named a `Deflection`,
+    /// and a coarse mesh is a request rather than a failure
+    /// (`docs/decisions.md` §23.5). Filing it as [`Cause::TolerantFallback`]
+    /// would leave a reader unable to tell an operation that gave up something
+    /// it wanted from one that did what it was asked, and
+    /// [`Cause::ConstructedPoint`] is about a number too fine to write down
+    /// rather than about a chord standing in for an arc.
+    ///
+    /// **Last on purpose.** `postcard` writes an enum as its variant number, so
+    /// a variant added anywhere but the end renumbers the ones after it and
+    /// every model already on disk reads back a different reason
+    /// (`docs/decisions.md` §25.8).
+    FlatStandIn,
 }
 
 /// One decision that was not certified, with enough context to explain it.
@@ -421,6 +438,66 @@ mod tests {
             Cause::ConstructedPoint,
             "the distinction has to survive being written to disk"
         );
+    }
+
+    /// A mesh's slop is not a fallback and not a rounding, and a reader has to
+    /// be able to tell.
+    ///
+    /// All three can carry the same magnitude. A tolerant fallback means an
+    /// operation wanted to be exact and settled; a constructed point means it
+    /// *was* exact and `f64` had no room to say so; a flat stand-in means the
+    /// caller asked for a rough picture and got one. Only the cause separates
+    /// them, so only the cause can be checked.
+    #[test]
+    fn a_triangle_standing_in_for_a_curve_is_neither_a_fallback_nor_a_rounding() {
+        let wobble = 1e-4;
+        let for_the_mesh = Approximation::new(wobble, Cause::FlatStandIn);
+
+        assert_ne!(
+            for_the_mesh,
+            Approximation::new(wobble, Cause::TolerantFallback)
+        );
+        assert_ne!(
+            for_the_mesh,
+            Approximation::new(wobble, Cause::ConstructedPoint)
+        );
+
+        let bytes = postcard::to_allocvec(&for_the_mesh).unwrap();
+        assert_eq!(
+            postcard::from_bytes::<Approximation>(&bytes)
+                .unwrap()
+                .cause(),
+            Cause::FlatStandIn,
+            "the distinction has to survive being written to disk"
+        );
+    }
+
+    /// A cause is written as its number, so where a new one is added is part of
+    /// the format.
+    ///
+    /// Putting [`Cause::FlatStandIn`] anywhere but the end would renumber the
+    /// causes after it, and every `Approximation` already on disk would read
+    /// back blaming something else. Nothing would notice: the bytes still parse
+    /// and the magnitude is still right.
+    #[test]
+    fn a_new_cause_goes_on_the_end_so_the_ones_before_it_keep_their_numbers() {
+        for (number, cause) in [
+            Cause::UndecidableResolved,
+            Cause::TolerantFallback,
+            Cause::ConstructedPoint,
+            Cause::ImportedUncertainty,
+            Cause::FlatStandIn,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let number = u8::try_from(number).expect("five causes");
+            assert_eq!(
+                postcard::to_allocvec(&cause).unwrap(),
+                [number],
+                "{cause:?}"
+            );
+        }
     }
 
     fn resolved_with(cause: Cause, wobble: f64) -> Record {

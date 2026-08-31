@@ -46,6 +46,24 @@
 //! proves everything or says it could not; [`Policy::tolerant`] trades a
 //! bounded amount of slop for an answer and records what it traded.
 //!
+//! [`Deflection`] is the *other* knob and it is not this one. It says how far a
+//! mesh may stray from the surface it stands for — how fine a picture you want
+//! — and a coarse answer is a request rather than a failure. Nothing out here
+//! takes one yet; it is exported because every meshing signature about to be
+//! written takes one, and because a caller who reached for [`Policy`] to ask
+//! for fewer triangles would have silently asked the kernel to certify less
+//! (`docs/decisions.md` §23.5, §25.8).
+//!
+//! ```
+//! use rcad::{Deflection, Scale};
+//!
+//! // A thousandth of the nominal size, which for a 100 mm part is 0.1 mm.
+//! let scale = Scale::millimetres(100.0)?;
+//! assert_eq!(Deflection::for_scale(scale).length(), 0.1);
+//! assert_eq!(Deflection::of(0.25)?.length(), 0.25);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
 //! # A worked example
 //!
 //! Build a cube, measure it, ask where a point sits, and write it out and read
@@ -249,9 +267,9 @@ pub use rcad_predicates::Error as PredicateError;
 pub use rcad_topo::Error as TopologyError;
 
 pub use rcad_geom::{
-    Axis, BSplineCurve, BSplineSurface, Cylinder, EVALUATION_ROUNDOFF, Isometry, KnotVector,
-    MAX_DEGREE, Orientation, Plane, PlaneAgreement, Point, REFINEMENT_ROUNDOFF, Scale, Segment,
-    Sphere, Surface, Unit, Vector,
+    Axis, BSplineCurve, BSplineSurface, Cylinder, Deflection, EVALUATION_ROUNDOFF, Isometry,
+    KnotVector, MAX_DEGREE, Orientation, Plane, PlaneAgreement, Point, REFINEMENT_ROUNDOFF, Scale,
+    Segment, Sphere, Surface, Unit, Vector,
 };
 pub use rcad_predicates::{
     Approximation, Cause, Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D,

@@ -359,6 +359,16 @@ fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
             "the classifier casts rays at flat faces, and a {what} has none"
         );
 
+        // Without the guard this neither refuses nor answers. A bar's caps fan
+        // into no triangles at all and its wall into two with no area, so the
+        // divergence sum is a clean zero and `measure` dies on its own
+        // assertion — a crash where a refusal is the honest answer.
+        let refusal = model.solid(curved).measure();
+        assert!(
+            matches!(refusal, Err(Error::MeasureNeedsFlatFaces)),
+            "measuring a {what} gave {refusal:?}"
+        );
+
         for rule in [Rule::Union, Rule::Difference, Rule::Intersection] {
             // Both ways round, because refusing lazily would make which answer
             // comes back depend on which side was walked first.
@@ -379,6 +389,14 @@ fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
     }
 
     // And the control: the guard refuses curved solids, not every solid.
+    assert_eq!(
+        model
+            .solid(cube)
+            .measure()
+            .expect("a cube measures")
+            .volume(),
+        8.0
+    );
     assert!(
         model
             .fuse(
@@ -390,6 +408,46 @@ fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
             )
             .is_ok(),
         "two flat solids still fuse"
+    );
+}
+
+/// A box round the corners is not a box round a curved solid, and the name has
+/// to keep saying so.
+///
+/// This used to be called `bounding_box`, and it was one until a curved face
+/// existed. A bar's two corners are both on its seam, so the box round them is
+/// a line the bar bulges a whole radius out of; a ball's are its poles, and the
+/// box round those misses the equator entirely. Anything that took the old name
+/// at its word got a confident wrong answer, which `docs/decisions.md` §4.1
+/// ranks below a crash.
+#[test]
+fn the_box_round_a_curved_solids_corners_does_not_hold_the_solid() {
+    let bar = a_round_bar();
+    let (low, high) = bar
+        .solids()
+        .next()
+        .expect("the bar")
+        .box_around_its_corners()
+        .expect("the bar has corners");
+    assert_eq!(low, Point::new(RADIUS, 0.0, 0.0));
+    assert_eq!(high, Point::new(RADIUS, 0.0, HEIGHT));
+    assert!(
+        low.coordinates()[0] > -RADIUS,
+        "the far side of the wall is at x = -{RADIUS} and this box starts at \
+         x = {}",
+        low.coordinates()[0]
+    );
+
+    // A ball is worse than wrong: its one face has two corners and two corners
+    // make no triangle, so there is no box at all. `None` used to mean "no
+    // faces", and a ball has one.
+    let ball = a_ball();
+    assert_eq!(
+        ball.solids()
+            .next()
+            .expect("the ball")
+            .box_around_its_corners(),
+        None
     );
 }
 

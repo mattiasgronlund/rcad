@@ -28,11 +28,21 @@
 //! That reads like a defect until you see that the parameter values are a
 //! working space and never an answer.
 //!
+//! # Who refines what
+//!
+//! **The loops that arrive here are final.** This crate adds points inside the
+//! patch and never on its boundary. It cannot see that a boundary is shared —
+//! it is shown one face at a time — so if it subdivided a loop, the two faces
+//! along an edge would each refine it in their own `(u, v)` and land on
+//! different 3D points, which is exactly the promise above being broken. The
+//! caller refines every boundary once and hands the same corners to both sides
+//! (`docs/decisions.md` §25.1).
+//!
 //! # What is not here yet
 //!
-//! The triangulator. This crate currently holds the contract the two halves of
-//! the milestone agreed on before either started, which is the whole job of a
-//! gate (`docs/decisions.md` §13 rule 4).
+//! Refinement inside the patch, and the number saying how far the triangles
+//! stray from the surface. [`triangulate`] currently returns the corners it was
+//! given and nothing more.
 
 #![forbid(unsafe_code)]
 

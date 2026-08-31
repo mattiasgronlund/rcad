@@ -114,7 +114,7 @@ pub fn grid_over(solid: SolidView<'_>, points_per_side: usize) -> Vec<Point> {
         "a grid spanning a box needs at least both ends of it, got {points_per_side}"
     );
     let (low, high) = solid
-        .bounding_box()
+        .box_around_its_corners()
         .expect("the plate has faces to be bounded by");
     let low = low.coordinates();
     let high = high.coordinates();

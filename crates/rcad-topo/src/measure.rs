@@ -52,6 +52,13 @@ impl SolidView<'_> {
     ///
     /// # Errors
     ///
+    /// [`Error::MeasureNeedsFlatFaces`] for a solid with a curved face. The fan
+    /// is a polyhedron's answer and a round bar is not a polyhedron — asked
+    /// anyway it sums to zero, which is not a small error but no answer at all.
+    /// Asked over **every** face before anything is summed, for the reason
+    /// [`SolidView::is_wholly_flat`] gives: which answer comes back must not
+    /// depend on the order the faces were reached.
+    ///
     /// [`Error::VolumeTooLargeToMeasure`] or
     /// [`Error::SurfaceAreaTooLargeToMeasure`] when that answer is a real
     /// number the solid genuinely has and `f64` has no room for — a cube of
@@ -65,6 +72,9 @@ impl SolidView<'_> {
     /// [`Model::validate`](crate::Model::validate) says so, which makes this a
     /// broken model rather than bad input.
     pub fn measure(self) -> Result<Measurement> {
+        if !self.is_wholly_flat() {
+            return Err(Error::MeasureNeedsFlatFaces);
+        }
         let hub = self.hub();
         let shifts = self.axis_shifts(hub);
         let (six_volumes, moment) = self.volume_and_moment(hub, shifts);

@@ -187,7 +187,7 @@ fn drift(measured: f64, expected: f64) -> f64 {
 fn reach_of(model: &Model, solid: SolidKey) -> f64 {
     let (low, high) = model
         .solid(solid)
-        .bounding_box()
+        .box_around_its_corners()
         .expect("an extrusion has faces");
     largest_coordinate(low).max(largest_coordinate(high))
 }

@@ -97,11 +97,25 @@ impl<'m> SolidView<'m> {
         self.faces().all(|face| face.surface().as_plane().is_some())
     }
 
-    /// The smallest axis-aligned box holding every vertex of this solid.
+    /// The smallest axis-aligned box holding every corner of this solid.
     ///
-    /// `None` when the solid has no faces at all.
+    /// **Not a box round the solid**, and the name says so because for a curved
+    /// solid the two are different things. A round bar has two corners, both on
+    /// its seam, so the box round them is a line — while the bar bulges a
+    /// radius away from it on every side. A ball has two corners, its poles,
+    /// and the box round those misses the whole equator.
+    ///
+    /// This is the shape of mistake `docs/decisions.md` §23.8 records four
+    /// times over: a helper that meant one thing until a new kind of input
+    /// arrived. It used to be called a bounding box, and it was one for every
+    /// solid that existed when it was written. A box round a *curved* solid
+    /// needs the mesh, and §25.9 hands it to the lane that builds one.
+    ///
+    /// `None` when the solid fans into no triangles at all — which for a
+    /// polyhedron means it has no faces, and which a **ball** also manages: its
+    /// one face has two corners, and two corners make no triangle.
     #[must_use]
-    pub fn bounding_box(self) -> Option<(Point, Point)> {
+    pub fn box_around_its_corners(self) -> Option<(Point, Point)> {
         let mut low = [f64::INFINITY; 3];
         let mut high = [f64::NEG_INFINITY; 3];
         let mut seen = false;

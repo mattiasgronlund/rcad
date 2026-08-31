@@ -132,6 +132,22 @@ pub enum Error {
     #[error("the fuse needs every face to be flat, and one of these solids has a curved one")]
     FuseNeedsFlatFaces,
 
+    /// [`SolidView::measure`] was handed a solid with a curved face.
+    ///
+    /// Volume, area and centroid come out of a sum over the triangles a face
+    /// fans into, which is exact for a polyhedron and says nothing about a
+    /// round bar: its caps fan into no triangles at all and its wall into two
+    /// with no area, so the sum is a flat zero. Measuring a curved solid needs
+    /// the mesh, and the mesh is the lane after this one (decisions.md §25.5).
+    ///
+    /// A refusal and not a failure: the solid is sound and the operation is the
+    /// thing that is not ready for it, exactly as with
+    /// [`Error::FuseNeedsFlatFaces`].
+    ///
+    /// [`SolidView::measure`]: crate::SolidView::measure
+    #[error("measuring needs every face to be flat, and this solid has a curved one")]
+    MeasureNeedsFlatFaces,
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the
