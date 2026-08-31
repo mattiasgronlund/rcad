@@ -218,14 +218,25 @@ impl BSplineCurve {
     ///
     /// [`Error::ParameterOutsideDomain`], as [`BSplineCurve::evaluate`].
     ///
-    /// [`Error::NotFinite`] if the derivative cannot be worked out in `f64`,
-    /// which needs two neighbouring homogeneous control coordinates more than
-    /// the whole `f64` range apart. The derived net subtracts them, and no
-    /// ordering of the arithmetic gets that back — see the note on
-    /// `de_boor::derived_points`. The true tangent may be an ordinary number
-    /// even so; a refusal here says `f64` could not reach it, not that it does
-    /// not exist. Handing back the `NaN` instead would be the silent corrupt
-    /// value `docs/decisions.md` §4.1 ranks below a crash.
+    /// [`Error::NotFinite`] if the true tangent is itself past what `f64` can
+    /// hold. A knot span one `f64` step wide under ordinary coordinates does
+    /// that, and [`KnotVector::new`] accepts such a span on purpose — two knots
+    /// a step apart are the caller's data, not something to snap. So this is a
+    /// refusal about the numbers asked for, not about the arithmetic used, and
+    /// §4.1 makes it an `Err`. Handing back the `NaN` would be the silent
+    /// corrupt value §4.1 ranks below a crash.
+    ///
+    /// The derived net no longer loses a representable answer: where its
+    /// subtraction would run off the end of the range, both coordinates are
+    /// halved first and the factor comes back in the scale — see the note on
+    /// `de_boor::derived_points`.
+    ///
+    /// One narrower case is *not* covered, and is written down rather than left
+    /// to be found. `rational_derivative` forms `(A' − w'·C) / w`, and `w'·C`
+    /// can overflow while the quotient would fit, which needs a huge weight
+    /// derivative against huge coordinates and a huge weight together. Nothing
+    /// in the kernel builds that; it is reachable only by handing
+    /// [`BSplineCurve::new`] a net near the ends of the `f64` range on purpose.
     ///
     /// # Panics
     ///
@@ -1116,27 +1127,44 @@ mod tests {
         );
     }
 
-    /// What dividing before scaling does not fix, said out loud rather than
-    /// left to be found. The two control points are a whole `f64` range apart,
-    /// so `P[1] − P[0]` overflows before any division can help — and no
-    /// ordering of the three operations avoids it, because dividing each
-    /// coordinate first would overflow on a hair-wide span instead, which is
-    /// the ordinary case.
+    /// The two control points are a whole `f64` range apart, so `P[1] − P[0]`
+    /// runs off the end of the range before any division can help. Reordering
+    /// cannot reach this one — every route to the derived point needs that
+    /// subtraction — but halving both first does, and the factor of two comes
+    /// back in the scale.
     ///
-    /// The true tangent is `5e307` and would fit. The old code handed back an
-    /// infinity for it. A refusal is the honest answer, and it is an `Err`
-    /// rather than a panic because this net is caller data the kernel looked at
-    /// and accepted — the point below shows it still evaluates perfectly well
-    /// (`docs/decisions.md` §4.1).
+    /// The true tangent is exactly `5e307`, which fits with room to spare, so
+    /// refusing it was a gap and not a limit. Asserted exactly: halving is a
+    /// power of two and rounds nothing here.
     #[test]
-    fn a_curve_whose_two_control_points_are_a_whole_f64_range_apart_has_no_tangent_in_f64() {
+    fn a_curve_whose_two_control_points_are_a_whole_f64_range_apart_still_has_its_tangent() {
         let knots = KnotVector::new(1, vec![0.0, 0.0, 4.0, 4.0]).expect("one straight span");
         let ends = [Point::new(-1e308, 0.0, 0.0), Point::new(1e308, 0.0, 0.0)];
         let curve = BSplineCurve::new(knots, &ends, &[1.0; 2]).expect("two finite points");
 
         assert_eq!(curve.evaluate(2.0).unwrap(), Point::origin());
+        assert_eq!(curve.tangent(2.0).unwrap(), Vector::new(5e307, 0.0, 0.0));
+    }
+
+    /// The refusal that is left, and it is about the numbers asked for rather
+    /// than the arithmetic used.
+    ///
+    /// The span is one `f64` step wide at the bottom of the range while the
+    /// control points are ordinary, so the true derivative is past `f64::MAX`
+    /// and no amount of scaling reaches a number that does not exist.
+    /// [`KnotVector::new`] takes a span like this on purpose — two knots a step
+    /// apart are the caller's data, not something to snap — so §4.1 makes this
+    /// an `Err` and not a panic. The curve still evaluates perfectly well.
+    #[test]
+    fn a_span_a_single_f64_step_wide_has_a_tangent_too_big_for_f64() {
+        let a_step = f64::from_bits(1);
+        let knots = KnotVector::new(1, vec![0.0, 0.0, a_step, a_step]).expect("one hair of a span");
+        let ends = [Point::new(-0.5, 0.0, 0.0), Point::new(0.5, 0.0, 0.0)];
+        let curve = BSplineCurve::new(knots, &ends, &[1.0; 2]).expect("two finite points");
+
+        assert_eq!(curve.evaluate(0.0).unwrap(), Point::new(-0.5, 0.0, 0.0));
         assert_eq!(
-            curve.tangent(2.0),
+            curve.tangent(0.0),
             Err(Error::NotFinite {
                 what: "spline derivative"
             })

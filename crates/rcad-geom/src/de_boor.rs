@@ -127,6 +127,15 @@ pub(crate) trait Coefficient:
     /// Division, which is not one of the `core::ops` this trait already has
     /// because an interval cannot divide by a range that straddles zero.
     fn divided_by(self, divisor: Self) -> Self;
+
+    /// Whether the rest of the arithmetic can still do anything with this.
+    ///
+    /// Only [`derived_points`] asks, and only to find out that a subtraction
+    /// ran off the end of the range so it can take the other route.
+    fn is_in_range(self) -> bool;
+
+    /// Exactly half. A power of two, so nothing rounds above the subnormals.
+    fn halved(self) -> Self;
 }
 
 impl Coefficient for f64 {
@@ -136,6 +145,14 @@ impl Coefficient for f64 {
 
     fn divided_by(self, divisor: Self) -> Self {
         self / divisor
+    }
+
+    fn is_in_range(self) -> bool {
+        self.is_finite()
+    }
+
+    fn halved(self) -> Self {
+        self * 0.5
     }
 }
 
@@ -153,6 +170,14 @@ impl Coefficient for Interval {
 
     fn divided_by(self, divisor: Self) -> Self {
         quotient_enclosing(self, divisor)
+    }
+
+    fn is_in_range(self) -> bool {
+        self.lo().is_finite() && self.hi().is_finite()
+    }
+
+    fn halved(self) -> Self {
+        self * Interval::exactly(0.5)
     }
 }
 
@@ -229,13 +254,25 @@ pub(crate) fn de_boor<C: Coefficient>(
 /// of a span under ordinary coordinates is a case this kernel meets all the
 /// time.
 ///
-/// What is left is the subtraction. `P[i+1] − P[i]` overflows when two
-/// neighbouring homogeneous control coordinates are more than the whole `f64`
-/// range apart, and no ordering of the remaining two operations gets that back
-/// — the true `Q` may well be an ordinary number and there is no way to reach
-/// it from here. The result is not finite, and the callers turn that into
-/// [`Error::NotFinite`](crate::Error::NotFinite) rather than hand a `NaN` out;
-/// see [`rational_derivative`].
+/// What is left is the subtraction, and reordering cannot help it: every route
+/// to `Q` needs `P[i+1] − P[i]`, which runs off the end of the range when two
+/// neighbouring homogeneous control coordinates are more than the whole of `f64`
+/// apart. **Scaling can.** Both coordinates are at most `f64::MAX`, so their
+/// halves are at most `f64::MAX` apart and one halving is always enough — there
+/// is no need to look for how many. Halving is exact, and the factor of two it
+/// owes comes back in the scale at the end, where `2p` is at most 30 and cannot
+/// overflow anything the answer would not.
+///
+/// So the wide route runs only when the plain one has already failed, and the
+/// plain one is left alone rather than made uniformly slower and, in the
+/// subnormals, slightly less exact.
+///
+/// `Q` can still be genuinely out of reach — a span a hair wide under ordinary
+/// coordinates gives a true derivative past `f64::MAX`, and `KnotVector::new`
+/// accepts such a span on purpose, since two knots one step apart are the
+/// caller's data. That is the only remaining non-finite result, and the callers
+/// turn it into [`Error::NotFinite`](crate::Error::NotFinite) rather than hand a
+/// `NaN` out; see [`rational_derivative`].
 ///
 /// **The caller must not build a [`KnotVector`](crate::KnotVector) for that.**
 /// A degree-1 curve derives to degree 0, and `KnotVector::new` refuses degree
@@ -270,6 +307,7 @@ pub(crate) fn derived_points<C: Coefficient>(
     );
 
     let rise = C::exactly(degree as f64);
+    let twice_the_rise = C::exactly(2.0 * degree as f64);
     for (j, derived) in out.iter_mut().enumerate() {
         let i = j + span - degree;
         let below = knots[i + 1];
@@ -281,7 +319,12 @@ pub(crate) fn derived_points<C: Coefficient>(
         );
         let width = C::exactly(above) - C::exactly(below);
         *derived = core::array::from_fn(|axis| {
-            (active[j + 1][axis] - active[j][axis]).divided_by(width) * rise
+            let gap = active[j + 1][axis] - active[j][axis];
+            if gap.is_in_range() {
+                return gap.divided_by(width) * rise;
+            }
+            (active[j + 1][axis].halved() - active[j][axis].halved()).divided_by(width)
+                * twice_the_rise
         });
     }
 }
