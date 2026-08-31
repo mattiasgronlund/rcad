@@ -39,6 +39,13 @@ pub enum Error {
         radius: f64,
     },
 
+    /// A mesh was asked to stray a distance that is not a distance.
+    #[error("a deflection must be greater than zero, but it was {length}")]
+    DeflectionNotPositive {
+        /// What the caller asked for.
+        length: f64,
+    },
+
     /// The two ends of a segment are the same point.
     #[error("the two ends of the segment are the same point")]
     SegmentHasNoLength,

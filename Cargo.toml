@@ -13,6 +13,7 @@ repository = "https://github.com/mattiasgronlund/rcad"
 [workspace.dependencies]
 rcad-predicates = { path = "crates/rcad-predicates", version = "0.0.0" }
 rcad-geom = { path = "crates/rcad-geom", version = "0.0.0" }
+rcad-mesh = { path = "crates/rcad-mesh", version = "0.0.0" }
 rcad-topo = { path = "crates/rcad-topo", version = "0.0.0" }
 
 inari = { version = "=2.0.0", default-features = false }

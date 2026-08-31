@@ -730,6 +730,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcad-mesh"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "rcad-geom",
+ "rcad-predicates",
+ "thiserror",
+]
+
+[[package]]
 name = "rcad-predicates"
 version = "0.0.0"
 dependencies = [
