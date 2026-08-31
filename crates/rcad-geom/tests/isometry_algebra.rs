@@ -7,7 +7,7 @@
 //! hands out are quietly wrong everywhere at once.
 
 use proptest::prelude::*;
-use rcad_geom::{Axis, Isometry, Point, Vector};
+use rcad_geom::{Axis, Isometry, Plane, Point, Vector};
 
 /// Coordinates stay inside a 1000-unit box, so an absolute tolerance of `1e-9`
 /// is about six digits looser than the rounding on the numbers themselves.
@@ -143,5 +143,53 @@ proptest! {
         for (before, after) in asked_for.components().iter().zip(snapped.components()) {
             prop_assert!((after - before).abs() <= half_a_step);
         }
+    }
+}
+
+/// Moving a plane by the movement that does nothing has to leave the plane
+/// alone, and does not.
+///
+/// **A defect, recorded and not fixed.** [`Plane::transformed`] rebuilds the
+/// offset as `normal · movement(origin())`, and `origin()` is `normal * offset`,
+/// so the round trip computes `offset * (nx² + ny² + nz²)`. For a normal that is
+/// only as close to unit length as `f64` allows, that squared length is not
+/// exactly one, and the offset comes back one ulp further out. Applied again it
+/// moves again: over twenty reads the plane below walks from
+/// `-1.0000000000000002` to `-1.0000000000000047`, monotonically, with nothing
+/// to stop it.
+///
+/// **Why it matters more than an ulp.** `FaceView::plane` in `rcad-topo` is
+/// `surface.transformed(&location)` and applies it whatever the location is, so
+/// **reading a plane out of a model is not a pure read**. The fuse reads its
+/// inputs' planes through exactly that accessor, so a chain of fuses moves every
+/// non-axis-aligned plane one ulp per fuse — which is the slow leak
+/// `docs/decisions.md` §17.1 rejected vertex-authoritative geometry in order to
+/// avoid, arriving through the accessor instead of through the geometry.
+/// `rcad-topo`'s `uniting_a_turned_solid_with_copies_of_itself_never_moves_a_plane`
+/// is what it costs a chain, and it is `#[ignore]`d for the same reason.
+///
+/// **Why it is a gap and not a limit.** The answer exists and is one line away:
+/// the identity leaves both the normal and the offset alone, and a rotation that
+/// has already been applied to the normal does not need the offset re-derived
+/// through a point at all. Nothing about `f64` requires the round trip.
+#[test]
+#[ignore = "a gap: Plane::transformed re-derives the offset through a point, so the identity moves it one ulp"]
+fn moving_a_plane_by_the_identity_walks_its_offset_one_ulp_further_every_time() {
+    let plane = Plane::from_coefficients([
+        -0.634_393_284_163_645_5,
+        0.773_010_453_362_737_1,
+        0.0,
+        -1.000_000_000_000_000_2,
+    ])
+    .expect("four coefficients that describe a plane");
+
+    let mut read_back = plane;
+    for read in 1..=20 {
+        read_back = read_back.transformed(&Isometry::identity());
+        assert_eq!(
+            read_back.coefficients(),
+            plane.coefficients(),
+            "reading a plane back {read} times moved it"
+        );
     }
 }

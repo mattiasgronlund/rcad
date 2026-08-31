@@ -188,6 +188,7 @@ fn both_ways_round(
     let still = Configuration {
         solids: configuration.solids.clone(),
         turn: None,
+        elsewhere: configuration.elsewhere,
     };
 
     let turned_last = fused(tally, &tally.still, &still, rule)?;

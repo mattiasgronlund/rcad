@@ -2510,6 +2510,120 @@ spread at this corpus size is about ±1.6 points, so the widest seed lands near
 29.5% — and 30% is above that while still tripping on either bug coming back. It
 is asserted in the same place by the same test.
 
+**Amended 2026-08-31, and `MEASURED_CASES` goes back to 128.**
+
+The raise to a thousand took the workspace suite from ten seconds to sixty, and a
+minute on every run is more than this measurement is worth — these numbers change
+about once a milestone and the suite runs about once a minute. The corpus is 128
+generated configurations plus the ten `proptest` has kept from past failures
+again: 138 configurations, **414 fuses per family**, and the suite back to about
+ten seconds.
+
+Nothing measured at scale is withdrawn. What changes is how much of it the suite
+re-checks, and that split is the point of this amendment.
+
+**Checked on every run**, at 414 fuses per family, from a fixed seed:
+
+| Family | Corpus | Refused | Rate |
+|---|---|---|---|
+| Lattice-aligned pairs | 414 fuses | **0** | 0% |
+| The same, built to share coordinates | 414 fuses | **0** | 0% |
+| The same, written somewhere else in `f64` | 414 fuses | **0** | 0% |
+| Rotated pairs | 414 fuses | 105 | **25.4%** |
+
+| What could not be decided | Refusals | Share of the 414 |
+|---|---|---|
+| `"side of plane"` | 105 | 25.36% |
+| everything else | 0 | 0% |
+
+**Not checked on any run.** The 26.66% ± 0.46 over twelve seeds and 38,400 fuses
+each, the zero refusals in 921,600 control fuses, and the third refusal cause are
+all evidence from a **soak the suite does not re-run**. Three consequences, said
+plainly rather than glossed:
+
+- The fresh-seed spread is back to about **±4 points**. The asserted number is
+  still deterministic — the measurement runs from a fixed seed — so nothing goes
+  flaky. What drops is *power*: 414 fuses is a far noisier estimate of the true
+  rate than 38,400, and a regression has to be larger before the threshold can
+  see it.
+- The third cause, `"order along a line"` at 0.13%, is **below the resolution of
+  the default run**. Its expected count over 414 fuses is one half, and the run
+  above names it zero times. It turned up on twelve seeds out of twelve at scale.
+  **A default run that does not name it is not evidence that it has gone.**
+- `"a point inside a piece of a face"` at 0.40% is in the same position: at 414
+  fuses some seeds see it and most do not, and the fixed seed does not.
+
+This puts §12.5's complaint back, in this section's own voice. §12.5 had to
+record that criterion 10's ≥0.8× half "is not machine-checked; it is a `criterion`
+run a human reads", and this section says above that "that caveat should not need
+writing twice". It is being written twice. The trade is deliberate, the reason is
+suite wall clock, and a reader is owed the split rather than an average of the
+two.
+
+**The soak is one command and not a code edit**, which is what makes the split
+tolerable. `MEASURED_CASES` is multiplied by `RCAD_SOAK_FACTOR` and the fixed seed
+is replaced by `RCAD_SOAK_SEED`, both read at run time:
+
+```sh
+for seed in $(seq 1 12); do
+  RCAD_SOAK_FACTOR=100 RCAD_SOAK_SEED=$seed cargo nextest run -p rcad-topo \
+    --no-capture how_often_a_certified_fuse_of_a_turned_pair_refuses
+done
+```
+
+Both variables are documented at the constants they drive, in
+`crates/rcad-topo/tests/fuses_that_must_agree.rs`.
+
+**The threshold moves from 30% to 28%.** The fixed-seed rate over 414 fuses is
+25.36% — 105 refusals — and it is the same number on every machine, so the
+threshold has no sampling noise to clear and only ordinary drift. Two and a half
+points is eleven fuses. Thirty would no longer do the job the amendment above gave
+it: each of the two undeserved refusals recorded there is worth about 3.5 points
+at this corpus, which puts the rate at 28.9%, so 30% would catch neither of them
+alone where at 3,030 fuses it caught either. Twenty-eight catches both.
+
+**And it is judged on the shipped corpus only.** A soak is not the same
+measurement: six fresh seeds at ten times the corpus came out at 27.0%, 27.1%,
+27.2%, 27.2%, 28.1% and 28.4% over 3,870 fuses each — a different mean and a
+different spread, with two of the six above 28% and nothing wrong. Judging those
+by the shipped corpus's threshold would be treating two numbers as one, which is
+the mistake the top of this section exists to avoid. A soak prints its rate,
+prints its by-cause breakdown, and judges nothing; the fixed 414-fuse run is what
+carries the assertion. That is `this_is_the_shipped_corpus` in
+`fuses_that_must_agree.rs`, and it is the same trade as everything else in this
+amendment: what the machine checks is the small number, and the big one is read
+by a person.
+
+Those six seeds are also what says the soak mechanism works. Each named
+`"order along a line"` on four of the six, at 0.08% to 0.23%, and
+`"a point inside a piece of a face"` on all six at 0.62% to 1.01% — both causes
+that the shipped 414-fuse run sees zero times.
+
+**A fourth measured family, and it is a control.** The lattice pairs with every
+coordinate multiplied by `2^k` and moved by `2^m` along each axis, both exact.
+Zero refusals of 414. It is a sharper control than the lattice family alone,
+because it is the same fuse asked at sizes from `2^-280` to `2^30`, and measurement
+says the size changes what the arithmetic can settle: the same overlapping pair
+answers down to `k = -356` unshifted and only to `k = -332` shifted by `2^30`. Its
+generator is `pairs::a_pair_somewhere_else`, it answers §14.1's four questions
+there, and it found two defects — §17.9.
+
+**Two vacuity guards, because three of these four rows could have been green over
+nothing.** `every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing`
+asserted `refused == 0` and nothing else, so a regression that made *every* fuse
+come back `ResultIsNotManifold` would have kept that assertion true and left every
+metamorphic property beside it vacuously passing — each of them returns `Ok(())`
+the moment a fuse has no answer. Measured on this tree, 20 of the 414 control
+fuses and 72 of the 414 degenerate ones are legitimately not solids, so the guard
+is a plausible band and not a zero. Each measured row now judges that share
+against one; each property reports how many of the comparisons it set out to make
+it reached, and fails below three tenths. Demonstrated by making `Model::fuse`
+return `ResultIsNotManifold` unconditionally: the refusal assertions stay
+satisfied, and all eighteen tests in the file fail anyway — the measured rows on
+the band and the properties on the floor. `turning_a_fuse.rs` had already solved
+this for itself, and the guard here is deliberately the same shape rather than a
+second one.
+
 ### 17.8 What M2.5 actually cost, recorded 2026-08-31
 
 M2.5 is complete. §12 did this for M0; this is the same for the fuse, and it is
@@ -2643,3 +2757,106 @@ came from somewhere else". Every word of that is true, and the second half names
 the way in while calling it a place nobody comes from. A comment explaining why
 something is unreachable is a claim, and a claim that spells out its own
 counterexample is worth reading twice.
+
+### 17.9 Three defects found after M2.5 closed, recorded 2026-08-31
+
+*After M2.5 closed. §17.8 says the corpus that has already run is worth almost
+nothing and the shape nobody has drawn yet is worth almost everything; this is
+the same sentence about **where** a shape is drawn rather than **what** shape it
+is.*
+
+Two new generators and one new oracle went in after §17.8 was written. Between
+them they found three defects, and all three are **gaps** rather than limits
+(§16.10): the answer exists, is exactly representable, and the arithmetic we
+chose does not reach it. None is fixed here. Each has an `#[ignore]`d minimal
+reproduction naming what it is, so the suite stays green and nothing is quietly
+patched.
+
+All three are also §16.11's open question with teeth. `DynamicRange` is a
+*ratio*, and every one of these models has a perfectly ordinary ratio. It is the
+absolute magnitude — of a coordinate, of a plane offset, of a normal's squared
+length — that breaks them.
+
+**1. A plane read out of a model is not the plane that was put in.**
+`FaceView::plane` is `surface.transformed(&location)`, and `Plane::transformed`
+rebuilds the offset as `normal · movement(origin())` where `origin()` is
+`normal * offset` — so the round trip computes `offset · (nx² + ny² + nz²)`. For
+a normal only as close to unit length as `f64` allows, that squared length is not
+exactly one, and the offset comes back one ulp further out. **Even for
+`Isometry::identity()`.** Applied twenty times a measured plane walks from
+`-1.0000000000000002` to `-1.0000000000000047`, monotonically, with nothing to
+stop it.
+
+This is §17.1's deciding argument failing at the accessor. That section chose
+plane-authoritative geometry over vertex-authoritative geometry because "a split
+face inherits its parent's plane bit for bit, so however long the chain the
+planes in the model stay the planes the user built, undegraded", and the fuse
+reads its inputs' planes through exactly this accessor — so a chain of fuses
+moves every non-axis-aligned plane one more ulp per fuse. The slow leak that
+argument rejected arrives through the getter instead of through the geometry.
+
+What is **not** wrong is the fuse. The plane the answer *stores* is the input's
+plane bit for bit: reading the answer back gives one ulp more and reading it back
+twice gives two, which is only consistent with the arena holding the undegraded
+value. Axis-aligned planes are unaffected, because a signed unit axis has a
+squared length of exactly one — which is why the whole existing suite is green
+and why it took a turned chain to see this.
+
+Found by the oracle §17.1 always deserved and never had: **every face of every
+answer has to carry some input face's four coefficients, bit for bit, or their
+exact negation.** It is folded into the fuse helper in
+`fuses_that_must_agree.rs`, so all of that file's fuses over exactly
+representable families check it at no extra wall clock. It is not run on turned
+pairs, and the reason is this defect: there the two sides have been through
+different numbers of reads and a mismatch would be a fact about the accessor
+rather than about the fuse. Reproductions:
+`moving_a_plane_by_the_identity_walks_its_offset_one_ulp_further_every_time` in
+`rcad-geom`, and
+`uniting_a_turned_solid_with_copies_of_itself_never_moves_a_plane` next to the
+oracle.
+
+**2. A solid whose faces are more than about `2^72` from the origin cannot be
+fused at all.** `fuse/select.rs`'s `InPlane::of` needs a point it can *prove* is
+off a face's plane, and looks for one by stepping along the normal from the
+plane's nearest point to the origin by `1.0`, then `1024.0`, then `1048576.0` —
+three absolute distances. Past an offset of about `2^72` the `f64` spacing there
+is wider than the largest of the three, every step lands back on the plane, and
+the fuse returns `Error::Undecidable` naming `"a point off a face's plane"`. The
+doc comment on that function says "a bigger reach only helps when the plane's own
+offset is large enough to swallow a smaller one" and then hard-codes three
+reaches — §17.8's last paragraph again, a claim that spells out its own
+counterexample. Reproduction:
+`a_cube_too_far_from_the_origin_cannot_be_fused_at_all`.
+
+**3. A solid more than about `2^28` from the origin is said to enclose negative
+space.** `SolidView::measure` and `signed_volume` sum `a · (b × c)` over the
+answer's triangles with `a`, `b` and `c` measured **from the world origin**, so a
+solid `2^m` away adds terms of size `2^{3m}` to reach a volume of order one. Past
+`m = 28` the spacing of those terms is larger than the answer, what comes back has
+no correct digits and can be negative, and `Model::validate` — which the fuse runs
+over its own answer in debug builds — refuses a perfectly good solid.
+`DynamicRange` sees a ratio of `2.7e8` here and is satisfied. Summing about the
+solid's own first corner instead gives the exact answer, because the differences
+are exact by Sterbenz's lemma when the coordinates share an exponent.
+Reproduction:
+`a_frame_a_long_way_from_the_origin_is_said_to_enclose_negative_space`. The frame
+is the shape that goes first, at eight units of volume; a cube survives further,
+because a box's terms cancel in opposite pairs and a frame's do not.
+
+**What the deeper chains found: nothing, and that is worth recording too.** §17.8
+notes that associativity found the coplanar-corner hole at depth two and that
+§17.1's argument is about depth three and four, so `a_chain_of_fuses` builds four
+solids and runs `fuse([A,B,C,D])` against uniting them one at a time, and
+`((A ∪ B) \ B) ∪ B` against `A ∪ B`. Both pass. A fourth fuse's inputs do have
+properties no generated input has — corners with four or more planes round them,
+faces joined out of coplanar pieces, shells built by `nest_the_shells` — and the
+fix §17.4's amendment made for depth two covers them. The depth-four property is
+also the file's least productive: a sixth of its fuses have no answer to give,
+because four solids in a row often leave an edge with four faces along it, and it
+is what sets the vacuity floor §17.7 records.
+
+**Where the three came from is one sentence.** Not a new shape. The *same* four
+outlines, on the same integer grid, with every coordinate multiplied by a power of
+two and moved by a power of two — two knobs, both exact, both leaving the geometry
+identical. §12.3 is where one family of shapes found one family of bugs; this is
+where one family of *sizes* did, and the two knobs cost about eighty lines.

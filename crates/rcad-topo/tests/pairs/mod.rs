@@ -1,10 +1,10 @@
-//! Three families of solid pairs to fuse, and the exactly representable
-//! movements one of the properties needs.
+//! The families of solid configurations to fuse, and the exactly representable
+//! movements some of the properties need.
 //!
-//! # Why three families and not one
+//! # Why several families and not one
 //!
 //! `docs/decisions.md` §12.3 is the section where one family of shapes found
-//! one family of bugs, and §17.7 says what to do about it here: report three
+//! one family of bugs, and §17.7 says what to do about it here: report the
 //! configuration families separately and never as one number.
 //!
 //! - [`a_lattice_pair`] is the **control**. Rectilinear outlines on the integer
@@ -22,6 +22,17 @@
 //!   share coordinates exactly and the coplanarity is true rather than nearly
 //!   true. §17.7 rejects nudging a valid pair by `1e-9`: that makes the *near*
 //!   case and never the *on* case.
+//! - [`a_pair_somewhere_else`] is the **control written somewhere else in
+//!   `f64`**. The same configurations with every coordinate multiplied by `2^k`
+//!   and moved by `2^m`, both exact, so the answer has to be the same answer
+//!   moved the same way, bit for bit. It found the two defects written up in
+//!   `a_solid_a_long_way_from_the_origin.rs`.
+//! - [`a_chain_of_fuses`] is **four solids instead of two**, so a fuse can be
+//!   handed an answer three fuses old — which is the only place a corner with
+//!   four or more planes round it, or a face joined out of coplanar pieces, ever
+//!   turns up as an *input*.
+//!
+//! Each of the last two answers §14.1's four questions at its own strategy.
 //!
 //! # Why these shapes
 //!
@@ -69,6 +80,68 @@ pub const WORKING_SIZE: f64 = 100.0;
 /// Shapes reach about six across, so this puts a pair anywhere from wholly
 /// apart to wholly inside one another.
 const FURTHEST_SHIFT: i32 = 5;
+
+/// The smallest power of two [`a_pair_somewhere_else`] writes a configuration
+/// at.
+///
+/// **A limit and not a gap** (§16.10), and it is §12.2's precondition arriving
+/// end to end. `orient3d` is a determinant of products of coordinates, and at
+/// `2^k` those products go as `2^{2k}`; once they fall subnormal the relative
+/// error model Shewchuk's filter is derived under stops holding, level 1
+/// declines by design, and expansion arithmetic refuses to certify a product it
+/// cannot represent exactly. So the fuse comes back `Undecidable` naming
+/// `orient3d`, which is the honest answer and not a timid one.
+///
+/// Measured on this tree, two overlapping three-by-three blocks: the last scale
+/// that answers is `-356` unshifted and `-332` shifted by `2^30`. Two hundred
+/// and eighty leaves fifty powers of two of room for the larger shapes, and
+/// `2^-280` is about `8e-85`, which is well past anything a relative bound has
+/// ever been asked about here.
+const SMALLEST_SCALE: i32 = -280;
+
+/// The largest power of two [`a_pair_somewhere_else`] writes a configuration at.
+///
+/// **A gap and not a limit**, and it is a defect this family found — see
+/// `a_cube_too_far_from_the_origin_cannot_be_fused_at_all` in
+/// `crates/rcad-topo/tests/degenerate_fuses.rs`. `fuse/select.rs`'s `InPlane::of`
+/// looks for a point provably off a face's plane by stepping along the normal
+/// from the plane's own origin by `1.0`, then `1024.0`, then `1048576.0` —
+/// three *absolute* distances. A plane whose offset is past about `2^72` has an
+/// `f64` spacing wider than the largest of the three, so all three steps land
+/// back on the plane and the fuse refuses a configuration it could plainly
+/// answer.
+///
+/// Measured: the first scale that refuses is `71` unshifted and `43` shifted by
+/// `2^30`, and both are the same plane offset of about `2^73`. Thirty plus
+/// [`FURTHEST_SHIFT_EXPONENT`] puts the worst offset this family reaches at
+/// about `2^54`, which is five hundred times short of the edge.
+const LARGEST_SCALE: i32 = 30;
+
+/// The furthest [`a_pair_somewhere_else`] moves a configuration from the origin,
+/// as a power of two.
+///
+/// **A second gap, and it is the reason this is 24 and not the 30 the dynamic
+/// range would allow** — see
+/// `a_frame_a_long_way_from_the_origin_is_said_to_enclose_negative_space` in
+/// `crates/rcad-topo/tests/a_solid_a_long_way_from_the_origin.rs`.
+/// `SolidView::signed_volume` sums `a · (b × c)` over triangles measured from
+/// the **world origin**, so a solid `2^m` away adds terms of size `2^{3m}` to
+/// reach a volume of order one. Past `m = 28` the spacing of those terms is
+/// wider than the answer, the sum can come out negative, and `Model::validate`
+/// then refuses a perfectly good solid as one whose faces do not point outwards.
+///
+/// Measured by uniting each generated shape with a copy of itself at growing
+/// distances: the `3 × 3` frame, whose volume of eight is the smallest of the
+/// four, is the first to fail and it fails at `2^28`. A one-by-one cube survives
+/// to `2^30`, because a box's terms cancel in opposite pairs and a frame's do
+/// not. Twenty-four leaves a factor of sixteen below the frame's edge.
+///
+/// The edge this *would* have had is `DynamicRange`, which refuses a model whose
+/// largest coordinate is more than `1e11` times its smallest feature: with a
+/// smallest feature of one that is `m = 37`. Twenty-four gives a spread of about
+/// `1.7e7` where `1e9` was wanted, and the gap between those two numbers is the
+/// defect.
+const FURTHEST_SHIFT_EXPONENT: u32 = 24;
 
 /// How many steps a whole turn is generated in.
 ///
@@ -148,6 +221,20 @@ pub struct Rigid {
     pub shift: [i32; 3],
 }
 
+/// A [`Rigid`] as the model's own coordinates see it.
+///
+/// The same quarter turn, and the shift multiplied by whatever power of two the
+/// configuration is written at. Built by [`Rigid::in_the_world_of`] and used to
+/// move an *answer*, where the coordinates are the model's rather than the
+/// generator's whole numbers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Movement {
+    /// How many quarter turns about `z`, anticlockwise.
+    pub quarters: u32,
+    /// How far to move afterwards, along each axis, in the model's own numbers.
+    pub shift: [f64; 3],
+}
+
 /// A general rotation: a whole-number axis direction and a share of a whole
 /// turn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,8 +245,28 @@ pub struct Turn {
     pub steps: u32,
 }
 
-/// A whole configuration: the solids, and the one rotation applied to all of
-/// them.
+/// Where in `f64` a configuration is built, as against where in space.
+///
+/// Two knobs, both exactly representable, both applied to every coordinate of
+/// every solid: multiply by `2^scale`, and move by `2^shift` along each axis.
+/// A power of two times a whole number is exact until it underflows, and a
+/// power of two plus a small whole number is exact while both fit in 53 bits,
+/// so a configuration built [`Elsewhere`] is the same configuration written in
+/// different `f64` and its answer must be the same answer written the same way.
+///
+/// [`Elsewhere::here`] is the one every other family uses: no scaling and no
+/// shift, so the numbers are the small whole numbers `Shape` makes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Elsewhere {
+    /// The power of two every coordinate is multiplied by.
+    pub scale: i32,
+    /// The power of two every coordinate is moved by along each axis, if any.
+    /// `None` leaves the configuration where the lattice family puts it.
+    pub shift: Option<u32>,
+}
+
+/// A whole configuration: the solids, the one rotation applied to all of
+/// them, and where in `f64` it is written.
 ///
 /// The turn is shared rather than one per solid on purpose. It leaves the solids
 /// in the same places relative to each other as the lattice configuration they
@@ -171,17 +278,27 @@ pub struct Configuration {
     pub solids: Vec<Placed>,
     /// The rotation every solid is turned by, if any.
     pub turn: Option<Turn>,
+    /// Where in `f64` the whole thing is written.
+    pub elsewhere: Elsewhere,
 }
 
 /// Two rectilinear solids on the integer grid, near enough to interact.
 pub fn a_lattice_pair() -> impl Strategy<Value = Configuration> {
-    lattice_solids(2).prop_map(|solids| Configuration { solids, turn: None })
+    lattice_solids(2).prop_map(|solids| Configuration {
+        solids,
+        turn: None,
+        elsewhere: Elsewhere::here(),
+    })
 }
 
 /// Three of them, for the property that fusing all three at once agrees with
 /// fusing two and then the third.
 pub fn a_lattice_trio() -> impl Strategy<Value = Configuration> {
-    lattice_solids(3).prop_map(|solids| Configuration { solids, turn: None })
+    lattice_solids(3).prop_map(|solids| Configuration {
+        solids,
+        turn: None,
+        elsewhere: Elsewhere::here(),
+    })
 }
 
 /// The lattice pairs under one general rotation, which leaves nothing about them
@@ -190,6 +307,7 @@ pub fn a_turned_pair() -> impl Strategy<Value = Configuration> {
     (lattice_solids(2), a_turn()).prop_map(|(solids, turn)| Configuration {
         solids,
         turn: Some(turn),
+        elsewhere: Elsewhere::here(),
     })
 }
 
@@ -219,6 +337,7 @@ pub fn a_flush_pair() -> impl Strategy<Value = Configuration> {
                 Placed { shape, height, at },
             ],
             turn: None,
+            elsewhere: Elsewhere::here(),
         }
     })
 }
@@ -228,7 +347,11 @@ pub fn a_flush_pair() -> impl Strategy<Value = Configuration> {
 /// Two solids rather than one solid twice, because a fuse names its two sides by
 /// key and the same key on both sides would be a different question.
 pub fn a_solid_and_its_copy() -> impl Strategy<Value = Configuration> {
-    a_copied_solid().prop_map(|solids| Configuration { solids, turn: None })
+    a_copied_solid().prop_map(|solids| Configuration {
+        solids,
+        turn: None,
+        elsewhere: Elsewhere::here(),
+    })
 }
 
 /// The same under a general rotation, where the two solids still share every
@@ -237,6 +360,127 @@ pub fn a_turned_solid_and_its_copy() -> impl Strategy<Value = Configuration> {
     (a_copied_solid(), a_turn()).prop_map(|(solids, turn)| Configuration {
         solids,
         turn: Some(turn),
+        elsewhere: Elsewhere::here(),
+    })
+}
+
+/// Four lattice solids, for a chain of fuses deeper than any other family
+/// reaches.
+///
+/// # §14.1's four questions
+///
+/// 1. **Exactly true, or needing a bound?** Exactly true. Everything here is the
+///    lattice family's arithmetic — axis-aligned planes, whole-number corners,
+///    Cramer solves with a determinant of ±1 — so `fuse([A,B,C,D])` and uniting
+///    the four one at a time are two exact computations of one answer, and the
+///    properties compare volume, area, centroid and shell count with no
+///    tolerance anywhere.
+/// 2. **Do the two runs take different paths?** Yes, and further than anything
+///    at depth two does, because the fourth fuse's *inputs* have properties no
+///    generated input ever has. A corner of the third answer can have four or
+///    more planes round it, which is the only way to reach
+///    `bake::derive_a_corner`'s over-determined branch and the
+///    `Invalid::VertexOffItsFacePlane` refusal that hangs off it. Faces of that
+///    answer can be joined out of coplanar pieces of two different inputs. And
+///    its shells came out of `nest_the_shells` rather than out of
+///    `add_extrusion`. §17.8 records that associativity found the coplanar-corner
+///    hole at depth two and that §17.1's argument is about depth three and four;
+///    the oracle that found it had never run that deep.
+/// 3. **What family of inputs?** The lattice shapes, four at a time instead of
+///    two or three. Nothing is added to [`a_shape`] — §17.7's recorded figures
+///    run a fixed seed over it.
+/// 4. **Which gap would this have caught?** §17.8's, the one it says the
+///    catalogue could not see: "a corner between two coplanar faces has two
+///    planes round it and not three, so the *next* fuse over such an answer
+///    divides by a determinant of exactly zero". That was found by a depth-two
+///    property and fixed; nothing in the tree then went deeper to see whether
+///    depth three and four have their own version of it.
+pub fn a_chain_of_fuses() -> impl Strategy<Value = Configuration> {
+    lattice_solids(4).prop_map(|solids| Configuration {
+        solids,
+        turn: None,
+        elsewhere: Elsewhere::here(),
+    })
+}
+
+/// One turned solid and two to four more built from the same numbers in the
+/// same place.
+///
+/// Every copy carries bit-identical planes, so uniting them one at a time has to
+/// come back bit-identical at every step — exactly true even under a general
+/// rotation, because no arithmetic anywhere has two different numbers to
+/// disagree about.
+pub fn a_turned_solid_and_several_copies() -> impl Strategy<Value = Configuration> {
+    (a_shape(), 1u32..=3, 2usize..=4, a_turn()).prop_map(|(shape, height, copies, turn)| {
+        let placed = Placed {
+            shape,
+            height,
+            at: [0, 0, 0],
+        };
+        Configuration {
+            solids: vec![placed; copies + 1],
+            turn: Some(turn),
+            elsewhere: Elsewhere::here(),
+        }
+    })
+}
+
+/// The lattice pairs, written somewhere else in `f64`.
+///
+/// The same configurations [`a_lattice_pair`] makes, with every coordinate
+/// multiplied by `2^k` and moved by `2^m` along each axis. Nothing about the
+/// geometry changes; everything about the numbers does.
+///
+/// # §14.1's four questions
+///
+/// 1. **Exactly true, or needing a bound?** Exactly true, with no bound
+///    anywhere. The shift is added to the outline's corners as whole numbers,
+///    and `2^m` plus a coordinate under thirty-two is under `2^25`, which an
+///    `f64` holds exactly with twenty-eight bits to spare. Multiplying by `2^k`
+///    only moves an exponent, so it is exact until it underflows, and
+///    [`SMALLEST_SCALE`] stops well above where that starts. So the answer to a
+///    fuse over one of these has to be the `k = 0, m = 0` answer with the same
+///    movement applied, **bit for bit**, and there is no tolerance to tune.
+/// 2. **Do the two runs take different paths?** Yes, and it is measured rather
+///    than argued. Two overlapping three-by-three blocks answer down to
+///    `k = -356` unshifted and only down to `k = -332` when they are shifted by
+///    `2^30`, and they answer up to `k = 70` unshifted and only up to `k = 42`
+///    shifted — so both knobs change what the arithmetic can settle, which they
+///    could not do if every size went down the same branch. What the low end
+///    walks toward is §12.2's precondition exactly: below its edge the fuse
+///    refuses naming `orient3d`, which is the level-1 filter declining because
+///    its products have fallen subnormal and expansion arithmetic then refusing
+///    to certify a product it cannot hold. And [`Policy`] derives its budget
+///    from the working size and from what a predicate `Measures`, so a predicate
+///    carrying the wrong power of that size (§12.4) can only show itself at a
+///    size other than one.
+/// 3. **What family of inputs?** Old shapes, new numbers — the cheapest form
+///    §13 rule 5 takes, and deliberately not a fourth shape family, because what
+///    is being varied here is the `f64` and not the geometry. Nothing is added
+///    to [`a_shape`]: §17.7's recorded figures run a fixed seed over it, and
+///    changing it would silently change numbers written into `docs/decisions.md`.
+/// 4. **Which gap would this have caught?** §12.4's, and by name. That section
+///    records an `Approximation` magnitude carrying the units of the wrong
+///    predicate degree, and says outright that **no end-to-end outcome flip was
+///    ever built** — the bug was "real, latent, and would have become reachable
+///    the moment a second predicate took constructed input". This is that
+///    end-to-end flip: the same configuration decided at two sizes, where a
+///    budget derived from the working size in the wrong power lands on opposite
+///    sides of the same question.
+///
+/// # Where the edges are, and what kind of edge each one is
+///
+/// Both ends of `k` were measured rather than guessed, and they are two
+/// different kinds of thing (§16.10). Downward is a **limit** — the answer stops
+/// existing in `f64` and the kernel says so. Upward is a **gap** — the answer
+/// exists and the kernel cannot reach it, which makes it a defect this family
+/// found. [`SMALLEST_SCALE`], [`LARGEST_SCALE`] and [`FURTHEST_SHIFT_EXPONENT`]
+/// carry the measurements and the reasoning one each.
+pub fn a_pair_somewhere_else() -> impl Strategy<Value = Configuration> {
+    (lattice_solids(2), an_elsewhere()).prop_map(|(solids, elsewhere)| Configuration {
+        solids,
+        turn: None,
+        elsewhere,
     })
 }
 
@@ -270,11 +514,12 @@ impl Configuration {
     /// being trusted.
     #[must_use]
     pub fn built_after(&self, movement: &Rigid) -> (Model, Vec<SolidKey>) {
-        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let mut model =
+            Model::new(Scale::millimetres(self.elsewhere.working_size()).expect("a working size"));
         let keys: Vec<SolidKey> = self
             .solids
             .iter()
-            .map(|placed| placed.built_after(movement, &mut model))
+            .map(|placed| placed.built_after(movement, self.elsewhere, &mut model))
             .collect();
         if let Some(turn) = self.turn {
             let turn = turn.isometry();
@@ -287,13 +532,22 @@ impl Configuration {
 }
 
 impl Placed {
-    fn built_after(&self, movement: &Rigid, model: &mut Model) -> SolidKey {
+    /// Build this solid, `movement` applied to its whole numbers and
+    /// `elsewhere` applied to the `f64` that come out of them.
+    ///
+    /// The shift goes on before the quarter turn, which is what keeps the
+    /// world-coordinate movement a quarter turn and a shift of `2^scale` times
+    /// a whole number rather than something with the shift's own image in it.
+    /// [`Rigid::in_the_world_of`] is the other half of that arrangement.
+    fn built_after(&self, movement: &Rigid, elsewhere: Elsewhere, model: &mut Model) -> SolidKey {
         let rings = self.shape.rings();
+        let away = elsewhere.shift_along_each_axis();
         let flat = |ring: &[[i32; 2]]| -> Vec<[f64; 2]> {
             ring.iter()
                 .map(|&[x, y]| {
-                    let [x, y, _] = movement.whole_point([x + self.at[0], y + self.at[1], 0]);
-                    [f64::from(x), f64::from(y)]
+                    let [x, y, _] =
+                        movement.whole_point([x + self.at[0] + away, y + self.at[1] + away, 0]);
+                    [elsewhere.scaled(x), elsewhere.scaled(y)]
                 })
                 .collect()
         };
@@ -304,14 +558,53 @@ impl Placed {
         let profile = builder
             .build(&Policy::certified(), &mut ProvenanceLog::new())
             .expect("every generated outline is a sound profile");
-        let lift = Vector::new(0.0, 0.0, f64::from(self.at[2] + movement.shift[2]));
+        let lift = Vector::new(
+            0.0,
+            0.0,
+            elsewhere.scaled(self.at[2] + away + movement.shift[2]),
+        );
         model
             .add_extrusion(
                 &profile,
-                f64::from(self.height),
+                elsewhere.scaled(whole(self.height)),
                 &Isometry::translation(lift).expect("a whole-number lift"),
             )
             .expect("every generated profile extrudes")
+    }
+}
+
+impl Elsewhere {
+    /// Where the lattice family builds: no scaling, no shift.
+    #[must_use]
+    pub fn here() -> Self {
+        Self {
+            scale: 0,
+            shift: None,
+        }
+    }
+
+    /// How far every coordinate is moved along every axis. Zero, or a power of
+    /// two.
+    #[must_use]
+    pub fn shift_along_each_axis(self) -> i32 {
+        self.shift.map_or(0, |exponent| 1 << exponent)
+    }
+
+    /// A whole number as this configuration writes it: `whole * 2^scale`.
+    ///
+    /// Exact. Multiplying by a power of two only moves the exponent, and
+    /// [`SMALLEST_SCALE`] keeps the result out of the subnormals where that
+    /// stops being true.
+    #[must_use]
+    pub fn scaled(self, whole: i32) -> f64 {
+        f64::from(whole) * two_to_the(self.scale)
+    }
+
+    /// The nominal size to build a [`Scale`] from: [`WORKING_SIZE`] moved by
+    /// the same power of two everything else is.
+    #[must_use]
+    pub fn working_size(self) -> f64 {
+        WORKING_SIZE * two_to_the(self.scale)
     }
 }
 
@@ -325,15 +618,45 @@ impl Rigid {
         }
     }
 
+    /// The same movement as the world coordinates of `elsewhere` see it.
+    ///
+    /// [`Rigid::shift`] is a whole number of lattice steps and the lattice is
+    /// multiplied by `2^scale` on the way into the model, so in the model's own
+    /// coordinates the shift is that whole number times `2^scale` — a power of
+    /// two times a small whole number, which is exact, so the claim stays a
+    /// bit-for-bit one. The quarter turn does not change at all: a swap and a
+    /// negation is the same map at every size.
+    ///
+    /// The shift `elsewhere` itself applies does not appear here. It goes on
+    /// *before* the quarter turn in [`Placed::built_after`], so the turn carries
+    /// it along with the shape and it cancels out of the difference between the
+    /// two runs.
+    #[must_use]
+    pub fn in_the_world_of(&self, elsewhere: Elsewhere) -> Movement {
+        Movement {
+            quarters: self.quarters,
+            shift: self.shift.map(|step| elsewhere.scaled(step)),
+        }
+    }
+
+    /// Where a whole-number point ends up, still a whole number.
+    fn whole_point(&self, [x, y, z]: [i32; 3]) -> [i32; 3] {
+        let [x, y, z] = match self.quarters % 4 {
+            0 => [x, y, z],
+            1 => [-y, x, z],
+            2 => [-x, -y, z],
+            _ => [y, -x, z],
+        };
+        [x + self.shift[0], y + self.shift[1], z]
+    }
+}
+
+impl Movement {
     /// Where a point ends up. Exact, whatever the coordinates are.
     #[must_use]
     pub fn point(&self, [x, y, z]: [f64; 3]) -> [f64; 3] {
         let [x, y, z] = self.direction([x, y, z]);
-        [
-            x + f64::from(self.shift[0]),
-            y + f64::from(self.shift[1]),
-            z + f64::from(self.shift[2]),
-        ]
+        [x + self.shift[0], y + self.shift[1], z + self.shift[2]]
     }
 
     /// Which way a direction ends up pointing. A swap and a negation, so exact.
@@ -351,25 +674,14 @@ impl Rigid {
     ///
     /// The normal turns with the movement and the constant picks up how far the
     /// plane slid along its own normal, `d' = d - n' · t`. With an axis-aligned
-    /// normal that dot product is one whole-number term and two zeroes, so it is
-    /// exact — which is the second half of why this family is rectilinear.
+    /// normal that dot product is one term and two zeroes, and that one term is
+    /// a power of two times a small whole number, so it is exact — which is the
+    /// second half of why these families are rectilinear.
     #[must_use]
     pub fn plane(&self, [a, b, c, d]: [f64; 4]) -> [f64; 4] {
         let [a, b, c] = self.direction([a, b, c]);
-        let along = a * f64::from(self.shift[0])
-            + b * f64::from(self.shift[1])
-            + c * f64::from(self.shift[2]);
+        let along = a * self.shift[0] + b * self.shift[1] + c * self.shift[2];
         [a, b, c, d - along]
-    }
-
-    fn whole_point(&self, [x, y, z]: [i32; 3]) -> [i32; 3] {
-        let [x, y, z] = match self.quarters % 4 {
-            0 => [x, y, z],
-            1 => [-y, x, z],
-            2 => [-x, -y, z],
-            _ => [y, -x, z],
-        };
-        [x + self.shift[0], y + self.shift[1], z]
     }
 }
 
@@ -528,6 +840,36 @@ fn a_copied_solid() -> impl Strategy<Value = Vec<Placed>> {
         };
         vec![placed, placed]
     })
+}
+
+/// Two whole-number exponents, each shrinking toward where the lattice family
+/// already builds.
+///
+/// `scale` shrinks toward `0`, which is a multiplier of one, and `shift` shrinks
+/// toward `None`, which is no move at all. So a failure shrinks to "an existing
+/// lattice configuration, and it fails at `2^-300`" rather than to a heap of
+/// coordinates nobody can read.
+fn an_elsewhere() -> impl Strategy<Value = Elsewhere> {
+    (
+        SMALLEST_SCALE..=LARGEST_SCALE,
+        proptest::option::of(0u32..=FURTHEST_SHIFT_EXPONENT),
+    )
+        .prop_map(|(scale, shift)| Elsewhere { scale, shift })
+}
+
+/// `2^exponent`, exactly.
+///
+/// Assembled from the bits rather than through `powi`, which is repeated
+/// multiplication and rounds on the way to a far exponent.
+///
+/// # Panics
+///
+/// Outside the normal exponent range, which [`SMALLEST_SCALE`] and
+/// [`LARGEST_SCALE`] keep the generator well inside.
+fn two_to_the(exponent: i32) -> f64 {
+    let biased = u64::try_from(1023 + exponent).expect("a normal binary exponent");
+    assert!(biased < 2047, "a normal binary exponent, not {exponent}");
+    f64::from_bits(biased << 52)
 }
 
 /// A general rotation about a whole-number axis through the origin.

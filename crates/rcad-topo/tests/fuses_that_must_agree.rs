@@ -1,10 +1,22 @@
 //! Fuses that have to give the same answer as each other, whatever that answer
 //! turns out to be.
 //!
-//! §1.7's sixth exit criterion and §14.8's three extra oracles, over the three
+//! §1.7's sixth exit criterion and §14.8's three extra oracles, over the
 //! configuration families §17.7 asks for and reports separately. Nothing here
 //! knows what the right answer to any fuse is; every test runs the same question
 //! two ways round and insists the two agree.
+//!
+//! # What a pass is worth
+//!
+//! Every property here hands back `Ok(())` the moment a fuse comes back with no
+//! answer — refused, or an answer no `Model` can hold — so a green run says
+//! nothing on its own. Two things are counted so that it does. Each property
+//! reports how many of the comparisons it set out to make it reached and fails
+//! below [`SOME_COMPARISONS_MUST_HAPPEN`], the same guard and the same shape as
+//! `turning_a_fuse.rs`'s next door. And each measured row judges the share of
+//! its fuses that came back not-a-solid against a band, because that outcome is
+//! the one the `refused == 0` assertions cannot see and it is what a regression
+//! would hide behind.
 //!
 //! # What "agree" means, and where a tolerance would come from
 //!
@@ -61,19 +73,32 @@
 //!    intersection row once. A whole-number movement of the input changes every
 //!    coordinate the arrangement sorts on without changing which side of
 //!    anything anything is.
-//! 3. **What family of inputs?** Three, reported separately, in `pairs/mod.rs`.
+//!    Writing the same configuration at another power of two sends the same
+//!    question down a different level of the cascade, and four solids in a row
+//!    hand a fuse an input with properties no generated solid has.
+//! 3. **What family of inputs?** Several, reported separately, in
+//!    `pairs/mod.rs`, and the two added last answer these four questions for
+//!    themselves at their own strategies.
 //! 4. **Which gap would this have caught?** §12.3's, twice over. A generator of
 //!    one shape family finds one family of bugs, and `random_extrusions` threw
 //!    away every input the builder refused, so a wrongly refused input was
 //!    invisible. Nothing here filters: every fuse is counted, refusals are
-//!    counted separately from answers, and on the two exactly representable
+//!    counted separately from answers, and on the exactly representable
 //!    families a refusal fails the test.
+//!
+//! # §17.1, checked rather than argued
+//!
+//! Every fuse over an exactly representable family also runs
+//! [`every_plane_of_the_answer_is_a_plane_of_an_input`], which is the deciding
+//! argument for plane-authoritative geometry stated as an assertion. It runs
+//! inside [`fused`], so it costs no wall clock at all.
 
 mod pairs;
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+use std::ops::RangeInclusive;
 
 use proptest::prelude::*;
 use proptest::test_runner::{
@@ -83,8 +108,9 @@ use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{
-    Configuration, Rigid, a_flush_pair, a_lattice_pair, a_lattice_trio, a_rigid_movement,
-    a_solid_and_its_copy, a_turned_pair, a_turned_solid_and_its_copy,
+    Configuration, Movement, Rigid, a_chain_of_fuses, a_flush_pair, a_lattice_pair, a_lattice_trio,
+    a_pair_somewhere_else, a_rigid_movement, a_solid_and_its_copy, a_turned_pair,
+    a_turned_solid_and_its_copy, a_turned_solid_and_several_copies,
 };
 
 /// How many configurations a property that runs two fuses per case sees.
@@ -98,21 +124,52 @@ const CASES: u32 = 48;
 /// How many a property that runs four or more fuses per case sees.
 const LONGER_CASES: u32 = 24;
 
-/// How many the three measurement tests see.
+/// How many the three measurement tests see by default.
 ///
-/// Larger, because their number is the thing being reported rather than a means
-/// to an end, and they run on a fixed seed so the number is the same every time.
+/// Larger than the properties above, because their number is the thing being
+/// reported rather than a means to an end, and they run on a fixed seed so the
+/// number is the same every time.
 ///
-/// One thousand, and the ceiling is the clock rather than the statistics. A soak
-/// at scale showed two things the shipped 128 could not: the headline rate's
-/// fresh-seed spread was ±4 points, which is wider than any regression worth
-/// asserting on, and a third refusal cause turns up at about one fuse in eight
-/// hundred and was never sampled at all. A thousand cases is 3,030 fuses per
-/// family, which brings the spread to about ±1.6 points and sees the third cause
-/// six times. Two thousand would halve the spread again and takes the whole
-/// workspace suite from ten seconds to two minutes; a thousand takes it to one,
-/// and one minute is the most this measurement is worth.
-const MEASURED_CASES: u32 = 1000;
+/// A hundred and twenty-eight, and the ceiling is the clock and not the
+/// statistics. At this count each family is 414 fuses, the whole workspace suite
+/// runs in about ten seconds, and a soak at eighty times this corpus is what
+/// §17.7's precise figures come from. Raising the shipped number to a thousand
+/// was tried and reverted: it bought a fresh-seed spread of ±1.6 points instead
+/// of ±4, and it cost the default suite a minute of wall clock every run. §17.7
+/// records honestly which figures the suite re-checks and which it does not.
+const MEASURED_CASES: u32 = 128;
+
+/// The environment variable that multiplies [`MEASURED_CASES`] for a soak.
+///
+/// A high-resolution run is one command rather than a code edit:
+///
+/// ```text
+/// RCAD_SOAK_FACTOR=100 cargo nextest run -p rcad-topo --no-capture \
+///     how_often_a_certified_fuse_of_a_turned_pair_refuses
+/// ```
+///
+/// That is 12,800 configurations, 38,400 fuses, and the better part of ten
+/// minutes. Repeating it changes nothing on its own — these tests are
+/// deliberately deterministic — so a *spread* needs [`SOAK_SEED`] varied as
+/// well.
+const SOAK_FACTOR: &str = "RCAD_SOAK_FACTOR";
+
+/// The environment variable that reseeds the measurement tests.
+///
+/// Set it to any whole number and the three measurement tests run from that
+/// seed instead of the fixed one, which is how the fresh-seed spread §17.7
+/// quotes was measured:
+///
+/// ```text
+/// for seed in $(seq 1 12); do
+///   RCAD_SOAK_FACTOR=100 RCAD_SOAK_SEED=$seed cargo nextest run -p rcad-topo \
+///     --no-capture how_often_a_certified_fuse_of_a_turned_pair_refuses
+/// done
+/// ```
+///
+/// Unset — which is how the suite always runs it — the seed is fixed and the
+/// number reproduces.
+const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 
 /// How much of the turned family a certified fuse is allowed to refuse.
 ///
@@ -123,28 +180,101 @@ const MEASURED_CASES: u32 = 1000;
 /// every property in this file, a property only ever looking at the fuses that
 /// came back.
 ///
-/// Thirty per cent, chosen from measurement rather than from taste, and tighter
-/// than the 32% it replaces because the measurement behind it is now precise
-/// enough to justify it. The fixed-seed rate over 3,030 fuses is 27.2%; twelve
-/// fresh seeds at ten times that corpus put it at 26.66% with a standard
-/// deviation of 0.46 points, which scales to about 1.6 points here, so the
-/// widest fresh seed lands near 29.5%. The old 32% was above every one of those
-/// by so much that it was guarding sampling noise: neither of the two undeserved
-/// refusals §17.7 records would have tripped it on its own, since each was worth
-/// about 3.5 points and only the pair of them together reached 32.8%. Thirty
-/// trips on either. A threshold is not a target — the measurement is what is
+/// Twenty-eight per cent, chosen from measurement rather than from taste, and
+/// it is a threshold on a **deterministic** number: [`measured`] runs from a
+/// fixed seed, so the shipped corpus of 414 turned fuses refuses 105 of them,
+/// 25.36%, every run on every machine. There is no sampling noise for the
+/// threshold to have to clear, so what it has to clear instead is ordinary
+/// drift — 2.6 points is eleven fuses — and what it has to catch is a
+/// regression. Either of the two undeserved refusals §17.7 records is worth
+/// about 3.5 points at this corpus, which puts the rate at 28.9%, so either
+/// coming back on its own trips this. At the 3,030-fuse corpus that was briefly
+/// shipped, 30% did the same job; at 414 fuses 30% would catch neither of them
+/// alone, which is the power the shorter run costs and the reason this number
+/// moved down rather than staying put.
+///
+/// **It is judged on the shipped corpus only** — see
+/// [`this_is_the_shipped_corpus`]. A soak is a different measurement with a
+/// different distribution: six fresh seeds at ten times the corpus came out at
+/// 27.0%, 27.1%, 27.2%, 27.2%, 28.1% and 28.4%, so two of the six sit above this
+/// number with nothing wrong. Judging them by the shipped corpus's threshold
+/// would be treating two different numbers as one, which is the thing §17.7 is
+/// at pains not to do. A threshold is not a target — the measurement is what is
 /// recorded, and this is only here so it cannot drift unnoticed.
-const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.30;
+const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.28;
+
+/// How many of the comparisons a property set out to make it has to have made.
+///
+/// §14.7's half of it, and the same idea and the same shape as
+/// `turning_a_fuse.rs`'s `SOME_PAIRINGS_MUST_BE_COMPARED` next door. Every
+/// property in this file hands back `Ok(())` the moment a fuse comes back
+/// without an answer, so a regression that made every fuse refuse — or every
+/// answer come back as something a `Model` cannot hold — would leave every one
+/// of them green while comparing nothing at all. A pass is only worth what was
+/// compared.
+///
+/// Three tenths, from measurement over this tree, and the number that matters is
+/// the *worst* property rather than the average. These properties run from a
+/// fresh seed every time, so this floor is the one thing in the file that could
+/// go flaky, and it is sized against eight fresh-seed runs of each:
+///
+/// - the properties over the exactly representable pairs reach 90% to 100%,
+/// - the trio properties, which need three fuses to line up, reach 71% to 79%,
+/// - commutativity over turned pairs reaches 58% to 78%, because a quarter of
+///   turned fuses refuse and a comparison needs both sides,
+/// - the depth-four chain is the floor-setter at 50% to 69%: four solids united
+///   in a row give an edge with four faces along it often enough that a sixth of
+///   its fuses have no answer to give.
+///
+/// Three tenths is about five standard deviations under the worst of those. It
+/// is far enough not to fire on a hard corpus, and nowhere near far enough to
+/// let a property that has stopped comparing anything through: halving the rate
+/// of any of them trips it.
+const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
+
+/// How much of the lattice control comes back as something a `Model` cannot
+/// hold.
+///
+/// Measured at 4.8% over the shipped corpus — 20 of 414 — and the band is
+/// roughly half to double that. Every one of them is the case §17.7's catalogue
+/// records by hand: two solids meeting along a whole edge would put four faces
+/// along it, and an edge belongs to exactly two.
+const A_LATTICE_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.02..=0.10;
+
+/// The same for the family built to share coordinates, which is full of them.
+///
+/// Measured at 17.4% — 72 of 414 — which is what "deliberately degenerate"
+/// buys: the offsets are whole extents, so edge-on-edge and corner-on-corner
+/// are the ordinary case here rather than the rare one.
+const A_FLUSH_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.10..=0.28;
+
+/// The same for the lattice pairs written somewhere else in `f64`.
+///
+/// Measured at 4.1% — 17 of 414 — against the lattice family's 4.8%, and the two
+/// are the same figure rather than two. The configurations are drawn from the
+/// same generator and the same seed, but this family draws two more numbers per
+/// case, so the two corpora are not the same 138 configurations. What is exactly
+/// the same is the reason: moving everything by a power of two cannot turn an
+/// answer into one a `Model` can hold or the other way about. Same band.
+const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.02..=0.10;
+
+/// The same for the turned family.
+///
+/// Measured at 3.9% — 16 of 414 — lower than the lattice family it is a
+/// rotation of, because a quarter of that family's fuses refuse before they get
+/// far enough to find out whether the answer is a solid.
+const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.015..=0.09;
 
 #[test]
 fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
     let tally = over(CASES, a_lattice_pair(), |configuration, tally| {
         let (model, keys) = configuration.build();
         let (one, other) = (keys[0], keys[1]);
+        tally.meaning_to_compare();
 
         let Some(united) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &model,
             &[one],
             &[other],
@@ -155,7 +285,7 @@ fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
         };
         let Some(shared) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &model,
             &[one],
             &[other],
@@ -165,6 +295,7 @@ fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
             return Ok(());
         };
 
+        tally.comparing();
         prop_assert_eq!(
             volume_of(&united.0, &united.1) + volume_of(&shared.0, &shared.1),
             volume_of(&model, &[one]) + volume_of(&model, &[other]),
@@ -172,7 +303,7 @@ fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
         );
         Ok(())
     });
-    tally.report("inclusion and exclusion, lattice pairs");
+    tally.report_what_it_compared("inclusion and exclusion, lattice pairs");
 }
 
 #[test]
@@ -180,6 +311,7 @@ fn uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the
     let tally = over(LONGER_CASES, a_lattice_trio(), |configuration, tally| {
         let (model, keys) = configuration.build();
         let (one, two, three) = (keys[0], keys[1], keys[2]);
+        tally.meaning_to_compare();
 
         let Some(left) = united_in_turn(tally, &model, &[one], &[two], &[three])? else {
             return Ok(());
@@ -188,6 +320,7 @@ fn uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the
             return Ok(());
         };
 
+        tally.comparing();
         prop_assert_eq!(
             invariants_of(&left.0, &left.1),
             invariants_of(&right.0, &right.1),
@@ -195,7 +328,7 @@ fn uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the
         );
         Ok(())
     });
-    tally.report("associativity of union, lattice trios");
+    tally.report_what_it_compared("associativity of union, lattice trios");
 }
 
 #[test]
@@ -203,10 +336,11 @@ fn taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_shar
     let tally = over(LONGER_CASES, a_lattice_pair(), |configuration, tally| {
         let (model, keys) = configuration.build();
         let (one, other) = (keys[0], keys[1]);
+        tally.meaning_to_compare();
 
         let Some(bitten) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &model,
             &[one],
             &[other],
@@ -217,7 +351,7 @@ fn taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_shar
         };
         let Some(twice_bitten) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &bitten.0,
             &[one],
             &bitten.1,
@@ -228,7 +362,7 @@ fn taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_shar
         };
         let Some(shared) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &model,
             &[one],
             &[other],
@@ -238,6 +372,7 @@ fn taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_shar
             return Ok(());
         };
 
+        tally.comparing();
         prop_assert_eq!(
             invariants_of(&twice_bitten.0, &twice_bitten.1),
             invariants_of(&shared.0, &shared.1),
@@ -245,7 +380,7 @@ fn taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_shar
         );
         Ok(())
     });
-    tally.report("A \\ (A \\ B) = A ∩ B, lattice pairs");
+    tally.report_what_it_compared("A \\ (A \\ B) = A ∩ B, lattice pairs");
 }
 
 #[test]
@@ -253,67 +388,100 @@ fn turning_a_pair_a_quarter_turn_and_moving_it_a_whole_number_changes_not_one_bi
     let tally = over(
         LONGER_CASES,
         (a_lattice_pair(), a_rigid_movement()),
-        |(configuration, movement), tally| {
-            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-                let (still, keys) = configuration.build();
-                let Some(before) = fused(
-                    tally,
-                    Refusals::AreABug,
-                    &still,
-                    &[keys[0]],
-                    &[keys[1]],
-                    rule,
-                )?
-                else {
-                    continue;
-                };
-
-                let (moved, keys) = configuration.built_after(&movement);
-                let Some(after) = fused(
-                    tally,
-                    Refusals::AreABug,
-                    &moved,
-                    &[keys[0]],
-                    &[keys[1]],
-                    rule,
-                )?
-                else {
-                    return Err(TestCaseError::fail(format!(
-                        "{rule:?} came back with an answer where the moved pair did not"
-                    )));
-                };
-
-                let expected = answer_of(&before.0, &before.1).moved_by(&movement);
-                same_answer(&expected, &answer_of(&after.0, &after.1), rule, "moving it")?;
-            }
-            Ok(())
-        },
+        moving_a_pair_leaves_the_answer_alone,
     );
-    tally.report("transform invariance, lattice pairs under quarter turns and whole-number shifts");
+    tally.report_what_it_compared(
+        "transform invariance, lattice pairs under quarter turns and whole-number shifts",
+    );
+}
+
+/// The same property over [`a_pair_somewhere_else`], which is the whole reason
+/// that family exists.
+///
+/// The two runs are the same configuration written at two places in `f64`, and
+/// the claim is bit for bit with no bound anywhere — see the family's own doc
+/// comment for why that is exactly true and for what a different `k` costs the
+/// cascade. §12.4 says outright that no end-to-end outcome flip was ever built
+/// for a predicate whose budget carries the wrong power of the working size;
+/// this is the one that would catch it.
+#[test]
+fn writing_a_pair_somewhere_else_in_f64_and_then_moving_it_changes_not_one_bit() {
+    let tally = over(
+        LONGER_CASES,
+        (a_pair_somewhere_else(), a_rigid_movement()),
+        moving_a_pair_leaves_the_answer_alone,
+    );
+    tally.report_what_it_compared(
+        "transform invariance, pairs somewhere else in f64 under quarter turns and shifts",
+    );
+}
+
+/// Fuse the pair, move the pair and fuse it again, and insist the second answer
+/// is the first one moved.
+fn moving_a_pair_leaves_the_answer_alone(
+    (configuration, movement): (Configuration, Rigid),
+    tally: &Tally,
+) -> Result<(), TestCaseError> {
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        tally.meaning_to_compare();
+        let (still, keys) = configuration.build();
+        let Some(before) = fused(
+            tally,
+            Coordinates::AreExactlyRepresentable,
+            &still,
+            &[keys[0]],
+            &[keys[1]],
+            rule,
+        )?
+        else {
+            continue;
+        };
+
+        let (moved, keys) = configuration.built_after(&movement);
+        let Some(after) = fused(
+            tally,
+            Coordinates::AreExactlyRepresentable,
+            &moved,
+            &[keys[0]],
+            &[keys[1]],
+            rule,
+        )?
+        else {
+            return Err(TestCaseError::fail(format!(
+                "{rule:?} came back with an answer where the moved pair did not"
+            )));
+        };
+
+        tally.comparing();
+        let expected = answer_of(&before.0, &before.1)
+            .moved_by(&movement.in_the_world_of(configuration.elsewhere));
+        same_answer(&expected, &answer_of(&after.0, &after.1), rule, "moving it")?;
+    }
+    Ok(())
 }
 
 #[test]
 fn swapping_the_two_sides_of_a_lattice_pair_changes_not_one_bit() {
     let tally = over(CASES, a_lattice_pair(), |configuration, tally| {
-        both_ways_round(tally, Refusals::AreABug, configuration)
+        both_ways_round(tally, Coordinates::AreExactlyRepresentable, configuration)
     });
-    tally.report("commutativity, lattice pairs");
+    tally.report_what_it_compared("commutativity, lattice pairs");
 }
 
 #[test]
 fn swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit() {
     let tally = over(CASES, a_turned_pair(), |configuration, tally| {
-        both_ways_round(tally, Refusals::AreExpected, configuration)
+        both_ways_round(tally, Coordinates::AreUnderAGeneralRotation, configuration)
     });
-    tally.report("commutativity, turned pairs");
+    tally.report_what_it_compared("commutativity, turned pairs");
 }
 
 #[test]
 fn swapping_the_two_sides_of_a_degenerate_pair_changes_not_one_bit() {
     let tally = over(CASES, a_flush_pair(), |configuration, tally| {
-        both_ways_round(tally, Refusals::AreABug, configuration)
+        both_ways_round(tally, Coordinates::AreExactlyRepresentable, configuration)
     });
-    tally.report("commutativity, pairs sharing coordinates");
+    tally.report_what_it_compared("commutativity, pairs sharing coordinates");
 }
 
 #[test]
@@ -322,10 +490,11 @@ fn a_solid_united_with_a_copy_of_itself_is_itself() {
         let (model, keys) = configuration.build();
         let (one, copy) = (keys[0], keys[1]);
         let itself = invariants_of(&model, &[one]);
+        tally.meaning_to_compare();
 
         let Some(united) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &model,
             &[one],
             &[copy],
@@ -338,7 +507,7 @@ fn a_solid_united_with_a_copy_of_itself_is_itself() {
 
         let Some(shared) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &model,
             &[one],
             &[copy],
@@ -349,6 +518,7 @@ fn a_solid_united_with_a_copy_of_itself_is_itself() {
         };
         prop_assert_eq!(invariants_of(&shared.0, &shared.1), itself);
 
+        tally.comparing();
         same_answer(
             &answer_of(&united.0, &united.1),
             &answer_of(&shared.0, &shared.1),
@@ -357,7 +527,7 @@ fn a_solid_united_with_a_copy_of_itself_is_itself() {
         )?;
         Ok(())
     });
-    tally.report("idempotence, a lattice solid and a copy of it");
+    tally.report_what_it_compared("idempotence, a lattice solid and a copy of it");
 }
 
 /// The one property in this file that needs no coordinate to be exactly
@@ -374,16 +544,17 @@ fn a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
         ("lattice", a_solid_and_its_copy().boxed()),
         ("turned", a_turned_solid_and_its_copy().boxed()),
     ] {
-        let refusals = if name == "turned" {
-            Refusals::AreExpected
+        let coordinates = if name == "turned" {
+            Coordinates::AreUnderAGeneralRotation
         } else {
-            Refusals::AreABug
+            Coordinates::AreExactlyRepresentable
         };
         let tally = over(CASES, strategy, |configuration, tally| {
             let (model, keys) = configuration.build();
+            tally.meaning_to_compare();
             let Some(nothing) = fused(
                 tally,
-                refusals,
+                coordinates,
                 &model,
                 &[keys[0]],
                 &[keys[1]],
@@ -392,6 +563,7 @@ fn a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
             else {
                 return Ok(());
             };
+            tally.comparing();
             prop_assert!(
                 nothing.1.is_empty(),
                 "a solid with itself taken away leaves nothing, got {} solids",
@@ -399,7 +571,7 @@ fn a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
             );
             Ok(())
         });
-        tally.report(&format!("A \\ A = ∅, {name} solid and a copy of it"));
+        tally.report_what_it_compared(&format!("A \\ A = ∅, {name} solid and a copy of it"));
     }
 }
 
@@ -408,10 +580,11 @@ fn a_solid_united_with_what_it_shares_with_another_is_itself() {
     let tally = over(LONGER_CASES, a_lattice_pair(), |configuration, tally| {
         let (model, keys) = configuration.build();
         let (one, other) = (keys[0], keys[1]);
+        tally.meaning_to_compare();
 
         let Some(shared) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &model,
             &[one],
             &[other],
@@ -422,7 +595,7 @@ fn a_solid_united_with_what_it_shares_with_another_is_itself() {
         };
         let Some(swallowed) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &shared.0,
             &[one],
             &shared.1,
@@ -432,6 +605,7 @@ fn a_solid_united_with_what_it_shares_with_another_is_itself() {
             return Ok(());
         };
 
+        tally.comparing();
         prop_assert_eq!(
             invariants_of(&swallowed.0, &swallowed.1),
             invariants_of(&model, &[one]),
@@ -439,21 +613,29 @@ fn a_solid_united_with_what_it_shares_with_another_is_itself() {
         );
         Ok(())
     });
-    tally.report("absorption, lattice pairs");
+    tally.report_what_it_compared("absorption, lattice pairs");
 }
 
 #[test]
 fn uniting_three_at_once_is_uniting_two_and_then_the_third() {
     let tally = over(LONGER_CASES, a_lattice_trio(), |configuration, tally| {
         let (model, keys) = configuration.build();
+        tally.meaning_to_compare();
 
-        let Some(at_once) = fused(tally, Refusals::AreABug, &model, &keys, &[], Rule::Union)?
+        let Some(at_once) = fused(
+            tally,
+            Coordinates::AreExactlyRepresentable,
+            &model,
+            &keys,
+            &[],
+            Rule::Union,
+        )?
         else {
             return Ok(());
         };
         let Some(first_two) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &model,
             &keys[..2],
             &[],
@@ -466,7 +648,7 @@ fn uniting_three_at_once_is_uniting_two_and_then_the_third() {
         then_the_third.push(keys[2]);
         let Some(in_steps) = fused(
             tally,
-            Refusals::AreABug,
+            Coordinates::AreExactlyRepresentable,
             &first_two.0,
             &then_the_third,
             &[],
@@ -476,6 +658,7 @@ fn uniting_three_at_once_is_uniting_two_and_then_the_third() {
             return Ok(());
         };
 
+        tally.comparing();
         prop_assert_eq!(
             invariants_of(&at_once.0, &at_once.1),
             invariants_of(&in_steps.0, &in_steps.1),
@@ -483,7 +666,183 @@ fn uniting_three_at_once_is_uniting_two_and_then_the_third() {
         );
         Ok(())
     });
-    tally.report("fuse([A,B,C]) = fuse([fuse([A,B]),C]), lattice trios");
+    tally.report_what_it_compared("fuse([A,B,C]) = fuse([fuse([A,B]),C]), lattice trios");
+}
+
+/// `((A ∪ B) \ B) ∪ B` is `A ∪ B`, three fuses deep.
+///
+/// Deeper than anything else here, and each fuse hands the next one faces no
+/// input ever had. The middle one is the interesting step: it takes the union
+/// away again, so its argument is an answer whose faces were joined out of
+/// pieces of both inputs, and what it leaves has to add back up.
+#[test]
+fn taking_a_solid_out_of_a_union_and_putting_it_back_gives_the_union_again() {
+    let tally = over(LONGER_CASES, a_lattice_pair(), |configuration, tally| {
+        let (model, keys) = configuration.build();
+        let (one, other) = (keys[0], keys[1]);
+        tally.meaning_to_compare();
+
+        let Some(united) = fused(
+            tally,
+            Coordinates::AreExactlyRepresentable,
+            &model,
+            &[one],
+            &[other],
+            Rule::Union,
+        )?
+        else {
+            return Ok(());
+        };
+        let Some(bitten) = fused(
+            tally,
+            Coordinates::AreExactlyRepresentable,
+            &united.0,
+            &united.1,
+            &[other],
+            Rule::Difference,
+        )?
+        else {
+            return Ok(());
+        };
+        let Some(back) = fused(
+            tally,
+            Coordinates::AreExactlyRepresentable,
+            &bitten.0,
+            &bitten.1,
+            &[other],
+            Rule::Union,
+        )?
+        else {
+            return Ok(());
+        };
+
+        tally.comparing();
+        prop_assert_eq!(
+            invariants_of(&back.0, &back.1),
+            invariants_of(&united.0, &united.1),
+            "((A ∪ B) \\ B) ∪ B is A ∪ B"
+        );
+        Ok(())
+    });
+    tally.report_what_it_compared("((A ∪ B) \\ B) ∪ B = A ∪ B, lattice pairs");
+}
+
+/// `fuse([A, B, C, D])` against uniting the four one at a time.
+///
+/// The deepest chain in the suite. The fourth fuse of the stepwise run is
+/// looking at an answer three fuses old, which is where a corner with four or
+/// more planes round it, a face joined out of coplanar pieces, and a shell built
+/// by `nest_the_shells` all live at once.
+#[test]
+fn uniting_four_at_once_is_uniting_them_one_at_a_time() {
+    let tally = over(LONGER_CASES, a_chain_of_fuses(), |configuration, tally| {
+        let (model, keys) = configuration.build();
+        tally.meaning_to_compare();
+
+        let Some(at_once) = fused(
+            tally,
+            Coordinates::AreExactlyRepresentable,
+            &model,
+            &keys,
+            &[],
+            Rule::Union,
+        )?
+        else {
+            return Ok(());
+        };
+
+        let mut so_far = (model, vec![keys[0]]);
+        for &next in &keys[1..] {
+            let Some(wider) = fused(
+                tally,
+                Coordinates::AreExactlyRepresentable,
+                &so_far.0,
+                &so_far.1,
+                &[next],
+                Rule::Union,
+            )?
+            else {
+                return Ok(());
+            };
+            so_far = wider;
+        }
+
+        tally.comparing();
+        prop_assert_eq!(
+            invariants_of(&at_once.0, &at_once.1),
+            invariants_of(&so_far.0, &so_far.1),
+            "fuse([A, B, C, D]) is A ∪ B ∪ C ∪ D taken one at a time"
+        );
+        Ok(())
+    });
+    tally.report_what_it_compared("fuse([A,B,C,D]) = uniting them one at a time, lattice chains");
+}
+
+/// Uniting a turned solid with bit-identical copies of itself has to give back
+/// the very same solid at every step, and does not.
+///
+/// **The one property in this file that is exactly true under a general
+/// rotation.** Every copy is built from the same numbers by the same code, so
+/// every copy carries bit-identical planes and bit-identical corners; the fuse
+/// has nothing to round differently between them. `A ∪ A` is `A`, and it is `A`
+/// bit for bit — which is §17.1's claim stated as sharply as it can be, and it
+/// is why this is the shape of the test rather than a volume comparison.
+///
+/// **It fails on the first step, and the failure is a defect.**
+/// `FaceView::plane` is `surface.transformed(&location)`, and
+/// `Plane::transformed` moves a plane's offset one ulp even for
+/// `Isometry::identity()` — `rcad-geom`'s
+/// `moving_a_plane_by_the_identity_walks_its_offset_one_ulp_further_every_time`
+/// is the two-line reproduction. So a plane read out of a model is not the plane
+/// that was put in, the fuse reads its inputs through that accessor, and every
+/// fuse in a chain therefore moves every non-axis-aligned plane one more ulp.
+/// That is precisely the slow leak §17.1 rejected vertex-authoritative geometry
+/// to avoid: "however long the chain the planes in the model stay the planes the
+/// user built, undegraded". They do not.
+///
+/// **What is not wrong.** The fuse itself inherits exactly. The plane the answer
+/// *stores* is the input's plane bit for bit — reading the answer back gives one
+/// ulp more, and reading it back twice gives two, which is only consistent with
+/// the arena holding the undegraded value. The leak is in the accessor, and it
+/// is a gap rather than a limit: the identity has an exact answer and
+/// `Plane::transformed` does not take it.
+#[test]
+#[ignore = "a gap: FaceView::plane re-derives the offset through Plane::transformed, so a chain of fuses walks every turned plane one ulp per fuse"]
+fn uniting_a_turned_solid_with_copies_of_itself_never_moves_a_plane() {
+    let tally = over(
+        LONGER_CASES,
+        a_turned_solid_and_several_copies(),
+        |configuration, tally| {
+            let (model, keys) = configuration.build();
+            let itself = answer_of(&model, &[keys[0]]);
+
+            let mut so_far = (model, vec![keys[0]]);
+            for &copy in &keys[1..] {
+                tally.meaning_to_compare();
+                let Some(wider) = fused(
+                    tally,
+                    Coordinates::AreUnderAGeneralRotation,
+                    &so_far.0,
+                    &so_far.1,
+                    &[copy],
+                    Rule::Union,
+                )?
+                else {
+                    return Ok(());
+                };
+                tally.comparing();
+                same_answer(
+                    &itself,
+                    &answer_of(&wider.0, &wider.1),
+                    Rule::Union,
+                    "uniting a turned solid with a bit-identical copy of itself",
+                )?;
+                so_far = wider;
+            }
+            Ok(())
+        },
+    );
+    tally.report_what_it_compared("A ∪ A ∪ A ∪ …, a turned solid and copies of it");
 }
 
 /// §17.7's control row, and §14.7's acceptance oracle for the fuse.
@@ -496,9 +855,10 @@ fn uniting_three_at_once_is_uniting_two_and_then_the_third() {
 #[test]
 fn every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing() {
     let tally = measured(a_lattice_pair(), |configuration, tally| {
-        every_rule(tally, Refusals::AreABug, configuration)
+        every_rule(tally, Coordinates::AreExactlyRepresentable, configuration)
     });
     tally.report("§17.7 control: lattice pairs, every rule");
+    tally.share_of_answers_that_were_not_solids_must_be_within(A_LATTICE_PAIR_IS_NOT_A_SOLID);
     assert_eq!(
         tally.refused.get(),
         0,
@@ -512,13 +872,37 @@ fn every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing() {
 #[test]
 fn every_certified_fuse_of_a_pair_sharing_coordinates_is_decided() {
     let tally = measured(a_flush_pair(), |configuration, tally| {
-        every_rule(tally, Refusals::AreABug, configuration)
+        every_rule(tally, Coordinates::AreExactlyRepresentable, configuration)
     });
     tally.report("§17.7 degenerate: pairs sharing coordinates, every rule");
+    tally.share_of_answers_that_were_not_solids_must_be_within(A_FLUSH_PAIR_IS_NOT_A_SOLID);
     assert_eq!(
         tally.refused.get(),
         0,
         "two solids sharing coordinates exactly leave nothing that cannot be decided"
+    );
+}
+
+/// A fourth measured row for §17.7: the lattice pairs written somewhere else in
+/// `f64`.
+///
+/// A control, and the strictest one in the file. Multiplying by a power of two
+/// and shifting by a power of two are both exact, so every meet is exactly
+/// representable at every size the family reaches — a refusal is a bug in our
+/// filters at that size, which is a sharper statement than the same sentence
+/// about the lattice family alone, because the cascade does not decide these
+/// fuses at the same level.
+#[test]
+fn every_certified_fuse_of_a_pair_somewhere_else_in_f64_is_decided() {
+    let tally = measured(a_pair_somewhere_else(), |configuration, tally| {
+        every_rule(tally, Coordinates::AreExactlyRepresentable, configuration)
+    });
+    tally.report("§17.7 control: pairs somewhere else in f64, every rule");
+    tally.share_of_answers_that_were_not_solids_must_be_within(A_PAIR_ELSEWHERE_IS_NOT_A_SOLID);
+    assert_eq!(
+        tally.refused.get(),
+        0,
+        "moving a configuration by a power of two cannot make it undecidable"
     );
 }
 
@@ -543,17 +927,31 @@ fn every_certified_fuse_of_a_pair_sharing_coordinates_is_decided() {
 #[test]
 fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
     let tally = measured(a_turned_pair(), |configuration, tally| {
-        every_rule(tally, Refusals::AreExpected, configuration)
+        every_rule(tally, Coordinates::AreUnderAGeneralRotation, configuration)
     });
     tally.report("§17.7 headline: turned pairs, every rule");
+    tally.share_of_answers_that_were_not_solids_must_be_within(A_TURNED_PAIR_IS_NOT_A_SOLID);
+
     let refused = tally.refused.get() as f64 / tally.fuses.get() as f64;
-    assert!(
-        refused < TURNED_REFUSALS_MUST_STAY_BELOW,
-        "{:.1}% of {} turned fuses refused, over the {:.0}% §17.7 records",
-        refused * 100.0,
-        tally.fuses.get(),
-        TURNED_REFUSALS_MUST_STAY_BELOW * 100.0
-    );
+    if this_is_the_shipped_corpus() {
+        assert!(
+            refused < TURNED_REFUSALS_MUST_STAY_BELOW,
+            "{:.1}% of {} turned fuses refused, over the {:.0}% §17.7 records",
+            refused * 100.0,
+            tally.fuses.get(),
+            TURNED_REFUSALS_MUST_STAY_BELOW * 100.0
+        );
+    }
+}
+
+/// Whether this run is the shipped measurement rather than a soak.
+///
+/// [`TURNED_REFUSALS_MUST_STAY_BELOW`] is a statement about one deterministic
+/// number over one fixed corpus, and a soak measures something else: a bigger
+/// corpus with a different mean and a spread of its own. Both are printed; only
+/// the shipped one is judged.
+fn this_is_the_shipped_corpus() -> bool {
+    std::env::var(SOAK_FACTOR).is_err() && std::env::var(SOAK_SEED).is_err()
 }
 
 /// `A ∪ B` and `B ∪ A`, then `A ∩ B` and `B ∩ A`, bit for bit.
@@ -564,20 +962,22 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// be nothing to fix (§17.4). Comparing volumes would not see it.
 fn both_ways_round(
     tally: &Tally,
-    refusals: Refusals,
+    coordinates: Coordinates,
     configuration: Configuration,
 ) -> Result<(), TestCaseError> {
     for rule in [Rule::Union, Rule::Intersection] {
+        tally.meaning_to_compare();
         let (model, keys) = configuration.build();
         let (one, other) = (keys[0], keys[1]);
 
-        let Some(forwards) = fused(tally, refusals, &model, &[one], &[other], rule)? else {
+        let Some(forwards) = fused(tally, coordinates, &model, &[one], &[other], rule)? else {
             continue;
         };
-        let Some(backwards) = fused(tally, refusals, &model, &[other], &[one], rule)? else {
+        let Some(backwards) = fused(tally, coordinates, &model, &[other], &[one], rule)? else {
             continue;
         };
 
+        tally.comparing();
         same_answer(
             &answer_of(&forwards.0, &forwards.1),
             &answer_of(&backwards.0, &backwards.1),
@@ -591,12 +991,12 @@ fn both_ways_round(
 /// Ask all three rules of one configuration and keep nothing but the tally.
 fn every_rule(
     tally: &Tally,
-    refusals: Refusals,
+    coordinates: Coordinates,
     configuration: Configuration,
 ) -> Result<(), TestCaseError> {
     let (model, keys) = configuration.build();
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-        fused(tally, refusals, &model, &[keys[0]], &[keys[1]], rule)?;
+        fused(tally, coordinates, &model, &[keys[0]], &[keys[1]], rule)?;
     }
     Ok(())
 }
@@ -609,12 +1009,20 @@ fn united_in_turn(
     second: &[SolidKey],
     third: &[SolidKey],
 ) -> Result<Option<(Model, Vec<SolidKey>)>, TestCaseError> {
-    let Some(pair) = fused(tally, Refusals::AreABug, model, first, second, Rule::Union)? else {
+    let Some(pair) = fused(
+        tally,
+        Coordinates::AreExactlyRepresentable,
+        model,
+        first,
+        second,
+        Rule::Union,
+    )?
+    else {
         return Ok(None);
     };
     fused(
         tally,
-        Refusals::AreABug,
+        Coordinates::AreExactlyRepresentable,
         &pair.0,
         &pair.1,
         third,
@@ -628,9 +1036,14 @@ fn united_in_turn(
 /// than from whatever the last one left behind. `None` means the answer was not
 /// a solid this kernel can hold, or was refused where refusals are expected —
 /// both counted, neither swept away.
+///
+/// Every answer over exactly representable coordinates goes through
+/// [`every_plane_of_the_answer_is_a_plane_of_an_input`], so §17.1's deciding
+/// argument is checked by most of the fuses in this file rather than by a test
+/// of its own. Why "most" and not "all" is at that function.
 fn fused(
     tally: &Tally,
-    refusals: Refusals,
+    coordinates: Coordinates,
     model: &Model,
     arguments: &[SolidKey],
     tools: &[SolidKey],
@@ -649,6 +1062,14 @@ fn fused(
                     log.len()
                 )));
             }
+            if coordinates == Coordinates::AreExactlyRepresentable {
+                every_plane_of_the_answer_is_a_plane_of_an_input(
+                    &model,
+                    &[arguments, tools].concat(),
+                    &solids,
+                    rule,
+                )?;
+            }
             Ok(Some((model, solids)))
         }
         Err(Error::Undecidable { records }) => {
@@ -660,9 +1081,9 @@ fn fused(
                     .entry(record.predicate())
                     .or_default() += 1;
             }
-            match refusals {
-                Refusals::AreExpected => Ok(None),
-                Refusals::AreABug => Err(TestCaseError::fail(format!(
+            match coordinates {
+                Coordinates::AreUnderAGeneralRotation => Ok(None),
+                Coordinates::AreExactlyRepresentable => Err(TestCaseError::fail(format!(
                     "a {rule:?} over exactly representable coordinates refused, with {} records",
                     records.len()
                 ))),
@@ -676,15 +1097,87 @@ fn fused(
     }
 }
 
-/// Whether a refusal is an outcome to count or a test failure.
+/// §17.1's deciding argument, checked rather than argued.
+///
+/// The settled reason `Surface::Plane` is authoritative and the stored corners
+/// are cached samples of it is drift across chained fuses: "a split face
+/// inherits its parent's plane bit for bit, so however long the chain the planes
+/// in the model stay the planes the user built, undegraded." That sentence is
+/// the whole case against vertex-authoritative geometry and nothing in the tree
+/// checked it, so this does: every face of every answer has to carry the four
+/// coefficients of some input face's plane, bit for bit, or their exact
+/// negation.
+///
+/// The negation is not slack. A rule can keep a face facing the other way, and
+/// `Plane::reversed` negates all four coefficients, which is exact. Nothing else
+/// is allowed: not a refitted plane, not a renormalized one, not one whose last
+/// bit moved.
+///
+/// It runs inside [`fused`] rather than as a test of its own, so every fuse this
+/// file already performs checks it and the wall clock does not move.
+///
+/// # Why it does not run on turned pairs
+///
+/// Because there it would be asking about the reader rather than about the fuse.
+/// `FaceView::plane` is `surface.transformed(&location)`, and
+/// `Plane::transformed` is **not the identity for `Isometry::identity()`**: it
+/// rebuilds the offset as `normal · (normal · offset)`, and for a normal whose
+/// squared length rounds to just over one that walks the offset one ulp further
+/// out on every read, without bound. A turned input is read at its placement and
+/// the answer is read at the identity, so the two sides have been through
+/// different arithmetic and a mismatch says nothing about what the fuse stored.
+///
+/// That is a defect and not a fact about `f64`, it is recorded as one, and it is
+/// not fixed here: `rcad-geom`'s
+/// `moving_a_plane_by_the_identity_walks_its_offset_one_ulp_further_every_time`
+/// is the minimal reproduction and
+/// [`uniting_a_turned_solid_with_copies_of_itself_never_moves_a_plane`] is what
+/// it costs a chain of fuses. On the exactly representable families every normal
+/// is a signed unit axis, its squared length is exactly one, and the read is
+/// exact — which is why the oracle runs there and means what it says.
+fn every_plane_of_the_answer_is_a_plane_of_an_input(
+    model: &Model,
+    inputs: &[SolidKey],
+    answer: &[SolidKey],
+    rule: Rule,
+) -> Result<(), TestCaseError> {
+    let mut theirs: BTreeSet<[u64; 4]> = BTreeSet::new();
+    for &solid in inputs {
+        for face in model.solid(solid).faces() {
+            let plane = face.plane().coefficients();
+            theirs.insert(plane.map(bits));
+            theirs.insert(plane.map(|coefficient| bits(-coefficient)));
+        }
+    }
+
+    for &solid in answer {
+        for face in model.solid(solid).faces() {
+            if !theirs.contains(&face.plane().coefficients().map(bits)) {
+                return Err(TestCaseError::fail(format!(
+                    "a {rule:?} put a face on {:?}, which is no input face's plane \
+                     and no input face's plane reversed",
+                    face.plane().coefficients()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// What kind of numbers the configuration is made of.
+///
+/// Two things follow from this one fact, which is why it is one value and not
+/// two flags: whether a refusal is an outcome to count or a test failure, and
+/// whether [`every_plane_of_the_answer_is_a_plane_of_an_input`] is asking about
+/// the fuse or about the reader.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Refusals {
-    /// The configuration is exactly representable, so a certified policy has to
-    /// decide it (§17.7's control row).
-    AreABug,
-    /// The configuration is under a general rotation, where a refusal is the
-    /// thing being measured.
-    AreExpected,
+enum Coordinates {
+    /// Rectilinear on the integer grid. A certified policy has to decide every
+    /// fuse (§17.7's control row), and a plane read back out of the model is the
+    /// plane that went in.
+    AreExactlyRepresentable,
+    /// Under a general rotation, where a refusal is the thing being measured.
+    AreUnderAGeneralRotation,
 }
 
 /// What every fuse a property ran came back with.
@@ -698,6 +1191,13 @@ struct Tally {
     fuses: Cell<usize>,
     refused: Cell<usize>,
     not_a_solid: Cell<usize>,
+    /// Comparisons a property set out to make, and made.
+    ///
+    /// Every property here returns `Ok(())` the moment a fuse comes back with
+    /// no answer, so a property whose fuses all stopped answering would assert
+    /// nothing at all and pass. These two are what say it did not.
+    meant_to_compare: Cell<usize>,
+    compared: Cell<usize>,
     /// Which predicate each refusal named, and how often.
     ///
     /// Criterion 8 asks for a rate, and a rate on its own cannot tell a timid
@@ -707,16 +1207,28 @@ struct Tally {
 }
 
 impl Tally {
+    /// The property is about to try a comparison. Call it before the first
+    /// fuse the comparison needs.
+    fn meaning_to_compare(&self) {
+        self.meant_to_compare.set(self.meant_to_compare.get() + 1);
+    }
+
+    /// The property got both sides and is about to compare them.
+    fn comparing(&self) {
+        self.compared.set(self.compared.get() + 1);
+    }
+
     fn report(&self, what: &str) {
         let fuses = self.fuses.get();
         println!(
-            "{what}: {fuses} fuses, {} refused ({:.1}%), {} not a solid",
+            "{what}: {fuses} fuses, {} refused ({:.1}%), {} not a solid ({:.1}%)",
             self.refused.get(),
             100.0 * self.refused.get() as f64 / fuses as f64,
-            self.not_a_solid.get()
+            self.not_a_solid.get(),
+            100.0 * self.not_a_solid.get() as f64 / fuses as f64
         );
-        // Two decimal places, because the rarest cause this corpus turns up runs
-        // at about one fuse in eight hundred and one place would round it to the
+        // Two decimal places, because the rarest cause a soak turns up runs at
+        // about one fuse in eight hundred and one place would round it to the
         // same 0.1% as a cause ten times commoner.
         for (predicate, count) in self.gave_up.borrow().iter() {
             println!(
@@ -724,6 +1236,63 @@ impl Tally {
                 100.0 * *count as f64 / fuses as f64
             );
         }
+    }
+
+    /// Report, and insist the property actually compared something.
+    ///
+    /// This is the shape `turning_a_fuse.rs` already uses, next door and for
+    /// the same reason (§14.7). Every property in this file hands back `Ok(())`
+    /// when a fuse comes back with no answer, so the pass says nothing on its
+    /// own; what says something is how many of the comparisons the property set
+    /// out to make it reached.
+    fn report_what_it_compared(&self, what: &str) {
+        self.report(what);
+        let meant_to = self.meant_to_compare.get();
+        assert!(
+            meant_to > 0,
+            "{what} never said it was going to compare anything, so this floor \
+             is measuring nothing"
+        );
+        println!(
+            "    {} of {meant_to} comparisons reached ({:.0}%)",
+            self.compared.get(),
+            100.0 * self.compared.get() as f64 / meant_to as f64
+        );
+        assert!(
+            self.compared.get() as f64 >= SOME_COMPARISONS_MUST_HAPPEN * meant_to as f64,
+            "{what}: only {} of {meant_to} comparisons had an answer on both sides, \
+             so this property barely asserted anything",
+            self.compared.get()
+        );
+    }
+
+    /// Insist the share of fuses whose answer was not a solid this kernel can
+    /// hold is still about what it has always been.
+    ///
+    /// The other half of the vacuity guard, and the half that is not about a
+    /// property at all. [`Coordinates::AreExactlyRepresentable`] turns a refusal into a failure and
+    /// the control rows assert `refused == 0`, but
+    /// [`Error::ResultIsNotManifold`] is neither: it is `None`, counted, printed
+    /// and never judged. A regression that made *every* lattice fuse come back
+    /// not-a-solid would leave `refused == 0` true and every metamorphic
+    /// property vacuously green.
+    ///
+    /// It is a band and not a zero because it is a real answer to a real
+    /// question: four faces along one edge is not something a `Model` can hold,
+    /// and the corpus is built to produce exactly that (§17.7's table has two of
+    /// them by hand). Where the ends come from is at each call site.
+    fn share_of_answers_that_were_not_solids_must_be_within(&self, band: RangeInclusive<f64>) {
+        let share = self.not_a_solid.get() as f64 / self.fuses.get() as f64;
+        assert!(
+            band.contains(&share),
+            "{} of {} fuses came back not a solid ({:.1}%), outside the {:.0}%–{:.0}% \
+             this family has always given",
+            self.not_a_solid.get(),
+            self.fuses.get(),
+            100.0 * share,
+            100.0 * band.start(),
+            100.0 * band.end()
+        );
     }
 }
 
@@ -739,18 +1308,54 @@ fn over<T: core::fmt::Debug>(
 
 /// The same from a fixed seed, so the number that comes out is the same every
 /// time it is asked for.
+///
+/// [`SOAK_FACTOR`] multiplies the corpus and [`SOAK_SEED`] replaces the seed;
+/// with neither set — which is how the suite runs it — this is
+/// [`MEASURED_CASES`] configurations from the one fixed seed.
 fn measured<T: core::fmt::Debug>(
     strategy: impl Strategy<Value = T>,
     property: impl Fn(T, &Tally) -> Result<(), TestCaseError>,
 ) -> Tally {
     run(
-        TestRunner::new_with_rng(
-            configured(MEASURED_CASES),
-            TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-        ),
+        TestRunner::new_with_rng(configured(measured_cases()), fresh_seeded_soak()),
         strategy,
         property,
     )
+}
+
+/// [`MEASURED_CASES`], multiplied by whatever [`SOAK_FACTOR`] says.
+///
+/// # Panics
+///
+/// If the variable is set to something that is not a whole number above zero. A
+/// soak that silently ran the default corpus would be worse than one that
+/// stopped.
+fn measured_cases() -> u32 {
+    let Ok(factor) = std::env::var(SOAK_FACTOR) else {
+        return MEASURED_CASES;
+    };
+    let factor: u32 = factor
+        .parse()
+        .unwrap_or_else(|_| panic!("{SOAK_FACTOR} has to be a whole number, not {factor:?}"));
+    assert!(factor > 0, "{SOAK_FACTOR} has to be at least one");
+    MEASURED_CASES * factor
+}
+
+/// The fixed seed, or the one [`SOAK_SEED`] names.
+///
+/// # Panics
+///
+/// If the variable is set to something that is not a whole number.
+fn fresh_seeded_soak() -> TestRng {
+    let Ok(seed) = std::env::var(SOAK_SEED) else {
+        return TestRng::deterministic_rng(RngAlgorithm::ChaCha);
+    };
+    let seed: u64 = seed
+        .parse()
+        .unwrap_or_else(|_| panic!("{SOAK_SEED} has to be a whole number, not {seed:?}"));
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&seed.to_le_bytes());
+    TestRng::from_seed(RngAlgorithm::ChaCha, &bytes)
 }
 
 fn run<T: core::fmt::Debug>(
@@ -907,7 +1512,7 @@ fn answer_of(model: &Model, solids: &[SolidKey]) -> Answer {
 
 impl Answer {
     /// The same answer after an exactly representable movement.
-    fn moved_by(&self, movement: &Rigid) -> Answer {
+    fn moved_by(&self, movement: &Movement) -> Answer {
         Answer {
             solids: self
                 .solids
