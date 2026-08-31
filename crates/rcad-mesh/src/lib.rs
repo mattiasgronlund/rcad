@@ -38,11 +38,32 @@
 //! caller refines every boundary once and hands the same corners to both sides
 //! (`docs/decisions.md` §25.1).
 //!
-//! # What is not here yet
+//! One thing follows that is worth saying out loud, because it reads like a
+//! defect: **a loop too coarse for the deflection is refused.** A side of a
+//! loop is a chord of the surface, its distance from that surface is settled the
+//! moment its two corners are chosen, and nothing this crate is allowed to do
+//! moves it. So the answer is a refusal naming the side, and the fix is at the
+//! caller — which is where it belongs, because the caller is the one that can
+//! see both faces along that edge.
 //!
-//! Refinement inside the patch, and the number saying how far the triangles
-//! stray from the surface. [`triangulate`] currently returns the corners it was
-//! given and nothing more.
+//! # How close it says it is
+//!
+//! A [`Patch`] carries a length: the furthest any point of any triangle can be
+//! from the surface, in the model's own unit, as an `Approximation` blaming
+//! [`Cause::FlatStandIn`]. One number for the whole patch rather than one per
+//! triangle, and a length rather than a `(u, v)` — a turn round a wide pipe and
+//! a turn round a narrow one are not the same distance.
+//!
+//! [`triangulate`] takes **no policy and no log**, and that is a decision rather
+//! than an omission. It makes no uncertified decision to record: it refines
+//! until its own bound is under the [`Deflection`] it was handed, or it refuses.
+//! Whether a given deflection is good enough is a judgement, and judgements
+//! belong to the caller, where the policy already is. There is no best-effort
+//! answer either, because a patch that quietly missed would need every caller to
+//! compare two numbers, and none would (`docs/decisions.md` §25.3).
+//!
+//! [`Cause::FlatStandIn`]: rcad_predicates::Cause::FlatStandIn
+//! [`Deflection`]: rcad_geom::Deflection
 
 #![forbid(unsafe_code)]
 
