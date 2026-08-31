@@ -34,7 +34,18 @@ These are the ones that are expensive to notice late.
   sweep is `Model::validate()`, called at test and import boundaries. A full sweep
   per operation makes the test suite quadratic.
 - **A part with no named consumer is not built.** Defer it to the milestone where
-  the consumer appears. `docs/decisions.md` §13 says why.
+  the consumer appears. `docs/decisions.md` §13 says why. This governs **features,
+  never correctness gaps** — see the next rule.
+- **A claim that something cannot be done, or cannot be reached, needs a
+  demonstration and not a paragraph.** Same rule as a published bound needing a
+  test (§15.6), applied to two more kinds of claim. "No ordering of the arithmetic
+  helps" was true of orderings and silent about scalings, and a representable
+  answer was refused for it. Before writing such a sentence, name the family of
+  fixes you considered and say why that family is the only one; for "no caller
+  hits this", check the **public API**, not today's callers. A refusal is a
+  *limit* when the answer does not exist and a *gap* when it does and the
+  arithmetic could not reach it — defer a limit, fix a gap. `docs/decisions.md`
+  §16.10.
 
 ## Tooling
 
