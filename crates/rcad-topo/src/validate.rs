@@ -407,8 +407,14 @@ const MEASURING_SLACK: f64 = 16.0;
 ///
 /// [`Error::Undecidable`] when the cascade cannot settle the sign. For the
 /// exact `f64` coordinates a model stores that only happens when a coordinate
-/// product overflows or falls into the subnormals, which is what the
-/// dynamic-range check exists to reject (decisions.md §3.5).
+/// product overflows or falls into the subnormals.
+///
+/// This used to add "which is what the dynamic-range check exists to reject",
+/// and that check does not reject it: it is a **ratio** test and is blind to
+/// absolute magnitude, so a uniformly tiny model passes with a ratio of one.
+/// This matters more here than elsewhere, because `Model` is `Deserialize` and
+/// `validate` is the untrusted-import boundary — which is exactly where such
+/// coordinates arrive. `docs/decisions.md` §16.11.
 fn winding_of(wire: WireView<'_>, normal: Vector) -> Result<Decision> {
     let corners: Vec<[f64; 3]> = wire.points().map(|corner| corner.coordinates()).collect();
     winding_round(&corners, normal.components())

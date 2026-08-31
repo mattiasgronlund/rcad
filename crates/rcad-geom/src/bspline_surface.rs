@@ -400,6 +400,9 @@ impl BSplineSurface {
             if !(weight.is_finite() && weight > 0.0) {
                 return Err(Error::WeightNotPositive { weight });
             }
+            if weight < f64::MIN_POSITIVE {
+                return Err(Error::WeightTooSmallToBlend { weight });
+            }
             if !(x.is_finite() && y.is_finite() && z.is_finite()) {
                 return Err(Error::NotFinite {
                     what: "weighted spline control point",

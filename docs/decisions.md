@@ -1714,6 +1714,132 @@ is stronger than the rule states: review did not merely find *more* than the
 suite, it found things the suite was structurally incapable of finding. Budget it
 as a phase with its own findings, not as a pass over finished work.
 
+### 16.10 A claim that justifies an absence is not reviewable, and needs its own check
+
+*Added after §16.9's second amendment, because the same thing happened twice and
+the second time it was noticed only by being asked about.*
+
+Two of M1's defects were found by neither the suite nor the adversarial review.
+They were found by a reader asking what a sentence meant. Both sentences were
+doing the same job, and it is a job no reviewer was looking at.
+
+**The distinction that matters.** A code review examines **what is there**. Both
+of these were arguments for **what is not there**:
+
+- *"no ordering of the arithmetic gets that back"* — an argument that a fix does
+  not exist.
+- *"reachable only by handing `BSplineCurve::new` a net near the ends of the
+  `f64` range on purpose"* — an argument that a fix is not needed.
+
+An absence has no lines in a diff. A reviewer hunting defects reads the code that
+exists, finds it consistent with the doc comment beside it, and moves on — which
+is the correct thing to do with code. The review that ran on this milestone did
+check both `assert!` unreachability arguments in `de_boor.rs` and found them
+sound, because those are claims about **code that is there**. It walked past the
+two claims about code that is not, and so would any reviewer, because there was
+nothing to look at.
+
+Worse, the reasoning attached reads as *evidence of care*. A bare `TODO` invites
+scrutiny. A paragraph explaining why something cannot be done deflects it, and
+deflects it in proportion to how well written it is. Both of these were well
+written. Both were wrong.
+
+**This generalizes §15.6, which the project already believes.** §15.6 says a
+published bound needs **a test that could fail, not a paragraph** — prose
+standing in for evidence, caught for one kind of claim. It is the same failure
+here, in two more:
+
+> **A claim that something cannot be done, or cannot be reached, needs a
+> demonstration and not a paragraph.**
+
+For an impossibility claim the demonstration is an enumeration: name the family
+of fixes considered and say why that family is the only one. "No ordering helps"
+was true of orderings and silent about scalings, and the silence is where the
+bug lived. For an unreachability claim the demonstration is a reachability
+argument through the **public API**, not through today's callers.
+
+**Three species, and the question each needs answered:**
+
+| Species | Sounds like | The question |
+|---|---|---|
+| Impossibility | "no ordering helps", "there is no way to reach it" | Is the named family of fixes the only family? |
+| Unreachability | "nothing in the kernel builds that", "only on purpose" | Is it reachable through the public API at all? |
+| Sufficiency | "one guard is enough", "by construction", "covers every case" | Enumerate what it ranges over; which member is uncovered? |
+
+The third is not hypothetical either — it is the milestone's most serious bug, a
+relative bound whose precondition was enforced in two of the three places it was
+needed.
+
+**The uncomfortable part: §13 rule 3 is also the camouflage.** "A part with no
+named consumer is not built" is a real rule, it is in `CLAUDE.md`, and it is
+right. It is also exactly the sentence the second defect hid behind. The
+refinement, which §16.9 already names: **rule 3 governs features, not correctness
+gaps.** Deferring a part nobody needs is rule 3 working. Deferring a case where a
+representable answer is refused is rule 3 being used as cover, because the
+question rule 3 asks — *who consumes this?* — is the wrong question to ask about
+a defect. The test is §16.9's: a refusal is a **limit** when the answer does not
+exist, and a **gap** when it does and the arithmetic could not reach it. Rule 3
+may defer a missing feature. It may not defer a gap.
+
+**Operationally**, and the half of this that lives in `CLAUDE.md`: the markers are
+few and grepping for them is cheap — `cannot`, `never`, `always`, `no ordering`,
+`nothing`, `only`, `impossible`, `unreachable`, `by construction`, `suffices`,
+`covers`, `reachable only`. A whole crate holds a dozen or two. Each is a work
+item with a definite question, and the answer is a demonstration or a rewritten
+sentence. `.claude/skills/claim-audit` is the pass, and it is deliberately **not**
+a code review: pointing a reviewer at defects finds defects, and these are not
+defects until someone asks what the sentence rules out.
+
+### 16.11 The dynamic-range check is a ratio, and cannot see absolute magnitude
+
+*Open question, recorded rather than settled. Found by the §16.10 claim audit.*
+
+`DynamicRange::is_within_supported_range` is `self.ratio <= LARGEST_SUPPORTED_RATIO`
+and nothing else. `largest_coordinate_magnitude` is computed, stored, and never
+consulted. So the check answers *"is this model's smallest feature resolvable
+against its largest?"* — which is the question §3.5 set out to ask, and it is a
+good question.
+
+It is not the question three doc comments were citing it for. `build.rs` and
+`validate.rs` both said `Undecidable` on exact `f64` input happens only when a
+product overflows or falls subnormal, *"which is what the dynamic-range check
+exists to catch"*. It cannot catch that, because the models where it happens are
+**uniformly** tiny or **uniformly** enormous, and those have a ratio of exactly
+one. Measured: the `1e-170` square that used to panic the profile builder
+reports `ratio = 1, accepted = true`.
+
+The three sentences are corrected in place. What is left is a design question,
+and it is deliberately not answered here:
+
+**Should the kernel refuse a model whose coordinates are absolutely too small or
+too large, independently of their ratio?**
+
+For it: `Model` is `Deserialize` and `validate()` is the untrusted-import
+boundary, which is exactly where such coordinates arrive. `add_cube(1e140, …)`
+returns `Ok` on a solid `validate` then refuses, and `classify_point` on it
+comes back `Undecidable` with an infinite enclosure and a full log — an
+operation reporting failure through a channel §12.5 said would stay empty.
+
+Against: it is a change to what the kernel accepts, so it touches §3.5 and §3.8
+and needs its own reasoning about where the limits go and in whose units. A
+working size is already carried by `Scale`; a second, absolute limit is a second
+thing to keep in step, and §12.4's lesson is about exactly that. It is also not
+obviously the kernel's job — `1e-170` metres is not a manufacturing tolerance,
+it is a caller mistake, and refusing it is a convenience rather than a
+correctness requirement now that nothing panics.
+
+**What is already fixed, so this is not blocking.** The two panics that made it
+urgent are gone: `ring_runs_anticlockwise` returns `Error::Undecidable` instead
+of reaching an `unreachable!`, and `BSplineCurve::new` refuses subnormal weights
+rather than letting `evaluate` panic on them. Both were §16.10 gaps — an answer
+that existed and was not reached — and both are covered by tests. What remains
+here is a question about *refusing earlier and more loudly*, not about anything
+returning a wrong answer or crashing.
+
+Deferred with its consumer named, per §13 rule 3, which governs features and
+this is one: the milestone that imports a STEP file it did not write is the one
+that wants an absolute limit at the boundary.
+
 ---
 
 ## 17. The planar fuse

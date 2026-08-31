@@ -16,12 +16,21 @@
 //! decisions.md §12.5 records that the enclosure and the provenance this
 //! returns "carry no signal today ... and cannot until classification meets
 //! constructed points". That is exactly right, and this is where it stops being
-//! true. Ask about an exact point under a certified policy and every `orient3d`
+//! true. Ask about an exact point under a certified policy **on a model whose
+//! coordinates the arithmetic can actually multiply**, and every `orient3d`
 //! falls through to exact arithmetic and proves its sign: nothing is ever
 //! recorded, so the log stays empty, and the only way left to
 //! [`Containment::Undecidable`] is all three rays meeting an edge dead on,
 //! which reports an enclosure of zero. Both fields are carried and neither
 //! says anything.
+//!
+//! That qualification is not decoration. It was missing, and on a `1e140` cube
+//! the same call returns `Undecidable` with an enclosure of infinity and
+//! thirty-six records in the log — the products overflow and level 3 has
+//! nothing to offer. `Model::validate` refuses that model, so a caller who
+//! validates never sees it, but `add_cube` returns `Ok` for it first. The
+//! dynamic-range check does not catch it either, being a ratio test blind to
+//! absolute magnitude; `docs/decisions.md` §16.11 carries the question.
 //!
 //! Ask about a point that is only known to lie inside a box and both start
 //! meaning something. Exact arithmetic cannot run on a coordinate nobody has,
