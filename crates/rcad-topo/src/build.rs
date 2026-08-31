@@ -303,18 +303,29 @@ fn check_holes_sit_inside(
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] if the turn cannot be decided.
+/// [`Error::Undecidable`] if the turn cannot be decided, **including when it
+/// comes back straight**.
 ///
-/// # Panics
+/// Straight used to be an `unreachable!` here, on the argument that
+/// [`check_nothing_crosses`] has already run and rules it out: both neighbours
+/// of the lowest, leftmost corner sit at or above it, so three points on one
+/// line would leave both neighbours on the *same* ray out of the corner, which
+/// is the fold [`check_the_corner_does_not_double_back`] refuses.
 ///
-/// If that corner turns out straight. [`check_nothing_crosses`] has already
-/// run, and it makes that impossible: both neighbours of the lowest, leftmost
-/// corner sit at or above it, so three points on one line have to leave both
-/// neighbours on the *same* ray out of the corner — one of them between the
-/// corner and the other — which is the fold
-/// [`check_the_corner_does_not_double_back`] refuses as
-/// [`Error::ProfileCrossesItself`]. Reaching here means one of those two
-/// checks stopped agreeing with the other.
+/// That argument is about three points on one line, and [`Turn::Straight`] is
+/// not that. It is whatever `orient2d_tolerantly` called
+/// [`Decision::Zero`](rcad_predicates::Decision::Zero), and under
+/// [`Strictness::TolerantFallback`](rcad_predicates::Strictness) that includes
+/// an enclosure the policy waved through without settling. A clean right-angled
+/// corner reads straight once its coordinates are small enough — an ordinary
+/// square of side `1e-170` did it — while
+/// [`check_the_corner_does_not_double_back`] passes, because that one asks an
+/// exact question the tolerant policy never touches.
+///
+/// So the two checks did not stop agreeing. They were answering different
+/// questions, and only one of them was the question the argument was about.
+/// A corner nobody could settle is exactly [`Error::Undecidable`], and this is
+/// caller input rather than a broken invariant (`docs/decisions.md` §4.1).
 fn ring_runs_anticlockwise(
     ring: &[[f64; 2]],
     policy: &Policy,
@@ -333,11 +344,9 @@ fn ring_runs_anticlockwise(
     match turn_of(before, ring[lowest], after, policy, log)? {
         Turn::Left => Ok(true),
         Turn::Right => Ok(false),
-        Turn::Straight => unreachable!(
-            "the lowest, leftmost corner of a ring that does not cross itself cannot be straight, \
-             and this one is: {before:?} {:?} {after:?}",
-            ring[lowest]
-        ),
+        Turn::Straight => Err(Error::Undecidable {
+            records: core::mem::take(log),
+        }),
     }
 }
 
@@ -421,8 +430,14 @@ enum Where {
 /// # Errors
 ///
 /// [`Error::Undecidable`] when the cascade cannot settle the sign. For plain
-/// `f64` inputs that only happens when a product overflows or underflows,
-/// which is what the dynamic-range check exists to catch (decisions.md §3.5).
+/// `f64` inputs that only happens when a product overflows or underflows.
+///
+/// This used to add "which is what the dynamic-range check exists to catch".
+/// It does not: `DynamicRange::is_within_supported_range` compares a **ratio**
+/// against `LARGEST_SUPPORTED_RATIO` and never looks at absolute magnitude, so
+/// a model that is uniformly tiny or uniformly enormous passes it with a ratio
+/// of exactly one — and uniformly tiny is precisely where the products fall
+/// into the subnormals. `docs/decisions.md` §16.11 carries the open question.
 fn turn_of(
     a: [f64; 2],
     b: [f64; 2],

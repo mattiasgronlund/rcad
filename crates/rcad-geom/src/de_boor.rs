@@ -342,7 +342,7 @@ pub(crate) fn divided(homogeneous: [f64; 4]) -> Point {
     let [x, y, z, weight] = homogeneous;
     assert!(
         weight > 0.0,
-        "the weight at this parameter came out as {weight}, which a net of positive weights \
+        "the weight at this parameter came out as {weight}, which a net of *normal* weights \
          cannot produce"
     );
     Point::new(x / weight, y / weight, z / weight)
@@ -443,21 +443,33 @@ pub(crate) fn rational_derivative(value: [f64; 4], derivative: [f64; 4]) -> Resu
 /// barely change, meaning most of them — the cancellation happens at full size
 /// and only one rounding follows it.
 ///
-/// What it cannot do is carry `w'·C` past the end of the range. That product
-/// overflows while the answer still fits whenever `w` is large enough to bring
-/// it back, and `w` large is exactly when the second spelling is safe: dividing
-/// first makes both `A'/w` and `w'/w` *smaller*, so neither can overflow where
-/// the plain one did.
+/// What it cannot do is carry `w'·C` past the end of the range, and there are
+/// two separate ways for that to happen — which is worth spelling out, because
+/// the first version of this fallback handled one of them and claimed both.
 ///
-/// The two are equal in exact arithmetic and fail on opposite inputs, which is
-/// why this tries rather than chooses. Trying costs nothing on the path that
-/// works, and choosing would mean picking a threshold on `w` — a tuned number
-/// standing where a plain question about the answer will do.
+/// - **`w` is large**, large enough to bring the product back. Dividing first
+///   makes `A'/w` and `w'/w` smaller than the terms that overflowed.
+/// - **`w` is near one** and the two terms are each near the end of the range
+///   while their difference is small. Dividing changes nothing at `w = 1`;
+///   only *scaling* helps, and halving both terms is enough.
 ///
-/// Neither spelling is a proof of totality and this does not claim one. It
-/// answers strictly more inputs than the plain form alone, and what is left
-/// over comes back as [`Error::NotFinite`](crate::Error::NotFinite) rather than
-/// as a `NaN`.
+/// The second spelling below does both at once: halve, divide, subtract, and
+/// give the factor of two back at the end. Halving is a power of two, so on the
+/// path that matters it costs nothing but the digits lost to whatever
+/// cancellation was already there.
+///
+/// The two spellings are equal in exact arithmetic and fail on opposite inputs,
+/// which is why this tries rather than chooses. Trying costs nothing on the
+/// path that works, and choosing would mean picking a threshold on `w` — a
+/// tuned number standing where a plain question about the answer will do.
+///
+/// **This is not a proof of totality and does not claim one.** The previous
+/// version of this comment did, in the words "safe on exactly the inputs the
+/// plain form is not", and a curve whose true tangent is about `-1e307` went on
+/// being refused behind that sentence. What is claimed is narrower and
+/// checkable: strictly more inputs get an answer than the plain form alone, the
+/// two cases above are covered and tested, and whatever is left comes back as
+/// [`Error::NotFinite`](crate::Error::NotFinite) rather than as a `NaN`.
 ///
 /// The second spelling divides before it subtracts, so where the two terms
 /// nearly cancel it keeps fewer digits than the first would have. That is not a
@@ -476,7 +488,7 @@ fn one_axis_of_the_rate(
     if subtracting_first.is_finite() {
         return subtracting_first;
     }
-    numerator_rate / weight - (weight_rate / weight) * coordinate
+    ((numerator_rate / 2.0) / weight - ((weight_rate / 2.0) / weight) * coordinate) * 2.0
 }
 
 /// How far a divided point can be from the true one, per coordinate, or `None`

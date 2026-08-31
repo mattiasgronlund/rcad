@@ -318,3 +318,61 @@ fn a_policy_that_ignores_the_range_records_nothing_at_all() {
 
     assert!(log.is_empty(), "an ignored check has nothing to say");
 }
+
+/// An ordinary square, small enough that the tolerant policy stops being able
+/// to tell which way it turns.
+///
+/// This used to be an `unreachable!`. The argument for it was that
+/// `check_nothing_crosses` runs first and rules out three points on one line at
+/// the lowest, leftmost corner — which is true, and is not what a straight turn
+/// means here. A straight turn is whatever `orient2d_tolerantly` called `Zero`,
+/// and under a tolerant policy that includes an enclosure it waved through
+/// without settling. At `1e-170` a clean right angle reads straight, and the
+/// builder panicked on input a caller could hand it.
+///
+/// A corner nobody could settle is exactly `Error::Undecidable`
+/// (`docs/decisions.md` §4.2), and `docs/decisions.md` §16.10 is why the claim
+/// was looked at at all.
+#[test]
+fn a_square_too_small_for_the_tolerant_policy_to_orient_is_undecidable_not_a_panic() {
+    let side = 1e-170;
+    let corners = vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]];
+    let mut log = ProvenanceLog::new();
+
+    match ProfileBuilder::new(corners).build(&Policy::tolerant(1.0), &mut log) {
+        Err(Error::Undecidable { records }) => {
+            assert!(!records.is_empty(), "the refusal carries what caused it");
+        }
+        other => panic!("a corner the policy could not settle is undecidable: {other:?}"),
+    }
+}
+
+/// The stricter policy was always right about the square above, and that is the
+/// part that made the panic worth chasing: the *permissive* policy crashed
+/// where the certified one returned an honest error, which is the safety
+/// ordering upside down.
+#[test]
+fn the_certified_policy_refuses_the_same_square_it_always_did() {
+    let side = 1e-170;
+    let corners = vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]];
+    let mut log = ProvenanceLog::new();
+    assert!(matches!(
+        ProfileBuilder::new(corners).build(&Policy::certified(), &mut log),
+        Err(Error::Undecidable { .. })
+    ));
+}
+
+/// And it is a gap rather than a limit: the answer exists, and an exact
+/// power-of-two rescaling reaches it. Nothing about the shape changed — every
+/// coordinate is the same bits with a different exponent.
+#[test]
+fn the_same_square_scaled_by_a_power_of_two_builds_perfectly_well() {
+    let side = 1e-170 * 2f64.powi(200);
+    let corners = vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]];
+    let mut log = ProvenanceLog::new();
+    assert!(
+        ProfileBuilder::new(corners)
+            .build(&Policy::tolerant(1.0), &mut log)
+            .is_ok()
+    );
+}

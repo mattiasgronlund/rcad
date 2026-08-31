@@ -2468,3 +2468,53 @@ item with a definite question, and the answer is a demonstration or a rewritten
 sentence. `.claude/skills/claim-audit` is the pass, and it is deliberately **not**
 a code review: pointing a reviewer at defects finds defects, and these are not
 defects until someone asks what the sentence rules out.
+
+### 16.11 The dynamic-range check is a ratio, and cannot see absolute magnitude
+
+*Open question, recorded rather than settled. Found by the §16.10 claim audit.*
+
+`DynamicRange::is_within_supported_range` is `self.ratio <= LARGEST_SUPPORTED_RATIO`
+and nothing else. `largest_coordinate_magnitude` is computed, stored, and never
+consulted. So the check answers *"is this model's smallest feature resolvable
+against its largest?"* — which is the question §3.5 set out to ask, and it is a
+good question.
+
+It is not the question three doc comments were citing it for. `build.rs` and
+`validate.rs` both said `Undecidable` on exact `f64` input happens only when a
+product overflows or falls subnormal, *"which is what the dynamic-range check
+exists to catch"*. It cannot catch that, because the models where it happens are
+**uniformly** tiny or **uniformly** enormous, and those have a ratio of exactly
+one. Measured: the `1e-170` square that used to panic the profile builder
+reports `ratio = 1, accepted = true`.
+
+The three sentences are corrected in place. What is left is a design question,
+and it is deliberately not answered here:
+
+**Should the kernel refuse a model whose coordinates are absolutely too small or
+too large, independently of their ratio?**
+
+For it: `Model` is `Deserialize` and `validate()` is the untrusted-import
+boundary, which is exactly where such coordinates arrive. `add_cube(1e140, …)`
+returns `Ok` on a solid `validate` then refuses, and `classify_point` on it
+comes back `Undecidable` with an infinite enclosure and a full log — an
+operation reporting failure through a channel §12.5 said would stay empty.
+
+Against: it is a change to what the kernel accepts, so it touches §3.5 and §3.8
+and needs its own reasoning about where the limits go and in whose units. A
+working size is already carried by `Scale`; a second, absolute limit is a second
+thing to keep in step, and §12.4's lesson is about exactly that. It is also not
+obviously the kernel's job — `1e-170` metres is not a manufacturing tolerance,
+it is a caller mistake, and refusing it is a convenience rather than a
+correctness requirement now that nothing panics.
+
+**What is already fixed, so this is not blocking.** The two panics that made it
+urgent are gone: `ring_runs_anticlockwise` returns `Error::Undecidable` instead
+of reaching an `unreachable!`, and `BSplineCurve::new` refuses subnormal weights
+rather than letting `evaluate` panic on them. Both were §16.10 gaps — an answer
+that existed and was not reached — and both are covered by tests. What remains
+here is a question about *refusing earlier and more loudly*, not about anything
+returning a wrong answer or crashing.
+
+Deferred with its consumer named, per §13 rule 3, which governs features and
+this is one: the milestone that imports a STEP file it did not write is the one
+that wants an absolute limit at the boundary.

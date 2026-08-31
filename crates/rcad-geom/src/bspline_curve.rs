@@ -89,15 +89,34 @@ impl BSplineCurve {
     ///
     /// `control_points` and `weights` both have
     /// [`KnotVector::control_point_count`] entries, and every weight is a
-    /// finite number greater than zero.
+    /// normal number greater than zero.
+    ///
+    /// # Why weights have to be normal, not merely positive
+    ///
+    /// A de Boor stage blends two weights as `(1 − a)·w₀ + a·w₁`. Down among the
+    /// subnormals both products can round away to nothing at once — two weights
+    /// of `5e-324` at the middle of a span give exactly zero — and a curve that
+    /// evaluates at four parameters and dies at the fifth is not one this kernel
+    /// should have accepted.
+    ///
+    /// Normal weights rule it out with room to spare. Rounding `(1 − a)·w₀` to
+    /// zero needs `1 − a` below `2⁻⁵³`, and rounding `a·w₁` to zero needs `a`
+    /// below `2⁻⁵³`; but `a` that small makes `1 − a` round to exactly `1`. The
+    /// margin is a factor of `2⁵³`, so the few ulps a stage can drift are
+    /// nowhere near it.
+    ///
+    /// Refusing costs the caller nothing. A rational spline depends on its
+    /// weights only through their ratios, so multiplying every weight by a power
+    /// of two hands back the identical curve with no bits lost.
     ///
     /// # Errors
     ///
     /// [`Error::WrongNumberOfControlPoints`] if either list is the wrong
     /// length, [`Error::NotFinite`] if a control point has a coordinate that is
-    /// not a finite number or if weighting it overflows, and
+    /// not a finite number or if weighting it overflows,
     /// [`Error::WeightNotPositive`] for a weight that is zero, negative, or not
-    /// a finite number.
+    /// a finite number, and [`Error::WeightTooSmallToBlend`] for a positive
+    /// weight among the subnormals.
     pub fn new(knots: KnotVector, control_points: &[Point], weights: &[f64]) -> Result<Self> {
         let expected = knots.control_point_count();
         for given in [control_points.len(), weights.len()] {
@@ -191,14 +210,20 @@ impl BSplineCurve {
     ///
     /// # Panics
     ///
-    /// If the weight at `u` does not come out above zero. Every stored weight
-    /// is checked to be above zero at construction and de Boor mixes them with
-    /// non-negative coefficients that sum to one, so nothing else can produce
-    /// that — it means the stored net is not what construction promised. A
-    /// broken invariant is a crash and a corrupt point is worse than a crash
-    /// (`docs/decisions.md` §4.1). This is a deliberate departure from roadmap
-    /// §4.5's blanket "never panic", which is about bad caller input; bad
-    /// caller input here is the `Err` above.
+    /// If the weight at `u` does not come out above zero — which means the
+    /// stored net is not what construction promised. A broken invariant is a
+    /// crash and a corrupt point is worse than a crash (`docs/decisions.md`
+    /// §4.1). This is a deliberate departure from roadmap §4.5's blanket "never
+    /// panic", which is about bad caller input; bad caller input here is the
+    /// `Err` above.
+    ///
+    /// This used to say that a positive stored net could not produce it,
+    /// because de Boor mixes weights with non-negative coefficients that sum to
+    /// one. Positive was not enough: two subnormal weights blend to exactly
+    /// zero at the middle of a span, and the constructor accepted them, so the
+    /// panic fired on ordinary caller input. [`BSplineCurve::new`] now requires
+    /// weights to be **normal**, which does rule it out — see the argument and
+    /// its `2⁵³` margin there.
     pub fn evaluate(&self, u: f64) -> Result<Point> {
         Ok(divided(self.homogeneous_evaluate(u)?))
     }
@@ -231,14 +256,15 @@ impl BSplineCurve {
     /// halved first and the factor comes back in the scale — see the note on
     /// `de_boor::derived_points`.
     ///
-    /// `rational_derivative`'s `(A' − w'·C) / w` is covered too: `w'·C` can
-    /// overflow while the quotient would fit, and when it does the same
-    /// expression is formed again dividing first, which is safe on exactly the
-    /// inputs the plain form is not.
+    /// `rational_derivative`'s `(A' − w'·C) / w` has its own two overflow cases,
+    /// both covered and both tested — see `de_boor::one_axis_of_the_rate`.
     ///
-    /// Neither of those is a proof that every representable tangent comes back,
-    /// and none is claimed. Both enlarge the set of inputs that get an answer,
-    /// and whatever is left refuses rather than returning a `NaN`.
+    /// **None of this proves every representable tangent comes back.** An
+    /// earlier version of this sentence came close to claiming it, and a curve
+    /// whose true tangent is about `-1e307` was refused behind the claim. What
+    /// holds is narrower: each fix enlarges the set of inputs that get an
+    /// answer, the cases named are tested, and whatever is left refuses rather
+    /// than returning a `NaN`.
     ///
     /// # Panics
     ///
@@ -649,6 +675,9 @@ impl BSplineCurve {
         for &[x, y, z, weight] in &net {
             if !(weight.is_finite() && weight > 0.0) {
                 return Err(Error::WeightNotPositive { weight });
+            }
+            if weight < f64::MIN_POSITIVE {
+                return Err(Error::WeightTooSmallToBlend { weight });
             }
             if !(x.is_finite() && y.is_finite() && z.is_finite()) {
                 return Err(Error::NotFinite {
@@ -1173,6 +1202,75 @@ mod tests {
         assert_eq!(
             curve.tangent(halfway).unwrap(),
             Vector::new(-4.762_260_476_383_41e300, 0.0, 0.0)
+        );
+    }
+
+    /// The second way `w'·C` leaves the range, which dividing first cannot fix.
+    ///
+    /// Here `w` is exactly `1`, so `A'/w − (w'/w)·C` is the plain form written
+    /// differently and overflows identically. Both terms sit near the end of the
+    /// range while their difference is small, and only scaling helps. The true
+    /// tangent is about `-1e307`; this was refused until halving was added
+    /// alongside the divide.
+    #[test]
+    fn a_tangent_whose_two_terms_are_both_near_the_end_of_the_range_still_arrives() {
+        let hair = 1e-300;
+        let knots = KnotVector::new(1, vec![0.0, 0.0, hair, hair]).expect("one hair of a span");
+        let ends = [
+            Point::new(1.9e8, 0.0, 0.0),
+            Point::new(2.65e8 / 1.5, 0.0, 0.0),
+        ];
+        let curve = BSplineCurve::new(knots, &ends, &[0.5, 1.5]).expect("two normal weights");
+
+        let tangent = curve.tangent(hair / 2.0).expect("a representable tangent");
+        let truth = -1.0e307;
+        assert!(
+            ((tangent.x() - truth) / truth).abs() < 1e-12,
+            "the true tangent is about {truth:e} and this came back {:e}",
+            tangent.x()
+        );
+    }
+
+    /// Two of the smallest subnormal weights blend to exactly zero at the
+    /// middle of a span, because `0.5 * 5e-324` rounds half-to-even down to
+    /// nothing. The constructor used to accept these — "finite and above zero"
+    /// was its whole rule — and then `evaluate` panicked on the way back out.
+    ///
+    /// It is refused at construction now, which loses no curve: weights count
+    /// only through their ratios, so scaling every one of them up by a power of
+    /// two gives the identical curve exactly.
+    #[test]
+    fn weights_small_enough_to_blend_away_to_nothing_are_refused_up_front() {
+        let smallest = f64::from_bits(1);
+        assert_eq!(0.5 * smallest, 0.0, "this is what the constructor prevents");
+
+        let knots = KnotVector::new(1, vec![0.0, 0.0, 1.0, 1.0]).expect("one straight span");
+        let ends = [Point::origin(), Point::new(2.0, 0.0, 0.0)];
+        assert_eq!(
+            BSplineCurve::new(knots.clone(), &ends, &[smallest; 2]),
+            Err(Error::WeightTooSmallToBlend { weight: smallest })
+        );
+
+        let scaled_up = smallest * 2f64.powi(1000);
+        let curve = BSplineCurve::new(knots, &ends, &[scaled_up; 2])
+            .expect("the same curve, with the weights carried somewhere f64 can blend them");
+        assert_eq!(curve.evaluate(0.5).unwrap(), Point::new(1.0, 0.0, 0.0));
+    }
+
+    /// The same refusal reaches the routes that went through `.expect()` rather
+    /// than through a `Result`, which is what made this worth fixing at the
+    /// constructor instead of at each caller: `bezier_segments` hands back a
+    /// `Vec` and has no error channel at all.
+    #[test]
+    fn a_net_that_cannot_be_blended_never_reaches_bezier_extraction() {
+        let knots =
+            KnotVector::new(2, vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0]).expect("one interior knot");
+        let points: Vec<Point> = (0..4).map(|i| Point::new(f64::from(i), 0.0, 0.0)).collect();
+        assert_eq!(
+            BSplineCurve::new(knots, &points, &[f64::from_bits(1); 4]),
+            Err(Error::WeightTooSmallToBlend {
+                weight: f64::from_bits(1)
+            })
         );
     }
 

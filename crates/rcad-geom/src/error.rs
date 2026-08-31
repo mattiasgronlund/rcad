@@ -163,6 +163,21 @@ pub enum Error {
         weight: f64,
     },
 
+    /// A weight was positive but down among the subnormal numbers, where a
+    /// blend of two of them can round away to nothing.
+    ///
+    /// Refusing loses no curve. A rational spline depends on its weights only
+    /// through their ratios, so multiplying every weight by a power of two
+    /// gives back the identical curve, exactly and with no bits lost.
+    #[error(
+        "the weight {weight:e} is too small to blend; scale every weight up by a power of two \
+         for the same curve"
+    )]
+    WeightTooSmallToBlend {
+        /// The weight that was refused.
+        weight: f64,
+    },
+
     /// A parameter fell outside the stretch of parameter a spline is defined
     /// over.
     #[error("the parameter {parameter} is not between {lo} and {hi}")]
