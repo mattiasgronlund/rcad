@@ -32,6 +32,12 @@
 //! the middle of a straight edge has two planes round it, not three, so the next
 //! fuse cannot re-derive it.
 //!
+//! An *input* can arrive in that state too — `ProfileBuilder` accepts three
+//! profile points in a row and the extrusion of one has two side faces on a
+//! single plane — so [`joined_faces_of_an_input`] runs the same joining over
+//! each input solid before its corners are solved (§17.4, amended 2026-08-31).
+//! One joiner, two callers.
+//!
 //! # Which shell is a void of which
 //!
 //! Nesting asks whether a point on one shell is inside another, and the thing
@@ -51,7 +57,9 @@ use smallvec::SmallVec;
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse};
 use crate::validate::winding_round;
-use crate::{Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, VertexKey};
+use crate::{
+    Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
+};
 
 use super::arrange::agreement_of_two_planes;
 use super::select::Chosen;
@@ -79,6 +87,56 @@ pub(crate) fn assemble(
     assembly.shells = assembly.group_into_shells()?;
     assembly.solids = assembly.nest_the_shells(model, policy, log)?;
     Ok(assembly)
+}
+
+/// The faces of one input solid with any that are really one flat region joined
+/// into one, or `None` when it has no such pair and nothing needs doing.
+///
+/// §17.4's amendment of 2026-08-30 joins coplanar faces of the fuse's own
+/// answers, and §17.1 is why: a corner between two faces on one plane has two
+/// planes round it and not three, so nothing can re-derive it. An input the fuse
+/// did not build carries no such promise — `ProfileBuilder` accepts three
+/// profile points in a row and the extrusion of one has two side faces on a
+/// single plane — so the same joining runs on the way in, done by the same code.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when two of the input's planes cannot be told apart at
+/// all, and [`Error::ResultIsNotManifold`] when one of its edges is claimed by
+/// other than two faces, which means the input was already broken.
+pub(crate) fn joined_faces_of_an_input(
+    model: &Model,
+    solid: SolidView<'_>,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Vec<InputFace>>> {
+    let mut assembly = Assembly::from_one_input_solid(model, solid);
+    if !assembly.join_up_what_is_one_face(log)? {
+        return Ok(None);
+    }
+    Ok(Some(assembly.as_input_faces()?))
+}
+
+/// One face of an input solid once the coplanar ones have been joined.
+pub(crate) struct InputFace {
+    /// The input faces this is. More than one when coplanar faces were joined.
+    pub(crate) faces: Vec<FaceKey>,
+    /// The plane, turned to point out of the material.
+    pub(crate) plane: Plane,
+    /// The outline first and then one ring per hole, the outline walked
+    /// anticlockwise round [`InputFace::plane`]'s normal and the holes
+    /// clockwise.
+    pub(crate) wires: Vec<Vec<InputSide>>,
+}
+
+/// One side of one wire of an [`InputFace`].
+pub(crate) struct InputSide {
+    /// The input edges this is. More than one when joining left a corner in the
+    /// middle of a straight run and the edges either side of it became one.
+    pub(crate) edges: SmallVec<[EdgeKey; 1]>,
+    /// The corner the wire is at when it starts along here.
+    pub(crate) start: VertexKey,
+    /// The plane of the face on the other side.
+    pub(crate) across: Plane,
 }
 
 /// The whole result, in scratch.
@@ -168,7 +226,7 @@ impl Assembly {
                 .map(|wire| sides_of(wire, turned_round, model, &mut corners, &mut edges))
                 .collect();
             faces.push(Face {
-                ancestors: vec![piece.ancestor],
+                ancestors: piece.ancestors.clone(),
                 plane: if turned_round {
                     piece.plane.reversed()
                 } else {
@@ -184,6 +242,114 @@ impl Assembly {
             shells: Vec::new(),
             solids: Vec::new(),
         }
+    }
+
+    /// One face per face of an input solid, ready to be joined.
+    ///
+    /// The planes are turned to point out of the material and the wires walked
+    /// the way the solid uses them, which is the convention
+    /// [`Assembly::from_the_pieces`] leaves the pieces in and the one
+    /// [`Assembly::join_up_what_is_one_face`] reads.
+    ///
+    /// [`Corner::wobble`] is zero throughout and never read on this path.
+    /// Nothing here is committed: what a corner of an input is worth is settled
+    /// by re-deriving it from the planes round it afterwards (§17.1).
+    fn from_one_input_solid(model: &Model, solid: SolidView<'_>) -> Self {
+        let mut corner_of_vertex: BTreeMap<VertexSlot, usize> = BTreeMap::new();
+        let mut corners: Vec<Corner> = Vec::new();
+        let mut edge_of_input_edge: BTreeMap<EdgeSlot, usize> = BTreeMap::new();
+        let mut edges: Vec<Edge> = Vec::new();
+        let mut faces = Vec::new();
+
+        for face in solid.faces() {
+            let mut wires = Vec::new();
+            for wire in face.wires() {
+                let mut sides = Vec::new();
+                for coedge in wire.coedges() {
+                    let used = coedge.edge();
+                    let from = corner_of(model, &mut corner_of_vertex, &mut corners, used.start());
+                    let to = corner_of(model, &mut corner_of_vertex, &mut corners, used.end());
+                    let slot = used.key().slot_in(model.id());
+                    let edge = match edge_of_input_edge.get(&slot) {
+                        Some(&already) => already,
+                        None => {
+                            edges.push(Edge {
+                                ends: [from, to],
+                                from: vec![used.key()],
+                            });
+                            edge_of_input_edge.insert(slot, edges.len() - 1);
+                            edges.len() - 1
+                        }
+                    };
+                    sides.push(Side {
+                        edge,
+                        forward: edges[edge].ends[0] == from,
+                    });
+                }
+                wires.push(sides);
+            }
+            let plane = face.plane();
+            faces.push(Face {
+                ancestors: vec![face.key()],
+                plane: if face.orientation().is_reversed() {
+                    plane.reversed()
+                } else {
+                    plane
+                },
+                wires,
+            });
+        }
+
+        Self {
+            corners,
+            edges,
+            faces,
+            shells: Vec::new(),
+            solids: Vec::new(),
+        }
+    }
+
+    /// The joined faces read back out, for `bake` to solve the corners of.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
+    /// faces.
+    ///
+    /// # Panics
+    ///
+    /// If a corner left is not one of the input's own vertices. Joining drops
+    /// corners and invents none.
+    fn as_input_faces(&self) -> Result<Vec<InputFace>> {
+        let along = self.darts_along_each_edge()?;
+        let mut faces = Vec::new();
+        for (index, face) in self.faces.iter().enumerate() {
+            let mut wires = Vec::new();
+            for (wire, ring) in face.wires.iter().enumerate() {
+                let mut sides = Vec::new();
+                for (position, side) in ring.iter().enumerate() {
+                    let dart = Dart {
+                        face: index,
+                        wire,
+                        position,
+                    };
+                    sides.push(InputSide {
+                        edges: self.edges[side.edge].from.iter().copied().collect(),
+                        start: self.corners[self.starts_at(dart)]
+                            .from
+                            .expect("a corner of an input solid is one of its own vertices"),
+                        across: self.faces[across(dart, &along, side.edge).face].plane,
+                    });
+                }
+                wires.push(sides);
+            }
+            faces.push(InputFace {
+                faces: face.ancestors.clone(),
+                plane: face.plane,
+                wires,
+            });
+        }
+        Ok(faces)
     }
 
     /// Fold every run of faces that is really one flat region into one face.
@@ -206,6 +372,9 @@ impl Assembly {
     /// point with two faces round it sits in the middle of a straight edge and
     /// the two edges either side of it become one.
     ///
+    /// Answers `true` when it joined something, which is what lets
+    /// [`joined_faces_of_an_input`] leave an input that needs nothing alone.
+    ///
     /// # Errors
     ///
     /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
@@ -218,7 +387,7 @@ impl Assembly {
     /// pinching to a point at a corner, or with a ring of fewer than three
     /// sides. Both are broken internal invariants and a corrupt solid is worse
     /// than a crash (§4.1).
-    fn join_up_what_is_one_face(&mut self, log: &mut ProvenanceLog) -> Result<()> {
+    fn join_up_what_is_one_face(&mut self, log: &mut ProvenanceLog) -> Result<bool> {
         let along = self.darts_along_each_edge()?;
         let dissolved = self.edges_with_one_face_on_both_sides(&along, log)?;
 
@@ -229,12 +398,12 @@ impl Assembly {
             }
         }
         if !same.joined_anything() {
-            return Ok(());
+            return Ok(false);
         }
 
         let joined = self.rings_of_each_joined_face(&same, &along, &dissolved)?;
         self.rebuild_from(&joined, &along, &dissolved);
-        Ok(())
+        Ok(true)
     }
 
     /// The two darts along each edge, refusing a result that is not a manifold.
@@ -1018,6 +1187,25 @@ fn plane_of_the_joined_face(members: &[usize], faces: &[Face]) -> Plane {
         .expect("a joined face is made of at least one piece")
 }
 
+/// The corner an input vertex is, made the first time it is asked for.
+fn corner_of(
+    model: &Model,
+    named: &mut BTreeMap<VertexSlot, usize>,
+    made: &mut Vec<Corner>,
+    vertex: VertexView<'_>,
+) -> usize {
+    *named
+        .entry(vertex.key().slot_in(model.id()))
+        .or_insert_with(|| {
+            made.push(Corner {
+                point: vertex.point(),
+                wobble: 0.0,
+                from: Some(vertex.key()),
+            });
+            made.len() - 1
+        })
+}
+
 /// The keys in the order they arrive, with the repeats dropped.
 ///
 /// The nine pieces one face was cut into all name that one face, and the answer
@@ -1145,13 +1333,13 @@ impl Edges {
     /// If the two ends are the same corner. §17.4 prevents a side of no length
     /// rather than filtering one out afterwards, so one reaching here means the
     /// splitter is wrong.
-    fn of(&mut self, from: usize, to: usize, along: Option<EdgeKey>) -> Side {
+    fn of(&mut self, from: usize, to: usize, along: &[EdgeKey]) -> Side {
         assert!(from != to, "a piece of a face has a side with no length");
         let named = [from.min(to), from.max(to)];
         let edge = *self.between.entry(named).or_insert_with(|| {
             self.made.push(Edge {
                 ends: named,
-                from: along.into_iter().collect(),
+                from: along.to_vec(),
             });
             self.made.len() - 1
         });
@@ -1182,7 +1370,7 @@ fn sides_of(
     for meet in wire {
         let from = corners.of(model, &meet.ends[0]);
         let to = corners.of(model, &meet.ends[1]);
-        sides.push(edges.of(from, to, meet.along));
+        sides.push(edges.of(from, to, &meet.along));
     }
     if turned_round {
         sides.reverse();

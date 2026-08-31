@@ -2,15 +2,22 @@
 //!
 //! Placement is baked in here and nowhere else (§17.3). The transform's rounding
 //! is representation wobble, and it is tagged as such rather than refused on.
+//!
+//! Two faces of an input that lie on one plane with an edge between them are
+//! joined into one first, by the same joiner the commit uses, because a corner
+//! between such a pair has two planes round it and not three and §17.1 cannot
+//! re-derive it (§17.4, amended 2026-08-31).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{Orientation, Plane, Point};
 use rcad_predicates::{Decision, Measures, Point as PredicatePoint, ProvenanceLog};
+use smallvec::SmallVec;
 
 use crate::key::{FaceSlot, VertexSlot};
 use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
 
+use super::assemble::{InputFace, joined_faces_of_an_input};
 use super::{WHERE_THREE_PLANES_MEET, as_exact_as_it_is, gave_up, middle_of};
 
 /// Move every solid in `solids` into world coordinates.
@@ -58,9 +65,10 @@ pub(crate) struct BakedSolid {
 /// One face of an input solid, in world coordinates.
 #[derive(Clone, Debug)]
 pub(crate) struct BakedFace {
-    /// The face this came from. Every piece cut out of it names it as its one
-    /// ancestor.
-    pub(crate) key: FaceKey,
+    /// The faces this came from. Every piece cut out of it names them as its
+    /// ancestors. More than one when coplanar faces of the input were joined
+    /// into a single face on the way in.
+    pub(crate) keys: Vec<FaceKey>,
     /// The plane it sits on, already moved into place. This is the face
     /// (§17.1); the corners below are cached samples of it.
     pub(crate) plane: Plane,
@@ -81,9 +89,11 @@ pub(crate) struct BakedFace {
 /// One edge of one wire of a face.
 #[derive(Clone, Debug)]
 pub(crate) struct BakedEdge {
-    /// The input edge this is. Carried so that a piece of it can name the edge
-    /// it came out of, which is what the history's edge images are made of.
-    pub(crate) key: EdgeKey,
+    /// The input edges this is. Carried so that a piece of it can name the edges
+    /// it came out of, which is what the history's edge images are made of. More
+    /// than one when joining coplanar input faces dropped a corner between two
+    /// of them.
+    pub(crate) keys: SmallVec<[EdgeKey; 1]>,
     /// The corner the wire is at when it starts along this edge.
     pub(crate) start: BakedCorner,
     /// The plane of the face on the other side of this edge. Together with the
@@ -153,9 +163,21 @@ impl Bounds {
     }
 }
 
+/// Move one solid into world coordinates, joining any two faces of it that are
+/// really one flat region first.
+///
+/// A solid built by this fuse never has such a pair (§17.4's amendment of
+/// 2026-08-30), and one built by `ProfileBuilder` from three profile points in a
+/// row does. The corner between them has two planes round it and not three, so
+/// §17.1 cannot re-derive it, which is why the joining has to happen before the
+/// corners are solved rather than after.
 fn bake_one_solid(model: &Model, key: SolidKey, log: &mut ProvenanceLog) -> Result<BakedSolid> {
     let solid = model.solid(key);
     let planes = plane_of_every_face(model, solid);
+    if let Some(joined) = joined_faces_of_an_input(model, solid, log)? {
+        return bake_the_joined_faces(model, key, &joined, log);
+    }
+
     let corners = corner_of_every_vertex(model, solid, &planes, log)?;
 
     let mut faces = Vec::new();
@@ -166,6 +188,92 @@ fn bake_one_solid(model: &Model, key: SolidKey, log: &mut ProvenanceLog) -> Resu
         faces.push(baked);
     }
     Ok(BakedSolid { key, faces, bounds })
+}
+
+/// The same, for a solid whose coplanar faces have just been joined.
+///
+/// The joined faces already carry the planes and wires the arrangement wants, so
+/// all that is left is to solve each corner that survived the joining from the
+/// planes now round it. Every one of them has three, which is the whole point of
+/// having joined.
+fn bake_the_joined_faces(
+    model: &Model,
+    key: SolidKey,
+    joined: &[InputFace],
+    log: &mut ProvenanceLog,
+) -> Result<BakedSolid> {
+    let corners = corner_of_every_vertex_left(model, joined, log)?;
+
+    let mut faces = Vec::new();
+    let mut bounds = Bounds::nothing();
+    for face in joined {
+        let mut round_this_face = Bounds::nothing();
+        let mut wires = Vec::new();
+        for ring in &face.wires {
+            let mut walked = Vec::new();
+            for side in ring {
+                let start = corners[&side.start.slot_in(model.id())].clone();
+                round_this_face.take_in_point(middle_of(start.point));
+                walked.push(BakedEdge {
+                    keys: side.edges.clone(),
+                    start,
+                    across: side.across,
+                });
+            }
+            wires.push(walked);
+        }
+        bounds.take_in(round_this_face);
+        faces.push(BakedFace {
+            keys: face.faces.clone(),
+            plane: face.plane,
+            orientation: Orientation::Forward,
+            wires,
+            cuts: Vec::new(),
+            bounds: round_this_face,
+        });
+    }
+    Ok(BakedSolid { key, faces, bounds })
+}
+
+/// Solve every corner the joining left, from the planes of the joined faces
+/// round it.
+///
+/// # Panics
+///
+/// If fewer than three joined faces meet at a corner. Joining drops exactly the
+/// corners that a lump of faces runs straight through, so what is left is a
+/// corner of a closed solid and has at least three faces round it.
+fn corner_of_every_vertex_left(
+    model: &Model,
+    joined: &[InputFace],
+    log: &mut ProvenanceLog,
+) -> Result<BTreeMap<VertexSlot, BakedCorner>> {
+    let mut around: BTreeMap<VertexSlot, (VertexKey, Vec<Plane>)> = BTreeMap::new();
+    for face in joined {
+        let mut its_corners: BTreeMap<VertexSlot, VertexKey> = BTreeMap::new();
+        for side in face.wires.iter().flatten() {
+            its_corners.insert(side.start.slot_in(model.id()), side.start);
+        }
+        for (slot, vertex) in its_corners {
+            around
+                .entry(slot)
+                .or_insert((vertex, Vec::new()))
+                .1
+                .push(face.plane);
+        }
+    }
+
+    around
+        .into_iter()
+        .map(|(slot, (vertex, planes))| {
+            assert!(
+                planes.len() >= 3,
+                "a corner of a closed solid has at least three faces round it, this one has {}",
+                planes.len()
+            );
+            Ok((slot, derive_a_corner(vertex, planes, log)?))
+        })
+        .collect()
 }
 
 /// Every face of the solid with its plane already moved into place.
@@ -256,10 +364,16 @@ fn planes_around_a_vertex(
 /// Every triple failing is not a geometry error: it is a corner nothing can
 /// place, which leaves the operation with nothing to return, so it is
 /// [`Error::Undecidable`](crate::Error::Undecidable) with a record naming
-/// [`WHERE_THREE_PLANES_MEET`]. The corner of a solid this fuse itself built
-/// always has three different planes round it — §17.4's amendment of
-/// 2026-08-30 is what makes that true — so reaching here means the solid came
-/// from somewhere else.
+/// [`WHERE_THREE_PLANES_MEET`].
+///
+/// A corner with only two distinct planes round it does not reach here, because
+/// [`joined_faces_of_an_input`] has already joined the faces that made it two
+/// and dropped the corner (§17.4, amended 2026-08-31). What is left to fail is a
+/// corner whose planes are three but so nearly share a line that
+/// [`Plane::meet_of_three`] cannot bound where they meet. The comment this
+/// replaces argued the branch was reachable only by "a solid that came from
+/// somewhere else" — which was true, and the somewhere else was `add_extrusion`
+/// over a profile with three points in a row.
 fn derive_a_corner(
     vertex: VertexKey,
     around: Vec<Plane>,
@@ -342,7 +456,7 @@ fn bake_one_face(
         .map(|wire| {
             wire.coedges()
                 .map(|coedge| BakedEdge {
-                    key: coedge.edge().key(),
+                    keys: core::iter::once(coedge.edge().key()).collect(),
                     start: corners[&coedge.start().key().slot_in(model.id())].clone(),
                     across: planes[&face_across(model, key, coedge.edge().key())],
                 })
@@ -351,7 +465,7 @@ fn bake_one_face(
         .collect();
 
     BakedFace {
-        key,
+        keys: vec![key],
         plane: face.plane(),
         orientation: face.orientation(),
         wires,

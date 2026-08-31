@@ -76,7 +76,7 @@ impl Fused {
 
     /// Faces in the result with no input ancestor.
     ///
-    /// Always empty while the fuse is planar: every piece is cut out of exactly
+    /// Always empty while the fuse is planar: every piece is cut out of at least
     /// one input face and nothing here invents geometry. It is derived rather
     /// than asserted so that it stops being empty the day something does.
     pub fn generated_faces(&self) -> impl Iterator<Item = FaceKey> + '_ {

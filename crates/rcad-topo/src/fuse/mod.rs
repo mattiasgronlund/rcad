@@ -46,11 +46,11 @@
 //! [`Scratch`], and the three things to build on it are:
 //!
 //! - **Selection.** [`Scratch::pieces`] is every face of both groups cut into
-//!   the pieces the two groups' boundaries leave. Each [`Piece`] names its one
-//!   ancestor face, carries that face's plane bit for bit, and says which way
-//!   round the ancestor's solid used it. Which group a piece belongs to is
-//!   whether its ancestor is a face of a solid in [`Scratch::arguments`] or in
-//!   [`Scratch::tools`]. §17.4's selection table is a table plus one `match` on
+//!   the pieces the two groups' boundaries leave. Each [`Piece`] names the
+//!   ancestor faces it was cut out of, carries their plane bit for bit, and says
+//!   which way round the ancestors' solid used them. Which group a piece belongs
+//!   to is whether its ancestors are faces of a solid in [`Scratch::arguments`]
+//!   or in [`Scratch::tools`]. §17.4's selection table is a table plus one `match` on
 //!   `Rule`, and classifying a piece is
 //!   [`SolidView::classify_point`](crate::SolidView::classify_point) on a point
 //!   inside it; the ON columns are
@@ -78,6 +78,7 @@ use rcad_predicates::{
     Approximation, Decision, Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     Record, resolve_under_policy,
 };
+use smallvec::SmallVec;
 
 use crate::Model;
 use crate::{EdgeKey, Error, Result, SolidKey, VertexKey};
@@ -232,8 +233,8 @@ pub(crate) struct Scratch {
     pub(crate) arguments: Vec<BakedSolid>,
     /// The tool solids, the same way.
     pub(crate) tools: Vec<BakedSolid>,
-    /// Every face of both groups, cut into pieces. Each piece names the one
-    /// input face it came from.
+    /// Every face of both groups, cut into pieces. Each piece names the input
+    /// faces it came from.
     pub(crate) pieces: Vec<Piece>,
 }
 
@@ -292,9 +293,10 @@ pub(crate) struct FaceMeet {
     pub(crate) carried_by: [Plane; 2],
     /// Where the piece starts and where it ends, in that order.
     pub(crate) ends: [MeetPoint; 2],
-    /// The input edge this runs along, when it runs along one. `None` for a
-    /// piece of a cut line, which is boundary the result invents.
-    pub(crate) along: Option<EdgeKey>,
+    /// The input edges this runs along, when it runs along any. Empty for a
+    /// piece of a cut line, which is boundary the result invents, and more than
+    /// one when joining coplanar input faces made two edges into one.
+    pub(crate) along: SmallVec<[EdgeKey; 1]>,
     /// How far the real meet may stray from this description. Planes meet in a
     /// straight line, so this is always zero here; M3's curved marcher is its
     /// first real producer (§15.7).
@@ -561,7 +563,7 @@ mod tests {
             let pieces: Vec<&Piece> = scratch
                 .pieces
                 .iter()
-                .filter(|piece| piece.ancestor == face.key)
+                .filter(|piece| piece.ancestors == face.keys)
                 .collect();
             assert!(!pieces.is_empty(), "every face comes back as something");
             let whole = 2.0 * 2.0 * 2.0;

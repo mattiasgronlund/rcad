@@ -98,11 +98,21 @@ const CASES: u32 = 48;
 /// How many a property that runs four or more fuses per case sees.
 const LONGER_CASES: u32 = 24;
 
-/// How many the two measurement tests see.
+/// How many the three measurement tests see.
 ///
 /// Larger, because their number is the thing being reported rather than a means
 /// to an end, and they run on a fixed seed so the number is the same every time.
-const MEASURED_CASES: u32 = 128;
+///
+/// One thousand, and the ceiling is the clock rather than the statistics. A soak
+/// at scale showed two things the shipped 128 could not: the headline rate's
+/// fresh-seed spread was ±4 points, which is wider than any regression worth
+/// asserting on, and a third refusal cause turns up at about one fuse in eight
+/// hundred and was never sampled at all. A thousand cases is 3,030 fuses per
+/// family, which brings the spread to about ±1.6 points and sees the third cause
+/// six times. Two thousand would halve the spread again and takes the whole
+/// workspace suite from ten seconds to two minutes; a thousand takes it to one,
+/// and one minute is the most this measurement is worth.
+const MEASURED_CASES: u32 = 1000;
 
 /// How much of the turned family a certified fuse is allowed to refuse.
 ///
@@ -113,12 +123,18 @@ const MEASURED_CASES: u32 = 128;
 /// every property in this file, a property only ever looking at the fuses that
 /// came back.
 ///
-/// Thirty-two per cent, chosen from measurement rather than from taste. The
-/// fixed-seed rate is 25.4%, and over fourteen fresh seeds the same corpus ran
-/// from 19.6% to 28.3%, so no seed reaches this. It sits just under 32.8%, which
-/// is what the rate was before the two undeserved refusals of §14.7 were fixed,
-/// so either of those coming back trips it.
-const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.32;
+/// Thirty per cent, chosen from measurement rather than from taste, and tighter
+/// than the 32% it replaces because the measurement behind it is now precise
+/// enough to justify it. The fixed-seed rate over 3,030 fuses is 27.2%; twelve
+/// fresh seeds at ten times that corpus put it at 26.66% with a standard
+/// deviation of 0.46 points, which scales to about 1.6 points here, so the
+/// widest fresh seed lands near 29.5%. The old 32% was above every one of those
+/// by so much that it was guarding sampling noise: neither of the two undeserved
+/// refusals §17.7 records would have tripped it on its own, since each was worth
+/// about 3.5 points and only the pair of them together reached 32.8%. Thirty
+/// trips on either. A threshold is not a target — the measurement is what is
+/// recorded, and this is only here so it cannot drift unnoticed.
+const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.30;
 
 #[test]
 fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
@@ -699,9 +715,12 @@ impl Tally {
             100.0 * self.refused.get() as f64 / fuses as f64,
             self.not_a_solid.get()
         );
+        // Two decimal places, because the rarest cause this corpus turns up runs
+        // at about one fuse in eight hundred and one place would round it to the
+        // same 0.1% as a cause ten times commoner.
         for (predicate, count) in self.gave_up.borrow().iter() {
             println!(
-                "    {count} ({:.1}% of all fuses) named \"{predicate}\"",
+                "    {count} ({:.2}% of all fuses) named \"{predicate}\"",
                 100.0 * *count as f64 / fuses as f64
             );
         }

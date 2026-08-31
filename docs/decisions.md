@@ -2021,6 +2021,45 @@ anyway gets told that nothing here can tell. This is the ordinary shape of the
 rule in `CLAUDE.md`: a predicate returns a `Decision` and `Undecidable` is one
 of the answers, so anything built out of predicates inherits the case.
 
+**Amended 2026-08-31, and the amendment of 2026-08-30 was half of it.** That
+paragraph joins two coplanar faces of the *answer*, and it is written as though
+the answer were the only place such a pair could come from. It is not. A
+`ProfileBuilder` outline may have three points in a row — nothing refuses one,
+and nothing should, since `[0,0], [1,0], [2,0]` is a perfectly good way to
+describe one wall of a part — and the extrusion of such a profile has two side
+faces on one plane with an edge between them. §17.1 then cannot re-derive the
+corner on that edge: the planes round it are two planes and not three, however
+many faces carry them, Cramer's determinant is exactly zero, and the fuse refuses
+with a record naming `WHERE_THREE_PLANES_MEET`. It refused whatever the other
+solid was and whatever the rule was, including for a pair five units apart that
+never touched, because the refusal is about one input's own corners and not about
+the pair at all.
+
+**Settled: the same joining runs on the way in.** `bake` builds an `Assembly` out
+of each input solid, calls the same `join_up_what_is_one_face` the commit calls,
+and re-derives the corners of what comes back — so §17.1 still holds and every
+corner the arrangement sees still has three planes round it. It is the one
+joiner and not a second one that has to agree with the first, which is what
+§1.7's third criterion means by *reused, not reimplemented*, and two joiners is a
+seam of exactly the kind §13's preamble is about. A joined input face keeps
+naming every input face it was made of, and a joined input edge every input edge,
+so nothing that survived comes back through the history as deleted; that is why
+`BakedFace`, `Piece` and `FaceMeet` now name a list of ancestors rather than one.
+
+Nothing already decided moves, and the shape of the fix is what says so rather
+than a hopeful test. The joining is skipped whole for an input with no two
+coplanar faces sharing an edge — which is every input the fuse itself built, and
+every one the catalogue and the three generated families produce — and an input
+that does have such a pair refused outright before, so there is no answer to
+change. §17.7's three measured rows came back with the same counts to the fuse,
+and every bit-identical property still passes.
+
+Rejected: refusing three profile points in a row in `ProfileBuilder`, or refusing
+two coplanar faces sharing an edge in `Model::validate`. Both narrow what counts
+as a valid model to suit one operation, and that is a larger decision than this
+bug is entitled to make. What a `Model` is has to be settled for the kernel, not
+for whichever operation found the shape inconvenient first.
+
 ### 17.5 What this milestone owes to earlier sections
 
 Four corrections, all amended in place where they belong so a reader of that
@@ -2291,6 +2330,60 @@ catalogue is about — coplanar faces means coplanar, not coplanar to within a
 nanometre. We take §11.3's instruction and note that our dangerous band has a
 boundary we can land on exactly, so we construct it instead of approaching it.
 
+**Amended 2026-08-31, after a soak at scale.** Everything above was measured over
+128 generated configurations, and three of the claims made from that sample are
+artefacts of its size. A soak over twelve fresh seeds at 12,800 configurations a
+seed — 38,400 fuses each — says:
+
+- The turned family's rate is **26.0% to 27.7%, mean 26.66%, standard deviation
+  0.46 points**. That is a tenth of the ±4 points the same corpus spread over at
+  414 fuses. The 25.4% above is inside the range and was never wrong; what was
+  wrong is how much of it looked like signal.
+- The two controls refused **0 of 921,600 fuses** between them, which is the
+  control claim holding over a corpus two thousand times the one above.
+- **A third cause exists.** "No run of them has ever named a third cause" is
+  false. `"order along a line"` turns up at 0.13% on all twelve seeds, and
+  `"orient3d"` on two of the twelve. Neither can be seen at 414 fuses, where the
+  expected count of the commoner of the two is one half.
+
+So `MEASURED_CASES` is **1,000** rather than 128, and each row is now 1,000
+generated configurations plus the ten seeds `proptest` has kept, each asked all
+three rules: 3,030 fuses. The ceiling on it is the clock and not the statistics
+— two thousand cases takes the whole workspace suite from ten seconds to two
+minutes, a thousand takes it to one, and one minute is what this measurement is
+worth. The by-cause breakdown prints two decimal places, because one place
+rounds a cause at 0.13% to the same figure as a cause ten times commoner.
+
+| Family | Corpus | Refused | Rate |
+|---|---|---|---|
+| Lattice-aligned pairs | 3,030 fuses | **0** | 0% |
+| The same, built to share coordinates | 3,030 fuses | **0** | 0% |
+| Rotated pairs | 3,030 fuses | 825 | **27.2%** |
+
+| What could not be decided | Refusals | Share of the 3,030 |
+|---|---|---|
+| `"side of plane"` | 807 | 26.63% |
+| `"a point inside a piece of a face"` | 12 | 0.40% |
+| `"order along a line"` | 6 | 0.20% |
+| everything else | 0 | 0% |
+
+The third cause is no surprise once it has been seen. Two points on a cut line
+whose intervals on that line's dominant axis overlap cannot be put in order, and
+§17.4 settles that an overlap there is the coincidence case rather than a gap;
+under a general rotation, two corners a rounding apart produce exactly that
+overlap. It is one fuse in five hundred. Naming it separately is the entire
+reason the breakdown exists, and it took a corpus seven times the shipped one
+before it was named at all.
+
+**The threshold moves from 32% to 30%**, and the tightening is what the precision
+buys. Thirty-two sat above every fresh seed by so much that it was guarding
+sampling noise rather than drift: neither of the two undeserved refusals recorded
+above would have tripped it on its own, since each was worth about 3.5 points and
+only the two together reached 32.8%. The fixed-seed rate is 27.2%, the fresh-seed
+spread at this corpus size is about ±1.6 points, so the widest seed lands near
+29.5% — and 30% is above that while still tripping on either bug coming back. It
+is asserted in the same place by the same test.
+
 ### 17.8 What M2.5 actually cost, recorded 2026-08-31
 
 M2.5 is complete. §12 did this for M0; this is the same for the fuse, and it is
@@ -2392,3 +2485,35 @@ an answer that has already been computed, not the fuse's own arithmetic in the
 turned frame. Guessing a tolerance instead would make the test measure the
 tolerance (§14.1 question 1), so the property is not run there and the gap is
 written down at the top of `fuses_that_must_agree.rs` as well as here.
+
+**Amended 2026-08-31, and three things above need correcting.**
+
+The paragraph on the metamorphic properties says §17.4's amendment "is the one
+fix for both" halves of the coplanar hole. Joining coplanar faces of the
+*answer* was half of it. A public builder can hand the fuse an input that already
+has two faces on one plane sharing an edge, and §17.1 cannot read that either:
+`ProfileBuilder` accepts three profile points in a row, the extrusion of one has
+two side faces on a single plane, and every fuse over such a solid refused —
+under all three rules, in debug and release, and whether the pair overlapped,
+touched or was nowhere near. §17.4's amendment of today records the rest of the
+fix. Criterion 8's row still points at §17.7, which now records the same three
+families over ten times the corpus, a third refusal cause, and a threshold of
+30% rather than 32%.
+
+The method is worth recording, because it is §12.3's lesson with a cost ratio
+attached. Three million fuses drawn from the three shipped generators found
+nothing, in 934 seconds. One new shape family — a profile with a point halfway
+along a wall — found this in 0.02 seconds and under forty fuses. §12.3 is the
+section where one family of shapes found one family of bugs and a 335-test suite
+could not see a right triangle; this is the same sentence with numbers on it, and
+the numbers are about fifty thousand to one in favour of a new shape over more of
+the old ones. **The corpus that has already run is worth almost nothing; the
+shape nobody has drawn yet is worth almost everything.**
+
+The last of it is about comments. `bake.rs` argued, in the doc comment on the
+very branch this bug reached, that "the corner of a solid this fuse itself built
+always has three different planes round it ... so reaching here means the solid
+came from somewhere else". Every word of that is true, and the second half names
+the way in while calling it a place nobody comes from. A comment explaining why
+something is unreachable is a claim, and a claim that spells out its own
+counterexample is worth reading twice.

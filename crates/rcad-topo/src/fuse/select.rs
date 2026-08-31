@@ -99,7 +99,9 @@ pub(crate) fn choose(
 
     let mut chosen = Vec::new();
     for (index, piece) in scratch.pieces.iter().enumerate() {
-        let mine = owner[&piece.ancestor.slot_in(model.id())];
+        // Every ancestor of a piece is a face of one solid, so the first of them
+        // names which one as well as any other.
+        let mine = owner[&piece.ancestors[0].slot_in(model.id())];
         let side = if mine < arguments {
             Side::Argument
         } else {
@@ -507,7 +509,9 @@ fn which_solid_owns_each_face(model: &Model, solids: &[&BakedSolid]) -> BTreeMap
     let mut owner = BTreeMap::new();
     for (index, solid) in solids.iter().enumerate() {
         for face in &solid.faces {
-            owner.insert(face.key.slot_in(model.id()), index);
+            for key in &face.keys {
+                owner.insert(key.slot_in(model.id()), index);
+            }
         }
     }
     owner

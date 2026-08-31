@@ -9,7 +9,7 @@
 
 use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey, VertexKey};
+use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey, VertexKey};
 
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
@@ -831,4 +831,178 @@ fn comb(model: &mut Model, at: [f64; 2]) -> SolidKey {
     model
         .add_extrusion(&profile, 1.0, &Isometry::identity())
         .expect("a comb extrudes")
+}
+
+/// A 2×2 square extruded by one, with an extra profile point halfway along the
+/// bottom wall and another halfway along the top, put down at `at`.
+///
+/// `ProfileBuilder` accepts three points in a row and `Model::validate` calls
+/// the extrusion sound, so this is a solid any caller can build and hand to the
+/// fuse. Its two bottom side faces sit on one plane and share an edge, and the
+/// corner between them has two planes round it and not three — which is what
+/// §17.1's re-derivation cannot solve, and why the fuse joins such faces on the
+/// way in as well as on the way out.
+fn a_box_with_a_point_in_the_middle_of_two_of_its_walls(
+    model: &mut Model,
+    at: [f64; 2],
+) -> SolidKey {
+    let outline = [
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [2.0, 0.0],
+        [2.0, 2.0],
+        [1.0, 2.0],
+        [0.0, 2.0],
+    ]
+    .map(|[x, y]| [x + at[0], y + at[1]])
+    .to_vec();
+    let profile = ProfileBuilder::new(outline)
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square with a point halfway along two of its walls");
+    model
+        .add_extrusion(&profile, 1.0, &Isometry::identity())
+        .expect("it extrudes")
+}
+
+/// The pair does not touch at all, so there is nothing here for the fuse to
+/// work out — and it still refused every rule before the input was joined,
+/// because the refusal is about one solid's own corners and not about the pair.
+#[test]
+fn a_solid_with_a_profile_point_in_the_middle_of_a_wall_fuses_with_one_it_does_not_touch() {
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        let mut model = a_model();
+        let lumpy = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.0, 0.0]);
+        let plain = cube(&mut model, 1.0, Vector::new(5.0, 5.0, 0.0));
+
+        let answer = fuse(&mut model, &[lumpy], &[plain], rule);
+
+        match rule {
+            Rule::Union => {
+                assert_eq!(answer.len(), 2, "nothing joined them, so they stay two");
+                assert_eq!(volume_of(&model, &answer), 4.0 + 1.0);
+                let walls: usize = model.solid(answer[0]).faces().count();
+                assert_eq!(
+                    walls, 6,
+                    "the two side faces on one plane came through as the one face they are"
+                );
+            }
+            Rule::Intersection => assert!(answer.is_empty()),
+            Rule::Difference => {
+                assert_eq!(answer.len(), 1);
+                assert_eq!(volume_of(&model, &answer), 4.0);
+            }
+            other => panic!("a rule nothing here knows: {other:?}"),
+        }
+    }
+}
+
+/// The same solid with a cube driven through the middle of its joined wall, so
+/// the face the joining made is cut in its turn. Everything the joining dropped
+/// — a corner and an edge — sat exactly where the cut lands.
+#[test]
+fn a_solid_with_a_profile_point_in_the_middle_of_a_wall_can_be_cut_across_that_wall() {
+    let straddling = Vector::new(0.5, -0.5, 0.0);
+    let overlap = 1.0 * 0.5 * 1.0;
+
+    let mut model = a_model();
+    let lumpy = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.0, 0.0]);
+    let plain = cube(&mut model, 1.0, straddling);
+    let united = fuse(&mut model, &[lumpy], &[plain], Rule::Union);
+    assert_eq!(united.len(), 1);
+    assert_eq!(volume_of(&model, &united), 4.0 + 1.0 - overlap);
+
+    let mut model = a_model();
+    let lumpy = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.0, 0.0]);
+    let plain = cube(&mut model, 1.0, straddling);
+    let shared = fuse(&mut model, &[lumpy], &[plain], Rule::Intersection);
+    assert_eq!(volume_of(&model, &shared), overlap);
+
+    let mut model = a_model();
+    let lumpy = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.0, 0.0]);
+    let plain = cube(&mut model, 1.0, straddling);
+    let bitten = fuse(&mut model, &[lumpy], &[plain], Rule::Difference);
+    assert_eq!(volume_of(&model, &bitten), 4.0 - overlap);
+}
+
+/// Both sides of the fuse have a point in the middle of a wall, so both get
+/// joined on the way in and neither is a plain box the other could lean on.
+#[test]
+fn two_solids_that_both_have_a_profile_point_in_the_middle_of_a_wall_unite() {
+    let overlap = 1.5 * 1.5 * 1.0;
+
+    let mut model = a_model();
+    let one = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.0, 0.0]);
+    let other = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.5, 0.5]);
+
+    let united = fuse(&mut model, &[one], &[other], Rule::Union);
+    assert_eq!(united.len(), 1);
+    assert_eq!(volume_of(&model, &united), 4.0 + 4.0 - overlap);
+
+    let mut model = a_model();
+    let one = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.0, 0.0]);
+    let other = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.5, 0.5]);
+
+    let shared = fuse(&mut model, &[one], &[other], Rule::Intersection);
+    assert_eq!(volume_of(&model, &shared), overlap);
+}
+
+/// §17.4's amendment of 2026-08-30 already made every *answer* free of two
+/// faces on one plane sharing an edge. Fusing such a solid and then fusing the
+/// answer again is what pins that inputs and answers now meet the same
+/// standard: the second fuse joins nothing, because there is nothing left to
+/// join.
+#[test]
+fn uniting_a_solid_with_a_point_in_the_middle_of_a_wall_gives_an_answer_that_unites_again() {
+    let mut model = a_model();
+    let lumpy = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.0, 0.0]);
+    let straddling = cube(&mut model, 1.0, Vector::new(0.5, -0.5, 0.0));
+    let corner = cube(&mut model, 1.0, Vector::new(1.5, 1.5, 0.5));
+
+    let once = fuse(&mut model, &[lumpy], &[straddling], Rule::Union);
+    assert_eq!(once.len(), 1);
+    assert_eq!(volume_of(&model, &once), 4.0 + 1.0 - 0.5);
+
+    let twice = fuse(&mut model, &once, &[corner], Rule::Union);
+    assert_eq!(twice.len(), 1);
+    assert_eq!(volume_of(&model, &twice), 4.5 + 1.0 - 0.125);
+}
+
+/// Joining two input faces into one must not lose either of them from the
+/// history. Both survive, and both name the single face the answer has where
+/// the two of them were.
+#[test]
+fn both_input_faces_that_were_joined_on_the_way_in_name_the_face_they_became() {
+    let mut model = a_model();
+    let lumpy = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.0, 0.0]);
+    let plain = cube(&mut model, 1.0, Vector::new(5.0, 5.0, 0.0));
+    let walls: Vec<FaceKey> = model.solid(lumpy).faces().map(|face| face.key()).collect();
+    assert_eq!(
+        walls.len(),
+        8,
+        "six walls, two of which are halves of one, plus a top and a bottom"
+    );
+
+    let fused = model
+        .fuse(
+            &[lumpy],
+            &[plain],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a pair that does not touch");
+
+    let mut faces_of_the_answer: Vec<FaceKey> = Vec::new();
+    for wall in walls {
+        let images = fused.images_of_face(wall);
+        assert_eq!(images.len(), 1, "no wall of the input was lost");
+        if !faces_of_the_answer.contains(&images[0]) {
+            faces_of_the_answer.push(images[0]);
+        }
+    }
+    assert_eq!(
+        faces_of_the_answer.len(),
+        6,
+        "the eight walls came through as the six faces the shape actually has"
+    );
 }

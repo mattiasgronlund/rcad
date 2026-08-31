@@ -46,7 +46,9 @@ use rcad_predicates::{
     ProvenanceLog, orient2d, orient3d,
 };
 
-use crate::{EdgeKey, FaceKey, Invalid, Result, VertexKey};
+use smallvec::SmallVec;
+
+use crate::{FaceKey, Invalid, Result, VertexKey};
 
 use super::bake::BakedFace;
 use super::{
@@ -101,9 +103,11 @@ pub(crate) fn stretches_of_a_line_inside(
 /// One piece a face was cut into.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Piece {
-    /// The one input face this came out of. Every piece has exactly one
-    /// ancestor, and nothing here is allowed to invent geometry that has none.
-    pub(crate) ancestor: FaceKey,
+    /// The input faces this came out of. Every piece has at least one ancestor,
+    /// and nothing here is allowed to invent geometry that has none; more than
+    /// one when coplanar faces of the input were joined into a single face on
+    /// the way in. They are all faces of one solid.
+    pub(crate) ancestors: Vec<FaceKey>,
     /// The plane, inherited from the ancestor bit for bit (§17.1).
     pub(crate) plane: Plane,
     /// Which way round the ancestor's solid used it.
@@ -256,8 +260,10 @@ struct Boundary {
     wire: usize,
     /// Whether the wire walks this arc in the line's forward direction.
     runs_forward: bool,
-    /// The input edge this stretch of the boundary is part of.
-    edge: EdgeKey,
+    /// How far round the wire the side this stretch is part of sits. The input
+    /// edges are named there rather than copied here, because joining coplanar
+    /// input faces can leave a side that is several of them.
+    position: usize,
 }
 
 /// A way to leave a node: along a line, one way or the other.
@@ -661,7 +667,7 @@ impl<'f> Arrangement<'f> {
                         boundary[step] = Some(Boundary {
                             wire,
                             runs_forward,
-                            edge: edges[position].key,
+                            position,
                         });
                         present[step] = true;
                     }
@@ -1247,7 +1253,7 @@ impl<'f> Arrangement<'f> {
             .map(|cycle| self.wire_from(cycle))
             .collect();
         Piece {
-            ancestor: self.face.key,
+            ancestors: self.face.keys.clone(),
             plane: self.plane,
             orientation: self.face.orientation,
             wires,
@@ -1278,7 +1284,11 @@ impl<'f> Arrangement<'f> {
                 ],
                 along: self.arcs[half_edge / 2]
                     .boundary
-                    .map(|boundary| boundary.edge),
+                    .map_or_else(SmallVec::new, |boundary| {
+                        self.face.wires[boundary.wire][boundary.position]
+                            .keys
+                            .clone()
+                    }),
                 approximation: None,
             })
             .collect()
@@ -1683,7 +1693,7 @@ mod tests {
         let pieces = split(&top);
 
         assert_eq!(pieces.len(), 1);
-        assert_eq!(pieces[0].ancestor, top.key);
+        assert_eq!(pieces[0].ancestors, top.keys);
         assert_eq!(pieces[0].plane, top.plane);
         assert_eq!(pieces[0].wires.len(), 1);
         assert_eq!(pieces[0].wires[0].len(), 4);
@@ -1808,7 +1818,7 @@ mod tests {
         );
 
         for piece in &split(&top) {
-            assert_eq!(piece.ancestor, top.key);
+            assert_eq!(piece.ancestors, top.keys);
             assert_eq!(piece.orientation, top.orientation);
         }
     }
