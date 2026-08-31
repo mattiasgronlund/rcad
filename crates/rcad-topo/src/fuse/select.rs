@@ -541,13 +541,34 @@ impl InPlane {
     /// A reference point off `plane`, or `None` when none of the tries could be
     /// proved to be off it.
     ///
-    /// The three reaches are only tries. Each is *proved* to be on one side or
-    /// abandoned, so which one lands decides nothing; a bigger reach only helps
-    /// when the plane's own offset is large enough to swallow a smaller one.
+    /// **The reach is a fraction of where the plane is, not a distance.** A step
+    /// of a fixed size vanishes into a plane far enough out — past an offset of
+    /// about `2^72` the `f64` spacing there is wider than a step of `2^20`, so
+    /// every candidate lands back exactly on the plane and a perfectly ordinary
+    /// fuse has no answer. The plane's own offset is the only length in sight
+    /// that scales with it, so that is what a reach is measured in, and a plane
+    /// through the origin has no such length and takes one instead.
+    ///
+    /// Both reaches are only tries: each is *proved* to be on one side or
+    /// abandoned, so which one lands decides nothing. The second is smaller
+    /// rather than larger, because the first is already enormous next to the
+    /// spacing — `2^-52` of the offset would clear it — and what a second try is
+    /// for is a plane so far out that stepping a whole offset off it overflows.
+    /// A plane at `1e308` is the case, and
+    /// `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` is where it runs:
+    /// the fuse there refuses naming `orient3d`, which it only reaches by having
+    /// found a point off the plane first.
+    ///
+    /// There is no third try. Past about `f64::MAX * (1 - 2^-20)` both steps
+    /// overflow and this returns `None` — but a plane whose offset is that far
+    /// out has no solid around it either, since a corner one unit further along
+    /// the normal is already infinite. That is a limit and not a gap (§16.10):
+    /// the point being looked for does not exist in `f64`.
     fn of(plane: &Plane) -> Option<Self> {
         let origin = plane.origin().coordinates();
         let normal = plane.normal().components();
-        for reach in [1.0, 1024.0, 1_048_576.0] {
+        let out_here = plane.offset().abs().max(1.0);
+        for reach in [out_here, out_here / 1_048_576.0] {
             let from = PredicatePoint::from([
                 origin[0] + normal[0] * reach,
                 origin[1] + normal[1] * reach,

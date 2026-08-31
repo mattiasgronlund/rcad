@@ -27,17 +27,15 @@ fn cube(model: &mut Model, side: f64, at: Vector) -> SolidKey {
     cube
 }
 
-/// A unit square extruded `1e200` high and put down at `at`. The coordinates
-/// then run from one to `1e200`, which is far past where `f64` can multiply two
-/// of them and still have an exact answer to fall back on.
-fn tower(model: &mut Model, at: Vector) -> SolidKey {
+/// A unit square extruded `height` high and put down at `at`.
+fn tower(model: &mut Model, at: Vector, height: f64) -> SolidKey {
     let square = ProfileBuilder::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
         .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a unit square");
     model
         .add_extrusion(
             &square,
-            1e200,
+            height,
             &Isometry::translation(at).expect("a finite placement"),
         )
         .expect("building it needs no decision")
@@ -462,15 +460,25 @@ fn a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_
     );
 }
 
-/// The other half of criterion 7. Two towers `1e200` tall overlap, and nothing
-/// in `f64` can multiply coordinates that far apart without overflowing, so a
-/// decision the answer depends on cannot be proved — and a certified policy
-/// refuses rather than guessing.
+/// The other half of criterion 7. Two towers `1e308` tall overlap, `orient3d`
+/// cannot multiply coordinates that far apart without overflowing, so a decision
+/// the answer depends on cannot be proved — and a certified policy refuses
+/// rather than guessing.
+///
+/// **This test asked the same question at `1e200` and got the right answer for
+/// the wrong reason.** What refused there was not the arithmetic: it was
+/// `InPlane::of` stepping off a plane by a fixed distance, which vanishes into a
+/// plane that far out, so the fuse never reached a predicate at all. The
+/// companion below is the same pair at `1e200`, now settled and measured, and
+/// `a_solid_a_long_way_from_the_origin.rs` is where that defect is written up. A
+/// refusal is only worth having as a demonstration when it is the arithmetic
+/// that refused, which is the distinction `docs/decisions.md` §15.8 draws
+/// between a refusal and a deserved one.
 #[test]
 fn a_fuse_that_needs_a_decision_nothing_can_prove_refuses() {
     let mut model = a_model();
-    let one = tower(&mut model, Vector::new(0.0, 0.0, 0.0));
-    let other = tower(&mut model, Vector::new(0.5, 0.5, 0.0));
+    let one = tower(&mut model, Vector::new(0.0, 0.0, 0.0), 1e308);
+    let other = tower(&mut model, Vector::new(0.5, 0.5, 0.0), 1e308);
 
     let refused = model.fuse(
         &[one],
@@ -483,12 +491,58 @@ fn a_fuse_that_needs_a_decision_nothing_can_prove_refuses() {
     match refused {
         Err(Error::Undecidable { records }) => {
             assert!(
-                !records.is_empty(),
-                "the records say what could not be settled"
+                records
+                    .records()
+                    .iter()
+                    .any(|record| record.predicate() == "orient3d"),
+                "the records name the predicate that could not be settled, and it is the \
+                 one whose products overflow: {records:?}"
+            );
+            assert!(
+                records
+                    .records()
+                    .iter()
+                    .all(|record| record.predicate() != "a point off a face's plane"),
+                "the fuse got as far as the arithmetic: a plane at 1e308 is what \
+                 `InPlane::of`'s second, smaller reach is for, and this is where it runs \
+                 — {records:?}"
             );
         }
         other => panic!("nothing in f64 can settle that pair: {other:?}"),
     }
+}
+
+/// The same pair a hundred powers of ten shorter, which a certified fuse settles
+/// and used to refuse.
+///
+/// Two unit squares half a unit apart, each `1e200` tall: the union is two
+/// towers' worth of space less the quarter they share, and every decision it
+/// needs is one `orient3d` can prove. `1e200` squared is past the largest `f64`,
+/// so the cascade's first two levels have nothing to say — but its exact level
+/// does not multiply anything, and this is what it is for.
+#[test]
+fn a_pair_of_towers_a_hundred_powers_of_ten_shorter_is_settled_and_measured() {
+    let mut model = a_model();
+    let one = tower(&mut model, Vector::new(0.0, 0.0, 0.0), 1e200);
+    let other = tower(&mut model, Vector::new(0.5, 0.5, 0.0), 1e200);
+
+    let united = model
+        .fuse(
+            &[one],
+            &[other],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("two overlapping towers are a union f64 can prove");
+
+    assert_eq!(united.solids().len(), 1);
+    let volume = volume_of(&model, united.solids());
+    let two_towers_less_what_they_share = 1.75e200;
+    assert!(
+        (volume - two_towers_less_what_they_share).abs() < 1e-12 * two_towers_less_what_they_share,
+        "two towers overlapping in a quarter of their base enclose {two_towers_less_what_they_share:e}, got {volume:e}"
+    );
 }
 
 /// A frame, and a plug that fills one corner of its hole (§17.7's control).

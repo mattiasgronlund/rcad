@@ -323,12 +323,27 @@ impl Model {
         Ok(())
     }
 
+    /// The coordinate magnitude is measured **where the solids actually are**,
+    /// not where their vertices are stored.
+    ///
+    /// A solid placed a long way out keeps ordinary small numbers in the arena
+    /// and carries the distance in its location, so reading the arena says a
+    /// model is comfortable when every predicate that runs on it is working at
+    /// `2^39`. A fuse bakes placement in (§17.3), so the same geometry read the
+    /// arena's way passed this check before a fuse and failed it after — the
+    /// same model, two answers, decided by where the placement happened to be
+    /// written down. What the check is about is the numbers the predicates see,
+    /// and those are located.
+    ///
+    /// Lengths are not affected by placement, so the smallest feature is read
+    /// straight off the edges.
     fn check_dynamic_range(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         let largest = self
-            .data()
-            .vertices
-            .values()
-            .map(|vertex| vertex.point.largest_coordinate_magnitude())
+            .solids()
+            .flat_map(|solid| solid.faces())
+            .flat_map(|face| face.wires())
+            .flat_map(|wire| wire.points())
+            .map(|corner| corner.largest_coordinate_magnitude())
             .fold(0.0, f64::max);
         let smallest_feature = self
             .edges()

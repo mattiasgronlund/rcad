@@ -1,23 +1,29 @@
-//! Two defects that only show up when a model is written somewhere else in
-//! `f64`, each cut down to the smallest case that reproduces it.
+//! How far from the origin a model can be written, and what stops it there.
 //!
-//! Both were found by `pairs::a_pair_somewhere_else` — the family that takes an
-//! existing lattice configuration and multiplies every coordinate by `2^k` and
-//! moves it by `2^m`. Neither is fixed here. Both are **gaps** rather than
-//! limits (`docs/decisions.md` §16.10): the answer exists and is exactly
-//! representable, and the arithmetic we chose cannot reach it. Both are also
-//! §16.11's open question with teeth — `DynamicRange` is a *ratio*, so it sees
-//! nothing wrong with either of these models, and it is the absolute magnitude
-//! that breaks them.
+//! Two defects lived here, each cut down to the smallest case that reproduced
+//! it: a cube whose faces sat past about `2^72` could not be fused at all, and a
+//! solid past about `2^28` was said to enclose negative space. Both were found
+//! by `pairs::a_pair_somewhere_else` — the family that takes an existing lattice
+//! configuration and multiplies every coordinate by `2^k` and moves it by `2^m`
+//! — and both were **gaps** rather than limits (`docs/decisions.md` §16.10): the
+//! answer existed and was exactly representable, and the arithmetic we chose
+//! could not reach it. Both are fixed, and each test now runs out to where the
+//! shape itself stops fitting in an `f64`, with a companion test naming what
+//! ends the range.
 //!
-//! They are `#[ignore]`d so the suite stays green, and the family's own range is
-//! bounded to stay below both edges — `SMALLEST_SCALE`, `LARGEST_SCALE` and
-//! `FURTHEST_SHIFT_EXPONENT` in `pairs/mod.rs` carry a measurement each. Remove
-//! the attribute to see either of these fail.
+//! They were also §16.11's open question with teeth. `DynamicRange` is a
+//! *ratio*, so it saw nothing wrong with either model — and it saw even less
+//! than that, because it read the coordinates as the arena stores them rather
+//! than where the solids are; `Model::check_dynamic_range` is where that is
+//! written up.
+//!
+//! `SMALLEST_SCALE`, `LARGEST_SCALE` and `FURTHEST_SHIFT_EXPONENT` in
+//! `pairs/mod.rs` bound the generated family's own range, and carry a
+//! measurement each.
 
 use rcad_geom::{Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 /// `2^exponent`, exactly.
 fn two_to_the(exponent: i32) -> f64 {
@@ -59,98 +65,168 @@ fn frame(model: &mut Model, side: f64, wall: f64, at: Vector) -> SolidKey {
         .expect("building a frame needs no decision")
 }
 
-/// A cube whose faces sit further than about `2^72` from the origin cannot be
-/// fused with anything, including itself.
+/// A cube fuses with a copy of itself at every size `f64` can hold the answer
+/// at, up to and including `2^340`.
 ///
-/// **The defect.** `fuse/select.rs`'s `InPlane::of` needs a point it can *prove*
-/// is off a face's plane, and it looks for one by stepping from the plane's own
-/// nearest point to the origin along the normal, by `1.0`, then `1024.0`, then
-/// `1048576.0`. Those are three absolute distances in the model's own unit. A
-/// plane `2^73` from the origin has an `f64` spacing of `2^21`, wider than the
-/// largest of the three, so every step lands back exactly on the plane, no
-/// candidate can be proved to be off it, and the fuse returns
+/// It could not past about `2^72`. `fuse/select.rs`'s `InPlane::of` needs a
+/// point it can *prove* is off a face's plane, and it looked for one by stepping
+/// from the plane's own nearest point to the origin along the normal by `1.0`,
+/// then `1024.0`, then `1048576.0` — three absolute distances in the model's own
+/// unit. A plane `2^73` out has an `f64` spacing of `2^21`, wider than the
+/// largest of the three, so every step landed back exactly on the plane, no
+/// candidate could be proved off it, and the fuse returned
 /// [`Error::Undecidable`](rcad_topo::Error::Undecidable) naming
-/// `"a point off a face's plane"`.
+/// `"a point off a face's plane"`. Measured over two overlapping three-by-three
+/// blocks, the first power of two that refused was `2^71` with no shift and
+/// `2^43` with a `2^30` shift — the same plane offset of about `2^73` both
+/// times. The reach is now a fraction of the plane's own offset, so there is no
+/// size at which it vanishes.
 ///
-/// **Why it is a gap and not a limit.** The answer exists: `A ∪ A` is `A`, every
-/// coordinate involved is exactly representable, and points off the plane are
-/// plentiful — any multiple of the plane's own spacing would do. The three
-/// reaches are a *family of fixes* (§16.10) that considered only how large a
-/// step to take and never that the right step depends on where the plane is. The
-/// doc comment on `InPlane::of` says as much and then does not act on it: "a
-/// bigger reach only helps when the plane's own offset is large enough to
-/// swallow a smaller one."
-///
-/// **Where the edge is.** Measured over two overlapping three-by-three blocks,
-/// the first power of two that refuses is `2^71` with no shift and `2^43` with a
-/// `2^30` shift — the same plane offset of about `2^73` both times.
+/// **Where the range ends now, and why that end is a limit.** `2^341`, and the
+/// fuse has nothing to do with it: a cube that big encloses `2^1023` of space,
+/// six times which is past the largest `f64`, so `signed_volume` overflows and
+/// `Model::validate` refuses an infinite volume. The answer does not exist in
+/// the number type, which is what makes it a limit rather than a gap
+/// (`docs/decisions.md` §16.10).
 #[test]
-#[ignore = "a gap: InPlane::of steps by three absolute distances, so a plane past 2^72 has no reachable point off it"]
-fn a_cube_too_far_from_the_origin_cannot_be_fused_at_all() {
-    let far = two_to_the(80);
+fn a_cube_a_long_way_from_the_origin_fuses_with_a_copy_of_itself() {
+    for exponent in [0, 36, 71, 72, 73, 100, 200, 340] {
+        let far = two_to_the(exponent);
+        let mut model = Model::new(Scale::millimetres(100.0 * far).expect("a working size"));
+        let one = block(&mut model, [far, far, far], Vector::zero());
+        let copy = block(&mut model, [far, far, far], Vector::zero());
+
+        let answer = model.fuse(
+            &[one],
+            &[copy],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            answer.is_ok(),
+            "a cube united with a copy of itself is that cube, and this one is written at 2^{exponent}: {:?}",
+            answer.err()
+        );
+    }
+}
+
+/// The end of that range, and what ends it.
+///
+/// A published bound needs a test (`docs/decisions.md` §15.6). The one above
+/// says `2^341` is out of reach because six times the volume overflows rather
+/// than because anything in the fuse gave up, so this is the sentence that would
+/// have to change if the fuse ever became the reason again.
+#[test]
+fn the_first_cube_too_big_to_fuse_is_the_first_whose_volume_overflows() {
+    let far = two_to_the(341);
     let mut model = Model::new(Scale::millimetres(100.0 * far).expect("a working size"));
     let one = block(&mut model, [far, far, far], Vector::zero());
     let copy = block(&mut model, [far, far, far], Vector::zero());
 
-    let answer = model.fuse(
-        &[one],
-        &[copy],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
+    let refusal = model
+        .fuse(
+            &[one],
+            &[copy],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect_err("a cube of 2^1023 units of space is past what an f64 volume holds");
     assert!(
-        answer.is_ok(),
-        "a cube united with a copy of itself is that cube, whatever size it is written at: {:?}",
-        answer.err()
+        matches!(
+            refusal,
+            Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume.is_infinite()
+        ),
+        "the fuse decided everything it was asked; the volume is what overflowed: {refusal:?}"
     );
 }
 
-/// A solid whose corners are more than about `2^28` from the origin is reported
-/// as enclosing a negative amount of space.
+/// A frame united with a copy of itself encloses eight units of space wherever
+/// it is drawn, out to `2^50`.
 ///
-/// **The defect.** `SolidView::measure` and `SolidView::signed_volume` sum
-/// `a · (b × c)` over the answer's triangles, where `a`, `b` and `c` are
-/// measured **from the world origin**. A solid `2^m` from the origin therefore
-/// adds up terms of size `2^{3m}` to reach a volume of order one, and past
-/// `m = 28` the `f64` spacing of those terms is larger than the answer. What
-/// comes back has no correct digits and can be negative, at which point
-/// `Model::validate` — which the fuse runs over its own answer in a debug build
-/// — refuses a perfectly good solid as one whose faces do not point outwards.
+/// It was said to enclose *negative* space past about `2^28`. `SolidView::measure`
+/// and `SolidView::signed_volume` sum `a · (b × c)` over the answer's triangles,
+/// and `a`, `b` and `c` used to be measured **from the world origin**, so a solid
+/// `2^m` out added up terms of size `2^{3m}` to reach a volume of order one. Past
+/// `m = 28` the `f64` spacing of those terms was larger than the answer, what came
+/// back had no correct digits and could be negative, and `Model::validate` — which
+/// the fuse runs over its own answer in a debug build — refused a perfectly good
+/// solid as one whose faces do not point outwards. The tetrahedra now hang from a
+/// corner of the solid, so every term is the size of the solid and the three
+/// subtractions are exact by Sterbenz's lemma when the coordinates share an
+/// exponent, which is exactly this case.
 ///
-/// **Why it is a gap and not a limit.** The volume is a small whole number and
-/// exactly representable; nothing about `f64` prevents computing it. Summing the
-/// same triangles about the solid's own first corner instead of the world origin
-/// gives the exact answer, because the differences are exact by Sterbenz's lemma
-/// when the coordinates share an exponent. The family of fixes considered when
-/// the divergence theorem was written down was "which point do the tetrahedra
-/// hang from", and the origin was chosen for tidiness.
+/// A `3 × 3` frame with walls one thick is the shape that used to go first,
+/// because its volume is the smallest of the four the generators draw and a box's
+/// terms cancel in opposite pairs where a frame's do not. `DynamicRange` saw a
+/// ratio of `2.7e8` here and was satisfied, which is §16.11 exactly.
 ///
-/// **Where the edge is.** Measured by uniting each of the four generated shapes
-/// with a copy of itself at growing distances: a `3 × 3` frame with walls one
-/// thick — the smallest volume of the four, at eight — is the first to go, at
-/// `2^28`. A one-by-one cube survives to `2^30`, because a box's terms cancel in
-/// opposite pairs and a frame's do not. `DynamicRange` sees a ratio of `2.7e8`
-/// here and is satisfied, which is §16.11 exactly.
+/// **Where the range ends now.** `2^51` and `2^52` refuse, and past `2^53` there
+/// is no frame to fuse: a wall one unit thick against a coordinate of `2^53` is
+/// below the spacing there, so the two corners of a wall are the same `f64` and
+/// the extrusion has an edge with no length. Both are limits rather than gaps —
+/// the shape stops existing in the number type. Past about `2^37` the model is
+/// outside [`DynamicRange::LARGEST_SUPPORTED_RATIO`] and a validate boundary says
+/// so; that is a separate statement from the volume, which stays exact.
+///
+/// [`DynamicRange::LARGEST_SUPPORTED_RATIO`]: rcad_geom::DynamicRange::LARGEST_SUPPORTED_RATIO
 #[test]
-#[ignore = "a gap: signed_volume sums tetrahedra hung from the world origin, so a solid past 2^28 away loses every digit"]
-fn a_frame_a_long_way_from_the_origin_is_said_to_enclose_negative_space() {
-    let far = two_to_the(28);
+fn a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses() {
+    for exponent in [0, 28, 30, 36, 40, 50] {
+        let far = two_to_the(exponent);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let one = frame(&mut model, 3.0, 1.0, Vector::new(far, far, far));
+        let copy = frame(&mut model, 3.0, 1.0, Vector::new(far, far, far));
+
+        let united = model
+            .fuse(
+                &[one],
+                &[copy],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| {
+                panic!("a frame at 2^{exponent} unites with a copy of itself: {why}")
+            });
+
+        let volume: f64 = united
+            .solids()
+            .iter()
+            .map(|&solid| model.solid(solid).measure().volume())
+            .sum();
+        assert_eq!(
+            volume, 8.0,
+            "a 3 by 3 frame with walls one thick encloses eight, and this one is at 2^{exponent}"
+        );
+    }
+}
+
+/// The end of *that* range, and what ends it.
+///
+/// A published bound needs a test (`docs/decisions.md` §15.6). The frame above
+/// stops at `2^50` because of what `f64` can hold, not because of how the volume
+/// is summed, and this is the sentence that says so: at `2^53` a wall one unit
+/// thick has both its corners on the same number.
+#[test]
+fn a_frame_so_far_out_that_a_wall_is_thinner_than_the_spacing_is_not_a_frame() {
+    let far = two_to_the(53);
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let one = frame(&mut model, 3.0, 1.0, Vector::new(far, far, far));
     let copy = frame(&mut model, 3.0, 1.0, Vector::new(far, far, far));
 
-    let answer = model.fuse(
-        &[one],
-        &[copy],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
+    let refusal = model
+        .fuse(
+            &[one],
+            &[copy],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect_err("a wall of one unit at 2^53 has no thickness to fuse");
     assert!(
-        answer.is_ok(),
-        "a frame united with a copy of itself encloses what the frame does, \
-         however far from the origin it is drawn: {:?}",
-        answer.err()
+        matches!(refusal, Error::Invalid(Invalid::EdgeHasNoLength)),
+        "the frame is what stopped being a frame, not the fuse: {refusal:?}"
     );
 }

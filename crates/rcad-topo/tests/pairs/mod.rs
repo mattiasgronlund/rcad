@@ -93,7 +93,7 @@ const FURTHEST_SHIFT: i32 = 5;
 /// `orient3d`, which is the honest answer and not a timid one.
 ///
 /// Measured on this tree, two overlapping three-by-three blocks: the last scale
-/// that answers is `-356` unshifted and `-332` shifted by `2^30`. Two hundred
+/// that answers is `-359` unshifted and `-332` shifted by `2^30`. Two hundred
 /// and eighty leaves fifty powers of two of room for the larger shapes, and
 /// `2^-280` is about `8e-85`, which is well past anything a relative bound has
 /// ever been asked about here.
@@ -101,47 +101,44 @@ const SMALLEST_SCALE: i32 = -280;
 
 /// The largest power of two [`a_pair_somewhere_else`] writes a configuration at.
 ///
-/// **A gap and not a limit**, and it is a defect this family found — see
-/// `a_cube_too_far_from_the_origin_cannot_be_fused_at_all` in
-/// `crates/rcad-topo/tests/degenerate_fuses.rs`. `fuse/select.rs`'s `InPlane::of`
-/// looks for a point provably off a face's plane by stepping along the normal
-/// from the plane's own origin by `1.0`, then `1024.0`, then `1048576.0` —
-/// three *absolute* distances. A plane whose offset is past about `2^72` has an
-/// `f64` spacing wider than the largest of the three, so all three steps land
-/// back on the plane and the fuse refuses a configuration it could plainly
-/// answer.
+/// **A limit and not a gap** (§16.10), and it is a long way out. A pair written
+/// at `2^k` encloses about `2^{3k}` of space, so past `k = 339` six times the
+/// volume is more than the largest `f64`, `signed_volume` overflows, and
+/// `Model::validate` refuses a solid that encloses an infinite amount of space.
+/// The answer stops existing in the number type; nothing about the arithmetic
+/// gives up first.
 ///
-/// Measured: the first scale that refuses is `71` unshifted and `43` shifted by
-/// `2^30`, and both are the same plane offset of about `2^73`. Thirty plus
-/// [`FURTHEST_SHIFT_EXPONENT`] puts the worst offset this family reaches at
-/// about `2^54`, which is five hundred times short of the edge.
-const LARGEST_SCALE: i32 = 30;
+/// Measured on this tree, two overlapping three-by-three blocks: the last scale
+/// that answers is `339`, both unshifted and shifted by `2^30`. Two hundred and
+/// eighty leaves fifty-nine powers of two of room, and matches
+/// [`SMALLEST_SCALE`] at the other end.
+///
+/// This was `30` while `fuse/select.rs`'s `InPlane::of` stepped off a plane by
+/// three *absolute* distances, which vanish into a plane whose offset is past
+/// about `2^72` — see
+/// `a_cube_a_long_way_from_the_origin_fuses_with_a_copy_of_itself` in
+/// `crates/rcad-topo/tests/a_solid_a_long_way_from_the_origin.rs`. That was a
+/// gap this family found, and the family could not reach past it until it was
+/// fixed.
+const LARGEST_SCALE: i32 = 280;
 
 /// The furthest [`a_pair_somewhere_else`] moves a configuration from the origin,
 /// as a power of two.
 ///
-/// **A second gap, and it is the reason this is 24 and not the 30 the dynamic
-/// range would allow** — see
-/// `a_frame_a_long_way_from_the_origin_is_said_to_enclose_negative_space` in
-/// `crates/rcad-topo/tests/a_solid_a_long_way_from_the_origin.rs`.
-/// `SolidView::signed_volume` sums `a · (b × c)` over triangles measured from
-/// the **world origin**, so a solid `2^m` away adds terms of size `2^{3m}` to
-/// reach a volume of order one. Past `m = 28` the spacing of those terms is
-/// wider than the answer, the sum can come out negative, and `Model::validate`
-/// then refuses a perfectly good solid as one whose faces do not point outwards.
+/// **The edge here is `DynamicRange`**, which refuses a model whose largest
+/// coordinate is more than `1e11` times its smallest feature: with a smallest
+/// feature of one that is `m = 37`. Thirty gives a spread of about `1e9`, which
+/// is the number this family was always meant to reach.
 ///
-/// Measured by uniting each generated shape with a copy of itself at growing
-/// distances: the `3 × 3` frame, whose volume of eight is the smallest of the
-/// four, is the first to fail and it fails at `2^28`. A one-by-one cube survives
-/// to `2^30`, because a box's terms cancel in opposite pairs and a frame's do
-/// not. Twenty-four leaves a factor of sixteen below the frame's edge.
-///
-/// The edge this *would* have had is `DynamicRange`, which refuses a model whose
-/// largest coordinate is more than `1e11` times its smallest feature: with a
-/// smallest feature of one that is `m = 37`. Twenty-four gives a spread of about
-/// `1.7e7` where `1e9` was wanted, and the gap between those two numbers is the
-/// defect.
-const FURTHEST_SHIFT_EXPONENT: u32 = 24;
+/// It was `24` while `SolidView::signed_volume` summed `a · (b × c)` over
+/// triangles measured from the **world origin**, which made a solid `2^m` away
+/// add terms of size `2^{3m}` to reach a volume of order one and lose every
+/// digit past `m = 28` — see
+/// `a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses`. The
+/// tetrahedra now hang from a corner of the solid, so a frame's volume comes
+/// back exactly eight out to `2^50`, and the gap between `1.7e7` and `1e9` that
+/// this constant used to record is closed.
+const FURTHEST_SHIFT_EXPONENT: u32 = 30;
 
 /// How many steps a whole turn is generated in.
 ///
@@ -445,10 +442,13 @@ pub fn a_turned_solid_and_several_copies() -> impl Strategy<Value = Configuratio
 ///    movement applied, **bit for bit**, and there is no tolerance to tune.
 /// 2. **Do the two runs take different paths?** Yes, and it is measured rather
 ///    than argued. Two overlapping three-by-three blocks answer down to
-///    `k = -356` unshifted and only down to `k = -332` when they are shifted by
-///    `2^30`, and they answer up to `k = 70` unshifted and only up to `k = 42`
-///    shifted — so both knobs change what the arithmetic can settle, which they
-///    could not do if every size went down the same branch. What the low end
+///    `k = -359` unshifted and only down to `k = -332` when they are shifted by
+///    `2^30` — so the shift changes what the arithmetic can settle, which it
+///    could not do if every size went down the same branch. (The upper end no
+///    longer tells them apart: both answer up to `k = 339`, where the volume
+///    overflows. While `InPlane::of` stepped off a plane by an absolute
+///    distance they parted at `70` and `42`, and that difference was the
+///    defect.) What the low end
 ///    walks toward is §12.2's precondition exactly: below its edge the fuse
 ///    refuses naming `orient3d`, which is the level-1 filter declining because
 ///    its products have fallen subnormal and expansion arithmetic then refusing
@@ -472,12 +472,12 @@ pub fn a_turned_solid_and_several_copies() -> impl Strategy<Value = Configuratio
 ///
 /// # Where the edges are, and what kind of edge each one is
 ///
-/// Both ends of `k` were measured rather than guessed, and they are two
-/// different kinds of thing (§16.10). Downward is a **limit** — the answer stops
-/// existing in `f64` and the kernel says so. Upward is a **gap** — the answer
-/// exists and the kernel cannot reach it, which makes it a defect this family
-/// found. [`SMALLEST_SCALE`], [`LARGEST_SCALE`] and [`FURTHEST_SHIFT_EXPONENT`]
-/// carry the measurements and the reasoning one each.
+/// Both ends of `k` were measured rather than guessed, and both are now
+/// **limits** (§16.10) — the answer stops existing in `f64` and the kernel says
+/// so: products fall subnormal at the bottom, the volume overflows at the top.
+/// The top used to be a **gap**, and finding it is what this family was for.
+/// [`SMALLEST_SCALE`], [`LARGEST_SCALE`] and [`FURTHEST_SHIFT_EXPONENT`] carry
+/// the measurements and the reasoning one each.
 pub fn a_pair_somewhere_else() -> impl Strategy<Value = Configuration> {
     (lattice_solids(2), an_elsewhere()).prop_map(|(solids, elsewhere)| Configuration {
         solids,

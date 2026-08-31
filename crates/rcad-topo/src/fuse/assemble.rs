@@ -193,18 +193,29 @@ impl Assembly {
     /// invariant [`Model::validate`] checks. A fuse invents topology that was in
     /// no input, which puts it nearer an import than a mutation (§17.4), and a
     /// corrupt solid is worse than a crash.
+    ///
+    /// **Only when the model was sound before the write.** [`Model::validate`]
+    /// sweeps everything, including the parts of the model the fuse never
+    /// looked at, and a caller can build a model that does not pass it — the
+    /// sweep runs at test and import boundaries, not after every mutation
+    /// (§4.3). Panicking there would report somebody else's broken solid, or
+    /// somebody else's dynamic range, as this fuse's bug. What the panic
+    /// promises is that a fuse handed a sound model leaves a sound one.
     pub(crate) fn commit(
         &self,
         model: &mut Model,
         inherited: Option<Approximation>,
         policy: &Policy,
     ) -> Written {
+        let was_sound =
+            cfg!(debug_assertions) && model.validate(policy, &mut ProvenanceLog::new()).is_ok();
+
         let approximation_before = model.worst_approximation();
         let written = self.write_into(model, &self.solids);
         let worst = self.tag_everything_it_built(model, &written, inherited);
         model.assert_approximation_did_not_grow(approximation_before.max(worst));
 
-        if cfg!(debug_assertions) {
+        if was_sound {
             model
                 .validate(policy, &mut ProvenanceLog::new())
                 .expect("a fuse writes a valid model or does not write at all");
