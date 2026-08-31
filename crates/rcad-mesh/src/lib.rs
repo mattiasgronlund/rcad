@@ -37,5 +37,7 @@
 #![forbid(unsafe_code)]
 
 mod domain;
+mod triangulate;
 
-pub use crate::domain::{Loop, TrimmedDomain};
+pub use crate::domain::{Loop, NotALoop, TrimmedDomain};
+pub use crate::triangulate::{CannotTriangulate, Patch, triangulate};

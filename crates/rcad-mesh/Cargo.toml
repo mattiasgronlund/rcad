@@ -15,6 +15,7 @@ repository.workspace = true
 [dependencies]
 rcad-geom.workspace = true
 rcad-predicates.workspace = true
+spade.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
