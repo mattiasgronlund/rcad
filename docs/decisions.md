@@ -3018,13 +3018,44 @@ the bound is actually about.
   more strongly than they held and are fixed, but neither was the load-bearing
   kind of wrong.
 
-### 18.7 The refusal rate moves, and it moves the right way
+### 18.7 The refusal rate does not move, and I had written that it would
 
-§1.7's exit criterion 8 and §15.8 both count refusals. This change certifies
-cases that previously came back `Undecidable`, so that number improves — a
-`1e-170` profile and a `1e200` tower now build and classify with empty logs, and
-the tests that pinned their refusals are inverted rather than deleted.
+*Corrected 2026-08-31, after measuring.*
 
-Recorded because a number that moves for a good reason still needs to be seen to
-move. Anyone comparing a refusal rate across this commit is comparing two
-different kernels.
+As first written this section was headed *"The refusal rate moves, and it moves
+the right way"*, and said the change "certifies cases that previously came back
+`Undecidable`, so that number improves". **Measured across `a23d73d`, it does
+not move at all.**
+
+| | before | after |
+|---|---|---|
+| Turned pairs, the headline family | 105 of 414 = **25.4%** | 105 of 414 = **25.4%** |
+| Lattice, sharing coordinates, elsewhere (controls) | 0 | 0 |
+
+Every refusal is `"side of plane"`, before and after; the catalogue table is
+identical row for row; no operation that succeeded now refuses; no answer
+changed value. The harness is `Tally` in
+`crates/rcad-topo/tests/fuses_that_must_agree.rs`, and it counts §15.8's number
+— per operation, `Err(Error::Undecidable)` only, under `Policy::certified()`.
+
+**The change is real; the corpus cannot see it.** Verified rather than assumed:
+copying `main`'s `when_it_cannot_tell.rs` into a worktree at the previous commit
+fails four tests, so `a23d73d` genuinely certifies cases its predecessor
+refused. None of them lie inside §1.7's corpus, which contains no coordinates
+anywhere near `1e-170` or `1e200`. The corpus is built from shapes at ordinary
+working sizes, which is what makes it a good corpus for its own purpose and
+blind to this one.
+
+**Two things worth carrying.** A delta of `0/414` bounds the corpus-level
+improvement near zero; it does **not** show the change is inert, and those are
+different statements. And §1.7's criterion 8 measures refusals over one corpus
+at one range of magnitudes — a kernel-wide "refusal rate" it is not, and nothing
+should quote it as one.
+
+**Why this correction is in the record rather than a quiet edit.** The claim
+that the number improves was written because it was obviously true — more cases
+certify, so fewer refuse. It is obviously true and it is not what the number
+does, because the number is over a corpus that never contained the cases. That
+is §16.10's shape exactly: a locally valid argument answering a subtly different
+question than the measurement asks. Written by the same head that wrote §16.10,
+in the same session, one commit after using it to find two panics.
