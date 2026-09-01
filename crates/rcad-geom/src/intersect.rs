@@ -1753,6 +1753,44 @@ mod tests {
         }
     }
 
+    /// §31.4 criterion 2, and the consumer §22.6 never had.
+    ///
+    /// Two solids flush against each other on one cylinder describe that
+    /// cylinder twice, and the two descriptions come off two different builders
+    /// with two different axis directions along one line. `Axis::new` used to
+    /// normalize what it was handed without reducing it first, so those two
+    /// stored different numbers, and then this pair of surfaces came back as two
+    /// pipes crossing rather than as one pipe — which is `Curves` where the
+    /// truth is `SameSurface`, and the ON columns of a fuse never fire.
+    #[test]
+    fn the_same_pipe_built_from_a_longer_axis_direction_is_the_same_pipe() {
+        for multiple in [2.0, 3.0, 5.0, 7.0, 11.0, 97.0] {
+            let met = crossing(
+                &a_pipe([1.0, 2.0, 3.0], [4.0, 0.0, -1.0], 2.0),
+                &a_pipe(
+                    [multiple, 2.0 * multiple, 3.0 * multiple],
+                    [4.0, 0.0, -1.0],
+                    2.0,
+                ),
+            );
+            assert_eq!(
+                met,
+                SurfaceMeet::SameSurface,
+                "one pipe, its direction named {multiple} times over"
+            );
+        }
+    }
+
+    /// The same pipe pointed the other way is still one pipe, and still not two.
+    #[test]
+    fn the_same_pipe_pointed_backwards_is_the_same_pipe() {
+        let met = crossing(
+            &a_pipe([1.0, 2.0, 3.0], [4.0, 0.0, -1.0], 2.0),
+            &a_pipe([-3.0, -6.0, -9.0], [4.0, 0.0, -1.0], 2.0),
+        );
+        assert_eq!(met, SurfaceMeet::SameSurface);
+    }
+
     #[test]
     fn two_parallel_planes_a_distance_apart_never_meet() {
         let met = crossing(
