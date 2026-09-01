@@ -154,9 +154,8 @@ impl PointsAlongACrossing {
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on the
 /// run pick both of the two arcs between its ends, or neither.
 ///
-/// [`Error::CrossingRunsToAQuartic`] for the two pairs the closed form does not
-/// name, and [`Error::Undecidable`] when the conic's own size could not be
-/// worked out because a product fell out of range.
+/// [`Error::Undecidable`] when the conic's own size could not be worked out
+/// because a product fell out of range.
 ///
 /// [`Error::AnEndOfARunNamesNoPlace`] when an end is neither the box that says
 /// nothing at all is known nor a box with a middle.
@@ -512,6 +511,17 @@ fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Su
 /// down to that too — through the radical plane, which is built **here** and not
 /// in the naming half, because it is only ever needed to work points out
 /// (§27.1).
+///
+/// # Panics
+///
+/// On a pair that crosses in a degree-four curve.
+/// [`a_crossing_that_runs_to_a_quartic`] matches exactly those three pairs and
+/// [`walk`] hands every one of them to the marcher before reaching here, so this
+/// is a broken invariant of this file and not something a caller can ask for.
+/// **It used to be a refusal**, `CrossingRunsToAQuartic`, and the claim audit
+/// found that the second stage had filled the arm and left the variant behind:
+/// a public refusal nothing could produce, whose own doc said the evaluator
+/// still raised it.
 fn the_conic_between(pair: [Surface; 2]) -> Result<Option<Conic>> {
     match pair {
         [Surface::Plane(_), Surface::Plane(_)] => Ok(None),
@@ -532,10 +542,10 @@ fn the_conic_between(pair: [Surface; 2]) -> Result<Option<Conic>> {
         [Surface::Sphere(one), Surface::Sphere(other)] => {
             where_two_balls_cut(&one, &other).map(Some)
         }
-        [first, second] => Err(Error::CrossingRunsToAQuartic {
-            first: name_of(&first),
-            second: name_of(&second),
-        }),
+        [first, second] => panic!(
+            "{first:?} and {second:?} cross in a quartic, so the marcher \
+             should already have this run"
+        ),
     }
 }
 
@@ -920,15 +930,6 @@ fn wrapped(angle: f64) -> f64 {
         inside + whole_turn
     } else {
         inside
-    }
-}
-
-/// What a surface is called in a refusal a person has to read.
-fn name_of(surface: &Surface) -> &'static str {
-    match surface {
-        Surface::Plane(_) => "plane",
-        Surface::Sphere(_) => "ball",
-        Surface::Cylinder(_) => "pipe",
     }
 }
 

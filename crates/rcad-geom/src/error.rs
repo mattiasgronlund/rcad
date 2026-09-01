@@ -234,25 +234,6 @@ pub enum Error {
         hi: f64,
     },
 
-    /// Two surfaces whose crossing is a degree-four space curve, which the
-    /// closed form does not name.
-    ///
-    /// Kept for the evaluator, which meets a quartic where no conic can stand in
-    /// for it and hands the run to the marcher instead. The naming half no
-    /// longer raises it: a ball against a pipe is named by §27.1's eighth-degree
-    /// discriminant, and two pipes are named as far as an enclosure reaches
-    /// (§29).
-    #[error(
-        "where a {first} and a {second} cross is a degree-four curve, which the closed form does \
-         not name"
-    )]
-    CrossingRunsToAQuartic {
-        /// What the first surface is.
-        first: &'static str,
-        /// What the second surface is.
-        second: &'static str,
-    },
-
     /// Two surfaces tangent along their crossing rather than at a point, so
     /// what they cross in is one curve that runs through itself.
     ///
