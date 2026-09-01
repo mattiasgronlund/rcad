@@ -48,7 +48,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, PlaneAgreement, Point, Surface};
+use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, PlaneAgreement, Point, Surface, Vector};
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
 };
@@ -1527,7 +1527,7 @@ impl Edges {
     /// filtering it out afterwards, so one reaching here means the splitter is
     /// wrong — and a *closed* side is not one, which is why the two ends being
     /// the same corner is checked against what carries it.
-    fn of(&mut self, meet: &FaceMeet, from: usize, to: usize) -> Side {
+    fn of(&mut self, meet: &FaceMeet, from: usize, to: usize, at: Point) -> Side {
         let (carried_by, along) = (meet.carried_by, meet.along.as_slice());
         assert!(
             from != to
@@ -1546,21 +1546,83 @@ impl Edges {
             });
             self.made.len() - 1
         });
-        // **Which way a face walks a *closed* edge is not something its two
-        // ends can say**, because they are one corner. What says it is which
-        // side of the partner the face's material is on: left of a crossing's
-        // forward direction is always the partner's negative side (§36.6). And
-        // "forward" is the direction of `∇S × ∇T` for *this* face's own surface
-        // `S`, which is the other way round for the face on the other side — so
-        // the sense is turned round for whichever of the two did not create the
-        // edge.
         let forward = if from == to {
-            let same_sense = self.made[edge].carried_by[0] == carried_by[0];
-            (meet.material_side == Decision::Neg) == same_sense
+            which_way_a_closed_edge_is_walked(meet, at)
         } else {
             self.made[edge].ends[0] == from
         };
         Side { edge, forward }
+    }
+}
+
+/// Whether a face walks a **closed** edge the way that edge is stored running.
+///
+/// Its two ends are one corner and say nothing, so two facts have to meet.
+///
+/// **Which way the wire runs in space** is which side of the partner the face's
+/// material is on: left of a crossing's forward direction `∇S × ∇T` is always
+/// the partner's negative side — `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by
+/// Cauchy–Schwarz, with no case analysis (§36.6).
+///
+/// **Which way the edge is stored running** is the way the longitude of the
+/// curved surface either side of it increases, which is the mesher's rule and is
+/// now canonical (§36.19). A surface's own longitude runs along `ẑ × ∇C` for
+/// `ẑ` the frame axis it is parametrised about, and only the *sign* of that
+/// against the crossing's direction is read here.
+///
+/// The two together are the answer, and the face's own orientation does not
+/// enter into it: a wire winds about the surface's stored normal whichever way
+/// round its solid uses the face, which is what `Model::validate` reads.
+fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> bool {
+    let [mine, partner] = meet.carried_by;
+    let along_the_crossing = gradient_of(&mine, at).cross(gradient_of(&partner, at));
+    let Some(curved) = the_curved_one_of(&meet.carried_by) else {
+        // Two planes cross in a straight line, which does not close, so nothing
+        // reaches here — and a wire with no curved surface either side of it has
+        // no longitude to run along.
+        return true;
+    };
+    let longitude = the_way_it_is_parametrised_about(&curved).cross(gradient_of(&curved, at));
+    let runs_along_stored = along_the_crossing.dot(longitude) > 0.0;
+    (meet.material_side == Decision::Neg) == runs_along_stored
+}
+
+/// Which of the two surfaces either side of an edge names which way it runs.
+fn the_curved_one_of(carried_by: &[Surface; 2]) -> Option<Surface> {
+    let mut curved: Vec<Surface> = carried_by
+        .iter()
+        .filter(|surface| surface.as_plane().is_none())
+        .copied()
+        .collect();
+    curved.sort_by_key(name_of_surface_bits);
+    curved.first().copied()
+}
+
+/// The axis a surface's own two coordinates are wound about.
+///
+/// A sphere is parametrised about the frame's own `z` — `Sphere::point_at` says
+/// so in its arithmetic — and a pipe about its stored axis direction. This is
+/// read only for the *sign* of a dot product, so nothing here is normalized.
+fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
+    match surface {
+        Surface::Sphere(_) => Vector::new(0.0, 0.0, 1.0),
+        Surface::Cylinder(pipe) => pipe.axis().direction(),
+        other => panic!("this crate cannot say what {other:?} is wound about"),
+    }
+}
+
+/// Which way a surface faces at a point, as a polynomial in the numbers it
+/// stores with no normalization in it (§31.2).
+fn gradient_of(surface: &Surface, at: Point) -> Vector {
+    match surface {
+        Surface::Plane(flat) => flat.normal(),
+        Surface::Sphere(ball) => at - ball.centre(),
+        Surface::Cylinder(pipe) => {
+            let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
+            let out = at - origin;
+            out * along.dot(along) - along * along.dot(out)
+        }
+        other => panic!("this crate cannot say which way {other:?} faces"),
     }
 }
 
@@ -1608,7 +1670,8 @@ fn sides_of(
     for meet in wire {
         let from = corners.of(model, &meet.ends[0]);
         let to = corners.of(model, &meet.ends[1]);
-        sides.push(edges.of(meet, from, to));
+        let at = middle_of(meet.ends[0].point());
+        sides.push(edges.of(meet, from, to, at));
     }
     if turned_round {
         sides.reverse();

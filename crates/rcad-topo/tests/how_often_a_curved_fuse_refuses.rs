@@ -158,7 +158,7 @@ fn how_each_fuse_went(family: Family) -> (usize, BTreeMap<String, usize>, usize)
 /// arrangement solved for have collapsed onto one.
 #[test]
 fn every_certified_fuse_of_a_lattice_curved_pair_is_decided_and_records_nothing() {
-    for family in [Family::Lattice, Family::AtAPowerOfTwo] {
+    for family in [Family::Lattice, Family::ABall, Family::AtAPowerOfTwo] {
         let (fuses, gave_up, recorded) = how_each_fuse_went(family);
         assert!(
             fuses > 300,
@@ -172,42 +172,6 @@ fn every_certified_fuse_of_a_lattice_curved_pair_is_decided_and_records_nothing(
         );
         assert_eq!(recorded, 0, "{}: recorded something", family.named());
     }
-}
-
-/// A ball cut by a plane is refused, by name, every time.
-///
-/// **The shape M4 does not reach**, and the reason is structural rather than
-/// arithmetic: a cap a plane cuts off a ball is bounded by one circle of
-/// latitude and by nothing else, and its patch in the sphere's own two
-/// coordinates is a rectangle whose top edge is the pole and whose two sides are
-/// one meridian used twice. The model says neither of those about the face, and
-/// a fuse has no way to invent either — a seam wants two corners at one
-/// longitude and a cap has one corner in all.
-///
-/// A **ring**, which is two curves each going right round, *is* cut across, and
-/// that is what a block with a round hole through it needs. The difference is
-/// that a ring has somewhere to cut *to*.
-///
-/// Asserted as a whole family rather than as one shape, because a refusal that
-/// only fires sometimes is a refusal somebody has to characterise (§14.7).
-#[test]
-fn a_ball_cut_by_a_plane_is_refused_by_name_rather_than_meshed_wrongly() {
-    let (fuses, gave_up, _) = how_each_fuse_went(Family::ABall);
-    assert!(fuses > 300, "only {fuses} fuses were drawn");
-    assert_eq!(
-        gave_up
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<&str>>()
-            .as_slice(),
-        ["a curved face is bounded by one curve right round it and has no seam to open at"],
-        "the ball family should refuse for exactly one reason, and it refused for {gave_up:?}"
-    );
-    assert_eq!(
-        gave_up.values().sum::<usize>(),
-        fuses,
-        "every one of them, not some of them"
-    );
 }
 
 /// The turned family, measured rather than judged against a number this file

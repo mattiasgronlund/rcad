@@ -93,6 +93,8 @@ mod select;
 pub use history::Fused;
 pub use select::Rule;
 
+pub(crate) use arrange::name_of_surface_bits;
+
 use arrange::{Piece, split_a_face};
 use assemble::assemble;
 use bake::{BakedSolid, bake};

@@ -1003,3 +1003,89 @@ fn a_block_with_a_round_hole_meshes_into_a_closed_surface() {
         }
     }
 }
+
+/// §31.7 criterion 13's other half: a **ball cut by a plane**, which is about
+/// the simplest curved boolean there is.
+///
+/// The answer is a spherical cap and the flat disk that closes it. The cap is
+/// bounded by one circle of latitude and by nothing else, so its patch in the
+/// sphere's own two coordinates is a rectangle whose top edge is the pole and
+/// whose two sides are one meridian — and the model says neither, because a fuse
+/// has no way to invent a seam or a pole step.
+///
+/// The volume has a closed form and it is the strongest thing to check: a cap of
+/// height `h` on a ball of radius `R` holds `πh²(3R − h)/3`, and a cap wound the
+/// wrong way would take its own volume off twice.
+#[test]
+fn a_ball_cut_by_a_plane_meshes_into_a_closed_surface() {
+    const RADIUS: f64 = 4.0;
+    // **Both poles, and that is the point of the table rather than tidiness.**
+    // Which pole a cap reaches is read off which way its one loop runs, and an
+    // arm that read it backwards would still mesh a *north* cap into a closed
+    // surface of the right volume — it would simply never be asked. The south
+    // rows are where getting it wrong does not cancel.
+    for (cut_at, keep_above, what) in [
+        (1.0, true, "the cap above a cut through the top"),
+        (-2.0, true, "the cap above a cut through the bottom"),
+        (1.0, false, "the cap below a cut through the top"),
+        (-2.0, false, "the cap below a cut through the bottom"),
+    ] {
+        let mut model = a_model();
+        let ball = model
+            .add_ball(RADIUS, &Isometry::identity())
+            .expect("a ball of radius four");
+        // A slab on one side of the cut plane, wide enough to hold the ball.
+        let block = model
+            .add_cube(20.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a block round it");
+        let below = if keep_above { cut_at } else { cut_at - 20.0 };
+        model.place_solid(
+            block,
+            &Isometry::translation(Vector::new(-10.0, -10.0, below)).expect("a shift"),
+        );
+
+        let mut log = ProvenanceLog::new();
+        let fused = model
+            .fuse(
+                &[ball],
+                &[block],
+                Rule::Intersection,
+                &Policy::certified(),
+                &mut log,
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        assert!(
+            log.records().is_empty(),
+            "{what}: nothing here had to be approximated, got {:?}",
+            log.records()
+        );
+
+        let solids = fused.solids();
+        assert_eq!(solids.len(), 1, "{what} is one solid");
+        let solid = solids[0];
+        let mesh = meshed(&model, solid, 0.02);
+        the_mesh_closes_up(&model, solid, &mesh, 0.02);
+
+        let height = if keep_above {
+            RADIUS - cut_at
+        } else {
+            RADIUS + cut_at
+        };
+        let should_be = core::f64::consts::PI * height * height * (3.0 * RADIUS - height) / 3.0;
+        let measured = model
+            .solid(solid)
+            .measure(
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what} measures: {why}"));
+        let out_by = (measured.volume() - should_be).abs();
+        assert!(
+            out_by < 0.01 * should_be,
+            "{what}: {} against the {should_be} a cap of height {height} on a ball of {RADIUS} \
+             comes to, which is {out_by} out",
+            measured.volume()
+        );
+    }
+}
