@@ -14,10 +14,10 @@ use rcad_predicates::{
 };
 use slotmap::SecondaryMap;
 
+use crate::holds::{the_side_this_face_lies_on, what_trims_this_face};
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
-use crate::holds::{the_side_this_face_lies_on, what_trims_this_face};
 use crate::view::{FaceView, SolidView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
 
@@ -1224,9 +1224,11 @@ mod tests {
             let mine = model.add_coedge(circle, Orientation::Forward);
             round_it.push(model.add_wire(smallvec::smallvec![mine]));
 
-            let flat =
-                Plane::from_point_and_normal(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0))
-                    .expect("the z axis is a unit normal");
+            let flat = Plane::from_point_and_normal(
+                Point::new(0.0, 0.0, height),
+                Vector::new(0.0, 0.0, 1.0),
+            )
+            .expect("the z axis is a unit normal");
             let theirs = model.add_coedge(circle, Orientation::Reversed);
             let wire = model.add_wire(smallvec::smallvec![theirs]);
             caps.push(model.add_face(Surface::Plane(flat), SmallVec::from_buf([wire])));
@@ -1250,10 +1252,7 @@ mod tests {
         }]));
 
         assert!(
-            matches!(
-                refusal(&model),
-                Invalid::AFaceStraddlesSomethingTrimmingIt
-            ),
+            matches!(refusal(&model), Invalid::AFaceStraddlesSomethingTrimmingIt),
             "got {:?}",
             refusal(&model)
         );

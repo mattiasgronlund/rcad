@@ -322,9 +322,8 @@ fn what_a_curved_face_holds(
         )? {
             return Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face: face.key() });
         }
-        let inwards = the_side_this_face_lies_on(face, &trimming)?.ok_or(
-            Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() },
-        )?;
+        let inwards = the_side_this_face_lies_on(face, &trimming)?
+            .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
         let side = side_of_surface(&trimming.surface, point);
         match side {
             Decision::Zero => on_its_boundary = true,
@@ -493,7 +492,11 @@ pub(crate) fn the_side_this_face_lies_on(
 ) -> Result<Option<Decision>> {
     let partner = &trimming.surface;
     let mut found: Option<Decision> = None;
-    for corner in face.wires().flat_map(WireView::coedges).map(CoedgeView::start) {
+    for corner in face
+        .wires()
+        .flat_map(WireView::coedges)
+        .map(CoedgeView::start)
+    {
         if trimming.corners_on_it.contains(&corner.key()) {
             continue;
         }
