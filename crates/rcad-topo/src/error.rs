@@ -132,6 +132,118 @@ pub enum Error {
     #[error("the fuse needs every face to be flat, and one of these solids has a curved one")]
     FuseNeedsFlatFaces,
 
+    /// One face of a solid could not be cut into triangles.
+    ///
+    /// Carries what the triangulator said. Most of those are about the
+    /// *request*: this deflection needs more triangles than one patch will
+    /// hold, or the loops handed over are not loops. The fix is a coarser mesh,
+    /// or a sounder solid.
+    ///
+    /// Two of them are not about the request, and are reached from here only by
+    /// a solid whose own numbers are extreme.
+    /// [`CannotTriangulate::CoordinateOutOfRange`] is a triangulation that takes
+    /// a narrower range than `f64`, and
+    /// [`CannotTriangulate::NoMeshCanGetThatCloseToTheSurface`] is the floor
+    /// [`Error::DeflectionBelowWhatAMeshCanReach`] normally catches first,
+    /// arriving here in the hair's breadth above it where one face rounds a
+    /// little worse than the solid does.
+    ///
+    /// [`CannotTriangulate::CoordinateOutOfRange`]: rcad_mesh::CannotTriangulate::CoordinateOutOfRange
+    /// [`CannotTriangulate::NoMeshCanGetThatCloseToTheSurface`]: rcad_mesh::CannotTriangulate::NoMeshCanGetThatCloseToTheSurface
+    #[error("a face of this solid could not be cut into triangles: {why}")]
+    CannotMeshAFace {
+        /// Which face.
+        face: crate::FaceKey,
+        /// What the triangulator said about it.
+        why: rcad_mesh::CannotTriangulate,
+    },
+
+    /// The deflection asks for a mesh closer to the surfaces than a point of one
+    /// can be placed.
+    ///
+    /// A point on a curved surface comes out of an evaluator that rounds, and is
+    /// then carried into place by the solid's own placement, which rounds again.
+    /// A mesh made of those points is no nearer the surface than they are, so a
+    /// deflection under that is not a request for more triangles: it is a
+    /// request for arithmetic `f64` does not have. The answer does not exist,
+    /// which makes this a *limit* and not a §16.10 gap.
+    ///
+    /// **The floor depends on where the solid sits and not only on how big it
+    /// is**, because both roundings are charged against how far out the surface
+    /// reaches. The same ball a kilometre from the origin cannot be meshed as
+    /// finely as one at the origin.
+    ///
+    /// **And a scaling reaches it, in the one direction §18 allows.** The floor
+    /// is a fixed multiple of the solid's own coordinates, so shrinking the
+    /// whole model shrinks the floor in exact step: what is refused is an
+    /// absolute deflection under the spacing of the `f64` grid where the solid
+    /// sits, and never a *relative* one. A point cannot be put between two
+    /// neighbouring `f64`s by reordering the arithmetic, by rescaling it, or by
+    /// summing it exactly, so the family of fixes is empty rather than
+    /// unexamined.
+    #[error(
+        "no mesh of this solid gets closer than {closest} to it, and the deflection asks {asked}"
+    )]
+    DeflectionBelowWhatAMeshCanReach {
+        /// What was asked for, in the model's own unit.
+        asked: f64,
+        /// The closest a mesh of this solid can be, in the same unit.
+        closest: f64,
+    },
+
+    /// A wire round a face will not lie flat in that face's own two
+    /// coordinates.
+    ///
+    /// Two ways one can fail to. It can come back to a different longitude from
+    /// the one it set off at, so the loop handed to the triangulator would not
+    /// close; or it can stand still at a pole on a surface that does not pinch
+    /// to one, which a plane never does.
+    ///
+    /// **A refusal and not an assert**, and the difference is
+    /// [`Model`](crate::Model)'s `Deserialize`. Neither shape is one a builder
+    /// here makes, and neither is one anything earlier in
+    /// [`Model::validate`](crate::Model::validate) looks at: a ball missing one
+    /// of its two pole steps is three wire steps that close up as topology, and
+    /// a flat face with a pole tacked onto its wire winds exactly as it did
+    /// before. A panic is the wrong answer to a caller's bytes (§4.1).
+    #[error("a wire of this face will not lie flat in the face's own two coordinates")]
+    AWireWillNotLieFlatOnItsFace {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// A curved face with a hole in it goes too far round its surface to be cut
+    /// into triangles in one piece.
+    ///
+    /// A face that goes more than a quarter turn round is cut into pieces first,
+    /// or every triangle in it would be stretched from one side of the seam to
+    /// the other and have no area at all. Cutting a face that has a hole would
+    /// have to say which piece the hole ends up in, and nothing does.
+    ///
+    /// **A refusal about the solid and not about the request**, and no deflection
+    /// avoids it. Nothing this kernel *builds* is such a face — the two builders
+    /// that make a curved one give it a single wire — but [`Model`](crate::Model)
+    /// is `Deserialize`, so one can arrive from a file, and a panic is the wrong
+    /// answer to a caller's bytes (decisions.md §4.1).
+    #[error("a curved face with a hole in it goes too far round its surface to be meshed")]
+    CurvedFaceWithAHoleGoesTooFarRound {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Walking this solid's boundaries at this deflection needs more points than
+    /// one mesh will hold.
+    ///
+    /// Counted as the walk goes, so this is a refusal rather than a wait.
+    /// `rcad-mesh` draws the same line one patch at a time, and this one is
+    /// needed as well, because the boundaries are walked before any patch is
+    /// handed over.
+    #[error("this deflection needs more than {most} points for one solid")]
+    MoreMeshPointsThanASolidWillHold {
+        /// How many points one mesh will hold.
+        most: usize,
+    },
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the
@@ -246,6 +358,18 @@ pub enum Invalid {
         /// The volume that came out of the divergence-theorem sum.
         volume: f64,
     },
+
+    /// Two faces meeting along an edge do not agree which way they face, so the
+    /// solid's skin does not close up.
+    ///
+    /// This is what catches a round cap put on back to front, and it is the
+    /// only thing that can. A cap's boundary is one closed edge and one corner,
+    /// so there is no polygon to wind and the winding check has nothing to ask;
+    /// a *tessellated* cap does have one, and a cap facing the wrong way sends
+    /// its triangles round the shared circle the same way as the wall's instead
+    /// of the opposite way (decisions.md §23.9, §23.4).
+    #[error("two faces of this solid meet along an edge without agreeing which way they face")]
+    FacesDoNotAgreeWhichWayTheyFace,
 
     /// Something in the model is not used by anything above it.
     #[error("a {entity} is not used by anything")]

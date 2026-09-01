@@ -104,7 +104,7 @@ use proptest::prelude::*;
 use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
 };
-use rcad_geom::{Plane, Point, Vector};
+use rcad_geom::{Deflection, Plane, Point, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
@@ -1602,7 +1602,11 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         .map(|&solid| {
             model
                 .solid(solid)
-                .measure()
+                .measure(
+                    a_deflection(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
                 .expect("a solid this size measures")
                 .volume()
         })
@@ -1618,7 +1622,13 @@ fn invariants_of(model: &Model, solids: &[SolidKey]) -> Vec<Measured> {
         .iter()
         .map(|&solid| {
             let solid = model.solid(solid);
-            let measure = solid.measure().expect("a solid this size measures");
+            let measure = solid
+                .measure(
+                    a_deflection(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a solid this size measures");
             Measured {
                 volume: measure.volume(),
                 surface_area: measure.surface_area(),
@@ -1823,4 +1833,13 @@ fn bits(number: f64) -> u64 {
     } else {
         number.to_bits()
     }
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

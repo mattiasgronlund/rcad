@@ -139,12 +139,12 @@ fn a_face_broken_into_triangles_covers_its_whole_area() {
 }
 
 #[test]
-fn a_solid_knows_the_box_it_fits_in() {
+fn a_cube_fits_inside_the_box_round_its_own_corners() {
     let (model, cube) = a_cube_of_side_two();
 
     let (low, high) = model
         .solid(cube)
-        .bounding_box()
+        .box_around_its_corners()
         .expect("a cube has corners");
 
     assert_eq!(low, Point::new(0.0, 0.0, 0.0));

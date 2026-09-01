@@ -1,0 +1,701 @@
+//! Cutting a whole solid into triangles, and the one oracle that says it worked.
+//!
+//! `docs/decisions.md` §23.4: *"The oracle is combinatorial rather than metric —
+//! every mesh edge used by exactly two triangles with opposite orientation, and
+//! χ of the mesh equal to χ of the solid — which is a sharper claim than 'the
+//! gaps are small'."* That is [`the_mesh_closes_up`], and every test here runs
+//! it. There is no distance anywhere in it.
+//!
+//! The flat solids come first on purpose. A cube and the notched extrusions the
+//! rest of the suite already trusts are shapes this kernel has been right about
+//! since M0, so if the oracle fails on one of those it is the oracle that is
+//! wrong — and it also gives `mesh` a consumer that leans on none of M2's new
+//! curved machinery.
+
+use std::collections::{HashMap, HashSet};
+
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
+use rcad_predicates::{Cause, Policy, ProvenanceLog};
+use rcad_topo::{Error, Mesh, Model, ProfileBuilder, SolidKey};
+
+const RADIUS: f64 = 3.0;
+const HEIGHT: f64 = 5.0;
+
+fn a_model() -> Model {
+    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
+}
+
+fn meshed(model: &Model, solid: SolidKey, deflection: f64) -> Mesh {
+    let mut log = ProvenanceLog::new();
+    let mesh = model
+        .solid(solid)
+        .mesh(
+            Deflection::of(deflection).expect("a positive length"),
+            &Policy::certified(),
+            &mut log,
+        )
+        .unwrap_or_else(|why| panic!("meshing at a deflection of {deflection}: {why}"));
+    assert!(
+        log.is_empty(),
+        "nothing about this mesh had to go unsettled, got {:?}",
+        log.records()
+    );
+    the_mesh_closes_up(model, solid, &mesh, deflection);
+    mesh
+}
+
+/// §23.4's oracle, in full, with no distance in it.
+///
+/// Four claims, and every one of them is about **indices**:
+///
+/// 1. Every side of every triangle is used the same number of times each way
+///    round. That is watertightness: a side used once is a hole, and a side used
+///    twice the same way is a fold. It is a **balance** and not the count §23.4
+///    asks for — a side used four times, twice each way, would pass — and it is
+///    the balance because that is what makes "twice the same way round" a
+///    failure, and because no input the kernel can build fails the count without
+///    also failing this.
+/// 2. χ of the mesh is χ of the solid. Closing up the holes is not enough on its
+///    own — a mesh that covered the ball twice over would pass the first check
+///    and fail this one.
+/// 3. No two entries of the point table are the same place. If the two faces
+///    along an edge had each worked its points out for themselves they would
+///    either land apart, which check 1 catches, or land together, which only
+///    this catches. It is what "bit for bit" (§23.4) means as a test.
+/// 4. Every triangle names a face this solid actually has, no triangle stands on
+///    one point twice, and no point is in the table without being in a triangle.
+fn the_mesh_closes_up(model: &Model, solid: SolidKey, mesh: &Mesh, deflection: f64) {
+    let faces: HashSet<_> = model.solid(solid).faces().map(|face| face.key()).collect();
+    let mut times_used: HashMap<(u32, u32), i32> = HashMap::new();
+    for triangle in mesh.triangles() {
+        assert!(
+            faces.contains(&triangle.face()),
+            "a triangle names a face this solid does not have"
+        );
+        let [first, second, third] = triangle.corners();
+        assert!(
+            first != second && second != third && third != first,
+            "the triangle {:?} stands on one point twice",
+            triangle.corners()
+        );
+        for (from, to) in [(first, second), (second, third), (third, first)] {
+            let side = (from.min(to), from.max(to));
+            *times_used.entry(side).or_default() += if from < to { 1 } else { -1 };
+        }
+    }
+
+    for (side, balance) in &times_used {
+        assert_eq!(
+            *balance, 0,
+            "the side between points {side:?} is used {balance} more times one \
+             way round than the other, so the mesh is not closed"
+        );
+    }
+
+    let corners: HashSet<u32> = mesh
+        .triangles()
+        .iter()
+        .flat_map(|triangle| triangle.corners())
+        .collect();
+    let of_the_mesh =
+        corners.len() as i64 - times_used.len() as i64 + mesh.triangles().len() as i64;
+    assert_eq!(
+        of_the_mesh,
+        euler_characteristic_of(model, solid),
+        "the mesh has {} points, {} sides and {} triangles",
+        corners.len(),
+        times_used.len(),
+        mesh.triangles().len()
+    );
+
+    let mut somewhere: HashMap<[u64; 3], u32> = HashMap::new();
+    for (at, point) in mesh.points().iter().enumerate() {
+        let at = at as u32;
+        let bits = point.coordinates().map(f64::to_bits);
+        if let Some(already) = somewhere.insert(bits, at) {
+            panic!("points {already} and {at} are both at {point:?}");
+        }
+        assert!(
+            corners.contains(&at),
+            "point {at} is in the table and in no triangle"
+        );
+    }
+
+    assert!(
+        mesh.deviation().magnitude() <= deflection,
+        "the mesh strays {} and was asked for {deflection}",
+        mesh.deviation().magnitude()
+    );
+    assert_eq!(mesh.deviation().cause(), Cause::FlatStandIn);
+}
+
+/// χ of the solid, counted off its own entities — and **not** the naive
+/// `V − E + F`, which is wrong here in two different ways.
+///
+/// `V − E + F` counts a *face* as a disc, and two of the shapes this kernel
+/// builds have faces that are not.
+///
+/// - **A face with a hole in it.** A plate with a square hole through it has 16
+///   corners, 24 edges and 10 faces, and the naive sum is 2 — the answer for a
+///   ball. The plate is a ring: its two flat sides are each a disc with a disc
+///   taken out, worth nothing rather than one, and the true answer is 0. So a
+///   face is worth `2 − wires`, which is 1 for the usual one-wire face.
+/// - **A pole.** A ball's one face is bounded by four wire steps, and two of
+///   them go nowhere at all. Counting them as edges gives `2 − 3 + 1 = 0` for a
+///   shape whose χ is 2. A pole is not an edge (§23.3), it is where the surface
+///   pinches — so it adds nothing to the count, which is exactly what walking
+///   the wire's *coedges* does.
+///
+/// A seam is not a third wrinkle: an edge used twice by one face is still one
+/// edge, and counting the entities rather than the uses gets that right for
+/// free.
+fn euler_characteristic_of(model: &Model, solid: SolidKey) -> i64 {
+    let mut corners = HashSet::new();
+    let mut edges = HashSet::new();
+    let mut faces = 0_i64;
+    for face in model.solid(solid).faces() {
+        faces += 2 - face.wire_count() as i64;
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                edges.insert(coedge.edge().key());
+                corners.insert(coedge.start().key());
+                corners.insert(coedge.end().key());
+            }
+        }
+    }
+    corners.len() as i64 - edges.len() as i64 + faces
+}
+
+/// The control the rest of the file leans on: a shape the kernel has been right
+/// about since M0, meshed without one line of M2's curved machinery.
+///
+/// Its mesh is the fan it already had — every point is a corner of the model, so
+/// there is nothing here that stands in for a curve and the deviation is exactly
+/// zero rather than merely small.
+#[test]
+fn a_cube_meshes_into_the_corners_it_already_had() {
+    let mut model = a_model();
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
+
+    let mesh = meshed(&model, cube, 0.1);
+    assert_eq!(
+        mesh.points().len(),
+        8,
+        "a cube has eight corners and no more"
+    );
+    assert_eq!(mesh.triangles().len(), 12, "two triangles a side");
+    assert_eq!(
+        mesh.deviation().magnitude(),
+        0.0,
+        "a flat triangle standing in for a flat surface stands in for nothing"
+    );
+    assert_eq!(euler_characteristic_of(&model, cube), 2);
+}
+
+/// A notched outline and a plate with a hole, which the fuse suite already
+/// builds — and the plate is the one that made the oracle wrong the first time.
+///
+/// A plate with a square hole through it is a **ring**, and its χ is 0. Read off
+/// its entities as `V − E + F` it comes out 2, because that sum counts the two
+/// flat sides as discs and they are not. See [`euler_characteristic_of`].
+#[test]
+fn the_extrusions_the_suite_already_trusts_mesh_into_closed_surfaces() {
+    let mut model = a_model();
+    let notched = ProfileBuilder::new(vec![
+        [0.0, 0.0],
+        [4.0, 0.0],
+        [4.0, 2.0],
+        [2.0, 2.0],
+        [2.0, 4.0],
+        [0.0, 4.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("an L");
+    let ell = model
+        .add_extrusion(&notched, 1.5, &Isometry::identity())
+        .expect("an L one and a half thick");
+
+    let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+        .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a hole");
+    let ring = model
+        .add_extrusion(&plate, 3.0, &Isometry::identity())
+        .expect("a plate three thick");
+
+    assert_eq!(euler_characteristic_of(&model, ell), 2, "an L is a ball");
+    assert_eq!(
+        euler_characteristic_of(&model, ring),
+        0,
+        "a plate with a hole through it is a ring"
+    );
+    for solid in [ell, ring] {
+        let mesh = meshed(&model, solid, 0.1);
+        assert_eq!(mesh.deviation().magnitude(), 0.0);
+    }
+}
+
+fn a_round_bar(model: &mut Model, placement: &Isometry) -> SolidKey {
+    model
+        .add_round_bar(RADIUS, HEIGHT, placement)
+        .expect("a bar three across and five tall")
+}
+
+fn a_ball(model: &mut Model, placement: &Isometry) -> SolidKey {
+    model
+        .add_ball(RADIUS, placement)
+        .expect("a ball of radius three")
+}
+
+/// A seam used twice by one face, two closed cap edges, and a cylinder.
+#[test]
+fn a_round_bar_meshes_into_a_closed_surface() {
+    let mut model = a_model();
+    let bar = a_round_bar(&mut model, &Isometry::identity());
+    assert_eq!(euler_characteristic_of(&model, bar), 2);
+
+    let mesh = meshed(&model, bar, 0.1);
+    assert!(
+        mesh.deviation().magnitude() > 0.0,
+        "a flat triangle standing in for a cylinder stands in for something"
+    );
+    for point in mesh.points() {
+        let across = point.x().hypot(point.y());
+        assert!(
+            across <= RADIUS + 1e-9 && (0.0..=HEIGHT).contains(&point.z()),
+            "the mesh point {point:?} is not on the bar"
+        );
+    }
+}
+
+/// One face, one seam and two poles, which is every structure a ball has.
+///
+/// χ of a ball is 2, and its entity counts say so: two corners, one edge, one
+/// face — because the two wire steps that go nowhere are poles and a pole is not
+/// an edge.
+#[test]
+fn a_ball_meshes_into_a_closed_surface() {
+    let mut model = a_model();
+    let ball = a_ball(&mut model, &Isometry::identity());
+    assert_eq!(model.vertex_count(), 2);
+    assert_eq!(model.edge_count(), 1);
+    assert_eq!(euler_characteristic_of(&model, ball), 2);
+
+    let mesh = meshed(&model, ball, 0.1);
+    for point in mesh.points() {
+        assert!(
+            (point.distance_to(Point::origin()) - RADIUS).abs() < 1e-9,
+            "the mesh point {point:?} is not on the ball"
+        );
+    }
+}
+
+/// §23.4's promise, checked where it is made rather than through the oracle.
+///
+/// The wall of a bar and the cap next to it meet along one closed edge. Every
+/// point along it belongs to both, and they are the **same entries** of the one
+/// point table — not two entries that happen to hold the same number, which is
+/// what [`the_mesh_closes_up`]'s third claim rules out for the whole mesh at
+/// once.
+#[test]
+fn an_edges_points_are_worked_out_once_and_both_faces_along_it_name_the_same_ones() {
+    let mut model = a_model();
+    let bar = a_round_bar(&mut model, &Isometry::identity());
+    let mesh = meshed(&model, bar, 0.1);
+
+    let mut used_by: HashMap<_, HashSet<u32>> = HashMap::new();
+    for triangle in mesh.triangles() {
+        used_by
+            .entry(triangle.face())
+            .or_default()
+            .extend(triangle.corners());
+    }
+    assert_eq!(used_by.len(), 3, "a bar has three faces");
+
+    let wall = model
+        .solid(bar)
+        .faces()
+        .find(|face| face.surface().as_plane().is_none())
+        .expect("the bar has a wall");
+    let caps: Vec<_> = used_by
+        .iter()
+        .filter(|(face, _)| **face != wall.key())
+        .map(|(_, points)| points)
+        .collect();
+
+    for cap in &caps {
+        let shared: HashSet<_> = cap.intersection(&used_by[&wall.key()]).copied().collect();
+        assert_eq!(
+            shared.len(),
+            cap.len(),
+            "every corner of a cap is on the circle it shares with the wall"
+        );
+        assert!(shared.len() >= 3, "a cap circle is more than a triangle");
+    }
+
+    // And the two caps are the two ends: nothing at all in common.
+    assert!(caps[0].is_disjoint(caps[1]));
+}
+
+/// A coarse deflection is a request and not a failure (§23.5), so a coarse mesh
+/// has to pass the same oracle a fine one does.
+///
+/// The coarse end is where it is most likely to break: a bar meshed to a
+/// deflection wider than its own radius comes out as a few flat plates, and a
+/// ball as a handful of triangles with a pole in each. It goes out to a
+/// deflection a hundred thousand times the solid, because the claim audit found
+/// a ball coming back with no triangles at all past about `6.6 · radius` and the
+/// grid stopped short of it.
+#[test]
+fn a_coarse_mesh_closes_up_just_as_a_fine_one_does() {
+    let mut model = a_model();
+    let bar = a_round_bar(&mut model, &Isometry::identity());
+    let ball = a_ball(&mut model, &Isometry::identity());
+
+    let mut coarsest = 0;
+    for deflection in [1e6, 100.0, 20.0, 4.0, 2.0, 1.0, 0.5, 0.2, 0.05, 0.01] {
+        for solid in [bar, ball] {
+            let mesh = meshed(&model, solid, deflection);
+            if deflection == 1e6 {
+                coarsest = coarsest.max(mesh.triangles().len());
+            }
+        }
+    }
+    assert!(
+        coarsest < 64,
+        "a deflection wider than the solid should give a handful of triangles, \
+         and gave {coarsest}"
+    );
+}
+
+/// A rough picture of a ball is a rough ball, and never nothing at all.
+///
+/// **The fourth of §23.8's silent wrong answers, found by the claim audit.** A
+/// ball's one face is a rectangle in `(u, v)` whose top and bottom sides are
+/// each a single point in space. The mesher sized a step by how far it went
+/// round in *longitude*, and a step from pole to pole goes half a turn in
+/// latitude and none at all in longitude — so past a deflection of about
+/// `6.6 · radius` the seam came back one step long, every triangle of the
+/// rectangle stood on one point twice, every one was dropped (§25.6), and
+/// `mesh` handed back **two points and no triangles** with a deviation on it
+/// that looked perfectly honest. `measure` then died on its own
+/// `six_volumes > 0.0`, which is §25.5's defect a second time.
+///
+/// The floor is now the same quarter turn in either direction, so the coarsest
+/// mesh of a ball there is is an octahedron.
+#[test]
+fn a_ball_asked_for_a_rough_picture_gets_a_rough_ball_and_not_an_empty_mesh() {
+    let mut model = a_model();
+    let ball = a_ball(&mut model, &Isometry::identity());
+    for deflection in [7.0 * RADIUS, 100.0 * RADIUS, 1e12] {
+        let mesh = meshed(&model, ball, deflection);
+        assert!(
+            mesh.triangles().len() >= 8,
+            "a ball at a deflection of {deflection} came back with {} triangles",
+            mesh.triangles().len()
+        );
+        let measured = model
+            .solid(ball)
+            .measure(
+                Deflection::of(deflection).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a ball still weighs something");
+        assert!(
+            measured.volume() > 0.0,
+            "a ball at a deflection of {deflection} weighs {}",
+            measured.volume()
+        );
+    }
+}
+
+fn a_third_of_a_turn_about_a_slanted_axis() -> Isometry {
+    let axis = Axis::new(Point::new(0.5, -1.5, 2.0), Vector::new(1.0, 1.0, 1.0))
+        .expect("a direction with length");
+    Isometry::rotation(&axis, core::f64::consts::TAU / 3.0).expect("a rotation")
+}
+
+/// §18 and §19 for meshes: a solid that has been moved and turned is still the
+/// solid it was, and still meshes into a closed surface.
+///
+/// **A turned ball is the case that decides how this is built.**
+/// `Sphere::transformed` under a turn about the centre moves nothing, so a
+/// turned ball's seam is not a line of constant longitude of the turned sphere's
+/// own coordinates and its face is not a rectangle in them. Meshed there it
+/// would come back with holes where the coordinates pinch. `mesh` cuts a face up
+/// in the frame it is stored in and moves the points afterwards, and this is
+/// what says so.
+#[test]
+fn a_bar_and_a_ball_moved_and_turned_still_mesh_into_closed_surfaces() {
+    let placements = [
+        Isometry::identity(),
+        Isometry::translation(Vector::new(17.5, -3.25, 1000.0)).expect("a shift"),
+        a_third_of_a_turn_about_a_slanted_axis(),
+        a_third_of_a_turn_about_a_slanted_axis()
+            .compose(&Isometry::translation(Vector::new(-40.0, 8.0, 0.0)).expect("a shift")),
+    ];
+    for placement in &placements {
+        let mut model = a_model();
+        let bar = a_round_bar(&mut model, placement);
+        let ball = a_ball(&mut model, placement);
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a placed bar and ball are sound");
+
+        for (solid, what) in [(bar, "bar"), (ball, "ball")] {
+            let mesh = meshed(&model, solid, 0.1);
+            assert!(
+                !mesh.triangles().is_empty(),
+                "the {what} at {placement:?} meshed into nothing at all"
+            );
+        }
+
+        // A ball's skin is the one thing a turn cannot change: every point of
+        // the mesh is a radius from where the centre ended up.
+        let centre = placement.apply_to_point(Point::origin());
+        for point in meshed(&model, ball, 0.1).points() {
+            assert!(
+                (point.distance_to(centre) - RADIUS).abs() < 1e-9,
+                "the mesh point {point:?} is not on the turned ball"
+            );
+        }
+    }
+}
+
+/// A ball is cut open along the meridian its seam really lies in.
+///
+/// A seam with a pole at each end has no longitude its own ends can give — every
+/// longitude names a pole — so `mesh` walks it at longitude zero, which is where
+/// `add_ball` puts it: `y = 0` with `x ≥ 0`. This is the test that says the walk
+/// lands on the model's own seam and not on some other meridian of the right
+/// ball, and it is the only thing that would notice.
+#[test]
+fn the_seam_a_balls_mesh_is_cut_along_is_the_seam_the_model_has() {
+    let mut model = a_model();
+    let ball = a_ball(&mut model, &Isometry::identity());
+    let mesh = meshed(&model, ball, 0.1);
+
+    let on_the_meridian: Vec<_> = mesh
+        .points()
+        .iter()
+        .filter(|point| point.y() == 0.0 && point.x() != 0.0)
+        .collect();
+    assert!(
+        !on_the_meridian.is_empty(),
+        "no point of this mesh is on the plane the seam lies in"
+    );
+    for point in &on_the_meridian {
+        assert!(
+            point.x() > 0.0,
+            "the mesh is cut along the far half of the meridian at {point:?}, \
+             and the seam is the half with x >= 0"
+        );
+    }
+}
+
+/// The mesher's order is fixed, so two runs are the same run (§25.7).
+///
+/// §9.2's benchmark compares a serial run against a parallel one bit for bit,
+/// and every sum built on a shuffled mesh would come out different.
+#[test]
+fn meshing_the_same_solid_twice_gives_the_same_mesh() {
+    let mut model = a_model();
+    let ball = a_ball(&mut model, &a_third_of_a_turn_about_a_slanted_axis());
+    assert_eq!(meshed(&model, ball, 0.1), meshed(&model, ball, 0.1));
+}
+
+/// Every triangle says which face it stands in for, and between them they cover
+/// every face the solid has (§25.7).
+#[test]
+fn every_triangle_names_the_face_it_came_from() {
+    let mut model = a_model();
+    let bar = a_round_bar(&mut model, &Isometry::identity());
+    let mesh = meshed(&model, bar, 0.1);
+
+    let covered: HashSet<_> = mesh
+        .triangles()
+        .iter()
+        .map(|triangle| triangle.face())
+        .collect();
+    let has: HashSet<_> = model.solid(bar).faces().map(|face| face.key()).collect();
+    assert_eq!(covered, has, "every face is stood in for and no other");
+}
+
+/// §19 again, and the part of it that is a refusal rather than an answer.
+///
+/// A mesh point is put on the surface by an evaluator that rounds against how
+/// far out the surface reaches, and is then carried into place by the solid's
+/// own placement, which rounds against the same thing. So the floor under a
+/// deflection is a fact about **where the solid sits**: the same ball a billion
+/// units out cannot be meshed as finely as one at the origin, and the two ends
+/// of this test are the same ball asked the same question.
+#[test]
+fn a_ball_a_long_way_out_cannot_be_meshed_as_finely_as_one_at_the_origin() {
+    let asked = 1e-3;
+    let mut model = a_model();
+    let near = model
+        .add_ball(1.0, &Isometry::identity())
+        .expect("a unit ball at the origin");
+    let far = model
+        .add_ball(
+            1.0,
+            &Isometry::translation(Vector::new(1e12, 0.0, 0.0)).expect("a long way"),
+        )
+        .expect("a unit ball a long way out");
+
+    let refusal = model.solid(far).mesh(
+        Deflection::of(asked).expect("a length"),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let Err(Error::DeflectionBelowWhatAMeshCanReach { closest, .. }) = refusal else {
+        panic!("a ball a billion out meshed to {asked}: {refusal:?}")
+    };
+    assert!(
+        closest > asked && closest < 1.0,
+        "the floor that far out came to {closest}"
+    );
+
+    // The control: the same ball at the origin, the same question, an answer.
+    let mesh = model
+        .solid(near)
+        .mesh(
+            Deflection::of(asked).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a unit ball at the origin meshes this finely");
+    assert!(mesh.deviation().magnitude() <= asked);
+}
+
+/// §23.5's one job for the policy: what happens when the deviation cannot be
+/// *proven* under the deflection asked for. Certified refuses; tolerant tags.
+///
+/// The tolerant caller has already said how far out of place it will let a point
+/// be, and here the floor is inside that. So it gets the finest mesh the
+/// arithmetic reaches, with [`Mesh::deviation`] saying what that came to — which
+/// is wider than it asked for, and it is the tag that makes that honest rather
+/// than a quiet miss.
+#[test]
+fn a_tolerant_caller_gets_the_finest_mesh_the_arithmetic_reaches() {
+    let asked = 1e-7;
+    let mut model = a_model();
+    let bar = model
+        .add_round_bar(
+            1.0,
+            0.01,
+            &Isometry::translation(Vector::new(1e9, 0.0, 0.0)).expect("a long way"),
+        )
+        .expect("a thin bar a long way out");
+    let deflection = Deflection::of(asked).expect("a length");
+
+    assert!(
+        matches!(
+            model
+                .solid(bar)
+                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new()),
+            Err(Error::DeflectionBelowWhatAMeshCanReach { .. })
+        ),
+        "a certified caller is refused a deflection under the floor"
+    );
+
+    let mesh = model
+        .solid(bar)
+        .mesh(
+            deflection,
+            &Policy::tolerant(1e9),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a tolerant caller gets what the arithmetic reaches");
+    assert!(
+        mesh.deviation().magnitude() > asked,
+        "a tolerant mesh under the floor strays further than it was asked to, \
+         and this one says it strays {}",
+        mesh.deviation().magnitude()
+    );
+    assert_eq!(mesh.deviation().cause(), Cause::FlatStandIn);
+    the_mesh_closes_up(&model, bar, &mesh, mesh.deviation().magnitude());
+}
+
+/// A request for more points than a mesh will hold is refused rather than
+/// waited out (§25.3).
+///
+/// Counted before the points are made, so this comes back at once. Above the
+/// floor, so it is not the refusal the test before this one is about.
+#[test]
+fn a_deflection_needing_more_points_than_a_mesh_holds_is_refused() {
+    let mut model = a_model();
+    let ball = model
+        .add_ball(1.0, &Isometry::identity())
+        .expect("a unit ball");
+
+    let refusal = model.solid(ball).mesh(
+        Deflection::of(1e-13).expect("a length"),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(refusal, Err(Error::MoreMeshPointsThanASolidWillHold { .. })),
+        "a ball meshed to a tenth of a picometre gave {refusal:?}"
+    );
+}
+
+/// The oracle over a grid rather than over one shape: every size, every
+/// coarseness, every placement.
+///
+/// `docs/decisions.md` §13 rule 5 wants a generator whose shapes are not the
+/// ones any other lane draws, and this one is a bar and a ball across four
+/// orders of magnitude of size and from a deflection a thousand times the solid
+/// down to a fiftieth of it. Both refusals below are honest — a request for more
+/// points than a mesh will hold, and a deflection under what a point can be
+/// placed to — so a refusal counts as a pass and only a wrong answer does not.
+#[test]
+fn every_size_of_bar_and_ball_at_every_coarseness_meshes_into_a_closed_surface() {
+    let placements = [
+        Isometry::identity(),
+        a_third_of_a_turn_about_a_slanted_axis(),
+        Isometry::translation(Vector::new(250.0, -80.0, 12.5)).expect("a shift"),
+        Isometry::rotation(&Axis::x(), 0.7)
+            .expect("a turn")
+            .compose(&Isometry::translation(Vector::new(-13.0, 4.0, 9.0)).expect("a shift")),
+    ];
+    let mut checked = 0;
+    for placement in &placements {
+        for radius in [0.01, 1.0, 100.0] {
+            for part_of_the_radius in [1e3, 20.0, 2.0, 0.5, 0.1, 0.02] {
+                let deflection = Deflection::of(radius * part_of_the_radius).expect("a length");
+                for height in [0.001, 1.0, 20.0] {
+                    let mut model = a_model();
+                    let bar = model
+                        .add_round_bar(radius, height, placement)
+                        .expect("a bar");
+                    if let Ok(mesh) = model.solid(bar).mesh(
+                        deflection,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        the_mesh_closes_up(&model, bar, &mesh, deflection.length());
+                        checked += 1;
+                    }
+                }
+                let mut model = a_model();
+                let ball = model.add_ball(radius, placement).expect("a ball");
+                if let Ok(mesh) = model.solid(ball).mesh(
+                    deflection,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                ) {
+                    the_mesh_closes_up(&model, ball, &mesh, deflection.length());
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        checked > 150,
+        "only {checked} of the grid meshed at all, which is not a sweep"
+    );
+}

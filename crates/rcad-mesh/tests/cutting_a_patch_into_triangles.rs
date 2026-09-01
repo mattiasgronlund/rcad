@@ -5,19 +5,41 @@
 //! is what `docs/decisions.md` §13 rule 1 asks of a piece that runs beside the
 //! rest rather than after it.
 //!
-//! Four claims, and they are chosen so that between them nothing can be quietly
-//! wrong. **Coverage**: the triangles add up to the area the loops enclose, so
-//! nothing was dropped and nothing counted twice. **No new corners**: the
-//! points that come out are the points that went in. **Every side is there**:
-//! each boundary side is an edge of some triangle, so the mesh has not cut
-//! across a boundary. **The same answer twice**: the same input gives the same
-//! output, bit for bit, because a fuse property that compares two runs is worth
-//! nothing if the mesher underneath is free to disagree with itself.
+//! Five claims, and they are chosen so that between them nothing can be quietly
+//! wrong.
+//!
+//! **Coverage**: the triangles add up to the area the loops enclose, so nothing
+//! was dropped and nothing counted twice. Exactly, while every corner is a
+//! whole number; once the refinement puts a midpoint in, that midpoint is a
+//! rounded one and the sum over the pieces carries a rounding per triangle, so
+//! the claim gets an error term and nothing else.
+//!
+//! **The loops come back as they went in**: the first corners out are the
+//! corners in, in order and unmoved, and every corner after them is *strictly
+//! inside* the patch — off every side of every loop. This used to read "no new
+//! corners", which is no longer true of the inside and is still exactly true of
+//! the boundary. It is the sharper claim of the two, because a mesher that
+//! refined a shared edge would break watertightness at the layer above
+//! (`docs/decisions.md` §25.1) and this is what would catch it.
+//!
+//! **Every side is there**: each boundary side is an edge of some triangle, so
+//! the mesh has not cut across a boundary.
+//!
+//! **It is as close as it was asked to be**: the patch says how far it strays,
+//! that number is at or under the deflection, and it blames the flat stand-in.
+//! What makes it a claim rather than a restatement is that it is checked
+//! against the **real surface** further down, and not against the bound.
+//!
+//! **The same answer twice**: the same input gives the same output, bit for
+//! bit, because a fuse property that compares two runs is worth nothing if the
+//! mesher underneath is free to disagree with itself.
 
 use std::collections::HashSet;
+use std::f64::consts::{FRAC_PI_2, TAU};
 
 use rcad_geom::{Axis, Cylinder, Deflection, Plane, Point, Scale, Sphere, Surface, Vector};
 use rcad_mesh::{CannotTriangulate, Loop, Patch, TrimmedDomain, triangulate};
+use rcad_predicates::Cause;
 
 fn flat() -> Surface {
     Surface::from(
@@ -31,6 +53,15 @@ fn a_deflection() -> Deflection {
 }
 
 fn domain_of(surface: Surface, outer: Vec<[f64; 2]>, holes: Vec<Vec<[f64; 2]>>) -> TrimmedDomain {
+    domain_at(a_deflection(), surface, outer, holes)
+}
+
+fn domain_at(
+    deflection: Deflection,
+    surface: Surface,
+    outer: Vec<[f64; 2]>,
+    holes: Vec<Vec<[f64; 2]>>,
+) -> TrimmedDomain {
     TrimmedDomain::new(
         surface,
         Loop::through(outer).expect("an outer loop"),
@@ -38,15 +69,40 @@ fn domain_of(surface: Surface, outer: Vec<[f64; 2]>, holes: Vec<Vec<[f64; 2]>>) 
             .into_iter()
             .map(|hole| Loop::through(hole).expect("a hole"))
             .collect(),
-        a_deflection(),
+        deflection,
     )
+}
+
+/// A rectangle in the surface's own two coordinates, each side already walked
+/// into `steps` corners.
+///
+/// The caller refines a boundary and this crate never does (`docs/decisions.md`
+/// §25.1), so a test that wants a curved patch worth refining has to hand one
+/// over the way a caller would: a loop already fine enough that no single side
+/// of it strays further than the deflection on its own.
+fn a_walked_rectangle(u: [f64; 2], v: [f64; 2], steps: usize) -> Vec<[f64; 2]> {
+    let mut ring = Vec::new();
+    let mut walk = |from: [f64; 2], to: [f64; 2]| {
+        for step in 0..steps {
+            let how_far = step as f64 / steps as f64;
+            ring.push([
+                from[0] + (to[0] - from[0]) * how_far,
+                from[1] + (to[1] - from[1]) * how_far,
+            ]);
+        }
+    };
+    walk([u[0], v[0]], [u[1], v[0]]);
+    walk([u[1], v[0]], [u[1], v[1]]);
+    walk([u[1], v[1]], [u[0], v[1]]);
+    walk([u[0], v[1]], [u[0], v[0]]);
+    ring
 }
 
 /// Twice the area a ring of corners encloses, by the shoelace sum.
 ///
 /// Twice, and as a signed number, because doubling keeps every term of the sum
-/// an exact product of two inputs for the whole-number corners these tests use,
-/// so the comparison below is an equality and not a near-enough.
+/// an exact product of two inputs for the whole-number corners many of these
+/// tests use, so the comparison below is an equality and not a near-enough.
 fn twice_the_area_of(ring: &[[f64; 2]]) -> f64 {
     let mut total = 0.0;
     for (index, corner) in ring.iter().enumerate() {
@@ -96,28 +152,97 @@ fn sides_of_the_triangles(patch: &Patch) -> HashSet<(u32, u32)> {
     sides
 }
 
-/// All four claims, over every shape in the corpus.
-fn check_everything(name: &str, surface: Surface, outer: Vec<[f64; 2]>, holes: Vec<Vec<[f64; 2]>>) {
-    let domain = domain_of(surface, outer.clone(), holes.clone());
-    let patch = triangulate(&domain).unwrap_or_else(|why| panic!("{name} would not cut: {why}"));
+/// Whether a corner sits inside the outer loop, out of every hole, and on no
+/// side of either.
+fn is_strictly_inside(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>], corner: [f64; 2]) -> bool {
+    if sits_on(outer, corner) || !is_wrapped_by(outer, corner) {
+        return false;
+    }
+    holes
+        .iter()
+        .all(|hole| !sits_on(hole, corner) && !is_wrapped_by(hole, corner))
+}
+
+fn sits_on(ring: &[[f64; 2]], corner: [f64; 2]) -> bool {
+    ring.iter().enumerate().any(|(index, from)| {
+        let to = ring[(index + 1) % ring.len()];
+        let off_the_line =
+            (to[0] - from[0]) * (corner[1] - from[1]) - (to[1] - from[1]) * (corner[0] - from[0]);
+        off_the_line == 0.0
+            && (0..2).all(|axis| {
+                corner[axis] >= from[axis].min(to[axis]) && corner[axis] <= from[axis].max(to[axis])
+            })
+    })
+}
+
+/// A ray going out in `+u`, counting the sides it crosses.
+fn is_wrapped_by(ring: &[[f64; 2]], corner: [f64; 2]) -> bool {
+    let mut crossings = 0;
+    for (index, from) in ring.iter().enumerate() {
+        let to = ring[(index + 1) % ring.len()];
+        if (from[1] > corner[1]) == (to[1] > corner[1]) {
+            continue;
+        }
+        let at = from[0] + (corner[1] - from[1]) / (to[1] - from[1]) * (to[0] - from[0]);
+        if at > corner[0] {
+            crossings += 1;
+        }
+    }
+    crossings % 2 == 1
+}
+
+/// All five claims, over every shape in the corpus.
+fn check_everything(name: &str, domain: &TrimmedDomain) {
+    let outer = domain.outer().corners().to_vec();
+    let holes: Vec<Vec<[f64; 2]>> = domain
+        .holes()
+        .iter()
+        .map(|hole| hole.corners().to_vec())
+        .collect();
+    let went_in: Vec<[f64; 2]> = outer
+        .iter()
+        .chain(holes.iter().flatten())
+        .copied()
+        .collect();
+    let patch = triangulate(domain).unwrap_or_else(|why| panic!("{name} would not cut: {why}"));
 
     let expected: f64 = twice_the_area_of(&outer).abs()
         - holes
             .iter()
-            .map(|h| twice_the_area_of(h).abs())
+            .map(|hole| twice_the_area_of(hole).abs())
             .sum::<f64>();
-    assert_eq!(
-        twice_the_area_of_the_triangles(&patch),
-        expected,
-        "{name}: the triangles do not add up to the area the loops enclose"
+    // Exact while every corner is a whole number: each triangle's doubled area
+    // is then a difference of exact integer products and a sum of exact
+    // integers is exact. Otherwise every one of the triangles contributes a
+    // term of at most the whole area, the running sum rounds once per term, and
+    // a midpoint the refinement put in is itself a rounded point off the edge
+    // it split — a few epsilons of the area per triangle, and no more.
+    let all_whole = patch
+        .corners()
+        .iter()
+        .all(|corner| corner.iter().all(|value| value.fract() == 0.0));
+    let slack = if all_whole {
+        0.0
+    } else {
+        8.0 * expected * f64::EPSILON * patch.triangles().len() as f64
+    };
+    let covered = twice_the_area_of_the_triangles(&patch);
+    assert!(
+        (covered - expected).abs() <= slack,
+        "{name}: the triangles cover {covered} where the loops enclose {expected}"
     );
 
-    let corners: usize = outer.len() + holes.iter().map(Vec::len).sum::<usize>();
     assert_eq!(
-        patch.corners().len(),
-        corners,
-        "{name}: the triangulation added corners of its own"
+        &patch.corners()[..went_in.len()],
+        &went_in[..],
+        "{name}: the loops did not come back the way they went in"
     );
+    for extra in &patch.corners()[went_in.len()..] {
+        assert!(
+            is_strictly_inside(&outer, &holes, *extra),
+            "{name}: the refinement put {extra:?} somewhere other than strictly inside"
+        );
+    }
 
     let missing: Vec<_> = every_side(&outer, &holes)
         .difference(&sides_of_the_triangles(&patch))
@@ -128,17 +253,34 @@ fn check_everything(name: &str, surface: Surface, outer: Vec<[f64; 2]>, holes: V
         "{name}: these boundary sides are not edges of any triangle: {missing:?}"
     );
 
-    let again = triangulate(&domain).expect("and again");
-    assert_eq!(patch, again, "{name}: two runs of the same input disagree");
+    assert_eq!(
+        patch.deviation().cause(),
+        Cause::FlatStandIn,
+        "{name}: a mesh's slop is a flat piece standing in for a curved one"
+    );
+    assert!(
+        patch.deviation().magnitude() <= domain.deflection().length(),
+        "{name}: strays {} where {} was asked for",
+        patch.deviation().magnitude(),
+        domain.deflection().length()
+    );
+
+    let again = triangulate(domain).expect("and again");
+    assert_eq!(
+        &patch, &again,
+        "{name}: two runs of the same input disagree"
+    );
 }
 
 #[test]
 fn a_square_is_two_triangles_that_add_up_to_the_square() {
     check_everything(
         "a square",
-        flat(),
-        vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
-        Vec::new(),
+        &domain_of(
+            flat(),
+            vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
+            Vec::new(),
+        ),
     );
 }
 
@@ -147,16 +289,18 @@ fn a_square_is_two_triangles_that_add_up_to_the_square() {
 fn a_dented_outline_does_not_get_its_dent_filled_in() {
     check_everything(
         "an ell",
-        flat(),
-        vec![
-            [0.0, 0.0],
-            [6.0, 0.0],
-            [6.0, 2.0],
-            [2.0, 2.0],
-            [2.0, 6.0],
-            [0.0, 6.0],
-        ],
-        Vec::new(),
+        &domain_of(
+            flat(),
+            vec![
+                [0.0, 0.0],
+                [6.0, 0.0],
+                [6.0, 2.0],
+                [2.0, 2.0],
+                [2.0, 6.0],
+                [0.0, 6.0],
+            ],
+            Vec::new(),
+        ),
     );
 }
 
@@ -164,9 +308,11 @@ fn a_dented_outline_does_not_get_its_dent_filled_in() {
 fn a_square_with_a_square_hole_keeps_the_hole() {
     check_everything(
         "a frame",
-        flat(),
-        vec![[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]],
-        vec![vec![[2.0, 2.0], [2.0, 6.0], [6.0, 6.0], [6.0, 2.0]]],
+        &domain_of(
+            flat(),
+            vec![[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]],
+            vec![vec![[2.0, 2.0], [2.0, 6.0], [6.0, 6.0], [6.0, 2.0]]],
+        ),
     );
 }
 
@@ -174,12 +320,14 @@ fn a_square_with_a_square_hole_keeps_the_hole() {
 fn two_holes_are_both_kept() {
     check_everything(
         "a plate with two holes",
-        flat(),
-        vec![[0.0, 0.0], [12.0, 0.0], [12.0, 8.0], [0.0, 8.0]],
-        vec![
-            vec![[2.0, 2.0], [2.0, 4.0], [4.0, 4.0], [4.0, 2.0]],
-            vec![[8.0, 4.0], [8.0, 6.0], [10.0, 6.0], [10.0, 4.0]],
-        ],
+        &domain_of(
+            flat(),
+            vec![[0.0, 0.0], [12.0, 0.0], [12.0, 8.0], [0.0, 8.0]],
+            vec![
+                vec![[2.0, 2.0], [2.0, 4.0], [4.0, 4.0], [4.0, 2.0]],
+                vec![[8.0, 4.0], [8.0, 6.0], [10.0, 6.0], [10.0, 4.0]],
+            ],
+        ),
     );
 }
 
@@ -234,21 +382,49 @@ fn the_other_ways_two_loops_can_touch_are_refused_too() {
     }
 }
 
+/// A plane is flat, a triangle is flat, and standing one in for the other loses
+/// nothing at all.
+///
+/// So a plane is never refined however fine the deflection, and the number it
+/// reports is **exactly** zero rather than something small. A plane that came
+/// back with a corner it was not given, or with any deviation at all, would be
+/// a bug in the arm that is supposed to be the easy one.
+#[test]
+fn a_plane_is_never_refined_and_never_strays() {
+    let outer = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
+    for length in [1e6, 1.0, 1e-9, f64::MIN_POSITIVE] {
+        let deflection = Deflection::of(length).expect("a positive length");
+        let patch = triangulate(&domain_at(deflection, flat(), outer.clone(), Vec::new()))
+            .expect("a square of a plane");
+        assert_eq!(
+            patch.corners(),
+            &outer[..],
+            "asked to be within {length} of a plane, and it moved"
+        );
+        assert_eq!(patch.deviation().magnitude(), 0.0);
+        assert_eq!(patch.deviation().cause(), Cause::FlatStandIn);
+    }
+}
+
 /// The scaling is not decoration: an unscaled pipe of large radius is a strip
 /// `2π` wide, and every triangle in it is a sliver.
 ///
-/// What this asserts is that the answer is still *right* — the same four claims
-/// hold on a domain whose two coordinates are wildly different in size, which
-/// is the case the scaling exists for.
+/// What this asserts is that the answer is still *right* — the five claims hold
+/// on a domain whose two coordinates are wildly different in size, which is the
+/// case the scaling exists for. The steps differ per radius because the loop is
+/// the caller's to refine and a caller would refine it by the same rule: enough
+/// corners that no one side is already too far off the pipe.
 #[test]
 fn a_patch_of_a_wide_pipe_comes_out_right() {
-    for radius in [1.0, 1000.0, 1e-3] {
+    for (radius, steps) in [(1.0, 4), (1000.0, 90), (1e-3, 1)] {
         let pipe = Cylinder::new(Axis::z(), radius).expect("a pipe");
         check_everything(
             &format!("a patch of a pipe of radius {radius}"),
-            Surface::from(pipe),
-            vec![[0.0, 0.0], [1.5, 0.0], [1.5, 2.0], [0.0, 2.0]],
-            Vec::new(),
+            &domain_of(
+                Surface::from(pipe),
+                a_walked_rectangle([0.0, 1.5], [0.0, 2.0], steps),
+                Vec::new(),
+            ),
         );
     }
 }
@@ -258,9 +434,27 @@ fn a_patch_of_a_ball_comes_out_right() {
     let ball = Sphere::new(Point::origin(), 5.0).expect("a ball");
     check_everything(
         "a patch of a ball",
-        Surface::from(ball),
-        vec![[0.0, -1.0], [2.0, -1.0], [2.0, 1.0], [0.0, 1.0]],
-        Vec::new(),
+        &domain_of(
+            Surface::from(ball),
+            a_walked_rectangle([0.0, 2.0], [-1.0, 1.0], 10),
+            Vec::new(),
+        ),
+    );
+}
+
+/// A ball's one face, in the shape `docs/decisions.md` §25.6 settled: a
+/// rectangle in `(u, v)` whose top and bottom sides are each one point in 3D.
+#[test]
+fn a_patch_of_a_ball_that_reaches_both_poles_comes_out_right() {
+    let ball = Sphere::new(Point::new(1.0, 2.0, 3.0), 2.0).expect("a ball");
+    check_everything(
+        "a whole ball",
+        &domain_at(
+            Deflection::of(0.1).expect("a tenth"),
+            Surface::from(ball),
+            a_walked_rectangle([0.0, TAU], [-FRAC_PI_2, FRAC_PI_2], 12),
+            Vec::new(),
+        ),
     );
 }
 
@@ -301,13 +495,327 @@ fn a_coordinate_too_large_to_triangulate_is_refused() {
     );
 }
 
-/// The same four claims over a corpus nobody hand-picked.
+/// How far the mesh really is from the surface, and not how far it says it is.
+///
+/// The corners are put on the surface and the triangle between them is *flat*,
+/// which is the whole point: a sample is a weighted average of three 3D
+/// corners, never the surface point at the average of three `(u, v)`.
+fn how_far_the_mesh_really_strays(
+    patch: &Patch,
+    surface: &Surface,
+    how_far_off: impl Fn(Point) -> f64,
+) -> f64 {
+    let places: Vec<Point> = patch
+        .corners()
+        .iter()
+        .map(|corner| surface.point_at(corner[0], corner[1]))
+        .collect();
+    let steps = 6;
+    let mut worst = 0.0_f64;
+    for &[a, b, c] in patch.triangles() {
+        let (a, b, c) = (
+            places[a as usize].coordinates(),
+            places[b as usize].coordinates(),
+            places[c as usize].coordinates(),
+        );
+        for first in 0..=steps {
+            for second in 0..=steps - first {
+                let third = steps - first - second;
+                let weigh = |axis: usize| {
+                    (a[axis] * f64::from(first)
+                        + b[axis] * f64::from(second)
+                        + c[axis] * f64::from(third))
+                        / f64::from(steps)
+                };
+                worst = worst.max(how_far_off(Point::new(weigh(0), weigh(1), weigh(2))));
+            }
+        }
+    }
+    worst
+}
+
+fn how_far_off_the_ball(ball: Sphere) -> impl Fn(Point) -> f64 {
+    move |point| (point.distance_to(ball.centre()) - ball.radius()).abs()
+}
+
+fn how_far_off_a_pipe_on_z(radius: f64) -> impl Fn(Point) -> f64 {
+    move |point| ((point.x() * point.x() + point.y() * point.y()).sqrt() - radius).abs()
+}
+
+/// The claim that matters, measured against the pipe rather than against the
+/// bound: no point of any triangle is further off the pipe than the patch says,
+/// and nothing is further off than was asked for.
+#[test]
+fn a_mesh_of_a_pipe_stays_within_its_deflection_of_the_pipe() {
+    for (radius, steps) in [(1.0, 8), (40.0, 60)] {
+        let pipe = Cylinder::new(Axis::z(), radius).expect("a pipe");
+        let surface = Surface::from(pipe);
+        let deflection = Deflection::of(0.05).expect("a twentieth");
+        let domain = domain_at(
+            deflection,
+            surface,
+            a_walked_rectangle([0.0, 2.5], [-1.0, 3.0], steps),
+            Vec::new(),
+        );
+        let patch = triangulate(&domain).expect("a patch of a pipe");
+        let really =
+            how_far_the_mesh_really_strays(&patch, &surface, how_far_off_a_pipe_on_z(radius));
+        assert!(
+            really <= patch.deviation().magnitude(),
+            "a pipe of radius {radius} really strays {really} and the patch published {}",
+            patch.deviation().magnitude()
+        );
+        assert!(
+            really <= deflection.length(),
+            "a pipe of radius {radius} really strays {really} and {} was asked for",
+            deflection.length()
+        );
+    }
+}
+
+/// The same for a ball, including the patch that reaches both poles.
+#[test]
+fn a_mesh_of_a_ball_stays_within_its_deflection_of_the_ball() {
+    let deflection = Deflection::of(0.05).expect("a twentieth");
+    let cases = [
+        (
+            "a patch off the poles",
+            Sphere::new(Point::new(1.0, 2.0, 3.0), 3.0).expect("a ball"),
+            a_walked_rectangle([0.0, 2.0], [-1.0, 1.0], 16),
+        ),
+        (
+            "a patch reaching both poles",
+            Sphere::new(Point::origin(), 1.5).expect("a ball"),
+            a_walked_rectangle([0.0, TAU], [-FRAC_PI_2, FRAC_PI_2], 16),
+        ),
+    ];
+
+    for (what, ball, outer) in cases {
+        let surface = Surface::from(ball);
+        let domain = domain_at(deflection, surface, outer, Vec::new());
+        let patch =
+            triangulate(&domain).unwrap_or_else(|why| panic!("{what} would not cut: {why}"));
+        let really = how_far_the_mesh_really_strays(&patch, &surface, how_far_off_the_ball(ball));
+        assert!(
+            really <= patch.deviation().magnitude(),
+            "{what} really strays {really} and the patch published {}",
+            patch.deviation().magnitude()
+        );
+        assert!(
+            really <= deflection.length(),
+            "{what} really strays {really} and {} was asked for",
+            deflection.length()
+        );
+    }
+}
+
+/// Asking for a closer fit never gets a worse one.
+///
+/// Not implied by either of the two claims above: a patch that met every
+/// deflection it was given could still wander about underneath them, and a
+/// caller that halves the number and gets a rougher mesh has been told
+/// something untrue by the knob.
+#[test]
+fn halving_the_deflection_never_makes_the_mesh_stray_further() {
+    let ball = Sphere::new(Point::origin(), 3.0).expect("a ball");
+    let outer = a_walked_rectangle([0.0, 2.0], [-1.0, 1.0], 20);
+    let mut coarser = f64::INFINITY;
+    let mut triangles = 0;
+    for halving in 0..4 {
+        let length = 0.2 / f64::from(1 << halving);
+        let deflection = Deflection::of(length).expect("a positive length");
+        let domain = domain_at(deflection, Surface::from(ball), outer.clone(), Vec::new());
+        let patch = triangulate(&domain).expect("a patch of a ball");
+        assert!(
+            patch.deviation().magnitude() <= coarser,
+            "asking for {length} strayed {} where the deflection before it strayed {coarser}",
+            patch.deviation().magnitude()
+        );
+        assert!(patch.deviation().magnitude() <= length);
+        assert!(
+            patch.triangles().len() >= triangles,
+            "asking for {length} used fewer triangles than the deflection before it"
+        );
+        coarser = patch.deviation().magnitude();
+        triangles = patch.triangles().len();
+    }
+}
+
+/// A boundary side is a chord, and a chord's distance from the surface is fixed
+/// the moment its two corners are chosen.
+///
+/// This crate may not put a point on a loop, so there is nothing here to try
+/// and the honest answer is a refusal naming the side. Refining the boundary
+/// belongs to the caller, which is the only one that can see both sides of it
+/// (`docs/decisions.md` §25.1).
+#[test]
+fn a_boundary_side_further_off_the_surface_than_the_deflection_is_refused() {
+    let pipe = Cylinder::new(Axis::z(), 1.0).expect("a pipe");
+    // A quarter turn of a unit pipe is a chord standing 0.29 off it, and a
+    // thousand more triangles inside the patch will not move that chord.
+    let refusal = triangulate(&domain_at(
+        Deflection::of(0.01).expect("a hundredth"),
+        Surface::from(pipe),
+        vec![[0.0, 0.0], [FRAC_PI_2, 0.0], [FRAC_PI_2, 1.0], [0.0, 1.0]],
+        Vec::new(),
+    ));
+    assert!(
+        matches!(
+            refusal,
+            Err(CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection { .. })
+        ),
+        "got {refusal:?}"
+    );
+
+    // The same patch walked into sixteen steps, which is what a caller hands
+    // over, cuts without complaint.
+    let fine_enough = domain_at(
+        Deflection::of(0.01).expect("a hundredth"),
+        Surface::from(pipe),
+        a_walked_rectangle([0.0, FRAC_PI_2], [0.0, 1.0], 16),
+        Vec::new(),
+    );
+    check_everything("a quarter of a pipe, walked", &fine_enough);
+}
+
+/// A coarse mesh is a request and not a failure, and a fine one is a request
+/// too. Both have to finish, and the coarse one has to stay small.
+#[test]
+fn a_coarse_deflection_stays_small_and_a_fine_one_still_finishes() {
+    let pipe = Cylinder::new(Axis::z(), 1.0).expect("a pipe");
+
+    let coarse = domain_at(
+        Deflection::of(0.3).expect("three tenths"),
+        Surface::from(pipe),
+        a_walked_rectangle([0.0, 1.5], [0.0, 2.0], 2),
+        Vec::new(),
+    );
+    let patch = triangulate(&coarse).expect("a coarse patch");
+    assert!(
+        patch.triangles().len() <= 24,
+        "a coarse mesh came out as {} triangles",
+        patch.triangles().len()
+    );
+    assert!(patch.deviation().magnitude() <= 0.3);
+
+    let fine = domain_at(
+        Deflection::of(1e-4).expect("a ten-thousandth"),
+        Surface::from(pipe),
+        a_walked_rectangle([0.0, 1.5], [0.0, 2.0], 100),
+        Vec::new(),
+    );
+    let patch = triangulate(&fine).expect("a fine patch");
+    assert!(
+        patch.triangles().len() > 2_000,
+        "a fine mesh came out as {} triangles, which is not fine",
+        patch.triangles().len()
+    );
+    assert!(patch.deviation().magnitude() <= 1e-4);
+}
+
+/// A deflection under what the evaluator itself rounds to is refused, and not
+/// chased.
+///
+/// The points a mesh is made of come out of `Surface::point_at`, which rounds.
+/// Asking to be nearer the surface than they are is not a request for more
+/// triangles — no number of them arrives — so it is answered at once rather
+/// than after a very long wait.
+///
+/// The floor moves with where the surface is, not only with how big it is: the
+/// same ball a kilometre out has its points known to a rounding of the
+/// kilometre, and a deflection the ball at the origin takes is refused there.
+#[test]
+fn a_deflection_finer_than_a_point_can_be_placed_is_refused() {
+    let outer = a_walked_rectangle([0.0, 0.01], [-0.005, 0.005], 32);
+    let at_the_origin = Sphere::new(Point::origin(), 1.0).expect("a ball");
+    let far_away = Sphere::new(Point::new(1e9, 0.0, 0.0), 1.0).expect("the same ball, moved");
+    let deflection = Deflection::of(1e-7).expect("a ten-millionth");
+
+    let close_enough = triangulate(&domain_at(
+        deflection,
+        Surface::from(at_the_origin),
+        outer.clone(),
+        Vec::new(),
+    ));
+    assert!(close_enough.is_ok(), "got {close_enough:?}");
+
+    let too_close = triangulate(&domain_at(
+        deflection,
+        Surface::from(far_away),
+        outer,
+        Vec::new(),
+    ));
+    assert!(
+        matches!(
+            too_close,
+            Err(CannotTriangulate::NoMeshCanGetThatCloseToTheSurface { .. })
+        ),
+        "got {too_close:?}"
+    );
+}
+
+/// A deflection that would need a mesh nobody can hold is refused before a
+/// single point of it is placed.
+#[test]
+fn a_deflection_needing_more_points_than_a_patch_holds_is_refused() {
+    let ball = Sphere::new(Point::origin(), 1.0).expect("a ball");
+    let refusal = triangulate(&domain_at(
+        Deflection::of(1e-11).expect("a hundred-billionth"),
+        Surface::from(ball),
+        a_walked_rectangle([0.0, 1.0], [-0.5, 0.5], 8),
+        Vec::new(),
+    ));
+    assert!(
+        matches!(
+            refusal,
+            Err(CannotTriangulate::MoreTrianglesThanAPatchWillHold { .. })
+        ),
+        "got {refusal:?}"
+    );
+}
+
+/// The refinement's own points have to fit in the triangulation's range too,
+/// and a midpoint of two coordinates that very nearly cancel does not.
+///
+/// A midpoint lies between two coordinates already in the mesh, so it is never
+/// too *big*; it can be too small. What must not happen is a panic. What
+/// happens instead is that the point is declined, the triangle it would have
+/// split stays over budget, and the patch is refused with the distance it got
+/// to.
+///
+/// The numbers are chosen rather than found: a ball of radius `1e-27` puts its
+/// scaled corners around `5e-28`, comfortably inside spade's `2^-142 .. 2^201`,
+/// while the diagonal of the rectangle is the longest chord and its midpoint
+/// lands at `5.5e-44`, under `2^-142`, because the two `u` are a single `f64`
+/// step from cancelling.
+#[test]
+fn a_refinement_point_the_triangulation_will_not_take_is_refused_and_never_a_panic() {
+    let tiny = Sphere::new(Point::origin(), 1e-27).expect("a very small ball");
+    let left = -0.5;
+    let right = (0.5_f64).next_up();
+    let refusal = triangulate(&domain_at(
+        Deflection::of(4e-28).expect("a positive length"),
+        Surface::from(tiny),
+        vec![[left, -0.5], [right, -0.5], [right, 0.5], [left, 0.5]],
+        Vec::new(),
+    ));
+    assert!(
+        matches!(
+            refusal,
+            Err(CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection { .. })
+        ),
+        "got {refusal:?}"
+    );
+}
+
+/// The same five claims over a corpus nobody hand-picked.
 ///
 /// Every coordinate is a whole number, which is what lets the coverage claim be
 /// an **equality** rather than a near-enough: each triangle's area is a cross
 /// product of exact integer differences, and a sum of exact integers is exact.
 /// A tolerance here would be a number the test was measuring instead of the
-/// mesher (§14.1 question 1).
+/// mesher (§14.1 question 1). The plane is what keeps it exact — a plane is
+/// never refined, so no rounded midpoint ever joins the sum.
 ///
 /// §13 rule 5 wants the generators across pieces to differ, and this one does:
 /// the topology lane draws bars and balls, and this draws plates with holes
@@ -352,7 +860,7 @@ mod a_plate_with_holes_punched_in_it {
                 .filter(|&(x, y)| x * 3 + 2 < width && y * 3 + 2 < height)
                 .collect();
             let (outer, holes) = a_plate(width, height, punched);
-            check_everything("a punched plate", flat(), outer, holes);
+            check_everything("a punched plate", &domain_of(flat(), outer, holes));
         }
     }
 }

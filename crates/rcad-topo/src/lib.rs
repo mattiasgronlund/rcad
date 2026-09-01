@@ -25,11 +25,12 @@
 //! [`Model::add_cube`] is the short way to the obvious test case.
 //!
 //! ```
-//! use rcad_geom::{Point, Scale};
+//! use rcad_geom::{Deflection, Point, Scale};
 //! use rcad_predicates::{Policy, ProvenanceLog};
 //! use rcad_topo::{Containment, Model};
 //!
-//! let mut model = Model::new(Scale::millimetres(100.0)?);
+//! let scale = Scale::millimetres(100.0)?;
+//! let mut model = Model::new(scale);
 //! let mut log = ProvenanceLog::new();
 //! let cube = model.add_cube(2.0, &Policy::certified(), &mut log)?;
 //! assert!(log.is_empty(), "a cube of side two needs nothing approximated");
@@ -37,10 +38,19 @@
 //! model.validate(&Policy::certified(), &mut log)?;
 //! assert!(log.is_empty(), "a clean sweep records nothing at all");
 //!
-//! let measured = model.solid(cube).measure()?;
+//! // A cube is a polyhedron: the deflection is ignored, its own fan is summed,
+//! // and all three error terms come back exactly zero.
+//! let measured = model.solid(cube).measure(
+//!     Deflection::for_scale(scale),
+//!     &Policy::certified(),
+//!     &mut log,
+//! )?;
 //! assert_eq!(measured.volume(), 8.0);
 //! assert_eq!(measured.surface_area(), 24.0);
 //! assert_eq!(measured.centroid(), Point::new(1.0, 1.0, 1.0));
+//! assert_eq!(measured.volume_error(), 0.0);
+//! assert_eq!(measured.area_error(), 0.0);
+//! assert_eq!(measured.centroid_wobble(), 0.0);
 //!
 //! let policy = Policy::certified();
 //! let middle = model
@@ -82,6 +92,7 @@ mod error;
 mod fuse;
 mod key;
 mod measure;
+mod mesh;
 mod model;
 pub mod serialize;
 mod validate;
@@ -93,6 +104,7 @@ pub use error::{Error, Invalid, Result};
 pub use fuse::{Fused, Rule};
 pub use key::{CoedgeKey, EdgeKey, FaceKey, ShellKey, SolidKey, VertexKey, WireKey};
 pub use measure::Measurement;
+pub use mesh::{Mesh, MeshTriangle};
 pub use model::Model;
 pub use serialize::FORMAT_VERSION;
 pub use view::{

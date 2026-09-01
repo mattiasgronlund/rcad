@@ -101,6 +101,29 @@ impl Sphere {
                 up.sin() * self.radius,
             )
     }
+
+    /// Which longitude and latitude `point` sits at — [`Sphere::point_at`] the
+    /// other way round.
+    ///
+    /// Only the *direction* from the centre is read, so a point off the skin
+    /// gets the coordinates of the point on the skin nearest it, which for a
+    /// ball is the one straight out through it. How far out it was is thrown
+    /// away.
+    ///
+    /// Longitude comes back on `atan2`'s branch, `(-π, π]`, and how close it
+    /// gets is [`Surface::ROUND_TRIP_ROUNDOFF`](crate::Surface::ROUND_TRIP_ROUNDOFF).
+    ///
+    /// **At a pole the longitude is not determined by the geometry at all** —
+    /// every longitude names that one point — and zero is what comes back. It
+    /// is as right an answer as any other, and it falls out of `atan2(0, 0)`
+    /// rather than out of a branch. The centre has no nearest point on the skin
+    /// whatsoever and comes back `(0, 0)`, for the same reason and by the same
+    /// arithmetic (`docs/decisions.md` §25.2).
+    #[must_use]
+    pub fn coordinates_of(&self, point: Point) -> (f64, f64) {
+        let [x, y, z] = (point - self.centre).components();
+        (y.atan2(x), z.atan2(x.hypot(y)))
+    }
 }
 
 /// Inside, on, or outside, decided through the cascade.

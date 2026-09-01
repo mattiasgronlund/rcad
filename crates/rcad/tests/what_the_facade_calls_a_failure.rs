@@ -14,9 +14,9 @@
 //! should never have to depend on a crate the facade exists to hide.
 
 use rcad::{
-    Approximation, Cause, Containment, Decision, Error, GeometryError, Invalid, Isometry, Level,
-    Measures, Model, Point, Policy, PredicateError, ProfileBuilder, ProvenanceLog, Record, Scale,
-    TopologyError,
+    Approximation, Cause, Containment, Decision, Deflection, Error, GeometryError, Invalid,
+    Isometry, Level, Measures, Model, Point, Policy, PredicateError, ProfileBuilder, ProvenanceLog,
+    Record, Scale, TopologyError,
 };
 
 #[test]
@@ -26,7 +26,14 @@ fn one_question_mark_works_on_all_three_layers_underneath() {
         let mut model = Model::new(scale);
         let cube = model.add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())?;
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
-        Ok(model.solid(cube).measure()?.volume())
+        Ok(model
+            .solid(cube)
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )?
+            .volume())
     }
 
     assert_eq!(
@@ -184,4 +191,13 @@ fn a_tolerant_build_hands_back_both_the_shape_and_what_it_cost() {
         .add_extrusion(&profile, 1.0, &Isometry::identity())
         .expect("an approximated profile still extrudes");
     assert_eq!(model.worst_approximation(), slop.magnitude());
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

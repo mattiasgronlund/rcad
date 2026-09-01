@@ -28,11 +28,42 @@
 //! That reads like a defect until you see that the parameter values are a
 //! working space and never an answer.
 //!
-//! # What is not here yet
+//! # Who refines what
 //!
-//! The triangulator. This crate currently holds the contract the two halves of
-//! the milestone agreed on before either started, which is the whole job of a
-//! gate (`docs/decisions.md` §13 rule 4).
+//! **The loops that arrive here are final.** This crate adds points inside the
+//! patch and never on its boundary. It cannot see that a boundary is shared —
+//! it is shown one face at a time — so if it subdivided a loop, the two faces
+//! along an edge would each refine it in their own `(u, v)` and land on
+//! different 3D points, which is exactly the promise above being broken. The
+//! caller refines every boundary once and hands the same corners to both sides
+//! (`docs/decisions.md` §25.1).
+//!
+//! One thing follows that is worth saying out loud, because it reads like a
+//! defect: **a loop too coarse for the deflection is refused.** A side of a
+//! loop is a chord of the surface, its distance from that surface is settled the
+//! moment its two corners are chosen, and nothing this crate is allowed to do
+//! moves it. So the answer is a refusal naming the side, and the fix is at the
+//! caller — which is where it belongs, because the caller is the one that can
+//! see both faces along that edge.
+//!
+//! # How close it says it is
+//!
+//! A [`Patch`] carries a length: the furthest any point of any triangle can be
+//! from the surface, in the model's own unit, as an `Approximation` blaming
+//! [`Cause::FlatStandIn`]. One number for the whole patch rather than one per
+//! triangle, and a length rather than a `(u, v)` — a turn round a wide pipe and
+//! a turn round a narrow one are not the same distance.
+//!
+//! [`triangulate`] takes **no policy and no log**, and that is a decision rather
+//! than an omission. It makes no uncertified decision to record: it refines
+//! until its own bound is under the [`Deflection`] it was handed, or it refuses.
+//! Whether a given deflection is good enough is a judgement, and judgements
+//! belong to the caller, where the policy already is. There is no best-effort
+//! answer either, because a patch that quietly missed would need every caller to
+//! compare two numbers, and none would (`docs/decisions.md` §25.3).
+//!
+//! [`Cause::FlatStandIn`]: rcad_predicates::Cause::FlatStandIn
+//! [`Deflection`]: rcad_geom::Deflection
 
 #![forbid(unsafe_code)]
 

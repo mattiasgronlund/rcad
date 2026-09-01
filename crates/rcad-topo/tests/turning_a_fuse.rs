@@ -65,7 +65,7 @@ use std::cell::Cell;
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence, TestCaseError, TestRunner};
-use rcad_geom::Isometry;
+use rcad_geom::{Deflection, Isometry};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
@@ -481,7 +481,13 @@ impl Totals {
 
         for &solid in solids {
             let solid = model.solid(solid);
-            let measure = solid.measure().expect("a solid this size measures");
+            let measure = solid
+                .measure(
+                    a_deflection(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a solid this size measures");
             volume += measure.volume();
             area += measure.surface_area();
             let middle = measure.centroid().coordinates();
@@ -508,4 +514,13 @@ impl Totals {
             largest_coordinate,
         }
     }
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

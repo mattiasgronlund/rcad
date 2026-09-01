@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{
-    CoedgeData, EdgeData, EdgeRun, FaceData, ShellData, SolidData, VertexData, WireData,
+    CoedgeData, EdgeData, EdgeRun, FaceData, ShellData, SolidData, VertexData, WireData, WireStep,
 };
 use crate::{CoedgeKey, EdgeKey, FaceKey, Model, ShellKey, SolidKey, VertexKey, WireKey};
 
@@ -97,11 +97,25 @@ impl<'m> SolidView<'m> {
         self.faces().all(|face| face.surface().as_plane().is_some())
     }
 
-    /// The smallest axis-aligned box holding every vertex of this solid.
+    /// The smallest axis-aligned box holding every corner of this solid.
     ///
-    /// `None` when the solid has no faces at all.
+    /// **Not a box round the solid**, and the name says so because for a curved
+    /// solid the two are different things. A round bar has two corners, both on
+    /// its seam, so the box round them is a line — while the bar bulges a
+    /// radius away from it on every side. A ball has two corners, its poles,
+    /// and the box round those misses the whole equator.
+    ///
+    /// This is the shape of mistake `docs/decisions.md` §23.8 records four
+    /// times over: a helper that meant one thing until a new kind of input
+    /// arrived. It used to be called a bounding box, and it was one for every
+    /// solid that existed when it was written. A box round a *curved* solid
+    /// needs the mesh, and §25.9 hands it to the lane that builds one.
+    ///
+    /// `None` when the solid fans into no triangles at all — which for a
+    /// polyhedron means it has no faces, and which a **ball** also manages: its
+    /// one face has two corners, and two corners make no triangle.
     #[must_use]
-    pub fn bounding_box(self) -> Option<(Point, Point)> {
+    pub fn box_around_its_corners(self) -> Option<(Point, Point)> {
         let mut low = [f64::INFINITY; 3];
         let mut high = [f64::NEG_INFINITY; 3];
         let mut seen = false;
@@ -507,6 +521,33 @@ impl<'m> WireView<'m> {
         })
     }
 
+    /// Every step round the chain, in the order this wire is being used, poles
+    /// and all.
+    ///
+    /// [`WireView::coedges`] is the same walk with the poles left out, and that
+    /// is what almost everything wants. This is for the one caller that has to
+    /// see where the boundary stands still: a mesher, which needs the pole to
+    /// know that the side of the patch it is standing on is a whole turn wide
+    /// (`docs/decisions.md` §25.6).
+    pub(crate) fn steps(self) -> impl Iterator<Item = WireStepView<'m>> {
+        let (model, loc, orient) = (self.model, self.loc, self.orient);
+        let steps: SmallVec<[WireStep; 4]> = self.data().steps.clone();
+        let count = steps.len();
+        (0..count).map(move |step| {
+            let position = if orient.is_reversed() {
+                count - 1 - step
+            } else {
+                step
+            };
+            match steps[position] {
+                WireStep::Along(coedge) => {
+                    WireStepView::Along(CoedgeView::new(model, coedge, loc, orient))
+                }
+                WireStep::Pole(vertex) => WireStepView::Pole(VertexView::new(model, vertex, loc)),
+            }
+        })
+    }
+
     /// The corner points, in the stored order, already located.
     ///
     /// One point per coedge: the point that coedge starts at. Following them
@@ -533,6 +574,20 @@ impl<'m> WireView<'m> {
     fn data(self) -> &'m WireData {
         &self.model.data().wires[self.slot]
     }
+}
+
+/// One step round a wire, as that wire is being used.
+///
+/// A wire is almost always a chain of coedges, and was only that until a ball
+/// arrived. What a ball adds is the pole: the surface pinches to a point, the
+/// boundary has to go somewhere between arriving there and leaving, and where
+/// it goes is nowhere at all.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum WireStepView<'m> {
+    /// Along one use of an edge.
+    Along(CoedgeView<'m>),
+    /// Standing still at a pole.
+    Pole(VertexView<'m>),
 }
 
 /// A coedge, with the location and orientation it is being looked at through.

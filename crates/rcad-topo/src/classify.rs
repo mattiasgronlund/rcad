@@ -169,7 +169,7 @@ impl SolidView<'_> {
         if !self.is_wholly_flat() {
             return Containment::NeedsFlatFaces;
         }
-        let Some((low, high)) = self.bounding_box() else {
+        let Some((low, high)) = self.box_around_its_corners() else {
             return Containment::Outside;
         };
         if is_outside_the_box(point, low, high) {

@@ -8,7 +8,7 @@
 //! about, so they are simple by construction and almost never convex.
 
 use proptest::prelude::*;
-use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Model, Profile, ProfileBuilder};
 
@@ -76,7 +76,7 @@ proptest! {
 
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
 
-        let measured = model.solid(solid).measure().expect("a solid this size measures");
+        let measured = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
         prop_assert!(measured.volume() > 0.0);
         prop_assert!(measured.surface_area() > 0.0);
     }
@@ -89,12 +89,12 @@ proptest! {
     ) {
         let mut model = empty_model();
         let solid = model.add_extrusion(&profile, height, &Isometry::identity())?;
-        let before = model.solid(solid).measure().expect("a solid this size measures");
+        let before = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(1.0, 2.0, 3.0))
             .expect("a direction with length");
         model.place_solid(solid, &Isometry::rotation(&axis, angle).expect("a rotation"));
-        let after = model.solid(solid).measure().expect("a solid this size measures");
+        let after = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
         let slack = 1e-9 * before.volume().max(before.surface_area());
@@ -126,4 +126,13 @@ proptest! {
         prop_assert_eq!(answer, expected);
         prop_assert!(log.is_empty());
     }
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

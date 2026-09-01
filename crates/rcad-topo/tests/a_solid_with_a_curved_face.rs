@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use rcad_geom::{Isometry, Point, Scale, Surface};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Surface};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{Containment, Error, Model, Rule};
 
@@ -335,6 +335,10 @@ fn a_ball_refuses_a_radius_that_is_not_a_positive_number() {
 /// unwrapped a cylinder — and the classifier silently answered as though the
 /// bar were the handful of chords its corners happen to span. §4.1 ranks that
 /// second one below the crash.
+///
+/// **`measure` used to be on this list and is not any more.** It refused a
+/// curved solid at M2's gate because a bar has no fan to sum (§25.5); it now
+/// sums over a mesh instead, and `measuring.rs` is where that is checked.
 #[test]
 fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -379,6 +383,18 @@ fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
     }
 
     // And the control: the guard refuses curved solids, not every solid.
+    assert_eq!(
+        model
+            .solid(cube)
+            .measure(
+                Deflection::of(0.1).expect("a length a polyhedron ignores"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
+            .expect("a cube measures")
+            .volume(),
+        8.0
+    );
     assert!(
         model
             .fuse(
@@ -390,6 +406,46 @@ fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
             )
             .is_ok(),
         "two flat solids still fuse"
+    );
+}
+
+/// A box round the corners is not a box round a curved solid, and the name has
+/// to keep saying so.
+///
+/// This used to be called `bounding_box`, and it was one until a curved face
+/// existed. A bar's two corners are both on its seam, so the box round them is
+/// a line the bar bulges a whole radius out of; a ball's are its poles, and the
+/// box round those misses the equator entirely. Anything that took the old name
+/// at its word got a confident wrong answer, which `docs/decisions.md` §4.1
+/// ranks below a crash.
+#[test]
+fn the_box_round_a_curved_solids_corners_does_not_hold_the_solid() {
+    let bar = a_round_bar();
+    let (low, high) = bar
+        .solids()
+        .next()
+        .expect("the bar")
+        .box_around_its_corners()
+        .expect("the bar has corners");
+    assert_eq!(low, Point::new(RADIUS, 0.0, 0.0));
+    assert_eq!(high, Point::new(RADIUS, 0.0, HEIGHT));
+    assert!(
+        low.coordinates()[0] > -RADIUS,
+        "the far side of the wall is at x = -{RADIUS} and this box starts at \
+         x = {}",
+        low.coordinates()[0]
+    );
+
+    // A ball is worse than wrong: its one face has two corners and two corners
+    // make no triangle, so there is no box at all. `None` used to mean "no
+    // faces", and a ball has one.
+    let ball = a_ball();
+    assert_eq!(
+        ball.solids()
+            .next()
+            .expect("the ball")
+            .box_around_its_corners(),
+        None
     );
 }
 

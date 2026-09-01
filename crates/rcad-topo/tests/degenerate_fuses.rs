@@ -45,7 +45,7 @@
 //! in [`the_nine_planar_entries_as_a_table`], naming where it is discharged, so
 //! that the table is nine entries and not eight.
 
-use rcad_geom::{Isometry, PlaneAgreement, Point, Scale, Segment, Vector};
+use rcad_geom::{Deflection, Isometry, PlaneAgreement, Point, Scale, Segment, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -128,7 +128,11 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         .map(|&solid| {
             model
                 .solid(solid)
-                .measure()
+                .measure(
+                    a_deflection(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
                 .expect("a solid this size measures")
                 .volume()
         })
@@ -1067,4 +1071,13 @@ fn what_happened(build: fn(&mut Model) -> Pair, rule: Rule) -> Outcome {
         Err(Error::ResultIsNotManifold { .. }) => Outcome::NotManifold,
         Err(why) => panic!("a lattice-aligned {rule:?} is decided by proof alone: {why}"),
     }
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

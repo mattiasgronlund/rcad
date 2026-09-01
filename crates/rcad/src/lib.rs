@@ -46,15 +46,33 @@
 //! proves everything or says it could not; [`Policy::tolerant`] trades a
 //! bounded amount of slop for an answer and records what it traded.
 //!
+//! [`Deflection`] is the *other* knob and it is not this one. It says how far a
+//! mesh may stray from the surface it stands for — how fine a picture you want
+//! — and a coarse answer is a request rather than a failure.
+//! [`SolidView::mesh`] and [`SolidView::measure`] both take one, and a caller
+//! who reached for [`Policy`] to ask for fewer triangles would have silently
+//! asked the kernel to certify less (`docs/decisions.md` §23.5, §25.8).
+//!
+//! ```
+//! use rcad::{Deflection, Scale};
+//!
+//! // A thousandth of the nominal size, which for a 100 mm part is 0.1 mm.
+//! let scale = Scale::millimetres(100.0)?;
+//! assert_eq!(Deflection::for_scale(scale).length(), 0.1);
+//! assert_eq!(Deflection::of(0.25)?.length(), 0.25);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
 //! # A worked example
 //!
 //! Build a cube, measure it, ask where a point sits, and write it out and read
 //! it back.
 //!
 //! ```
-//! use rcad::{Containment, Model, Point, Policy, ProvenanceLog, Scale};
+//! use rcad::{Containment, Deflection, Model, Point, Policy, ProvenanceLog, Scale};
 //!
-//! let mut model = Model::new(Scale::millimetres(100.0)?);
+//! let scale = Scale::millimetres(100.0)?;
+//! let mut model = Model::new(scale);
 //! let mut log = ProvenanceLog::new();
 //! let cube = model.add_cube(10.0, &Policy::certified(), &mut log)?;
 //! assert!(log.is_empty(), "a cube of side ten needs nothing approximated");
@@ -62,10 +80,18 @@
 //! model.validate(&Policy::certified(), &mut log)?;
 //! assert!(log.is_empty(), "a clean sweep records nothing at all");
 //!
-//! let measured = model.solid(cube).measure()?;
+//! // A cube is a polyhedron: its own fan is the answer, so the deflection is
+//! // ignored and nothing here is approximated.
+//! let how_fine = Deflection::for_scale(scale);
+//! let measured = model
+//!     .solid(cube)
+//!     .measure(how_fine, &Policy::certified(), &mut log)?;
 //! assert_eq!(measured.volume(), 1000.0);
 //! assert_eq!(measured.surface_area(), 600.0);
 //! assert_eq!(measured.centroid(), Point::new(5.0, 5.0, 5.0));
+//! assert_eq!(measured.volume_error(), 0.0, "a cubed unit");
+//! assert_eq!(measured.area_error(), 0.0, "a squared one");
+//! assert_eq!(measured.centroid_wobble(), 0.0, "and a length");
 //!
 //! let policy = Policy::certified();
 //! match model
@@ -88,7 +114,10 @@
 //! let read_back: Model = postcard::from_bytes(&bytes)?;
 //! read_back.validate(&Policy::certified(), &mut log)?;
 //! let same_cube = read_back.solids().next().expect("the cube came back");
-//! assert_eq!(same_cube.measure()?, measured);
+//! assert_eq!(
+//!     same_cube.measure(how_fine, &Policy::certified(), &mut log)?,
+//!     measured
+//! );
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -198,8 +227,19 @@
 //! which model made it.
 //!
 //! **Measure.** [`SolidView::measure`] gives volume, surface area and centroid
-//! in one pass, straight out of the divergence theorem. No quadrature; planar
-//! faces do not need any.
+//! in one pass, straight out of the divergence theorem, each with how far out it
+//! could be. A polyhedron is summed over its own fan — no quadrature, no mesh,
+//! and all three errors exactly zero — and a solid with a curved face is summed
+//! over a [`Mesh`], where [`Measurement::volume_error`],
+//! [`Measurement::area_error`] and [`Measurement::centroid_wobble`] say what the
+//! triangles could be hiding. Three quantities in three units, deliberately
+//! (`docs/decisions.md` §25.4).
+//!
+//! **Mesh.** [`SolidView::mesh`] cuts a whole solid into [`MeshTriangle`]s that
+//! stay within a [`Deflection`] of its surfaces, through one point table for the
+//! whole solid — which is what makes the result watertight by index rather than
+//! by tolerance (§23.4, §25.7). Each triangle says which [`FaceKey`] it stands
+//! in for.
 //!
 //! **Classify.** [`SolidView::classify_point`] returns a [`Containment`],
 //! decided by exact predicates with no tolerance anywhere in the loop.
@@ -248,10 +288,18 @@ pub use rcad_geom::Error as GeometryError;
 pub use rcad_predicates::Error as PredicateError;
 pub use rcad_topo::Error as TopologyError;
 
+/// Why one face could not be cut into triangles.
+///
+/// Out here because [`TopologyError::CannotMeshAFace`] carries one, and a caller
+/// that wants to know *which* refusal it was would otherwise have to name
+/// `rcad-mesh` — the dependency this facade exists to hide
+/// (`docs/decisions.md` §3.6, §7.2).
+pub use rcad_mesh::CannotTriangulate;
+
 pub use rcad_geom::{
-    Axis, BSplineCurve, BSplineSurface, Cylinder, EVALUATION_ROUNDOFF, Isometry, KnotVector,
-    MAX_DEGREE, Orientation, Plane, PlaneAgreement, Point, REFINEMENT_ROUNDOFF, Scale, Segment,
-    Sphere, Surface, Unit, Vector,
+    Axis, BSplineCurve, BSplineSurface, Cylinder, Deflection, EVALUATION_ROUNDOFF, Isometry,
+    KnotVector, MAX_DEGREE, Orientation, Plane, PlaneAgreement, Point, REFINEMENT_ROUNDOFF, Scale,
+    Segment, Sphere, Surface, Unit, Vector,
 };
 pub use rcad_predicates::{
     Approximation, Cause, Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D,
@@ -260,6 +308,6 @@ pub use rcad_predicates::{
 };
 pub use rcad_topo::{
     CoedgeKey, CoedgeView, Containment, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef,
-    FaceView, Fused, Invalid, Measurement, Model, Profile, ProfileBuilder, Rule, ShellKey,
-    ShellView, SolidKey, SolidView, VertexKey, VertexView, WireKey, WireView,
+    FaceView, Fused, Invalid, Measurement, Mesh, MeshTriangle, Model, Profile, ProfileBuilder,
+    Rule, ShellKey, ShellView, SolidKey, SolidView, VertexKey, VertexView, WireKey, WireView,
 };

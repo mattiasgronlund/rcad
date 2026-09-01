@@ -4397,3 +4397,708 @@ gate started from it.
 4. `rkyv`, the bump arena, cone and torus, the B-spline fit (§1.8) and the
    working frame (§24.8) all stay deferred, each with its consumer named.
 5. §24.12's risk prediction was recorded before the work. M4's gate scores it.
+
+---
+
+## 25. Where the mesher meets the topology
+
+*Recorded 2026-09-01, before the lanes fan out. §15 settled the shared meanings
+before M1 and M2.5, §23 before M2's lanes and §24 before M3's stages; this is
+the same, for §13 rule 4's reason. Three quarters of M2 has landed. What is left
+is the seam between `rcad-mesh` and `rcad-topo`, plus curved `measure`, and it
+is about to be four people.*
+
+### 25.1 The boundary is refined by whoever can see both sides of it
+
+**Settled: `rcad-topo` refines every boundary. `rcad-mesh` refines only the
+inside of a patch and never adds a point to a loop it was handed.**
+
+§23.4: edge points are worked out once and the same 3D points go to both faces
+along that edge, bit for bit. `rcad-mesh` is shown one face at a time, and its
+`Cargo.toml` makes that a fact the compiler checks (§23.6), so it cannot know a
+loop is shared. If it subdivided one, the two faces along an edge would each
+refine in their own `(u, v)` and land on different 3D points — and not by a
+rounding. A cylinder's inverse and a plane's are different functions of the same
+edge, so the two sides need not even produce the same *number* of points, and
+§23.4's oracle would fail by a count rather than by a distance.
+
+Rejected: hand the mesher both faces at once. That is topology in the one crate
+whose whole value is not having any, and it costs the oracle that needs no
+solid — §13 rule 1's condition, and the reason `rcad-mesh` could be built beside
+the rest instead of after it.
+
+Rejected: let the mesher subdivide and have the caller weld coincident points
+afterwards. Welding is a tolerance decision on constructed points, which is a
+place to manufacture the undecidability §1.7 exists to measure — §15.5's mistake
+arriving by a new road. An index cannot drift and costs nothing.
+
+So the mesher may assume **a loop it is given is final**: every corner is a point
+the caller means to see in the mesh, it hands every one of them back at the index
+it came in at, and it adds nothing to any loop. `Patch`'s own doc already
+promises the index half. Points it adds go strictly inside the patch and on the
+end of the corner list.
+
+One consequence, because it looks wrong otherwise. A refined boundary point is
+**not** certified onto its surface and does not have to be: it comes out of an
+evaluator and carries a deviation. `validate`'s "every corner of a curved face is
+certified onto its surface" is about vertices stored in the model, not about
+points in a mesh, and running the two together would be asking a picture to be as
+true as the geometry it is a picture of.
+
+### 25.2 Which of a surface's own two coordinates a point sits at
+
+`Surface::point_at` has no inverse, and every lane below needs one.
+
+```rust
+impl Surface  { pub fn coordinates_of(&self, point: Point) -> (f64, f64) }
+impl Sphere   { pub fn coordinates_of(&self, point: Point) -> (f64, f64) }
+impl Cylinder { pub fn coordinates_of(&self, point: Point) -> (f64, f64) }
+```
+
+`Plane::plane_coordinates_of` already exists and keeps its name; the `Surface`
+arm calls it.
+
+**Bare numbers. No `Decision` and no `Result`.** It decides nothing and cannot
+fail. §23.4 says `(u, v)` is a working space and never an answer, and a predicate
+is for answers; handing one back here would invite a caller to take a decision on
+projected coordinates, which is exactly what §15.5 forbids.
+
+**It answers about the nearest point on the surface.** A point off the surface
+gets its projection's coordinates, which is what `Plane::plane_coordinates_of`
+already does, so this is one rule rather than two. The axis of a cylinder and the
+centre of a sphere have no nearest point, and there the answer is `(0, 0)`,
+stated rather than refused: a caller that reaches it is already broken, and a
+number is cheaper than a branch nobody takes.
+
+**What a round-trip test may assert:** for a point *on* the surface,
+`point_at(coordinates_of(p))` is within a stated multiple of `radius · ε` of
+`p` — the bound a named public constant beside the expression, with a test that
+could fail, per §15.6 and its amendment. What it may **not** assert: bit equality
+in either direction, or `coordinates_of(point_at(u, v)) == (u, v)`, which is
+false for any `u` outside the branch below and undefined at a pole.
+
+**The seam.** `u` comes back on one `atan2` branch, `(-π, π]`, chosen once and
+said out loud. A point exactly on a cylinder's seam — `y = 0`, `x > 0` in
+`Cylinder::basis` — comes back `u = 0` and never `2π`, because
+`atan2(+0.0, positive)` is `+0.0`. So a point on the seam has one answer here and
+not two.
+
+**A wire that goes all the way round is the caller's problem and not the
+surface's.** Whoever walks a loop is the one that knows it is a loop, so the
+unwrap lives in `rcad-topo`: after taking each corner's `u`, add or subtract a
+turn so that no two corners in a row jump by more than half a turn. A ball's face
+then comes out as the rectangle §25.6 needs, with its two seam sides at `u = 0`
+and `u = 2π` instead of both at zero.
+
+Rejected: have `coordinates_of` take the previous `u` and carry on from it. That
+makes a surface's answer depend on the order it was asked in, which is the shape
+of bug §19.1 and §23.8 keep finding.
+
+### 25.3 The mesher reports a length and never judges it
+
+```rust
+pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate>
+impl Patch { pub fn deviation(&self) -> Approximation }
+```
+
+The signature does not change. What changes is that a `Patch` carries a number.
+
+**A length, in the model's own unit, in an `Approximation`** — §15.2 and §23.5 —
+with `Cause::FlatStandIn`, which §25.8 takes here. Never in `(u, v)`: a `u` on a
+pipe of radius 1000 and a `u` on one of radius 0.001 are not the same length, and
+§23.4 says `(u, v)` is never an answer.
+
+**One number per patch**, the furthest any point of any triangle can be from the
+surface. Not one per triangle: §5 records provenance per decision and not per
+coordinate, and §24.13 says the same about the evaluator for the same reason.
+
+**`triangulate` does not take a `&Policy`, and that is the decision rather than
+an omission.** §12.5's convention gives a policy and a log to an operation that
+can make a non-certified *decision*, and this one makes none — it refines until
+its own bound is under the `Deflection` it was handed. Whether that is good
+enough is a judgement, it belongs to the caller, and the caller is in `rcad-topo`
+where the policy already is. A mesher that judged would mean someone who asked
+for a rougher picture had silently asked the kernel to certify less, which is the
+conflation §23.5 exists to stop.
+
+**There is no best-effort answer.** `triangulate` meets the deflection or
+refuses. A patch that quietly missed it and reported the miss would need every
+caller to compare two numbers, and none would. The refusal is about the request —
+this deflection needs more triangles than this domain can hold — and never about
+the surface; naming it is the lane's.
+
+Then what is the number for, if a successful call always comes in under the
+deflection? Because it is usually far under, and because the caller has to put a
+real figure on the face it built (§15.2) rather than the ceiling it asked for.
+
+### 25.4 A volume error is not a length, and `Measurement` says so in three units
+
+```rust
+pub struct Measurement { /* volume, volume_error, surface_area, area_error,
+                            centroid, centroid_wobble */ }
+
+impl Measurement {
+    pub fn volume_error(self) -> f64;     // cubed unit
+    pub fn area_error(self) -> f64;       // squared unit
+    pub fn centroid_wobble(self) -> f64;  // length
+}
+```
+
+**Only `centroid_wobble` is judged against `Policy::max_wobble`.** It is the one
+length, and §15.2 says a magnitude is how far a *point* could be out of place —
+the centroid is a point and this is how far it could be out of place. The other
+two are reported and never judged: a budget in lengths says nothing true about a
+cubic unit, and cramming one into an `Approximation` is §12.4's mistake, which
+§23.5 refused in advance.
+
+The signature the lane lands:
+
+```rust
+pub fn measure(
+    self,
+    deflection: Deflection,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Measurement>
+```
+
+A `Deflection` because the answer is only as good as the mesh it is summed over,
+and a deflection read from anywhere but the call site is §2.6's footgun. A
+`Policy` and a log because it can now make a non-certified decision, which is
+§12.5's rule.
+
+**For a wholly flat solid the deflection is ignored**, the exact fan is summed
+exactly as it is today, and all three errors come back exactly `0.0`. That is a
+claim with a test behind it, and it is what keeps M0's numbers bit for bit.
+
+Rejected: keep `measure()` and add a second `measure_meshed(&Mesh)`. Two
+functions answering "how big is this" is two answers to one question, and §23.8
+is four instances of what happens when one of them stops being right.
+
+**Not taken at this gate**, which is a change from the plan that opened it.
+Adding the fields now would put three of them and one argument into a public type
+with nothing producing any of them, tested only by asserting the zero they were
+initialised with — §12.6's first gap exactly, the mistake §13 was written after.
+`Measurement` and `measure` live in one file that one lane owns; the shape above
+is the contract, and that lane lands it in one go.
+
+**Amended 2026-09-01, while implementing. "Judged" cannot mean "refused on", and
+the arithmetic is what says so.** `Policy::max_wobble` is `64·ε·working_size` —
+`1.4e-12` for a 100 mm model — and `0.0` under `Policy::certified`. A mesh of a
+ball of radius three at a deflection of `0.1` leaves a centroid wobble of about
+`3e-1`, and the wobble falls roughly in step with the deflection, so meeting that
+budget would need a deflection near `5e-13`. A ball asked for one comes back
+`MoreMeshPointsThanASolidWillHold`. So
+`policy.wobble_is_acceptable(centroid_wobble)` is `false` for **every** curved
+solid at **every** deflection that can be met, and a `measure` that refused on it
+would have replaced §25.5's blanket refusal with another wearing a hat — the lane
+would have delivered nothing.
+
+It is also the conflation §23.5 forbids, arriving from the other side: the
+*deflection* would be deciding what the *policy* certifies, so a caller who asked
+for a rougher picture would be refused an answer rather than given a rougher one.
+§23.5's own division of labour is the one that holds — the deflection says how
+fine, and the policy decides what happens when the deviation cannot be *proven*
+under it, which is the floor `SolidView::mesh` already asks it about.
+
+So what the sentence above means is that `centroid_wobble` is the one of the
+three that is *commensurable* with `Policy::max_wobble`, and comparing them is
+the caller's to do on a number handed back for exactly that. `measure` passes
+`policy` and the log through to `mesh` and refuses nothing of its own.
+`judging_a_meshed_centroid_against_the_policy_would_refuse_every_ball` is the
+demonstration rather than the paragraph, per `CLAUDE.md`.
+
+### 25.5 Until then, `measure` refuses a curved solid
+
+§24.4 states as a premise that `is_wholly_flat` gates `measure`. **It does not,
+and never did.** `classify` and `fuse` ask it; `measure` was left out when §23.8
+item 4 added the shared check, and nothing in the suite asked.
+
+What happened on a round bar was neither a refusal nor an answer. Its caps fan
+into no triangles at all — a one-corner wire has no polygon — and its wall into
+two triangles with no area, so `six_volumes` comes out a clean `0.0` and
+`measure` dies on its own `assert!(six_volumes > 0.0)`. A ball does the same. The
+assert is right that a solid enclosing nothing is a broken model; it is wrong
+about which of the two it was looking at.
+
+**Settled: `measure` asks `is_wholly_flat` first and returns
+`Error::MeasureNeedsFlatFaces`**, alongside `Error::FuseNeedsFlatFaces` and for
+the same reason — the solid is sound and the operation is what is not ready for
+it. Deliberately not `Error::Undecidable`: nothing here is in doubt. Asked over
+every face before anything is summed, so which answer comes back cannot depend on
+the order the faces were reached.
+
+Landed at this gate, with a test. It comes back out when §25.4's lane lands.
+
+### 25.6 A pole is a side of the rectangle, not a repeated corner
+
+`Loop::through` refuses fewer than three corners and `triangulate` refuses two
+corners in the same place, so a ball's face — a rectangle in `(u, v)` whose top
+and bottom edges are each one point in 3D — has to be handed over in some shape
+that survives both.
+
+**Settled: the caller hands over the rectangle, and a pole is a *side* of it
+whose corners share one 3D point.**
+
+A ball's one face is four wire steps: down the seam, across the south pole, up
+the seam, back across the north pole. In `(u, v)` that is four corners —
+`(0, π/2)`, `(0, −π/2)`, `(2π, −π/2)`, `(2π, π/2)` — three or more of them, all
+different, so `Loop::through` and `triangulate` take it as it stands. The two
+`u`s differ because §25.2's unwrap made them differ.
+
+**Identity is the caller's table and never the mesher's index.** Two corners at
+different `(u, v)` may be one 3D point, and both pole corners of that rectangle
+are. The topo layer maps each `Patch` corner to a point index of its own and maps
+every pole corner of a face to the same one, so §23.4's oracle — every mesh edge
+used by exactly two triangles, opposite ways round — is a statement about indices
+and comes out right. A triangle whose three corners do not map to three different
+points is **dropped**: it has no area and covers nothing, and dropping it is what
+turns the rectangle's top row into the fan a sphere's pole actually has.
+
+What the mesher may refuse is what it refuses today and nothing new: fewer than
+three corners, two corners in the same place, a boundary that crosses itself, a
+corner of one loop sitting on another loop's side. It is **not** entitled to
+notice that two different `(u, v)` are one point, because it cannot see 3D at all.
+
+Rejected: a pole as one repeated corner, with the mesher taught to allow it. That
+asks a crate with no topology to tell which repeats are a pole from which are the
+broken input `CornersCoincide` exists to catch — the same overloading §23.3
+turned down for zero-length edges, and it makes that check unaskable the same way.
+
+### 25.7 What a mesh of a solid is
+
+§23.6 settled the two levels: `rcad-mesh` returns topology-free triangles and
+`rcad-topo` pairs them with the key it asked about. This names the upper one.
+
+`crates/rcad-topo/src/mesh.rs`:
+
+```rust
+pub struct Mesh { /* … */ }
+impl Mesh {
+    pub fn points(&self) -> &[Point];
+    pub fn triangles(&self) -> &[MeshTriangle];
+    pub fn deviation(&self) -> Approximation;
+}
+
+pub struct MeshTriangle { /* … */ }
+impl MeshTriangle {
+    pub fn corners(self) -> [u32; 3];
+    pub fn face(self) -> FaceKey;
+}
+
+impl SolidView<'_> {
+    pub fn mesh(
+        self,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Mesh>;
+}
+```
+
+**One point table for the whole solid, and that is what watertightness *is*
+here.** An edge's points appear in it once, and both faces along that edge name
+the same index, so §23.4's oracle is a check on indices with no distance in it
+anywhere. §23.4 called the claim combinatorial rather than metric; this is the
+type that makes it so.
+
+`mesh` takes a `&Policy` and a log where `triangulate` takes neither (§25.3). The
+judging happens once, here, where the policy is.
+
+**The order is fixed** — faces in stored order, and within a face whatever
+`triangulate` gives back for a domain built the same way — because §9.2's
+benchmark compares a serial run against a parallel one bit for bit, and every sum
+built on a shuffled mesh would come out different.
+
+The facade exports `Mesh` and `MeshTriangle`. §24.15's argument for the
+intersector applies here for less work: the only topology in the signature is a
+`FaceKey`, which is public already.
+
+### 25.8 What landed at this gate
+
+Each has a test that fails without it.
+
+1. **`Cause::FlatStandIn`** (§25.3), taken here rather than in a lane. §15.9's
+   precedent is exact: `Cause::ConstructedPoint` was taken before M1's worktree
+   opened so that the freeze on `rcad-predicates` would be real rather than
+   aspirational, and it cost a day. **`rcad-predicates` is frozen from here until
+   the lanes close.** The variant goes **last** in the enum, because `postcard`
+   writes an enum as its number: one inserted in the middle makes every
+   `Approximation` already on disk read back blaming something else, silently,
+   because the bytes still parse and the magnitude is still right. There is a
+   test on the numbering.
+2. **`measure` refuses a curved solid** (§25.5).
+3. **`SolidView::bounding_box` is now `box_around_its_corners`** (§25.9).
+4. **`Deflection` is exported from the facade.** Nothing out there takes one yet,
+   and it goes out anyway: every signature this section writes down takes one,
+   and three lanes would otherwise each add the same line to the one file they
+   share. §15.9's table makes the facade's re-export list the shared, append-only
+   thing precisely so that a fan does not contend over it, and pre-loading the
+   one name all of them need is what a gate is for.
+
+Not taken, and named here so that nobody takes them inside a lane: the
+`Measurement` fields and `measure`'s new arguments (§25.4), and `Mesh` (§25.7).
+Both would be public shapes with nothing producing them.
+
+### 25.9 What the gate found that the plan did not
+
+**`bounding_box` was not one, and had not been since a curved face became
+legal.** §23.8 recorded four defects that were each a helper meaning one thing
+until a new kind of input arrived; this is the fifth, and it was still in the
+tree because §23.8 stopped at the ones that had already fired.
+
+A round bar's two corners are both on its seam, so the box round them is a
+**line**, while the bar bulges a whole radius out of it on every side. Nothing
+crashed and nothing refused: a caller asking how big a bar is got a confident
+wrong answer, which §4.1 ranks below the crash. A ball is worse — its one face
+has two corners, two corners make no triangle, and the answer is `None`, which
+the doc said meant "no faces at all". A ball has one.
+
+Renamed `box_around_its_corners`, which cannot be misread, exactly as
+`distance_between_its_ends` was (§23.8 item 3). A real box round a curved solid
+needs the mesh and belongs to the lane that builds one. `classify` is the only
+caller inside the kernel and it asks `is_wholly_flat` before it reads a box, so
+nothing changes for it.
+
+Also corrected: `rcad-mesh`'s crate doc still said the triangulator was not there
+yet. It shipped in the same milestone that wrote the sentence.
+
+### 25.10 Who owns what, and in what order
+
+| Lane | What it is | Files it may touch | Opens |
+|---|---|---|---|
+| **A. Which coordinates a point sits at** | §25.2 | `rcad-geom/src/surface.rs`, `sphere.rs`, `cylinder.rs`, `lib.rs`, its own new test file | now |
+| **B. Refinement, and the number for how far it strays** | §25.3 | everything under `crates/rcad-mesh/` | now |
+| **C. The mesh of a solid** | §25.1, §25.6, §25.7 | `rcad-topo/src/mesh.rs` (new), `view.rs`, `lib.rs`, `rcad-topo/Cargo.toml`, `rcad-topo/tests/meshing_a_curved_solid.rs` (new) | when A lands |
+| **D. Curved `measure`, and the two gaps behind it** | §25.4, §25.5, §23.9's first two | `rcad-topo/src/measure.rs`, `validate.rs`, `error.rs`, `rcad-topo/tests/measuring.rs`, `a_solid_with_a_curved_face.rs`, `rcad/src/lib.rs` | when C lands |
+| `rcad-predicates` | nobody | frozen (§25.8) | — |
+
+**Not a four-way fan, and the ordering is a dependency rather than a preference.**
+A and B are in different crates and neither consumes the other: B refines inside
+a patch, which needs `point_at` and a curvature bound and never the inverse. C
+needs A's inverse to put a shared edge point into each face's own `(u, v)`, and
+it is written against B's contract rather than B's code, so it needs B landed only
+to run green. D needs C's `Mesh`.
+
+That puts two lanes inside `rcad-topo`, which §13 rule 6 permits — it caps work
+in flight in one crate at two or three — and they are in sequence rather than
+side by side because the dependency is real. §24.12 made the same call for the
+same reason.
+
+`crates/rcad/src/lib.rs` is shared, re-export lists only, as §15.9's table has
+it, **with one exception written down here so it is not a surprise**: the worked
+example in it calls `measure()`, and §25.4 changes that signature. That edit
+belongs to D. C hands its two re-export lines to D rather than editing the file.
+
+§13 rule 5 wants the lanes' generators to differ so that two suites cannot go
+green together for the same wrong reason. A draws points on spheres and pipes, B
+draws polygons in a flat domain, and those two are clear of everything. **C and D
+share the bar and the ball**, because those are the only two curved solids that
+exist, and that is worth naming rather than glossing. What separates them is the
+oracle: C's is combinatorial — every mesh edge used by exactly two triangles, and
+χ of the mesh equal to χ of the solid — and D's is arithmetic, a bar's volume
+against `πr²h`. No one wrong mesh satisfies both.
+
+M2's closing gate writes **§26**; the number is reserved here so the lanes do not
+collide over it.
+
+---
+
+## 26. What M2 actually cost, recorded 2026-09-01
+
+*Written by M2's closing gate, per §25.10's reservation of this number. §12 did
+this for M0, §16 for M1 and §17.8 for the fuse.*
+
+M2 is complete. Topology holds curved faces, seams and poles; `rcad-mesh` cuts a
+trimmed patch into triangles to a stated deflection; `SolidView::mesh` puts a
+whole solid into one point table; `measure` weighs a solid that is not a
+polyhedron and says in three separate units how much of the answer the triangles
+could be hiding. `validate`'s two named gaps (§23.9) are closed. The suite went
+from 796 tests to 860, and the claim audit that closes every milestone ran last
+and found two defects and two overstated sentences.
+
+`rcad-predicates` was touched once, at the gate, to add `Cause::FlatStandIn`.
+§25.8's freeze held for the whole of the fan.
+
+### 26.1 §23.8's pattern held, and there are seven of them now
+
+§23.8 recorded four defects with one shape: **a helper that meant one thing
+until a new kind of input arrived, and then quietly meant another.** It predicted
+nothing about how many more there were. Three more turned up:
+
+5. **`bounding_box` was not one** (§25.9). A round bar's two corners are both on
+   its seam, so the box round them is a line while the bar bulges a radius out of
+   it on every side, and a ball's answer was `None` — which the doc said meant a
+   solid with no faces. Renamed `box_around_its_corners`.
+6. **`measure` asserted its way to a panic** (§25.5). A round bar's caps fan into
+   no triangles at all, so `six_volumes` came out a clean `0.0` and `measure`
+   died on its own `assert!(six_volumes > 0.0)`. The assert was right that a
+   solid enclosing nothing is broken and wrong about which of the two it was
+   looking at.
+7. **A ball asked for a rough picture meshed into nothing at all** — found by the
+   claim audit, after all four lanes had landed and the suite was green. The
+   mesher sized a step by how far it went round in *longitude*, and a ball's seam
+   runs pole to pole: half a turn of latitude and no longitude whatever. Past a
+   deflection of about `6.6 · radius` the seam came back one step long, the face
+   was a rectangle whose only corners were its two poles, every triangle stood on
+   one point twice and was dropped, and `mesh` handed back two points, no
+   triangles, and a deviation that read perfectly honestly. `measure` then died
+   on the *same* assert as item 6, down a road item 6's fix did not cover.
+
+So the pattern held, and it sharpened. In items 1 to 5 the new input was a new
+kind of **solid** — the first curved face. In items 6 and 7 it was a new kind of
+**number**: a deflection, which is a knob a caller turns and no shape at all.
+That is the harder half to see coming, because a new solid arrives with a new
+builder and a review, and a new number arrives inside an existing signature.
+
+The audit also found a fourth instance of the §16.10 species proper — three
+places where the mesher **asserted** on a shape `Model`'s `Deserialize` can
+deliver, one of them inside `validate`, which is the one function in the kernel
+whose job is to hand back a refusal rather than crash. §26.5 has them.
+
+### 26.2 §23.7 predicted the risk and thereby defused it
+
+§23.7 named `measure` — shipped in M0, exact, bit-for-bit reproducible, and read
+by every metamorphic property in the fuse suite — as M2's schedule risk, on the
+grounds that rebuilding it on an approximate mesh puts inclusion–exclusion,
+idempotence and absorption downstream of new arithmetic.
+
+**Half right, and the half that was wrong is wrong for a good reason.** It did
+not slip there, because the prediction was acted on: lane D left the exact path
+untouched, byte for byte, and wrote the mesh path beside it behind
+`is_wholly_flat`. `a_flat_solids_measurement_is_bit_for_bit_what_it_was` freezes
+six shapes' volume, area and centroid as bit patterns read off the kernel before
+the change, and it catches a turned cube routed through the mesh — its volume
+moves by an ulp and its centroid much further. A prediction that causes the risk
+to be designed around is a prediction working, not a prediction failing, and it
+should be scored that way.
+
+The unbudgeted time went to three things nobody had listed:
+
+- **No patch may span more than a quarter turn.** A triangle is measured by its
+  longest chord, and a chord stops growing with the turn it spans once that turn
+  passes a half — right the way round it is zero again. A ball's patch therefore
+  filled with triangles that each stood on one point twice, and the mesh came
+  back empty. Half a turn is not enough either. Lane C found this with its own
+  oracle, and the claim audit later found the same rule missing in the other
+  direction (§26.1 item 7), which makes it the most expensive single idea in the
+  milestone.
+- **χ of a solid is not `V − E + F`**, twice over: a face with a hole is worth
+  `2 − wires` rather than one, and a pole is not an edge. The oracle found the
+  first of those on a shape the suite already trusted.
+- **§25.4's `max_wobble` reading had to be amended mid-flight**, because taken
+  literally it refused every curved solid at every reachable deflection.
+
+**The running score, since §24.12 asks for one.** §12.1 stated the lesson after
+the fact rather than predicting anything. §17.6 predicted, against §1.7 in the
+same file, and was right. §23.7 predicted and was half right in the sense above.
+§24.12's is made and not yet scored. So: **three predictions made in advance, one
+right, one half right, one open.** §24.12 also says it is "the first made in
+advance", which is not so — §23.7 was written before M2's lanes fanned out, and
+this section is what scores it.
+
+### 26.3 §25 was wrong about arithmetic and right about ownership, and that is why it paid
+
+§25 exists because §13 rule 4 says a meaning two people settle separately gets
+settled twice, differently. Four lanes ran off it. Three of them reported places
+it was silent, incomplete or wrong:
+
+- **§25.6's "`Loop::through` and `triangulate` take it as it stands" was false,
+  and is now false three times over.** It was written about a ball's rectangle
+  and it is true of the two refusals it names — but the rectangle a ball hands
+  over cannot be triangulated *usefully*, because every triangle in it spans the
+  seam. Lane C found the quarter-turn cut. The audit found the same rule missing
+  in latitude.
+- **§25.2's suggested bound shape was false.** "Within a stated multiple of
+  `radius · ε`" reads perfectly and is wrong: the angle a pipe reads off a point
+  is a difference of terms the size of the whole model, so a pipe of radius one a
+  long way out loses the model's worth of bits and not one radius' worth. The
+  constant landed as `256 · ε` of *the largest number involved*, and the worst a
+  search over forty orders of magnitude can find is `2.4 · ε` of it.
+- **§25.4's `max_wobble` reading was amended while the lane was open**, as above.
+- **§25.10's file table under-counted a signature change.** Lane D was given six
+  files and touched twenty, because `measure`'s new arguments ripple into every
+  test that calls it. Nothing collided, because D ran last and alone; had it run
+  beside another `rcad-topo` lane it would have.
+
+**Was writing it first still worth it? Yes, and the split says why.** Everything
+§25 got wrong was about *arithmetic* — a bound's shape, how coarse is too coarse,
+what a budget compares against. Code finds those, cheaply, in the lane that hits
+them. Everything §25 got right was about *meaning and ownership* — who refines a
+boundary, what a `(u, v)` is for, which of three knobs decides what, where
+identity lives, what a mesh of a solid is. Two people settle those differently
+and neither is wrong, which is the expensive kind. Four lanes wrote across five
+crates with one shared re-export file and collided over nothing; `Cause::FlatStandIn`
+went in at the gate and the `rcad-predicates` freeze was real rather than
+aspirational. A gate that is wrong about numbers and right about names has done
+its job. It should stop suggesting numbers.
+
+### 26.4 The numbers
+
+| | at §25's gate | now |
+|---|---|---|
+| tests (`cargo nextest`) | 796 | 860 |
+| doc tests | 23 | 24 |
+| suite, wall clock | 16.0 s | 17.0 s |
+
+What a curved solid costs, release build, 100 mm working size:
+
+| | `validate` | `measure` at the model's own deflection | triangles |
+|---|---|---|---|
+| cube of side ten | 9.9 µs | 5.4 µs | 12 |
+| bar, radius 3, height 5 | 30 µs | 272 µs | 112 |
+| ball, radius 3 | 23 µs | 1.31 ms | 840 |
+
+`validate` meshes every curved solid now and did not before, and it costs two to
+three times a polyhedron's sweep to do it — because it asks for the coarsest mesh
+there is, which is a sign and a count and neither gets truer with more triangles.
+`measure` is two orders above `validate` on the same solid for the opposite
+reason: it is summed over a mesh at the deflection the caller asked for.
+
+Two published bounds and how much room the drawn cases leave:
+`Surface::ROUND_TRIP_ROUNDOFF` is `256 · ε` of the largest number involved and
+the worst drawn case uses `2.4`; `rcad-mesh`'s evaluator roundoff is `8 · ε` of
+how far the surface reaches and the worst drawn case is inside ten times it, with
+a test that fails if a constant ten times too big would also pass.
+
+### 26.5 What the claim audit found, and what it could not break
+
+The audit (`claim-audit`, per §16.10) ran after review, over every "cannot",
+"nothing reaches this" and "by construction" the four lanes wrote. Two defects
+and two sentences.
+
+**Defects.**
+
+1. **The collapsing ball** (§26.1 item 7). A gap, not a limit: the mesh exists,
+   the arithmetic simply did not ask for enough of it. Fixed in the mesher, where
+   the floor belongs. `validate` had already met this and worked around it by
+   meshing a ball at its own radius instead of as coarsely as the mesher goes —
+   and a workaround in one caller is a floor only that caller gets, which is
+   exactly why `measure` panicked. The workaround is gone and the sweep is a
+   constant again.
+2. **Three shapes a file can hold that the mesher asserted on.** Lane C wrote
+   *"a curved face with a hole is asserted against; nothing public builds one"*,
+   which is §16.10's mistake verbatim: no *builder* makes one, and `Model`
+   implements `Deserialize`. §16.11 already records that `validate` is the
+   untrusted-import boundary, and since §25 that sweep meshes. The three are a
+   curved face with a hole, a wire that comes back to a different longitude than
+   it left, and a pole step on a flat face. All three are refusals now —
+   `Error::CurvedFaceWithAHoleGoesTooFarRound` and
+   `Error::AWireWillNotLieFlatOnItsFace`. The second one panicked *inside*
+   `validate`: a ball missing one of its two pole steps is three wire steps that
+   chain up and close, so nothing earlier in the sweep has anything to say about
+   it.
+
+**Sentences, corrected rather than fixed.**
+
+3. **Is the deflection floor a limit, or does a scaling reach it?** §16.10 exists
+   because "no ordering of the arithmetic helps" was true of orderings and silent
+   about scalings, so both floors were asked the question directly.
+   `Error::DeflectionBelowWhatAMeshCanReach` is a **limit**: it is a fixed
+   multiple of the solid's own coordinates, so shrinking the whole model shrinks
+   the floor in exact step and nothing *relative* is ever refused, and no
+   ordering, rescaling or compensated sum puts a point between two neighbouring
+   `f64`s. `rcad-mesh`'s `NoMeshCanGetThatCloseToTheSurface` said "no mesh" and
+   meant "no mesh built from points bounded the way this crate bounds them" — a
+   pipe is invariant along its own axis, so one whose axis origin sits a billion
+   units up it is refused a deflection it could comfortably meet. That is a
+   **gap in a bound rather than in an answer**; closing it needs the axis
+   direction, because an error along `z` moves a point off a `z` pipe by nothing
+   and off a slanted one by all of it. `rcad-topo` never builds one —
+   `add_round_bar` puts the axis at the origin and carries the placement on the
+   solid — so it is named and left, which is what §16.10 asks for when the family
+   of fixes is known and the consumer is not.
+4. **`validate` claims §23.4's oracle and checks something weaker.**
+   `every_side_of_the_skin_is_used_both_ways` counts a *balance* and not a count,
+   so a side used four times, twice each way, would pass. There is no input the
+   kernel can build that fails the count without also failing the balance, so
+   there is no test that could fail if it were strengthened — and a change with
+   no failing test is not a change (`CLAUDE.md` rule 2). The sentence says so
+   now, in both the sweep and the suite's own copy of the oracle.
+
+**Two of the four flagged claims survived, and here is how hard they were
+pushed.** Lane C's ball-seam comment says a ball whose seam went elsewhere would
+get "a watertight mesh of the right ball cut in the wrong place", and that
+nothing today could tell the difference. Built: a ball whose `EdgeRun` records
+its seam a quarter turn from where `add_ball` puts it meshes into 276 triangles,
+passes the whole combinatorial oracle, validates clean and measures the volume it
+should. Nothing can tell, and the reason is that a sphere looks the same from
+every meridian and only that one face uses that edge. It is a **gap** all the
+same — the longitude is in the model, on `EdgeRun::PartOfWhereItCrosses`, and the
+mesher does not read it — and it becomes a wrong answer the moment a second face
+meets a ball along that seam. That is M3's, and §26.6 hands it over.
+
+Lane D's `Undecidable` arm out of a triangulation is a **gap** and could not be
+reached. §2.5 says `Undecidable` arrives through *constructed* points, and every
+corner handed to the mesher today is the projection of an exact stored corner; the
+only other road is a coordinate product overflowing or falling subnormal, and
+`Profile::build` runs the same exact predicate on the same corners first, with the
+triangulation's own `2^-142`–`2^201` window closing the rest. Probed across forty
+orders of magnitude of radius and height, through the public builders, in every
+combination: **not one panic and not one `Undecidable` — every extreme came back
+as a named refusal.** So the arm is correct, correctly classified and currently
+unreachable, and the first thing that reaches it is a mesh domain holding a
+constructed corner, which is M3's crossings.
+
+### 26.6 What M2 hands to M3
+
+§24.4 says M3 does not open until curved `measure` has landed. **It has landed**,
+with error terms in three units and its exact path frozen bit for bit, so that
+precondition is met and M3's gate may open on §24.4's four items. Six things M3's
+gate must now also deal with, which §24 did not know:
+
+1. **The mesher can only walk an edge that is a straight line in the surface's
+   own two coordinates.** That is exactly right for the three edges this kernel
+   builds — a pipe's ruling, a cap circle, a ball's meridian seam — and false in
+   general: a circle cut out of a ball by a plane that misses the centre is not
+   one. §24.2 makes the mesher M3's consumer, so **M3's first crossing is also
+   the first edge the mesher cannot walk.** This is the largest single item on
+   this list and it is not in §24.
+2. **A ball's seam longitude is readable off `EdgeRun::PartOfWhereItCrosses`, and
+   §24.4 item 2 widens that very field from `Plane` to `Surface`.** The two are
+   the same edit arriving from two directions. Whoever widens the field should
+   also make the pole-to-pole walk read the meridian out of it instead of
+   assuming longitude zero; doing it at the gate costs a few lines and doing it
+   after M3's first sphere–plane crossing costs a debugging session.
+3. **`validate` meshes now, so a new `Surface` variant is nine stops and not
+   one.** Three in `rcad-topo/src/mesh.rs`, one in its `measure.rs` and five in
+   `rcad-mesh/src/triangulate.rs` all match on `Surface` and panic on an arm they
+   have not been taught — which is the right answer to a broken workspace
+   invariant and a long list to walk. §24.6 says the surface set does not grow in M3, so
+   nothing is due — but the cost of growing it has gone up and should be counted
+   before, not during.
+4. **`Undecidable` out of `mesh` becomes reachable when a mesh domain first holds
+   a constructed corner** (§26.5). M3's crossing points are the first. The arm
+   and its provenance record already exist; what does not exist is a test, and
+   M3 is the milestone that can write one.
+5. **`rcad-mesh`'s evaluator-roundoff bound over-charges a pipe placed along its
+   own axis** (§26.5 item 3). Unreachable from `rcad-topo`. If M3 ever hands the
+   mesher a surface it did not get from a `Model`, this becomes reachable, and
+   the fix needs the axis direction.
+6. **`measure` over a mesh still asserts `six_volumes > 0.0`.** After §26.5's fix
+   nothing found can reach it — the coarseness sweep now runs to a hundred
+   thousand times the solid, and `validate` meshes every curved solid as coarsely
+   as the mesher goes and checks the sign. It is an assert on a number derived
+   from a caller's deflection, and that is the shape §26.1 items 6 and 7 both
+   had. Worth a second look the next time a new kind of surface arrives.
+
+Carried forward unchanged from §23.9's third item: **arcs in a profile are still
+their own piece**, and every 2D self-intersection check in `build.rs` would have
+to become arc-aware. Nothing in M3 needs one.
+
+### 26.7 Corrections to earlier sections
+
+- **§24.12**: "this is the first made in advance" is not so. §17.6 named the
+  fuse's risk against §1.7 before the work, and §23.7 was recorded before M2's
+  lanes fanned out. §24.12's is the third made in advance and the only one still
+  open; §26.2 keeps the score.
+- **§25.5**: `measure`'s blanket refusal of a curved solid came back out when
+  lane D landed, as that section said it would.
+- **§25.6**: "`Loop::through` and `triangulate` take it as it stands" is true of
+  those two refusals and not of the mesh that results. See §26.3.
+- **§25.10**: the file table is a statement about the lane's *own* files and not
+  about the ripple of a signature it changes. See §26.3.
+- **§23.9**: all three gaps are addressed. A round cap facing outwards and a
+  curved solid's volume are both checked over the mesh in
+  `check_shells_and_solids`; arcs in a profile are deferred again, at item 3
+  above.
