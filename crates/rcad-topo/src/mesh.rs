@@ -1420,11 +1420,12 @@ mod tests {
 
         let meridian = Plane::from_point_and_normal(Point::origin(), normal).expect("a normal");
         let picker =
-            Plane::from_point_and_normal(Point::origin(), picked_by_facing).expect("a normal");
+            rcad_geom::HalfSpace::through_a_point_facing(Point::origin(), picked_by_facing)
+                .expect("a normal");
         let edge = model.data().edges.keys().next().expect("the seam");
         model.data_mut().edges[edge].run = EdgeRun::PartOfWhereItCrosses {
             and: Surface::Plane(meridian),
-            picked_by: SmallVec::from_buf([Surface::Plane(picker)]),
+            picked_by: SmallVec::from_buf([rcad_geom::Picker::from(picker)]),
         };
         model
     }

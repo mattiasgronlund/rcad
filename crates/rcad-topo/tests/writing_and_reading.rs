@@ -4,7 +4,9 @@
 //! corpus in a format you intend to break is how you end up unable to break it
 //! (decisions.md §6).
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{
+    Deflection, EdgeRun, HalfSpace, Isometry, Picker, Plane, Point, Scale, Surface, Vector,
+};
 use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
 use rcad_topo::{FORMAT_VERSION, Model, ProfileBuilder};
 
@@ -128,6 +130,67 @@ fn a_placed_solid_comes_back_where_it_was_put() {
             .expect("a solid this size measures"),
         before
     );
+}
+
+/// **The round trip the version bump owes**, and the property that made the
+/// field change type at all.
+///
+/// A ball's seam is picked out by a half-space, and a half-space stores the four
+/// numbers it was handed with nothing scaled — so unlike a plane, which is
+/// rebuilt and rescaled on the way in, it has to come back **bit for bit**. The
+/// second half is the reason that matters: a normal written exactly square to a
+/// direction stays exactly square across the round trip, and the same four
+/// numbers put through a `Plane` do not.
+///
+/// The run goes through the format on its own, because putting one on a model
+/// means naming keys the front door does not hand out. The model beside it is
+/// what says the seam a ball really carries survives the trip and still
+/// validates.
+#[test]
+fn a_half_space_that_picks_a_seam_comes_back_bit_for_bit_and_still_square() {
+    let along = Vector::new(1.0, 3.0, 5.0);
+    let square_to_it = Vector::new(3.0, -1.0, 0.0);
+    assert_eq!(
+        square_to_it.dot(along),
+        0.0,
+        "written square before anything stores it"
+    );
+
+    let written = HalfSpace::through_a_point_facing(Point::origin(), square_to_it)
+        .expect("a normal with length");
+    let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+        .expect("the y axis is a unit normal");
+    let seam = EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(meridian),
+        picked_by: [Picker::from(written)].into_iter().collect(),
+    };
+
+    let bytes = postcard::to_allocvec(&seam).expect("a run writes out");
+    let after: EdgeRun = postcard::from_bytes(&bytes).expect("and reads back");
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &after else {
+        panic!("it came back a different kind of run")
+    };
+    let Picker::InFrontOf(came_back) = picked_by[0] else {
+        panic!(
+            "a seam is picked by a flat half-space, not {:?}",
+            picked_by[0]
+        )
+    };
+
+    assert_eq!(came_back.coefficients(), written.coefficients());
+    assert_eq!(
+        came_back.normal().dot(along),
+        0.0,
+        "and it is still exactly square to the direction it was written square to"
+    );
+
+    let mut model = empty_model();
+    model
+        .add_ball(2.0, &Isometry::identity())
+        .expect("a ball of radius two");
+    round_tripped(&model)
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a ball whose seam went through the format is still sound");
 }
 
 #[test]

@@ -135,7 +135,7 @@ impl Model {
                     }
                     if picked_by
                         .iter()
-                        .any(|half_space| side_of_surface(half_space, at) == Decision::Neg)
+                        .any(|picker| picker.side_of_point(at) == Decision::Neg)
                     {
                         return Err(Invalid::EdgeOutsideWhatPickedIt.into());
                     }
@@ -1090,14 +1090,16 @@ mod tests {
             .expect("a ball of radius two");
 
         let edge = model.data().edges.keys().next().expect("the seam");
-        let elsewhere =
-            Plane::from_point_and_normal(Point::new(5.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
-                .expect("the x axis is a unit normal");
+        let elsewhere = rcad_geom::HalfSpace::through_a_point_facing(
+            Point::new(5.0, 0.0, 0.0),
+            Vector::new(1.0, 0.0, 0.0),
+        )
+        .expect("the x axis has length");
         let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &mut model.data_mut().edges[edge].run
         else {
             panic!("a ball's seam is named by a crossing")
         };
-        picked_by[0] = Surface::Plane(elsewhere);
+        picked_by[0] = rcad_geom::Picker::from(elsewhere);
 
         assert_eq!(refusal(&model), Invalid::EdgeOutsideWhatPickedIt);
     }
@@ -1115,10 +1117,12 @@ mod tests {
     fn an_edge_outside_a_curved_half_space_that_picked_it_is_caught() {
         let beside_the_ball = Axis::new(Point::new(3.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
             .expect("a direction with length");
-        let sound =
-            Surface::Cylinder(Cylinder::new(beside_the_ball, 2.0).expect("a pipe of radius two"));
-        let swallows_the_poles =
-            Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a ball of radius five"));
+        let sound = rcad_geom::Picker::from(
+            Cylinder::new(beside_the_ball, 2.0).expect("a pipe of radius two"),
+        );
+        let swallows_the_poles = rcad_geom::Picker::from(
+            Sphere::new(Point::origin(), 5.0).expect("a ball of radius five"),
+        );
 
         for (picker, expected) in [
             (sound, None),

@@ -61,7 +61,17 @@ use crate::model::{Model, ModelData};
 /// shape would take a plane's leading coefficient for the tag — bytes that parse
 /// into a *different* solid rather than bytes that fail, which is the one
 /// outcome §4.1 ranks below a crash.
-pub const FORMAT_VERSION: u32 = 2;
+///
+/// **Three since M4's first lane**, where the same field narrowed from a
+/// `Surface` to a [`Picker`](rcad_geom::Picker) (§33). Both write a tag and then
+/// four or seven numbers, so a version 2 file read at this shape is again bytes
+/// that parse rather than bytes that fail — and worse than that, the flat arm
+/// now holds a [`HalfSpace`](rcad_geom::HalfSpace) whose normal is *not* scaled
+/// to length one. A version 2 file's plane read as a half-space would come back
+/// describing the same flat surface, so the tag is the only thing that can catch
+/// it, and it cannot on its own: `Surface::Plane` and `Picker::InFrontOf` are
+/// both the leading arm. Hence this number.
+pub const FORMAT_VERSION: u32 = 3;
 
 impl Serialize for Model {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -102,7 +112,9 @@ struct Payload {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cylinder, EdgeRun, Isometry, Plane, Point, Scale, Surface, Vector};
+    use rcad_geom::{
+        Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Picker, Plane, Point, Scale, Surface, Vector,
+    };
     use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::FORMAT_VERSION;
@@ -126,7 +138,7 @@ mod tests {
         let beside_the_ball = Axis::new(Point::new(3.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
             .expect("a direction with length");
         let picker =
-            Surface::Cylinder(Cylinder::new(beside_the_ball, 2.0).expect("a pipe of radius two"));
+            Picker::from(Cylinder::new(beside_the_ball, 2.0).expect("a pipe of radius two"));
         let edge = model.data().edges.keys().next().expect("the seam");
         let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &mut model.data_mut().edges[edge].run
         else {
@@ -202,21 +214,56 @@ mod tests {
         }
     }
 
-    /// Why the version had to move, in bytes.
+    /// **Why the version had to move, in bytes, and why the tag cannot catch
+    /// it.**
     ///
-    /// A plane and a surface holding that plane are not the same run of bytes,
-    /// so a version 1 file read at this shape would come apart — quietly, where
-    /// the leading coefficient happens to read as a valid tag. The number is
-    /// what stops that, and it is only worth having if the shapes really differ.
+    /// A version 2 file holds `Surface::Plane` where a version 3 file holds
+    /// `Picker::InFrontOf`. Both are the leading arm of their enum, so both
+    /// write the same tag byte, and both follow it with four numbers — so the
+    /// old bytes parse cleanly at the new shape and come back a *different*
+    /// solid rather than an error. §4.1 ranks that below a crash, and
+    /// [`FORMAT_VERSION`] is the only thing standing between the two.
+    ///
+    /// What differs is the four numbers themselves, and the assertion below is
+    /// that they really do: a plane scales its normal to length one and a
+    /// half-space stores what it was handed, so the same normal written both
+    /// ways is the same flat surface in different bits.
     #[test]
-    fn a_plane_and_a_surface_holding_that_plane_are_different_bytes() {
-        let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
-            .expect("the x axis is a unit normal");
-        let bare = postcard::to_allocvec(&plane).expect("a plane writes out");
-        let wrapped = postcard::to_allocvec(&Surface::Plane(plane)).expect("a surface writes out");
+    fn a_plane_and_a_half_space_facing_the_same_way_are_the_same_bytes_saying_different_numbers() {
+        let facing = Vector::new(3.0, -1.0, 0.0);
+        let plane =
+            Plane::from_point_and_normal(Point::origin(), facing).expect("a normal with length");
+        let half_space =
+            HalfSpace::through_a_point_facing(Point::origin(), facing).expect("a normal");
 
-        assert_eq!(FORMAT_VERSION, 2);
-        assert_ne!(bare, wrapped);
-        assert_eq!(wrapped.len(), bare.len() + 1, "one byte of tag in front");
+        let old_shape =
+            postcard::to_allocvec(&Surface::Plane(plane)).expect("a surface writes out");
+        let new_shape =
+            postcard::to_allocvec(&Picker::InFrontOf(half_space)).expect("a picker writes out");
+
+        assert_eq!(FORMAT_VERSION, 3);
+        assert_eq!(
+            old_shape[0], new_shape[0],
+            "both are the leading arm, so the tag byte cannot tell them apart"
+        );
+        assert_eq!(
+            old_shape.len(),
+            new_shape.len(),
+            "four numbers either way, so the old bytes parse at the new shape"
+        );
+        assert_ne!(
+            old_shape, new_shape,
+            "and say something different, which is the whole reason for the version"
+        );
+        assert_eq!(
+            half_space.normal(),
+            facing,
+            "a half-space keeps the normal it was handed"
+        );
+        assert_ne!(
+            plane.normal(),
+            facing,
+            "and a plane scales it to length one"
+        );
     }
 }

@@ -1,6 +1,6 @@
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Sphere, Surface, SurfaceMeet,
-    Vector,
+    Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Sphere,
+    Surface, SurfaceMeet, Vector,
 };
 use rcad_predicates::{
     Approximation, Decision, Policy, ProvenanceLog, Record, orient2d_tolerantly,
@@ -727,14 +727,15 @@ impl Model {
         // one whole circle; the seam is the half of that circle with `x >= 0`.
         let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
             .expect("the y axis is a unit normal");
-        let facing_x = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
-            .expect("the x axis is a unit normal");
+        let facing_x =
+            HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+                .expect("the x axis has length");
         let seam = self.add_edge_running(
             north,
             south,
             EdgeRun::PartOfWhereItCrosses {
                 and: Surface::Plane(meridian),
-                picked_by: smallvec::smallvec![Surface::Plane(facing_x)],
+                picked_by: smallvec::smallvec![Picker::from(facing_x)],
             },
         );
 
