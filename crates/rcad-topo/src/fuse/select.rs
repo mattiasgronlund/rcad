@@ -549,7 +549,7 @@ fn which_solid_owns_each_face(model: &Model, solids: &[&BakedSolid]) -> BTreeMap
 /// Nothing is projected into the plane's own two coordinates, which would round
 /// exact corners into inexact ones and manufacture the undecidability M2.5
 /// exists to measure (§15.5).
-struct InPlane {
+pub(crate) struct InPlane {
     from: PredicatePoint,
     /// Whether [`InPlane::from`] came out above the plane rather than below it.
     turned_round: bool,
@@ -579,7 +579,7 @@ impl InPlane {
     /// any arithmetic. Stepping towards the origin *first* was measured too, and
     /// it is the 37.9% again — a face far from the origin ends up with a
     /// reference point a whole offset away from it, and the fan degenerates.
-    fn of(plane: &Plane) -> Option<Self> {
+    pub(crate) fn of(plane: &Plane) -> Option<Self> {
         let origin = plane.origin().coordinates();
         let normal = plane.normal().components();
         let out_here = plane.offset().abs().max(1.0);
@@ -623,7 +623,11 @@ impl InPlane {
     /// [`candidate_points`] can offer for a rectangular piece lies on one of
     /// its two diagonals or on an edge, so a fan from one fixed corner leaves
     /// two rectangles pressed together with nothing to say about each other.
-    fn winding_around(&self, wires: &[Vec<PredicatePoint>], point: PredicatePoint) -> Option<i32> {
+    pub(crate) fn winding_around(
+        &self,
+        wires: &[Vec<PredicatePoint>],
+        point: PredicatePoint,
+    ) -> Option<i32> {
         wires
             .first()?
             .iter()

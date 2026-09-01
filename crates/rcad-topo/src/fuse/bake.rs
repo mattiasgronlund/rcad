@@ -131,6 +131,12 @@ pub(crate) struct BakedEdge {
     pub(crate) keys: SmallVec<[EdgeKey; 1]>,
     /// The corner the wire is at when it starts along this edge.
     pub(crate) start: BakedCorner,
+    /// The corner it is at when it stops.
+    ///
+    /// **Not the next side's start**, and that is what a closed edge changes: a
+    /// wire with a seam in it stops being a chain once the seam is left out, and
+    /// a cap circle starts and ends at the one corner it has.
+    pub(crate) end: BakedCorner,
     /// The surface of the face on the other side of this edge. Together with the
     /// face's own surface it *is* where the edge runs (§17.4, §31.3).
     pub(crate) across: Surface,
@@ -276,12 +282,14 @@ fn bake_the_joined_faces(
         let mut wires = Vec::new();
         for ring in &face.wires {
             let mut walked = Vec::new();
-            for side in ring {
+            for (position, side) in ring.iter().enumerate() {
                 let start = corners[&side.start.slot_in(model.id())].clone();
+                let next = ring[(position + 1) % ring.len()].start;
                 round_this_face.take_in_point(middle_of(start.point));
                 walked.push(BakedEdge {
                     keys: side.edges.clone(),
                     start,
+                    end: corners[&next.slot_in(model.id())].clone(),
                     across: Surface::Plane(side.across),
                 });
             }
@@ -619,6 +627,7 @@ fn bake_one_face(
                     Some(BakedEdge {
                         keys: core::iter::once(coedge.edge().key()).collect(),
                         start: corners[&coedge.start().key().slot_in(model.id())].clone(),
+                        end: corners[&coedge.end().key().slot_in(model.id())].clone(),
                         across: surfaces[&across].placed,
                     })
                 })

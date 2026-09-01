@@ -75,6 +75,7 @@ use crate::validate::{name_of_surface, side_of_surface};
 use crate::{Error, FaceKey, Invalid, Result, VertexKey};
 
 use super::bake::BakedFace;
+use super::select::InPlane;
 use super::{
     FaceMeet, MeetPoint, Sameness, as_exact_as_it_is, gave_up, must_decide, the_other_way,
 };
@@ -296,6 +297,12 @@ struct Arrangement<'f> {
     crossing_of_edge: Vec<Vec<usize>>,
     /// Which node each edge of each wire starts at, by wire and position.
     node_of_corner: Vec<Vec<usize>>,
+    /// Which node each of them stops at.
+    ///
+    /// Read off the edge and never off the next one along: a wire with a seam
+    /// left out of it is no longer a chain, and a closed edge stops where it
+    /// started.
+    node_of_the_end: Vec<Vec<usize>>,
     /// The half-edges leaving each node, sorted anticlockwise.
     leaving: Vec<Vec<usize>>,
     /// Which cycle each half-edge is walked by.
@@ -421,6 +428,7 @@ impl<'f> Arrangement<'f> {
             cut_crossings: Vec::new(),
             crossing_of_edge: Vec::new(),
             node_of_corner: Vec::new(),
+            node_of_the_end: Vec::new(),
             leaving: Vec::new(),
             cycle_of: Vec::new(),
             cycles: Vec::new(),
@@ -615,11 +623,7 @@ impl<'f> Arrangement<'f> {
             let mut corners = Vec::new();
             let count = self.face.wires[wire].len();
             for position in 0..count {
-                let before = (position + count - 1) % count;
-                let mut through = vec![
-                    self.crossing_of_edge[wire][before],
-                    self.crossing_of_edge[wire][position],
-                ];
+                let mut through = vec![self.crossing_of_edge[wire][position]];
                 let at = self.face.wires[wire][position].start.point;
                 let around = self.face.wires[wire][position].start.around.clone();
                 for index in 0..self.crossings.len() {
@@ -643,6 +647,21 @@ impl<'f> Arrangement<'f> {
             }
             self.node_of_corner.push(corners);
         }
+        self.node_of_the_end = self
+            .face
+            .wires
+            .iter()
+            .map(|wire| {
+                wire.iter()
+                    .map(|side| {
+                        self.nodes
+                            .iter()
+                            .position(|node| node.vertex == Some(side.end.vertex))
+                            .expect("the corner an edge stops at is a corner of this face")
+                    })
+                    .collect()
+            })
+            .collect();
         Ok(())
     }
 
@@ -860,7 +879,11 @@ impl<'f> Arrangement<'f> {
                 }
             }
         }
-        for corners in &mut self.node_of_corner {
+        for corners in self
+            .node_of_corner
+            .iter_mut()
+            .chain(&mut self.node_of_the_end)
+        {
             for corner in corners.iter_mut() {
                 *corner = folded[*corner].expect("every node lands somewhere");
             }
@@ -1027,7 +1050,7 @@ impl<'f> Arrangement<'f> {
                         continue;
                     }
                     let from = at_in(&order, self.node_of_corner[wire][position]);
-                    let to = at_in(&order, self.node_of_corner[wire][(position + 1) % count]);
+                    let to = at_in(&order, self.node_of_the_end[wire][position]);
                     let walked = self.arcs_an_edge_covers(crossing, &order, from, to);
                     for (step, runs_forward) in walked {
                         assert!(
@@ -1377,6 +1400,15 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Decision> {
+        // Two ways out along one curve are the same curve, and the turn between
+        // them is nothing at all. That is a fact about the drawing and not about
+        // the arithmetic: worked out, the determinant has the same gradient in
+        // two of its rows, and a gradient that is a *box* — every corner of a
+        // placed curved solid is one — makes an interval evaluation of it
+        // straddle zero. §35.2 again, arriving one function along.
+        if first.crossing == second.crossing {
+            return Ok(Decision::Zero);
+        }
         let at = self.nodes[node].point;
         let mine = gradient_at(&self.surface, at);
         let one = gradient_at(&self.crossings[first.crossing].partner, at);
@@ -1424,10 +1456,12 @@ impl<'f> Arrangement<'f> {
             sides.push(self.which_side_of_everything(cycle, policy, log)?);
         }
 
+        self.say_whether_the_face_holds_each_lump_of_closed_cuts(&lump);
+
         let mut same = Sameness::of(self.cycles.len());
         for one in 0..self.cycles.len() {
             for other in (one + 1)..self.cycles.len() {
-                if lump[one] == lump[other] {
+                if lump[one] == lump[other] || self.windings_are_known_to_differ(one, other) {
                     continue;
                 }
                 let mut agreed = 0;
@@ -1461,6 +1495,79 @@ impl<'f> Arrangement<'f> {
             self.cells[cell].push(cycle);
         }
         Ok(())
+    }
+
+    /// Whether the face's boundary is already known to wind different numbers of
+    /// times round the regions two walks bound.
+    ///
+    /// Two walks that disagree about it are never one cell, whatever else they
+    /// agree about — the inside of a face and the outside of it are two places.
+    fn windings_are_known_to_differ(&self, one: usize, other: usize) -> bool {
+        match (self.winding_of_cycle[one], self.winding_of_cycle[other]) {
+            (Some(mine), Some(theirs)) => mine != theirs,
+            _ => false,
+        }
+    }
+
+    /// Say whether the face holds each lump made only of cuts that close.
+    ///
+    /// A closed cut that touches no boundary arc lies wholly inside the face or
+    /// wholly outside it — if it crossed the boundary it would share a node with
+    /// it and be the same lump — so one point of it answers for the whole lump,
+    /// and every walk the lump bounds is wound the same number of times.
+    ///
+    /// **Only a flat face needs this**, and that is not timidity. On a curved
+    /// face every boundary edge is a whole closed curve (a cap circle, a hole a
+    /// pipe left in a ball's skin), so it is drawn in full and the sign of it
+    /// places the lump on its own. What a *flat* face is bounded by is straight
+    /// lines, and the stretch of a line past the edge that lies on it is not
+    /// drawn — so the sign says the same thing on both sides of the face's own
+    /// rim and cannot tell the inside from the outside. Counting how often the
+    /// rim winds round the point can, and that is one walk that already exists.
+    ///
+    /// A face this cannot answer for is left alone: an unknown winding rules
+    /// nothing out, and what follows either places the lump some other way or
+    /// leaves it bounding no piece.
+    fn say_whether_the_face_holds_each_lump_of_closed_cuts(&mut self, lump: &[usize]) {
+        let Some(flat) = self.surface.as_plane() else {
+            return;
+        };
+        let Some(in_plane) = InPlane::of(flat) else {
+            return;
+        };
+        let rim: Vec<Vec<PredicatePoint>> = self
+            .face
+            .wires
+            .iter()
+            .map(|wire| wire.iter().map(|side| side.start.point).collect())
+            .collect();
+
+        let mut lumps: Vec<usize> = lump.to_vec();
+        lumps.sort_unstable();
+        lumps.dedup();
+        for which in lumps {
+            let its_walks: Vec<usize> = (0..self.cycles.len())
+                .filter(|&cycle| lump[cycle] == which)
+                .collect();
+            if its_walks
+                .iter()
+                .any(|&cycle| self.winding_of_cycle[cycle].is_some())
+            {
+                continue;
+            }
+            let Some(at) = its_walks
+                .first()
+                .map(|&cycle| self.nodes[self.from(self.cycles[cycle][0])].point)
+            else {
+                continue;
+            };
+            let Some(held) = in_plane.winding_around(&rim, at) else {
+                continue;
+            };
+            for cycle in its_walks {
+                self.winding_of_cycle[cycle] = Some(held);
+            }
+        }
     }
 
     /// The lumps of the drawing holding a curve that runs on for ever, other
@@ -2793,5 +2900,237 @@ mod tests {
         assert_eq!(pieces.len(), 1);
         assert_eq!(pieces[0].wires[0].len(), 4);
         assert_eq!(twice_the_area_of(&pieces[0]), 8.0);
+    }
+}
+
+#[cfg(test)]
+mod curved {
+    use rcad_geom::{Isometry, Scale, Surface, Vector};
+    use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+
+    use super::super::MeetPoint;
+    use super::super::bake::{BakedFace, BakedSolid, bake};
+    use super::super::cuts;
+    use super::{Piece, split_a_face};
+    use crate::Model;
+
+    /// A block eight across sitting on the origin with a round bar of radius
+    /// one straight through the middle of it, both already cut against each
+    /// other.
+    ///
+    /// §31.7 criterion 11's headline shape, one step short of being fused. The
+    /// bar sticks out two either side, so every one of the block's six faces and
+    /// every one of the bar's three has something to say.
+    fn a_block_and_a_bar_through_it() -> Vec<BakedSolid> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let block = model.add_cube(8.0, &policy, &mut log).expect("a block");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                12.0,
+                &Isometry::translation(Vector::new(4.0, 4.0, -2.0)).expect("a shift"),
+            )
+            .expect("a bar through the middle");
+        let mut solids = bake(&model, &[block, bar], &policy, &mut log).expect("both bake");
+        cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
+        assert!(log.is_empty(), "nothing here had to be approximated");
+        solids
+    }
+
+    fn split(face: &BakedFace) -> Vec<Piece> {
+        let mut log = ProvenanceLog::new();
+        let pieces = split_a_face(face, &Policy::certified(), &mut log)
+            .expect("a lattice-aligned pair splits with nothing left undecided");
+        assert!(log.is_empty(), "nothing here had to be approximated");
+        pieces
+    }
+
+    /// Which surface a face sits on, as one word, for reading a table.
+    fn kind(surface: &Surface) -> &'static str {
+        match surface {
+            Surface::Plane(_) => "plane",
+            Surface::Sphere(_) => "ball",
+            Surface::Cylinder(_) => "pipe",
+            other => panic!("no {other:?} here"),
+        }
+    }
+
+    /// §31.7 criterion 12: the pieces a face is cut into cover it and overlap
+    /// nowhere.
+    ///
+    /// The oracle needs no area and so works on a curved face exactly as it does
+    /// on a flat one: **every side of every piece is walked once, and a side two
+    /// pieces share is walked once each way.** A piece that overlapped another
+    /// would walk a side the same way twice; a piece missing would leave a side
+    /// walked once with nothing walking it back, and the only sides allowed that
+    /// are the ones on the rim the face came in with.
+    ///
+    /// A side is named by where it starts, where it stops and what carries it —
+    /// never by a coordinate, because two ends that are boxes are compared as
+    /// what the arrangement *called* them and not as what they rounded to.
+    #[test]
+    fn the_pieces_a_curved_face_is_cut_into_cover_it_and_overlap_nowhere() {
+        let solids = a_block_and_a_bar_through_it();
+        let mut curved_faces = 0;
+        for solid in &solids {
+            for face in &solid.faces {
+                let rim: Vec<Surface> = face
+                    .wires
+                    .iter()
+                    .flatten()
+                    .map(|side| side.across)
+                    .collect();
+                let mut walked: Vec<(String, String, Surface)> = Vec::new();
+                for piece in &split(face) {
+                    for wire in &piece.wires {
+                        for step in 0..wire.len() {
+                            assert_eq!(
+                                wire[step].ends[1].point(),
+                                wire[(step + 1) % wire.len()].ends[0].point(),
+                                "a side of a piece starts where the one before it stopped"
+                            );
+                        }
+                        for side in wire {
+                            walked.push((
+                                name_of(&side.ends[0]),
+                                name_of(&side.ends[1]),
+                                side.carried_by[1],
+                            ));
+                        }
+                    }
+                }
+                for side in &walked {
+                    let how_often = walked.iter().filter(|other| *other == side).count();
+                    let on_the_rim = rim.contains(&side.2);
+                    // A side that closes on itself starts and stops at the same
+                    // corner, so the two pieces either side of it walk what looks
+                    // like the very same side. Nothing tells them apart but how
+                    // many there are, and that is the whole check here.
+                    if side.0 == side.1 {
+                        assert_eq!(
+                            how_often,
+                            if on_the_rim { 1 } else { 2 },
+                            "a closed side of a piece of a {} is walked the wrong number of times",
+                            kind(&face.surface)
+                        );
+                        continue;
+                    }
+                    assert_eq!(
+                        how_often,
+                        1,
+                        "one side of one piece of a {} is walked twice the same way",
+                        kind(&face.surface)
+                    );
+                    let back = (side.1.clone(), side.0.clone(), side.2);
+                    assert!(
+                        walked.contains(&back) || on_the_rim,
+                        "a side nobody walks back along has to be on the rim of the face"
+                    );
+                }
+                if face.surface.as_plane().is_none() {
+                    curved_faces += 1;
+                }
+            }
+        }
+        assert_eq!(curved_faces, 1, "the bar's wall is the curved face here");
+    }
+
+    /// What the arrangement calls one end of a side.
+    ///
+    /// The two ends of a side that two pieces share are the *same* corner and
+    /// the arrangement gives it one name, so comparing names is exact where
+    /// comparing the boxes they landed in would be a tolerance.
+    fn name_of(end: &MeetPoint) -> String {
+        match end {
+            MeetPoint::Existing { vertex, .. } => format!("{vertex:?}"),
+            MeetPoint::OfThreeSurfaces {
+                surfaces, which, ..
+            } => format!("{surfaces:?}/{which}"),
+            MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => format!("{carried_by:?}"),
+        }
+    }
+
+    /// What each face of the pair comes apart into, face by face.
+    ///
+    /// The table is the thing to read: a block's face has a round hole in it for
+    /// the first time in this kernel, and a bar's wall comes apart into three
+    /// rings — below the block, inside it, and above — each bounded by two
+    /// closed curves and neither of them an outer wire (§31.3).
+    #[test]
+    fn a_block_with_a_bar_through_it_comes_apart_into_a_ring_and_a_disk_and_three_tubes() {
+        let solids = a_block_and_a_bar_through_it();
+        let mut table: Vec<(&'static str, usize, Vec<usize>)> = Vec::new();
+        for solid in &solids {
+            for face in &solid.faces {
+                let pieces = split(face);
+                let mut wires: Vec<usize> = pieces.iter().map(|piece| piece.wires.len()).collect();
+                wires.sort_unstable();
+                table.push((kind(&face.surface), face.cuts.len(), wires));
+            }
+        }
+        table.sort();
+
+        assert_eq!(
+            table,
+            [
+                // The bar's wall, cut by the block's top and bottom into three
+                // rings, each between two closed curves.
+                ("pipe", 2, vec![2, 2, 2]),
+                // The block's top and bottom: a square with a round hole in it,
+                // and the disk that came out.
+                ("plane", 1, vec![1, 2]),
+                ("plane", 1, vec![1, 2]),
+                // The block's four walls: cut by the bar's two cap planes, which
+                // reach right past them and cut nothing off.
+                ("plane", 2, vec![1]),
+                ("plane", 2, vec![1]),
+                ("plane", 2, vec![1]),
+                ("plane", 2, vec![1]),
+                // The bar's two caps, cut by the block's four walls, which are
+                // nowhere near them.
+                ("plane", 4, vec![1]),
+                ("plane", 4, vec![1]),
+            ]
+        );
+    }
+
+    /// A closed crossing with no corner on it still gets one, and it is the same
+    /// one whichever face asks (§31.3, §34.4).
+    ///
+    /// The circle where the bar's wall cuts the block's top has no corner
+    /// anywhere on it, and a wire needs a coedge, an edge needs two ends, and a
+    /// wire that closes on one edge needs both ends to be one vertex.
+    #[test]
+    fn a_closed_cut_with_no_corner_on_it_starts_where_the_crossing_starts() {
+        let solids = a_block_and_a_bar_through_it();
+        let top = solids[0]
+            .faces
+            .iter()
+            .find(|face| {
+                face.surface
+                    .as_plane()
+                    .is_some_and(|flat| flat.normal() == Vector::new(0.0, 0.0, 1.0))
+            })
+            .expect("the block has a top");
+
+        let disk = split(top)
+            .into_iter()
+            .find(|piece| piece.wires.len() == 1)
+            .expect("the disk the bar took out");
+        assert_eq!(disk.wires[0].len(), 1, "one closed side and nothing else");
+        let side = &disk.wires[0][0];
+        assert_eq!(side.ends[0].point(), side.ends[1].point());
+        assert!(matches!(
+            side.ends[0],
+            MeetPoint::WhereAClosedCurveStarts { .. }
+        ));
+        assert_eq!(
+            side.ends[0].point(),
+            PredicatePoint::from([4.0, 5.0, 8.0]),
+            "the point at angle zero on the circle of radius one about (4, 4), where angle zero \
+             is whichever way `Plane::basis` faces and not whichever way looks natural"
+        );
     }
 }
