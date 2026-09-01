@@ -24,12 +24,14 @@
 //! `n₁ × n₂` for the two planes *in that order*. `fuse(A, B)` and `fuse(B, A)`
 //! therefore number the same corner the same way.
 //!
-//! # Nothing here reads a magnitude out of an exact difference
+//! # A sign and a size are two different numbers here
 //!
 //! [`Exact::square_minus`] hands back a sign and never a value, because it
-//! multiplies both sides by a positive power of two (§32.1). The discriminant's
-//! *sign* comes from there and its *size* comes from the enclosures of the three
-//! coefficients, which are separate numbers.
+//! multiplies both sides by a positive power of two (§32.1). It is what settles
+//! which way the discriminant points where nothing else can. **How big the
+//! discriminant is comes from somewhere else** — the same difference summed
+//! without the slide — and mixing the two up would put a corner wherever the
+//! slide happened to land.
 
 use rcad_predicates::{
     Decision, Interval, Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog, Record,
@@ -362,6 +364,24 @@ struct Quadratic {
     constant: Exact,
 }
 
+impl Quadratic {
+    /// `B² − A·C` with nothing slid anywhere, so it is a **value** as well as a
+    /// sign — or `None` when a product it needs falls out of `f64`'s range.
+    ///
+    /// [`Exact::square_minus`] reaches further, because it slides both halves
+    /// into the window where squaring is exact; what it hands back is a sign
+    /// multiplied by a positive power of two, and reading a size off it is the
+    /// mistake §32.1 names. This is the same number without the slide, and it is
+    /// what the roots are worked out from.
+    fn difference_of_the_two_halves(&self) -> Option<Exact> {
+        Some(
+            self.half_linear
+                .times(&self.half_linear)?
+                .minus(&self.squared.times(&self.constant)?),
+        )
+    }
+}
+
 /// The quadratic a ball or a pipe cuts out of the line, or `None` when a product
 /// it needs falls out of `f64`'s range.
 ///
@@ -482,17 +502,66 @@ fn where_a_line_meets_a_quadric(
             quotient_or_everything(-half_linear, squared),
         )])),
         Decision::Pos => {
-            // **The size of the discriminant is not read off `square_minus`**,
-            // which slid both sides up the range and hands back a sign (§32.1).
-            // It is worked out again from the three coefficients' own
-            // enclosures, which are the tight ones an exact expansion gives.
-            let root = root_enclosing(the_size_of_the_discriminant(quadratic));
+            let [lower, upper] = the_two_places_along_it(quadratic);
             Ok(MeetOfThree::At(smallvec![
-                the_point_at(line, quotient_or_everything(-half_linear - root, squared)),
-                the_point_at(line, quotient_or_everything(-half_linear + root, squared)),
+                the_point_at(line, lower),
+                the_point_at(line, upper),
             ]))
         }
         other => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+}
+
+/// How far along the line each of the two meeting points sits, smaller first.
+///
+/// **`(−B ± √Δ) / A` on its own is not good enough, and the case that shows it
+/// is not exotic.** A line a hair off parallel to a pipe's axis has `A = ‖D × w‖²`
+/// down at `1e-32`, and then the two terms of `−B ± √Δ` cancel for one of the
+/// two roots and what is left is a rounding of `B` divided by that `A`. Measured
+/// on a bar's own cap plane turned by a sixty-fourth: a box **fifteen hundred
+/// times the shape**, for a corner that is perfectly well determined.
+///
+/// So the pair is worked out the way a quadratic solver has since Forsythe.
+/// `q = −(B + sign(B)·√Δ)` adds two numbers of the same sign and cancels
+/// nothing; one root is `q/A` and the other is `C/q`, because the two roots
+/// multiply to `C/A`. Both forms are valid enclosures of the same number — they
+/// are the same identity — so the narrower of the two is taken for each root and
+/// there is no branch to get wrong when `q` runs through zero.
+fn the_two_places_along_it(quadratic: &Quadratic) -> [Interval; 2] {
+    // **Not read off `square_minus`**, which slid both sides up the range and
+    // hands back a sign (§32.1).
+    let root = root_enclosing(the_size_of_the_discriminant(quadratic));
+    let squared = quadratic.squared.enclosure();
+    let half_linear = quadratic.half_linear.enclosure();
+    let plainly = |which: Interval| quotient_or_everything(-half_linear + which, squared);
+
+    let leans_back = matches!(quadratic.half_linear.sign(), Decision::Neg);
+    let steady = if leans_back {
+        root - half_linear
+    } else {
+        -half_linear - root
+    };
+    let (well_placed, its_partner) = (
+        quotient_or_everything(steady, squared),
+        quotient_or_everything(quadratic.constant.enclosure(), steady),
+    );
+    let (lower, upper) = if leans_back {
+        (its_partner, well_placed)
+    } else {
+        (well_placed, its_partner)
+    };
+    [
+        the_tighter(plainly(-root), lower),
+        the_tighter(plainly(root), upper),
+    ]
+}
+
+/// The narrower of two enclosures of the same number.
+fn the_tighter(one: Interval, other: Interval) -> Interval {
+    if other.width() < one.width() {
+        other
+    } else {
+        one
     }
 }
 
@@ -540,7 +609,21 @@ fn the_discriminant_of(
 
 /// How big the discriminant is, which is a different number from what says which
 /// way it points.
+///
+/// **Summed through the expansion and not in intervals**, and the difference is
+/// a box a rounding wide against a box two hundred times the shape. A line
+/// nearly tangent to a quadric has `B²` and `A·C` two large numbers that cancel
+/// to nothing, and an interval evaluation of the difference reaches out to the
+/// rounding of the larger — so `√Δ` carries it, and so does every point built on
+/// it. Summed exactly the difference is known to full relative accuracy, which
+/// is §29's lesson and §33.4's, one question up.
+///
+/// The fallback is the interval form, for the rare case where a product the
+/// exact route needs falls out of range. It is honest and it is wide.
 fn the_size_of_the_discriminant(quadratic: &Quadratic) -> Interval {
+    if let Some(exactly) = quadratic.difference_of_the_two_halves() {
+        return exactly.enclosure();
+    }
     let half_linear = quadratic.half_linear.enclosure();
     half_linear * half_linear - quadratic.squared.enclosure() * quadratic.constant.enclosure()
 }
