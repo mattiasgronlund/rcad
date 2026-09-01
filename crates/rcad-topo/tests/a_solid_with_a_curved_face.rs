@@ -454,3 +454,89 @@ fn a_bar_sits_where_it_was_asked_to_sit() {
     assert_eq!(corners[0], Point::new(RADIUS, 0.0, 0.0));
     assert_eq!(corners[1], Point::new(RADIUS, 0.0, HEIGHT));
 }
+
+/// A box round one face of a curved solid, which is what a broad phase reads
+/// and what the fuse's baking step used to work out from triangles.
+///
+/// The wall of a bar fans into two triangles either side of its seam, and both
+/// of them are *on* the seam — a straight line the wall bulges a whole radius
+/// out of. The cap fans into nothing at all, because a wire that closes on one
+/// edge has one corner and one corner is no triangle. So the old box round the
+/// wall was a line and the old box round a cap was empty, and a pair of faces
+/// skipped on either would leave one of two faces along an edge split and the
+/// other not.
+#[test]
+fn a_box_round_one_curved_face_holds_the_face_and_the_box_round_its_triangles_does_not() {
+    let model = a_round_bar();
+    let bar = model.solids().next().expect("the bar");
+
+    for face in bar.faces() {
+        let (low, high) = bar
+            .box_around_one_face(face)
+            .expect("every face of a bar is somewhere");
+        let mut round_its_triangles = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        face.for_each_triangle(|triangle| {
+            for corner in triangle {
+                for axis in 0..3 {
+                    round_its_triangles.0[axis] =
+                        round_its_triangles.0[axis].min(corner.coordinates()[axis]);
+                    round_its_triangles.1[axis] =
+                        round_its_triangles.1[axis].max(corner.coordinates()[axis]);
+                }
+            }
+        });
+
+        match face.surface() {
+            // The corners' shadows on the axis are `z = 0` and `z = 5`, opened
+            // out by the radius on every axis — so the box is taller than the
+            // bar. Loose and sound, which is what a box that only decides which
+            // pairs to look at has to be.
+            Surface::Cylinder(_) => {
+                assert_eq!(low, Point::new(-RADIUS, -RADIUS, -RADIUS));
+                assert_eq!(high, Point::new(RADIUS, RADIUS, HEIGHT + RADIUS));
+                assert_eq!(
+                    round_its_triangles.0,
+                    [RADIUS, 0.0, 0.0],
+                    "the fan of a wall is its seam, and the seam is at x = {RADIUS}"
+                );
+            }
+            // A cap's circle is held by the wall it is shared with.
+            Surface::Plane(_) => {
+                for axis in 0..2 {
+                    assert!(low.coordinates()[axis] <= -RADIUS);
+                    assert!(high.coordinates()[axis] >= RADIUS);
+                }
+                assert!(low.coordinates()[2].is_finite() && high.coordinates()[2].is_finite());
+                assert_eq!(
+                    round_its_triangles.0,
+                    [f64::INFINITY; 3],
+                    "a round cap fans into no triangles at all"
+                );
+            }
+            other => panic!("a bar has no {other:?}"),
+        }
+    }
+}
+
+/// The box round the whole solid is the boxes round its faces put together, so
+/// the two cannot drift apart.
+#[test]
+fn the_box_round_a_bar_is_the_boxes_round_its_faces_put_together() {
+    let model = a_round_bar();
+    let bar = model.solids().next().expect("the bar");
+    let mut low = [f64::INFINITY; 3];
+    let mut high = [f64::NEG_INFINITY; 3];
+    for face in bar.faces() {
+        let (mine, theirs) = bar
+            .box_around_one_face(face)
+            .expect("every face of a bar is somewhere");
+        for axis in 0..3 {
+            low[axis] = low[axis].min(mine.coordinates()[axis]);
+            high[axis] = high[axis].max(theirs.coordinates()[axis]);
+        }
+    }
+    assert_eq!(
+        bar.box_around_it(),
+        Some((Point::from(low), Point::from(high)))
+    );
+}

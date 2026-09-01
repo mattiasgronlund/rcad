@@ -148,6 +148,24 @@ impl Bounds {
         }
     }
 
+    /// A box round one face of one solid, curved or flat.
+    ///
+    /// **Not a box round the face's corners**, which is what this used to read
+    /// off [`FaceView::for_each_triangle`] and which is wrong for every curved
+    /// face there is (§35.4): a round bar's wall fans into two triangles round
+    /// its seam, a line the wall bulges a whole radius out of, and a round cap
+    /// fans into nothing at all. A pair skipped on either would leave one of two
+    /// faces along an edge split and the other not.
+    fn round_a_face(solid: SolidView<'_>, face: FaceView<'_>) -> Self {
+        match solid.box_around_one_face(face) {
+            None => Self::nothing(),
+            Some((low, high)) => Self {
+                low: low.coordinates(),
+                high: high.coordinates(),
+            },
+        }
+    }
+
     fn take_in_point(&mut self, point: Point) {
         for (axis, coordinate) in point.coordinates().into_iter().enumerate() {
             self.low[axis] = self.low[axis].min(coordinate);
@@ -183,7 +201,7 @@ fn bake_one_solid(model: &Model, key: SolidKey, log: &mut ProvenanceLog) -> Resu
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
     for face in solid.faces() {
-        let baked = bake_one_face(model, face, &planes, &corners);
+        let baked = bake_one_face(model, solid, face, &planes, &corners);
         bounds.take_in(baked.bounds);
         faces.push(baked);
     }
@@ -438,17 +456,13 @@ fn derive_a_corner(
 /// edge exactly twice, so reaching this means the model was already broken.
 fn bake_one_face(
     model: &Model,
+    solid: SolidView<'_>,
     face: FaceView<'_>,
     planes: &BTreeMap<FaceSlot, Plane>,
     corners: &BTreeMap<VertexSlot, BakedCorner>,
 ) -> BakedFace {
     let key = face.key();
-    let mut bounds = Bounds::nothing();
-    face.for_each_triangle(|triangle| {
-        for corner in triangle {
-            bounds.take_in_point(corner);
-        }
-    });
+    let bounds = Bounds::round_a_face(solid, face);
 
     let wires = model
         .face(key)
