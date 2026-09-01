@@ -251,9 +251,11 @@ const MOST_POINTS_A_MESH_WILL_HOLD: usize = 4 * 1024 * 1024;
 /// How many pieces one face may be cut into before this gives up on it.
 ///
 /// Every cut that happens at all makes both pieces narrower, and four pieces is
-/// the answer for every face this kernel builds. Reaching this means a piece is
-/// being cut without getting any smaller, which is a bug here rather than a
-/// shape somebody asked for.
+/// the answer for every face this kernel builds — the fuse's rings included,
+/// which are cut across into exactly four. Reaching this means a piece is being
+/// cut without getting any smaller, and it is
+/// [`Error::ACurvedFaceCannotBeCutSmallEnoughToMesh`] rather than an assert
+/// because `validate` walks this and a face can arrive from a file (§16.11).
 const MOST_PIECES_A_FACE_IS_CUT_INTO: usize = 16;
 
 /// A mesh part way through being built.
@@ -440,6 +442,14 @@ impl BuildingAMesh {
         if how_far_round(&walked[0]) <= widest {
             return Ok(vec![walked]);
         }
+        // **One curve right round and nothing else has no seam to open at.** A
+        // cap a plane cuts off a ball is a rectangle in the surface's own two
+        // coordinates whose top edge is a pole and whose sides are one meridian
+        // used twice, and the model says neither of those about this face. A
+        // *ring* — two such curves — is cut across below and is not this.
+        if walked.len() == 1 && walked[0].goes_right_round {
+            return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
+        }
         // A **ring** is the one face with a hole that this can cut, and it is
         // the one the fuse makes: a tube of a bar's wall between two planes,
         // bounded by two curves that each go right round and by nothing else.
@@ -465,10 +475,9 @@ impl BuildingAMesh {
         let mut pieces = vec![walked.into_iter().next().expect("just checked")];
         let mut done: Vec<Vec<WalkedLoop>> = Vec::new();
         while let Some(piece) = pieces.pop() {
-            assert!(
-                pieces.len() + done.len() < MOST_PIECES_A_FACE_IS_CUT_INTO,
-                "cutting this face up is not making the pieces any smaller"
-            );
+            if pieces.len() + done.len() >= MOST_PIECES_A_FACE_IS_CUT_INTO {
+                return Err(Error::ACurvedFaceCannotBeCutSmallEnoughToMesh { face: face.key() });
+            }
             match self.cut_in_two(face, stored, &piece, widest, room)? {
                 Some((one, other)) => {
                     pieces.push(one);
@@ -509,10 +518,7 @@ impl BuildingAMesh {
         let [outer, hole] = walked else {
             return Ok(None);
         };
-        if [outer, hole]
-            .iter()
-            .any(|around| how_far_round(around) < whole_turn / 2.0)
-        {
+        if [outer, hole].iter().any(|around| !around.goes_right_round) {
             return Ok(None);
         }
 
@@ -599,6 +605,7 @@ impl BuildingAMesh {
         let mut along = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
+            goes_right_round: false,
         };
         for step in 1..steps {
             let part = step as f64 / steps as f64;
@@ -665,6 +672,7 @@ impl BuildingAMesh {
         let mut along_the_cut = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
+            goes_right_round: false,
         };
         for step in 1..steps {
             let part = step as f64 / steps as f64;
@@ -852,6 +860,9 @@ impl BuildingAMesh {
 struct WalkedLoop {
     corners: Vec<[f64; 2]>,
     points: Vec<u32>,
+    /// Whether this wire is one whole closed curve, so that it comes back to
+    /// where it started a whole turn on rather than at the longitude it left.
+    goes_right_round: bool,
 }
 
 impl WalkedLoop {
@@ -860,6 +871,7 @@ impl WalkedLoop {
         let mut taken = WalkedLoop {
             corners: Vec::new(),
             points: Vec::new(),
+            goes_right_round: false,
         };
         let mut at = from;
         loop {
@@ -894,6 +906,7 @@ impl WalkedLoop {
         WalkedLoop {
             corners: self.corners.iter().rev().copied().collect(),
             points: self.points.iter().rev().copied().collect(),
+            goes_right_round: self.goes_right_round,
         }
     }
 }
@@ -945,6 +958,7 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
             .map(|corner| [corner[0] + by, corner[1]])
             .collect(),
         points: chain.points.clone(),
+        goes_right_round: chain.goes_right_round,
     }
 }
 
@@ -966,6 +980,7 @@ fn unwrapped(chain: &WalkedLoop, whole: f64) -> WalkedLoop {
     WalkedLoop {
         corners,
         points: chain.points.clone(),
+        goes_right_round: chain.goes_right_round,
     }
 }
 
@@ -1007,6 +1022,7 @@ fn where_to_cut(around: &WalkedLoop, middle: f64) -> Option<(WalkedLoop, [usize;
     let mut opened = WalkedLoop {
         corners: Vec::with_capacity(count + 2),
         points: Vec::with_capacity(count + 2),
+        goes_right_round: false,
     };
     let mut moved_to = Vec::with_capacity(count);
     let mut places = Vec::new();
@@ -1193,6 +1209,7 @@ impl WalkingAWire {
         Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
+            goes_right_round: self.goes_right_round && self.wraps.is_some(),
         })
     }
 }

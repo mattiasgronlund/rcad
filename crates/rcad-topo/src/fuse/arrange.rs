@@ -60,9 +60,9 @@
 use core::cmp::Ordering;
 
 use rcad_geom::{
-    EdgeRun, MeetOfThree, NamedRun, Orientation, Picker, Plane, PlaneAgreement, Surface,
-    SurfaceMeet, intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
-    which_comes_first_round_a_crossing,
+    EdgeRun, MeetOfThree, NamedRun, Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane,
+    PlaneAgreement, Point, Surface, SurfaceMeet, intersect, meet_of_three_surfaces,
+    where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
@@ -843,8 +843,16 @@ impl<'f> Arrangement<'f> {
             ) else {
                 continue;
             };
+            // **A box and not the triple it came back as.** Where a closed
+            // crossing starts is a *walked* point — the marcher's own seed,
+            // settled onto both surfaces — and §34 says in as many words that
+            // being a point rather than a box is not a promise it is exact. Read
+            // as exact it becomes a corner of a curved face that the sweep can
+            // certify is off that face's own surface, which is §15.5's mistake
+            // arriving by §27.7's road for the third time in this milestone.
+            let point = where_the_crossing_starts(&self.surface, &partner, from);
             self.nodes.push(Node {
-                point: as_exact_as_it_is(PredicatePoint::from(from.coordinates())),
+                point,
                 vertex: None,
                 made_of: None,
                 crossings: vec![crossing],
@@ -2318,6 +2326,33 @@ fn how_often_the_rim_winds_round(
         }
     }
     Some(winding)
+}
+
+/// Where a closed crossing starts, as what is really known about it.
+///
+/// **A box and not the triple it came back as, unless the triple is proved.**
+/// Where a closed crossing starts is a *walked* point — the marcher's own seed,
+/// settled onto both surfaces — and §34 says in as many words that being a point
+/// rather than a box is not a promise it is exact. Read as exact it becomes a
+/// corner of a curved face the sweep can certify is *off* that face's own
+/// surface, which is §15.5's mistake arriving by §27.7's road.
+///
+/// A point the two surfaces both certify `Zero` on **is** on both of them, and
+/// saying so is a statement about what was proved rather than a rounding — the
+/// same sentence [`as_exact_as_it_is`] makes about a box of no width. It matters
+/// as much: a circle drawn on the lattice starts at a whole number, and a box
+/// round it would turn every sign the arrangement asks about it into a refusal.
+fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) -> PredicatePoint {
+    let exact = PredicatePoint::from(from.coordinates());
+    if side_of_surface(surface, exact) == Decision::Zero
+        && side_of_surface(partner, exact) == Decision::Zero
+    {
+        return exact;
+    }
+    let reach = POINT_ALONG_A_CROSSING_ROUNDOFF * from.largest_coordinate_magnitude().max(1.0);
+    PredicatePoint::Constructed(from.coordinates().map(|coordinate| {
+        Interval::new(coordinate - reach, coordinate + reach).expect("a reach is a positive length")
+    }))
 }
 
 /// Whether two boxes have any point in common, so that one may be the other.

@@ -57,7 +57,9 @@ use smallvec::SmallVec;
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::model::{FaceUse, ShellUse};
-use crate::validate::{as_coarse_as_a_mesh_gets, winding_round};
+use crate::validate::{
+    as_coarse_as_a_mesh_gets, every_side_of_the_skin_is_used_both_ways, winding_round,
+};
 use crate::{
     Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
 };
@@ -1305,6 +1307,15 @@ fn how_much_space_it_encloses(
         return Ok(solid.signed_volume());
     }
     let mesh = solid.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
+    // **Asked here rather than left to the sweep, and that is the difference
+    // between a refusal and a corrupt solid.** `Assembly::commit` re-validates
+    // what it wrote, but only in a debug build and only as a *panic* — it is
+    // there to catch a bug in this crate, and a release build would write the
+    // answer out regardless. A curved answer whose two faces along one side
+    // disagree which way they face is exactly that, so it is asked before
+    // anything is written and comes back as a refusal (§4.1: refusing beats
+    // corrupting, and both beat crashing on a caller's solid).
+    every_side_of_the_skin_is_used_both_ways(&mesh)?;
     Ok(signed_volume_over(&mesh))
 }
 

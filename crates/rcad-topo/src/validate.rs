@@ -18,7 +18,7 @@ use crate::holds::{the_side_this_face_lies_on, what_trims_this_face};
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
-use crate::view::{FaceView, SolidView, WireView};
+use crate::view::{CoedgeView, FaceView, SolidView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
 
 impl Model {
@@ -570,7 +570,7 @@ pub(crate) fn as_coarse_as_a_mesh_gets() -> Deflection {
 /// `meshing_a_curved_solid.rs` is the same balance, so nothing in the kernel
 /// asks for the count; saying so is cheaper than a check with no input that
 /// fails it.
-fn every_side_of_the_skin_is_used_both_ways(mesh: &Mesh) -> Result<()> {
+pub(crate) fn every_side_of_the_skin_is_used_both_ways(mesh: &Mesh) -> Result<()> {
     let mut balance: HashMap<(u32, u32), i32> = HashMap::new();
     for triangle in mesh.triangles() {
         let [first, second, third] = triangle.corners();
@@ -694,9 +694,12 @@ fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
     let named = name_of_surface(surface);
 
     for wire in view.wires() {
-        for corner in wire.points() {
-            let point = PredicatePoint::from(corner.coordinates());
+        for corner in wire.coedges().map(CoedgeView::start) {
+            let point = PredicatePoint::from(corner.point().coordinates());
             let decision = side_of_surface(surface, point);
+            if decision != Decision::Zero && not_provably_off(surface, corner) {
+                continue;
+            }
             match decision {
                 Decision::Zero => {}
                 Decision::Pos | Decision::Neg => {
@@ -720,6 +723,39 @@ fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Whether a corner that is not *exactly* on its face's surface is nonetheless
+/// not provably off it, once the slop recorded on it is taken into account.
+///
+/// **This is §17.2, and it is what a fused curved corner needs.** A corner of a
+/// curved face is asked for a *sign* and never for a distance, because a ball
+/// and a pipe have a value rather than a signed length — so there is nothing to
+/// compare against an allowance the way a flat face's corner is. What there is
+/// instead is the width the corner already carries: a corner a builder placed on
+/// a sphere carries none, and a corner a fuse solved for carries the width of
+/// the box it was solved as. Whether *that box* straddles the surface is the
+/// honest question, and a box that does is a corner nobody has shown to be off.
+///
+/// Asked only after the exact point has failed, so **an exactly placed corner is
+/// asked exactly what it always was** and nothing is loosened for one. A corner
+/// with no slop recorded on it never reaches here either.
+fn not_provably_off(surface: &Surface, corner: crate::VertexView<'_>) -> bool {
+    let Some(reach) = corner
+        .approximation()
+        .map(Approximation::magnitude)
+        .filter(|by| *by > 0.0)
+    else {
+        return false;
+    };
+    let within = PredicatePoint::Constructed(corner.point().coordinates().map(|coordinate| {
+        Interval::new(coordinate - reach, coordinate + reach)
+            .expect("a recorded slop is a positive length")
+    }));
+    matches!(
+        side_of_surface(surface, within),
+        Decision::Zero | Decision::Undecidable { .. }
+    )
 }
 
 /// Which way `wire` winds round `normal`.

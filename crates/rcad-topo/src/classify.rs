@@ -725,10 +725,19 @@ fn where_it_lands(t: Interval, from: [Interval; 3], along: [Interval; 3]) -> Mee
 fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
     match surface {
         Surface::Plane(flat) => exactly(flat.normal().components()),
-        Surface::Sphere(ball) => gap_enclosing(at, ball.centre()),
+        // **Out of the middle and not towards it.** `gap_enclosing(a, b)` is the
+        // step *from* `a` *to* `b`, so the step from the centre to the point is
+        // the one turned round — the same way round `where_the_ray_meets` reads
+        // it a few lines up. Taken the other way this is the gradient of the
+        // negated expression, and then a ray that enters a curved face counts as
+        // leaving it. It cancels for a solid whose faces are *all* curved, which
+        // is why a ball and a bar's own wall never showed it: what shows it is a
+        // ray that crosses one curved face and one flat one, which is a ray
+        // through a bar's wall and out of its cap (§36.13).
+        Surface::Sphere(ball) => negated(gap_enclosing(at, ball.centre())),
         Surface::Cylinder(pipe) => {
             let direction = exactly(pipe.axis().direction().components());
-            let out = gap_enclosing(at, pipe.axis().origin());
+            let out = negated(gap_enclosing(at, pipe.axis().origin()));
             let up = dot_enclosing(out, direction);
             // `|d|²`, and it is **not** one. `Cylinder::side_of` decides
             // `|(x − o) × d|² − r²` about the direction *as stored*, whose

@@ -886,10 +886,54 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
         }
         return candidates;
     }
+    // **A piece bounded by one closed curve has one corner**, and every blend of
+    // one corner is that corner, which is on the boundary. A cap a plane cuts
+    // off a ball is exactly that. What reaches it is six points spread round the
+    // surface from the middle of what corners there are — nothing is trusted
+    // about them either, and the six are a fixed set so which one answers does
+    // not depend on anything but the piece.
+    let middle = middle_of_the_corners(wires);
+    let reach = how_big_the_surface_is(&piece.surface);
+    for axis in 0..3 {
+        for way in [1.0, -1.0] {
+            let mut step = [0.0; 3];
+            step[axis] = way * reach;
+            candidates.push(PredicatePoint::from(
+                [0, 1, 2].map(|which| middle.coordinates()[which] + step[which]),
+            ));
+        }
+    }
     candidates
         .into_iter()
         .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
         .collect()
+}
+
+/// The middle of a piece's corners, which is somewhere near it and nowhere in
+/// particular on it.
+fn middle_of_the_corners(corners: &[Vec<PredicatePoint>]) -> Point {
+    let mut summed = [0.0; 3];
+    let mut how_many = 0.0;
+    for corner in corners.iter().flatten() {
+        let at = middle_of(*corner).coordinates();
+        for axis in 0..3 {
+            summed[axis] += at[axis];
+        }
+        how_many += 1.0;
+    }
+    if how_many == 0.0 {
+        return Point::origin();
+    }
+    Point::from(summed.map(|total| total / how_many))
+}
+
+/// How far across a curved surface is: the radius of the ball or the pipe.
+fn how_big_the_surface_is(surface: &Surface) -> f64 {
+    match surface {
+        Surface::Sphere(ball) => ball.radius(),
+        Surface::Cylinder(pipe) => pipe.radius(),
+        _ => 1.0,
+    }
 }
 
 /// Where the ball or pipe that cut a round wire has its middle, on the plane

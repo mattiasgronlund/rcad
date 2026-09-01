@@ -224,19 +224,68 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// A curved face is bounded by one curve that goes right round its surface,
+    /// and there is no seam and no pole to open it at.
+    ///
+    /// A cap a plane cuts off a ball is the shape: its whole boundary is one
+    /// circle of latitude, and its own patch in the surface's two coordinates is
+    /// a rectangle whose top edge is the pole and whose two sides are one
+    /// meridian used twice. The model says neither — a
+    /// [`WireStep::Pole`](crate::model::WireStep) and a seam are what say them,
+    /// and a fuse has no way to invent either: a seam wants two corners at one
+    /// longitude and this face has one corner in all.
+    ///
+    /// A **gap**, and the shape that reaches it is a ball cut by a plane. What
+    /// closes it is a commit that puts a pole step and a seam on such a piece,
+    /// which is the same construction §36 says a tube's seam would need and did
+    /// not get. A **ring** — two curves that each go right round — is cut across
+    /// instead and is not this.
+    #[error("a curved face is bounded by one curve right round it and has no seam to open at")]
+    ACurvedFaceGoesRightRoundWithNoSeam {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// A curved face could not be cut into pieces narrow enough to mesh.
+    ///
+    /// Every cut that happens at all makes both pieces narrower, and four pieces
+    /// is the answer for every face this kernel builds — the fuse's rings
+    /// included, which are cut across into exactly four. Reaching the cap means
+    /// a piece is being cut without getting any smaller.
+    ///
+    /// **This was an `assert!` until M4**, on the grounds that no builder makes
+    /// such a face. `validate` walks it and [`Model`](crate::Model) is
+    /// `Deserialize`, so what reaches it is a caller's bytes — and a panic is
+    /// the wrong answer to those (decisions.md §4.1, §16.11). A fuse invents
+    /// topology that was in no input, which puts its answers on the same side of
+    /// that line.
+    #[error("a curved face cannot be cut into pieces narrow enough to mesh")]
+    ACurvedFaceCannotBeCutSmallEnoughToMesh {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
     /// A curved face with a hole in it goes too far round its surface to be cut
     /// into triangles in one piece.
     ///
     /// A face that goes more than a quarter turn round is cut into pieces first,
     /// or every triangle in it would be stretched from one side of the seam to
-    /// the other and have no area at all. Cutting a face that has a hole would
-    /// have to say which piece the hole ends up in, and nothing does.
+    /// the other and have no area at all.
+    ///
+    /// **A face with a hole is cut only where it is a ring** — two curves that
+    /// each go right round and nothing else — because then there is somewhere to
+    /// cut *across* to and the answer is four patches with one loop each. That
+    /// is the one the fuse makes: a tube of a bar's wall between two planes. A
+    /// hole that does not go right round has nothing to cut across to, and
+    /// nothing says which piece it would end up in.
     ///
     /// **A refusal about the solid and not about the request**, and no deflection
-    /// avoids it. Nothing this kernel *builds* is such a face — the two builders
-    /// that make a curved one give it a single wire — but [`Model`](crate::Model)
-    /// is `Deserialize`, so one can arrive from a file, and a panic is the wrong
-    /// answer to a caller's bytes (decisions.md §4.1).
+    /// avoids it. §31.10 item 5 filed this doc as a claim about today's builders
+    /// that M4 would falsify, and it did: the sentence that used to be here —
+    /// *"nothing this kernel builds is such a face"* — stopped being true when
+    /// `Error::FuseNeedsFlatFaces` came off. What is left arrives from a file,
+    /// because [`Model`](crate::Model) is `Deserialize`, and a panic is the
+    /// wrong answer to a caller's bytes (decisions.md §4.1).
     #[error("a curved face with a hole in it goes too far round its surface to be meshed")]
     CurvedFaceWithAHoleGoesTooFarRound {
         /// Which face.
