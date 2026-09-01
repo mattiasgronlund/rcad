@@ -394,16 +394,7 @@ impl Plane {
     /// rots, so all four are checked.
     #[must_use]
     pub fn side_of_point(&self, point: PredicatePoint) -> Decision {
-        let plane_is_real =
-            are_real_numbers(self.normal.components()) && are_real_numbers([self.offset]);
-        if !(is_a_real_point(point) && plane_is_real) {
-            return NOTHING_IS_KNOWN;
-        }
-        decide(&SideOfPlane {
-            plane: *self,
-            point,
-        })
-        .0
+        which_side_of_a_flat_surface(SIDE_OF_PLANE, self.normal.components(), self.offset, point)
     }
 
     /// Where three planes meet.
@@ -521,20 +512,47 @@ pub enum PlaneAgreement {
     CannotTell,
 }
 
+/// Which side of `normal · p = offset` the point is on, for any `normal` at all.
+///
+/// [`Plane`] hands over a normal scaled to length one and
+/// [`HalfSpace`](crate::HalfSpace) hands over whatever its caller wrote down.
+/// Neither the filter below nor the two levels under it care which: the error
+/// bound is a fraction of the permanent, which carries the normal's own size,
+/// and the other two levels are exact.
+pub(crate) fn which_side_of_a_flat_surface(
+    named: &'static str,
+    normal: [f64; 3],
+    offset: f64,
+    point: PredicatePoint,
+) -> Decision {
+    if !(is_a_real_point(point) && are_real_numbers(normal) && are_real_numbers([offset])) {
+        return NOTHING_IS_KNOWN;
+    }
+    decide(&SideOfAFlatSurface {
+        named,
+        normal,
+        offset,
+        point,
+    })
+    .0
+}
+
 /// `normal · point - offset`, evaluated three ways for the cascade.
-struct SideOfPlane {
-    plane: Plane,
+struct SideOfAFlatSurface {
+    named: &'static str,
+    normal: [f64; 3],
+    offset: f64,
     point: PredicatePoint,
 }
 
-impl Predicate for SideOfPlane {
+impl Predicate for SideOfAFlatSurface {
     fn name(&self) -> &'static str {
-        SIDE_OF_PLANE
+        self.named
     }
 
     fn on_floats(&self) -> Option<Filtered> {
         let point = self.point.exact_coordinates()?;
-        let normal = self.plane.normal.components();
+        let normal = self.normal;
 
         // The bound below is a fraction of the permanent, which only bounds
         // anything while every product keeps its relative accuracy. One of them
@@ -544,7 +562,7 @@ impl Predicate for SideOfPlane {
         }
 
         let terms = [0, 1, 2].map(|axis| normal[axis] * point[axis]);
-        let offset = self.plane.offset;
+        let offset = self.offset;
 
         // The three terms can be of either sign and the offset cancels against
         // their sum, so the permanent adds magnitudes rather than values.
@@ -558,14 +576,14 @@ impl Predicate for SideOfPlane {
 
     fn on_intervals(&self) -> Interval {
         let point = self.point.enclosure();
-        let normal = self.plane.normal.components();
+        let normal = self.normal;
         let term = |axis: usize| Interval::exactly(normal[axis]) * point[axis];
-        term(0) + term(1) + term(2) - Interval::exactly(self.plane.offset)
+        term(0) + term(1) + term(2) - Interval::exactly(self.offset)
     }
 
     fn exactly(&self) -> Option<Decision> {
         let point = self.point.exact_coordinates()?;
-        let normal = self.plane.normal.components();
+        let normal = self.normal;
 
         let mut total = [0.0f64; LONGEST_PLANE_TOTAL];
         let mut total_len = 0;
@@ -580,7 +598,7 @@ impl Predicate for SideOfPlane {
             core::mem::swap(&mut total, &mut merged);
         }
 
-        total_len = expansion_sum(&total[..total_len], &[-self.plane.offset], &mut merged);
+        total_len = expansion_sum(&total[..total_len], &[-self.offset], &mut merged);
 
         match expansion_sign(&merged[..total_len]) {
             Decision::Neg => Some(Decision::Neg),
@@ -599,7 +617,7 @@ impl Predicate for SideOfPlane {
 /// `epsilon` is the `f64` unit roundoff, 2⁻⁵³.
 ///
 /// Where the 4 comes from: follow the longest chain of roundings from an input
-/// to `value` in [`SideOfPlane::on_floats`]. A term `normal · point` is one
+/// to `value` in [`SideOfAFlatSurface::on_floats`]. A term `normal · point` is one
 /// rounding — both factors are inputs, so nothing is carried in. Folding the
 /// three terms together takes two additions, a second and a third, and
 /// subtracting the offset is a fourth. `(1 + epsilon)^4 - 1 <=
@@ -611,7 +629,7 @@ impl Predicate for SideOfPlane {
 ///
 /// Every step of that argument is a *relative* one, so the bound holds only
 /// while nothing overflows or falls into the subnormals.
-/// [`SideOfPlane::on_floats`] enforces the bottom end product by product
+/// [`SideOfAFlatSurface::on_floats`] enforces the bottom end product by product
 /// through [`product_is_normal`], and `decide` the top end by refusing a bound
 /// that is not itself a normal number.
 const SIDE_OF_PLANE_ERROR_BOUND: f64 = {
@@ -1044,8 +1062,10 @@ mod tests {
 
     #[test]
     fn a_point_clear_of_the_plane_is_settled_by_the_cheapest_level() {
-        let (decision, level) = decide(&SideOfPlane {
-            plane: plane_at_height_two(),
+        let (decision, level) = decide(&SideOfAFlatSurface {
+            named: SIDE_OF_PLANE,
+            normal: plane_at_height_two().normal().components(),
+            offset: plane_at_height_two().offset(),
             point: PredicatePoint::from([0.0, 0.0, 100.0]),
         });
         assert_eq!(decision, Decision::Pos);
