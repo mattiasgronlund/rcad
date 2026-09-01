@@ -268,7 +268,11 @@ fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
                 .triangles()
                 .iter()
                 .filter(|triangle| triangle.face() == face.key())
-                .map(|triangle| triangle.corners().map(|corner| mesh.points()[corner as usize]))
+                .map(|triangle| {
+                    triangle
+                        .corners()
+                        .map(|corner| mesh.points()[corner as usize])
+                })
                 .collect();
 
             for sample in samples_over(&surface) {
@@ -309,7 +313,11 @@ fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
     // sixteen longitudes round the bar, ten heights each, of which the four
     // between the caps are held; sixteen round the ball, fifteen latitudes each,
     // and a ball's one face holds every point on its sphere.
-    assert_eq!(compared, 16 * 10 + 16 * 15, "every sample is decided by both");
+    assert_eq!(
+        compared,
+        16 * 10 + 16 * 15,
+        "every sample is decided by both"
+    );
     assert_eq!(held, 16 * 4 + 16 * 15);
 }
 
@@ -330,7 +338,8 @@ fn samples_over(surface: &Surface) -> Vec<Point> {
             }
             _ => {
                 for step in -7..=7 {
-                    points.push(surface.point_at(u, f64::from(step) * core::f64::consts::PI / 16.0));
+                    points
+                        .push(surface.point_at(u, f64::from(step) * core::f64::consts::PI / 16.0));
                 }
             }
         }
@@ -372,4 +381,3 @@ fn how_far_from_a_side(at: Point, from: Point, to: Point) -> f64 {
     let part = ((at - from).dot(side) / squared).clamp(0.0, 1.0);
     (at - (from + side * part)).length()
 }
-

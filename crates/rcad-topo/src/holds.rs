@@ -543,3 +543,392 @@ fn gave_up_on_a_side(point: PredicatePoint, decision: Decision) -> Error {
     ));
     Error::Undecidable { records }
 }
+
+#[cfg(test)]
+mod tests {
+    use rcad_geom::{Axis, Cylinder, Isometry, Orientation, Scale, Vector};
+    use smallvec::SmallVec;
+
+    use super::*;
+    use crate::model::{FaceUse, ShellUse};
+    use crate::{Model, SolidKey};
+
+    const OUTER: f64 = 3.0;
+    const INNER: f64 = 1.0;
+    const HEIGHT: f64 = 5.0;
+
+    /// A washer: a bar with a round hole straight through it.
+    ///
+    /// **Nothing in this kernel builds one yet**, and that is why it is here.
+    /// It is the shape §31.7's criterion 11 asks the fuse for — a block with a
+    /// round hole through it is the same solid with a square outline — and it is
+    /// the first face with a round *hole* in it, which is a case
+    /// [`FaceView::for_each_triangle`] gets wrong and this file has to get
+    /// right. Built by hand because the fuse cannot make one until lane 5.
+    ///
+    /// Four faces: the wall outside, the wall inside the hole used the other way
+    /// round, and two flat caps, each an outline circle with a circle cut out of
+    /// it.
+    fn a_washer() -> (Model, SolidKey) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let corner = |model: &mut Model, across: f64, up: f64| {
+            model.add_vertex(rcad_geom::Point::new(across, 0.0, up))
+        };
+        let outer_bottom = corner(&mut model, OUTER, 0.0);
+        let outer_top = corner(&mut model, OUTER, HEIGHT);
+        let inner_bottom = corner(&mut model, INNER, 0.0);
+        let inner_top = corner(&mut model, INNER, HEIGHT);
+
+        let outer_seam = model.add_edge(outer_bottom, outer_top);
+        let inner_seam = model.add_edge(inner_bottom, inner_top);
+        let round_outer_bottom = model.add_closed_edge(outer_bottom);
+        let round_outer_top = model.add_closed_edge(outer_top);
+        let round_inner_bottom = model.add_closed_edge(inner_bottom);
+        let round_inner_top = model.add_closed_edge(inner_top);
+
+        let wall = |model: &mut Model, radius: f64, bottom, seam, top| {
+            let round_it: SmallVec<[_; 4]> = SmallVec::from_buf([
+                model.add_coedge(bottom, Orientation::Forward),
+                model.add_coedge(seam, Orientation::Forward),
+                model.add_coedge(top, Orientation::Reversed),
+                model.add_coedge(seam, Orientation::Reversed),
+            ]);
+            let wire = model.add_wire(round_it);
+            let pipe = Cylinder::new(Axis::z(), radius).expect("a pipe");
+            model.add_face(Surface::Cylinder(pipe), SmallVec::from_buf([wire]))
+        };
+        let outside = wall(
+            &mut model,
+            OUTER,
+            round_outer_bottom,
+            outer_seam,
+            round_outer_top,
+        );
+        let hole = wall(
+            &mut model,
+            INNER,
+            round_inner_bottom,
+            inner_seam,
+            round_inner_top,
+        );
+
+        let cap = |model: &mut Model, up: f64, outward: f64, outline, inner, turn| {
+            let plane = Plane::from_point_and_normal(
+                rcad_geom::Point::new(0.0, 0.0, up),
+                Vector::new(0.0, 0.0, outward),
+            )
+            .expect("the z axis is a unit normal");
+            let round_it = model.add_coedge(outline, turn);
+            // The same turn as the outline, not the opposite one: the wall of
+            // the hole mirrors the outer wall coedge for coedge, so what makes
+            // the hole run the other way round in space is that its face is used
+            // reversed, and what the two coedges of each circle have to be is
+            // opposite *as stored*.
+            let round_the_hole = model.add_coedge(inner, turn);
+            let outer = model.add_wire(smallvec::smallvec![round_it]);
+            let cut_out = model.add_wire(smallvec::smallvec![round_the_hole]);
+            model.add_face(
+                Surface::Plane(plane),
+                SmallVec::from_vec(vec![outer, cut_out]),
+            )
+        };
+        let bottom = cap(
+            &mut model,
+            0.0,
+            -1.0,
+            round_outer_bottom,
+            round_inner_bottom,
+            Orientation::Reversed,
+        );
+        let top = cap(
+            &mut model,
+            HEIGHT,
+            1.0,
+            round_outer_top,
+            round_inner_top,
+            Orientation::Forward,
+        );
+
+        let shell = model.add_shell(vec![
+            FaceUse {
+                face: bottom,
+                loc: Isometry::identity(),
+                orient: Orientation::Forward,
+            },
+            FaceUse {
+                face: top,
+                loc: Isometry::identity(),
+                orient: Orientation::Forward,
+            },
+            FaceUse {
+                face: outside,
+                loc: Isometry::identity(),
+                orient: Orientation::Forward,
+            },
+            // The hole's wall faces inwards, towards the axis, because the
+            // material is outside it.
+            FaceUse {
+                face: hole,
+                loc: Isometry::identity(),
+                orient: Orientation::Reversed,
+            },
+        ]);
+        let solid = model.add_solid(SmallVec::from_buf([ShellUse {
+            shell,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]));
+        let key = model.key_for_solid(solid);
+        (model, key)
+    }
+
+    fn at(x: f64, y: f64, z: f64) -> PredicatePoint {
+        PredicatePoint::from([x, y, z])
+    }
+
+    fn what_it_holds(
+        model: &Model,
+        solid: SolidKey,
+        face: FaceKey,
+        point: PredicatePoint,
+    ) -> OnAFace {
+        model
+            .solid(solid)
+            .face_holds_the_point(face, point, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a washer is a shape this can follow")
+    }
+
+    /// A flat face with a round hole in it holds the ring and not the hole.
+    ///
+    /// The one thing `for_each_triangle` cannot say. Its fan over the hole's
+    /// single corner has no area, so the outline's own fan covers the hole and
+    /// every point in it comes back as material.
+    #[test]
+    fn a_flat_face_with_a_round_hole_in_it_does_not_hold_the_hole() {
+        let (model, washer) = a_washer();
+        let cap = model
+            .solid(washer)
+            .faces()
+            .find(|face| face.surface().as_plane().is_some())
+            .expect("a washer has two caps")
+            .key();
+
+        assert_eq!(
+            what_it_holds(&model, washer, cap, at(2.0, 0.0, 0.0)),
+            OnAFace::Held,
+            "between the two circles"
+        );
+        assert_eq!(
+            what_it_holds(&model, washer, cap, at(0.5, 0.0, 0.0)),
+            OnAFace::NotHeld,
+            "inside the hole"
+        );
+        assert_eq!(
+            what_it_holds(&model, washer, cap, at(4.0, 0.0, 0.0)),
+            OnAFace::NotHeld,
+            "outside the outline"
+        );
+        for on_a_circle in [INNER, OUTER] {
+            assert_eq!(
+                what_it_holds(&model, washer, cap, at(0.0, on_a_circle, 0.0)),
+                OnAFace::OnItsBoundary,
+                "on the circle of radius {on_a_circle}"
+            );
+        }
+    }
+
+    /// The hole's own wall is trimmed by the same two cap planes as the outer
+    /// one, and holds the same stretch of its own cylinder.
+    #[test]
+    fn the_wall_of_a_round_hole_holds_the_stretch_between_the_caps() {
+        let (model, washer) = a_washer();
+        let hole = model
+            .solid(washer)
+            .faces()
+            .find(|face| match face.surface() {
+                Surface::Cylinder(pipe) => pipe.radius() == INNER,
+                _ => false,
+            })
+            .expect("a washer has a hole")
+            .key();
+
+        assert_eq!(
+            what_it_holds(&model, washer, hole, at(0.0, INNER, HEIGHT / 2.0)),
+            OnAFace::Held
+        );
+        assert_eq!(
+            what_it_holds(&model, washer, hole, at(0.0, INNER, -1.0)),
+            OnAFace::NotHeld
+        );
+        assert_eq!(
+            what_it_holds(&model, washer, hole, at(0.0, INNER, 0.0)),
+            OnAFace::OnItsBoundary
+        );
+    }
+
+    /// A washer is a sound solid, and the sweep says so.
+    ///
+    /// Worth asserting rather than assuming: it is the first solid here with a
+    /// hole in a flat face and a curved face facing inwards, and `validate`
+    /// meshes every curved solid it is handed. §35 records what that turned up.
+    #[test]
+    fn a_washer_passes_the_full_sweep() {
+        let (model, _) = a_washer();
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a washer is a sound solid");
+    }
+
+    /// A ball is one face with nothing trimming it, so it holds every point on
+    /// its sphere — including both poles, which are its only two corners.
+    #[test]
+    fn a_balls_one_face_holds_every_point_on_its_sphere() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let ball = model
+            .add_ball(OUTER, &Isometry::identity())
+            .expect("a ball");
+        let skin = model.solid(ball).faces().next().expect("one face").key();
+
+        for point in [
+            at(OUTER, 0.0, 0.0),
+            at(0.0, 0.0, OUTER),
+            at(0.0, 0.0, -OUTER),
+            at(0.0, -OUTER, 0.0),
+        ] {
+            assert_eq!(what_it_holds(&model, ball, skin, point), OnAFace::Held);
+        }
+    }
+
+    /// A face trimmed by *part* of a curve is refused by name.
+    ///
+    /// An edge with two different ends runs along a piece of a crossing and not
+    /// the whole of one, so which side of that partner surface a point is on
+    /// says nothing about whether the face holds it. Which piece a point is on is
+    /// a question about where a curve runs, and §35 says why that is not this
+    /// lane's to answer.
+    ///
+    /// **Two faces and one edge, and it is deliberately not a closed solid.**
+    /// Nothing here validates it, because what is being asked is a question about
+    /// one face and its neighbour, and the smallest thing that has one of those
+    /// is two faces. The fuse is what will make the real shape, at lane 4.
+    #[test]
+    fn a_face_trimmed_by_part_of_a_curve_is_refused_by_name() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bottom = model.add_vertex(rcad_geom::Point::new(OUTER, 0.0, 0.0));
+        let top = model.add_vertex(rcad_geom::Point::new(OUTER, 0.0, HEIGHT));
+        let up_the_side = model.add_edge(bottom, top);
+
+        let mine = model.add_coedge(up_the_side, Orientation::Forward);
+        let round_it = model.add_wire(smallvec::smallvec![mine]);
+        let pipe = Cylinder::new(Axis::z(), OUTER).expect("a pipe");
+        let wall = model.add_face(Surface::Cylinder(pipe), SmallVec::from_buf([round_it]));
+
+        let theirs = model.add_coedge(up_the_side, Orientation::Reversed);
+        let round_that = model.add_wire(smallvec::smallvec![theirs]);
+        let flat =
+            Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal");
+        let beside_it = model.add_face(Surface::Plane(flat), SmallVec::from_buf([round_that]));
+
+        let shell = model.add_shell(
+            [wall, beside_it]
+                .into_iter()
+                .map(|face| FaceUse {
+                    face,
+                    loc: Isometry::identity(),
+                    orient: Orientation::Forward,
+                })
+                .collect(),
+        );
+        let solid = model.add_solid(SmallVec::from_buf([ShellUse {
+            shell,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]));
+        let key = model.key_for_solid(solid);
+
+        let refusal = model
+            .solid(key)
+            .face_holds_the_point(
+                crate::FaceKey::new(wall, model.id()),
+                at(0.0, OUTER, HEIGHT / 2.0),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a side that is a piece of a curve cannot be followed");
+        assert!(
+            matches!(refusal, Error::AFaceTrimmedByACurveThisCannotFollow { .. }),
+            "got {refusal:?}"
+        );
+    }
+
+    fn wall_slot(model: &Model, face: FaceKey) -> crate::key::FaceSlot {
+        model
+            .data()
+            .faces
+            .keys()
+            .find(|&slot| crate::FaceKey::new(slot, model.id()) == face)
+            .expect("a face of this model")
+    }
+
+    /// A face that runs along one of two loops is refused rather than named as
+    /// both.
+    ///
+    /// One of the two disks a pipe leaves in a ball's skin. Its one boundary is a
+    /// whole closed curve and its one corner is on the pipe, so both of the two
+    /// things this reads — which side the face lies on, and whether the face has
+    /// every loop — have to catch it. Built by hand: a ball whose face is trimmed
+    /// by a pipe through it is lane 4's.
+    #[test]
+    fn a_face_along_one_of_two_loops_is_refused_rather_than_named_as_both() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let ball = model
+            .add_ball(OUTER, &Isometry::identity())
+            .expect("a ball");
+        let skin = model.solid(ball).faces().next().expect("one face").key();
+
+        // A pipe up the z axis crosses this ball in two circles, one either side
+        // of the equator. One corner on the upper one, and one closed edge round
+        // it, standing in for the boundary of the cap the pipe cuts out.
+        let across = (OUTER * OUTER - INNER * INNER).sqrt();
+        let on_the_circle = model.add_vertex(rcad_geom::Point::new(INNER, 0.0, across));
+        let loop_edge = model.add_closed_edge(on_the_circle);
+        let mine = model.add_coedge(loop_edge, Orientation::Forward);
+        let theirs = model.add_coedge(loop_edge, Orientation::Reversed);
+        let cut = model.add_wire(smallvec::smallvec![mine]);
+        let round_it = model.add_wire(smallvec::smallvec![theirs]);
+        let at_skin = wall_slot(&model, skin);
+        model.data_mut().faces[at_skin].wires.push(cut);
+        let pipe = Cylinder::new(Axis::z(), INNER).expect("a pipe");
+        let wall = model.add_face(Surface::Cylinder(pipe), SmallVec::from_buf([round_it]));
+        model
+            .data_mut()
+            .shells
+            .values_mut()
+            .next()
+            .expect("a shell")
+            .faces
+            .push(FaceUse {
+                face: wall,
+                loc: Isometry::identity(),
+                orient: Orientation::Forward,
+            });
+
+        let refusal = model
+            .solid(ball)
+            .face_holds_the_point(
+                skin,
+                at(0.0, 0.0, -OUTER),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a face along one of two loops cannot be read off a sign");
+        assert!(
+            matches!(
+                refusal,
+                Error::AFaceMissesPartOfWhereItsSurfacesCross { .. }
+            ),
+            "got {refusal:?}"
+        );
+    }
+}

@@ -220,13 +220,10 @@ impl SolidView<'_> {
     ) -> Result<Crossings, FaceKey> {
         let mut tally = Crossings::default();
         for face in self.faces() {
-            let surface = face.surface();
-            if surface.as_plane().is_some() && every_side_of_it_is_straight(face) {
+            if face.surface().as_plane().is_some() && every_side_of_it_is_straight(face) {
                 self.count_a_polygon(face, &mut tally, point, target, policy, log)?;
             } else {
-                self.count_where_the_ray_meets_it(
-                    face, &surface, &mut tally, point, target, policy, log,
-                )?;
+                self.count_where_the_ray_meets_it(face, &mut tally, point, target, policy, log)?;
             }
         }
         Ok(tally)
@@ -296,13 +293,13 @@ impl SolidView<'_> {
     fn count_where_the_ray_meets_it(
         self,
         face: FaceView<'_>,
-        surface: &Surface,
         tally: &mut Crossings,
         point: PredicatePoint,
         target: Point,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<(), FaceKey> {
+        let surface = &face.surface();
         let from = point.enclosure();
         let along = travel(from, target);
 
