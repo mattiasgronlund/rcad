@@ -43,3 +43,12 @@ many_single_char_names = "allow"
 
 [profile.bench]
 debug = true
+
+# One draw of the band family marches a nearly-tangent quartic loop in 18 365
+# points, and unoptimised that single test is 90 of the suite's 99 seconds.
+# Splitting its draws was tried and measured and buys nothing, because the cost is
+# one draw and not the count. `debug-assertions` and `overflow-checks` are separate
+# settings and stay on, so every `debug_assert!` the kernel checks itself with
+# still fires and no test verifies less than it did.
+[profile.test]
+opt-level = 2
