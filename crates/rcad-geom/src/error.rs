@@ -234,6 +234,55 @@ pub enum Error {
         hi: f64,
     },
 
+    /// Two surfaces whose crossing is a degree-four space curve, which the
+    /// closed form does not name.
+    ///
+    /// A ball against a pipe, or a pipe against a pipe. Their sign questions run
+    /// to the eighth and twelfth power and need an expansion buffer M3's second
+    /// stage builds (§27.1), so the first stage names the four pairs whose
+    /// crossing lies in a plane and says so about the other two.
+    #[error(
+        "where a {first} and a {second} cross is a degree-four curve, which the closed form does \
+         not name"
+    )]
+    CrossingRunsToAQuartic {
+        /// What the first surface is.
+        first: &'static str,
+        /// What the second surface is.
+        second: &'static str,
+    },
+
+    /// A crossing came in two pieces and no half-space could be written down
+    /// that picks one of them out and holds along the whole of it.
+    ///
+    /// A **gap** and not a limit (§16.10): the two pieces are there and they are
+    /// tellable apart, and what runs out is `f64`'s supply of unit vectors
+    /// exactly square to a given direction. The families of fixes weighed are on
+    /// `two_lines_along_a_pipe`.
+    #[error(
+        "this crossing comes in two pieces and no half-space square to both surfaces can be \
+         written down in f64 to tell them apart"
+    )]
+    CannotNameWhichPieceOfACrossingThisIs,
+
+    /// A point cannot be worked out as close to a crossing as was asked for.
+    ///
+    /// Two knobs meet here and they do different jobs: the deflection says how
+    /// close, and the policy says what happens when the arithmetic cannot prove
+    /// it (§23.5). A certified caller is refused; a tolerant one — which has
+    /// already said how far out of place it will let a point be — gets its
+    /// points with the deviation reported beside them.
+    #[error(
+        "a point along this crossing can only be placed within {closest} of it, and {asked} was \
+         asked for"
+    )]
+    CannotPlaceAPointThatCloseToACrossing {
+        /// The deflection the caller asked for.
+        asked: f64,
+        /// The closest a point can actually be placed.
+        closest: f64,
+    },
+
     /// A predicate refused the input it was handed — three planes with no
     /// single meeting point, for instance.
     #[error(transparent)]

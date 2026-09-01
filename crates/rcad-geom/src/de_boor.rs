@@ -628,7 +628,7 @@ pub(crate) fn blended<C: Coefficient>(rest: C, before: [C; 4], share: C, after: 
 /// enclosure to hand back, and every caller here has already checked: the knot
 /// differences are positive by the knot vector's own invariants, and
 /// [`enclosed`] tests the weight before it divides by it.
-fn quotient_enclosing(over: Interval, under: Interval) -> Interval {
+pub(crate) fn quotient_enclosing(over: Interval, under: Interval) -> Interval {
     assert!(
         !under.contains_zero(),
         "dividing by {under:?}, which touches zero, has no enclosure"

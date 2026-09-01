@@ -66,6 +66,7 @@ mod de_boor;
 mod deflection;
 mod error;
 mod exact;
+mod intersect;
 mod isometry;
 mod knot_vector;
 mod meet;
@@ -83,6 +84,10 @@ pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
 pub use crate::de_boor::EVALUATION_ROUNDOFF;
 pub use crate::deflection::Deflection;
 pub use crate::error::{Error, Result};
+pub use crate::intersect::{
+    WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_BALLS_CROSS,
+    WHERE_TWO_PLANES_CROSS, intersect,
+};
 pub use crate::isometry::Isometry;
 pub use crate::knot_vector::{KnotVector, MAX_DEGREE};
 pub use crate::meet::{EdgeRun, NamedRun, SurfaceMeet};

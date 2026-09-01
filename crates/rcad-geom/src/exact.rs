@@ -1,6 +1,9 @@
 //! Exact expansion arithmetic the quadric predicates share.
 
-use rcad_predicates::expansion::{expansion_sum, product_is_exact, scale_expansion, two_diff};
+use rcad_predicates::Decision;
+use rcad_predicates::expansion::{
+    expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_diff, two_product,
+};
 
 /// `a - b` as a two-entry expansion, smallest first.
 ///
@@ -69,6 +72,89 @@ pub(crate) fn square_of_expansion(value: &[f64], out: &mut [f64]) -> Option<usiz
     Some(running_len)
 }
 
+/// One exact number, held as an expansion that grows as it needs to.
+///
+/// [`square_of_expansion`] above writes into a fixed slice, because the two
+/// predicates that call it know their own sizes. An intersector's discriminants
+/// do not: `n·n · r² − w·w · (n·o − d)²` multiplies a six-entry expansion by a
+/// ninety-eight-entry one, and the worst case a fixed buffer would have to hold
+/// is over a thousand `f64` for a level that runs on a small minority of calls
+/// (`docs/decisions.md` §27.1). §27.1 weighs the same three fixes for the
+/// quartics one degree up and picks the heap scratch, for the same reason: it
+/// costs an allocation on a rare path and refuses nothing.
+///
+/// Every operation here is exact or refuses. There is no rounding anywhere in
+/// this type, which is what makes [`Exact::sign`] a proof rather than a guess.
+#[derive(Clone, Debug)]
+pub(crate) struct Exact(Vec<f64>);
+
+impl Exact {
+    /// The number `value`, exactly.
+    pub(crate) fn of(value: f64) -> Self {
+        Self(if value == 0.0 {
+            Vec::new()
+        } else {
+            vec![value]
+        })
+    }
+
+    /// `a * b`, exactly, or `None` when the product's low half would be a
+    /// subnormal and the pair would no longer add up to the true product.
+    pub(crate) fn product_of(a: f64, b: f64) -> Option<Self> {
+        if !product_is_exact(a, b) {
+            return None;
+        }
+        let (high, low) = two_product(a, b);
+        Some(Self(vec![low, high]))
+    }
+
+    /// `a · b`, exactly, over two triples of stored numbers.
+    pub(crate) fn dot_of(a: [f64; 3], b: [f64; 3]) -> Option<Self> {
+        let mut total = Self::of(0.0);
+        for axis in 0..3 {
+            total = total.plus(&Self::product_of(a[axis], b[axis])?);
+        }
+        Some(total)
+    }
+
+    /// This plus `other`, exactly.
+    pub(crate) fn plus(&self, other: &Exact) -> Exact {
+        let mut out = vec![0.0; self.0.len() + other.0.len()];
+        let len = expansion_sum(&self.0, &other.0, &mut out);
+        out.truncate(len);
+        Exact(out)
+    }
+
+    /// This minus `other`, exactly.
+    pub(crate) fn minus(&self, other: &Exact) -> Exact {
+        self.plus(&Exact(other.0.iter().map(|entry| -entry).collect()))
+    }
+
+    /// This times `other`, exactly, or `None` when one of the products it needs
+    /// would round.
+    pub(crate) fn times(&self, other: &Exact) -> Option<Exact> {
+        let mut running = Exact::of(0.0);
+        let mut scaled = vec![0.0; 2 * self.0.len()];
+        for &factor in &other.0 {
+            if !self.0.iter().all(|&entry| product_is_exact(entry, factor)) {
+                return None;
+            }
+            let len = scale_expansion(&self.0, factor, &mut scaled);
+            running = running.plus(&Exact(scaled[..len].to_vec()));
+        }
+        Some(running)
+    }
+
+    /// The sign of this number.
+    ///
+    /// [`Decision::Undecidable`] only when an entry is not a real number, which
+    /// takes an overflow somewhere upstream — every operation above is exact, so
+    /// there is nothing else here for a sign to be uncertain about.
+    pub(crate) fn sign(&self) -> Decision {
+        expansion_sign(&self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rcad_predicates::Decision;
@@ -134,5 +220,73 @@ mod tests {
     fn squaring_an_expansion_longer_than_the_scratch_buffer_is_a_bug() {
         let mut squared = [0.0; LONGEST_SQUARE];
         let _ = square_of_expansion(&[1.0; 9], &mut squared);
+    }
+}
+
+#[cfg(test)]
+mod an_exact_number {
+    use rcad_predicates::Decision;
+
+    use super::Exact;
+
+    /// Two whole-number vectors whose dot product is a hair away from zero, and
+    /// that hair is a hundred bits below the terms that make it. `f64` sees
+    /// nothing but cancellation; an expansion sees the sign.
+    #[test]
+    fn a_dot_product_that_cancels_to_nothing_in_f64_still_has_a_sign() {
+        let big = 2f64.powi(60);
+        let one = [big, 1.0, 0.0];
+        let other = [1.0, -big, 1.0];
+
+        let in_f64 = one[0] * other[0] + one[1] * other[1] + one[2] * other[2];
+        assert_eq!(in_f64, 0.0, "every term cancels once it has been rounded");
+
+        assert_eq!(Exact::dot_of(one, other).unwrap().sign(), Decision::Zero);
+        assert_eq!(
+            Exact::dot_of(one, [1.0, -big, 1.0])
+                .unwrap()
+                .plus(&Exact::of(1.0))
+                .sign(),
+            Decision::Pos
+        );
+    }
+
+    /// A sum of squares is never below zero, however the numbers are signed,
+    /// and that is what lets "are these parallel" be asked as one sign question.
+    #[test]
+    fn a_sum_of_squares_is_never_below_zero() {
+        for value in [-7.5, 0.0, 7.5] {
+            let squared = Exact::of(value).times(&Exact::of(value)).unwrap();
+            let expected = if value == 0.0 {
+                Decision::Zero
+            } else {
+                Decision::Pos
+            };
+            assert_eq!(squared.sign(), expected, "{value}");
+        }
+    }
+
+    /// A product whose low half would land among the subnormals is refused
+    /// rather than rounded, because a pair that does not add back up to the true
+    /// product turns exact arithmetic into confident arithmetic.
+    #[test]
+    fn a_product_too_small_to_be_exact_refuses_rather_than_rounds() {
+        let tiny = 2f64.powi(-600);
+        assert!(Exact::product_of(tiny, tiny).is_none());
+        assert!(Exact::of(tiny).times(&Exact::of(tiny)).is_none());
+        assert!(Exact::dot_of([tiny, 0.0, 0.0], [tiny, 0.0, 0.0]).is_none());
+        assert!(Exact::product_of(tiny, 1.0).is_some());
+    }
+
+    /// An overflow travels as a number that is not a number, and the sign
+    /// refuses it rather than reading a confident answer off an infinity.
+    #[test]
+    fn a_value_that_overflowed_on_the_way_in_has_no_sign() {
+        let overflowed = Exact::product_of(1e300, 1e300);
+        match overflowed.map(|value| value.sign()) {
+            Some(Decision::Undecidable { enclosure }) => assert!(enclosure.is_infinite()),
+            None => (),
+            other => panic!("an overflowed product has no sign: {other:?}"),
+        }
     }
 }
