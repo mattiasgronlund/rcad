@@ -177,9 +177,22 @@ fn every_certified_fuse_of_a_lattice_curved_pair_is_decided_and_records_nothing(
 /// The turned family, measured rather than judged against a number this file
 /// made up (§31.7 offers none at the gate and says the lane measures it).
 ///
-/// What is asserted is the shape of the answer rather than a threshold: every
-/// refusal is named, and a share of them is recorded in the section that ran
-/// this. A rate that moves is a rate to re-derive, not to relax.
+/// **Judged at zero, and §39 is where that number is re-derived.** The ceiling
+/// here was three fifths, written at §36.14 when the ball family beside it
+/// refused every fuse; §36.21 took that family to none and left the ceiling
+/// where it was. A threshold of 60% over a measurement of 0.00% catches nothing
+/// short of a catastrophe, and "a rate that moves is a rate to re-derive, not to
+/// relax" cuts both ways — a rate that falls to zero wants a threshold that
+/// follows it down (§19.1 is the precedent).
+///
+/// Zero is not a guess: [`Draw`] runs from a fixed seed, so this is 384 fuses
+/// that come out the same on every machine, and every one of them is decided.
+/// The headline now says exactly what the control says, and that is the honest
+/// state of affairs rather than a weakness in the test — no draw of *this*
+/// generator reaches a shape that refuses, and the shapes that do are
+/// hand-written in `degenerate_curved_fuses.rs`. Widening the generator until it
+/// reaches one is what would make a rate of this family mean anything, and it is
+/// the day this number gets re-derived again.
 #[test]
 fn how_often_a_certified_fuse_of_a_turned_curved_pair_refuses() {
     let (fuses, gave_up, recorded) = how_each_fuse_went(Family::Turned);
@@ -189,10 +202,92 @@ fn how_often_a_certified_fuse_of_a_turned_curved_pair_refuses() {
         100.0 * refused as f64 / fuses as f64
     );
     assert!(fuses > 300, "only {fuses} fuses were drawn");
-    assert!(
-        refused as f64 <= 0.60 * fuses as f64,
-        "{refused} of {fuses} refused, over the three fifths §36 records"
+    assert_eq!(
+        refused, 0,
+        "the turned family is measured at none refused, and this is that measurement"
     );
+    assert_eq!(recorded, 0, "nor did any of them record a decision");
+}
+
+/// A block notching a bar, turned against it rather than with it, and every
+/// answer put through the sweep.
+///
+/// **This is the family §39's claim audit found missing, and the defect it
+/// found.** Every other family in this file turns both solids by one rotation,
+/// which is an affine map of the pair: the block's cut planes stay square to the
+/// bar's own frame, every corner of every answer lands on a coordinate `f64`
+/// holds exactly, and `check_edges`'s demand that a corner read *exactly*
+/// `Decision::Zero` against the surface across the edge is met by luck. Turn the
+/// block on its own and a corner is `through + t·direction` over a divisor, one
+/// ulp off the plane it was solved from — and the fuse wrote a solid its own
+/// sweep called broken: `Ok` with a corrupt answer in a release build, a panic
+/// in a debug one.
+///
+/// So this asserts the sweep and not a rate: a fuse either refuses by name or
+/// hands back a model that passes [`Model::validate`]. The count that answered
+/// is printed and floored, because a family that refused everything would sweep
+/// nothing and pass (§14.7).
+#[test]
+fn every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates() {
+    let policy = Policy::certified();
+    let mut draw = Draw(0x5EED);
+    let mut fuses = 0;
+    let mut answered = 0;
+    let mut gave_up: BTreeMap<String, usize> = BTreeMap::new();
+    for _ in 0..DRAWS {
+        let Some((mut model, bar, block)) = a_bar_notched_by_a_turned_block(&mut draw) else {
+            continue;
+        };
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            for (arguments, tools) in [([bar], [block]), ([block], [bar])] {
+                fuses += 1;
+                let mut log = ProvenanceLog::new();
+                match model.fuse(&arguments, &tools, rule, &policy, &mut log) {
+                    Ok(_) => {
+                        answered += 1;
+                        model
+                            .validate(&policy, &mut ProvenanceLog::new())
+                            .expect("a fuse hands back a sound model or refuses");
+                    }
+                    Err(Error::Undecidable { records }) => {
+                        let named = records
+                            .records()
+                            .last()
+                            .map_or("nothing named", |record| record.predicate());
+                        *gave_up.entry(named.to_owned()).or_default() += 1;
+                    }
+                    Err(why) => *gave_up.entry(format!("{why}")).or_default() += 1,
+                }
+            }
+        }
+    }
+    println!(
+        "a block turned against a bar: {answered} of {fuses} fuses answered, refused {gave_up:?}"
+    );
+    assert!(fuses > 300, "only {fuses} fuses were drawn");
+    assert!(
+        answered * 4 >= fuses,
+        "only {answered} of {fuses} came back with an answer to sweep"
+    );
+}
+
+/// A unit block cutting a notch out of a bar's wall, turned about the bar's own
+/// axis so that its cut planes are oblique to everything the bar is written in.
+///
+/// The block has to be *small* and sit where the bar's wall is: a block the bar
+/// runs right through is cut by two caps square to the axis whatever the block
+/// is turned by, and a corner of that is exact again.
+fn a_bar_notched_by_a_turned_block(draw: &mut Draw) -> Option<(Model, SolidKey, SolidKey)> {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bar = model.add_round_bar(1.0, 4.0, &Isometry::identity()).ok()?;
+    let block = model
+        .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .ok()?;
+    let up = 3.0 + draw.fraction();
+    let across = Isometry::translation(Vector::new(0.5, -0.5, up)).ok()?;
+    let turn = Isometry::rotation(&Axis::z(), 0.05 + draw.fraction()).ok()?;
+    model.place_solid(block, &across.compose(&turn));
+    Some((model, bar, block))
 }
 
 /// A bar notched by a block, which is the shape §35.10 hands lane 5 as the one

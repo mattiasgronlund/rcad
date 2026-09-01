@@ -132,10 +132,33 @@ impl Model {
             // pick which piece it is. Otherwise the name describes a curve this
             // edge is not on, and nothing else in the kernel would notice.
             if let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &edge.run {
-                for corner in [start.point, end.point] {
-                    let at = PredicatePoint::from(corner.coordinates());
-                    if side_of_surface(and, at) != Decision::Zero {
-                        return Err(Invalid::VertexOffItsFaceSurface.into());
+                for corner in [start, end] {
+                    let at = PredicatePoint::from(corner.point.coordinates());
+                    match side_of_surface(and, at) {
+                        Decision::Zero => {}
+                        // The same slop `check_curved_face` reads off a solved
+                        // corner (§36.13), read here too. A corner where three
+                        // surfaces meet is a box divided down to a point, so it
+                        // lands *near* each of them and exactly on one only when
+                        // the arithmetic happened to be exact.
+                        _ if not_provably_off(and, corner.point, corner.approximation) => {}
+                        Decision::Pos | Decision::Neg => {
+                            return Err(Invalid::VertexOffItsFaceSurface.into());
+                        }
+                        decision @ Decision::Undecidable { .. } => {
+                            let mut records = ProvenanceLog::new();
+                            records.push(Record::new(
+                                name_of_surface(and),
+                                &[at],
+                                Level::Exact,
+                                decision,
+                                Measures::Area,
+                            ));
+                            return Err(Error::Undecidable { records });
+                        }
+                        other => panic!(
+                            "a corner came back with a decision nothing here knows: {other:?}"
+                        ),
                     }
                     if picked_by
                         .iter()
@@ -922,7 +945,9 @@ fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
         for corner in wire.coedges().map(CoedgeView::start) {
             let point = PredicatePoint::from(corner.point().coordinates());
             let decision = side_of_surface(surface, point);
-            if decision != Decision::Zero && not_provably_off(surface, corner) {
+            if decision != Decision::Zero
+                && not_provably_off(surface, corner.point(), corner.approximation())
+            {
                 continue;
             }
             match decision {
@@ -965,15 +990,18 @@ fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
 /// Asked only after the exact point has failed, so **an exactly placed corner is
 /// asked exactly what it always was** and nothing is loosened for one. A corner
 /// with no slop recorded on it never reaches here either.
-fn not_provably_off(surface: &Surface, corner: crate::VertexView<'_>) -> bool {
-    let Some(reach) = corner
-        .approximation()
-        .map(Approximation::magnitude)
-        .filter(|by| *by > 0.0)
-    else {
+///
+/// Asked about a face's own surface by [`check_curved_face`] and about an edge's
+/// partner surface by `check_edges`. The second was an exact `Decision::Zero`
+/// until §39, on the argument that a corner a fuse solved for is *exactly* on a
+/// plane it was solved from. It is not: the corner is `through + t·direction`
+/// over a divisor and it rounds, so a block turned relative to a bar left the
+/// fuse writing a solid its own sweep called broken.
+fn not_provably_off(surface: &Surface, point: Point, slop: Option<Approximation>) -> bool {
+    let Some(reach) = slop.map(Approximation::magnitude).filter(|by| *by > 0.0) else {
         return false;
     };
-    let within = PredicatePoint::Constructed(corner.point().coordinates().map(|coordinate| {
+    let within = PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
         Interval::new(coordinate - reach, coordinate + reach)
             .expect("a recorded slop is a positive length")
     }));
