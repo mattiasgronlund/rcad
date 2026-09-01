@@ -331,6 +331,20 @@ pub use rcad_geom::{
     MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing,
     WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
     WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS, WHERE_TWO_PLANES_CROSS, intersect, walk,
+    where_a_closed_crossing_starts,
+};
+
+/// Where three surfaces meet, how many points that is, and which of two points
+/// on a closed crossing comes first.
+///
+/// Out here for the same reason as [`intersect`]: none of the three has any
+/// topology in its signature, and a caller that wants the corner of a curved
+/// arrangement without a kernel is the user §24.15 exports for. Where a corner
+/// read out of a model lands once it has been placed is here too, because it is
+/// what a caller has to use instead of moving the point itself (§31.3).
+pub use rcad_geom::{
+    CORNER_AFTER_MOVING_ROUNDOFF, MeetOfThree, ROUND_A_CROSSING, WHERE_THREE_SURFACES_MEET,
+    meet_of_three_surfaces, where_a_corner_lands_after_moving, which_comes_first_round_a_crossing,
 };
 
 pub use rcad_geom::{

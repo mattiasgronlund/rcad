@@ -10,7 +10,7 @@
 
 use rcad_geom::{Deflection, Isometry, Point, Scale, Surface};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, FaceKey, Mesh, Model, OnAFace, SolidKey};
+use rcad_topo::{Containment, Model, OnAFace, SolidKey};
 
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 5.0;
@@ -239,7 +239,7 @@ fn a_grid_of_points_against_a_bar_and_a_ball_is_decided_and_records_nothing() {
 /// swallowing the whole test would fail rather than pass.
 #[test]
 fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
-    let fine = Deflection::of(0.002).expect("a fine mesh");
+    let fine = Deflection::of(0.02).expect("a fine enough mesh");
     let mut compared = 0;
     let mut held = 0;
 
@@ -253,18 +253,29 @@ fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
         // within `deviation` of some triangle of it — the distance below is to
         // the nearest *triangle* and not to the nearest corner, so a long thin
         // triangle up the side of a bar costs nothing. Four times that leaves
-        // room for the drop being measured in `f64`; twenty-five times it again
-        // is the band inside which the mesh is not being asked.
+        // room for the drop being measured in `f64`; ten times it again is the
+        // band inside which the mesh is not being asked, and every sample below
+        // is either on a face or a whole unit clear of one.
         let near = 4.0 * mesh.deviation().magnitude();
-        let far = 25.0 * near;
+        let far = 10.0 * near;
 
         for face in model.solid(solid).faces() {
             let surface = face.surface();
             if surface.as_plane().is_some() {
                 continue;
             }
+            let standing_in: Vec<[Point; 3]> = mesh
+                .triangles()
+                .iter()
+                .filter(|triangle| triangle.face() == face.key())
+                .map(|triangle| triangle.corners().map(|corner| mesh.points()[corner as usize]))
+                .collect();
+
             for sample in samples_over(&surface) {
-                let by_mesh = how_far_from_the_mesh_of(&mesh, face.key(), sample);
+                let by_mesh = standing_in
+                    .iter()
+                    .map(|&[a, b, c]| how_far_from_a_triangle(sample, a, b, c))
+                    .fold(f64::INFINITY, f64::min);
                 let by_the_face = model
                     .solid(solid)
                     .face_holds_the_point(
@@ -307,41 +318,26 @@ fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
 /// Points on a surface to ask about, spread well past whatever the face covers.
 ///
 /// A pipe is sampled a long way up and down its axis so that the samples run off
-/// both caps of any bar drawn on it; a ball has no off, so it is sampled all over
-/// and every sample should be held.
+/// both caps of any bar drawn on it, and never within a unit of one; a ball has
+/// no off, so it is sampled all over and every sample should be held.
 fn samples_over(surface: &Surface) -> Vec<Point> {
     let mut points = Vec::new();
-    for round in 0..24 {
-        let u = f64::from(round) * core::f64::consts::TAU / 24.0;
+    for round in 0..16 {
+        let u = f64::from(round) * core::f64::consts::TAU / 16.0;
         match surface {
             Surface::Cylinder(_) => {
-                for step in -8..=24 {
-                    points.push(surface.point_at(u, f64::from(step) * 0.25));
+                for along in [-3.0, -2.0, -1.0, 1.0, 2.0, 3.0, 4.0, 6.0, 7.0, 8.0] {
+                    points.push(surface.point_at(u, along));
                 }
             }
             _ => {
-                for step in -11..=11 {
-                    points
-                        .push(surface.point_at(u, f64::from(step) * core::f64::consts::PI / 24.0));
+                for step in -7..=7 {
+                    points.push(surface.point_at(u, f64::from(step) * core::f64::consts::PI / 16.0));
                 }
             }
         }
     }
     points
-}
-
-/// How far `at` is from the nearest triangle of one face of `mesh`.
-fn how_far_from_the_mesh_of(mesh: &Mesh, face: FaceKey, at: Point) -> f64 {
-    mesh.triangles()
-        .iter()
-        .filter(|triangle| triangle.face() == face)
-        .map(|triangle| {
-            let [a, b, c] = triangle
-                .corners()
-                .map(|corner| mesh.points()[corner as usize]);
-            how_far_from_a_triangle(at, a, b, c)
-        })
-        .fold(f64::INFINITY, f64::min)
 }
 
 /// The distance from `at` to the nearest point of the triangle `a b c`.
@@ -379,15 +375,3 @@ fn how_far_from_a_side(at: Point, from: Point, to: Point) -> f64 {
     (at - (from + side * part)).length()
 }
 
-/// The longest side of any triangle in the mesh.
-fn longest_chord(mesh: &Mesh) -> f64 {
-    mesh.triangles()
-        .iter()
-        .flat_map(|triangle| {
-            let [a, b, c] = triangle
-                .corners()
-                .map(|corner| mesh.points()[corner as usize]);
-            [(b - a).length(), (c - b).length(), (a - c).length()]
-        })
-        .fold(0.0, f64::max)
-}

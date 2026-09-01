@@ -766,4 +766,106 @@ mod tests {
             Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
         );
     }
+
+    /// What the degree of the discriminant costs in `f64`, measured.
+    ///
+    /// §31.2 row 4 guesses "about 14" and §34 records what it is: **ten** for
+    /// two planes and a ball, **fourteen** for two planes and a pipe. A degree
+    /// is a fact about the expression and is derived term by term where each
+    /// half is built; what a degree does not say is how many `f64` the exact
+    /// value takes to hold, and that is the number a caller pays.
+    ///
+    /// Measured here so §29's question — how wide an expansion this arithmetic
+    /// asks `Exact` to carry — has an answer for the row above the ones §29
+    /// measured. The ceiling is a **watch and not a bound**: nothing derives it,
+    /// and what it is there to catch is the discriminant's expansion growing by
+    /// an order of magnitude without anybody noticing.
+    #[test]
+    fn how_many_f64_the_discriminant_of_a_line_and_a_quadric_takes_to_hold() {
+        let turn = crate::Isometry::rotation(
+            &Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction"),
+            0.4,
+        )
+        .expect("a finite angle");
+        let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 2.0, 0.0), 5.0).expect("a radius"));
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(0.0, 1.0, 0.0), Vector::new(1.0, 3.0, 5.0))
+                    .expect("a direction"),
+                3.0,
+            )
+            .expect("a radius"),
+        );
+        let one = flat([1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let other = flat([0.0, 1.0, 3.0], [0.0, 1.0, 0.0]);
+
+        let mut widest = 0usize;
+        for turned in [false, true] {
+            let placed = |surface: &Surface| {
+                if turned {
+                    surface.transformed(&turn)
+                } else {
+                    *surface
+                }
+            };
+            let (Surface::Plane(first), Surface::Plane(second)) = (placed(&one), placed(&other))
+            else {
+                unreachable!("both of these are flat");
+            };
+            let line = the_line_two_planes_cross_in(
+                &first,
+                &second,
+                &[PredicatePoint::from([0.0; 3]); 2],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("these two planes are not parallel")
+            .expect("and they cross");
+
+            for (what, quadric) in [("a ball", placed(&ball)), ("a pipe", placed(&pipe))] {
+                let quadratic =
+                    how_a_quadric_cuts_the_line(&line, &quadric).expect("all of this fits");
+                let discriminant = quadratic
+                    .difference_of_the_two_halves()
+                    .expect("all of this fits");
+                widest = widest.max(discriminant.entries());
+                println!(
+                    "{what}{}: A {} entries, B {}, C {}, B²−AC {} entries spanning {} binary orders",
+                    if turned {
+                        ", turned"
+                    } else {
+                        ", on the lattice"
+                    },
+                    quadratic.squared.entries(),
+                    quadratic.half_linear.entries(),
+                    quadratic.constant.entries(),
+                    discriminant.entries(),
+                    discriminant.spread(),
+                );
+            }
+        }
+        assert!(
+            widest < MOST_F64_A_DISCRIMINANT_HAS_BEEN_SEEN_TO_NEED,
+            "the discriminant took {widest} entries to hold"
+        );
+    }
+
+    /// A ceiling on how many `f64` the discriminant of a line and a quadric has
+    /// been seen to need.
+    ///
+    /// **A watch and not a published bound.** `Exact::times` grows a product to
+    /// at most twice the two lengths multiplied, which for a degree-fourteen
+    /// discriminant is a number with five zeroes on it; what keeps the real
+    /// figure two orders below that is `expansion_sum` dropping every roundoff
+    /// that comes out exactly zero. Nothing derives the real figure, so this is
+    /// set an order of magnitude above what is measured and its job is to notice
+    /// a change of shape rather than to certify one.
+    ///
+    /// Measured on the four rows above: five entries for a ball on the lattice,
+    /// nineteen for a pipe on the lattice, thirty-six and fifty-seven turned.
+    /// The turned pipe's discriminant spans **761 binary orders**, which is
+    /// inside the 995 [`Exact::square_minus`]'s window leaves and not by much —
+    /// so the row above this one is the row that runs out first if the degree
+    /// ever goes up again.
+    const MOST_F64_A_DISCRIMINANT_HAS_BEEN_SEEN_TO_NEED: usize = 512;
 }
