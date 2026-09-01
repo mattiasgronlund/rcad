@@ -84,11 +84,22 @@ pub enum Cause {
     /// [`Cause::ConstructedPoint`] is about a number too fine to write down
     /// rather than about a chord standing in for an arc.
     ///
-    /// **Last on purpose.** `postcard` writes an enum as its variant number, so
-    /// a variant added anywhere but the end renumbers the ones after it and
-    /// every model already on disk reads back a different reason
-    /// (`docs/decisions.md` §25.8).
+    /// `postcard` writes an enum as its variant number, so a variant added
+    /// anywhere but the end renumbers the ones after it and every model already
+    /// on disk reads back a different reason (`docs/decisions.md` §25.8).
     FlatStandIn,
+    /// A point was worked out along the curve where two surfaces cross, and the
+    /// magnitude is how far it may sit off that curve.
+    ///
+    /// Not a [`Cause::FlatStandIn`], and the two are one dimension apart. A
+    /// flat stand-in is a triangle put where a *surface* is; this is a point put
+    /// where a *curve* is, and the curve is named by two surfaces rather than
+    /// drawn (`docs/decisions.md` §24.3). A mesh of a crossing carries both, and
+    /// a reader that could not tell them apart could not tell a coarse
+    /// triangulation from a marcher that wandered.
+    ///
+    /// Last, for the reason above.
+    PointAlongACrossing,
 }
 
 /// One decision that was not certified, with enough context to explain it.
@@ -472,6 +483,37 @@ mod tests {
         );
     }
 
+    /// A point stepped along a crossing is not a triangle standing in for a
+    /// surface, and the two turn up in the same mesh.
+    ///
+    /// A mesh of a solid whose edges were computed carries both at once: the
+    /// triangles miss the surface by one amount and the boundary points miss the
+    /// curve by another. Same magnitude, different thing to go and fix, and only
+    /// the cause says which.
+    #[test]
+    fn a_point_along_a_crossing_is_not_a_triangle_standing_in_for_a_surface() {
+        let wobble = 1e-6;
+        let along_the_curve = Approximation::new(wobble, Cause::PointAlongACrossing);
+
+        assert_ne!(
+            along_the_curve,
+            Approximation::new(wobble, Cause::FlatStandIn)
+        );
+        assert_ne!(
+            along_the_curve,
+            Approximation::new(wobble, Cause::ConstructedPoint)
+        );
+
+        let bytes = postcard::to_allocvec(&along_the_curve).unwrap();
+        assert_eq!(
+            postcard::from_bytes::<Approximation>(&bytes)
+                .unwrap()
+                .cause(),
+            Cause::PointAlongACrossing,
+            "the distinction has to survive being written to disk"
+        );
+    }
+
     /// A cause is written as its number, so where a new one is added is part of
     /// the format.
     ///
@@ -487,11 +529,12 @@ mod tests {
             Cause::ConstructedPoint,
             Cause::ImportedUncertainty,
             Cause::FlatStandIn,
+            Cause::PointAlongACrossing,
         ]
         .into_iter()
         .enumerate()
         {
-            let number = u8::try_from(number).expect("five causes");
+            let number = u8::try_from(number).expect("six causes");
             assert_eq!(
                 postcard::to_allocvec(&cause).unwrap(),
                 [number],
