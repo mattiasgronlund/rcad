@@ -70,17 +70,21 @@ use crate::{
 ///   terms under `3L`, so under `12u·L`.
 ///
 /// That comes to about `68u·L`, which is `34 · f64::EPSILON · L`. The constant
-/// is fifteen times it, and the room is for the trigonometry, on the same
-/// argument as [`Surface::ROUND_TRIP_ROUNDOFF`](crate::Surface::ROUND_TRIP_ROUNDOFF):
+/// is seven times it, and the room is for the trigonometry, on the same argument
+/// as [`Surface::ROUND_TRIP_ROUNDOFF`](crate::Surface::ROUND_TRIP_ROUNDOFF):
 /// this has to hold for a libm that is a few ulps out rather than one that is
 /// perfect.
+///
+/// **One step of that chain is not a rounding but a subtraction that had to be
+/// put there**, and leaving it out is the one way this bound stops being one.
+/// See `two_directions_in`.
 ///
 /// **An error in the angle does not come into it.** Getting `angle` wrong slides
 /// the point *along* the curve, and this is how far it can sit *off* it.
 ///
 /// `every_point_along_a_crossing_is_on_both_surfaces.rs` measures the worst a
 /// search can find and prints the figure.
-pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 512.0 * f64::EPSILON;
+pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 
 /// The most points one crossing is walked into.
 ///
@@ -457,12 +461,7 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
     let up_the_axis = (flat.offset() - normal.dot(pipe.axis().origin() - Point::origin())) / leans;
     let middle = pipe.axis().origin() + along * up_the_axis;
 
-    let across = along
-        .cross(normal)
-        .normalized_as("the direction across both a pipe and a plane it leans over")?;
-    let and = across
-        .cross(normal)
-        .normalized_as("the direction down the slope of a plane over a pipe")?;
+    let (across, and) = two_directions_in(flat, along);
     let radius_across = pipe.radius() / along.length();
     let radius_down_the_slope = pipe.radius() * normal.length() / leans.abs();
 
@@ -475,6 +474,40 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
             &[pipe.radius(), radius_across, radius_down_the_slope],
         ),
     })
+}
+
+/// Two directions in `flat`, square to each other, the first of them square to
+/// `along` as well.
+///
+/// **The subtraction on the second line is what keeps the published bound a
+/// bound**, and it is easy to leave out. `along × normal` is worked out to an
+/// absolute rounding of about `u`, and its own length is the sine of the angle
+/// between the two — so for a plane nearly square to the pipe the direction that
+/// comes out of scaling it to length one is tilted *out of the plane* by about
+/// `u / sin`, and every point built on it misses the plane by the radius times
+/// that. Taking the part of it that lies in the plane leaves a tilt of order `u`
+/// squared instead, which is nothing.
+///
+/// Where the plane is square to the axis the cross product has no length at all,
+/// and there is nothing to work out: the crossing is a plain circle and any two
+/// directions across the pipe will do. [`Cylinder::basis`] is the fixed pair the
+/// pipe already answers with, so the same pipe always gives the same one.
+fn two_directions_in(flat: &Plane, along: Vector) -> (Vector, Vector) {
+    let normal = flat.normal();
+    let leaning = along.cross(normal);
+    let across = leaning - normal * (leaning.dot(normal) / normal.length_squared());
+    match across.normalized() {
+        Ok(across) => {
+            let and = across.cross(normal);
+            let and = and - normal * (and.dot(normal) / normal.length_squared());
+            (
+                across,
+                and.normalized()
+                    .expect("two square directions cross into a third with a length"),
+            )
+        }
+        Err(_) => flat.basis(),
+    }
 }
 
 /// The circle where two balls cross, which lies in their radical plane.
