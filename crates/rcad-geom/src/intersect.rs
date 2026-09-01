@@ -2357,9 +2357,19 @@ mod tests {
     /// product, so "is this plane parallel to this axis" is a question that can
     /// give up — which §27.2 predicted would never happen and §28 records.
     ///
-    /// It is a **gap** for the same reason as the test above: the two are
-    /// plainly not parallel, and no scaling of a *unit* direction reaches the
-    /// answer, which is why this one is worth writing down.
+    /// It is a **gap**, and the second half of this test says which family of
+    /// fixes reaches it. The sentence that used to stand here — *"no scaling of
+    /// a unit direction reaches the answer"* — is true and answers the wrong
+    /// question: nobody was proposing to scale the direction. What reaches it is
+    /// scaling the **expansion**, which [`Exact::square_minus`] already does one
+    /// question up (§31.4), and which [`Exact::dot_of`] does not do at all.
+    /// Multiplying both triples by one positive power of two rounds nothing and
+    /// cannot change the sign of a dot product, and at `2^300` the sign is there
+    /// to be read.
+    ///
+    /// Closing it is a change to `Exact` and therefore to every predicate in the
+    /// kernel that reaches level three, which is a lane and not a gate. §39
+    /// records it with its consumer.
     #[test]
     fn a_direction_with_a_subnormal_component_cannot_be_told_from_square_to_a_plane() {
         let hair = 2f64.powi(-700);
@@ -2376,6 +2386,27 @@ mod tests {
             }
             other => panic!("this product falls off the bottom of the range: {other:?}"),
         }
+
+        let normal = flat.as_plane().expect("a plane").normal().components();
+        let Surface::Cylinder(along) = &pipe else {
+            panic!("a pipe");
+        };
+        let direction = along.axis().direction().components();
+        assert_eq!(
+            Exact::dot_of(normal, direction).as_ref().map(Exact::sign),
+            None,
+            "where they stand, the product falls off the bottom of the range"
+        );
+
+        let up = 2f64.powi(300);
+        let slid = |triple: [f64; 3]| triple.map(|component| component * up);
+        assert_eq!(
+            Exact::dot_of(slid(normal), slid(direction))
+                .as_ref()
+                .map(Exact::sign),
+            Some(Decision::Pos),
+            "the same two triples, both multiplied by a power of two, have a sign"
+        );
     }
 
     /// **The refusal §29.8 left standing, closed.** This is §31.7's third

@@ -68,6 +68,15 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose crossing is
 /// not one closed curve lying in a plane: two planes, a plane along a pipe's
 /// axis, two pipes, and a ball against a pipe.
+///
+/// **"A plane along a pipe's axis" is decided here by a rounded `f64` and by
+/// [`intersect`](crate::intersect) exactly**, so the two disagree about a plane
+/// whose dot with the axis cancels to zero in `f64` and does not cancel
+/// exactly. Such a pair *is* a conic, `intersect` names it one closed curve, and
+/// this refuses it —
+/// `a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently`
+/// is the demonstration. A **gap**: the answer exists and is worked out
+/// correctly one file away. `docs/decisions.md` §39.
 pub fn which_comes_first_round_a_crossing(
     pair: [&Surface; 2],
     from: PredicatePoint,
@@ -328,6 +337,74 @@ mod tests {
                 "{pair:?} does not cross in a conic"
             );
         }
+    }
+
+    /// Two authorities on "is this plane along this pipe's axis", asking it two
+    /// different ways and disagreeing.
+    ///
+    /// [`intersect`](crate::intersect) runs the certified cascade on the exact
+    /// dot of the two stored triples and names one closed curve.
+    /// [`the_way_this_crossing_winds`] runs `== 0.0` on the same two triples in
+    /// plain `f64`, reads "two straight lines", and refuses. `(1, 0, 3)` against
+    /// a plane facing `(−12, −12, 4)` is a pair of small whole numbers where the
+    /// `f64` dot cancels and the exact one does not, and the two answers are as
+    /// far apart as they can be.
+    ///
+    /// **A gap, and this test pins today's answer so a fix fails it loudly**
+    /// (§19's shape). Closing it means the two asking the same question, which is
+    /// §23.8, and it moves `walk`'s own dispatch too — `walk.rs` has the same
+    /// `== 0.0` for the same reason — so it is a lane rather than a gate. §39
+    /// records it.
+    #[test]
+    fn a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently() {
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::origin(), Vector::new(1.0, 0.0, 3.0)).expect("a direction"),
+                2.0,
+            )
+            .expect("a radius"),
+        );
+        let leaning = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(-12.0, -12.0, 4.0))
+                .expect("a normal with length"),
+        );
+
+        let Surface::Cylinder(along) = &pipe else {
+            panic!("a pipe");
+        };
+        let direction = along.axis().direction();
+        let normal = leaning.as_plane().expect("a plane").normal();
+        assert_eq!(
+            normal.dot(direction),
+            0.0,
+            "in plain f64 these two look exactly square"
+        );
+        assert_eq!(
+            crate::exact::Exact::dot_of(normal.components(), direction.components())
+                .as_ref()
+                .map(crate::exact::Exact::sign),
+            Some(Decision::Pos),
+            "and exactly they are not, so the crossing is a conic"
+        );
+
+        let named = crate::intersect(
+            &leaning,
+            &pipe,
+            &rcad_predicates::Policy::certified(),
+            &mut rcad_predicates::ProvenanceLog::new(),
+        )
+        .expect("the intersector names this pair");
+        assert!(
+            matches!(named, crate::SurfaceMeet::Curves(ref runs) if runs.len() == 1),
+            "the intersector says one closed curve: {named:?}"
+        );
+
+        let somewhere = PredicatePoint::from([1.0, 0.0, 0.0]);
+        assert_eq!(
+            which_comes_first_round_a_crossing([&leaning, &pipe], somewhere, somewhere, somewhere),
+            Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+            "and this refuses the very same pair"
+        );
     }
 
     /// A point known only as a box that straddles another's is refused rather

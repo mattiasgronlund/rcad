@@ -100,11 +100,21 @@ impl Exact {
 
     /// `a * b`, exactly, or `None` when the product's low half would be a
     /// subnormal and the pair would no longer add up to the true product.
+    ///
+    /// A low half of zero is dropped rather than stored. Every other operation
+    /// here eliminates zero entries, and
+    /// [`Exact::exponent_that_makes_its_square_exact`] reads the smallest entry
+    /// to work out how far to slide — so a stored zero made the slide read
+    /// "already at the bottom of the range" and refuse a square that a slide
+    /// reaches.
     pub(crate) fn product_of(a: f64, b: f64) -> Option<Self> {
         if !product_is_exact(a, b) {
             return None;
         }
         let (high, low) = two_product(a, b);
+        if low == 0.0 {
+            return Some(Self(vec![high]));
+        }
         Some(Self(vec![low, high]))
     }
 
@@ -165,12 +175,14 @@ impl Exact {
     /// Zero whenever the square already fits. Otherwise the smallest move that
     /// does, so a slide never travels further than it has to.
     fn exponent_that_makes_its_square_exact(&self) -> Option<i32> {
-        let (Some(&smallest), Some(&largest)) = (self.0.first(), self.0.last()) else {
+        // A zero entry is worth nothing to the value and squares exactly
+        // wherever it is put, so the entry that decides how far down the range
+        // this expansion reaches is the smallest one that is not zero.
+        let (Some(&smallest), Some(&largest)) =
+            (self.0.iter().find(|entry| **entry != 0.0), self.0.last())
+        else {
             return Some(0);
         };
-        if smallest == 0.0 {
-            return Some(0);
-        }
         let lift_the_bottom = SMALLEST_ENTRY_A_SQUARE_CAN_HOLD - binary_exponent(smallest);
         let hold_the_top = LARGEST_ENTRY_A_SQUARE_CAN_HOLD - binary_exponent(largest);
         if lift_the_bottom > hold_the_top {
@@ -362,9 +374,11 @@ pub(crate) const WIDEST_SQUARABLE_SPREAD: i32 =
 ///
 /// # Panics
 ///
-/// If `value` is zero, which has no such exponent. An expansion's entries are
-/// non-zero except for the single zero entry that stands for the number zero,
-/// and callers here drop that first.
+/// If `value` is zero, which has no such exponent. Callers here skip zero
+/// entries rather than trust an expansion not to hold one: the sentence that
+/// used to stand here said an expansion's entries are non-zero, and
+/// [`Exact::product_of`] stored a zero low half for every product that came out
+/// exact, which is what kept a slide that would have worked from being tried.
 fn binary_exponent(value: f64) -> i32 {
     assert!(value != 0.0, "zero has no binary exponent");
     let bits = value.abs().to_bits();
@@ -855,6 +869,33 @@ mod how_far_exact_arithmetic_reaches {
                  2^{high} this one did not find it"
             );
         }
+    }
+
+    /// A product whose low half came out zero still slides before it is squared.
+    ///
+    /// [`Exact::product_of`] stored `[0.0, high]` for every product that landed
+    /// on an `f64` exactly, and
+    /// [`Exact::exponent_that_makes_its_square_exact`] read that zero as the
+    /// smallest entry and answered "already as low as it goes, do not slide" —
+    /// so a number with a perfectly good square somewhere else was refused where
+    /// it stood, whatever its magnitude. Nothing in the kernel hands
+    /// [`Exact::square_minus`] a raw product today, which is why a green suite
+    /// never saw it.
+    ///
+    /// `2^300 · 2^300` is that product: it is `2^600` and nothing else, and
+    /// `2^600` squared is past the top of the range where it stands.
+    #[test]
+    fn a_product_whose_low_half_is_zero_is_still_slid_before_it_is_squared() {
+        let big = Exact::product_of(2f64.powi(300), 2f64.powi(300)).expect("an exact product");
+        assert_eq!(
+            big.times(&big).map(|_| ()),
+            None,
+            "the whole point is that this one cannot be squared where it stands"
+        );
+        let slid = big
+            .square_minus(&Exact::of(0.0))
+            .expect("a slide reaches this square");
+        assert_eq!(slid.sign(), Decision::Pos);
     }
 
     /// A comparison that already fits is not moved, so nothing this lane did

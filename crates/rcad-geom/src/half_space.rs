@@ -44,6 +44,18 @@ pub const SIDE_OF_A_HALF_SPACE: &str = "side of a half-space";
 /// evaluates that with nothing rounded. One rounding in `normal · direction` and
 /// a long enough run leaves whichever side it started on.
 ///
+/// **That is a statement about the point `p + t·direction`, and not about the
+/// `f64` triple a caller works out for it.** `fl(p + fl(t·direction))` is the
+/// true point plus a rounding `ε` whose size grows with `t`, and the reading
+/// picks up `normal · ε`, which the squareness says nothing about. Measured, on
+/// the run this file's own test walks: a start at `(0, 5, −3)` along `(1, 3, 5)`
+/// reads `Pos` up to `t = 2⁵⁴` and `Zero` at `2⁵⁵`, where the sum first rounds.
+/// So the squareness buys `t`-independence for a point that is *exactly* on the
+/// run, which is what a corner of a model is, and buys nothing for a point that
+/// was merely computed towards one.
+/// `a_point_far_enough_down_an_endless_run_stops_being_exactly_on_it` is the
+/// demonstration.
+///
 /// The offset does **not** have to be exact for that. A rounded offset moves the
 /// flat surface along its own normal without turning it, so it can only be
 /// wrong about *where between* two pieces the surface sits, which is a bounded
@@ -133,7 +145,9 @@ impl HalfSpace {
     ///
     /// [`Error::NotFinite`] if `through` is not made of finite numbers or the
     /// offset overflows, and [`Error::ZeroLength`] if `endless_way` has no
-    /// length.
+    /// length. **`towards` may be anything at all**, zero included: it is only
+    /// ever used to rank three normals that are square to `endless_way` however
+    /// it is ranked.
     pub fn through_a_point_square_to(
         through: Point,
         endless_way: Vector,
@@ -154,7 +168,12 @@ impl HalfSpace {
             .ok_or(Error::ZeroLength {
                 what: "the direction a half-space is square to",
             })?;
-        let best = if is_exactly_square(towards, endless_way) {
+        // A zero `towards` is square to everything, vacuously, so it would win
+        // this comparison and then be refused for having no length to point
+        // along — with three good normals already in hand. A caller that works
+        // `towards` out as a projection lands on zero whenever what it projected
+        // ran along `endless_way`.
+        let best = if towards != Vector::zero() && is_exactly_square(towards, endless_way) {
             towards
         } else {
             best_fallback
@@ -383,6 +402,30 @@ mod tests {
         }
     }
 
+    /// A caller that leans nowhere in particular still gets a square normal.
+    ///
+    /// A zero `towards` is exactly square to everything — the dot of a zero
+    /// triple with anything is exactly zero — so it used to win the comparison
+    /// against the three fallbacks and then be refused for having no length,
+    /// while all three of them sat there square and unused. The search in
+    /// `the_best_exactly_square_normal_is_never_less_than_a_third_aligned_with_what_was_asked`
+    /// skips this case by hand, which is the tell.
+    ///
+    /// A caller reaches it by projecting: `towards − along·(towards·along/|along|²)`
+    /// is zero for every `towards` that runs along `along`.
+    #[test]
+    fn a_half_space_asked_to_lean_nowhere_in_particular_is_still_square_to_its_direction() {
+        let along = Vector::new(1.0, 3.0, 5.0);
+        let picked = HalfSpace::through_a_point_square_to(Point::origin(), along, Vector::zero())
+            .expect("three normals square to (1, 3, 5) are in hand before anything is ranked");
+        assert_ne!(picked.normal(), Vector::zero());
+        assert_eq!(
+            exact_dot_sign(picked.normal().components(), along.components()),
+            Some(Decision::Zero),
+            "what came back has to be square to the direction, whatever it leans towards"
+        );
+    }
+
     fn exact_dot_sign(one: [f64; 3], other: [f64; 3]) -> Option<Decision> {
         crate::exact::Exact::dot_of(one, other)
             .as_ref()
@@ -465,6 +508,52 @@ mod tests {
                 "{steps} steps along {along:?} left the half-space"
             );
         }
+    }
+
+    /// And far enough along, the point a caller works out is not on the run any
+    /// more, so the side it reads is about the rounding rather than about the
+    /// half-space.
+    ///
+    /// The test above stops at a million million steps, where `start + along*t`
+    /// still lands on `f64` exactly. Two steps further up it does not: `3·2⁵⁵` has
+    /// an `ulp` of sixteen, so adding five to it rounds, and what is asked about
+    /// is a point beside the run rather than on it. The squareness has nothing to
+    /// say about that point and does not pretend to.
+    ///
+    /// **Not a defect and not a gap** — the answer about the point handed over is
+    /// the right one, and the point handed over is the wrong point. It is here
+    /// because the type's own doc used to read as though the guarantee covered
+    /// any `t`, and a caller placing a picker a long way down a run would have
+    /// believed it.
+    #[test]
+    fn a_point_far_enough_down_an_endless_run_stops_being_exactly_on_it() {
+        let along = Vector::new(1.0, 3.0, 5.0);
+        let picker = HalfSpace::through_a_point_square_to(
+            Point::origin(),
+            along,
+            Vector::new(0.0, 5.0, -3.0),
+        )
+        .expect("a direction with length");
+        let start = Point::new(0.0, 5.0, -3.0);
+
+        let near = 2f64.powi(54);
+        assert_eq!(
+            picker.side_of_point(PredicatePoint::from((start + along * near).coordinates())),
+            Decision::Pos,
+            "2^54 steps along is still on the side it set off on"
+        );
+
+        let far = 2f64.powi(55);
+        assert_eq!(
+            3.0f64.mul_add(far, 5.0),
+            3.0 * far,
+            "at 2^55 the five the start stood off by is below the spacing of the grid"
+        );
+        assert_eq!(
+            picker.side_of_point(PredicatePoint::from((start + along * far).coordinates())),
+            Decision::Zero,
+            "so the point asked about is on the run rather than beside it, and reads Zero"
+        );
     }
 
     /// The four numbers survive being written out and read back, which a plane's
