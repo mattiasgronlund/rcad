@@ -1117,6 +1117,119 @@ fn a_skew() -> impl Strategy<Value = Skew> {
     (-SHARPEST_SKEW..=SHARPEST_SKEW).prop_map(|x_per_y| Skew { x_per_y })
 }
 
+/// A block with a round bar driven through it, a whole unit clear of every
+/// wall.
+///
+/// **A family of its own rather than an arm of [`Shape`]**, and deliberately so:
+/// adding a curved outline to `a_shape()` would change the corpus every measured
+/// family above draws from, and every number §17.7 and §22 record with it. This
+/// generator shares nothing with them.
+///
+/// The bar is kept clear of the block's walls because §36.14 measured that
+/// arrangement at nothing refused, and a metamorphic property is only worth what
+/// it compares — a family the fuse refuses outright leaves every property here
+/// green having asserted nothing (§14.7). The degenerate arrangements a bar
+/// tangent to a wall or flush with a cap reaches are roadmap §7.4's catalogue
+/// entries, and `degenerate_curved_fuses.rs` is where they are hand-written one
+/// at a time.
+///
+/// Every number is a small whole one, so the block's corners and the bar's
+/// radius and seam are exact. What is **not** exact is any corner where the
+/// bar's wall meets a wall of the block, and that is the point of running the
+/// properties over this family at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CurvedPair {
+    /// How wide the block is, and how tall.
+    pub side: u32,
+    /// The bar's radius.
+    pub radius: u32,
+    /// Where the bar's axis stands, in the block's own coordinates.
+    pub at: [u32; 2],
+}
+
+impl CurvedPair {
+    /// Build the block and then the bar, in that order.
+    #[must_use]
+    pub fn build(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let side = f64::from(self.side);
+        let block = model
+            .add_cube(side, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a whole-number cube");
+        let bar = model
+            .add_round_bar(
+                f64::from(self.radius),
+                side + 4.0,
+                &Isometry::translation(Vector::new(
+                    f64::from(self.at[0]),
+                    f64::from(self.at[1]),
+                    -2.0,
+                ))
+                .expect("a whole-number shift"),
+            )
+            .expect("a bar long enough to go right through");
+        (model, vec![block, bar])
+    }
+
+    /// The same bar built twice in the same place, and no block.
+    ///
+    /// What `A \ A` is asked of. Both copies come out of the same numbers by the
+    /// same code, so they are bit-identical rather than nearly so.
+    #[must_use]
+    pub fn built_as_a_bar_and_a_copy_of_it(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let mut bar = || {
+            model
+                .add_round_bar(
+                    f64::from(self.radius),
+                    f64::from(self.side),
+                    &Isometry::identity(),
+                )
+                .expect("a whole-number bar")
+        };
+        let one = bar();
+        let copy = bar();
+        (model, vec![one, copy])
+    }
+
+    /// The same block built twice in the same place, and no bar.
+    ///
+    /// The control for [`CurvedPair::built_as_a_bar_and_a_copy_of_it`]: the same
+    /// question with every face flat, which the flat families already answer, so
+    /// a difference between the two rows is the curve and nothing else.
+    #[must_use]
+    pub fn built_as_a_block_and_a_copy_of_it(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let mut cube = || {
+            model
+                .add_cube(
+                    f64::from(self.side),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a whole-number cube")
+        };
+        let one = cube();
+        let copy = cube();
+        (model, vec![one, copy])
+    }
+}
+
+/// A block with a bar through it, the bar clear of every wall by at least one.
+///
+/// Shrinks toward a block of side four with a bar of radius one up its middle.
+pub fn a_curved_pair() -> impl Strategy<Value = CurvedPair> {
+    (4u32..=8)
+        .prop_flat_map(|side| (Just(side), 1u32..=(side / 2 - 1).min(2)))
+        .prop_flat_map(|(side, radius)| {
+            // A whole unit of room between the bar and every wall, at both ends
+            // of the range, so no drawn pair is tangent to anything.
+            let room = radius + 1..=side - radius - 1;
+            (Just(side), Just(radius), [room.clone(), room])
+                .prop_map(|(side, radius, at)| CurvedPair { side, radius, at })
+        })
+}
+
 /// Where the second solid of a degenerate pair sits along one axis.
 ///
 /// In the order shrinking walks: right on top of the first, then flush against

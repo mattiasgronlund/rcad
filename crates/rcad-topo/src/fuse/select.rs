@@ -38,18 +38,19 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Plane, PlaneAgreement};
+use rcad_geom::{Plane, PlaneAgreement, Point, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     orient3d_of_points,
 };
 
 use crate::key::FaceSlot;
+use crate::validate::side_of_surface;
 use crate::{Containment, Error, Model, Result, SolidView};
 
 use super::arrange::{Piece, agreement_of_two_planes};
 use super::bake::{BakedFace, BakedSolid};
-use super::{Scratch, as_exact_as_it_is, gave_up, the_other_way};
+use super::{FaceMeet, Scratch, as_exact_as_it_is, gave_up, middle_of, the_other_way};
 
 /// Which pieces of the two groups a fuse keeps.
 ///
@@ -107,12 +108,14 @@ pub(crate) fn choose(
         } else {
             Side::Tool
         };
-        let facing = outward_plane_of(piece);
         let corners = corners_of(piece);
-        let Some(in_plane) = InPlane::of(&piece.plane) else {
-            return Err(nothing_to_measure_from(piece, log));
+        let in_plane = match piece.surface.as_plane() {
+            Some(flat) => {
+                Some(InPlane::of(flat).ok_or_else(|| nothing_to_measure_from(piece, log))?)
+            }
+            None => None,
         };
-        let candidates = candidate_points(&corners);
+        let candidates = candidate_points(piece, &corners);
 
         let own_group: Vec<usize> = (0..solids.len())
             .filter(|&other| other != mine && (other < arguments) == (mine < arguments))
@@ -122,9 +125,8 @@ pub(crate) fn choose(
             &solids,
             &own_group,
             &candidates,
-            &corners,
-            &in_plane,
-            &facing,
+            piece,
+            in_plane.as_ref(),
             policy,
             log,
         )?;
@@ -146,9 +148,8 @@ pub(crate) fn choose(
             &solids,
             &other_group,
             &candidates,
-            &corners,
-            &in_plane,
-            &facing,
+            piece,
+            in_plane.as_ref(),
             policy,
             log,
         )?;
@@ -337,9 +338,8 @@ fn place_the_piece(
     solids: &[&BakedSolid],
     against: &[usize],
     candidates: &[PredicatePoint],
-    corners: &[Vec<PredicatePoint>],
-    in_plane: &InPlane,
-    facing: &Plane,
+    piece: &Piece,
+    in_plane: Option<&InPlane>,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Placement> {
@@ -347,12 +347,12 @@ fn place_the_piece(
         return Ok(Placement::Outside);
     }
     for &candidate in candidates {
-        if in_plane.winding_around(corners, candidate) != Some(1) {
+        if the_piece_holds(piece, in_plane, candidate) != Some(true) {
             continue;
         }
         let mut trial = ProvenanceLog::new();
         let settled = settle_against_each(
-            model, solids, against, candidate, in_plane, facing, policy, &mut trial,
+            model, solids, against, candidate, piece, in_plane, policy, &mut trial,
         )?;
         if let Some(placement) = settled {
             trial.drain_into(log);
@@ -361,10 +361,99 @@ fn place_the_piece(
     }
     Err(gave_up(
         INSIDE_A_PIECE,
-        &corners.concat(),
+        &corners_of(piece).concat(),
         Measures::Length,
         log,
     ))
+}
+
+/// Whether one piece of a face holds a point on its surface, or `None` when
+/// nothing here can say.
+///
+/// **A flat piece is wound and a curved one is not**, and §35.2 is why rather
+/// than this being two answers to one question. A closed curve cut on a *plane*
+/// by a ball or a pipe bounds the part of the plane inside that ball or pipe —
+/// one of the two sides is bounded and the other runs on for ever, so which is
+/// which is settled without asking anything, and that is what lets a round wire
+/// join a crossing count as `±1`. On a **closed** surface both sides are
+/// bounded, a circle on a sphere leaves two caps and neither is the outer one,
+/// so there is nothing to wind and what answers instead is which side of each
+/// bounding curve the piece's own material lies on — which the arrangement
+/// already worked out and put on [`FaceMeet::material_side`].
+///
+/// The one thing a *flat* piece may not have any more is a polygon: the disk a
+/// bar takes out of a block's face is bounded by one closed curve and has one
+/// corner. Its wire contributes to the count exactly as a round hole does, which
+/// is `holds.rs`'s rule read the same way round.
+fn the_piece_holds(
+    piece: &Piece,
+    in_plane: Option<&InPlane>,
+    point: PredicatePoint,
+) -> Option<bool> {
+    // A piece that is the **whole** of a closed surface is trimmed by nothing.
+    // Its one wire is a seam — where the surface's own two coordinates were cut
+    // open, not where the face stops — so every point of the surface is in it,
+    // and reading the seam as a trimming would keep half a ball (§38.1).
+    if piece.is_the_whole_surface {
+        return Some(true);
+    }
+    let Some(in_plane) = in_plane else {
+        return Some(
+            piece
+                .wires
+                .iter()
+                .flatten()
+                .all(|side| side_of_surface(&side.carried_by[1], point) == side.material_side),
+        );
+    };
+    // **A flat piece's corners are a polygon and its sides need not be**
+    // (§38.5). Where a bar's wall cuts a plane the side between two corners is an
+    // arc, and the chord across it is on the other side of the crossing: the
+    // midway point of the chord is inside the bar where the piece is outside it,
+    // so a winding count over the corners alone hands classification a point the
+    // piece does not hold. What rules it out is the sign the arrangement already
+    // wrote down — the side of the partner this piece's material is on — read
+    // here for a flat piece exactly as the curved branch above reads it.
+    for side in piece.wires.iter().flatten() {
+        if side.carried_by[1].as_plane().is_some() {
+            continue;
+        }
+        match side_of_surface(&side.carried_by[1], point) {
+            found if found == side.material_side => (),
+            Decision::Neg | Decision::Pos | Decision::Zero => return Some(false),
+            _ => return None,
+        }
+    }
+    let mut winding = 0;
+    for (position, wire) in piece.wires.iter().enumerate() {
+        let inwards = if position == 0 { 1 } else { -1 };
+        match round_wire_of(wire) {
+            Some(partner) => match side_of_surface(&partner, point) {
+                Decision::Neg => winding += inwards,
+                Decision::Pos => (),
+                _ => return None,
+            },
+            None => {
+                let corners: Vec<PredicatePoint> =
+                    wire.iter().map(|side| side.ends[0].point()).collect();
+                winding += in_plane.winding_around(core::slice::from_ref(&corners), point)?;
+            }
+        }
+    }
+    Some(winding == 1)
+}
+
+/// The surface that cut a wire made of one closed curve, or `None` for a wire
+/// that is a polygon.
+///
+/// A wire with one side whose two ends are the same corner goes right round a
+/// closed curve. On a plane that curve was cut by a ball or a pipe, because two
+/// planes cross in a straight line and a straight line does not close.
+fn round_wire_of(wire: &[FaceMeet]) -> Option<Surface> {
+    match wire {
+        [only] if only.ends[0].point() == only.ends[1].point() => Some(only.carried_by[1]),
+        _ => None,
+    }
 }
 
 /// Where one point sits relative to each solid in the set, or `None` when this
@@ -394,13 +483,33 @@ fn settle_against_each(
     solids: &[&BakedSolid],
     against: &[usize],
     point: PredicatePoint,
-    in_plane: &InPlane,
-    facing: &Plane,
+    piece: &Piece,
+    in_plane: Option<&InPlane>,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Placement>> {
     let mut on = None;
     for &index in against {
+        // A **curved** piece is asked about coincidence before the ray and not
+        // after it. A candidate on a plane is exactly on it and a ray fired at a
+        // solid whose face is that plane comes back `OnBoundary`; a candidate on
+        // a *sphere* is worked out through the surface's own two coordinates and
+        // lands a rounding off it, so the same ray comes back confidently Inside
+        // or Outside about a face the piece is lying on. Coincidence is settled
+        // by the surfaces and the outlines and never by the ray (§17.1), so
+        // asking it first costs nothing and reaching for it afterwards would be
+        // too late.
+        if in_plane.is_none()
+            && let Some(face) = coincident_face(model, solids[index], piece, point, policy, log)?
+        {
+            if on.is_none() {
+                on = Some(Placement::On {
+                    solid: index,
+                    same_way: face,
+                });
+            }
+            continue;
+        }
         let solid: SolidView<'_> = model.solid(solids[index].key);
         let mut ray = ProvenanceLog::new();
         let placed = solid.classify_uncertain_point(point, policy, &mut ray);
@@ -414,13 +523,15 @@ fn settle_against_each(
         match placed {
             Containment::Inside => return Ok(Some(Placement::Inside)),
             Containment::Outside => (),
-            // `Model::fuse` refuses a curved solid before any pair is looked at,
-            // so reaching here is a broken invariant inside this crate.
-            Containment::NeedsFlatFaces => {
-                unreachable!("the fuse refuses curved solids at entry")
-            }
+            // A face nobody can follow is not a piece that could be placed
+            // somewhere else, and reading it as `Outside` would drop material.
+            // This was `unreachable!`, on the grounds that the fuse refuses
+            // curved solids at entry; `docs/decisions.md` §35 records why that
+            // argument stops holding and why what replaces it is a refusal
+            // about a caller's solid rather than a panic.
+            Containment::CannotFollowAFacesTrimming { .. } => return Ok(None),
             Containment::OnBoundary | Containment::Undecidable { .. } => {
-                let Some(face) = coincident_face(solids[index], in_plane, facing, point, log)?
+                let Some(face) = coincident_face(model, solids[index], piece, point, policy, log)?
                 else {
                     return Ok(None);
                 };
@@ -443,21 +554,80 @@ fn settle_against_each(
 ///
 /// [`Error::Undecidable`] when two planes cannot be told apart at all.
 fn coincident_face(
+    model: &Model,
     solid: &BakedSolid,
-    in_plane: &InPlane,
-    facing: &Plane,
+    piece: &Piece,
     point: PredicatePoint,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<bool>> {
+    let mine = outward_plane_of(piece);
     for face in &solid.faces {
-        let agreement = agreement_of_two_planes(facing, &outward_plane_of_face(face), log)?;
-        let same_way = match agreement {
-            PlaneAgreement::SameWay => true,
-            PlaneAgreement::OppositeWay => false,
-            PlaneAgreement::Different => continue,
+        let Some(same_way) = do_they_face_the_same_way(piece, mine, face, policy, log)? else {
+            continue;
+        };
+        if a_face_of_the_input_holds(model, solid, face, piece, point, policy, log)? {
+            return Ok(Some(same_way));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether a piece and an input face are on one surface, and if so whether they
+/// face the same way — or `None` when they are not on one surface.
+///
+/// §31.3 splits this in two and the split is what makes one rule cover all three
+/// surface kinds. **Is it one surface** is geometry, and for a plane
+/// [`Plane::agreement_with`] answers it and the direction together, because a
+/// reversed plane is a different four numbers. A sphere has no reversed form, so
+/// for a curved pair the surfaces settle the first half and the two faces' own
+/// **orientations** settle the second.
+fn do_they_face_the_same_way(
+    piece: &Piece,
+    mine: Option<Plane>,
+    face: &BakedFace,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<bool>> {
+    if let (Some(mine), Some(theirs)) = (mine, outward_plane_of_face(face)) {
+        return Ok(match agreement_of_two_planes(&mine, &theirs, log)? {
+            PlaneAgreement::SameWay => Some(true),
+            PlaneAgreement::OppositeWay => Some(false),
+            PlaneAgreement::Different => None,
             other => {
                 panic!("plane agreement came back with an answer nothing here knows: {other:?}")
             }
+        });
+    }
+    if !matches!(
+        intersect(&piece.surface, &face.surface, policy, log)?,
+        SurfaceMeet::SameSurface
+    ) {
+        return Ok(None);
+    }
+    Ok(Some(piece.orientation == face.orientation))
+}
+
+/// Whether the material of one face of an input holds a point already known to
+/// be on that face's surface.
+///
+/// A flat face is wound, the way it always was. A **curved** one is
+/// [`SolidView::face_holds_the_point`], which is the one authority on that
+/// question (§35) and which the fuse can call here because what it is asked
+/// about is a face of an *input* — a face the model holds, with corners it holds
+/// — rather than a piece the arrangement solved for.
+fn a_face_of_the_input_holds(
+    model: &Model,
+    solid: &BakedSolid,
+    face: &BakedFace,
+    piece: &Piece,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    if let Some(flat) = piece.surface.as_plane() {
+        let Some(in_plane) = InPlane::of(flat) else {
+            return Ok(false);
         };
         let corners: Vec<Vec<PredicatePoint>> = face
             .wires
@@ -467,16 +637,14 @@ fn coincident_face(
         // Either sign means the point is in this face's material. Which one
         // comes out says only which way that face's outline runs round *this*
         // piece's normal, and a face pressed against this one from the other
-        // side runs the other way — which is what `OppositeWay` above already
+        // side runs the other way — which is what the agreement above already
         // said. Zero is the only answer that puts the point outside it.
-        if in_plane
+        return Ok(in_plane
             .winding_around(&corners, point)
-            .is_some_and(|winding| winding != 0)
-        {
-            return Ok(Some(same_way));
-        }
+            .is_some_and(|winding| winding != 0));
     }
-    Ok(None)
+    let view = model.solid(solid.key);
+    Ok(view.face_holds_the_point(face.keys[0], point, policy, log)? != crate::OnAFace::NotHeld)
 }
 
 /// The plane a piece's material is *behind*: the piece's own plane, turned round
@@ -486,20 +654,24 @@ fn coincident_face(
 /// way exactly when these two planes do, and comparing the stored planes alone
 /// would call a face and the face pressed against it from the other side the
 /// same thing.
-fn outward_plane_of(piece: &Piece) -> Plane {
-    if piece.orientation.is_reversed() {
-        piece.plane.reversed()
+fn outward_plane_of(piece: &Piece) -> Option<Plane> {
+    let flat = *piece.surface.as_plane()?;
+    Some(if piece.orientation.is_reversed() {
+        flat.reversed()
     } else {
-        piece.plane
-    }
+        flat
+    })
 }
 
-fn outward_plane_of_face(face: &BakedFace) -> Plane {
-    if face.orientation.is_reversed() {
-        face.plane.reversed()
+/// The plane of an input face, turned to point out of the material, or `None`
+/// when the face is curved and has no such thing.
+fn outward_plane_of_face(face: &BakedFace) -> Option<Plane> {
+    let plane = *face.surface.as_plane()?;
+    Some(if face.orientation.is_reversed() {
+        plane.reversed()
     } else {
-        face.plane
-    }
+        plane
+    })
 }
 
 fn corners_of(piece: &Piece) -> Vec<Vec<PredicatePoint>> {
@@ -536,7 +708,7 @@ fn which_solid_owns_each_face(model: &Model, solids: &[&BakedSolid]) -> BTreeMap
 /// Nothing is projected into the plane's own two coordinates, which would round
 /// exact corners into inexact ones and manufacture the undecidability M2.5
 /// exists to measure (§15.5).
-struct InPlane {
+pub(crate) struct InPlane {
     from: PredicatePoint,
     /// Whether [`InPlane::from`] came out above the plane rather than below it.
     turned_round: bool,
@@ -566,7 +738,7 @@ impl InPlane {
     /// any arithmetic. Stepping towards the origin *first* was measured too, and
     /// it is the 37.9% again — a face far from the origin ends up with a
     /// reference point a whole offset away from it, and the fan degenerates.
-    fn of(plane: &Plane) -> Option<Self> {
+    pub(crate) fn of(plane: &Plane) -> Option<Self> {
         let origin = plane.origin().coordinates();
         let normal = plane.normal().components();
         let out_here = plane.offset().abs().max(1.0);
@@ -610,7 +782,11 @@ impl InPlane {
     /// [`candidate_points`] can offer for a rectangular piece lies on one of
     /// its two diagonals or on an edge, so a fan from one fixed corner leaves
     /// two rectangles pressed together with nothing to say about each other.
-    fn winding_around(&self, wires: &[Vec<PredicatePoint>], point: PredicatePoint) -> Option<i32> {
+    pub(crate) fn winding_around(
+        &self,
+        wires: &[Vec<PredicatePoint>],
+        point: PredicatePoint,
+    ) -> Option<i32> {
         wires
             .first()?
             .iter()
@@ -672,7 +848,7 @@ impl InPlane {
 
     /// Which way `first`, `second`, `third` turn about the plane's normal:
     /// [`Decision::Pos`] anticlockwise.
-    fn turn(
+    pub(crate) fn turn(
         &self,
         first: PredicatePoint,
         second: PredicatePoint,
@@ -694,12 +870,25 @@ impl InPlane {
 /// representable piece is exactly representable itself, which is what lets the
 /// cascade prove anything about it at all.
 ///
-/// Two families, and between them they cover any polygon that is not a straight
-/// line. A corner and the middle of the side facing it is inside every triangle
-/// and every convex corner, which is most pieces on the first try. A diagonal's
-/// middle is what is left for a piece with a dent in it, and a polygon with more
-/// than three corners always has a diagonal.
-fn candidate_points(wires: &[Vec<PredicatePoint>]) -> Vec<PredicatePoint> {
+/// Four families now, and the two new ones are what a piece bounded by a closed
+/// curve needs. A corner and the middle of the side facing it is inside every
+/// triangle and every convex corner, which is most pieces on the first try. A
+/// diagonal's middle is what is left for a piece with a dent in it, and a
+/// polygon with more than three corners always has a diagonal.
+///
+/// **A disk has one corner and no diagonal**, so neither of those reaches it:
+/// every blend of its one corner is that corner, which is on the boundary. What
+/// does reach it is the middle of the curve that bounds it — where the ball or
+/// pipe that cut it has its axis, which is a point of the plane provably inside
+/// that ball or pipe.
+///
+/// **A curved piece's corners are not on its surface once they are blended**,
+/// and a point off the surface says nothing about a region drawn on it. Every
+/// blend is therefore put back onto the surface through its own two coordinates.
+/// That is `atan2` and it is allowed here for the reason §5 gives: *choosing*
+/// which point to look at decides nothing, and what follows proves the point is
+/// inside the piece with signs that never see a coordinate.
+fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<PredicatePoint> {
     let mut candidates = Vec::new();
     for wire in wires {
         for (index, &corner) in wire.iter().enumerate() {
@@ -714,7 +903,121 @@ fn candidate_points(wires: &[Vec<PredicatePoint>]) -> Vec<PredicatePoint> {
             candidates.push(midway_between(one, other));
         }
     }
+    if let Some(flat) = piece.surface.as_plane() {
+        for wire in &piece.wires {
+            if let Some(partner) = round_wire_of(wire) {
+                candidates.extend(the_middle_of_a_round_wire(flat, &partner));
+            }
+        }
+        return candidates;
+    }
+    // **A piece bounded by one closed curve has one corner**, and every blend of
+    // one corner is that corner, which is on the boundary. A cap a plane cuts
+    // off a ball is exactly that. What reaches it is six points spread round the
+    // surface from the middle of what corners there are — nothing is trusted
+    // about them either, and the six are a fixed set so which one answers does
+    // not depend on anything but the piece.
+    let middle = middle_of_the_corners(wires);
+    let reach = how_big_the_surface_is(&piece.surface);
+    for axis in 0..3 {
+        for way in [1.0, -1.0] {
+            let mut step = [0.0; 3];
+            step[axis] = way * reach;
+            candidates.push(PredicatePoint::from(
+                [0, 1, 2].map(|which| middle.coordinates()[which] + step[which]),
+            ));
+        }
+    }
     candidates
+        .into_iter()
+        .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
+        .collect()
+}
+
+/// The middle of a piece's corners, which is somewhere near it and nowhere in
+/// particular on it.
+fn middle_of_the_corners(corners: &[Vec<PredicatePoint>]) -> Point {
+    let mut summed = [0.0; 3];
+    let mut how_many = 0.0;
+    for corner in corners.iter().flatten() {
+        let at = middle_of(*corner).coordinates();
+        for axis in 0..3 {
+            summed[axis] += at[axis];
+        }
+        how_many += 1.0;
+    }
+    if how_many == 0.0 {
+        return Point::origin();
+    }
+    Point::from(summed.map(|total| total / how_many))
+}
+
+/// How far across a curved surface is: the radius of the ball or the pipe.
+fn how_big_the_surface_is(surface: &Surface) -> f64 {
+    match surface {
+        Surface::Sphere(ball) => ball.radius(),
+        Surface::Cylinder(pipe) => pipe.radius(),
+        _ => 1.0,
+    }
+}
+
+/// Where the ball or pipe that cut a round wire has its middle, on the plane
+/// that wire is drawn on.
+///
+/// The centre of a circle cut on a plane, without ever saying the word: for a
+/// pipe it is where the axis meets the plane, and for a ball it is the foot of
+/// the perpendicular from the centre. Both are at distance nothing from the
+/// axis or centre, so both are provably inside — which is what the winding
+/// count then checks, in exact arithmetic and with no trust placed here.
+///
+/// `None` where the division has nothing to divide by, which is a pipe running
+/// along the plane rather than through it — and then the wire it cut is not a
+/// closed curve and this was not asked.
+fn the_middle_of_a_round_wire(flat: &Plane, partner: &Surface) -> Option<PredicatePoint> {
+    let (normal, offset) = (flat.normal(), flat.offset());
+    let from = match partner {
+        Surface::Sphere(ball) => ball.centre(),
+        Surface::Cylinder(pipe) => {
+            let axis = pipe.axis();
+            let along = normal.dot(axis.direction());
+            if along == 0.0 {
+                return None;
+            }
+            axis.origin()
+                + axis.direction()
+                    * ((offset - normal.dot(axis.origin() - Point::origin())) / along)
+        }
+        _ => return None,
+    };
+    let there =
+        from + normal * ((offset - normal.dot(from - Point::origin())) / normal.dot(normal));
+    there
+        .is_finite()
+        .then(|| PredicatePoint::from(there.coordinates()))
+}
+
+/// A point put back onto the surface it is meant to be a point of.
+///
+/// Through the surface's own two coordinates and out again, which rounds — so
+/// what comes back is a **box** [`Surface::ROUND_TRIP_ROUNDOFF`] wide rather
+/// than a triple. That width is not slop anybody accepted: a candidate a
+/// rounding off a curved face would be classified confidently against a solid
+/// whose own face it is lying on, and `ON` is the one column a ray was never
+/// what settled (§17.1).
+fn back_onto_the_surface(surface: &Surface, candidate: PredicatePoint) -> Option<PredicatePoint> {
+    let at = middle_of(candidate);
+    let (u, v) = surface.coordinates_of(at);
+    let there = surface.point_at(u, v);
+    if !there.is_finite() {
+        return None;
+    }
+    let reach = Surface::ROUND_TRIP_ROUNDOFF * there.largest_coordinate_magnitude().max(1.0);
+    Some(PredicatePoint::Constructed(there.coordinates().map(
+        |coordinate| {
+            Interval::new(coordinate - reach, coordinate + reach)
+                .expect("a reach is a positive length")
+        },
+    )))
 }
 
 /// Halfway between two points, which is exact whenever both ends are.
@@ -733,7 +1036,7 @@ const INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 const OFF_A_PLANE: &str = "a point off a face's plane";
 
 fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
-    let normal = piece.plane.normal().components();
+    let normal = piece.plane().normal().components();
     gave_up(
         OFF_A_PLANE,
         &[PredicatePoint::from(normal)],

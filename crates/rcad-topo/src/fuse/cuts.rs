@@ -47,12 +47,12 @@
 //! §7.4's catalogue of degenerate inputs, which is where the cases that would
 //! close them get written.
 
-use rcad_geom::{Plane, PlaneAgreement};
+use rcad_geom::{Surface, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::{Error, Result};
 
-use super::arrange::{agreement_of_two_planes, planes_are_parallel, stretches_of_a_line_inside};
+use super::arrange::stretches_of_a_line_inside;
 use super::bake::{BakedFace, BakedSolid};
 
 /// Work out every cut line, and hang each on the face it cuts.
@@ -74,7 +74,7 @@ pub(crate) fn gather(
         check_it_does_not_cross_itself(solid, policy, log)?;
     }
 
-    let mut found: Vec<(usize, usize, Plane)> = Vec::new();
+    let mut found: Vec<(usize, usize, Surface)> = Vec::new();
     for one in 0..solids.len() {
         for other in (one + 1)..solids.len() {
             if !solids[one].bounds.overlap(solids[other].bounds) {
@@ -98,30 +98,39 @@ pub(crate) fn gather(
     Ok(())
 }
 
-/// The lines each of two faces cuts in the other, each as the second plane of
-/// the pair — the face's own plane is the first and is not repeated.
+/// The crossings each of two faces cuts in the other, each as the second surface
+/// of the pair — the face's own surface is the first and is not repeated.
+///
+/// [`intersect`] is the one authority on how two surfaces meet (§24.3), so this
+/// asks it rather than working the three cases out again. That is also what
+/// makes the coincident case one rule for all three surface kinds: two faces on
+/// one *cylinder* answer [`SurfaceMeet::SameSurface`] exactly as two on one
+/// plane do, and the boundary of each is what cuts the other (§31.3).
+///
+/// **Which way round the two face is not asked here**, and §31.3 says why: "is
+/// it one surface" is geometry and this is where it is settled, while "does it
+/// face the same way" is topology and the faces' own orientations settle it, in
+/// selection. For a plane the two used to be welded together in
+/// `Plane::agreement_with`; a sphere has no reversed form, so they come apart.
 fn cuts_between(
     face: &BakedFace,
     against: &BakedFace,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<(Vec<Plane>, Vec<Plane>)> {
-    match agreement_of_two_planes(&face.plane, &against.plane, log)? {
-        PlaneAgreement::SameWay | PlaneAgreement::OppositeWay => {
-            Ok((boundary_of(against), boundary_of(face)))
-        }
-        PlaneAgreement::Different => {
-            if planes_are_parallel(&face.plane, &against.plane, policy, log)? {
-                return Ok((Vec::new(), Vec::new()));
-            }
-            Ok((vec![against.plane], vec![face.plane]))
-        }
-        other => panic!("plane agreement came back with an answer nothing here knows: {other:?}"),
+) -> Result<(Vec<Surface>, Vec<Surface>)> {
+    match intersect(&face.surface, &against.surface, policy, log)? {
+        SurfaceMeet::SameSurface => Ok((boundary_of(against), boundary_of(face))),
+        // A pair that touches at one point cuts nothing (§31.3): neither face is
+        // split and neither solid learns about the other. Two tangent balls
+        // united come back as two shells that share no vertex.
+        SurfaceMeet::Nothing | SurfaceMeet::TouchAtOnePoint { .. } => Ok((Vec::new(), Vec::new())),
+        SurfaceMeet::Curves(_) => Ok((vec![against.surface], vec![face.surface])),
+        other => panic!("two surfaces crossed in a way nothing here knows: {other:?}"),
     }
 }
 
-/// One cut line per edge of a face, for cutting a face coplanar with it.
-fn boundary_of(face: &BakedFace) -> Vec<Plane> {
+/// One cut per edge of a face, for cutting a face that is on the same surface.
+fn boundary_of(face: &BakedFace) -> Vec<Surface> {
     face.wires
         .iter()
         .flatten()
@@ -157,18 +166,14 @@ fn check_it_does_not_cross_itself(
             if !face.bounds.overlap(against.bounds) || share_a_corner(face, against) {
                 continue;
             }
-            match agreement_of_two_planes(&face.plane, &against.plane, log)? {
-                PlaneAgreement::SameWay | PlaneAgreement::OppositeWay => continue,
-                PlaneAgreement::Different => (),
-                other => {
-                    panic!("plane agreement came back with an answer nothing here knows: {other:?}")
-                }
-            }
-            if planes_are_parallel(&face.plane, &against.plane, policy, log)? {
+            if !matches!(
+                intersect(&face.surface, &against.surface, policy, log)?,
+                SurfaceMeet::Curves(_)
+            ) {
                 continue;
             }
-            let mine = stretches_of_a_line_inside(face, &against.plane, policy, log)?;
-            let theirs = stretches_of_a_line_inside(against, &face.plane, policy, log)?;
+            let mine = stretches_of_a_line_inside(face, &against.surface, policy, log)?;
+            let theirs = stretches_of_a_line_inside(against, &face.surface, policy, log)?;
             if mine.provably_overlap(&theirs) {
                 return Err(Error::ArgumentIntersectsItself);
             }
@@ -189,7 +194,7 @@ fn share_a_corner(face: &BakedFace, against: &BakedFace) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Isometry, Plane, Scale, Vector};
+    use rcad_geom::{Isometry, Plane, Scale, Surface, Vector};
     use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::gather;
@@ -209,15 +214,20 @@ mod tests {
             other,
             &Isometry::translation(shift).expect("a finite shift"),
         );
-        bake(&model, &[one, other], &mut ProvenanceLog::new()).expect("two cubes bake")
+        bake(&model, &[one, other], &policy, &mut ProvenanceLog::new()).expect("two cubes bake")
     }
 
     fn facing(solid: &BakedSolid, way: Vector) -> &BakedFace {
         solid
             .faces
             .iter()
-            .find(|face| face.plane.normal() == way)
+            .find(|face| flat(face).normal() == way)
             .expect("a cube has a face pointing every way")
+    }
+
+    /// The plane of a baked face. Every face in this module's tests is flat.
+    fn flat(face: &BakedFace) -> Plane {
+        *face.surface.as_plane().expect("a cube is a polyhedron")
     }
 
     fn gathered(solids: &mut [BakedSolid]) {
@@ -234,7 +244,7 @@ mod tests {
         gathered(&mut solids);
 
         let up = facing(&solids[0], Vector::new(0.0, 0.0, 1.0));
-        let mut cutting: Vec<[f64; 4]> = up.cuts.iter().map(Plane::coefficients).collect();
+        let mut cutting: Vec<[f64; 4]> = up.cuts.iter().map(coefficients_of).collect();
         cutting.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
         assert_eq!(
             cutting,
@@ -260,7 +270,7 @@ mod tests {
         gathered(&mut solids);
 
         let down = facing(&solids[0], Vector::new(0.0, 0.0, -1.0));
-        let mut cutting: Vec<[f64; 4]> = down.cuts.iter().map(Plane::coefficients).collect();
+        let mut cutting: Vec<[f64; 4]> = down.cuts.iter().map(coefficients_of).collect();
         cutting.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
         assert_eq!(
             cutting.len(),
@@ -285,7 +295,7 @@ mod tests {
         for (solid, way) in [(0, 1.0), (1, -1.0)] {
             let shared = facing(&solids[solid], Vector::new(0.0, 0.0, way));
             assert_eq!(shared.cuts.len(), 8);
-            let mut distinct: Vec<[f64; 4]> = shared.cuts.iter().map(Plane::coefficients).collect();
+            let mut distinct: Vec<[f64; 4]> = shared.cuts.iter().map(coefficients_of).collect();
             distinct.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
             distinct.dedup();
             assert_eq!(distinct.len(), 4);
@@ -329,7 +339,8 @@ mod tests {
         );
         let crossed = both_solids_as_one(&mut model, one, other);
 
-        let mut solids = bake(&model, &[crossed], &mut ProvenanceLog::new()).expect("it bakes");
+        let mut solids =
+            bake(&model, &[crossed], &policy, &mut ProvenanceLog::new()).expect("it bakes");
         let refusal = gather(&mut solids, &policy, &mut log);
 
         assert!(
@@ -354,6 +365,13 @@ mod tests {
             4,
             "the top of the lower cube is cut by the four walls of the upper one"
         );
+    }
+
+    fn coefficients_of(surface: &Surface) -> [f64; 4] {
+        surface
+            .as_plane()
+            .expect("a cube is a polyhedron")
+            .coefficients()
     }
 
     fn both_solids_as_one(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {

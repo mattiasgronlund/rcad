@@ -394,16 +394,7 @@ impl Plane {
     /// rots, so all four are checked.
     #[must_use]
     pub fn side_of_point(&self, point: PredicatePoint) -> Decision {
-        let plane_is_real =
-            are_real_numbers(self.normal.components()) && are_real_numbers([self.offset]);
-        if !(is_a_real_point(point) && plane_is_real) {
-            return NOTHING_IS_KNOWN;
-        }
-        decide(&SideOfPlane {
-            plane: *self,
-            point,
-        })
-        .0
+        which_side_of_a_flat_surface(SIDE_OF_PLANE, self.normal.components(), self.offset, point)
     }
 
     /// Where three planes meet.
@@ -426,6 +417,20 @@ impl Plane {
     /// line, or two of them are parallel, and there is no single meeting point —
     /// or when they are close enough to that for the determinant not to be
     /// bounded away from zero.
+    ///
+    /// # And one thing it does not refuse
+    ///
+    /// **`Ok` can hold a box with a side that runs the whole number line.**
+    /// Cramer's rule divides one interval determinant by another and checks
+    /// neither for overflow, so three planes that meet past the top of `f64`'s
+    /// range come back as a box that says nothing at all — which a caller would
+    /// read as a place. Ask `uncertainty().is_finite()` before believing one.
+    /// [`meet_of_three_surfaces`](crate::meet_of_three_surfaces) does, and treats
+    /// it as the refusal it is;
+    /// `three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere`
+    /// is the demonstration. The **limit** underneath it is real — no `f64`
+    /// triple names a point at `1e315` — and `docs/decisions.md` §39 corrects
+    /// §34.10, which filed it as a gap.
     pub fn meet_of_three(first: &Plane, second: &Plane, third: &Plane) -> Result<PredicatePoint> {
         Ok(meet_of_three_planes(
             first.coefficients(),
@@ -521,20 +526,47 @@ pub enum PlaneAgreement {
     CannotTell,
 }
 
+/// Which side of `normal · p = offset` the point is on, for any `normal` at all.
+///
+/// [`Plane`] hands over a normal scaled to length one and
+/// [`HalfSpace`](crate::HalfSpace) hands over whatever its caller wrote down.
+/// Neither the filter below nor the two levels under it care which: the error
+/// bound is a fraction of the permanent, which carries the normal's own size,
+/// and the other two levels are exact.
+pub(crate) fn which_side_of_a_flat_surface(
+    named: &'static str,
+    normal: [f64; 3],
+    offset: f64,
+    point: PredicatePoint,
+) -> Decision {
+    if !(is_a_real_point(point) && are_real_numbers(normal) && are_real_numbers([offset])) {
+        return NOTHING_IS_KNOWN;
+    }
+    decide(&SideOfAFlatSurface {
+        named,
+        normal,
+        offset,
+        point,
+    })
+    .0
+}
+
 /// `normal · point - offset`, evaluated three ways for the cascade.
-struct SideOfPlane {
-    plane: Plane,
+struct SideOfAFlatSurface {
+    named: &'static str,
+    normal: [f64; 3],
+    offset: f64,
     point: PredicatePoint,
 }
 
-impl Predicate for SideOfPlane {
+impl Predicate for SideOfAFlatSurface {
     fn name(&self) -> &'static str {
-        SIDE_OF_PLANE
+        self.named
     }
 
     fn on_floats(&self) -> Option<Filtered> {
         let point = self.point.exact_coordinates()?;
-        let normal = self.plane.normal.components();
+        let normal = self.normal;
 
         // The bound below is a fraction of the permanent, which only bounds
         // anything while every product keeps its relative accuracy. One of them
@@ -544,7 +576,7 @@ impl Predicate for SideOfPlane {
         }
 
         let terms = [0, 1, 2].map(|axis| normal[axis] * point[axis]);
-        let offset = self.plane.offset;
+        let offset = self.offset;
 
         // The three terms can be of either sign and the offset cancels against
         // their sum, so the permanent adds magnitudes rather than values.
@@ -558,14 +590,14 @@ impl Predicate for SideOfPlane {
 
     fn on_intervals(&self) -> Interval {
         let point = self.point.enclosure();
-        let normal = self.plane.normal.components();
+        let normal = self.normal;
         let term = |axis: usize| Interval::exactly(normal[axis]) * point[axis];
-        term(0) + term(1) + term(2) - Interval::exactly(self.plane.offset)
+        term(0) + term(1) + term(2) - Interval::exactly(self.offset)
     }
 
     fn exactly(&self) -> Option<Decision> {
         let point = self.point.exact_coordinates()?;
-        let normal = self.plane.normal.components();
+        let normal = self.normal;
 
         let mut total = [0.0f64; LONGEST_PLANE_TOTAL];
         let mut total_len = 0;
@@ -580,7 +612,7 @@ impl Predicate for SideOfPlane {
             core::mem::swap(&mut total, &mut merged);
         }
 
-        total_len = expansion_sum(&total[..total_len], &[-self.plane.offset], &mut merged);
+        total_len = expansion_sum(&total[..total_len], &[-self.offset], &mut merged);
 
         match expansion_sign(&merged[..total_len]) {
             Decision::Neg => Some(Decision::Neg),
@@ -599,7 +631,7 @@ impl Predicate for SideOfPlane {
 /// `epsilon` is the `f64` unit roundoff, 2⁻⁵³.
 ///
 /// Where the 4 comes from: follow the longest chain of roundings from an input
-/// to `value` in [`SideOfPlane::on_floats`]. A term `normal · point` is one
+/// to `value` in [`SideOfAFlatSurface::on_floats`]. A term `normal · point` is one
 /// rounding — both factors are inputs, so nothing is carried in. Folding the
 /// three terms together takes two additions, a second and a third, and
 /// subtracting the offset is a fourth. `(1 + epsilon)^4 - 1 <=
@@ -611,7 +643,7 @@ impl Predicate for SideOfPlane {
 ///
 /// Every step of that argument is a *relative* one, so the bound holds only
 /// while nothing overflows or falls into the subnormals.
-/// [`SideOfPlane::on_floats`] enforces the bottom end product by product
+/// [`SideOfAFlatSurface::on_floats`] enforces the bottom end product by product
 /// through [`product_is_normal`], and `decide` the top end by refusing a bound
 /// that is not itself a normal number.
 const SIDE_OF_PLANE_ERROR_BOUND: f64 = {
@@ -638,12 +670,13 @@ impl From<Plane> for [f64; 4] {
 
 #[cfg(test)]
 mod tests {
-    use core::f64::consts::FRAC_PI_2;
+    use core::f64::consts::{FRAC_PI_2, TAU};
 
     use rcad_predicates::{Level, orient3d};
 
     use super::*;
     use crate::Axis;
+    use crate::exact::Exact;
 
     fn plane_at_height_two() -> Plane {
         Plane::from_point_and_normal(Point::new(0.0, 0.0, 2.0), Vector::new(0.0, 0.0, 1.0)).unwrap()
@@ -679,6 +712,142 @@ mod tests {
             Err(Error::ZeroLength {
                 what: "plane normal"
             })
+        );
+    }
+
+    /// **The half-space gap, at the one line of arithmetic it comes from.**
+    ///
+    /// This asserts what the code does, so a fix fails it loudly (§19).
+    ///
+    /// A caller *can* write down a normal exactly square to a direction it
+    /// already holds: swap two components and negate one, and the dot product
+    /// becomes two products that are exact negatives of each other, so they
+    /// cancel whatever the direction is. For the axis `w = (1, 3, 5)` those are
+    /// `(3, −1, 0)`, `(0, 5, −3)` and `(5, 0, −1)`, and this checks all three
+    /// are exactly square to `w` before a plane sees them.
+    ///
+    /// **Not one of them is afterwards.**
+    /// [`Plane::reduced_by_largest_component`] divides every component by the
+    /// largest, and that division is correctly rounded rather than exact unless
+    /// the largest is a power of two; the normalization after it divides by a
+    /// square root, which is exact almost never. Worked out in exact rational
+    /// arithmetic over the stored bits, the three miss squareness by one or two
+    /// last bits of the direction. **Two of the three read exactly `0.0` in
+    /// plain `f64` and the third reads `1.1e−16`**, so a filter that trusted the
+    /// `f64` would call two of them square and be wrong about both; the exact
+    /// level sees the sign and refuses, which is what it is for.
+    ///
+    /// That is what leaves `Error::CannotNameWhichPieceOfACrossingThisIs`
+    /// standing for a piece of a crossing that runs on for ever: such a piece
+    /// leaves any half-space whose normal leans into its direction by even one
+    /// rounding, so the squareness has to be arranged and cannot be tested
+    /// (§29.8). The test below is why it is a **limit** of a plane that stores
+    /// a canonical normal rather than a gap.
+    #[test]
+    fn a_normal_written_square_to_a_direction_stops_being_square_once_a_plane_stores_it() {
+        let along = [1.0, 3.0, 5.0];
+        let square_to_it = [[3.0, -1.0, 0.0], [0.0, 5.0, -3.0], [5.0, 0.0, -1.0]];
+
+        for written in square_to_it {
+            assert_eq!(
+                Exact::dot_of(written, along).map(|dot| dot.sign()),
+                Some(Decision::Zero),
+                "{written:?} is square to {along:?} as the caller wrote it"
+            );
+
+            let stored = Plane::from_point_and_normal(Point::origin(), Vector::from(written))
+                .expect("a normal with a length")
+                .normal()
+                .components();
+            let in_f64 = stored[0] * along[0] + stored[1] * along[1] + stored[2] * along[2];
+            println!("{written:?} stored as {stored:?}, dot with {along:?} is {in_f64:e} in f64");
+            assert_ne!(
+                Exact::dot_of(stored, along).map(|dot| dot.sign()),
+                Some(Decision::Zero),
+                "and it is not square to it any more once stored as {stored:?}"
+            );
+            assert!(
+                in_f64.abs() <= f64::EPSILON,
+                "the miss is one rounding of the direction, which is why it hides: {in_f64:e}"
+            );
+        }
+    }
+
+    /// **Why §31.4's family of fixes is not one**, demonstrated rather than
+    /// argued.
+    ///
+    /// §31.4 works out that the reduction above is what loses the squareness,
+    /// and offers reducing by a **power of two** instead, which rounds nothing.
+    /// The first half here confirms that half of it: a normal written square to
+    /// a direction is still square to it after a power-of-two reduction, where
+    /// the test above says it is not after the reduction the code runs.
+    ///
+    /// **The second half is what §31.4 did not know.** Two multiples of one
+    /// wall reduced by two different powers of two differ by a factor that is
+    /// not a power of two — `(0, −1, 0)` stays where it is and `(0, −3, 0)`
+    /// becomes `(0, −1.5, 0)` — and the moment the model is turned, the two stop
+    /// being exactly proportional at all, because each component of each is
+    /// rounded on its own. [`Plane::agreement_with`] is an exact predicate over
+    /// the stored numbers, so it answers `Different`, correctly, about two faces
+    /// that are one wall.
+    ///
+    /// A canonical *name* beside the stored numbers does not reach this. Every
+    /// "is this the same plane" question in the kernel —
+    /// [`Plane::agreement_with`], `planes_are_parallel`, `relation_of_two_lines`
+    /// — is an exact predicate over the coefficients, and the two coefficient
+    /// vectors here are genuinely not proportional. Measured with the whole fix
+    /// in place: a certified fuse of a turned pair went from refusing 20.71% of
+    /// the corpus to refusing 77%, because two walls that are one wall each cut
+    /// the other and three planes that share a line have nowhere to meet.
+    ///
+    /// So a `Plane` can be canonical under scaling or it can keep a square
+    /// normal square, and **not both**: canonical means dividing by something
+    /// the direction alone decides, exact means dividing by a power of two, and
+    /// two multiples of one vector have the same power of two only when the
+    /// multiple is itself one. §32.
+    #[test]
+    fn a_power_of_two_reduction_keeps_a_normal_square_and_stops_one_wall_being_one_plane() {
+        let reduced = |v: Vector| {
+            let [x, y, z] = v.components();
+            let largest = x.abs().max(y.abs()).max(z.abs());
+            let scale = 2f64.powi(largest.log2().floor() as i32);
+            let reduced = Vector::new(x / scale, y / scale, z / scale);
+            assert_eq!(reduced * scale, v, "a power of two divides exactly");
+            reduced
+        };
+
+        let along = [1.0, 3.0, 5.0];
+        for written in [[3.0, -1.0, 0.0], [0.0, 5.0, -3.0], [5.0, 0.0, -1.0]] {
+            assert_eq!(
+                Exact::dot_of(reduced(Vector::from(written)).components(), along)
+                    .map(|dot| dot.sign()),
+                Some(Decision::Zero),
+                "{written:?} is still square to {along:?} after a power-of-two reduction"
+            );
+        }
+
+        let turn = Isometry::rotation(
+            &Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction"),
+            TAU * 7.0 / 64.0,
+        )
+        .expect("a finite rotation");
+        let wall_named_off_an_edge = |length: f64| {
+            turn.apply_to_vector(reduced(Vector::new(0.0, -length, 0.0)))
+                .components()
+        };
+        let (one, other) = (wall_named_off_an_edge(1.0), wall_named_off_an_edge(3.0));
+
+        let a_minor_is_not_zero = (0..3).any(|axis| {
+            let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+            orient2d(
+                [0.0, 0.0],
+                [one[next], one[after]],
+                [other[next], other[after]],
+            ) != Decision::Zero
+        });
+        assert!(
+            a_minor_is_not_zero,
+            "one wall named off two edge lengths and turned: {one:?} against {other:?}, which              this arithmetic would have to call one plane and cannot"
         );
     }
 
@@ -907,8 +1076,10 @@ mod tests {
 
     #[test]
     fn a_point_clear_of_the_plane_is_settled_by_the_cheapest_level() {
-        let (decision, level) = decide(&SideOfPlane {
-            plane: plane_at_height_two(),
+        let (decision, level) = decide(&SideOfAFlatSurface {
+            named: SIDE_OF_PLANE,
+            normal: plane_at_height_two().normal().components(),
+            offset: plane_at_height_two().offset(),
             point: PredicatePoint::from([0.0, 0.0, 100.0]),
         });
         assert_eq!(decision, Decision::Pos);

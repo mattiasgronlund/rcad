@@ -58,6 +58,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod along_a_crossing;
 mod bspline_curve;
 mod bspline_surface;
 mod conic;
@@ -67,11 +68,13 @@ mod deflection;
 mod enclosure;
 mod error;
 mod exact;
+mod half_space;
 mod intersect;
 mod isometry;
 mod knot_vector;
 mod march;
 mod meet;
+mod moved_corner;
 mod orientation;
 mod plane;
 mod point;
@@ -79,14 +82,17 @@ mod scale;
 mod segment;
 mod sphere;
 mod surface;
+mod three_surfaces;
 mod walk;
 
+pub use crate::along_a_crossing::{ROUND_A_CROSSING, which_comes_first_round_a_crossing};
 pub use crate::bspline_curve::{BSplineCurve, REFINEMENT_ROUNDOFF};
 pub use crate::bspline_surface::BSplineSurface;
 pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
 pub use crate::de_boor::EVALUATION_ROUNDOFF;
 pub use crate::deflection::Deflection;
 pub use crate::error::{Error, Result};
+pub use crate::half_space::{HalfSpace, Picker, SIDE_OF_A_HALF_SPACE};
 pub use crate::intersect::{
     WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
     WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS, WHERE_TWO_PLANES_CROSS, intersect,
@@ -94,6 +100,7 @@ pub use crate::intersect::{
 pub use crate::isometry::Isometry;
 pub use crate::knot_vector::{KnotVector, MAX_DEGREE};
 pub use crate::meet::{EdgeRun, NamedRun, SurfaceMeet};
+pub use crate::moved_corner::{CORNER_AFTER_MOVING_ROUNDOFF, where_a_corner_lands_after_moving};
 pub use crate::orientation::Orientation;
 pub use crate::plane::{Plane, PlaneAgreement, SIDE_OF_PLANE};
 pub use crate::point::{Axis, Point, Vector};
@@ -101,6 +108,8 @@ pub use crate::scale::{DYNAMIC_RANGE_CHECK, DynamicRange, Scale, Unit};
 pub use crate::segment::Segment;
 pub use crate::sphere::{SIDE_OF_SPHERE, Sphere};
 pub use crate::surface::Surface;
+pub use crate::three_surfaces::{MeetOfThree, WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces};
 pub use crate::walk::{
     MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing, walk,
+    where_a_closed_crossing_starts,
 };

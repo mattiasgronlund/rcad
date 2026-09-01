@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Cause, Policy, ProvenanceLog};
-use rcad_topo::{Error, Mesh, Model, ProfileBuilder, SolidKey};
+use rcad_topo::{Error, Mesh, Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 5.0;
@@ -734,6 +734,64 @@ fn every_triangle_names_the_face_it_came_from() {
     assert_eq!(covered, has, "every face is stood in for and no other");
 }
 
+/// A bar too thin for its own squares is refused rather than asserted against.
+///
+/// `Model::add_round_bar` accepts a radius of `1e-200` — it is a positive finite
+/// number and the builder makes the bar. Meshing it **panicked** until §39, on
+/// ordinary public input with no file anywhere near it. (`Model::validate`
+/// refuses such a bar `Undecidable` on *side of cylinder*, which is honest and
+/// is not what this is about: `SolidView::mesh` is public in its own right and
+/// nothing makes a caller sweep first.)
+/// `Conic::angle_of` divides by `and.length_squared()`, which is `1e-400` and
+/// underflows to zero, so the angle the walk turns over came back `0.0/0.0`. The
+/// guard meant to catch that could not fire: `f64::max` hands back the other
+/// operand when one is `NaN`, and the `.max(1.0)` beside it turned the `NaN`
+/// into a one — so a whole cap circle was walked in a single step, with no
+/// points at all between its ends, and the flat cap that reads those points back
+/// fanned into one corner.
+///
+/// It is `rcad-geom`'s `CannotWorkOutHowBigACrossingIs` now, whose own doc
+/// carries the classification: a **gap**, because the same bar written larger is
+/// walked without complaint, and the two controls here are that bar.
+#[test]
+fn a_bar_too_thin_for_its_own_squares_is_refused_rather_than_asserted_against() {
+    let mut model = a_model();
+    let deflection = Deflection::of(1.0).expect("a length");
+
+    for radius in [1.0, 1e-100] {
+        let ordinary = model
+            .add_round_bar(radius, 10.0, &Isometry::identity())
+            .expect("a positive radius");
+        let outcome =
+            model
+                .solid(ordinary)
+                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
+        assert!(
+            !matches!(outcome, Err(Error::Geometry(_))),
+            "a bar of radius {radius} is walked, and got {outcome:?}"
+        );
+    }
+
+    for radius in [1e-200, 1e-300] {
+        let thin = model
+            .add_round_bar(radius, 10.0, &Isometry::identity())
+            .expect("a positive finite radius is a bar this builder makes");
+        let refusal =
+            model
+                .solid(thin)
+                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
+        assert!(
+            matches!(
+                refusal,
+                Err(Error::Geometry(
+                    rcad_geom::Error::CannotWorkOutHowBigACrossingIs
+                ))
+            ),
+            "a bar of radius {radius} refuses by name, and got {refusal:?}"
+        );
+    }
+}
+
 /// §19 again, and the part of it that is a refusal rather than an answer.
 ///
 /// A mesh point is put on the surface by an evaluator that rounds against how
@@ -922,4 +980,272 @@ fn every_size_of_bar_and_ball_at_every_coarseness_meshes_into_a_closed_surface()
         checked > 150,
         "only {checked} of the grid meshed at all, which is not a sweep"
     );
+}
+
+/// §31.7 criterion 13, for the shape criterion 11 is the headline of: a fused
+/// curved solid meshes and passes §23.4's oracle in full.
+///
+/// Its answer has the first face in this kernel that is a **ring** — a tube of
+/// the bar's wall between the block's two planes, bounded by two curves that
+/// each go right round the cylinder and by nothing else. It has no seam and
+/// cannot be given one: a seam wants two corners at a single longitude, and the
+/// two curves bounding a tube start wherever the pair that cut each of them
+/// starts. So the seam is put in by the mesher, four times, as a cut in the
+/// surface's own two coordinates rather than as topology anybody has to hold.
+#[test]
+fn a_block_with_a_round_hole_meshes_into_a_closed_surface() {
+    let hole = core::f64::consts::PI * 8.0;
+    for (rule, what, should_be) in [
+        (
+            Rule::Difference,
+            "a block with a hole through it",
+            512.0 - hole,
+        ),
+        (
+            Rule::Union,
+            "a block with a bar sticking out of both sides",
+            512.0 + core::f64::consts::PI * 4.0,
+        ),
+        (
+            Rule::Intersection,
+            "the bit of the bar inside the block",
+            hole,
+        ),
+    ] {
+        let mut model = a_model();
+        let block = model
+            .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a block eight across");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                12.0,
+                &Isometry::translation(Vector::new(4.0, 4.0, -2.0)).expect("a shift"),
+            )
+            .expect("a bar through the middle of it");
+
+        let mut log = ProvenanceLog::new();
+        let fused = model
+            .fuse(&[block], &[bar], rule, &Policy::certified(), &mut log)
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        assert!(
+            log.records().is_empty(),
+            "{what}: a lattice-aligned curved pair needs nothing approximated, got {:?}",
+            log.records()
+        );
+
+        let solids = fused.solids();
+        assert_eq!(solids.len(), 1, "{what} is one solid");
+        for &solid in solids {
+            let mesh = meshed(&model, solid, 0.05);
+            the_mesh_closes_up(&model, solid, &mesh, 0.05);
+
+            // The volume is the strongest thing there is to say about a
+            // curved answer, and it is what says the tube is not inside out:
+            // a wall wound the wrong way takes its own volume off twice.
+            let measured = model
+                .solid(solid)
+                .measure(
+                    Deflection::of(0.01).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} measures: {why}"));
+            let out_by = (measured.volume() - should_be).abs();
+            assert!(
+                out_by < 0.02 * should_be,
+                "{what}: {} against the {should_be} a block of eight and a bar of radius one \
+                 come to, which is {out_by} out",
+                measured.volume()
+            );
+        }
+    }
+}
+
+/// §31.7 criterion 13's other half: a **ball cut by a plane**, which is about
+/// the simplest curved boolean there is.
+///
+/// The answer is a spherical cap and the flat disk that closes it. The cap is
+/// bounded by one circle of latitude and by nothing else, so its patch in the
+/// sphere's own two coordinates is a rectangle whose top edge is the pole and
+/// whose two sides are one meridian — and the model says neither, because a fuse
+/// has no way to invent a seam or a pole step.
+///
+/// The volume has a closed form and it is the strongest thing to check: a cap of
+/// height `h` on a ball of radius `R` holds `πh²(3R − h)/3`, and a cap wound the
+/// wrong way would take its own volume off twice.
+#[test]
+fn a_ball_cut_by_a_plane_meshes_into_a_closed_surface() {
+    const RADIUS: f64 = 4.0;
+    // **Both poles, and that is the point of the table rather than tidiness.**
+    // Which pole a cap reaches is read off which way its one loop runs, and an
+    // arm that read it backwards would still mesh a *north* cap into a closed
+    // surface of the right volume — it would simply never be asked. The south
+    // rows are where getting it wrong does not cancel.
+    for (cut_at, keep_above, what) in [
+        (1.0, true, "the cap above a cut through the top"),
+        (-2.0, true, "the cap above a cut through the bottom"),
+        (1.0, false, "the cap below a cut through the top"),
+        (-2.0, false, "the cap below a cut through the bottom"),
+    ] {
+        let mut model = a_model();
+        let ball = model
+            .add_ball(RADIUS, &Isometry::identity())
+            .expect("a ball of radius four");
+        // A slab on one side of the cut plane, wide enough to hold the ball.
+        let block = model
+            .add_cube(20.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a block round it");
+        let below = if keep_above { cut_at } else { cut_at - 20.0 };
+        model.place_solid(
+            block,
+            &Isometry::translation(Vector::new(-10.0, -10.0, below)).expect("a shift"),
+        );
+
+        let mut log = ProvenanceLog::new();
+        let fused = model
+            .fuse(
+                &[ball],
+                &[block],
+                Rule::Intersection,
+                &Policy::certified(),
+                &mut log,
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        assert!(
+            log.records().is_empty(),
+            "{what}: nothing here had to be approximated, got {:?}",
+            log.records()
+        );
+
+        let solids = fused.solids();
+        assert_eq!(solids.len(), 1, "{what} is one solid");
+        let solid = solids[0];
+        let mesh = meshed(&model, solid, 0.02);
+        the_mesh_closes_up(&model, solid, &mesh, 0.02);
+
+        let height = if keep_above {
+            RADIUS - cut_at
+        } else {
+            RADIUS + cut_at
+        };
+        let should_be = core::f64::consts::PI * height * height * (3.0 * RADIUS - height) / 3.0;
+        let measured = model
+            .solid(solid)
+            .measure(
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what} measures: {why}"));
+        let out_by = (measured.volume() - should_be).abs();
+        assert!(
+            out_by < 0.01 * should_be,
+            "{what}: {} against the {should_be} a cap of height {height} on a ball of {RADIUS} \
+             comes to, which is {out_by} out",
+            measured.volume()
+        );
+    }
+}
+
+/// §31.7 criterion 13 for the shape §36.19 left open: a **bar notched by a
+/// block**, whose answer has faces trimmed by *part* of a curved crossing.
+///
+/// Two corners on a cap circle leave two arcs with the same two ends, and until
+/// this lane naming which one was `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`.
+/// The volume is what says the right one was named: taking the other one round
+/// the cylinder would leave a wall that bounds the wrong side of the notch.
+///
+/// **The second row is where getting it wrong would not cancel**, and it is the
+/// row this test exists for. Every arc a block leaves on a bar of this size is
+/// shorter than half a turn, so a picker that always took the shorter of the two
+/// would pass the first row and never be asked. The wedge leaves one of **228
+/// degrees**: joined out of three stretches, longer than its own sibling, and
+/// the only arc in this file where "the shorter one" is the wrong answer.
+#[test]
+fn a_bar_notched_by_a_block_meshes_into_a_closed_surface() {
+    const RADIUS: f64 = 2.0;
+    // Where the wedge's two faces cut the bar's wall, which is `(−1 + √7)/2`.
+    let cut_at = (7.0_f64.sqrt() - 1.0) / 2.0;
+    let wedge_takes = 2.0
+        * ((cut_at + 1.0) * (cut_at + 1.0) + 4.0 * (cut_at / 2.0).acos()
+            - cut_at * (4.0 - cut_at * cut_at).sqrt());
+    for (what, wedge, taken) in [
+        (
+            "a bar notched by a block",
+            false,
+            // A slab two thick over the part of the disk with `x ≥ 1` and
+            // `|y| ≤ 1`, which is `∫√(4 − y²) dy − 2` across that strip.
+            2.0 * (3.0_f64.sqrt() + 2.0 * core::f64::consts::PI / 3.0 - 2.0),
+        ),
+        ("a bar notched by a wedge", true, wedge_takes),
+    ] {
+        let mut model = a_model();
+        let bar = model
+            .add_round_bar(RADIUS, 8.0, &Isometry::identity())
+            .expect("a bar of radius two");
+        let cutter = if wedge {
+            let outline = ProfileBuilder::new(vec![[-1.0, 0.0], [5.0, 6.0], [5.0, -6.0]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a wedge with its point on the bar's axis side");
+            model
+                .add_extrusion(
+                    &outline,
+                    2.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, 3.0)).expect("a shift"),
+                )
+                .expect("a wedge two thick")
+        } else {
+            let block = model
+                .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a small block");
+            model.place_solid(
+                block,
+                &Isometry::translation(Vector::new(1.0, -1.0, 3.0)).expect("a shift"),
+            );
+            block
+        };
+
+        let mut log = ProvenanceLog::new();
+        let fused = model
+            .fuse(
+                &[bar],
+                &[cutter],
+                Rule::Difference,
+                &Policy::certified(),
+                &mut log,
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        assert!(
+            log.records().is_empty(),
+            "{what}: a lattice-aligned pair needs nothing approximated, got {:?}",
+            log.records()
+        );
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what} validates: {why}"));
+
+        let solids = fused.solids();
+        assert_eq!(solids.len(), 1, "{what} is one solid");
+        let solid = solids[0];
+        let mesh = meshed(&model, solid, 0.02);
+        the_mesh_closes_up(&model, solid, &mesh, 0.02);
+
+        let should_be = core::f64::consts::PI * RADIUS * RADIUS * 8.0 - taken;
+        let measured = model
+            .solid(solid)
+            .measure(
+                Deflection::of(0.001).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what} measures: {why}"));
+        let out_by = (measured.volume() - should_be).abs();
+        assert!(
+            out_by < 0.001 * should_be,
+            "{what}: {} against the {should_be} the bar less the notch comes to, which is \
+             {out_by} out",
+            measured.volume()
+        );
+    }
 }

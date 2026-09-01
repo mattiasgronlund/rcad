@@ -57,6 +57,14 @@ use crossings::{
 /// `rcad-topo` without costing anything.
 const MEASURED_CASES: u32 = 2048;
 
+/// How many times over [`MEASURED_CASES`] the knife-edge demonstration draws.
+///
+/// Twenty, and the number follows a rate rather than a preference:
+/// `every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn`
+/// is about a refusal that used to be 4.64% of its family and is now 0.03% of
+/// it, so the draws had to go up by about the same factor to keep reaching one.
+const DRAWS_A_KNIFE_EDGE_NOW_TAKES: u32 = 20;
+
 /// The environment variable that multiplies [`MEASURED_CASES`] for a soak.
 ///
 /// ```text
@@ -108,53 +116,71 @@ const A_CROSSING_SOMEWHERE_ELSE_MAY_REFUSE: f64 = 0.25;
 /// The *other* refusal, counted separately because it gives up on a different
 /// question: not "what is the sign of this discriminant" but "which of these two
 /// lines is this". A plane exactly along a pipe's axis and inside it cuts two
-/// lines, and telling them apart needs a unit normal exactly across both the
-/// axis and the plane's normal, which `f64` does not always have. A **gap**, and
-/// its fix is the fourteenth-degree separation test §27.1 hands to the second
-/// stage.
+/// lines, and telling them apart needs a picking normal exactly square to the
+/// axis. A line is endless, so a normal that leans into its direction by even
+/// one rounding reads a different number a long way along it and the half-space
+/// holds nothing — the squareness has to be arranged and cannot be tested
+/// (§29.8).
 ///
-/// Two percent. Measured on the shipped corpus: 0.44% turned, 0.24% leaning,
-/// none at all on the lattice, where that direction is a coordinate axis.
-const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.02;
+/// **Arranging it is what M4 did**, and the arm that could not arrange it now
+/// fires nowhere in this file. A picker is a `HalfSpace` and stores whatever
+/// normal it is handed, and a caller can always hand over one exactly square to
+/// a direction it holds — that direction crossed with a coordinate axis. §33.
+///
+/// Half a percent. Measured on the shipped corpus: **0.10% turned**, down from
+/// 0.44%; **none at all leaning**, down from 0.20%; and none on the lattice,
+/// where the direction across a pipe and a plane is a coordinate axis. What is
+/// left is the *bounded* half of the same question — where the two lines sit
+/// relative to the flat surface that separates them — on a plane so close to a
+/// pipe's wall that the two lines nearly meet.
+const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.005;
 
 /// How much of a quartic family may refuse for want of a half-space.
 ///
-/// **Fifteen percent, and it is much the largest refusal rate in this file.**
-/// Two loops of a leaning-pipe crossing are told apart by a plane through the
-/// fat pipe's axis, and a loop runs a long way *along* that axis — so unlike the
-/// bounded pieces a ball leaves, the picking normal here has to be exactly
-/// square to the axis or it reads a different number at either end. `Plane`
-/// scales every normal to length one and that division rounds.
+/// **Four percent, down from fifteen, and still the largest refusal rate in this
+/// file.** Two loops of a leaning-pipe crossing are told apart by a half-space
+/// through the fat pipe's axis, and a loop runs a long way *along* that axis —
+/// so unlike the bounded pieces a ball leaves, the picking normal here has to be
+/// exactly square to the axis or it reads a different number at either end.
 ///
-/// A **gap**, and this crate has no construction that reaches it: the set of
-/// `f64` unit vectors exactly square to a given `f64` direction is not something
-/// `Plane::from_point_and_normal` can be steered to. The fix is §28.2's first
-/// family — a plane that stores its normal unscaled — which is a change to a
-/// type every predicate in the kernel is certified about, and so M4's.
+/// That much is now arranged and never refused. What is left is the price of
+/// arranging it: **the three normals `f64` can hold exactly square to a
+/// direction are not the direction that separates the two loops**, and the best
+/// of them can be up to 45° off it. Writing `n̂ = α·â + β·b̂`, a loop is picked
+/// when `α·√(ρ₂² − (δ+ρ₁)²)` beats `|β|·(δ + ρ₁)`, and a fat pipe barely wider
+/// than the thin one inside it does not clear that.
 ///
-/// Measured on the shipped corpus: 0% on the lattice, 10.9% turned.
-const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.15;
+/// A **gap** and not a limit: the two loops are there, they are tellable apart,
+/// and what runs out is `f64`'s supply of vectors exactly square to a given
+/// direction. §33.
+///
+/// Measured on the shipped corpus: 0% on the lattice, **2.24% turned**, down
+/// from 11.86%.
+const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.04;
 
 /// How much of the quartic pairs' turned family may refuse for want of a sign.
 ///
-/// **Not zero, and §29 says why.** The four planar pairs are polynomials in
-/// exact `f64` all the way down, so level 3 decides every one of them; two pipes
-/// leaning against each other are not. Deciding which of the four shapes that
-/// crossing takes compares `ρ₁ ± ρ₂` against `δ`, and those are `rᵢ/√Wᵢ` and
-/// `|T|/√K` — three square roots in three metrics. The enclosure settles it
-/// wherever the comparison is not on a knife edge, and the exact level backs it
-/// up only where the two stored directions have the same squared length, which
-/// a general rotation takes away.
+/// **Two tenths of a percent, down from eight, and §32 is what moved it.**
+/// Deciding which of the four shapes two leaning pipes cross in compares
+/// `ρ₁ ± ρ₂` against `δ`, and those are `rᵢ/√Wᵢ` and `|T|/√K` — three square
+/// roots in three metrics. Clearing the roots takes squaring an expansion five
+/// hundred binary orders wide. That does not fit where it stands and does fit
+/// somewhere else, so the comparison is slid up the range before it is squared
+/// and slid nowhere back: a sign is unchanged by multiplying by a positive power
+/// of two, so nothing about the answer is approximate.
 ///
-/// **Eight percent, and every one of them is a knife edge a rotation made.**
-/// Measured on the shipped corpus: 0% on the lattice and 4.64% turned. The
-/// generator draws radii up to five and places up to six apart in whole numbers,
-/// so a lattice pipe pair is *exactly* tangent surprisingly often — five apart
-/// with radii of two and three is one of them — and §28.6 already recorded that
-/// turning such a pair leaves it genuinely no longer tangent, by a few last bits.
+/// Measured on the shipped corpus: 0% on the lattice, **0.00% turned**, and
+/// 0.03% over twenty times as many draws. What is left is the expansion whose
+/// own spread is past the window a slide has to land in, which is a spread no
+/// scale narrows — and every one of those is still a knife edge a rotation made,
+/// which
 /// `every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn`
-/// is the demonstration that this is what the number is made of.
-const A_TURNED_QUARTIC_CROSSING_MAY_REFUSE: f64 = 0.08;
+/// demonstrates. The generator draws radii up to five and places up to six apart
+/// in whole numbers, so a lattice pipe pair is *exactly* tangent surprisingly
+/// often — five apart with radii of two and three is one of them — and §28.6
+/// already recorded that turning such a pair leaves it genuinely no longer
+/// tangent, by a few last bits.
+const A_TURNED_QUARTIC_CROSSING_MAY_REFUSE: f64 = 0.002;
 
 /// How much of the knife-edge family may refuse for want of a sign.
 ///
@@ -233,6 +259,17 @@ fn a_certified_naming_of_a_quartic_lattice_crossing_never_refuses() {
         "on the lattice both stored directions have the same squared length, so the exact \
          level runs and a refusal is a bug in our filters"
     );
+    // The half of the control that used to go unasserted, and the half that
+    // caught this lane's own regression: on the lattice the direction that
+    // separates two loops is already exactly square to the axis they run along,
+    // so a picker built any other way is a step backwards rather than a fact
+    // about geometry.
+    assert_eq!(
+        tally.no_half_space.get(),
+        0,
+        "on the lattice the direction separating two loops is exactly square to the axis, \
+         so writing the half-space down rounds nothing"
+    );
     tally.enough_of_them_crossed();
 }
 
@@ -261,9 +298,17 @@ fn how_often_a_certified_naming_of_a_turned_quartic_crossing_refuses() {
 /// of the two configurations whose crossing runs through itself, which is a
 /// knife edge as much as a tangency is. That is what tells this rate apart from
 /// a timid filter (§14.7).
+///
+/// **It draws twenty times what the rows above do**, because the refusal it is
+/// about is now 0.03% of the family rather than 4.64% and 2048 draws reach none
+/// of it. A property with nothing to measure passes for the wrong reason, which
+/// is the failure §14.7 is about, so the draws follow the rate down.
 #[test]
 fn every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn() {
-    let mut runner = TestRunner::new_with_rng(configured(measured_cases()), fresh_seeded_soak());
+    let mut runner = TestRunner::new_with_rng(
+        configured(measured_cases() * DRAWS_A_KNIFE_EDGE_NOW_TAKES),
+        fresh_seeded_soak(),
+    );
     let refused = Cell::new(0usize);
     let steady = Cell::new(0usize);
 

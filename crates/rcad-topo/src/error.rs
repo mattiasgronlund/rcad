@@ -144,18 +144,6 @@ pub enum Error {
         count: usize,
     },
 
-    /// The fuse was handed a solid with a curved face.
-    ///
-    /// The fuse cuts faces along the lines where their planes cross, and a
-    /// cylinder has no plane to cross. Extending it to curved crossings is M4
-    /// (decisions.md §1.7); until then this is a refusal and not a failure —
-    /// the input is a sound solid and the operation is the thing that is not
-    /// ready for it.
-    ///
-    /// Deliberately not [`Error::Undecidable`]. Nothing was in doubt here.
-    #[error("the fuse needs every face to be flat, and one of these solids has a curved one")]
-    FuseNeedsFlatFaces,
-
     /// One face of a solid could not be cut into triangles.
     ///
     /// Carries what the triangulator said. Most of those are about the
@@ -236,19 +224,114 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// A closed edge of the answer would start at a **pole** of the surface it is
+    /// drawn on, where nothing says which way it runs.
+    ///
+    /// A closed edge has one corner, so its two ends say nothing about its
+    /// direction and only the surface's own parametrisation does: the way its
+    /// longitude takes the points along it, which is
+    /// `a_closed_crossing_is_walked_the_way_it_is_stored` and is what the mesher
+    /// reads back. At a pole every longitude runs through the one point, so the
+    /// vector that rule dots against is the zero vector exactly, and both faces
+    /// along the edge come back walking it the same way, which is not a solid.
+    /// This is about that exact case and says nothing about a corner a rounding
+    /// *away* from a pole, where the vector is tiny and the sign of a dot with it
+    /// is decided in `f64` the way it always was.
+    ///
+    /// A ball cut by a plane containing its **polar axis** reaches it, and only
+    /// that: the great circle such a plane cuts runs through both poles, so the
+    /// one corner the arrangement puts on that closed crossing is one of them.
+    /// A plane through the ball's centre that does *not* contain the polar axis
+    /// is answered — measured, at the equator and at a plane leaning 0.4 of a
+    /// radian through the middle.
+    ///
+    /// **A gap and not a limit** (§16.10), and the direction rule is not what
+    /// makes it one. Handed a direction the rule cannot derive, the same fuse
+    /// gets two steps further and refuses
+    /// [`Error::ACurvedFaceGoesRightRoundWithNoSeam`]: the piece is half a ball
+    /// bounded by one curve right round its skin, with the poles on that curve
+    /// rather than inside the piece, and no face of this kernel holds that shape.
+    /// §38.3 records the run that measured it. Closing it takes the other half of
+    /// what §38.1 built — a *cut* closed face written out with a seam and poles
+    /// of its own.
+    #[error(
+        "a closed edge of the answer would start at a pole, where nothing says which way it runs"
+    )]
+    AClosedEdgeOfTheAnswerWouldStartAtAPole {
+        /// Which face of the input the piece was cut from.
+        face: crate::FaceKey,
+    },
+
+    /// A curved face is bounded by one curve that goes right round its surface —
+    /// **or by nothing at all** — and the surface does not pinch to a point for
+    /// the face to close on.
+    ///
+    /// The second half is §38.1's. A face with no boundary once its seam is left
+    /// out is the whole of its surface, and the fuse writes one back out by
+    /// cutting it open along a seam of its own, which has to end somewhere: a
+    /// ball pinches at two poles and is answered, while a plane and a pipe run on
+    /// for ever, so a face on one of them with nothing trimming it is unbounded
+    /// and there is no answer to give.
+    ///
+    /// Such a face has no seam and no pole in the model — a
+    /// [`WireStep::Pole`](crate::model::WireStep) and a seam edge are what say
+    /// those, and a fuse can invent neither, because a seam wants two corners at
+    /// a single longitude and this face has one corner in all. Where the surface
+    /// **does** pinch, the mesher cuts the face up to that pole four times and
+    /// there is nothing to refuse; a cap a plane takes off a ball is that, and it
+    /// is what §36.18 closed.
+    ///
+    /// What is left is a face bounded that way on a surface with no pole, which
+    /// is half an endless tube round a cylinder — **not a face at all**, so this
+    /// is a model whose topology and geometry disagree rather than a gap in the
+    /// arithmetic. `Model` is `Deserialize` and `validate` is the untrusted
+    /// import boundary (§16.11), so it is a refusal and not an assert.
+    #[error("a curved face is bounded by one curve right round it and has no seam to open at")]
+    ACurvedFaceGoesRightRoundWithNoSeam {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// A curved face could not be cut into pieces narrow enough to mesh.
+    ///
+    /// Every cut that happens at all makes both pieces narrower, and four pieces
+    /// is the answer for every face this kernel builds — the fuse's rings
+    /// included, which are cut across into exactly four. Reaching the cap means
+    /// a piece is being cut without getting any smaller.
+    ///
+    /// **This was an `assert!` until M4**, on the grounds that no builder makes
+    /// such a face. `validate` walks it and [`Model`](crate::Model) is
+    /// `Deserialize`, so what reaches it is a caller's bytes — and a panic is
+    /// the wrong answer to those (decisions.md §4.1, §16.11). A fuse invents
+    /// topology that was in no input, which puts its answers on the same side of
+    /// that line.
+    #[error("a curved face cannot be cut into pieces narrow enough to mesh")]
+    ACurvedFaceCannotBeCutSmallEnoughToMesh {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
     /// A curved face with a hole in it goes too far round its surface to be cut
     /// into triangles in one piece.
     ///
     /// A face that goes more than a quarter turn round is cut into pieces first,
     /// or every triangle in it would be stretched from one side of the seam to
-    /// the other and have no area at all. Cutting a face that has a hole would
-    /// have to say which piece the hole ends up in, and nothing does.
+    /// the other and have no area at all.
+    ///
+    /// **A face with a hole is cut only where it is a ring** — two curves that
+    /// each go right round and nothing else — because then there is somewhere to
+    /// cut *across* to and the answer is four patches with one loop each. That
+    /// is the one the fuse makes: a tube of a bar's wall between two planes. A
+    /// hole that does not go right round has nothing to cut across to, and
+    /// nothing says which piece it would end up in.
     ///
     /// **A refusal about the solid and not about the request**, and no deflection
-    /// avoids it. Nothing this kernel *builds* is such a face — the two builders
-    /// that make a curved one give it a single wire — but [`Model`](crate::Model)
-    /// is `Deserialize`, so one can arrive from a file, and a panic is the wrong
-    /// answer to a caller's bytes (decisions.md §4.1).
+    /// avoids it. §31.10 item 5 filed this doc as a claim about today's builders
+    /// that M4 would falsify, and it did: the sentence that used to be here —
+    /// *"nothing this kernel builds is such a face"* — stopped being true when
+    /// `Error::FuseNeedsFlatFaces` came off. What is left arrives from a file,
+    /// because [`Model`](crate::Model) is `Deserialize`, and a panic is the
+    /// wrong answer to a caller's bytes (decisions.md §4.1).
     #[error("a curved face with a hole in it goes too far round its surface to be meshed")]
     CurvedFaceWithAHoleGoesTooFarRound {
         /// Which face.
@@ -285,6 +368,181 @@ pub enum Error {
         /// How many points one mesh will hold.
         most: usize,
     },
+
+    /// A face was asked about against a solid that does not use it.
+    ///
+    /// What trims a face is the surfaces of the faces around it, and those are
+    /// only reachable — already moved into place — through the solid the face
+    /// sits in (§3.2). A key from somewhere else names no such thing here.
+    #[error("this solid does not use that face")]
+    NoSuchFaceInThisSolid {
+        /// The key that named nothing.
+        face: crate::FaceKey,
+    },
+
+    /// One edge of a face runs along a *piece* of a curve rather than the whole
+    /// of one, and whether the face holds a point cannot be read off a sign.
+    ///
+    /// Which piece of a curve a point is on is a question about where that curve
+    /// runs, and answering it means meeting three surfaces at once and then
+    /// ordering points along the answer — §31.2's rows 4 and 8, and neither of
+    /// them reaches a pair of quadrics (§31.2's limit under row 4).
+    ///
+    /// **A gap and not a limit** (§16.10): the point is on the piece or it is
+    /// not, and an algebraic solver says which. `docs/decisions.md` §35 names
+    /// the consumer.
+    #[error("an edge of this face runs along part of a curve rather than the whole of one")]
+    AFaceTrimmedByACurveThisCannotFollow {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// A face runs along some but not all of the curves its surface and a
+    /// neighbour's cross in.
+    ///
+    /// One of the two disks a pipe leaves in a ball's skin is the case. Its one
+    /// boundary loop is a whole closed curve, but the pair of surfaces crosses in
+    /// *two*, so "the piece of the ball inside the pipe" names both disks and not
+    /// this one. Reading the face off a sign would hold the other disk's points
+    /// as well.
+    ///
+    /// **A gap and not a limit**, and what closes it is a way to tell one loop
+    /// from another — which is what a
+    /// [`Picker`](rcad_geom::Picker) already does for an edge (§33.1).
+    #[error("this face runs along some but not all of where its surfaces cross")]
+    AFaceMissesPartOfWhereItsSurfacesCross {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Nothing in the model says which side of a surface trimming it a face lies
+    /// on.
+    ///
+    /// A corner of the face that is off that surface says; a face whose every
+    /// corner sits on it has none, and a face with corners off it on *both*
+    /// sides is not one of the two pieces at all.
+    ///
+    /// The other place the answer could come from is which way round the wire
+    /// runs, and a closed edge has no direction rule to read it from — §30.8
+    /// item 10, which §31.3 settles on paper and hands to the lane that builds
+    /// the curved arrangement.
+    #[error("nothing says which side of the surfaces trimming it this face lies on")]
+    NothingSaysWhichSideOfItsTrimmingAFaceLiesOn {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// A face's boundary edge runs along a curve where its own surface and the
+    /// one across that edge do not meet at all.
+    ///
+    /// Two faces that share an edge cross along it by definition, so this is a
+    /// model whose topology and geometry disagree — a plane and a ball that miss
+    /// each other with an edge drawn between them.
+    #[error("a face has an edge along a curve its two surfaces do not have")]
+    AFaceMeetsItsNeighbourNowhere {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// A face's boundary edge runs between two faces that are on **one**
+    /// surface.
+    ///
+    /// Two faces on one surface with an edge between them carry no curve for
+    /// that edge to run along. The joiner in the fuse's baking step takes such a
+    /// pair apart before the arrangement sees it, and a pair it does not reach —
+    /// two faces on one *cylinder*, which nothing joins yet — is refused rather
+    /// than arranged wrongly.
+    #[error("a face and the face across one of its edges are on the same surface")]
+    AFaceMeetsItsNeighbourOnItsOwnSurface {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Two surfaces cross in more than one curve and nothing says which of them
+    /// an edge of a face runs along.
+    ///
+    /// A plane down the inside of a pipe cuts two straight lines and a ball
+    /// crossing a pipe off-axis leaves two loops; which one an edge is, is the
+    /// half-spaces on its own run. A picker that could not decide rules out
+    /// nothing (§33.8), so a corner held by both curves — or by neither — is a
+    /// refusal here and never a guess.
+    #[error("nothing says which of the curves two surfaces cross in an edge of a face runs along")]
+    CannotTellWhichCurveOfACrossingAFaceRunsAlong {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Two curves drawn on one face meet at a point without crossing there, or
+    /// run along each other from it.
+    ///
+    /// Two curves tangent at a node leave the arrangement with no anticlockwise
+    /// order round it, so there is no way round the cell they bound. A **gap**:
+    /// the pieces are there and telling them apart takes following one of the
+    /// curves past the touch, which nothing in this kernel does.
+    ///
+    /// **Coincidence is the far end of the same thing** (§38.2). A `3 × 4` block
+    /// corner on a bar of radius five puts the block's two walls on the one
+    /// ruling `(3, 4, z)` of the bar's, so the two curves do not merely touch —
+    /// they are one line held by the arrangement as two crossings, and no order
+    /// round the node exists to be found.
+    #[error("two curves on one face touch without crossing")]
+    TwoCurvesTouchWithoutCrossing {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Two walks on one face could not be told apart into the cells they bound.
+    ///
+    /// The walks the arrangement leaves have to be grouped into the regions of
+    /// the surface they bound, and two of them in different lumps of the drawing
+    /// are the same region exactly when they lie on the same side of every curve
+    /// that is drawn in full. A curve that runs on for ever is never drawn in
+    /// full, so a face bounded by straight lines has to be placed some other way
+    /// — and where neither route settles it, two regions come out joined that
+    /// the surface keeps apart, and the winding count says so.
+    ///
+    /// A **gap**: the regions are there and telling them apart takes a point
+    /// inside each one, which is a construction this arrangement does not make.
+    /// It is deliberately not a broken invariant, because a face that really did
+    /// overlap itself would look the same from here and only one of the two is a
+    /// bug in this crate.
+    #[error("two regions of one face could not be told apart")]
+    CannotTellTheCellsOfAFaceApart {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Points along a curve a face is cut by cannot be put in order.
+    ///
+    /// A straight crossing is ordered by the axis it climbs fastest along and a
+    /// closed conic by the area three of its points sweep. A ball against a
+    /// pipe, or two pipes, is neither: the curve is a quartic, and ordering
+    /// points along one takes the marcher rather than a determinant. A **gap**,
+    /// and §34.10's own row records the same one dimension down.
+    #[error("nothing can put points in order along this curve")]
+    ACrossingThisCannotBeOrderedAlong,
+
+    /// An edge of a fused solid runs along *part* of a curved crossing, and
+    /// nothing can say which part.
+    ///
+    /// A crossing of two surfaces that closes and is cut at two corners leaves
+    /// two arcs with the same two ends, so the ends do not name one of them and
+    /// [`EdgeRun::PartOfWhereItCrosses`](crate::model::EdgeRun) wants the
+    /// half-space that does.
+    ///
+    /// **Which arc is no longer what this refuses** (`docs/decisions.md` §36.23).
+    /// The half-space through the chord square to the crossing's own plane tells
+    /// them apart, its normal is `v(c·c) − c(c·v)` for `v` a direction into the
+    /// arc, and its offset is proved down until the predicate says both ends are
+    /// on or in front. What is left is the one case where that normal has no
+    /// length to point along: a chord that lies along the crossing's own
+    /// direction, which for a conic means an arc so short the chord rounds onto
+    /// its own tangent. A **gap** — the arc is there and the half-space exists;
+    /// what cannot reach it is `f64` at that separation.
+    ///
+    /// `an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`.
+    #[error("an edge of the answer runs along part of a curved crossing and cannot be named")]
+    ACurvedEdgeThatIsPartOfACrossingCannotBeNamed,
 
     /// The operation ran out of things it could prove.
     ///
@@ -374,6 +632,39 @@ pub enum Invalid {
     /// do not agree about which side the material is on.
     #[error("both coedges of an edge run the same way round")]
     CoedgesRunTheSameWay,
+
+    /// A curved face stands on both sides of a surface that trims it.
+    ///
+    /// This is the curved twin of [`Invalid::OuterWireWindsAgainstTheNormal`],
+    /// and it is the part of "every wire keeps the face's material on its left"
+    /// (`docs/decisions.md` §31.3) that can be asked without a direction rule for
+    /// a closed edge. A crossing that goes right round cuts a surface into
+    /// exactly two pieces; a face whose whole boundary is that crossing is one of
+    /// them, so a corner on each side is a model whose topology and geometry
+    /// disagree.
+    ///
+    /// Only asked of a face whose every side is a whole closed crossing. A face
+    /// trimmed by a *piece* of one straddles that piece's surface quite properly
+    /// — a bar with a notch cut in its wall does — and §35 says what is still
+    /// owed there.
+    #[error("a curved face stands on both sides of a surface that trims it")]
+    AFaceStraddlesSomethingTrimmingIt,
+
+    /// A face walks a closed edge against the way that edge is stored running.
+    ///
+    /// A closed edge starts and ends at the one corner it has, so its two ends
+    /// say nothing about which way it goes and only a rule can. The rule is that
+    /// the points along it come back the way the **longitude of the curved
+    /// surface either side** increases, and that a wire walks it forward exactly
+    /// when the face's material lies on the partner's negative side — which is
+    /// `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by Cauchy–Schwarz, everywhere, with
+    /// no case analysis (`docs/decisions.md` §36.6, §36.18).
+    ///
+    /// Nothing else would notice: a bar's wall with both its cap circles walked
+    /// the same way round closes up, counts right, and is bounded by nothing at
+    /// all.
+    #[error("a face walks a closed edge against the way its surface winds")]
+    AClosedEdgeIsWalkedAgainstItsSurface,
 
     /// A wire has fewer than three coedges.
     #[error("a wire has {count} coedges; a closed wire needs at least three")]

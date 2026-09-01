@@ -63,7 +63,7 @@
 //!   they share a [`FaceMeet`] walked once each way, which is where the
 //!   manifold check of [`Error::ResultIsNotManifold`] belongs.
 //! - **The commit.** A [`MeetPoint::Existing`] is an input vertex the result
-//!   should keep the key of; a [`MeetPoint::OfThreePlanes`] is a new vertex, and
+//!   should keep the key of; a [`MeetPoint::OfThreeSurfaces`] is a new vertex, and
 //!   the width of its box is what to tag it with, as
 //!   [`Cause::ConstructedPoint`](rcad_predicates::Cause::ConstructedPoint) — not
 //!   as anything a policy judges (§17.2). The commit is the first mutation of
@@ -73,7 +73,7 @@
 //! the selection table, the image maps history is derived from, and
 //! `Model::fuse` itself.
 
-use rcad_geom::{Plane, Point};
+use rcad_geom::{Point, Surface};
 use rcad_predicates::{
     Approximation, Decision, Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     Record, resolve_under_policy,
@@ -92,6 +92,8 @@ mod select;
 
 pub use history::Fused;
 pub use select::Rule;
+
+pub(crate) use arrange::name_of_surface_bits;
 
 use arrange::{Piece, split_a_face};
 use assemble::assemble;
@@ -149,17 +151,6 @@ impl Model {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Fused> {
-        // Over every input before a single pair is looked at. Refusing lazily,
-        // when the splitter first met a curved face, would make *which* answer
-        // came back depend on the order the pairs happened to be walked — and
-        // the commutativity and associativity properties compare answers across
-        // exactly that reordering.
-        for &solid in arguments.iter().chain(tools) {
-            if !self.solid(solid).is_wholly_flat() {
-                return Err(Error::FuseNeedsFlatFaces);
-            }
-        }
-
         let mut mine = ProvenanceLog::new();
         let fused = self.fused_under(arguments, tools, rule, policy, &mut mine);
         mine.drain_into(log);
@@ -270,9 +261,9 @@ impl Scratch {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
-        let mut solids = bake(model, arguments, log)?;
+        let mut solids = bake(model, arguments, policy, log)?;
         let group_splits_here = solids.len();
-        solids.extend(bake(model, tools, log)?);
+        solids.extend(bake(model, tools, policy, log)?);
         cuts::gather(&mut solids, policy, log)?;
         let tools = solids.split_off(group_splits_here);
         let arguments = solids;
@@ -291,45 +282,90 @@ impl Scratch {
     }
 }
 
-/// Where two faces meet: part of the line carried by their two planes.
+/// Where two faces meet: part of the curve carried by their two surfaces.
 ///
 /// This is §15.7's intersection result type. The two ends are **not** exact and
-/// never will be, because Cramer's rule divides — §15.7 said this type "fills in
+/// never will be, because a meet divides — §15.7 said this type "fills in
 /// nothing else", which would have someone wire the enclosure to zero, and
 /// §17.5 corrects it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FaceMeet {
-    /// The two planes whose meet carries this piece of line. Never a point and a
-    /// direction: building one would round (§17.5).
-    pub(crate) carried_by: [Plane; 2],
+    /// The two surfaces whose meet carries this piece of curve. Never a point
+    /// and a direction: building one would round (§17.5).
+    pub(crate) carried_by: [Surface; 2],
     /// Where the piece starts and where it ends, in that order.
     pub(crate) ends: [MeetPoint; 2],
+    /// Which side of `carried_by[1]` the piece's material is on.
+    ///
+    /// [`Decision::Neg`] or [`Decision::Pos`], and never anything else. It costs
+    /// no arithmetic: the walk that made this side keeps the material on its
+    /// left, and left of a crossing's forward direction is always the negative
+    /// side of the partner — `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by
+    /// Cauchy–Schwarz, everywhere, with no case analysis (§36.6).
+    ///
+    /// It is what lets selection say whether a point is inside a **curved**
+    /// piece without winding anything: a piece bounded by whole closed curves is
+    /// the part of its surface on the material side of every one of them.
+    pub(crate) material_side: Decision,
     /// The input edges this runs along, when it runs along any. Empty for a
-    /// piece of a cut line, which is boundary the result invents, and more than
-    /// one when joining coplanar input faces made two edges into one.
+    /// piece of a cut, which is boundary the result invents, and more than one
+    /// when joining coplanar input faces made two edges into one.
     pub(crate) along: SmallVec<[EdgeKey; 1]>,
     /// How far the real meet may stray from this description. Planes meet in a
-    /// straight line, so this is always zero here; M3's curved marcher is its
-    /// first real producer (§15.7).
+    /// straight line, so this is always zero for a flat pair; M3's curved
+    /// marcher is its first real producer (§15.7).
     pub(crate) approximation: Option<Approximation>,
 }
 
 /// One end of a [`FaceMeet`].
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MeetPoint {
-    /// A corner the input already had. Re-derived all the same (§17.1); the key
-    /// is kept so history can name it.
+    /// A corner the input already had. Re-derived or moved all the same
+    /// (§17.1, §31.3); the key is kept so history can name it.
     Existing {
         /// The input vertex this corner is.
         vertex: VertexKey,
-        /// Where it is, re-derived from the planes around it.
+        /// Where it is.
         point: PredicatePoint,
     },
-    /// A new point, where three planes meet.
-    OfThreePlanes {
-        /// The three planes, in a fixed order.
-        planes: [Plane; 3],
+    /// A new point, where three surfaces meet.
+    OfThreeSurfaces {
+        /// The three surfaces, in a fixed order.
+        surfaces: [Surface; 3],
+        /// Which of their meeting points this is. **Load-bearing**: three
+        /// surfaces can meet at more than one point, so the three names do not
+        /// pick a corner on their own and `Corners::of` would join two different
+        /// corners into one (§31.3).
+        which: u8,
         /// The box their meeting point is somewhere inside.
+        point: PredicatePoint,
+    },
+    /// The one point on a closed crossing that nothing else cuts.
+    ///
+    /// A wire needs a coedge, an edge needs two ends, and a wire that closes on
+    /// one edge needs both ends to be one vertex — so a closed crossing with no
+    /// corner on it still needs one. Where it goes depends on the two surfaces
+    /// and on nothing else, which is what keeps `fuse(A, B)` and `fuse(B, A)`
+    /// agreeing (§31.3, §34.4).
+    WhereAClosedCurveStarts {
+        /// The two surfaces whose crossing this starts, in the order the face
+        /// asking carries them.
+        carried_by: [Surface; 2],
+        /// Where it is.
+        point: PredicatePoint,
+    },
+    /// A pole of a closed surface, where it pinches to a point.
+    ///
+    /// The one end of a boundary that is not where curves meet. A ball's skin
+    /// is trimmed by nothing at all, so the answer has to cut it open along a
+    /// seam of its own, and a seam runs pole to pole (§38.1).
+    APoleOfAClosedSurface {
+        /// The surface it is a pole of.
+        surface: Surface,
+        /// Which of the two: `true` for the one the surface's second coordinate
+        /// climbs towards.
+        at_the_top: bool,
+        /// Where it is.
         point: PredicatePoint,
     },
 }
@@ -338,21 +374,13 @@ impl MeetPoint {
     /// Where this end is.
     pub(crate) fn point(&self) -> PredicatePoint {
         match self {
-            MeetPoint::Existing { point, .. } | MeetPoint::OfThreePlanes { point, .. } => *point,
+            MeetPoint::Existing { point, .. }
+            | MeetPoint::OfThreeSurfaces { point, .. }
+            | MeetPoint::WhereAClosedCurveStarts { point, .. }
+            | MeetPoint::APoleOfAClosedSurface { point, .. } => *point,
         }
     }
 }
-
-/// The name a corner that could not be placed goes by in provenance records.
-///
-/// [`Plane::meet_of_three`] divides by the determinant of the three normals and
-/// has only an interval filter to bound it with — no exact level to fall back
-/// on, because the answer is a point and not a sign. So a determinant it cannot
-/// tell from zero is a decision the cascade did not settle, and the fuse is left
-/// with nothing to return: [`Error::Undecidable`] and a record, not
-/// [`Error::Geometry`]. The two tiers read very differently in §17.7's
-/// breakdown of what gave up, and only one of them is true.
-pub(crate) const WHERE_THREE_PLANES_MEET: &str = "where three planes meet";
 
 /// Give up on a decision nothing can bound, recording that it was asked.
 ///
@@ -530,7 +558,7 @@ mod tests {
     /// sum is exact in `f64` and the pieces of a face add up to that face with
     /// no tolerance anywhere.
     fn twice_the_area_of(piece: &Piece) -> f64 {
-        let normal = piece.plane.normal().components();
+        let normal = piece.plane().normal().components();
         piece
             .wires
             .iter()
@@ -585,7 +613,7 @@ mod tests {
         let cut_in_four = scratch
             .pieces
             .iter()
-            .filter(|piece| piece.plane.normal() == Vector::new(0.0, 0.0, 1.0))
+            .filter(|piece| piece.plane().normal() == Vector::new(0.0, 0.0, 1.0))
             .count();
         assert_eq!(
             cut_in_four, 8,

@@ -89,7 +89,7 @@
 //! # §17.1, checked rather than argued
 //!
 //! Every fuse in this file, of every family, also runs
-//! [`every_plane_of_the_answer_is_a_plane_of_an_input`], which is the deciding
+//! [`every_surface_of_the_answer_is_a_surface_of_an_input`], which is the deciding
 //! argument for plane-authoritative geometry stated as an assertion. It runs
 //! inside [`fused`], so it costs no wall clock at all.
 
@@ -104,15 +104,15 @@ use proptest::prelude::*;
 use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
 };
-use rcad_geom::{Deflection, Plane, Point, Vector};
+use rcad_geom::{Deflection, Orientation, Plane, Point, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{
-    Configuration, Movement, Rigid, a_chain_of_fuses, a_flush_pair, a_lattice_pair, a_lattice_trio,
-    a_pair_leaning_the_same_way, a_pair_somewhere_else, a_rigid_movement, a_skew_pair,
-    a_solid_and_its_copy, a_turned_pair, a_turned_solid_and_its_copy,
-    a_turned_solid_and_several_copies,
+    Configuration, CurvedPair, Movement, Rigid, a_chain_of_fuses, a_curved_pair, a_flush_pair,
+    a_lattice_pair, a_lattice_trio, a_pair_leaning_the_same_way, a_pair_somewhere_else,
+    a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
+    a_turned_solid_and_its_copy, a_turned_solid_and_several_copies,
 };
 
 /// How many configurations a property that runs two fuses per case sees.
@@ -133,8 +133,8 @@ const LONGER_CASES: u32 = 24;
 /// number is the same every time.
 ///
 /// A hundred and twenty-eight, and the ceiling is the clock and not the
-/// statistics. At this count each family is 414 fuses, the whole workspace suite
-/// runs in about ten seconds, and a soak at eighty times this corpus is what
+/// statistics. At this count each family is 423 fuses, the whole workspace suite
+/// runs in about three seconds, and a soak at eighty times this corpus is what
 /// §17.7's precise figures come from. Raising the shipped number to a thousand
 /// was tried and reverted: it bought a fresh-seed spread of ±1.6 points instead
 /// of ±4, and it cost the default suite a minute of wall clock every run. §17.7
@@ -184,23 +184,40 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 ///
 /// Twenty-four per cent, chosen from measurement rather than from taste, and it
 /// is a threshold on a **deterministic** number: [`measured`] runs from a fixed
-/// seed, so the shipped corpus of 420 turned fuses refuses 87 of them, 20.71%,
+/// seed, so the shipped corpus of 423 turned fuses refuses 96 of them, 22.70%,
 /// every run on every machine. There is no sampling noise for the threshold to
-/// have to clear, so what it has to clear instead is ordinary drift — 3.3 points
-/// is fourteen fuses — and what it has to catch is a regression. The three
-/// undeserved refusals recorded so far are each worth enough to trip it on their
-/// own: the two §17.7 names are about 3.5 points apiece, and §19.1's plane
-/// reader was worth 4.4, which is what took this number from 28 to 24 when it
-/// was fixed.
+/// have to clear, so what it has to clear instead is ordinary drift — 1.3 points
+/// is six fuses — and what it has to catch is a regression. The three undeserved
+/// refusals recorded so far are each worth several times that on their own: the
+/// two §17.7 names are about 3.5 points apiece, and §19.1's plane reader was
+/// worth 4.4, which is what took this number from 28 to 24 when it was fixed.
+///
+/// **Six fuses is thin, and §39 says where the room went.** §38.8 read the
+/// stale prose beside it — 20.71% of 420 — and put the difference down to the
+/// generator growing. Measured at M3's close the corpus was already 423 and the
+/// rate was **20.6%, 87 refusals**; it is 96 now, and the nine arrived at
+/// `c1e713e`, where `Axis::new` learned to reduce before it normalises. Every
+/// configuration in this family is turned about an `Axis`, so that commit
+/// changed the rotation each one is built with: this is a **different corpus**
+/// and not the same corpus refusing more, which is why no answer got worse and
+/// no property here noticed.
+///
+/// The threshold is deliberately **not** re-derived for it. Twenty-four per cent
+/// still fires on anything 1.3 points above the measurement, which is well
+/// inside the 3.5 points the smallest undeserved refusal on record was worth, so
+/// it is doing its job and doing it more sharply than it has to. What a red run
+/// asks for is the attribution above and not a bigger number — and a soak cannot
+/// supply one, because a soak is a different corpus with a distribution of its
+/// own and judging one by the other is the blending §17.7 forbids.
 ///
 /// **It is judged on the shipped corpus only** — see
 /// [`this_is_the_shipped_corpus`]. A soak is a different measurement with a
-/// different distribution: six fresh seeds at ten times the corpus came out at
-/// 22.6%, 23.0%, 23.7%, 24.1%, 24.1% and 24.4%, so two of the six sit above this
-/// number with nothing wrong. Judging them by the shipped corpus's threshold
-/// would be treating two different numbers as one, which is the thing §17.7 is
-/// at pains not to do. A threshold is not a target — the measurement is what is
-/// recorded, and this is only here so it cannot drift unnoticed.
+/// different distribution: six fresh seeds at ten times the corpus come out at
+/// 23.4%, 23.4%, 23.9%, 24.0%, 24.0% and 24.7%, so four of the six sit above
+/// this number with nothing wrong. Judging them by the shipped corpus's
+/// threshold would be treating two different numbers as one, which is the thing
+/// §17.7 is at pains not to do. A threshold is not a target — the measurement is
+/// what is recorded, and this is only here so it cannot drift unnoticed.
 const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 
 /// How much of the skew family a certified fuse is allowed to refuse.
@@ -211,14 +228,20 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// unnoticed rather than as a target.
 ///
 /// Eighteen per cent. [`measured`] runs from a fixed seed, so the shipped corpus
-/// of 420 skew fuses refuses 60 of them, 14.29%, every run on every machine.
+/// of 423 skew fuses refuses 51 of them, 12.06%, every run on every machine.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
-/// drift — 3.7 points is fifteen fuses, the same headroom
-/// [`TURNED_REFUSALS_MUST_STAY_BELOW`] leaves — and what it has to catch is a
-/// regression in the one family that reaches a branch nothing else does.
+/// drift — 5.9 points is twenty-five fuses, four times the headroom
+/// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
+/// a regression in the one family that reaches a branch nothing else does.
 ///
 /// **Judged on the shipped corpus only**, for the reason
-/// [`this_is_the_shipped_corpus`] gives. SKEW_SOAK_PROSE
+/// [`this_is_the_shipped_corpus`] gives, and here the two numbers are further
+/// apart than for the turned family rather than nearer: six fresh seeds at ten
+/// times the corpus come out at 12.6%, 13.8%, 14.5%, 15.3%, 16.2% and 16.3%, so
+/// none of the six reaches this number but the worst of them is within 1.7
+/// points of it. A soak that did cross it would be saying the fresh-seed
+/// distribution sits higher than the shipped one, which is what
+/// [`this_is_the_shipped_corpus`] says to expect and not a regression.
 const SKEW_REFUSALS_MUST_STAY_BELOW: f64 = 0.18;
 
 /// How many of the comparisons a property set out to make it has to have made.
@@ -253,7 +276,7 @@ const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
 /// How much of the lattice control comes back as something a `Model` cannot
 /// hold.
 ///
-/// Measured at 4.8% over the shipped corpus — 20 of 414 — and the band is
+/// Measured at 4.7% over the shipped corpus — 20 of 423 — and the band is
 /// roughly half to double that. Every one of them is the case §17.7's catalogue
 /// records by hand: two solids meeting along a whole edge would put four faces
 /// along it, and an edge belongs to exactly two.
@@ -261,46 +284,49 @@ const A_LATTICE_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.02..=0.10;
 
 /// The same for the family built to share coordinates, which is full of them.
 ///
-/// Measured at 17.4% — 72 of 414 — which is what "deliberately degenerate"
+/// Measured at 17.0% — 72 of 423 — which is what "deliberately degenerate"
 /// buys: the offsets are whole extents, so edge-on-edge and corner-on-corner
 /// are the ordinary case here rather than the rare one.
 const A_FLUSH_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.10..=0.28;
 
 /// The same for the lattice pairs written somewhere else in `f64`.
 ///
-/// Measured at 4.1% — 17 of 414 — against the lattice family's 4.8%, and the two
+/// Measured at 4.0% — 17 of 423 — against the lattice family's 4.7%, and the two
 /// are the same figure rather than two. The configurations are drawn from the
 /// same generator and the same seed, but this family draws two more numbers per
-/// case, so the two corpora are not the same 138 configurations. What is exactly
+/// case, so the two corpora are not the same 128 configurations. What is exactly
 /// the same is the reason: moving everything by a power of two cannot turn an
 /// answer into one a `Model` can hold or the other way about. Same band.
 const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.02..=0.10;
 
 /// The same for the turned family.
 ///
-/// Measured at 3.9% — 16 of 414 — lower than the lattice family it is a
-/// rotation of, because a quarter of that family's fuses refuse before they get
-/// far enough to find out whether the answer is a solid.
+/// Measured at 4.0% — 17 of 423 — lower than the lattice family's 4.7%, which it
+/// is a rotation of, because getting on for a quarter of that family's fuses
+/// refuse before they get far enough to find out whether the answer is a
+/// solid.
 const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.015..=0.09;
 
 /// The same for the family whose outlines lean over.
 ///
-/// Measured at 1.2% over the shipped corpus — 5 of 420 — which is a *quarter*
-/// of the lattice family's 4.8%, and the reason is the point of the family. An
+/// Measured at 1.9% over the shipped corpus — 8 of 423 — which is **two fifths**
+/// of the lattice family's 4.7%, and the reason is the point of the family. An
 /// answer is not a solid here almost always because two solids meet along a
 /// whole edge and four faces would run along it, and that needs the two edges to
 /// be the same edge exactly. Leaning the two solids by different amounts is
-/// precisely what stops them sharing an edge.
+/// precisely what stops them sharing an edge. It is still the lowest of the six
+/// families by some way, and it is the only one where the ratio to the lattice
+/// family is what the family was built to be about.
 const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.005..=0.03;
 
 /// The same for its control, where both solids lean the same way.
 ///
-/// Measured at 3.1% — 13 of 420 — and it is the lattice family's 4.8% rather
-/// than the skew family's 1.2%, which is the arithmetic saying what the control
+/// Measured at 4.0% — 17 of 423 — and it is the lattice family's 4.7% rather
+/// than the skew family's 1.9%, which is the arithmetic saying what the control
 /// claims. Leaning both solids by the same amount is an affine map of the whole
 /// pair, and an affine map preserves incidence exactly, so the edges that
 /// coincided still coincide and the answers that were not solids still are not.
-/// It does not land on 4.8% exactly because this family draws one more number
+/// It does not land on 4.7% exactly because this family draws one more number
 /// per case, so the two corpora are not the same 128 configurations — the same
 /// caveat [`A_PAIR_ELSEWHERE_IS_NOT_A_SOLID`] carries — and because a fuse that
 /// refuses never gets far enough to find out whether its answer was a solid.
@@ -844,7 +870,7 @@ fn uniting_four_at_once_is_uniting_them_one_at_a_time() {
 /// this asserts.
 ///
 /// The other half of the claim — that the planes never move, at any step, from
-/// the ones the input carried — is [`every_plane_of_the_answer_is_a_plane_of_an_input`],
+/// the ones the input carried — is [`every_surface_of_the_answer_is_a_surface_of_an_input`],
 /// which runs inside [`fused`] on all of these fuses. It could not until
 /// `Plane::transformed` stopped re-deriving a moved plane's offset through a
 /// point on it: `FaceView::plane` is `surface.transformed(&location)`, so that
@@ -1011,7 +1037,7 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// something the total cannot. §17.7 records that every refusal the turned
 /// family has ever produced named `"side of plane"`, with
 /// `"a point inside a piece of a face"` turning up rarely and no seed ever
-/// naming a third. This family's leading cause is `"order along a line"`, which
+/// naming a third. This family's leading cause is `"order along a crossing"`, which
 /// that corpus essentially never reaches — and reaching it is the point. Three
 /// cut lines through one point put two intersections at the same place on a
 /// line, and an ordering that is a tie is not a comparison any amount of
@@ -1084,6 +1110,262 @@ fn swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit() {
     tally.report_what_it_compared("A ∪ B against B ∪ A, skew pairs");
 }
 
+/// §31.7 criterion 15's first name, over the curved family.
+///
+/// The sharpest question in the file asked of the first family whose corners are
+/// not exactly representable *and* whose faces are not all flat. Swapping the
+/// two sides sends the same pieces down different rows of the selection table
+/// and hands the arrangement its cut surfaces the other way round, and the
+/// answer has to be the same one down to the last bit of the cylinder's radius.
+///
+/// **It really compares things**, and that is not something a curved family can
+/// be assumed to do (§14.7, and lane 5c's finding that a family can read clean
+/// because it never reaches the hard case). Two things say so here: the family's
+/// own measured row is at nothing refused, so both sides of every comparison
+/// arrive, and [`Coordinates::LieOnARoundWall`] makes a refusal a failure rather
+/// than a skipped case.
+#[test]
+fn swapping_the_two_sides_of_a_curved_pair_changes_not_one_bit() {
+    let tally = over(CASES, a_curved_pair(), |pair, tally| {
+        // Union and intersection only, for the reason `both_ways_round` runs
+        // those two next door: `A \ B` and `B \ A` are different questions and
+        // nothing says their answers agree.
+        for rule in [Rule::Union, Rule::Intersection] {
+            tally.meaning_to_compare();
+            let (model, keys) = pair.build();
+            let (block, bar) = (keys[0], keys[1]);
+
+            let Some(forwards) = fused(
+                tally,
+                Coordinates::LieOnARoundWall,
+                &model,
+                &[block],
+                &[bar],
+                rule,
+            )?
+            else {
+                continue;
+            };
+            let Some(backwards) = fused(
+                tally,
+                Coordinates::LieOnARoundWall,
+                &model,
+                &[bar],
+                &[block],
+                rule,
+            )?
+            else {
+                continue;
+            };
+
+            tally.comparing();
+            same_answer(
+                &answer_of(&forwards.0, &forwards.1),
+                &answer_of(&backwards.0, &backwards.1),
+                rule,
+                "swapping the two sides of a curved pair",
+            )?;
+        }
+        Ok(())
+    });
+    tally.report_what_it_compared("commutativity, a bar through a block");
+}
+
+/// §31.7 criterion 15's third name, at the one pair it is about.
+///
+/// A block and a bar through it, united each way round, at a fixed size rather
+/// than a generated one, so that a failure names a shape rather than a seed. The
+/// same claim as the property above at one point of its domain — and worth its
+/// own test because it is the criterion's own name and the criterion should be
+/// findable.
+#[test]
+fn uniting_a_block_and_a_bar_the_other_way_round_gives_the_same_solid() {
+    let pair = CurvedPair {
+        side: 8,
+        radius: 2,
+        at: [4, 4],
+    };
+    for rule in [Rule::Union, Rule::Intersection] {
+        let (model, keys) = pair.build();
+        let (block, bar) = (keys[0], keys[1]);
+        let forwards = plainly_fused(&model, &[block], &[bar], rule);
+        let backwards = plainly_fused(&model, &[bar], &[block], rule);
+        same_answer(
+            &answer_of(&forwards.0, &forwards.1),
+            &answer_of(&backwards.0, &backwards.1),
+            rule,
+            "uniting a block and a bar the other way round",
+        )
+        .expect("the same pair fused the other way round is the same answer");
+    }
+}
+
+/// §31.7 criterion 15's second name, and **it cannot be met today**.
+///
+/// A bar with a bit-identical copy of itself taken away should leave nothing at
+/// all, which is what the same question gives for every flat family in this
+/// file. What happens instead is a refusal: `Undecidable`, naming a point inside
+/// a piece of a face, at the bar's own seam corner. Two coincident curved faces
+/// are §36.16's row, and two copies of one bar is the plainest shape that
+/// reaches it.
+///
+/// So this test asserts the refusal **by name** rather than reporting a green
+/// run over a property that compared nothing — which is the shape §14.7 asks for
+/// when a family stops reaching its subject. The control is the same question
+/// with the bar replaced by a block, which answers and leaves nothing, so the
+/// difference between the two rows is the curve and nothing else.
+///
+/// The day the refusal is closed this test fails, and what replaces it is the
+/// assertion the criterion actually asks for.
+#[test]
+fn a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
+    let pair = CurvedPair {
+        side: 8,
+        radius: 2,
+        at: [0, 0],
+    };
+
+    let (mut model, keys) = pair.built_as_a_block_and_a_copy_of_it();
+    let nothing = model
+        .fuse(
+            &[keys[0]],
+            &[keys[1]],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a block with a copy of itself taken away is an ordinary answer");
+    assert!(
+        nothing.solids().is_empty(),
+        "the control: a block with a copy of itself taken away leaves nothing"
+    );
+
+    let (mut model, keys) = pair.built_as_a_bar_and_a_copy_of_it();
+    match model.fuse(
+        &[keys[0]],
+        &[keys[1]],
+        Rule::Difference,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) {
+        Err(Error::Undecidable { records }) => assert_eq!(
+            records
+                .records()
+                .last()
+                .expect("a refusal names a decision")
+                .predicate(),
+            "a point inside a piece of a face",
+            "pinning what happens today: `A \\ A` over a bar is refused, not answered"
+        ),
+        Ok(fused) => panic!(
+            "the refusal is closed — assert the criterion instead, got {} solids",
+            fused.solids().len()
+        ),
+        Err(why) => panic!("`A \\ A` over a bar refused with {why}"),
+    }
+}
+
+/// An empty answer over a curved pair is a success and not an error.
+///
+/// §17.4 settles that for the flat case and nothing had asked it of a curved
+/// one. The bar stands a whole unit clear of the block along `z`, so what the
+/// two share is nothing, and "nothing" has to arrive as `Ok` with no solids
+/// rather than as a refusal or as a solid enclosing no space.
+#[test]
+fn what_a_curved_pair_that_misses_shares_is_nothing_and_that_is_a_success() {
+    let mut model = Model::new(rcad_geom::Scale::millimetres(100.0).expect("a working size"));
+    let block = model
+        .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a block eight across");
+    let bar = model
+        .add_round_bar(
+            2.0,
+            4.0,
+            &rcad_geom::Isometry::translation(Vector::new(4.0, 4.0, 9.0)).expect("a shift"),
+        )
+        .expect("a bar standing clear above it");
+
+    let mut log = ProvenanceLog::new();
+    let shared = model
+        .fuse(
+            &[block],
+            &[bar],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("two solids that miss each other share nothing, which is an answer");
+    assert!(shared.solids().is_empty());
+    assert!(log.records().is_empty(), "nothing here had to be settled");
+}
+
+/// The curved family's measured row, and the thing that makes every property
+/// above worth its pass.
+///
+/// The same discipline as §17.7's control rows: a fixed seed, every rule, and a
+/// refusal is a failure. §36.27 measures this arrangement at nothing refused and
+/// nothing recorded, and this is the same claim from a different generator with
+/// a different corpus — which is worth having, because §36.27's four families
+/// draw from one hand-written sequence and this one draws from proptest.
+///
+/// **There is no band on answers that are not solids, because there are none.**
+/// A bar a whole unit clear of every wall of the block it goes through never
+/// leaves four faces along one edge, and asserting zero is a sharper statement
+/// than any band would be.
+#[test]
+fn every_certified_fuse_of_a_curved_pair_is_decided_and_records_nothing() {
+    let tally = measured(a_curved_pair(), |pair, tally| {
+        let (model, keys) = pair.build();
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            fused(
+                tally,
+                Coordinates::LieOnARoundWall,
+                &model,
+                &[keys[0]],
+                &[keys[1]],
+                rule,
+            )?;
+        }
+        Ok(())
+    });
+    tally.report("§37 control: a bar through a block, every rule");
+    assert_eq!(
+        tally.refused.get(),
+        0,
+        "a bar through a block, clear of every wall, is decided by proof alone"
+    );
+    assert_eq!(
+        tally.not_a_solid.get(),
+        0,
+        "no arrangement of this family puts four faces along one edge"
+    );
+}
+
+/// Fuse without a tally, for the tests that name one pair rather than a family.
+///
+/// # Panics
+///
+/// If the fuse refuses, or records a decision it could not prove.
+fn plainly_fused(
+    model: &Model,
+    arguments: &[SolidKey],
+    tools: &[SolidKey],
+    rule: Rule,
+) -> (Model, Vec<SolidKey>) {
+    let mut model = model.clone();
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(arguments, tools, rule, &Policy::certified(), &mut log)
+        .unwrap_or_else(|why| panic!("this {rule:?} is decided by proof alone: {why}"));
+    assert!(
+        log.records().is_empty(),
+        "a certified {rule:?} recorded {} decisions it could not prove",
+        log.records().len()
+    );
+    let solids = fused.solids().to_vec();
+    (model, solids)
+}
+
 /// §22.6's defect, at the one line of arithmetic it came from, now closed.
 ///
 /// `build_side_face` hands `Plane::from_point_and_normal` the vector
@@ -1131,12 +1413,16 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
     );
 }
 
-/// The predicate that settles which of two points on a line comes first.
+/// The predicate that settles which of two points on a crossing comes first.
 ///
 /// Named here because [`how_often_a_certified_fuse_of_a_skew_pair_refuses`]
 /// asserts on it rather than only printing it, and a bare string in an
 /// assertion is a thing that goes stale silently.
-const ORDER_ALONG_A_LINE: &str = "order along a line";
+///
+/// It was `"order along a line"` until the arrangement learned to draw a curve
+/// that closes, and the same question about a straight crossing is still the
+/// same question — the count this family asserts on did not move.
+const ORDER_ALONG_A_LINE: &str = "order along a crossing";
 
 /// Whether this run is the shipped measurement rather than a soak.
 ///
@@ -1232,7 +1518,7 @@ fn united_in_turn(
 /// both counted, neither swept away.
 ///
 /// Every answer goes through
-/// [`every_plane_of_the_answer_is_a_plane_of_an_input`], so §17.1's deciding
+/// [`every_surface_of_the_answer_is_a_surface_of_an_input`], so §17.1's deciding
 /// argument is checked by every fuse in this file rather than by a test of its
 /// own.
 fn fused(
@@ -1256,7 +1542,7 @@ fn fused(
                     log.len()
                 )));
             }
-            every_plane_of_the_answer_is_a_plane_of_an_input(
+            every_surface_of_the_answer_is_a_surface_of_an_input(
                 &model,
                 &[arguments, tools].concat(),
                 &solids,
@@ -1275,10 +1561,12 @@ fn fused(
             }
             match coordinates {
                 Coordinates::AreUnderAGeneralRotation | Coordinates::SitOnTiltedWalls => Ok(None),
-                Coordinates::AreExactlyRepresentable => Err(TestCaseError::fail(format!(
-                    "a {rule:?} over exactly representable coordinates refused, with {} records",
-                    records.len()
-                ))),
+                Coordinates::AreExactlyRepresentable | Coordinates::LieOnARoundWall => {
+                    Err(TestCaseError::fail(format!(
+                        "a {rule:?} over a family that has never refused refused, with {} records",
+                        records.len()
+                    )))
+                }
             }
         }
         Err(Error::ResultIsNotManifold { .. }) => {
@@ -1319,28 +1607,33 @@ fn fused(
 /// statement as the rectilinear ones — which is where it bites, because a
 /// turned normal is not a signed unit axis and nothing about it is exact by
 /// construction.
-fn every_plane_of_the_answer_is_a_plane_of_an_input(
+fn every_surface_of_the_answer_is_a_surface_of_an_input(
     model: &Model,
     inputs: &[SolidKey],
     answer: &[SolidKey],
     rule: Rule,
 ) -> Result<(), TestCaseError> {
-    let mut theirs: BTreeSet<[u64; 4]> = BTreeSet::new();
+    let mut theirs: BTreeSet<Vec<u64>> = BTreeSet::new();
     for &solid in inputs {
         for face in model.solid(solid).faces() {
-            let plane = face.plane().coefficients();
-            theirs.insert(plane.map(bits));
-            theirs.insert(plane.map(|coefficient| bits(-coefficient)));
+            let surface = face.surface();
+            theirs.insert(WhatItSitsOn::of(&surface).written_out());
+            if let Some(plane) = surface.as_plane() {
+                theirs.insert(
+                    WhatItSitsOn::Flat(plane.coefficients().map(|coefficient| -coefficient))
+                        .written_out(),
+                );
+            }
         }
     }
 
     for &solid in answer {
         for face in model.solid(solid).faces() {
-            if !theirs.contains(&face.plane().coefficients().map(bits)) {
+            let surface = face.surface();
+            if !theirs.contains(&WhatItSitsOn::of(&surface).written_out()) {
                 return Err(TestCaseError::fail(format!(
-                    "a {rule:?} put a face on {:?}, which is no input face's plane \
-                     and no input face's plane reversed",
-                    face.plane().coefficients()
+                    "a {rule:?} put a face on {surface:?}, which is no input face's surface \
+                     and no input face's plane reversed"
                 )));
             }
         }
@@ -1360,6 +1653,16 @@ enum Coordinates {
     /// Whole-number corners standing on walls that are not axis-aligned, where
     /// a refusal is again an outcome to count rather than a failure.
     SitOnTiltedWalls,
+    /// Whole-number corners with one round wall among them.
+    ///
+    /// **A refusal is a failure here too**, and the corners are *not* exactly
+    /// representable: where a block's flat wall meets a bar's round one the
+    /// answer is a square root. What makes the claim fair anyway is that §36.27
+    /// measures this arrangement at nothing refused and nothing recorded, so a
+    /// refusal would be a regression rather than a fact about the geometry —
+    /// which is the same thing the rectilinear control rows say, reached by a
+    /// different route.
+    LieOnARoundWall,
 }
 
 /// What every fuse a property ran came back with.
@@ -1459,10 +1762,16 @@ impl Tally {
     /// and its headline number is measuring the tilt over again.
     ///
     /// Judged on the shipped corpus only, for the same reason the thresholds
-    /// are: this is deterministic there — 30 naming it against 21 naming
+    /// are: this is deterministic there — 30 naming it against 12 naming
     /// `"side of plane"` — while a soak is a different corpus with a spread of
     /// its own. Four soaked seeds put the margin far wider than the shipped one
     /// rather than narrower, so this is the conservative place to judge it.
+    ///
+    /// The 30 has not moved since §17.7; the 21 beside it came down to 12 when
+    /// the gathering step stopped asking `Plane::agreement_with` and then
+    /// `planes_are_parallel` about every pair of faces and started asking
+    /// [`intersect`](rcad_geom::intersect), which settles the same three cases
+    /// in one call and gives up in fewer places on the way (§36).
     fn the_cause_named_most_often_is(&self, predicate: &str) {
         let gave_up = self.gave_up.borrow();
         let most = gave_up
@@ -1707,12 +2016,71 @@ struct Answer {
     solids: Vec<Vec<Face>>,
 }
 
-/// One face: the plane it sits on, which way it faces, and its rings of corners.
+/// One face: the surface it sits on, which way round its solid uses it, and its
+/// rings of corners.
+///
+/// **Which way round rather than which way it faces**, because a curved face has
+/// no one normal to read. For a flat face the two say the same thing: the
+/// outward normal is the stored plane's normal times the orientation's sign, so
+/// two faces with the same plane bits agree about the normal exactly when they
+/// agree about the orientation. That stays true under a [`Movement`] as well,
+/// since a quarter turn is a swap and a negation and multiplying by `±1`
+/// commutes with both.
 #[derive(Clone, Debug)]
 struct Face {
-    plane: [f64; 4],
-    outward: [f64; 3],
+    sits: WhatItSitsOn,
+    reversed: bool,
     wires: Vec<Vec<[f64; 3]>>,
+}
+
+/// What a face sits on, kept as the numbers that name it.
+///
+/// Numbers rather than a [`Surface`] because [`Answer::moved_by`] has to move a
+/// plane's four coefficients, and because the whole point of the comparison is
+/// that nothing about those numbers changed.
+#[derive(Clone, Debug)]
+enum WhatItSitsOn {
+    /// A plane, as its four coefficients.
+    Flat([f64; 4]),
+    /// A ball's skin: where its middle is and how big it is.
+    Ball([f64; 3], f64),
+    /// A pipe's skin: a point on its axis, the way that axis points, and how
+    /// big it is.
+    Pipe([f64; 3], [f64; 3], f64),
+}
+
+impl WhatItSitsOn {
+    fn of(surface: &Surface) -> WhatItSitsOn {
+        match surface {
+            Surface::Plane(flat) => WhatItSitsOn::Flat(flat.coefficients()),
+            Surface::Sphere(ball) => WhatItSitsOn::Ball(ball.centre().coordinates(), ball.radius()),
+            Surface::Cylinder(pipe) => WhatItSitsOn::Pipe(
+                pipe.axis().origin().coordinates(),
+                pipe.axis().direction().components(),
+                pipe.radius(),
+            ),
+            other => panic!("this file does not know how to write {other:?} down"),
+        }
+    }
+
+    /// The numbers, with a tag so two different kinds of surface can never
+    /// write themselves out the same way.
+    fn written_out(&self) -> Vec<u64> {
+        match self {
+            WhatItSitsOn::Flat(coefficients) => {
+                core::iter::once(0).chain(coefficients.map(bits)).collect()
+            }
+            WhatItSitsOn::Ball(centre, radius) => core::iter::once(1)
+                .chain(centre.map(bits))
+                .chain([bits(*radius)])
+                .collect(),
+            WhatItSitsOn::Pipe(origin, direction, radius) => core::iter::once(2)
+                .chain(origin.map(bits))
+                .chain(direction.map(bits))
+                .chain([bits(*radius)])
+                .collect(),
+        }
+    }
 }
 
 fn answer_of(model: &Model, solids: &[SolidKey]) -> Answer {
@@ -1724,8 +2092,8 @@ fn answer_of(model: &Model, solids: &[SolidKey]) -> Answer {
                     .solid(solid)
                     .faces()
                     .map(|face| Face {
-                        plane: face.plane().coefficients(),
-                        outward: face.outward_normal().components(),
+                        sits: WhatItSitsOn::of(&face.surface()),
+                        reversed: face.orientation() == Orientation::Reversed,
                         wires: face
                             .wires()
                             .map(|wire| wire.points().map(|at| at.coordinates()).collect())
@@ -1739,6 +2107,13 @@ fn answer_of(model: &Model, solids: &[SolidKey]) -> Answer {
 
 impl Answer {
     /// The same answer after an exactly representable movement.
+    ///
+    /// # Panics
+    ///
+    /// If a face of the answer is curved. Only the rectilinear families are
+    /// moved and compared — a [`Movement`] is a quarter turn and a whole-number
+    /// shift, which is exact on a plane's four coefficients and on a corner, and
+    /// nothing here has worked out what it is on a pipe's axis.
     fn moved_by(&self, movement: &Movement) -> Answer {
         Answer {
             solids: self
@@ -1748,8 +2123,16 @@ impl Answer {
                     faces
                         .iter()
                         .map(|face| Face {
-                            plane: movement.plane(face.plane),
-                            outward: movement.direction(face.outward),
+                            sits: match face.sits {
+                                WhatItSitsOn::Flat(coefficients) => {
+                                    WhatItSitsOn::Flat(movement.plane(coefficients))
+                                }
+                                _ => panic!(
+                                    "only the rectilinear families move an answer, and this one \
+                                     has a curved face in it"
+                                ),
+                            },
+                            reversed: face.reversed,
                             wires: face
                                 .wires
                                 .iter()
@@ -1788,13 +2171,8 @@ impl Answer {
 }
 
 fn written_out(face: &Face) -> Vec<u64> {
-    let mut written: Vec<u64> = face
-        .plane
-        .iter()
-        .chain(&face.outward)
-        .copied()
-        .map(bits)
-        .collect();
+    let mut written = face.sits.written_out();
+    written.push(u64::from(face.reversed));
 
     let mut wires: Vec<Vec<u64>> = face
         .wires

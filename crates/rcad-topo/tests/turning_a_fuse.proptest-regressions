@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0adce9e2887db0bc3caa241183257982ac2ae5ae0e27b6adfe56725f3d460501 # shrinks to Configuration { solids: [Placed { shape: Frame { width: 3, depth: 3 }, skew: Skew { x_per_y: 0 }, height: 1, at: [0, 0, 0] }, Placed { shape: Block { width: 1, depth: 1 }, skew: Skew { x_per_y: 0 }, height: 1, at: [0, 0, 2] }], turn: Some(Turn { direction: [0, 0, 1], steps: 1 }), elsewhere: Elsewhere { scale: 0, shift: None } }
+cc cab76f2d2d2da8813a5464d4023a17617ab33df27cb2ef54074745e00771b3ae # shrinks to Configuration { solids: [Placed { shape: Comb { teeth: 3, tooth_height: 3 }, skew: Skew { x_per_y: 0 }, height: 2, at: [0, 0, 0] }, Placed { shape: Block { width: 1, depth: 1 }, skew: Skew { x_per_y: 0 }, height: 1, at: [0, 0, 0] }], turn: Some(Turn { direction: [2, -2, 0], steps: 20 }), elsewhere: Elsewhere { scale: 0, shift: None } }

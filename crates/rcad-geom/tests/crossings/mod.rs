@@ -380,6 +380,104 @@ impl Turn {
     }
 }
 
+/// Two flat cuts and a third surface, and what all three are written in.
+///
+/// A [`Crossing`] with one more piece on it. The first two are always flat,
+/// because that is the shape `meet_of_three_surfaces` answers and `docs/
+/// decisions.md` §31.2 says why: a line and a quadric is a quadratic, and one
+/// plane with two quadrics is not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Corner {
+    /// The first flat cut.
+    pub first: Piece,
+    /// The second flat cut.
+    pub second: Piece,
+    /// What the line between them runs into.
+    pub third: Piece,
+    /// The turn applied to all three, if any.
+    pub turn: Option<Turn>,
+    /// Where in `f64` all three are written.
+    pub elsewhere: Elsewhere,
+}
+
+impl Corner {
+    /// The three surfaces, built.
+    ///
+    /// # Panics
+    ///
+    /// If a generated piece is not a surface. Nothing here generates one.
+    #[must_use]
+    pub fn surfaces(&self) -> [Surface; 3] {
+        let turn = self
+            .turn
+            .map_or_else(Isometry::identity, |turn| turn.isometry());
+        [self.first, self.second, self.third].map(|piece| {
+            piece
+                .surface(self.elsewhere, None)
+                .expect("every generated piece is a surface")
+                .transformed(&turn)
+        })
+    }
+
+    /// How big the numbers in this triple are, which is what a published bound
+    /// is a multiple of.
+    #[must_use]
+    pub fn how_big(&self) -> f64 {
+        let widest = [self.first, self.second, self.third]
+            .iter()
+            .map(|piece| piece.how_big(self.elsewhere))
+            .fold(0.0, f64::max);
+        widest.max(f64::MIN_POSITIVE)
+    }
+}
+
+/// The control: every plane square to an axis, every number a whole one.
+pub fn a_lattice_corner() -> impl Strategy<Value = Corner> {
+    a_triple(an_axis_direction().boxed())
+}
+
+/// The same shapes with the planes and pipes tilted, so a stored direction is a
+/// rounding of the one that was asked for.
+pub fn a_leaning_corner() -> impl Strategy<Value = Corner> {
+    a_triple(a_leaning_direction().boxed())
+}
+
+/// The headline: the control under one general rotation.
+pub fn a_turned_corner() -> impl Strategy<Value = Corner> {
+    (a_lattice_corner(), a_turn()).prop_map(|(corner, turn)| Corner {
+        turn: Some(turn),
+        ..corner
+    })
+}
+
+/// The control, written somewhere else in `f64`.
+pub fn a_corner_somewhere_else() -> impl Strategy<Value = Corner> {
+    (a_lattice_corner(), an_elsewhere()).prop_map(|(corner, elsewhere)| Corner {
+        elsewhere,
+        ..corner
+    })
+}
+
+/// Two flat cuts and one of the three surface kinds.
+///
+/// The third is drawn flat as often as it is drawn round, because three planes
+/// is a real corner and the arithmetic that answers it is a different one.
+fn a_triple(direction: BoxedStrategy<[i32; 3]>) -> impl Strategy<Value = Corner> {
+    let flat = a_flat(direction.clone());
+    (
+        flat.clone(),
+        flat.clone(),
+        prop_oneof![flat, a_ball(), a_pipe(direction)],
+    )
+        .prop_map(|(first, second, third)| Corner {
+            first,
+            second,
+            third,
+            turn: None,
+            elsewhere: Elsewhere::here(),
+        })
+}
+
 /// The control: every plane square to an axis, every number a whole one.
 pub fn a_lattice_crossing() -> impl Strategy<Value = Crossing> {
     a_pair(an_axis_direction().boxed())

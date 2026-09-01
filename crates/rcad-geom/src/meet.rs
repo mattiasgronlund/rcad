@@ -15,7 +15,7 @@ use rcad_predicates::{Interval, Point as PredicatePoint};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::Surface;
+use crate::{Picker, Surface};
 
 /// Where two surfaces cross.
 ///
@@ -100,9 +100,13 @@ impl NamedRun {
     ///
     /// Both ends come back as the box that says *nothing at all is known about
     /// where this is*. That is **not** the same as an end that could not be
-    /// worked out, and the two can never be confused: a partly undecidable
-    /// answer refuses whole (`docs/decisions.md` §24.10), so an end a predicate
-    /// gave up on comes back as `Err` and never inside a run.
+    /// worked out, and no route through [`intersect`](crate::intersect) confuses
+    /// them: a partly undecidable answer refuses whole (`docs/decisions.md`
+    /// §24.10), so an end a predicate gave up on comes back as `Err` and never
+    /// inside a run. The type does not carry that — [`NamedRun::new`] is `pub`
+    /// and checks only the closed-run rule, and `Interval::ENTIRE` is `pub` too,
+    /// so a caller can build the confusion by hand. Nothing in this crate does
+    /// (§39).
     ///
     /// A crossing can still come in more than one piece with no ends anywhere —
     /// a plane running down the inside of a pipe cuts two endless lines — and
@@ -208,8 +212,7 @@ pub enum EdgeRun {
     PartOfWhereItCrosses {
         /// The second surface, when the faces either side do not name it.
         and: Surface,
-        /// Surfaces this edge lies on or outside of, enough of them to pick one
-        /// piece.
+        /// What this edge lies on or inside of, enough of it to pick one piece.
         ///
         /// **Not only planes.** A piece of a crossing that can only be told from
         /// its sibling by which side of a ball or a pipe it is on could not be
@@ -217,7 +220,15 @@ pub enum EdgeRun {
         /// pipe are the case M3 reaches, and
         /// [`SideOfSurface`](rcad_predicates::SideOfSurface) already answers
         /// exactly for both curved kinds (§24.5).
-        picked_by: SmallVec<[Surface; 1]>,
+        ///
+        /// **And not a [`Surface`] either**, which is what M4 changed. A piece
+        /// that runs on for ever needs a picking normal exactly square to the
+        /// direction it runs along, and a [`Plane`](crate::Plane) rounds that
+        /// squareness away because it scales every normal to length one
+        /// (§32.3). A [`HalfSpace`](crate::HalfSpace) does not, and it can be
+        /// one only because it is never a face's geometry — which is what
+        /// [`Picker`] says in the type system rather than in a comment (§33).
+        picked_by: SmallVec<[Picker; 1]>,
     },
 }
 
@@ -227,7 +238,7 @@ mod tests {
     use smallvec::smallvec;
 
     use super::{EdgeRun, NamedRun, PredicatePoint, SurfaceMeet};
-    use crate::{Axis, Cylinder, Plane, Point, Sphere, Surface, Vector};
+    use crate::{Axis, Cylinder, HalfSpace, Picker, Plane, Point, Sphere, Surface, Vector};
 
     fn a_pole(up: f64) -> PredicatePoint {
         PredicatePoint::from([0.0, 0.0, up])
@@ -243,12 +254,13 @@ mod tests {
     fn a_balls_seam_is_a_named_run_between_its_two_poles() {
         let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
             .expect("the y axis is a unit normal");
-        let facing_x = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
-            .expect("the x axis is a unit normal");
+        let facing_x =
+            HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+                .expect("the x axis has length");
         let seam = NamedRun::new(
             EdgeRun::PartOfWhereItCrosses {
                 and: Surface::Plane(meridian),
-                picked_by: smallvec![Surface::Plane(facing_x)],
+                picked_by: smallvec![Picker::from(facing_x)],
             },
             [a_pole(3.0), a_pole(-3.0)],
         );
@@ -262,7 +274,7 @@ mod tests {
             panic!("a seam is part of where its face crosses a meridian");
         };
         assert_eq!(and, &Surface::Plane(meridian));
-        assert_eq!(picked_by.as_slice(), [Surface::Plane(facing_x)]);
+        assert_eq!(picked_by.as_slice(), [Picker::from(facing_x)]);
     }
 
     /// The half-space that picks a piece may be curved, which is the whole of
@@ -270,8 +282,8 @@ mod tests {
     #[test]
     fn a_piece_of_a_crossing_can_be_picked_out_by_a_ball_or_a_pipe() {
         for picker in [
-            Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a radius")),
-            Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a radius")),
+            Picker::from(Sphere::new(Point::origin(), 1.0).expect("a radius")),
+            Picker::from(Cylinder::new(Axis::z(), 1.0).expect("a radius")),
         ] {
             let run = EdgeRun::PartOfWhereItCrosses {
                 and: Surface::Sphere(Sphere::new(Point::origin(), 3.0).expect("a radius")),

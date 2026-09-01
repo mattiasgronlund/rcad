@@ -1,5 +1,7 @@
 //! The surfaces a face can sit on.
 
+use core::cmp::Ordering;
+
 use serde::{Deserialize, Serialize};
 
 use crate::isometry::Isometry;
@@ -163,6 +165,55 @@ impl Surface {
             Surface::Plane(_) => (1.0, 1.0),
             Surface::Sphere(sphere) => (sphere.radius(), sphere.radius()),
             Surface::Cylinder(cylinder) => (cylinder.radius(), 1.0),
+        }
+    }
+
+    /// Where this surface sorts against another, on the numbers each one
+    /// stores.
+    ///
+    /// **Two questions need a fixed order over a *pair or triple* of surfaces,
+    /// and neither may invent its own.** Where three surfaces meet has to name a
+    /// corner the same way whichever face asked, or a fuse's two arguments
+    /// number the same corner differently (`docs/decisions.md` §31.3); and a
+    /// closed crossing has to start at the same place whichever of its two faces
+    /// walks it, or the one vertex §31.3 puts on it lands in two places.
+    ///
+    /// Sorting on the stored numbers is sound for exactly the reason §32.5's
+    /// trap gives: two faces that are the same plane hold the same four numbers.
+    /// It is **not** sound for a [`HalfSpace`](crate::HalfSpace), which has no
+    /// canonical form at all, and §33.8 is the other half of the same rule.
+    ///
+    /// Planes sort before balls and balls before pipes, which is what puts the
+    /// two flat ones of a triple at the front.
+    pub(crate) fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
+        let (mine, my_numbers) = self.the_numbers_it_is_written_with();
+        let (theirs, their_numbers) = other.the_numbers_it_is_written_with();
+        mine.cmp(&theirs).then_with(|| {
+            my_numbers
+                .iter()
+                .zip(their_numbers.iter())
+                .map(|(mine, theirs)| mine.total_cmp(theirs))
+                .find(|order| order.is_ne())
+                .unwrap_or(Ordering::Equal)
+        })
+    }
+
+    /// Which kind this is, and the numbers it places and sizes itself with.
+    fn the_numbers_it_is_written_with(&self) -> (u8, [f64; 7]) {
+        match self {
+            Surface::Plane(flat) => {
+                let [a, b, c, d] = flat.coefficients();
+                (0, [a, b, c, d, 0.0, 0.0, 0.0])
+            }
+            Surface::Sphere(ball) => {
+                let [x, y, z] = ball.centre().coordinates();
+                (1, [x, y, z, ball.radius(), 0.0, 0.0, 0.0])
+            }
+            Surface::Cylinder(pipe) => {
+                let [x, y, z] = pipe.axis().origin().coordinates();
+                let [u, v, w] = pipe.axis().direction().components();
+                (2, [x, y, z, u, v, w, pipe.radius()])
+            }
         }
     }
 

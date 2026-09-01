@@ -3,51 +3,81 @@
 //! Placement is baked in here and nowhere else (§17.3). The transform's rounding
 //! is representation wobble, and it is tagged as such rather than refused on.
 //!
-//! Two faces of an input that lie on one plane with an edge between them are
-//! joined into one first, by the same joiner the commit uses, because a corner
-//! between such a pair has two planes round it and not three and §17.1 cannot
-//! re-derive it (§17.4, amended 2026-08-31).
+//! # A face is its surface, and a corner has two routes
+//!
+//! §17.1 says a face *is* its plane and the stored corners are cached samples of
+//! it, so every corner is re-derived at the door. §31.3 changes one word and
+//! adds the case that word opens up: a corner of a *round bar* has two surfaces
+//! round it — the cap's plane and the wall's cylinder — and the whole cap circle
+//! satisfies both, so there is nothing to solve. **A corner with three or more
+//! surfaces round it is re-derived, and a corner with fewer is read out of the
+//! model and moved.**
+//!
+//! Read and moved is not a retreat. `check_curved_face` has already certified
+//! that the stored corner is [`Decision::Zero`] on its surface, which is a
+//! stronger promise than the box a Cramer solve gives — and the moved corner
+//! becomes a box of its own, because `Isometry::apply_to_point` rounds and a
+//! moved corner handed on as an exact triple would certify a confident sign
+//! about a rounding (§34.6).
+//!
+//! # A seam is not a boundary and is left out
+//!
+//! §31.3 says a seam is an ordinary boundary edge whose second surface is read
+//! out of its own [`EdgeRun`]. **That is wrong, and [`seams_are_left_out`] is
+//! the demonstration**: a seam is used *twice by one face*, so both uses run
+//! along one arc of one crossing in opposite directions, and an arrangement that
+//! took it as boundary would have one stretch of one curve claimed by two sides
+//! of one wire at once. What a seam is, is where the surface's own two
+//! coordinates were cut open — not where the face stops — which is the same
+//! sentence [`what_trims_this_face`](crate::holds) already says on the other
+//! side of the crate.
+//!
+//! One thing follows that §33.8 and §34.9 both expected to go the other way:
+//! **[`Picker`](rcad_geom::Picker) still needs no `transformed`.** The only
+//! stored picker in the kernel is the one that says which half of a meridian a
+//! seam is, and nothing reads it here.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rcad_geom::{Orientation, Plane, Point};
-use rcad_predicates::{Decision, Measures, Point as PredicatePoint, ProvenanceLog};
+use rcad_geom::{
+    Isometry, MeetOfThree, Orientation, Point, Surface, WHERE_THREE_SURFACES_MEET,
+    meet_of_three_surfaces, where_a_corner_lands_after_moving,
+};
+use rcad_predicates::{Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog};
 use smallvec::SmallVec;
 
 use crate::key::{FaceSlot, VertexSlot};
+use crate::validate::side_of_surface;
 use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
 
 use super::assemble::{InputFace, joined_faces_of_an_input};
-use super::{WHERE_THREE_PLANES_MEET, as_exact_as_it_is, gave_up, middle_of};
+use super::{as_exact_as_it_is, gave_up, middle_of};
 
 /// Move every solid in `solids` into world coordinates.
 ///
-/// No policy is taken, because nothing here is a decision a budget could
-/// soften: a corner is refused only when a plane around it *proves* it is
-/// somewhere else, or when nothing can bound where the planes round it meet at
-/// all. The log is written to only in the second case, which leaves the
-/// operation with nothing to return.
+/// A corner is refused only when a surface around it *proves* it is somewhere
+/// else, or when nothing can bound where the surfaces round it meet at all.
 ///
 /// # Errors
 ///
 /// [`Error::Invalid`](crate::Error::Invalid) when a corner's own faces disagree
 /// about where it is by more than its box, and
-/// [`Error::Undecidable`](crate::Error::Undecidable) when no three planes around
-/// a corner could be shown to meet at a point.
+/// [`Error::Undecidable`](crate::Error::Undecidable) when no three surfaces
+/// around a corner could be shown to meet at a point.
 ///
 /// # Panics
 ///
 /// If a solid is broken in a way [`Model::validate`] rejects: a face used at two
-/// placements, a corner with fewer than three faces round it, or an edge with
-/// only one face along it.
+/// placements, or a corner whose faces are not all at one placement.
 pub(crate) fn bake(
     model: &Model,
     solids: &[SolidKey],
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Vec<BakedSolid>> {
     solids
         .iter()
-        .map(|&solid| bake_one_solid(model, solid, log))
+        .map(|&solid| bake_one_solid(model, solid, policy, log))
         .collect()
 }
 
@@ -69,19 +99,24 @@ pub(crate) struct BakedFace {
     /// ancestors. More than one when coplanar faces of the input were joined
     /// into a single face on the way in.
     pub(crate) keys: Vec<FaceKey>,
-    /// The plane it sits on, already moved into place. This is the face
-    /// (§17.1); the corners below are cached samples of it.
-    pub(crate) plane: Plane,
+    /// The surface it sits on, already moved into place. This is the face
+    /// (§17.1, §31.3); the corners below are cached samples of it.
+    pub(crate) surface: Surface,
     /// Which way round the solid uses the face.
     pub(crate) orientation: Orientation,
-    /// The wires that trim it, outer one first, each walked the way the face
-    /// itself stores it — anticlockwise round [`BakedFace::plane`]'s normal for
-    /// the outer wire and clockwise for a hole, which is what
-    /// [`Model::validate`] enforces.
+    /// The wires that trim it, each walked the way the face itself stores it,
+    /// **with its seams left out** — see this module's header.
+    ///
+    /// The first is the face's own first wire, which [`FaceData`] calls the
+    /// outer one by fiat. On a closed surface that is an order the face stores
+    /// and not a fact about the geometry (§31.3), so nothing below reads it as
+    /// one.
+    ///
+    /// [`FaceData`]: crate::model::FaceData
     pub(crate) wires: Vec<Vec<BakedEdge>>,
-    /// The second plane of each line cutting this face, filled in by the
+    /// The second surface of each crossing cutting this face, filled in by the
     /// gathering step. The first is always the face's own.
-    pub(crate) cuts: Vec<Plane>,
+    pub(crate) cuts: Vec<Surface>,
     /// A box round the face.
     pub(crate) bounds: Bounds,
 }
@@ -96,33 +131,36 @@ pub(crate) struct BakedEdge {
     pub(crate) keys: SmallVec<[EdgeKey; 1]>,
     /// The corner the wire is at when it starts along this edge.
     pub(crate) start: BakedCorner,
-    /// The plane of the face on the other side of this edge. Together with the
-    /// face's own plane it *is* the edge's line (§17.4).
-    pub(crate) across: Plane,
+    /// The corner it is at when it stops.
+    ///
+    /// **Not the next side's start**, and that is what a closed edge changes: a
+    /// wire with a seam in it stops being a chain once the seam is left out, and
+    /// a cap circle starts and ends at the one corner it has.
+    pub(crate) end: BakedCorner,
+    /// The surface of the face on the other side of this edge. Together with the
+    /// face's own surface it *is* where the edge runs (§17.4, §31.3).
+    pub(crate) across: Surface,
 }
 
-/// A corner of an input face, re-derived from the planes that make it.
+/// A corner of an input face, in world coordinates.
 #[derive(Clone, Debug)]
 pub(crate) struct BakedCorner {
     /// The input vertex this is.
     pub(crate) vertex: VertexKey,
-    /// The three planes it was solved from: the best-conditioned triple of the
-    /// planes around it.
-    pub(crate) planes: [Plane; 3],
     /// The box it is somewhere inside.
+    ///
+    /// How far the corner may be from where its surfaces really meet is the
+    /// width of that box — representation wobble (§17.2), present even though
+    /// every decision was proved, because a re-derivation divides and a
+    /// placement rounds. It is carried on the point rather than beside it so
+    /// that the number tagged on the committed vertex and the number the
+    /// arrangement decided with cannot drift apart.
     pub(crate) point: PredicatePoint,
-    /// Every face plane that meets here, in a fixed order. Which lines run
+    /// Every face surface that meets here, in a fixed order. Which crossings run
     /// through a corner is then a question about the model rather than about
     /// arithmetic, which is what keeps the arrangement from having to prove a
-    /// corner is on a line it is on by construction.
-    ///
-    /// How far the corner may be from where its planes really meet is the width
-    /// of [`BakedCorner::point`]'s own box — representation wobble (§17.2),
-    /// present even though every decision was proved, because Cramer's rule
-    /// divides. It is carried on the point rather than beside it so that the
-    /// number tagged on the committed vertex and the number the arrangement
-    /// decided with cannot drift apart.
-    pub(crate) around: Vec<Plane>,
+    /// corner is on a curve it is on by construction.
+    pub(crate) around: Vec<Surface>,
 }
 
 /// A box round some geometry, in world coordinates.
@@ -141,10 +179,41 @@ impl Bounds {
         (0..3).all(|axis| self.low[axis] <= other.high[axis] && other.low[axis] <= self.high[axis])
     }
 
+    /// Whether the box provably holds no part of `point`'s own box.
+    ///
+    /// A proof and not a hint: [`Bounds`] round a face is a box the face is
+    /// certainly inside, so a point whose whole enclosure is clear of it is
+    /// certainly off the face. Plain `f64` is honest here because the comparison
+    /// only ever *widens* what is kept.
+    pub(crate) fn provably_misses(self, point: PredicatePoint) -> bool {
+        let box_of_it = point.enclosure();
+        (0..3).any(|axis| {
+            box_of_it[axis].lo() > self.high[axis] || box_of_it[axis].hi() < self.low[axis]
+        })
+    }
+
     fn nothing() -> Self {
         Self {
             low: [f64::INFINITY; 3],
             high: [f64::NEG_INFINITY; 3],
+        }
+    }
+
+    /// A box round one face of one solid, curved or flat.
+    ///
+    /// **Not a box round the face's corners**, which is what this used to read
+    /// off [`FaceView::for_each_triangle`] and which is wrong for every curved
+    /// face there is (§35.4): a round bar's wall fans into two triangles round
+    /// its seam, a line the wall bulges a whole radius out of, and a round cap
+    /// fans into nothing at all. A pair skipped on either would leave one of two
+    /// faces along an edge split and the other not.
+    fn round_a_face(solid: SolidView<'_>, face: FaceView<'_>) -> Self {
+        match solid.box_around_one_face(face) {
+            None => Self::nothing(),
+            Some((low, high)) => Self {
+                low: low.coordinates(),
+                high: high.coordinates(),
+            },
         }
     }
 
@@ -168,22 +237,36 @@ impl Bounds {
 ///
 /// A solid built by this fuse never has such a pair (§17.4's amendment of
 /// 2026-08-30), and one built by `ProfileBuilder` from three profile points in a
-/// row does. The corner between them has two planes round it and not three, so
-/// §17.1 cannot re-derive it, which is why the joining has to happen before the
-/// corners are solved rather than after.
-fn bake_one_solid(model: &Model, key: SolidKey, log: &mut ProvenanceLog) -> Result<BakedSolid> {
+/// row does. Two faces on one plane with an edge between them carry no crossing
+/// for that edge to run along, so the arrangement would be handed a boundary
+/// edge with nowhere to be.
+///
+/// **The joiner is only asked about a wholly flat solid**, because it is written
+/// in planes and nothing in this milestone builds a curved solid with two faces
+/// on one surface. A curved *answer* of this fuse could have one; it would
+/// arrive at [`split_a_face`](super::arrange::split_a_face) as a face whose
+/// neighbour across an edge is the same surface, which refuses by name rather
+/// than guessing. That refusal is where a lane that meets this finds it.
+fn bake_one_solid(
+    model: &Model,
+    key: SolidKey,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<BakedSolid> {
     let solid = model.solid(key);
-    let planes = plane_of_every_face(model, solid);
-    if let Some(joined) = joined_faces_of_an_input(model, solid, log)? {
-        return bake_the_joined_faces(model, key, &joined, log);
+    if solid.is_wholly_flat()
+        && let Some(joined) = joined_faces_of_an_input(model, solid, log)?
+    {
+        return bake_the_joined_faces(model, key, &joined, policy, log);
     }
 
-    let corners = corner_of_every_vertex(model, solid, &planes, log)?;
+    let surfaces = surface_of_every_face(model, solid);
+    let corners = corner_of_every_vertex(model, solid, &surfaces, policy, log)?;
 
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
     for face in solid.faces() {
-        let baked = bake_one_face(model, face, &planes, &corners);
+        let baked = bake_one_face(model, solid, face, &surfaces, &corners);
         bounds.take_in(baked.bounds);
         faces.push(baked);
     }
@@ -200,9 +283,10 @@ fn bake_the_joined_faces(
     model: &Model,
     key: SolidKey,
     joined: &[InputFace],
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedSolid> {
-    let corners = corner_of_every_vertex_left(model, joined, log)?;
+    let corners = corner_of_every_vertex_left(model, joined, policy, log)?;
 
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
@@ -211,13 +295,15 @@ fn bake_the_joined_faces(
         let mut wires = Vec::new();
         for ring in &face.wires {
             let mut walked = Vec::new();
-            for side in ring {
+            for (position, side) in ring.iter().enumerate() {
                 let start = corners[&side.start.slot_in(model.id())].clone();
+                let next = ring[(position + 1) % ring.len()].start;
                 round_this_face.take_in_point(middle_of(start.point));
                 walked.push(BakedEdge {
                     keys: side.edges.clone(),
                     start,
-                    across: side.across,
+                    end: corners[&next.slot_in(model.id())].clone(),
+                    across: Surface::Plane(side.across),
                 });
             }
             wires.push(walked);
@@ -225,7 +311,7 @@ fn bake_the_joined_faces(
         bounds.take_in(round_this_face);
         faces.push(BakedFace {
             keys: face.faces.clone(),
-            plane: face.plane,
+            surface: Surface::Plane(face.plane),
             orientation: Orientation::Forward,
             wires,
             cuts: Vec::new(),
@@ -246,9 +332,10 @@ fn bake_the_joined_faces(
 fn corner_of_every_vertex_left(
     model: &Model,
     joined: &[InputFace],
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BTreeMap<VertexSlot, BakedCorner>> {
-    let mut around: BTreeMap<VertexSlot, (VertexKey, Vec<Plane>)> = BTreeMap::new();
+    let mut around: BTreeMap<VertexSlot, (VertexKey, Vec<Surface>)> = BTreeMap::new();
     for face in joined {
         let mut its_corners: BTreeMap<VertexSlot, VertexKey> = BTreeMap::new();
         for side in face.wires.iter().flatten() {
@@ -259,206 +346,303 @@ fn corner_of_every_vertex_left(
                 .entry(slot)
                 .or_insert((vertex, Vec::new()))
                 .1
-                .push(face.plane);
+                .push(Surface::Plane(face.plane));
         }
     }
 
     around
         .into_iter()
-        .map(|(slot, (vertex, planes))| {
+        .map(|(slot, (vertex, surfaces))| {
             assert!(
-                planes.len() >= 3,
+                surfaces.len() >= 3,
                 "a corner of a closed solid has at least three faces round it, this one has {}",
-                planes.len()
+                surfaces.len()
             );
-            Ok((slot, derive_a_corner(vertex, planes, log)?))
+            Ok((slot, derive_a_corner(vertex, surfaces, policy, log)?))
         })
         .collect()
 }
 
-/// Every face of the solid with its plane already moved into place.
+/// Every face of the solid with its surface already moved into place, and where
+/// it was moved from.
 ///
 /// # Panics
 ///
 /// If the solid uses one face twice. Two uses can sit at two placements, and
-/// then "the plane of that face" has two answers; [`Model::validate`] refuses it
-/// as [`Invalid::UsedMoreThanOnce`].
-fn plane_of_every_face(model: &Model, solid: SolidView<'_>) -> BTreeMap<FaceSlot, Plane> {
-    let mut planes = BTreeMap::new();
+/// then "the surface of that face" has two answers; [`Model::validate`] refuses
+/// it as [`Invalid::UsedMoreThanOnce`].
+fn surface_of_every_face(model: &Model, solid: SolidView<'_>) -> BTreeMap<FaceSlot, PlacedSurface> {
+    let mut surfaces = BTreeMap::new();
     for face in solid.faces() {
         let slot = face.key().slot_in(model.id());
-        let already_there = planes.insert(slot, face.plane());
+        let already_there = surfaces.insert(
+            slot,
+            PlacedSurface {
+                stored: model.data().faces[slot].surface,
+                placed: face.surface(),
+                movement: face.location(),
+            },
+        );
         assert!(
             already_there.is_none(),
-            "a solid uses one face twice, so it has two planes"
+            "a solid uses one face twice, so it has two surfaces"
         );
     }
-    planes
+    surfaces
+}
+
+/// One face's surface, moved into place, and the movement that put it there.
+///
+/// The movement is what a corner read out of the model needs: the box round
+/// where it lands is worked out from the *stored* corner and the *stored*
+/// surfaces, and applying the movement to each of them separately is what
+/// [`where_a_corner_lands_after_moving`] does.
+#[derive(Clone, Copy, Debug)]
+struct PlacedSurface {
+    stored: Surface,
+    placed: Surface,
+    movement: Isometry,
 }
 
 fn corner_of_every_vertex(
     model: &Model,
     solid: SolidView<'_>,
-    planes: &BTreeMap<FaceSlot, Plane>,
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BTreeMap<VertexSlot, BakedCorner>> {
     let mut corners = BTreeMap::new();
     for face in solid.faces() {
         for wire in model.face(face.key()).wires() {
             for coedge in wire.coedges() {
-                let vertex = coedge.start().key();
-                let slot = vertex.slot_in(model.id());
-                if corners.contains_key(&slot) {
-                    continue;
+                for vertex in [coedge.start().key(), coedge.end().key()] {
+                    let slot = vertex.slot_in(model.id());
+                    if corners.contains_key(&slot) {
+                        continue;
+                    }
+                    let around = faces_around_a_vertex(model, vertex, surfaces);
+                    corners.insert(
+                        slot,
+                        place_a_corner(model, vertex, slot, &around, policy, log)?,
+                    );
                 }
-                let around = planes_around_a_vertex(model, vertex, planes);
-                corners.insert(slot, derive_a_corner(vertex, around, log)?);
             }
         }
     }
     Ok(corners)
 }
 
-/// The planes of every face of this solid that meets at this vertex.
+/// The surfaces of every face of this solid that meets at this vertex.
 ///
 /// # Panics
 ///
-/// If fewer than three do. A corner of a closed solid has at least three faces
-/// round it, so reaching this means the model was already broken.
-fn planes_around_a_vertex(
+/// If none does, which means the vertex was reached through a face that does not
+/// have it, so the model was already broken.
+fn faces_around_a_vertex(
     model: &Model,
     vertex: VertexKey,
-    planes: &BTreeMap<FaceSlot, Plane>,
-) -> Vec<Plane> {
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+) -> Vec<PlacedSurface> {
     let mut faces = BTreeSet::new();
     for edge in model.vertex(vertex).edges().collect::<Vec<_>>() {
         for face in model.edge(edge).neighbouring_faces() {
             let slot = face.slot_in(model.id());
-            if planes.contains_key(&slot) {
+            if surfaces.contains_key(&slot) {
                 faces.insert(slot);
             }
         }
     }
     assert!(
-        faces.len() >= 3,
-        "a corner of a closed solid has at least three faces round it, this one has {}",
-        faces.len()
+        !faces.is_empty(),
+        "a corner of a solid is a corner of at least one of its faces"
     );
-    faces.iter().map(|slot| planes[slot]).collect()
+    faces.iter().map(|slot| surfaces[slot]).collect()
 }
 
-/// Solve a corner from the planes around it (§17.1).
+/// Where a corner of an input is, by whichever of §31.3's two routes its own
+/// faces allow.
+///
+/// Three or more distinct surfaces round it and it is re-derived from the
+/// best-conditioned triple. Fewer, and the whole of the curve those surfaces
+/// share passes through it, so there is nothing to solve and it is read out of
+/// the model and moved.
+///
+/// # Panics
+///
+/// If the faces round one corner are at different placements. Then the corner
+/// has two places at once, and a solid like that is broken rather than awkward.
+fn place_a_corner(
+    model: &Model,
+    vertex: VertexKey,
+    slot: VertexSlot,
+    around: &[PlacedSurface],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<BakedCorner> {
+    let mut distinct: Vec<Surface> = Vec::with_capacity(around.len());
+    for face in around {
+        if !distinct.contains(&face.placed) {
+            distinct.push(face.placed);
+        }
+    }
+    if distinct.len() >= 3 {
+        return derive_a_corner(vertex, distinct, policy, log);
+    }
+
+    let movement = around[0].movement;
+    assert!(
+        around.iter().all(|face| face.movement == movement),
+        "the faces round one corner are at different placements, so the corner is in two places"
+    );
+    // A pole of a ball has one face round it and one surface, and its box is
+    // that surface's rounding counted once for each of the two chains the bound
+    // is derived over. Handing the same surface twice is what says so.
+    let stored = model.data().vertices[slot].point;
+    // A solid standing where it was built is not moved at all, and a box round
+    // a move that rounded nothing would turn an exact corner into an inexact
+    // one — which is the whole of §17.7's lattice control.
+    if movement == Isometry::identity() {
+        return Ok(BakedCorner {
+            vertex,
+            point: PredicatePoint::from(stored.coordinates()),
+            around: distinct,
+        });
+    }
+    let on = [around[0].stored, around[around.len() - 1].stored];
+    // The width of the box is the whole of what the move cost, and the
+    // `Approximation` beside it says the same number a second time. §34.9's trap
+    // is that the box is for asking predicates and its middle is for storing, so
+    // the one thing that must not happen is the two drifting apart — and the way
+    // to make that impossible is to keep only one of them.
+    let (point, _) = where_a_corner_lands_after_moving(stored, [&on[0], &on[1]], &movement)?;
+    Ok(BakedCorner {
+        vertex,
+        point: as_exact_as_it_is(point),
+        around: distinct,
+    })
+}
+
+/// Solve a corner from the surfaces around it (§17.1, §31.3).
 ///
 /// A corner where four or more faces meet is over-determined, so it is solved
-/// from the best-conditioned triple and every remaining plane is then asked
-/// whether it agrees. [`Plane::meet_of_three`] refusing three planes that are
-/// too close to sharing a line *is* the conditioning filter, so there is no
-/// second threshold here to argue about.
+/// from the best-conditioned triple and every remaining surface is then asked
+/// whether it agrees. [`meet_of_three_surfaces`] answering
+/// [`MeetOfThree::Nowhere`] or [`MeetOfThree::MoreThanAPoint`] *is* the
+/// conditioning filter, so there is no second threshold here to argue about —
+/// and neither of those is a refusal (§34.9), it is that triple saying it does
+/// not place this corner while another may.
 ///
-/// A plane that comes back [`Decision::Pos`] or [`Decision::Neg`] has *proved*
-/// the corner is somewhere else, which means the input's corners and its planes
-/// disagree by more than roundoff. [`Decision::Undecidable`] is agreement, not a
-/// failure: the plane passes through the corner's box, which is as much as
-/// anything can say about a point that had to be built.
+/// Three surfaces can meet at more than one point, and the stored corner is what
+/// says which: it is a cached sample of the truth (§17.1), so the box it falls
+/// inside is the one. Two boxes that both hold it are two answers to one
+/// question and the triple is passed over.
+///
+/// A surface that comes back [`Decision::Pos`] or [`Decision::Neg`] has *proved*
+/// the corner is somewhere else, which means the input's corners and its
+/// surfaces disagree by more than roundoff. [`Decision::Undecidable`] is
+/// agreement, not a failure: the surface passes through the corner's box, which
+/// is as much as anything can say about a point that had to be built.
 ///
 /// Every triple failing is not a geometry error: it is a corner nothing can
 /// place, which leaves the operation with nothing to return, so it is
 /// [`Error::Undecidable`](crate::Error::Undecidable) with a record naming
-/// [`WHERE_THREE_PLANES_MEET`].
-///
-/// A corner with only two distinct planes round it does not reach here, because
-/// [`joined_faces_of_an_input`] has already joined the faces that made it two
-/// and dropped the corner (§17.4, amended 2026-08-31). What is left to fail is a
-/// corner whose planes are three but so nearly share a line that
-/// [`Plane::meet_of_three`] cannot bound where they meet. The comment this
-/// replaces argued the branch was reachable only by "a solid that came from
-/// somewhere else" — which was true, and the somewhere else was `add_extrusion`
-/// over a profile with three points in a row.
+/// [`WHERE_THREE_SURFACES_MEET_HERE`].
 fn derive_a_corner(
     vertex: VertexKey,
-    around: Vec<Plane>,
+    around: Vec<Surface>,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedCorner> {
-    let mut best: Option<([Plane; 3], PredicatePoint)> = None;
+    let mut best: Option<([Surface; 3], PredicatePoint)> = None;
     for first in 0..around.len() {
         for second in (first + 1)..around.len() {
             for third in (second + 1)..around.len() {
                 let triple = [around[first], around[second], around[third]];
-                if let Ok(point) = Plane::meet_of_three(&triple[0], &triple[1], &triple[2]) {
-                    let point = as_exact_as_it_is(point);
-                    if best.is_none_or(|(_, best)| point.uncertainty() < best.uncertainty()) {
-                        best = Some((triple, point));
-                    }
+                let Ok(MeetOfThree::At(places)) =
+                    meet_of_three_surfaces([&triple[0], &triple[1], &triple[2]], policy, log)
+                else {
+                    continue;
+                };
+                let [only] = places.as_slice() else {
+                    continue;
+                };
+                let point = as_exact_as_it_is(*only);
+                if best.is_none_or(|(_, best)| point.uncertainty() < best.uncertainty()) {
+                    best = Some((triple, point));
                 }
             }
         }
     }
-    let Some((planes, point)) = best else {
-        let normals: Vec<PredicatePoint> = around
-            .iter()
-            .map(|plane| PredicatePoint::from(plane.normal().components()))
-            .collect();
+    let Some((_, point)) = best else {
         return Err(gave_up(
-            WHERE_THREE_PLANES_MEET,
-            &normals,
+            WHERE_THREE_SURFACES_MEET,
+            &[middle_of_the_places(&around)],
             Measures::Volume,
             log,
         ));
     };
 
-    for plane in &around {
-        if planes.contains(plane) {
-            continue;
-        }
-        match plane.side_of_point(point) {
+    for surface in &around {
+        match side_of_surface(surface, point) {
             Decision::Zero | Decision::Undecidable { .. } => (),
             Decision::Neg | Decision::Pos => {
-                return Err(Invalid::VertexOffItsFacePlane {
-                    distance: plane.signed_distance_to(middle_of(point)).abs(),
+                return Err(match surface {
+                    Surface::Plane(flat) => Invalid::VertexOffItsFacePlane {
+                        distance: flat.signed_distance_to(middle_of(point)).abs(),
+                    },
+                    _ => Invalid::VertexOffItsFaceSurface,
                 }
                 .into());
             }
             other => {
-                panic!("side of plane came back with a decision nothing here knows: {other:?}")
+                panic!("side of a surface came back with a decision nothing here knows: {other:?}")
             }
         }
     }
 
     Ok(BakedCorner {
         vertex,
-        planes,
         point,
         around,
     })
 }
 
-/// # Panics
-///
-/// If an edge of the face has no second face along it. A closed solid uses every
-/// edge exactly twice, so reaching this means the model was already broken.
+/// The place a provenance record names a set of surfaces by: where the first of
+/// them sits.
+fn middle_of_the_places(around: &[Surface]) -> PredicatePoint {
+    PredicatePoint::from(match around[0] {
+        Surface::Plane(flat) => flat.origin().coordinates(),
+        Surface::Sphere(ball) => ball.centre().coordinates(),
+        Surface::Cylinder(pipe) => pipe.axis().origin().coordinates(),
+        other => panic!("a surface nothing here can name: {other:?}"),
+    })
+}
+
+/// One face of a solid in world coordinates, with its seams left out.
 fn bake_one_face(
     model: &Model,
+    solid: SolidView<'_>,
     face: FaceView<'_>,
-    planes: &BTreeMap<FaceSlot, Plane>,
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
     corners: &BTreeMap<VertexSlot, BakedCorner>,
 ) -> BakedFace {
     let key = face.key();
-    let mut bounds = Bounds::nothing();
-    face.for_each_triangle(|triangle| {
-        for corner in triangle {
-            bounds.take_in_point(corner);
-        }
-    });
+    let bounds = Bounds::round_a_face(solid, face);
+    let mine = key.slot_in(model.id());
 
     let wires = model
         .face(key)
         .wires()
         .map(|wire| {
             wire.coedges()
-                .map(|coedge| BakedEdge {
-                    keys: core::iter::once(coedge.edge().key()).collect(),
-                    start: corners[&coedge.start().key().slot_in(model.id())].clone(),
-                    across: planes[&face_across(model, key, coedge.edge().key())],
+                .filter_map(|coedge| {
+                    let across = face_across(model, mine, coedge.edge().key())?;
+                    Some(BakedEdge {
+                        keys: core::iter::once(coedge.edge().key()).collect(),
+                        start: corners[&coedge.start().key().slot_in(model.id())].clone(),
+                        end: corners[&coedge.end().key().slot_in(model.id())].clone(),
+                        across: surfaces[&across].placed,
+                    })
                 })
                 .collect()
         })
@@ -466,7 +650,7 @@ fn bake_one_face(
 
     BakedFace {
         keys: vec![key],
-        plane: face.plane(),
+        surface: face.surface(),
         orientation: face.orientation(),
         wires,
         cuts: Vec::new(),
@@ -474,8 +658,16 @@ fn bake_one_face(
     }
 }
 
-fn face_across(model: &Model, face: FaceKey, edge: EdgeKey) -> FaceSlot {
-    let mine = face.slot_in(model.id());
+/// The face on the other side of one edge of this face, or `None` when this same
+/// face is on both sides — a **seam**, which is left out of the arrangement
+/// altogether (see this module's header).
+///
+/// # Panics
+///
+/// If an edge of the face has more than one face on the other side. A closed
+/// solid uses every edge exactly twice, so reaching this means the model was
+/// already broken.
+fn face_across(model: &Model, mine: FaceSlot, edge: EdgeKey) -> Option<FaceSlot> {
     let across: Vec<FaceSlot> = model
         .edge(edge)
         .neighbouring_faces()
@@ -483,16 +675,16 @@ fn face_across(model: &Model, face: FaceKey, edge: EdgeKey) -> FaceSlot {
         .filter(|&other| other != mine)
         .collect();
     assert!(
-        across.len() == 1,
-        "an edge of a closed solid has exactly one face on the other side, this one has {}",
+        across.len() <= 1,
+        "an edge of a closed solid has at most one face on the other side, this one has {}",
         across.len()
     );
-    across[0]
+    across.first().copied()
 }
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
+    use rcad_geom::{Axis, Isometry, Point, Scale, Surface, Vector};
     use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::{Bounds, bake};
@@ -507,8 +699,18 @@ mod tests {
         (model, cube)
     }
 
+    fn baked(model: &Model, solids: &[SolidKey]) -> Vec<super::BakedSolid> {
+        bake(
+            model,
+            solids,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("it bakes")
+    }
+
     /// Where the model says its corners are, with the solid's placement applied
-    /// — which is what the baked planes have been moved by too.
+    /// — which is what the baked surfaces have been moved by too.
     fn corners_as_stored(model: &Model, solid: SolidKey) -> Vec<(VertexKey, [f64; 3])> {
         let mut corners = Vec::new();
         for face in model.solid(solid).faces() {
@@ -529,20 +731,38 @@ mod tests {
             .1
     }
 
+    /// Where a solid's own placement puts one of its corners.
+    ///
+    /// `Model::vertex` hands back the corner in the model's frame and not in the
+    /// solid's, and a placed solid is the whole point of this test.
+    fn where_the_solid_puts(model: &Model, solid: SolidKey, vertex: VertexKey) -> [f64; 3] {
+        model
+            .solid(solid)
+            .faces()
+            .flat_map(|face| face.wires().collect::<Vec<_>>())
+            .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+            .find(|coedge| coedge.start().key() == vertex)
+            .expect("a corner of the solid")
+            .start()
+            .point()
+            .coordinates()
+    }
+
     fn a_turn() -> Isometry {
         let axis = Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(1.0, 2.0, 3.0))
             .expect("a direction with length");
         Isometry::rotation(&axis, 0.7).expect("a rotation")
     }
 
-    /// Every plane of a lattice-aligned cube is an axis plane, so Cramer's rule
-    /// divides by one and the corner it solves for is an `f64` exactly.
+    /// Every plane of a lattice-aligned cube is an axis plane, so the meet of
+    /// three of them divides by one and the corner it solves for is an `f64`
+    /// exactly.
     #[test]
     fn re_deriving_the_corners_of_a_lattice_cube_gives_back_the_corners_it_started_with() {
         let (model, cube) = a_cube_of_side_two();
         let log = ProvenanceLog::new();
         let corners = corners_as_stored(&model, cube);
-        let baked = bake(&model, &[cube], &mut ProvenanceLog::new()).expect("a cube bakes");
+        let baked = baked(&model, &[cube]);
 
         for face in &baked[0].faces {
             for wire in &face.wires {
@@ -572,7 +792,7 @@ mod tests {
         let (mut model, cube) = a_cube_of_side_two();
         model.place_solid(cube, &a_turn());
         let corners = corners_as_stored(&model, cube);
-        let baked = bake(&model, &[cube], &mut ProvenanceLog::new()).expect("a turned cube bakes");
+        let baked = baked(&model, &[cube]);
 
         let mut anything_was_built = false;
         for face in &baked[0].faces {
@@ -609,8 +829,7 @@ mod tests {
         model.place_solid(cube, &a_turn());
         let log = ProvenanceLog::new();
 
-        bake(&model, &[cube], &mut ProvenanceLog::new())
-            .expect("a turned cube bakes under a certified policy");
+        baked(&model, &[cube]);
 
         assert!(log.is_empty());
         assert_eq!(log.worst_wobble(100.0), 0.0);
@@ -619,12 +838,106 @@ mod tests {
     #[test]
     fn a_box_round_a_cube_holds_the_cube_and_misses_one_beside_it() {
         let (model, cube) = a_cube_of_side_two();
-        let baked = bake(&model, &[cube], &mut ProvenanceLog::new()).expect("a cube bakes");
+        let baked = baked(&model, &[cube]);
         let far_away = Bounds {
             low: [10.0, 10.0, 10.0],
             high: [12.0, 12.0, 12.0],
         };
         assert!(baked[0].bounds.overlap(baked[0].bounds));
         assert!(!baked[0].bounds.overlap(far_away));
+    }
+
+    /// §31.3 says a seam is an ordinary boundary edge whose second surface is
+    /// read out of its own run. It is not one, and this is why.
+    ///
+    /// A seam is used **twice by one face**, so the two uses run along one arc
+    /// of one crossing in opposite directions. Taking it as boundary hands the
+    /// arrangement one stretch of one curve claimed by two sides of one wire at
+    /// once, which no winding count can read. What a seam is, is where the
+    /// surface's own two coordinates were cut open — not where the face stops —
+    /// so it is left out, and a bar's wall comes back bounded by its two cap
+    /// circles and a ball's skin by nothing at all.
+    #[test]
+    fn seams_are_left_out() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar = model
+            .add_round_bar(3.0, 5.0, &Isometry::identity())
+            .expect("a bar");
+        let ball = model
+            .add_ball(
+                2.0,
+                &Isometry::translation(Vector::new(20.0, 0.0, 0.0)).expect("a shift"),
+            )
+            .expect("a ball");
+
+        let baked = baked(&model, &[bar, ball]);
+
+        let wall = baked[0]
+            .faces
+            .iter()
+            .find(|face| matches!(face.surface, Surface::Cylinder(_)))
+            .expect("the bar has a wall");
+        assert_eq!(wall.wires.len(), 1);
+        assert_eq!(
+            wall.wires[0].len(),
+            2,
+            "the wall's wire is two cap circles and a seam walked twice, and the seam is not \
+             boundary"
+        );
+        for side in &wall.wires[0] {
+            assert!(matches!(side.across, Surface::Plane(_)), "a cap");
+        }
+
+        let skin = &baked[1].faces[0];
+        assert!(matches!(skin.surface, Surface::Sphere(_)));
+        assert_eq!(skin.wires.len(), 1);
+        assert!(
+            skin.wires[0].is_empty(),
+            "a ball's one wire is its seam twice, so nothing trims it"
+        );
+    }
+
+    /// A corner of a round bar has two surfaces round it and the whole cap
+    /// circle satisfies both, so there is nothing to solve (§31.3). It is read
+    /// out of the model and moved, and moving it makes it a box (§34.6).
+    #[test]
+    fn a_corner_with_two_surfaces_round_it_is_read_out_of_the_model_and_moved() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar = model
+            .add_round_bar(3.0, 5.0, &Isometry::identity())
+            .expect("a bar");
+
+        let standing_still = baked(&model, &[bar]);
+        for face in &standing_still[0].faces {
+            for side in face.wires.iter().flatten() {
+                assert_eq!(
+                    side.start.point.exact_coordinates(),
+                    Some(model.vertex(side.start.vertex).point().coordinates()),
+                    "a bar that has not been moved has corners that are f64 exactly"
+                );
+                assert_eq!(side.start.around.len(), 2);
+            }
+        }
+
+        model.place_solid(bar, &a_turn());
+        let turned = baked(&model, &[bar]);
+        let mut anything_was_built = false;
+        for face in &turned[0].faces {
+            for side in face.wires.iter().flatten() {
+                let stored = where_the_solid_puts(&model, bar, side.start.vertex);
+                let box_of_it = side.start.point.enclosure();
+                for axis in 0..3 {
+                    assert!(
+                        box_of_it[axis].lo() <= stored[axis]
+                            && stored[axis] <= box_of_it[axis].hi(),
+                        "the box round a moved corner holds where the model says it went"
+                    );
+                }
+                if side.start.point.uncertainty() > 0.0 {
+                    anything_was_built = true;
+                }
+            }
+        }
+        assert!(anything_was_built, "a turned bar's corners are boxes");
     }
 }

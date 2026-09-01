@@ -1,0 +1,380 @@
+//! §31.7's criteria 5, 6 and 7, and the figures §34 records.
+//!
+//! # "Certified ON" has to mean "never certified OFF", one dimension down
+//!
+//! Criterion 5 asks that every point where three surfaces meet come back as a
+//! box "certified `Zero` on all three". Taken literally that is not something
+//! any amount of precision reaches, and the reason is the one
+//! `every_point_along_a_crossing_is_on_both_surfaces.rs` already argues at
+//! length: where a line cuts a ball is at coordinates no `f64` can name, so a
+//! box round it has real width and an interval evaluation of `‖p − c‖² − R²`
+//! over that box straddles zero. `Decision::Zero` about it would take the box to
+//! have no width at all, which happens only where the arithmetic rounded
+//! nothing.
+//!
+//! So the oracle is the same one M3 used, with the same two halves:
+//!
+//! - **Nothing where three surfaces meet is ever certified off any of them.** A
+//!   `Pos` or a `Neg` is a bug — an exact answer to the wrong question (§2.5).
+//! - **The same box against a surface moved comfortably clear is decided.**
+//!   Otherwise the first half would pass just as well for boxes a mile wide.
+//!
+//! And where the arithmetic *does* round nothing — a lattice triple whose
+//! corner is a whole number — the answer is a box of no width and a certified
+//! `Zero` on all three. That is measured too, because it is the half of
+//! criterion 5 that can be met to the letter.
+//!
+//! # How wide the boxes are
+//!
+//! Reported as a share of the largest number the triple was written with, per
+//! family and never blended (§17.7).
+
+#![forbid(unsafe_code)]
+
+mod crossings;
+
+use proptest::prelude::*;
+use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
+use rcad_geom::{
+    Axis, Cylinder, Error, MeetOfThree, Plane, Point, Sphere, Surface, Vector,
+    meet_of_three_surfaces,
+};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
+
+use crossings::{
+    Corner, a_corner_somewhere_else, a_lattice_corner, a_leaning_corner, a_turned_corner,
+};
+
+/// How many triples each measured row draws.
+const CASES: u32 = 2048;
+
+/// How far a surface is moved to make a control that must be decided.
+///
+/// A millionth of the size of the triple. Ten orders of magnitude wider than any
+/// box measured below, so a row that fails this half is one whose boxes have
+/// stopped meaning anything rather than one that was asked too much.
+const COMFORTABLY_CLEAR: f64 = 1e-6;
+
+/// The widest box any row is allowed to hand back, as a share of the largest
+/// number the corner was worked out from.
+///
+/// **A floor under nonsense and not a derived bound**, and it is set where it is
+/// because two real mistakes were caught by moving it there. Reading the
+/// discriminant's size in intervals rather than out of the exact expansion put
+/// the `somewhere else` row at `2.1e-8`; taking the two roots as `(−B ± √Δ)/A`
+/// rather than through the stable pair put one turned corner's box at fifteen
+/// hundred times the shape. The rows now measure between `2.2e-16` and
+/// `1.8e-14`, so this leaves about five orders of headroom — enough that an
+/// ordinary drawing does not trip it and far too little for either of those two
+/// to come back unnoticed. §34 records what each row measures.
+const NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE: f64 = 1e-9;
+
+/// The control: whole numbers, planes square to an axis.
+///
+/// **§31.7's criterion 6.** Nothing on the lattice may refuse, and every corner
+/// on it lands on a whole number, so the boxes have no width and the `Zero`
+/// criterion 5 asks for is reached to the letter.
+#[test]
+fn a_certified_meeting_of_three_lattice_surfaces_never_refuses() {
+    let measured = meet_every_triple(a_lattice_corner(), "the control");
+    assert_eq!(
+        measured.refused, 0,
+        "the lattice control refused {} of {} triples",
+        measured.refused, measured.drawn
+    );
+    assert!(
+        measured.certified_zero > 0,
+        "a lattice corner that rounds nothing is certified Zero on all three, and none was"
+    );
+}
+
+/// The same shapes with the planes and pipes tilted, so a stored direction is a
+/// rounding of the one that was asked for.
+#[test]
+fn every_point_where_three_leaning_surfaces_meet_is_on_all_three_of_them() {
+    let measured = meet_every_triple(a_leaning_corner(), "leaning");
+    assert!(measured.worst_box < NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE);
+}
+
+/// The headline: the control under one general rotation.
+#[test]
+fn every_point_where_three_turned_surfaces_meet_is_on_all_three_of_them() {
+    let measured = meet_every_triple(a_turned_corner(), "turned");
+    assert!(measured.worst_box < NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE);
+}
+
+/// The control written somewhere else in `f64`, where the exact arithmetic runs
+/// out of range and the refusal is a **gap** rather than a limit.
+#[test]
+fn every_point_where_three_surfaces_meet_somewhere_else_in_f64_is_on_all_three_of_them() {
+    let measured = meet_every_triple(a_corner_somewhere_else(), "somewhere else");
+    assert!(measured.worst_box < NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE);
+}
+
+/// **§31.7's criterion 7.** Three surfaces of which fewer than two are flat are
+/// refused by name, and the refusal is a gap: the points are there and this is
+/// the demonstration.
+///
+/// A pipe of radius three down `z`, a ball of radius five at the origin and a
+/// plane. The pipe and the ball meet where `x² + y² = 9` and `x² + y² + z² =
+/// 25`, so at `z = ±4` — and the point `(3, 0, 4)` is exactly on both, in whole
+/// numbers, with nothing rounded anywhere. Add a third curved surface through it
+/// and the corner still exists and is still exact; what changes is that no
+/// discriminant this milestone writes can reach it.
+#[test]
+fn three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved() {
+    let corner = Point::new(3.0, 0.0, 4.0);
+    let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 3.0).expect("a radius"));
+    let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a radius"));
+    let second_ball =
+        Surface::Sphere(Sphere::new(Point::new(3.0, 0.0, 0.0), 4.0).expect("a radius"));
+    let cap = Surface::Plane(
+        Plane::from_point_and_normal(corner, Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal"),
+    );
+
+    // The corner is exactly on all four, with no rounding anywhere.
+    for surface in [&pipe, &ball, &second_ball, &cap] {
+        assert_eq!(
+            which_side_of(surface, PredicatePoint::from(corner.coordinates())),
+            Decision::Zero,
+            "{corner:?} is exactly on {surface:?}"
+        );
+    }
+
+    // One plane and two quadrics, and three quadrics. Both refuse by name.
+    for triple in [[&cap, &ball, &pipe], [&second_ball, &ball, &pipe]] {
+        assert_eq!(
+            meet_of_three_surfaces(triple, &Policy::certified(), &mut ProvenanceLog::new()),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        );
+    }
+
+    // Two planes and one of them is answered, so the refusal is about how many
+    // curved surfaces there are and not about this corner.
+    let wall = Surface::Plane(
+        Plane::from_point_and_normal(corner, Vector::new(0.0, 1.0, 0.0))
+            .expect("the y axis is a unit normal"),
+    );
+    assert_eq!(
+        meet_of_three_surfaces(
+            [&cap, &wall, &pipe],
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        )
+        .map(|answer| middles_of(&answer)),
+        Ok(vec![[-3.0, 0.0, 4.0], [3.0, 0.0, 4.0]])
+    );
+}
+
+/// The answer is about which three surfaces they are, and not about the order
+/// they were handed over in.
+///
+/// §31.3 needs this: three surfaces can meet at more than one point, so a corner
+/// is named by the three surfaces *and* by which of their meets it is, and that
+/// count is only well defined if every caller counts the same way. All six
+/// orders, bit for bit.
+#[test]
+fn the_same_three_surfaces_meet_at_the_same_points_whichever_order_they_are_asked_in() {
+    let mut runner = a_runner(256);
+    let outcome = runner.run(&a_turned_corner(), |corner| {
+        let surfaces = corner.surfaces();
+        let asked = |order: [usize; 3]| {
+            meet_of_three_surfaces(
+                [
+                    &surfaces[order[0]],
+                    &surfaces[order[1]],
+                    &surfaces[order[2]],
+                ],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+        };
+        let first = asked([0, 1, 2]);
+        for order in [[0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+            prop_assert_eq!(
+                asked(order),
+                first.clone(),
+                "asking in the order {:?} gave a different answer",
+                order
+            );
+        }
+        Ok(())
+    });
+    if let Err(why) = outcome {
+        panic!("{why}");
+    }
+}
+
+/// What one row measured.
+struct Measured {
+    drawn: usize,
+    refused: usize,
+    corners: usize,
+    certified_zero: usize,
+    worst_box: f64,
+}
+
+/// Draw a family of triples, meet each one, and check every point that comes
+/// back.
+fn meet_every_triple(strategy: impl Strategy<Value = Corner>, what: &str) -> Measured {
+    let mut runner = a_runner(CASES);
+
+    let drawn = std::cell::Cell::new(0usize);
+    let refused = std::cell::Cell::new(0usize);
+    let corners = std::cell::Cell::new(0usize);
+    let certified_zero = std::cell::Cell::new(0usize);
+    let worst_box = std::cell::Cell::new(0.0f64);
+
+    let outcome = runner.run(&strategy, |corner| {
+        drawn.set(drawn.get() + 1);
+        let surfaces = corner.surfaces();
+        let size = corner.how_big();
+        let answer = meet_of_three_surfaces(
+            [&surfaces[0], &surfaces[1], &surfaces[2]],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let MeetOfThree::At(points) = (match answer {
+            Ok(answer) => answer,
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat) => {
+                unreachable!("every triple here has two flat cuts in it")
+            }
+            Err(_) => {
+                refused.set(refused.get() + 1);
+                return Ok(());
+            }
+        }) else {
+            return Ok(());
+        };
+
+        for point in &points {
+            corners.set(corners.get() + 1);
+            // **The largest number involved, and the corner's own coordinates
+            // are among them.** Two planes a hair off parallel meet a long way
+            // from either of them, and charging the box that lands out there
+            // against the size of the shapes that named it would be measuring a
+            // rounding of `1e16` against a `3` (§19, and
+            // `Surface::ROUND_TRIP_ROUNDOFF`'s wording).
+            let scale = the_largest_number_involved(size, *point);
+            worst_box.set(worst_box.get().max(point.uncertainty() / scale));
+            let mut on_all_three = true;
+            for surface in &surfaces {
+                match which_side_of(surface, *point) {
+                    Decision::Zero => (),
+                    Decision::Undecidable { .. } => on_all_three = false,
+                    decided => prop_assert!(
+                        false,
+                        "a point where three surfaces meet was certified {:?} off {:?}: {:?}",
+                        decided,
+                        surface,
+                        point
+                    ),
+                }
+                prop_assert!(
+                    which_side_of(&moved_clear(surface, scale), *point).is_certified(),
+                    "the same box against {:?} moved comfortably clear was not decided: {:?}",
+                    surface,
+                    point
+                );
+            }
+            if on_all_three {
+                certified_zero.set(certified_zero.get() + 1);
+            }
+        }
+        Ok(())
+    });
+    if let Err(why) = outcome {
+        panic!("{why}");
+    }
+
+    let measured = Measured {
+        drawn: drawn.get(),
+        refused: refused.get(),
+        corners: corners.get(),
+        certified_zero: certified_zero.get(),
+        worst_box: worst_box.get(),
+    };
+    println!(
+        "{what}: {} triples, {} corners, {} of them certified Zero on all three, \
+         {} refused ({:.2}%), widest box {:e} of the size",
+        measured.drawn,
+        measured.corners,
+        measured.certified_zero,
+        measured.refused,
+        100.0 * measured.refused as f64 / measured.drawn as f64,
+        measured.worst_box,
+    );
+    measured
+}
+
+/// The same surface moved comfortably clear of where it was.
+///
+/// A plane pushed along its own normal, a ball and a pipe grown. A point that
+/// was on the original is then provably inside the moved one, and the sign that
+/// says so is what stops the first half of the oracle passing for a box a mile
+/// wide.
+fn moved_clear(surface: &Surface, size: f64) -> Surface {
+    let gap = size * COMFORTABLY_CLEAR;
+    match surface {
+        Surface::Plane(flat) => {
+            let [a, b, c, d] = flat.coefficients();
+            Surface::Plane(
+                Plane::from_coefficients([a, b, c, d - gap]).expect("a plane moved along itself"),
+            )
+        }
+        Surface::Sphere(ball) => Surface::Sphere(
+            Sphere::new(ball.centre(), ball.radius() + gap).expect("a larger radius"),
+        ),
+        Surface::Cylinder(pipe) => Surface::Cylinder(
+            Cylinder::new(pipe.axis(), pipe.radius() + gap).expect("a larger radius"),
+        ),
+        other => panic!("nothing here can move {other:?} clear"),
+    }
+}
+
+/// The largest magnitude any of this was worked out from: the numbers the three
+/// surfaces are placed and sized with, and the corner's own coordinates.
+fn the_largest_number_involved(size: f64, point: PredicatePoint) -> f64 {
+    point
+        .enclosure()
+        .iter()
+        .map(|side| side.lo().abs().max(side.hi().abs()))
+        .fold(size, f64::max)
+        .max(f64::MIN_POSITIVE)
+}
+
+/// Which side of a surface a point is on, whichever kind it is.
+fn which_side_of(surface: &Surface, point: PredicatePoint) -> Decision {
+    match surface {
+        Surface::Plane(flat) => flat.side_of_point(point),
+        Surface::Sphere(ball) => ball.side_of(point),
+        Surface::Cylinder(pipe) => pipe.side_of(point),
+        other => panic!("nothing here can place a point against {other:?}"),
+    }
+}
+
+/// The middle of each box, for a test that knows the answer is a whole number.
+fn middles_of(answer: &MeetOfThree) -> Vec<[f64; 3]> {
+    let MeetOfThree::At(points) = answer else {
+        panic!("expected points, got {answer:?}");
+    };
+    points
+        .iter()
+        .map(|point| point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0))
+        .collect()
+}
+
+fn a_runner(cases: u32) -> TestRunner {
+    TestRunner::new_with_rng(
+        Config {
+            cases,
+            source_file: Some(file!()),
+            failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
+                "proptest-regressions",
+            ))),
+            ..Config::default()
+        },
+        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+    )
+}

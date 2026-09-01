@@ -48,20 +48,29 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rcad_geom::{Isometry, Orientation, Plane, PlaneAgreement, Point, Surface};
+use rcad_geom::{
+    EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point, Surface,
+    Vector,
+};
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
 };
 use smallvec::SmallVec;
 
-use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
-use crate::model::{FaceUse, ShellUse};
-use crate::validate::winding_round;
+use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
+use crate::measure::signed_volume_over;
+use crate::model::{FaceUse, ShellUse, WireStep};
+use crate::validate::{
+    a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets,
+    every_side_of_the_skin_is_used_both_ways, gradient_of, the_curved_one_of, winding_round,
+};
 use crate::{
     Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
 };
 
-use super::arrange::agreement_of_two_planes;
+use super::arrange::{
+    agreement_of_two_planes, name_of_surface_bits, name_of_the_surface_either_way_round,
+};
 use super::select::Chosen;
 use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
 
@@ -73,8 +82,10 @@ use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
 ///
 /// [`Error::ResultIsNotManifold`] when an edge of the result would have other
 /// than two faces along it, [`Error::Invalid`] when a shell encloses no space or
-/// a void has nothing round it, and [`Error::Undecidable`] when one shell could
-/// not be placed inside or outside another.
+/// a void has nothing round it, [`Error::Undecidable`] when one shell could not
+/// be placed inside or outside another, and
+/// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's one
+/// corner is a pole of the surface it is drawn on.
 pub(crate) fn assemble(
     model: &Model,
     scratch: &Scratch,
@@ -82,8 +93,9 @@ pub(crate) fn assemble(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Assembly> {
-    let mut assembly = Assembly::from_the_pieces(model, scratch, chosen);
+    let mut assembly = Assembly::from_the_pieces(model, scratch, chosen)?;
     assembly.join_up_what_is_one_face(log)?;
+    assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
     assembly.solids = assembly.nest_the_shells(model, policy, log)?;
     Ok(assembly)
@@ -143,6 +155,9 @@ pub(crate) struct InputSide {
 pub(crate) struct Assembly {
     corners: Vec<Corner>,
     edges: Vec<Edge>,
+    /// What each edge runs along, worked out once so that the scratch model the
+    /// shells are nested in and the caller's model are built the same way.
+    runs: Vec<EdgeRun>,
     faces: Vec<Face>,
     shells: Vec<Vec<usize>>,
     solids: Vec<Lump>,
@@ -211,7 +226,7 @@ impl Assembly {
             cfg!(debug_assertions) && model.validate(policy, &mut ProvenanceLog::new()).is_ok();
 
         let approximation_before = model.worst_approximation();
-        let written = self.write_into(model, &self.solids);
+        let written = self.write_into(model, &self.solids, &self.runs);
         let worst = self.tag_everything_it_built(model, &written, inherited);
         model.assert_approximation_did_not_grow(approximation_before.max(worst));
 
@@ -224,7 +239,13 @@ impl Assembly {
     }
 
     /// One face per kept piece, and the corners and edges they share.
-    fn from_the_pieces(model: &Model, scratch: &Scratch, chosen: &[Chosen]) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's
+    /// one corner is a pole of the surface it is drawn on, where nothing says
+    /// which way it runs.
+    fn from_the_pieces(model: &Model, scratch: &Scratch, chosen: &[Chosen]) -> Result<Self> {
         let mut corners = Corners::default();
         let mut edges = Edges::default();
         let mut faces = Vec::new();
@@ -234,25 +255,38 @@ impl Assembly {
             let wires = piece
                 .wires
                 .iter()
-                .map(|wire| sides_of(wire, turned_round, model, &mut corners, &mut edges))
-                .collect();
+                .map(|wire| {
+                    sides_of(
+                        wire,
+                        turned_round,
+                        piece.ancestors[0],
+                        model,
+                        &mut corners,
+                        &mut edges,
+                    )
+                })
+                .collect::<Result<_>>()?;
+            let (surface, used) = match (piece.surface.as_plane(), turned_round) {
+                (Some(flat), true) => (Surface::Plane(flat.reversed()), Orientation::Forward),
+                (Some(_) | None, false) => (piece.surface, Orientation::Forward),
+                (None, true) => (piece.surface, Orientation::Reversed),
+            };
             faces.push(Face {
                 ancestors: piece.ancestors.clone(),
-                plane: if turned_round {
-                    piece.plane.reversed()
-                } else {
-                    piece.plane
-                },
+                surface,
+                used,
                 wires,
+                is_a_whole_closed_surface: piece.is_the_whole_surface,
             });
         }
-        Self {
+        Ok(Self {
             corners: corners.made,
             edges: edges.made,
+            runs: Vec::new(),
             faces,
             shells: Vec::new(),
             solids: Vec::new(),
-        }
+        })
     }
 
     /// One face per face of an input solid, ready to be joined.
@@ -286,6 +320,12 @@ impl Assembly {
                         None => {
                             edges.push(Edge {
                                 ends: [from, to],
+                                // The joiner is only ever asked about a wholly
+                                // flat solid, so a straight run is what every
+                                // one of these is, and nothing on this path
+                                // reads it back.
+                                carried_by: [face.surface(); 2],
+                                arc: WhichArc::TheOnlyOne,
                                 from: vec![used.key()],
                             });
                             edge_of_input_edge.insert(slot, edges.len() - 1);
@@ -302,18 +342,21 @@ impl Assembly {
             let plane = face.plane();
             faces.push(Face {
                 ancestors: vec![face.key()],
-                plane: if face.orientation().is_reversed() {
+                surface: Surface::Plane(if face.orientation().is_reversed() {
                     plane.reversed()
                 } else {
                     plane
-                },
+                }),
+                used: Orientation::Forward,
                 wires,
+                is_a_whole_closed_surface: false,
             });
         }
 
         Self {
             corners,
             edges,
+            runs: Vec::new(),
             faces,
             shells: Vec::new(),
             solids: Vec::new(),
@@ -349,14 +392,14 @@ impl Assembly {
                         start: self.corners[self.starts_at(dart)]
                             .from
                             .expect("a corner of an input solid is one of its own vertices"),
-                        across: self.faces[across(dart, &along, side.edge).face].plane,
+                        across: self.faces[across(dart, &along, side.edge).face].outward_plane(),
                     });
                 }
                 wires.push(sides);
             }
             faces.push(InputFace {
                 faces: face.ancestors.clone(),
-                plane: face.plane,
+                plane: face.outward_plane(),
                 wires,
             });
         }
@@ -463,11 +506,22 @@ impl Assembly {
                 if one.face == other.face {
                     return Ok(false);
                 }
-                let agreement = agreement_of_two_planes(
-                    &self.faces[one.face].plane,
-                    &self.faces[other.face].plane,
-                    log,
-                )?;
+                // **Only two flat faces are ever joined**, and what that leaves
+                // undone is worth naming. Two pieces of one *cylinder* facing
+                // the same way with an edge between them really are one face,
+                // and the answer keeps them as two — a sound solid, cut into
+                // more faces than it has. Joining them would need the rings walk
+                // below, which winds corners about a plane's normal and has no
+                // curved twin. What used to make this urgent no longer does:
+                // §17.1 could not re-derive a corner with two surfaces round it,
+                // and §31.3's second route reads one out of the model.
+                let (Some(mine), Some(theirs)) = (
+                    self.faces[one.face].surface.as_plane(),
+                    self.faces[other.face].surface.as_plane(),
+                ) else {
+                    return Ok(false);
+                };
+                let agreement = agreement_of_two_planes(mine, theirs, log)?;
                 Ok(agreement == PlaneAgreement::SameWay)
             })
             .collect()
@@ -497,7 +551,9 @@ impl Assembly {
         for members in groups.into_values() {
             if let [only] = members[..] {
                 joined.push(JoinedFace {
-                    plane: self.faces[only].plane,
+                    surface: self.faces[only].surface,
+                    used: self.faces[only].used,
+                    is_a_whole_closed_surface: self.faces[only].is_a_whole_closed_surface,
                     rings: (0..self.faces[only].wires.len())
                         .map(|wire| self.whole_ring(only, wire))
                         .collect(),
@@ -505,11 +561,16 @@ impl Assembly {
                 });
                 continue;
             }
+            // Only flat faces are ever joined — the walk below winds corners
+            // about a plane's normal and has no curved twin — so a group with
+            // more than one member is flat throughout.
             let plane = plane_of_the_joined_face(&members, &self.faces);
             let rings = self.rings_round(&members, along, dissolved, plane)?;
             joined.push(JoinedFace {
                 members,
-                plane,
+                surface: Surface::Plane(plane),
+                used: Orientation::Forward,
+                is_a_whole_closed_surface: false,
                 rings,
             });
         }
@@ -633,6 +694,11 @@ impl Assembly {
         &self.faces[dart.face].wires[dart.wire][dart.position]
     }
 
+    /// The corner a side arrives at.
+    fn stops_at(&self, side: &Side) -> usize {
+        self.edges[side.edge].ends[usize::from(side.forward)]
+    }
+
     /// Write the corners, edges and faces out again with the joined faces in
     /// place of their pieces and the corners that stopped being corners gone.
     ///
@@ -656,7 +722,9 @@ impl Assembly {
                         .iter()
                         .flat_map(|&member| self.faces[member].ancestors.iter().copied()),
                 ),
-                plane: face.plane,
+                surface: face.surface,
+                used: face.used,
+                is_a_whole_closed_surface: face.is_a_whole_closed_surface,
                 wires: face
                     .rings
                     .iter()
@@ -715,11 +783,18 @@ impl Assembly {
         let mut straight_through: BTreeSet<(usize, usize)> = BTreeSet::new();
         let mut still_a_corner = vec![false; self.corners.len()];
         for (&(lump, corner), by) in &leaving {
-            if let [one, other] = by[..] {
-                runs.join(one, other);
-                straight_through.insert((lump, corner));
-            } else {
-                still_a_corner[corner] = true;
+            // **Two different edges**, and the word "different" is what a closed
+            // edge changes. A circle starts and ends at its one corner, so it
+            // leaves that corner twice and this list is one edge written down
+            // twice — which is not a run of two edges to fold into one, it is
+            // the only corner a closed curve has. Dissolving it leaves the
+            // joined edge with no ends at all.
+            match by[..] {
+                [one, other] if one != other => {
+                    runs.join(one, other);
+                    straight_through.insert((lump, corner));
+                }
+                _ => still_a_corner[corner] = true,
             }
         }
 
@@ -744,34 +819,100 @@ impl Assembly {
                 continue;
             }
             let lump = renumbered.lump_of_edge[leader].expect("an edge that stays is in a lump");
-            let mut ends = Vec::new();
+            let mut kept = Vec::new();
+            let mut dropped = Vec::new();
+            let mut arcs = Vec::new();
             let mut from = Vec::new();
             for (edge, along) in self.edges.iter().enumerate() {
                 if renumbered.lump_of_edge[edge].is_none() || renumbered.runs.leader(edge) != leader
                 {
                     continue;
                 }
-                ends.extend(
-                    along
-                        .ends
-                        .iter()
-                        .filter(|&&end| !renumbered.straight_through.contains(&(lump, end)))
-                        .map(|&end| renumbered.corner_now[end].expect("an end is still a corner")),
-                );
+                for end in along.ends {
+                    if renumbered.straight_through.contains(&(lump, end)) {
+                        dropped.push(end);
+                    } else {
+                        kept.push(end);
+                    }
+                }
+                arcs.push(along.arc);
                 from.extend(along.from.iter().copied());
             }
-            let ends = <[usize; 2]>::try_from(ends.as_slice())
+            let ends = <[usize; 2]>::try_from(kept.as_slice())
                 .expect("a run of edges that became one edge has two ends left");
+            // One corner twice is a side that **closes**, not a side of no
+            // length — a cap circle and a round hole are exactly that, and
+            // `Edge::how_it_runs` reads the pair as `RightRoundWhereItsFacesCross`.
+            // What cannot happen is a *straight* side coming back to where it
+            // started: two planes cross in a line and a line does not close.
+            let flat = self.edges[leader]
+                .carried_by
+                .iter()
+                .all(|surface| surface.as_plane().is_some());
             assert!(
-                ends[0] != ends[1],
-                "a piece of a face has a side with no length"
+                ends[0] != ends[1] || !flat,
+                "a piece of a face has a straight side with no length"
             );
             made.push(Edge {
-                ends,
+                ends: ends.map(|end| renumbered.corner_now[end].expect("an end is still a corner")),
+                carried_by: self.edges[leader].carried_by,
+                arc: self.arc_of_a_joined_run(&arcs, ends, &dropped, renumbered),
                 from: each_one_once(from.into_iter()),
             });
         }
         made
+    }
+
+    /// Which arc a run of edges joined into one is.
+    ///
+    /// The pieces of a run are consecutive stretches of one arc, so the joined
+    /// arc is named the same way any one of them is: a corner of it, and a
+    /// direction from there into it. **A corner the joining dissolved is a point
+    /// on the joined arc**, so the direction from a surviving end towards one of
+    /// them points into it — and a corner the arrangement placed is not a point
+    /// this had to build.
+    ///
+    /// # Panics
+    ///
+    /// If a run of one edge dissolved a corner, or a run of several dissolved
+    /// none. Joining is what drops a corner and it drops exactly the ones
+    /// between the pieces, so either would mean this and
+    /// [`Assembly::what_is_left`] have stopped agreeing.
+    fn arc_of_a_joined_run(
+        &self,
+        arcs: &[WhichArc],
+        ends: [usize; 2],
+        dropped: &[usize],
+        renumbered: &Renumbered,
+    ) -> WhichArc {
+        let renumber = |corner: usize| {
+            renumbered.corner_now[corner].expect("an end of a joined run is still a corner")
+        };
+        let Some(&inside) = dropped.first() else {
+            assert!(
+                arcs.len() == 1,
+                "{} edges joined into one with no corner dissolved between them",
+                arcs.len()
+            );
+            return match arcs[0] {
+                WhichArc::TheOnlyOne => WhichArc::TheOnlyOne,
+                WhichArc::LeavingACorner { corner, towards } => WhichArc::LeavingACorner {
+                    corner: renumber(corner),
+                    towards,
+                },
+            };
+        };
+        assert!(
+            arcs.len() > 1,
+            "one edge on its own dissolved a corner of itself"
+        );
+        if arcs.iter().all(|arc| matches!(arc, WhichArc::TheOnlyOne)) {
+            return WhichArc::TheOnlyOne;
+        }
+        WhichArc::LeavingACorner {
+            corner: renumber(ends[0]),
+            towards: self.corners[inside].point - self.corners[ends[0]].point,
+        }
     }
 
     fn sides_of(&self, ring: &[Dart], renumbered: &Renumbered, edges: &[Edge]) -> Vec<Side> {
@@ -787,25 +928,51 @@ impl Assembly {
             .expect("a ring of a face has a corner on it");
 
         let mut sides: Vec<Side> = Vec::new();
-        let mut carrying: Option<usize> = None;
         for step in 0..ring.len() {
             let dart = ring[(opens + step) % ring.len()];
-            let edge = renumbered.runs.leader(self.edge_of(dart));
-            if carrying == Some(edge) {
+            // A dart whose corner the joining dissolved is the rest of the side
+            // before it and not a side of its own. Skipping on the *corner*
+            // rather than on the edge is what leaves a seam alone: a seam is one
+            // edge walked twice by one wire, so each of its poles has exactly one
+            // edge of this lump leaving it and neither is a corner anything
+            // dissolved. A corner is counted per lump, so another solid's vertex
+            // landing on a pole is a corner of *its* lump and not of this one.
+            if renumbered
+                .straight_through
+                .contains(&(lump, self.starts_at(dart)))
+            {
                 continue;
             }
-            carrying = Some(edge);
+            let edge = renumbered.runs.leader(self.edge_of(dart));
             let edge = renumbered.edge_now[edge].expect("a run of edges that stays becomes one");
             let from = renumbered.corner_now[self.starts_at(dart)]
                 .expect("a run of edges starts at a corner");
+            // A **closed** edge starts and ends at its one corner, so the corner
+            // says nothing about which way this face walks it and the side it
+            // already had is the only thing that does. A closed edge is always a
+            // run of one: its corner has it twice and nothing else, so nothing
+            // was ever joined onto it.
             sides.push(Side {
                 edge,
-                forward: edges[edge].ends[0] == from,
+                forward: if edges[edge].ends[0] == edges[edge].ends[1] {
+                    self.side_of(dart).forward
+                } else {
+                    edges[edge].ends[0] == from
+                },
             });
         }
+        // Three sides, **or one that closes on itself**, which is the rule
+        // `Model::validate` reads: a cap circle and the rim of a round hole are
+        // one whole curve and have one corner between them. A seam is the third
+        // shape a wire comes in — one edge walked both ways, with a pole between
+        // the two walks — and it has four steps once the poles are counted.
+        let closes_on_one = match &sides[..] {
+            [only] => edges[only.edge].ends[0] == edges[only.edge].ends[1],
+            _ => false,
+        };
         assert!(
-            sides.len() >= 3,
-            "a face has at least three sides, this one has {}",
+            sides.len() >= 3 || closes_on_one || self.faces[ring[0].face].is_a_whole_closed_surface,
+            "a face has at least three sides or one that closes, this one has {}",
             sides.len()
         );
         sides
@@ -855,11 +1022,12 @@ impl Assembly {
             })
             .collect();
         let mut apart = Model::new(model.scale());
-        let written = self.write_into(&mut apart, &one_each);
+        let written = self.write_into(&mut apart, &one_each, &self.runs);
 
         let mut volumes = Vec::new();
         for &solid in &written.solids {
-            let volume = apart.solid(apart.key_for_solid(solid)).signed_volume();
+            let volume =
+                how_much_space_it_encloses(apart.solid(apart.key_for_solid(solid)), policy, log)?;
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
             }
@@ -935,13 +1103,15 @@ impl Assembly {
                         trial.drain_into(log);
                         return Ok(false);
                     }
-                    Containment::OnBoundary | Containment::Undecidable { .. } => (),
-                    // `Model::fuse` refuses a curved solid before any pair is
-                    // looked at, so a face reaching here is a broken
-                    // invariant inside this crate and not bad input.
-                    Containment::NeedsFlatFaces => {
-                        unreachable!("the fuse refuses curved solids at entry")
-                    }
+                    // A corner nothing could place is abandoned for the next one,
+                    // and a face nobody can follow is the same kind of silence:
+                    // running out of corners is already a refusal, so nothing
+                    // here has to be a panic. This was `unreachable!` on the
+                    // grounds that the fuse refuses curved solids at entry —
+                    // `docs/decisions.md` §35 records why that stops holding.
+                    Containment::OnBoundary
+                    | Containment::Undecidable { .. }
+                    | Containment::CannotFollowAFacesTrimming { .. } => (),
                 }
             }
         }
@@ -953,6 +1123,22 @@ impl Assembly {
         ))
     }
 
+    /// What each edge of the result runs along, by §31.3's table.
+    ///
+    /// Worked out once and handed to both writes, so the scratch model the
+    /// shells are nested in and the caller's model are built the same way.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
+    /// curved crossing.
+    fn how_each_edge_runs(&self) -> Result<Vec<EdgeRun>> {
+        self.edges
+            .iter()
+            .map(|edge| edge.how_it_runs(&self.corners))
+            .collect()
+    }
+
     /// Build every entity of the result in `model`, in a fixed order.
     ///
     /// Used twice: once on a scratch model, to ask which shell is inside which,
@@ -962,7 +1148,7 @@ impl Assembly {
     ///
     /// If what it just built breaks one of the invariants checked on touched
     /// entities. That is a bug here, not bad input.
-    fn write_into(&self, model: &mut Model, lumps: &[Lump]) -> Written {
+    fn write_into(&self, model: &mut Model, lumps: &[Lump], runs: &[EdgeRun]) -> Written {
         let vertices: Vec<VertexSlot> = self
             .corners
             .iter()
@@ -971,25 +1157,36 @@ impl Assembly {
         let edges: Vec<EdgeSlot> = self
             .edges
             .iter()
-            .map(|edge| model.add_edge(vertices[edge.ends[0]], vertices[edge.ends[1]]))
+            .zip(runs)
+            .map(|(edge, run)| {
+                model.add_edge_running(vertices[edge.ends[0]], vertices[edge.ends[1]], run.clone())
+            })
             .collect();
 
         let mut faces: Vec<FaceSlot> = Vec::new();
         for face in &self.faces {
             let mut wires: SmallVec<[WireSlot; 1]> = SmallVec::new();
             for wire in &face.wires {
-                let mut coedges: SmallVec<[CoedgeSlot; 4]> = SmallVec::new();
+                let mut steps: SmallVec<[WireStep; 4]> = SmallVec::new();
                 for side in wire {
                     let turn = if side.forward {
                         Orientation::Forward
                     } else {
                         Orientation::Reversed
                     };
-                    coedges.push(model.add_coedge(edges[side.edge], turn));
+                    steps.push(WireStep::Along(model.add_coedge(edges[side.edge], turn)));
+                    // A whole closed surface is cut open along a seam, and a
+                    // seam ends where the surface pinches to a point. The
+                    // boundary has to go somewhere between arriving at a pole
+                    // and leaving it, and where it goes is nowhere at all —
+                    // which is `WireStep::Pole` and the reason it exists.
+                    if face.is_a_whole_closed_surface {
+                        steps.push(WireStep::Pole(vertices[self.stops_at(side)]));
+                    }
                 }
-                wires.push(model.add_wire(coedges));
+                wires.push(model.add_wire_of_steps(steps));
             }
-            faces.push(model.add_face(Surface::Plane(face.plane), wires));
+            faces.push(model.add_face(face.surface, wires));
         }
 
         let shells: Vec<ShellSlot> = self
@@ -1001,7 +1198,7 @@ impl Assembly {
                     .map(|&face| FaceUse {
                         face: faces[face],
                         loc: Isometry::identity(),
-                        orient: Orientation::Forward,
+                        orient: self.faces[face].used,
                     })
                     .collect();
                 model.add_shell(used)
@@ -1114,10 +1311,122 @@ struct Corner {
 
 /// One edge of the result.
 struct Edge {
+    /// The two corners it runs between. **The same corner twice for an edge
+    /// that closes**, which is what a cap circle and a round hole are.
     ends: [usize; 2],
+    /// The two surfaces either side of it. Together they *are* where it runs
+    /// (§17.4, §31.3), and they are what says which [`EdgeRun`] it is.
+    carried_by: [Surface; 2],
+    /// Which of the two arcs between [`Edge::ends`] this is. See
+    /// [`which_arc_this_is`].
+    arc: WhichArc,
     /// The input edges this is a piece of. Empty for boundary the result
     /// invents.
     from: Vec<EdgeKey>,
+}
+
+/// Which of the two arcs between one pair of corners a piece of a curved
+/// crossing is.
+#[derive(Clone, Copy)]
+enum WhichArc {
+    /// There is only one to be: the crossing runs straight between the two
+    /// corners, or the edge is the whole of a closed curve.
+    TheOnlyOne,
+    /// The one that leaves `corner` towards `towards`. See
+    /// [`which_arc_this_is`].
+    LeavingACorner {
+        /// Which of the edge's two corners the direction is measured from.
+        corner: usize,
+        /// A direction from that corner into this arc, along the crossing and
+        /// not along the chord.
+        towards: Vector,
+    },
+}
+
+impl Edge {
+    /// What this edge runs along, by §31.3's table and not by a judgement.
+    ///
+    /// Two planes with two different ends run straight. A pair naming one closed
+    /// curve, with one corner twice, runs right round it. Everything else is a
+    /// *piece* of a crossing, and which piece is
+    /// [`Edge::arc`](which_arc_this_is).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
+    /// curved crossing that nothing told from its sibling.
+    fn how_it_runs(&self, corners: &[Corner]) -> Result<EdgeRun> {
+        let flat = self
+            .carried_by
+            .iter()
+            .all(|surface| surface.as_plane().is_some());
+        match (flat, self.ends[0] == self.ends[1]) {
+            (true, false) => Ok(EdgeRun::Straight),
+            (_, true) => Ok(EdgeRun::RightRoundWhereItsFacesCross),
+            (false, false) => match self.arc {
+                WhichArc::TheOnlyOne => Ok(EdgeRun::Straight),
+                WhichArc::LeavingACorner { corner, towards } => {
+                    let ends = self.ends.map(|end| corners[end].point);
+                    let chord = corners[self.other_end_than(corner)].point - corners[corner].point;
+                    let facing = towards * chord.dot(chord) - chord * chord.dot(towards);
+                    let picker = the_half_space_both_ends_are_on(facing, ends)
+                        .ok_or(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed)?;
+                    Ok(EdgeRun::PartOfWhereItCrosses {
+                        and: self.the_surface_that_names_it_twice(),
+                        picked_by: SmallVec::from_buf([picker]),
+                    })
+                }
+            },
+        }
+    }
+
+    /// The end of this edge that is not `corner`.
+    ///
+    /// # Panics
+    ///
+    /// If `corner` is not an end of it, which would mean the arc was named
+    /// against an edge it is not on.
+    fn other_end_than(&self, corner: usize) -> usize {
+        match self.ends {
+            [one, other] if one == corner => other,
+            [one, other] if other == corner => one,
+            ends => panic!("an arc named from corner {corner}, which is not an end of {ends:?}"),
+        }
+    }
+
+    /// Which of the two surfaces either side goes in
+    /// [`EdgeRun::PartOfWhereItCrosses`]'s `and`.
+    ///
+    /// That field is there for a run whose two faces are the *same* surface — a
+    /// ball's seam — and names the second one. An arc's two faces already name
+    /// both, so either is a true answer, and what picks between them is a check:
+    /// `Model::validate` asks that both ends are not *provably* off `and`, and a
+    /// flat `and` is the cheapest of the three to be sure about. So the flat one
+    /// goes in wherever there is one, and `name_of_surface_bits` gives that for
+    /// free by sorting a plane ahead of a ball or a pipe.
+    ///
+    /// **The sentence that used to stand here said the check was an exact
+    /// `Zero`, and that a corner this fuse solved for is exactly on a plane it
+    /// was solved from.** Both halves were wrong, and the second is why nobody
+    /// checked the first: a corner is `through + t·direction` over a divisor, and
+    /// it lands on the plane exactly only when the line's direction is
+    /// axis-aligned. A block turned against a bar is enough to break it, and the
+    /// fix is the one the old sentence named as future work — the same slop
+    /// `check_curved_face` reads off a solved corner (§36.13), read in
+    /// `check_edges` too. §39.
+    ///
+    /// A crossing with **two** curved surfaces and two ends is a pair of balls
+    /// cut twice. Two balls united refuse `ACurvedFaceGoesRightRoundWithNoSeam`
+    /// before an arc of them is ever named (§36.23), and that is one shape of the
+    /// family rather than the family: `fuse([ballA], [ballB, cube])` is a pair of
+    /// balls cut twice and is reachable. What stops *it* is a crate down —
+    /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, because a corner of such an arc
+    /// has two quadrics round it (§31.2's limit under row 4).
+    fn the_surface_that_names_it_twice(&self) -> Surface {
+        let mut either = self.carried_by;
+        either.sort_by_key(name_of_surface_bits);
+        either[0]
+    }
 }
 
 /// One face of the result.
@@ -1126,9 +1435,37 @@ struct Face {
     /// one, because nothing in the fuse invents geometry with no ancestor, and
     /// more than one where coplanar pieces were joined.
     ancestors: Vec<FaceKey>,
-    /// The plane, already turned round if the rule turned the face round.
-    plane: Plane,
+    /// The surface it sits on, inherited from the ancestor bit for bit (§17.1).
+    ///
+    /// **A plane is stored already turned round** where the rule turned the face
+    /// round, and a curved surface is not — because a sphere has no reversed
+    /// form. That is §31.3's ON split arriving in the commit: which surface a
+    /// face is on is geometry, and which way round it is used is topology, and
+    /// only a plane welds the two together.
+    surface: Surface,
+    /// Which way round the answer's shell uses it. Always
+    /// [`Orientation::Forward`] for a plane, because the plane above carries it.
+    used: Orientation,
     wires: Vec<Vec<Side>>,
+    /// Whether this face is the **whole** of a closed surface, so that its one
+    /// wire is a seam and its two corners are poles the boundary stands still
+    /// at rather than corners it turns at (§38.1).
+    is_a_whole_closed_surface: bool,
+}
+
+impl Face {
+    /// The direction pointing out of the material, for a flat face.
+    ///
+    /// # Panics
+    ///
+    /// If the face is curved. Only the joiner asks, and it is only asked about
+    /// flat faces — see [`Assembly::edges_with_one_face_on_both_sides`].
+    fn outward_plane(&self) -> Plane {
+        *self
+            .surface
+            .as_plane()
+            .expect("only a flat face is asked which plane it is on")
+    }
 }
 
 /// One side of one wire of one face: an edge, walked one way or the other.
@@ -1174,9 +1511,47 @@ struct Renumbered {
 struct JoinedFace {
     /// The faces it was made of, in the order they were built.
     members: Vec<usize>,
-    plane: Plane,
+    surface: Surface,
+    used: Orientation,
+    /// Carried through the joining untouched: only flat faces are ever joined,
+    /// and a whole closed surface is a face on its own.
+    is_a_whole_closed_surface: bool,
     /// The outline first, then one ring per hole.
     rings: Vec<Vec<Dart>>,
+}
+
+/// How much space one shell of the answer encloses, signed by which way its
+/// faces point.
+///
+/// A polyhedron's own fan *is* its volume and is summed exactly. A **curved**
+/// shell has no such fan — a bar's wall fans into two triangles on its seam and
+/// a round cap into none at all (§35.4) — so it is summed over a mesh instead,
+/// which is what `Model::validate` already does about the same question one
+/// layer up. Only the sign is read here, and the coarsest mesh there is says
+/// which way round a shell is.
+///
+/// # Errors
+///
+/// Whatever meshing the shell makes of it.
+fn how_much_space_it_encloses(
+    solid: SolidView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<f64> {
+    if solid.is_wholly_flat() {
+        return Ok(solid.signed_volume());
+    }
+    let mesh = solid.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
+    // **Asked here rather than left to the sweep, and that is the difference
+    // between a refusal and a corrupt solid.** `Assembly::commit` re-validates
+    // what it wrote, but only in a debug build and only as a *panic* — it is
+    // there to catch a bug in this crate, and a release build would write the
+    // answer out regardless. A curved answer whose two faces along one side
+    // disagree which way they face is exactly that, so it is asked before
+    // anything is written and comes back as a refusal (§4.1: refusing beats
+    // corrupting, and both beat crashing on a caller's solid).
+    every_side_of_the_skin_is_used_both_ways(&mesh)?;
+    Ok(signed_volume_over(&mesh))
 }
 
 /// The other dart along the same edge.
@@ -1196,7 +1571,7 @@ fn across(dart: Dart, along: &[[Dart; 2]], edge: usize) -> Dart {
 fn plane_of_the_joined_face(members: &[usize], faces: &[Face]) -> Plane {
     members
         .iter()
-        .map(|&member| faces[member].plane)
+        .map(|&member| faces[member].outward_plane())
         .min_by(|one, other| {
             let (one, other) = (one.coefficients(), other.coefficients());
             (0..4)
@@ -1263,28 +1638,51 @@ struct Corners {
 
 /// What two faces agree to call the same corner.
 ///
-/// Never a coordinate. Two faces solving the same three planes in a different
+/// Never a coordinate. Two faces solving the same three surfaces in a different
 /// order round differently, so comparing what they rounded to would either miss
-/// a join or invent one; comparing the *names* of the planes cannot.
+/// a join or invent one; comparing the *names* of the surfaces cannot.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CornerName {
     /// A corner the input already had.
     Vertex(VertexSlot),
-    /// The meet of three planes, each written out as the bits of its four
-    /// coefficients, sorted so the three arrive the same way round whichever
-    /// face asked.
-    Meet([[u64; 4]; 3]),
+    /// One of the places three surfaces meet, each surface written out as the
+    /// bits it stores and sorted so the three arrive the same way round
+    /// whichever face asked, and **which** of their meeting points this is.
+    ///
+    /// Three surfaces can meet at more than one point, so the three names do not
+    /// pick a corner on their own; §31.3 is where that field comes from and it
+    /// is what stops two different corners being joined into one.
+    Meet([[u64; 8]; 3], u8),
+    /// The one point on a closed crossing that nothing else cuts, named by the
+    /// two surfaces it runs between.
+    RoundACurve([[u64; 8]; 2]),
+    /// A pole of a closed surface, named by that surface and which of its two
+    /// poles this is (§38.1).
+    Pole([u64; 8], bool),
 }
 
 impl Corners {
     fn of(&mut self, model: &Model, end: &MeetPoint) -> usize {
         let name = match end {
             MeetPoint::Existing { vertex, .. } => CornerName::Vertex(vertex.slot_in(model.id())),
-            MeetPoint::OfThreePlanes { planes, .. } => {
-                let mut named = planes.map(|plane| plane.coefficients().map(f64::to_bits));
+            MeetPoint::OfThreeSurfaces {
+                surfaces, which, ..
+            } => {
+                let mut named = surfaces.map(|surface| name_of_surface_bits(&surface));
                 named.sort_unstable();
-                CornerName::Meet(named)
+                CornerName::Meet(named, *which)
             }
+            MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => {
+                let mut named =
+                    carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
+                named.sort_unstable();
+                CornerName::RoundACurve(named)
+            }
+            MeetPoint::APoleOfAClosedSurface {
+                surface,
+                at_the_top,
+                ..
+            } => CornerName::Pole(name_of_surface_bits(surface), *at_the_top),
         };
         if let Some(&already) = self.named.get(&name) {
             return already;
@@ -1293,7 +1691,9 @@ impl Corners {
         let at = middle_of(point);
         let was = match end {
             MeetPoint::Existing { vertex, .. } => Some(*vertex),
-            MeetPoint::OfThreePlanes { .. } => None,
+            MeetPoint::OfThreeSurfaces { .. }
+            | MeetPoint::WhereAClosedCurveStarts { .. }
+            | MeetPoint::APoleOfAClosedSurface { .. } => None,
         };
         let index = match self.at.get(&exactly_at(at)) {
             Some(&already) => {
@@ -1338,36 +1738,234 @@ fn exactly_at(point: Point) -> [u64; 3] {
         .map(f64::to_bits)
 }
 
+/// What names one edge of the answer: the two corners it runs between, and —
+/// for an edge that closes, where those are one corner — the two surfaces
+/// either side of it. See [`which_curve_it_is`].
+type EdgeName = ([usize; 2], Option<[[u64; 8]; 2]>);
+
 /// The edges built so far, and how to find one again.
 #[derive(Default)]
 struct Edges {
     made: Vec<Edge>,
-    between: BTreeMap<[usize; 2], usize>,
+    between: BTreeMap<EdgeName, usize>,
 }
 
 impl Edges {
-    /// The edge between two corners, walked from `from` to `to`.
+    /// The edge between two corners, walked from `from` to `to`, along the
+    /// crossing of `carried_by`.
+    ///
+    /// **The two surfaces are part of what names it and not decoration.** Two
+    /// corners no longer pick an edge out on their own: a closed edge starts and
+    /// ends at the one corner it has, so a bar's two cap circles would be one
+    /// edge if the pair were the key. Sorting the two surfaces is what makes the
+    /// faces either side agree about which edge they share.
     ///
     /// # Panics
     ///
-    /// If the two ends are the same corner. §17.4 prevents a side of no length
-    /// rather than filtering one out afterwards, so one reaching here means the
-    /// splitter is wrong.
-    fn of(&mut self, from: usize, to: usize, along: &[EdgeKey]) -> Side {
-        assert!(from != to, "a piece of a face has a side with no length");
-        let named = [from.min(to), from.max(to)];
-        let edge = *self.between.entry(named).or_insert_with(|| {
+    /// If a straight side has no length. §17.4 prevents one rather than
+    /// filtering it out afterwards, so one reaching here means the splitter is
+    /// wrong — and a *closed* side is not one, which is why the two ends being
+    /// the same corner is checked against what carries it.
+    fn of(&mut self, meet: &FaceMeet, from: usize, to: usize, face: FaceKey) -> Result<Side> {
+        let (carried_by, along) = (meet.carried_by, meet.along.as_slice());
+        assert!(
+            from != to
+                || carried_by
+                    .iter()
+                    .any(|surface| surface.as_plane().is_none()),
+            "a piece of a flat face has a side with no length"
+        );
+        let at = middle_of(meet.ends[0].point());
+        let named = which_curve_it_is(from, to, carried_by);
+        let key = ([from.min(to), from.max(to)], named);
+        let edge = *self.between.entry(key).or_insert_with(|| {
             self.made.push(Edge {
-                ends: named,
+                ends: [from.min(to), from.max(to)],
+                carried_by,
+                arc: if from == to {
+                    WhichArc::TheOnlyOne
+                } else {
+                    which_arc_this_is(meet, from, at)
+                },
                 from: along.to_vec(),
             });
             self.made.len() - 1
         });
-        Side {
-            edge,
-            forward: self.made[edge].ends[0] == from,
-        }
+        let forward = if from == to {
+            which_way_a_closed_edge_is_walked(meet, at)
+                .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?
+        } else {
+            self.made[edge].ends[0] == from
+        };
+        Ok(Side { edge, forward })
     }
+}
+
+/// Whether a face walks a **closed** edge the way that edge is stored running.
+///
+/// Its two ends are one corner and say nothing, so two facts have to meet.
+///
+/// **Which way the wire runs in space** is which side of the partner the face's
+/// material is on: left of a crossing's forward direction `∇S × ∇T` is always
+/// the partner's negative side — `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by
+/// Cauchy–Schwarz, with no case analysis (§36.6).
+///
+/// **Which way the edge is stored running** is
+/// [`a_closed_crossing_is_walked_the_way_it_is_stored`], which `Model::validate`
+/// reads back off the finished model with the same function.
+///
+/// The piece's two surfaces already point out of its material, so what goes in
+/// as the used gradients are the stored ones. Where the rule turns the piece
+/// round, `sides_of` turns every side of it round with it and the face's use
+/// says so — which is what the sweep reads.
+fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Option<bool> {
+    let [mine, partner] = meet.carried_by;
+    if the_curved_one_of(&meet.carried_by).is_none() {
+        // Two planes cross in a straight line, which does not close, so nothing
+        // reaches here — and a wire with no curved surface either side of it has
+        // no longitude to run along.
+        return Some(true);
+    }
+    a_closed_crossing_is_walked_the_way_it_is_stored(
+        [&mine, &partner],
+        [gradient_of(&mine, at), gradient_of(&partner, at)],
+        at,
+        meet.material_side,
+    )
+}
+
+/// Which of the two arcs between an edge's two corners this face walks, as the
+/// direction the wire leaves its first corner along.
+///
+/// Two corners on a closed crossing leave two arcs with the same two ends, and
+/// a direction into one of them is the whole of what tells them apart — see
+/// [`the_half_space_both_ends_are_on`] for what it is turned into.
+///
+/// **The direction is a sign and not a search.** Left of `∇S × ∇T` is always the
+/// partner's negative side (§36.6), so the wire leaves its first corner along
+/// that direction exactly when its material is inside the partner — which
+/// [`FaceMeet::material_side`] already holds. **No point on the arc is built.**
+///
+/// # Panics
+///
+/// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`].
+/// [`FaceMeet::material_side`] is written from which way round the arrangement
+/// walked the arc and costs no arithmetic, so anything else is a bug here.
+fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> WhichArc {
+    if the_crossing_of_these_runs_straight(&meet.carried_by) {
+        return WhichArc::TheOnlyOne;
+    }
+    let [mine, partner] = meet.carried_by;
+    let along_the_crossing = gradient_of(&mine, from).cross(gradient_of(&partner, from));
+    WhichArc::LeavingACorner {
+        corner: starts_at,
+        towards: match meet.material_side {
+            Decision::Neg => along_the_crossing,
+            Decision::Pos => along_the_crossing * -1.0,
+            other => panic!("a side of a face was walked with no material side: {other:?}"),
+        },
+    }
+}
+
+/// Whether these two surfaces cross in straight lines, so that two corners on
+/// one leave one piece and not two.
+///
+/// The same three cases [`walk`](rcad_geom::walk) has nothing to put between the
+/// ends of, spelled the same way — a second spelling of this is how the two come
+/// to disagree about how many pieces there are. **Read off the surfaces and
+/// never off the chord**: a short enough arc has a chord that rounds to its own
+/// tangent, and this question has to stay one about the pair.
+fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
+    match carried_by {
+        [Surface::Plane(_), Surface::Plane(_)] => true,
+        [Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)] => {
+            flat.normal().dot(pipe.axis().direction()) == 0.0
+        }
+        [Surface::Cylinder(one), Surface::Cylinder(other)] => {
+            one.axis().direction().cross(other.axis().direction()) == Vector::zero()
+        }
+        _ => false,
+    }
+}
+
+/// The half-space that holds one of the two arcs between a pair of corners and
+/// not the other, or `None` when none can be found.
+///
+/// What tells them apart is the half-space through the chord **square to the
+/// plane the crossing lies in**: that plane meets the crossing's own plane in
+/// the chord line, and a line meets a conic at exactly two points, so the two
+/// arcs are strictly either side of it whichever one is the longer.
+///
+/// **The crossing's own plane is never built.** A direction `v` from one end
+/// into this arc and the chord `c` both lie in it, so `v × c` is that plane's
+/// normal and `c × (v × c)` is the one wanted. Written out that is
+/// `v(c·c) − c(c·v)`, whose dot with `v` is `|c|²|v|² − (c·v)²` — never
+/// negative, by Cauchy–Schwarz. So the normal already faces the way the arc
+/// goes and there is no sign to case out.
+///
+/// **The offset is proved rather than rounded.** `Model::validate` asks the
+/// predicate whether each end is on or in front, and the predicate is exact
+/// where the dot products here are not — so the offset comes *down* from the
+/// smaller of the two readings, by a step that starts at one rounding of the
+/// numbers involved and doubles, until the predicate itself says so. How far
+/// down it went is a number nobody needs.
+///
+/// The loop stops once the total is past twice the size of the arithmetic. That
+/// is past any reading `facing · p` can have by Cauchy–Schwarz, so by then both
+/// ends read in front and the loop has already returned — which is why the one
+/// way out of here is `facing` having no length to point along. That is a chord
+/// lying along the crossing's own direction, which for a conic means an arc so
+/// short its chord rounds onto its own tangent
+/// (`an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`).
+fn the_half_space_both_ends_are_on(facing: Vector, ends: [Point; 2]) -> Option<Picker> {
+    let readings = ends.map(|end| facing.dot(end - Point::origin()));
+    let size = facing.length()
+        * ends
+            .iter()
+            .map(|end| (*end - Point::origin()).length())
+            .fold(0.0, f64::max);
+    let from_here = readings[0].min(readings[1]);
+    let asked = ends.map(|end| PredicatePoint::from(end.coordinates()));
+
+    let mut down_by = 0.0;
+    let mut step = (size * f64::EPSILON).max(f64::MIN_POSITIVE);
+    while down_by <= 2.0 * size {
+        let picker = Picker::from(HalfSpace::new(facing, from_here - down_by).ok()?);
+        if asked
+            .iter()
+            .all(|end| picker.side_of_point(*end) != Decision::Neg)
+        {
+            return Some(picker);
+        }
+        down_by += step;
+        step *= 2.0;
+    }
+    None
+}
+
+/// What tells two edges between the same corners apart.
+///
+/// Two corners pick an edge out on their own while an edge is a straight line
+/// between them, and that is every edge a planar fuse makes. **A closed edge
+/// starts and ends at the one corner it has**, so a bar's two cap circles are
+/// one corner pair twice and the surfaces either side are the only thing left to
+/// tell them apart.
+///
+/// Asked *only* of an edge that closes, and that is not caution. Two solids
+/// pressed against each other work the plane they share out separately, and the
+/// two faces along one edge of the answer then name their partners with numbers
+/// that differ in the last bits — so surfaces in the key of an open edge would
+/// split it in two and leave each half with one face along it. Measured: the
+/// skew family's not-a-solid share went from under three in a hundred to three
+/// and a half.
+fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option<[[u64; 8]; 2]> {
+    if from != to {
+        return None;
+    }
+    let mut named = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
+    named.sort_unstable();
+    Some(named)
 }
 
 /// One wire of a piece as sides of the result, turned round when the rule turns
@@ -1382,15 +1980,16 @@ impl Edges {
 fn sides_of(
     wire: &[FaceMeet],
     turned_round: bool,
+    face: FaceKey,
     model: &Model,
     corners: &mut Corners,
     edges: &mut Edges,
-) -> Vec<Side> {
+) -> Result<Vec<Side>> {
     let mut sides = Vec::new();
     for meet in wire {
         let from = corners.of(model, &meet.ends[0]);
         let to = corners.of(model, &meet.ends[1]);
-        sides.push(edges.of(from, to, &meet.along));
+        sides.push(edges.of(meet, from, to, face)?);
     }
     if turned_round {
         sides.reverse();
@@ -1398,5 +1997,36 @@ fn sides_of(
             side.forward = !side.forward;
         }
     }
-    sides
+    Ok(sides)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Point, Vector, the_half_space_both_ends_are_on};
+
+    /// The whole of what
+    /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] is left refusing,
+    /// and a **gap** rather than a limit: the half-space exists and `f64` cannot
+    /// reach it.
+    ///
+    /// Two corners a hair apart on the unit circle. The chord to a point that
+    /// far round is `(cos δ − 1, sin δ)`, and for `δ` under an `f64` rounding
+    /// `cos δ` is exactly one — so the chord lies exactly along the tangent, the
+    /// normal `v(c·c) − c(c·v)` cancels to exactly nothing, and there is no
+    /// direction left to separate the two arcs along.
+    #[test]
+    fn an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name() {
+        let from = Point::new(1.0, 0.0, 0.0);
+        let to = Point::new(1.0, 1e-16, 0.0);
+        let leaving = Vector::new(0.0, 1.0, 0.0);
+        let chord = to - from;
+
+        let facing = leaving * chord.dot(chord) - chord * chord.dot(leaving);
+        assert_eq!(
+            facing,
+            Vector::zero(),
+            "an arc this short has a chord along its own tangent"
+        );
+        assert!(the_half_space_both_ends_are_on(facing, [from, to]).is_none());
+    }
 }

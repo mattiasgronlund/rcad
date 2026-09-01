@@ -19,7 +19,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rcad_geom::{Deflection, Isometry, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, Surface};
+use rcad_geom::{
+    Deflection, Isometry, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, Surface, Vector,
+};
 use rcad_mesh::{CannotTriangulate, Loop, TrimmedDomain, triangulate};
 use rcad_predicates::{
     Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
@@ -27,6 +29,8 @@ use rcad_predicates::{
 };
 use smallvec::SmallVec;
 
+use crate::fuse::name_of_surface_bits;
+use crate::validate::side_of_surface;
 use crate::view::{EdgeView, FaceView, VertexView, WireStepView, WireView};
 use crate::{EdgeKey, Error, FaceKey, Result, SolidView, VertexKey};
 
@@ -250,10 +254,21 @@ const MOST_POINTS_A_MESH_WILL_HOLD: usize = 4 * 1024 * 1024;
 
 /// How many pieces one face may be cut into before this gives up on it.
 ///
-/// Every cut that happens at all makes both pieces narrower, and four pieces is
-/// the answer for every face this kernel builds. Reaching this means a piece is
-/// being cut without getting any smaller, which is a bug here rather than a
-/// shape somebody asked for.
+/// Four pieces is the answer for every face this kernel builds — the fuse's
+/// rings included, which are cut across into exactly four — and a fuse over
+/// curved faces was measured, at deflections from `1e-4` to 3 and turned both
+/// ways, at one or two.
+///
+/// **Reaching this needs sixteen cuts that each *do* make both halves
+/// narrower.** The sentence that used to stand here said the opposite — that
+/// reaching it means a piece is being cut without getting any smaller — and
+/// [`cut_in_two`] is what says otherwise: a cut that does not narrow both halves
+/// hands back `None` and the piece goes straight onto the pile. Naming the one
+/// condition that provably cannot reach an error is worse than naming none,
+/// because it sends whoever hits it looking for the wrong thing.
+///
+/// It is [`Error::ACurvedFaceCannotBeCutSmallEnoughToMesh`] rather than an assert
+/// because `validate` walks this and a face can arrive from a file (§16.11).
 const MOST_PIECES_A_FACE_IS_CUT_INTO: usize = 16;
 
 /// A mesh part way through being built.
@@ -309,7 +324,7 @@ impl BuildingAMesh {
                 if self.along_edge.contains_key(&edge.key()) {
                     continue;
                 }
-                let walked = self.walk(edge, face, &stored, room, policy, log)?;
+                let walked = self.walk(edge, face, room, policy, log)?;
                 self.along_edge.insert(edge.key(), walked);
             }
         }
@@ -331,14 +346,16 @@ impl BuildingAMesh {
     /// the model needs the answer, because a bar's wall is a rectangle in
     /// `(longitude, height)` bounded by two cap circles used opposite ways, and
     /// it only closes if both circles are stored running the same way round the
-    /// pipe. The way this face's own longitude increases is what says so, and it
-    /// is a choice of direction rather than a second opinion about position: a
-    /// reversed list is the same points.
+    /// pipe. **The way the longitude of the curved surface either side of it
+    /// increases is what says so**, and where both are curved `Surface`'s own
+    /// fixed order picks one — so the answer depends on the edge and not on
+    /// which of its two faces was walked first. It is a choice of direction
+    /// rather than a second opinion about position: a reversed list is the same
+    /// points.
     fn walk(
         &mut self,
         edge: EdgeView<'_>,
         face: FaceView<'_>,
-        stored: &Surface,
         room: f64,
         policy: &Policy,
         log: &mut ProvenanceLog,
@@ -365,9 +382,25 @@ impl BuildingAMesh {
                 most: MOST_POINTS_A_MESH_WILL_HOLD,
             });
         }
+        // **A closed edge is stored running the way the longitude of the curved
+        // surface either side of it increases** — and *which* curved surface is
+        // settled by `Surface`'s own fixed order rather than by which face got
+        // here first. §30.8 item 10 has wanted a direction rule since M3 and
+        // this is it.
+        //
+        // What the arbitrary version cost, measured: a bar's two cap circles are
+        // both between a plane and one cylinder, so both were stored the
+        // cylinder's way and the wall's rectangle closed — but a ball cut by a
+        // plane leaves *two* caps in two different fuses, and each was stored
+        // the way whichever face walked it first ran. A pole read off that is
+        // right for half the caps there are.
         if edge.is_closed()
-            && how_far_round_this_face_it_goes(stored, back.apply_to_point(from.point()), &points)
-                < 0.0
+            && let Some(reference) = the_curved_surface_that_names_a_closed_edge(&along)
+            && how_far_round_this_face_it_goes(
+                &reference,
+                back.apply_to_point(from.point()),
+                &points,
+            ) < 0.0
         {
             points.reverse();
         }
@@ -440,24 +473,45 @@ impl BuildingAMesh {
         if how_far_round(&walked[0]) <= widest {
             return Ok(vec![walked]);
         }
-        // Cutting a face with a hole in it would have to say which piece the
-        // hole ends up in, and nothing does. No *builder* makes such a face —
-        // `add_round_bar` and `add_ball` each give a curved face one wire,
-        // `add_extrusion` makes planes only, and the fuse refuses a curved solid
-        // outright — but `Model` is `Deserialize` and `validate` is the
-        // untrusted-import boundary (§16.11), so one arrives from a file and
-        // this is a refusal rather than an assert.
+        // **One curve right round and nothing else is a cap**, and a cap has a
+        // pole to cut up to even though the model never said so. A *ring* — two
+        // such curves — is cut across to the other one instead, below.
+        if walked.len() == 1 && walked[0].goes_right_round {
+            let Some(patches) =
+                self.cut_a_cap_up_to_its_pole(face, stored, &walked[0], whole_turn, room)?
+            else {
+                return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
+            };
+            return Ok(patches);
+        }
+        // A **ring** is the one face with a hole that this can cut, and it is
+        // the one the fuse makes: a tube of a bar's wall between two planes,
+        // bounded by two curves that each go right round and by nothing else.
+        // Cut across both of them at once and what comes out is four patches
+        // with one loop each, which is the shape everything below expects.
+        //
+        // §31.10 item 5 and §35.7 both say this claim is the one lane 5
+        // falsifies, and the sentence that stops being true is *"the fuse
+        // refuses a curved solid outright"*. What is still refused is a face
+        // with a hole that is **not** a ring — one loop right round and another
+        // that is not — because then there is nothing to cut across to, and
+        // nothing says which piece the hole ends up in. `Model` is
+        // `Deserialize` and `validate` is the untrusted-import boundary
+        // (§16.11), so that is a refusal rather than an assert.
         if walked.len() != 1 {
-            return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
+            let Some(patches) = self.cut_a_ring_across(face, stored, &walked, whole_turn, room)?
+            else {
+                return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
+            };
+            return Ok(patches);
         }
 
         let mut pieces = vec![walked.into_iter().next().expect("just checked")];
         let mut done: Vec<Vec<WalkedLoop>> = Vec::new();
         while let Some(piece) = pieces.pop() {
-            assert!(
-                pieces.len() + done.len() < MOST_PIECES_A_FACE_IS_CUT_INTO,
-                "cutting this face up is not making the pieces any smaller"
-            );
+            if pieces.len() + done.len() >= MOST_PIECES_A_FACE_IS_CUT_INTO {
+                return Err(Error::ACurvedFaceCannotBeCutSmallEnoughToMesh { face: face.key() });
+            }
             match self.cut_in_two(face, stored, &piece, widest, room)? {
                 Some((one, other)) => {
                     pieces.push(one);
@@ -467,6 +521,273 @@ impl BuildingAMesh {
             }
         }
         Ok(done)
+    }
+
+    /// Cut a **cap** — one loop right round a surface that pinches to a point,
+    /// with nothing else bounding it — into four patches with one loop each.
+    ///
+    /// A ball cut by a plane leaves one, and it is about the simplest curved
+    /// boolean there is. Its patch in the sphere's own two coordinates is a
+    /// rectangle whose top edge is the pole and whose two sides are one meridian
+    /// used twice, and **the model says neither**: a
+    /// [`WireStep::Pole`](crate::model::WireStep) and a seam are what say them,
+    /// and a fuse has no way to invent either — a seam wants two corners at a
+    /// single longitude and a cap has one corner in all. So they go in here,
+    /// four times, where a pole is a corner and a meridian is a cut.
+    ///
+    /// **Which of the two poles the face reaches is read off the loop's own
+    /// direction and costs no arithmetic.** A face keeps its material on the
+    /// left of its wire, and a surface's two coordinates are right-handed about
+    /// its outward normal — `∂u × ∂v` is `R² cos v` times it, and `cos v` is
+    /// positive everywhere but the poles — so the left of "longitude
+    /// increasing" is "latitude increasing". A loop running that way is the
+    /// boundary of the piece **above** it.
+    ///
+    /// `None` when the surface does not pinch to a point. A cylindrical face
+    /// bounded by one curve right round it is half an endless tube, which is not
+    /// a face, and refusing it is right.
+    fn cut_a_cap_up_to_its_pole(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        cap: &WalkedLoop,
+        whole_turn: f64,
+        room: f64,
+    ) -> Result<Option<Vec<Vec<WalkedLoop>>>> {
+        if where_this_surface_pinches(stored).is_none() {
+            return Ok(None);
+        }
+        let Some(towards) = self.which_pole_this_cap_reaches(face, stored, cap) else {
+            return Ok(None);
+        };
+
+        // A quarter turn at a time, **the way the loop itself runs**, so that
+        // `between` walks a quarter of the way round and not three quarters.
+        let from = cap.corners[0][0];
+        let way = if runs_up(cap, whole_turn) { 1.0 } else { -1.0 };
+        let quarters: [f64; 4] =
+            [0, 1, 2, 3].map(|step| from + way * f64::from(step) * whole_turn / 4.0);
+        let along = quarters.map(|at| nearest_longitude(cap, at));
+
+        let there = face.location();
+        let at_the_pole = stored.point_at(from, towards);
+        if !at_the_pole.is_finite() {
+            return Ok(None);
+        }
+        let at_the_pole = self.remember(there.apply_to_point(at_the_pole));
+
+        let mut cuts = Vec::with_capacity(4);
+        for &corner in &along {
+            let leaving = cap.corners[corner];
+            let arriving = [leaving[0], towards];
+            cuts.push(self.points_along_a_cut(face, stored, leaving, arriving, room)?);
+        }
+
+        let mut patches = Vec::with_capacity(4);
+        for step in 0..4 {
+            let next = (step + 1) % 4;
+            let mut one = unwrapped(&cap.between(along[step], along[next]), whole_turn);
+            one.take_in_unwrapped(&cuts[next], whole_turn);
+            // The pole twice, at the two longitudes the meridians arrive at. It
+            // is one point in space and a whole side of the patch in the
+            // surface's coordinates, which is what a `WireStep::Pole` says about
+            // a ball this kernel builds.
+            let corner = one.corners.last().map_or(0.0, |corner| corner[0]);
+            one.corners.push([corner, towards]);
+            one.points.push(at_the_pole);
+            let back = corner - way * whole_turn / 4.0;
+            one.corners.push([back, towards]);
+            one.points.push(at_the_pole);
+            one.take_in_unwrapped(&cuts[step].the_other_way(), whole_turn);
+            patches.push(vec![one]);
+        }
+        Ok(Some(patches))
+    }
+
+    /// Which of a surface's two poles a cap reaches, as the latitude of it.
+    ///
+    /// **Not read off which way the loop runs**, and that is the trap this
+    /// walked into once. A closed edge has no direction rule in the model
+    /// (§30.8 item 10, still open), so which of its two coedges is the forward
+    /// one says only which of the two faces along it came first — it is fixed
+    /// within one solid, because the two have to disagree, and it is arbitrary
+    /// against anything else. A pole chosen from it is right for half the caps
+    /// there are.
+    ///
+    /// What is not arbitrary is the *step the loop actually takes in space*
+    /// against `∇S × ∇T`. The wire keeps the face's material on its left, and
+    /// left of a crossing's forward direction is always the negative side of the
+    /// partner — `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by Cauchy–Schwarz, with no
+    /// case analysis (§36.6). So the step says which side of `T` the material is
+    /// on, and the pole on that side is the one this face reaches.
+    ///
+    /// `None` when the face is not a cap this can read: it has no partner
+    /// surface to be cut by, or its loop is too short to take a step along.
+    fn which_pole_this_cap_reaches(
+        &self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        cap: &WalkedLoop,
+    ) -> Option<f64> {
+        let pole = where_this_surface_pinches(stored)?;
+        let back = face.location().inverse();
+        let mine = face.surface();
+        let coedge = face.wires().flat_map(WireView::coedges).next()?;
+        let partner = self
+            .along_each_edge
+            .get(&coedge.edge().key())?
+            .iter()
+            .find(|surface| **surface != mine)?
+            .transformed(&back);
+
+        let [first, second] = [0, 1].map(|step| cap.points.get(step).copied());
+        let (first, second) = (first?, second?);
+        let at = back.apply_to_point(self.points[first as usize]);
+        let step = back.apply_to_point(self.points[second as usize]) - at;
+        let forward = gradient_of(stored, at).cross(gradient_of(&partner, at));
+        // Along the crossing's own direction means the material is inside the
+        // partner; against it means outside.
+        let inside = step.dot(forward) > 0.0;
+
+        for towards in [pole, -pole] {
+            let corner = PredicatePoint::from(stored.point_at(0.0, towards).coordinates());
+            let side = side_of_surface(&partner, corner);
+            if (side == Decision::Neg) == inside {
+                return Some(towards);
+            }
+        }
+        None
+    }
+
+    /// Cut a **ring** — two loops that each go right round the surface, with
+    /// nothing else bounding it — into four patches with one loop each.
+    ///
+    /// A tube is what a fuse leaves of a bar's wall between two planes, and it
+    /// is the first face in this kernel with a hole in it that is not flat. It
+    /// has no seam and cannot be given one: a seam wants two corners at one
+    /// longitude, and the two curves bounding a tube start wherever the pair
+    /// that cut each of them starts. So the seam is put in *here*, four times,
+    /// where it is a cut in the surface's own two coordinates and not topology
+    /// anybody has to hold.
+    ///
+    /// **A cut has to end on points both halves already have** — the same rule
+    /// [`where_to_cut`] keeps — so each cut runs between a corner one loop
+    /// already has and a corner the other already has, and the points strictly
+    /// along it are made once and handed to the two patches either side.
+    ///
+    /// `None` when the face is not a ring: two loops is not enough, they both
+    /// have to go right round, or there is nothing across to cut to.
+    fn cut_a_ring_across(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        walked: &[WalkedLoop],
+        whole_turn: f64,
+        room: f64,
+    ) -> Result<Option<Vec<Vec<WalkedLoop>>>> {
+        let [outer, hole] = walked else {
+            return Ok(None);
+        };
+        if [outer, hole].iter().any(|around| !around.goes_right_round) {
+            return Ok(None);
+        }
+
+        // **The two loops of a ring run opposite ways round it**, which is what
+        // keeps the material between them on the left of both, and a patch is
+        // walked along the one going up and back along the one going down. Which
+        // of the two is stored first is an order the face happens to hold
+        // (§31.3), so it is asked rather than assumed.
+        // **Both loops are walked the way the longitude grows**, and the patch
+        // goes along one and back along the other. Which way each was stored is
+        // an order the face happens to hold — on a closed surface neither wire
+        // is the outer one (§31.3) — so it is turned to face the same way here
+        // rather than assumed, and the two are brought into one longitude frame
+        // before anything is measured against a longitude.
+        let facing_up = |around: &WalkedLoop| {
+            if runs_up(around, whole_turn) {
+                around.the_other_way().the_other_way()
+            } else {
+                around.the_other_way()
+            }
+        };
+        let up = facing_up(outer);
+        let down = in_the_same_turn_as(&facing_up(hole), &up, whole_turn);
+
+        let from = up.corners[0][0];
+        let quarters: [f64; 4] = [0, 1, 2, 3].map(|step| from + f64::from(step) * whole_turn / 4.0);
+        let along_the_top = quarters.map(|at| nearest_longitude(&up, at));
+        let along_the_bottom = quarters.map(|at| nearest_longitude(&down, at));
+
+        let mut cuts = Vec::with_capacity(4);
+        for step in 0..4 {
+            let leaving = up.corners[along_the_top[step]];
+            let arriving = down.corners[along_the_bottom[step]];
+            cuts.push(self.points_along_a_cut(face, stored, leaving, arriving, room)?);
+        }
+
+        // Every stretch is put on the end **unwrapped against what is already
+        // there**. A patch that took the two chains as they came would step a
+        // whole turn crossing from the end of one to the start of the other,
+        // which in the surface's two coordinates is a boundary folded across
+        // itself rather than a rectangle.
+        let mut patches = Vec::with_capacity(4);
+        for step in 0..4 {
+            let next = (step + 1) % 4;
+            let mut one = unwrapped(
+                &up.between(along_the_top[step], along_the_top[next]),
+                whole_turn,
+            );
+            one.take_in_unwrapped(&cuts[next], whole_turn);
+            one.take_in_unwrapped(
+                &down
+                    .between(along_the_bottom[step], along_the_bottom[next])
+                    .the_other_way(),
+                whole_turn,
+            );
+            one.take_in_unwrapped(&cuts[step].the_other_way(), whole_turn);
+            patches.push(vec![one]);
+        }
+        Ok(Some(patches))
+    }
+
+    /// The points strictly between two corners of one face, walked along the
+    /// straight line between them in the surface's own two coordinates.
+    fn points_along_a_cut(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        leaving: [f64; 2],
+        arriving: [f64; 2],
+        room: f64,
+    ) -> Result<WalkedLoop> {
+        let steps = how_many_steps(
+            stored,
+            arriving[0] - leaving[0],
+            arriving[1] - leaving[1],
+            room,
+        );
+        if self.points.len() + steps > MOST_POINTS_A_MESH_WILL_HOLD {
+            return Err(Error::MoreMeshPointsThanASolidWillHold {
+                most: MOST_POINTS_A_MESH_WILL_HOLD,
+            });
+        }
+        let there = face.location();
+        let mut along = WalkedLoop {
+            corners: Vec::with_capacity(steps - 1),
+            points: Vec::with_capacity(steps - 1),
+            goes_right_round: false,
+        };
+        for step in 1..steps {
+            let part = step as f64 / steps as f64;
+            let sits_at =
+                [0, 1].map(|which| leaving[which] + part * (arriving[which] - leaving[which]));
+            let on_it = stored.point_at(sits_at[0], sits_at[1]);
+            along.corners.push(sits_at);
+            along
+                .points
+                .push(self.remember(there.apply_to_point(on_it)));
+        }
+        Ok(along)
     }
 
     /// Cut one piece in half across the middle of how far round it goes, or
@@ -521,6 +842,7 @@ impl BuildingAMesh {
         let mut along_the_cut = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
+            goes_right_round: false,
         };
         for step in 1..steps {
             let part = step as f64 / steps as f64;
@@ -626,7 +948,10 @@ impl BuildingAMesh {
     ) -> Option<WalkedLoop> {
         let back = face.location().inverse();
         let poles = poles_of(wire);
-        let mut walk = WalkingAWire::new(how_far_the_longitude_wraps(stored));
+        let mut walk = WalkingAWire::new(
+            how_far_the_longitude_wraps(stored),
+            wire.closes_on_one_edge(),
+        );
 
         for step in wire.steps() {
             match step {
@@ -705,6 +1030,9 @@ impl BuildingAMesh {
 struct WalkedLoop {
     corners: Vec<[f64; 2]>,
     points: Vec<u32>,
+    /// Whether this wire is one whole closed curve, so that it comes back to
+    /// where it started a whole turn on rather than at the longitude it left.
+    goes_right_round: bool,
 }
 
 impl WalkedLoop {
@@ -713,6 +1041,7 @@ impl WalkedLoop {
         let mut taken = WalkedLoop {
             corners: Vec::new(),
             points: Vec::new(),
+            goes_right_round: false,
         };
         let mut at = from;
         loop {
@@ -731,12 +1060,122 @@ impl WalkedLoop {
         self.points.extend_from_slice(&rest.points);
     }
 
+    /// The same, with `rest`'s longitudes moved by whole turns so that no step
+    /// in the chain jumps more than half a turn.
+    fn take_in_unwrapped(&mut self, rest: &WalkedLoop, whole: f64) {
+        let mut longitude = self.corners.last().map_or(0.0, |corner| corner[0]);
+        for corner in &rest.corners {
+            longitude += the_short_way_round(corner[0] - longitude, whole);
+            self.corners.push([longitude, corner[1]]);
+        }
+        self.points.extend_from_slice(&rest.points);
+    }
+
     /// The same corners, walked backwards.
     fn the_other_way(&self) -> WalkedLoop {
         WalkedLoop {
             corners: self.corners.iter().rev().copied().collect(),
             points: self.points.iter().rev().copied().collect(),
+            goes_right_round: self.goes_right_round,
         }
+    }
+}
+
+/// Which way a surface faces at a point, as a polynomial in the numbers it
+/// stores with no normalization in it (§31.2).
+fn gradient_of(surface: &Surface, at: Point) -> Vector {
+    match surface {
+        Surface::Plane(flat) => flat.normal(),
+        Surface::Sphere(ball) => at - ball.centre(),
+        Surface::Cylinder(pipe) => {
+            let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
+            let out = at - origin;
+            out * along.dot(along) - along * along.dot(out)
+        }
+        other => panic!("this crate cannot say which way {other:?} faces"),
+    }
+}
+
+/// The latitude a surface pinches to a point at, or `None` for one that does
+/// not pinch at all.
+fn where_this_surface_pinches(surface: &Surface) -> Option<f64> {
+    match surface {
+        Surface::Sphere(_) => Some(core::f64::consts::FRAC_PI_2),
+        Surface::Plane(_) | Surface::Cylinder(_) => None,
+        other => panic!("this crate cannot say whether {other:?} pinches"),
+    }
+}
+
+/// Whether a loop is walked in the direction the longitude grows.
+fn runs_up(around: &WalkedLoop, whole: f64) -> bool {
+    let corners = &around.corners;
+    let mut climbed = 0.0;
+    for step in 0..corners.len() {
+        climbed += the_short_way_round(
+            corners[(step + 1) % corners.len()][0] - corners[step][0],
+            whole,
+        );
+    }
+    climbed > 0.0
+}
+
+/// Which corner of a loop sits nearest a longitude.
+///
+/// **Not counting whole turns as no distance at all**, which is the one thing a
+/// chain that goes right round makes wrong: its first corner and its last are a
+/// whole turn apart and would be equally near everything, so which of the two
+/// came back would decide whether the stretch after it goes a quarter of the way
+/// round or three quarters.
+fn nearest_longitude(around: &WalkedLoop, at: f64) -> usize {
+    (0..around.corners.len())
+        .min_by(|&one, &other| {
+            let away = |which: usize| (around.corners[which][0] - at).abs();
+            away(one).total_cmp(&away(other))
+        })
+        .expect("a walked loop has a corner")
+}
+
+/// One loop's longitudes moved by whole turns into the frame another was walked
+/// in.
+fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> WalkedLoop {
+    let least = |around: &WalkedLoop| {
+        around
+            .corners
+            .iter()
+            .map(|corner| corner[0])
+            .fold(f64::MAX, f64::min)
+    };
+    let by = ((least(frame) - least(chain)) / whole).round() * whole;
+    WalkedLoop {
+        corners: chain
+            .corners
+            .iter()
+            .map(|corner| [corner[0] + by, corner[1]])
+            .collect(),
+        points: chain.points.clone(),
+        goes_right_round: chain.goes_right_round,
+    }
+}
+
+/// The same corners with the whole turns put back, so that no step in the chain
+/// jumps more than half a turn.
+///
+/// A loop that goes right round is walked as one turn's worth of longitudes and
+/// then closes, so a stretch of it taken from anywhere but its own first corner
+/// runs off the end and starts again — which in the surface's two coordinates is
+/// a fold rather than a step. Unwrapping puts the jump back where it belongs, at
+/// the seam of the patch being built.
+fn unwrapped(chain: &WalkedLoop, whole: f64) -> WalkedLoop {
+    let mut corners = Vec::with_capacity(chain.corners.len());
+    let mut longitude = chain.corners.first().map_or(0.0, |corner| corner[0]);
+    for corner in &chain.corners {
+        longitude += the_short_way_round(corner[0] - longitude, whole);
+        corners.push([longitude, corner[1]]);
+    }
+    WalkedLoop {
+        corners,
+        points: chain.points.clone(),
+        goes_right_round: chain.goes_right_round,
     }
 }
 
@@ -778,6 +1217,7 @@ fn where_to_cut(around: &WalkedLoop, middle: f64) -> Option<(WalkedLoop, [usize;
     let mut opened = WalkedLoop {
         corners: Vec::with_capacity(count + 2),
         points: Vec::with_capacity(count + 2),
+        goes_right_round: false,
     };
     let mut moved_to = Vec::with_capacity(count);
     let mut places = Vec::new();
@@ -842,6 +1282,9 @@ fn the_nearer_of(middle: f64, here: f64, next: f64) -> bool {
 /// The running state of a walk round one wire.
 struct WalkingAWire {
     wraps: Option<f64>,
+    /// Whether this wire is one whole closed curve, so that it comes back to
+    /// where it started a whole turn on rather than at the longitude it left.
+    goes_right_round: bool,
     longitude: f64,
     started: bool,
     will_not_lie_flat: bool,
@@ -851,9 +1294,10 @@ struct WalkingAWire {
 }
 
 impl WalkingAWire {
-    fn new(wraps: Option<f64>) -> Self {
+    fn new(wraps: Option<f64>, goes_right_round: bool) -> Self {
         Self {
             wraps,
+            goes_right_round,
             longitude: 0.0,
             started: false,
             will_not_lie_flat: false,
@@ -945,7 +1389,14 @@ impl WalkingAWire {
         if self.will_not_lie_flat {
             return None;
         }
+        // A wire made of one whole closed curve is *meant* to come back a whole
+        // turn on — a cap circle of a tube the fuse cut out of a bar's wall is
+        // one — so the check below is not about it. It is a fact about the wire
+        // and not a measurement: one coedge whose two ends are one corner runs
+        // right round the curve its two faces cross in, which on a periodic
+        // surface is right round the surface.
         if let (Some(whole), Some(first)) = (self.wraps, self.corners.first())
+            && !self.goes_right_round
             && (self.longitude - first[0]).abs() >= whole / 2.0
         {
             return None;
@@ -953,6 +1404,7 @@ impl WalkingAWire {
         Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
+            goes_right_round: self.goes_right_round && self.wraps.is_some(),
         })
     }
 }
@@ -1049,6 +1501,22 @@ fn how_far_round_this_face_it_goes(stored: &Surface, from: Point, points: &[Poin
         at = next;
     }
     round
+}
+
+/// Which of the two surfaces either side of a closed edge says which way it
+/// runs: the curved one, and where both are curved the one `Surface`'s own fixed
+/// order puts first.
+///
+/// `None` where neither is curved, which is a straight edge and has its two ends
+/// to say which way it runs.
+fn the_curved_surface_that_names_a_closed_edge(along: &[Surface; 2]) -> Option<Surface> {
+    let mut curved: Vec<Surface> = along
+        .iter()
+        .filter(|surface| surface.as_plane().is_none())
+        .copied()
+        .collect();
+    curved.sort_by_key(name_of_surface_bits);
+    curved.first().copied()
 }
 
 /// How far this surface's first coordinate has to run to come back to where it
@@ -1255,7 +1723,6 @@ mod tests {
 
     use super::*;
     use crate::Model;
-    use crate::validate::side_of_surface;
 
     /// A curved face with a hole in it is refused and does not panic.
     ///
@@ -1420,11 +1887,12 @@ mod tests {
 
         let meridian = Plane::from_point_and_normal(Point::origin(), normal).expect("a normal");
         let picker =
-            Plane::from_point_and_normal(Point::origin(), picked_by_facing).expect("a normal");
+            rcad_geom::HalfSpace::through_a_point_facing(Point::origin(), picked_by_facing)
+                .expect("a normal");
         let edge = model.data().edges.keys().next().expect("the seam");
         model.data_mut().edges[edge].run = EdgeRun::PartOfWhereItCrosses {
             and: Surface::Plane(meridian),
-            picked_by: SmallVec::from_buf([Surface::Plane(picker)]),
+            picked_by: SmallVec::from_buf([rcad_geom::Picker::from(picker)]),
         };
         model
     }

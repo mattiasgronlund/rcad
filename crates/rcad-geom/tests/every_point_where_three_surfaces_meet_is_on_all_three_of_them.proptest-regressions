@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 74ddc0e7c883a3795f7ab1b7947ecf7643773e3b75a013b4382149ed411b1492 # shrinks to Corner { first: Flat { normal: [0, -1, 2], at: 0 }, second: Flat { normal: [-3, -2, 1], at: 0 }, third: Flat { normal: [-1, 1, -3], at: -1 }, turn: None, elsewhere: Elsewhere { scale: 0, shift: None } }
+cc 7356d42b37cc1df9544f7df6c60ac603d3ff188a81ae7f3c7667f3d703077b19 # shrinks to Corner { first: Flat { normal: [0, 1, 0], at: -5 }, second: Flat { normal: [0, 0, 1], at: 3 }, third: Pipe { along: [1, 0, 0], through: [0, -1, 0], radius: 5 }, turn: Some(Turn { direction: [-1, 1, 0], steps: 1 }), elsewhere: Elsewhere { scale: 0, shift: None } }

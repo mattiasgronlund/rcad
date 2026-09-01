@@ -134,9 +134,161 @@ impl<'m> SolidView<'m> {
         seen.then(|| (Point::from(low), Point::from(high)))
     }
 
+    /// An axis-aligned box the whole solid fits inside, or `None` when it has no
+    /// faces at all.
+    ///
+    /// **This is the one [`SolidView::box_around_its_corners`] is not**, and the
+    /// difference is what a ray caster needs: a point outside this box is
+    /// outside the solid with nothing left over, which is a proof and not a
+    /// shortcut, and a ray target picked from it is clear of every face.
+    ///
+    /// A flat face is the box round its own corners, exactly as before. The two
+    /// curved ones bulge away from theirs and each is bounded by an argument
+    /// rather than by a fudge factor:
+    ///
+    /// - A **ball**'s skin is inside the box round its centre a radius each way,
+    ///   whatever the face is trimmed down to. Nothing tighter is available
+    ///   without knowing where the trimming runs, and a ball's face may reach
+    ///   right round.
+    /// - A **pipe**'s skin is a radius from its axis, and how far *along* that
+    ///   axis a face reaches is settled by its corners: the distance along the
+    ///   axis grows steadily everywhere on a pipe, so it has no high or low spot
+    ///   in the middle of a face and reaches its own furthest on the boundary.
+    ///   So the box round the corners' shadows on the axis, opened out by the
+    ///   radius, holds the face.
+    ///
+    /// # Panics
+    ///
+    /// On a surface this has not been taught. [`Surface`] grows a variant at
+    /// every milestone, and a solid measured by not being measured is worse than
+    /// a stop.
+    #[must_use]
+    pub fn box_around_it(self) -> Option<(Point, Point)> {
+        let mut round_them_all: Option<(Point, Point)> = None;
+        for face in self.faces() {
+            let Some(round_this_one) = self.box_around_one_face(face) else {
+                continue;
+            };
+            round_them_all = Some(match round_them_all {
+                None => round_this_one,
+                Some(so_far) => both_boxes(so_far, round_this_one),
+            });
+        }
+        round_them_all
+    }
+
+    /// An axis-aligned box one face of this solid fits inside, or `None` when
+    /// there is nothing of it to measure.
+    ///
+    /// **Not the box round the face's corners**, and for a curved face the two
+    /// are nothing like each other: a round bar's wall has two corners, both on
+    /// its seam, and the wall bulges a whole radius away from the line between
+    /// them. A round cap has one corner and fans into no triangles at all, so a
+    /// box read off [`FaceView::for_each_triangle`] is empty. A broad phase
+    /// reading either would skip a pair of faces that really do cross.
+    ///
+    /// A **flat** face is the box round its corners, plus the box round each
+    /// face across a side of it that is not straight. A bar's cap is bounded by
+    /// a circle with one corner on it, and what holds that circle is the wall it
+    /// is shared with. The two faces along an edge both hold it, so borrowing
+    /// the neighbour's box is a fact about the model rather than a fudge. It is
+    /// a loose box and deliberately so — a cap of a bar comes out as tall as the
+    /// bar. Tightening it means bounding where a *curve* runs, and a box that
+    /// only ever decides which pairs to look at does not need one.
+    ///
+    /// It hangs off the solid rather than off the face for the reason
+    /// `docs/decisions.md` §3.2 gives about every neighbour question: a face
+    /// read out of the arena by key carries no location, and the box round the
+    /// stored surface is not the box round the one this solid is using.
+    ///
+    /// # Panics
+    ///
+    /// On a surface this has not been taught. [`Surface`] grows a variant at
+    /// every milestone, and a face measured by not being measured is worse than
+    /// a stop.
+    #[must_use]
+    pub fn box_around_one_face(self, face: FaceView<'m>) -> Option<(Point, Point)> {
+        let mut round_it = box_the_surface_bounds(face);
+        if face.surface().as_plane().is_none() {
+            return round_it;
+        }
+        for coedge in face.wires().flat_map(WireView::coedges) {
+            let edge = coedge.edge();
+            if *edge.run() == EdgeRun::Straight {
+                continue;
+            }
+            let Some(across) = edge
+                .neighbouring_faces()
+                .find(|&other| other != face.key())
+                .and_then(|other| self.faces().find(|used| used.key() == other))
+            else {
+                continue;
+            };
+            if let Some(theirs) = box_the_surface_bounds(across) {
+                round_it = Some(round_it.map_or(theirs, |mine| both_boxes(mine, theirs)));
+            }
+        }
+        round_it
+    }
+
     fn data(self) -> &'m SolidData {
         &self.model.data().solids[self.slot]
     }
+}
+
+/// A box holding everything the face's own surface can reach, given where its
+/// corners are.
+///
+/// - A **ball**'s skin is inside the box round its centre a radius each way,
+///   whatever the face is trimmed down to. Nothing tighter is available without
+///   knowing where the trimming runs, and a ball's face may reach right round.
+/// - A **pipe**'s skin is a radius from its axis, and how far *along* that axis
+///   a face reaches is settled by its corners: the distance along an axis grows
+///   steadily everywhere on a pipe, so a face has no high or low spot in the
+///   middle and reaches its own furthest on the boundary.
+/// - A **plane** bounds nothing on its own, so this is the box round the
+///   corners, which holds the face only while every side of it is straight.
+///   [`SolidView::box_around_one_face`] is what opens that out.
+fn box_the_surface_bounds(face: FaceView<'_>) -> Option<(Point, Point)> {
+    let mut low = [f64::INFINITY; 3];
+    let mut high = [f64::NEG_INFINITY; 3];
+    let mut seen = false;
+    let mut open_out = |at: [f64; 3], by: f64| {
+        seen = true;
+        for axis in 0..3 {
+            low[axis] = low[axis].min(at[axis] - by);
+            high[axis] = high[axis].max(at[axis] + by);
+        }
+    };
+    match face.surface() {
+        Surface::Plane(_) => {
+            for corner in face.wires().flat_map(WireView::points) {
+                open_out(corner.coordinates(), 0.0);
+            }
+        }
+        Surface::Sphere(ball) => open_out(ball.centre().coordinates(), ball.radius()),
+        Surface::Cylinder(pipe) => {
+            let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
+            for corner in face.wires().flat_map(WireView::points) {
+                let shadow = origin + along * along.dot(corner - origin);
+                open_out(shadow.coordinates(), pipe.radius());
+            }
+        }
+        other => panic!("this crate cannot say how far {other:?} reaches"),
+    }
+    seen.then(|| (Point::from(low), Point::from(high)))
+}
+
+/// The smallest box holding both of two boxes.
+fn both_boxes(one: (Point, Point), other: (Point, Point)) -> (Point, Point) {
+    let (low, high) = (
+        [one.0.coordinates(), other.0.coordinates()],
+        [one.1.coordinates(), other.1.coordinates()],
+    );
+    (
+        Point::from([0, 1, 2].map(|axis| low[0][axis].min(low[1][axis]))),
+        Point::from([0, 1, 2].map(|axis| high[0][axis].max(high[1][axis]))),
+    )
 }
 
 /// A shell, with the location and orientation it is being looked at through.
@@ -315,11 +467,17 @@ impl<'m> FaceView<'m> {
     ///
     /// `validate` used to be what made that unreachable, and **it is not any
     /// more**: a curved face is a sound face now, and `add_round_bar` builds
-    /// one. What keeps this sound is [`SolidView::is_wholly_flat`], asked by
-    /// every operation that only handles flat faces before it walks anything.
-    /// So reaching this means an operation skipped that check, which is a bug
-    /// in this crate rather than bad input. Use [`FaceView::surface`] when the
-    /// face might be curved.
+    /// one. What keeps every *in-crate* caller sound is
+    /// [`SolidView::is_wholly_flat`], asked by every operation that only handles
+    /// flat faces before it walks anything, so reaching this from inside the
+    /// kernel is a bug in this crate.
+    ///
+    /// **From outside it is three lines and no bug at all.** This is `pub`,
+    /// [`Model::face`](crate::Model::face) hands out a [`FaceView`] for any key,
+    /// and a bar's wall is curved. That is a documented panic on a stated
+    /// precondition and not §16.11's kind — [`FaceView::surface`] is right here
+    /// and answers for every face — but "rather than bad input" was not true and
+    /// is gone (§39).
     #[must_use]
     pub fn plane(self) -> Plane {
         *self.surface().as_plane().expect(

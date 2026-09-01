@@ -353,6 +353,57 @@ pub enum Error {
         most: usize,
     },
 
+    /// Two surfaces that cross in straight lines rather than in a closed curve.
+    ///
+    /// A closed edge needs one vertex on it and
+    /// [`where_a_closed_crossing_starts`](crate::where_a_closed_crossing_starts)
+    /// is where it goes. Two planes, a plane down a pipe's own axis, and two
+    /// pipes pointing the same way cross in lines that run on for ever, and a
+    /// line has no place on it that the pair alone picks out.
+    ///
+    /// A **limit** and not a gap (§16.10): the vertex this would name does not
+    /// exist, because the edge those pairs contribute is cut by corners at both
+    /// ends rather than closing on itself.
+    #[error("these two surfaces cross in straight lines rather than in a closed curve")]
+    TheCrossingOfTheseTwoSurfacesIsNotClosed,
+
+    /// Two surfaces whose crossing is not one closed curve lying in a plane.
+    ///
+    /// Ordering points round a closed crossing rests on the curve being convex,
+    /// which is what makes three points' cyclic order the sign of the area they
+    /// sweep. Two planes cross in a straight line, a plane along a pipe's axis
+    /// cuts two of them, and a ball against a pipe or a pipe against a pipe
+    /// crosses in a degree-four space curve that is neither flat nor convex.
+    ///
+    /// A **limit** for the straight cases — the question is a different one and
+    /// the arrangement's dominant-axis rule already answers it — and a **gap**
+    /// for the two quartic ones, where the curve is there and ordering points
+    /// along it takes the marcher rather than a determinant (§16.10, §31.2
+    /// row 8).
+    #[error("these two surfaces do not cross in one closed curve lying in a plane")]
+    TheseTwoSurfacesDoNotCrossInAConic,
+
+    /// Three surfaces of which fewer than two are flat.
+    ///
+    /// Two planes cross in a line, and where a quadric cuts that line is a
+    /// quadratic in one unknown whose discriminant is a polynomial in the stored
+    /// numbers. One plane and two quadrics is a quartic, and three quadrics is a
+    /// degree-eight system.
+    ///
+    /// A **gap** and not a limit (§16.10): the points are there, and a real
+    /// algebraic solver reaches them. The family of fixes is the
+    /// Dupont–Lazard–Lazard–Petitjean machinery or a certified numerical solver
+    /// with a separation bound of its own, and both are a milestone rather than
+    /// a lane (`docs/decisions.md` §31.2). The consumer that calls it due is
+    /// named there too: two capped bars crossing near one of their caps.
+    /// `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`
+    /// is the demonstration that the points exist.
+    #[error(
+        "where three surfaces meet is only worked out when two of them are flat, and fewer than \
+         two of these are"
+    )]
+    WhereThreeSurfacesMeetNeedsTwoOfThemFlat,
+
     /// A predicate refused the input it was handed — three planes with no
     /// single meeting point, for instance.
     #[error(transparent)]

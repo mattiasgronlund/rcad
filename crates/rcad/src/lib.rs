@@ -310,6 +310,16 @@ pub use rcad_mesh::CannotTriangulate;
 /// not kernel users, which is §24.15's argument for exporting it at all.
 pub use rcad_geom::{EdgeRun, NamedRun, SurfaceMeet};
 
+/// What picks one piece of a crossing out of the rest, and the flat kind of it.
+///
+/// A [`Picker`] is out here because [`EdgeRun::PartOfWhereItCrosses`] holds a
+/// list of them, so a caller matching on a run meets one. [`HalfSpace`] is out
+/// here because building a run means building one — and because its whole point
+/// is that it stores the four numbers it is handed, which a caller that wants a
+/// normal exactly square to a direction it holds has to be able to rely on
+/// (§33).
+pub use rcad_geom::{HalfSpace, Picker, SIDE_OF_A_HALF_SPACE};
+
 /// Naming where two surfaces cross, and working out points along it.
 ///
 /// §24.15: the entry point has no topology in its signature, so exporting it
@@ -321,6 +331,20 @@ pub use rcad_geom::{
     MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing,
     WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
     WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS, WHERE_TWO_PLANES_CROSS, intersect, walk,
+    where_a_closed_crossing_starts,
+};
+
+/// Where three surfaces meet, how many points that is, and which of two points
+/// on a closed crossing comes first.
+///
+/// Out here for the same reason as [`intersect`]: none of the three has any
+/// topology in its signature, and a caller that wants the corner of a curved
+/// arrangement without a kernel is the user §24.15 exports for. Where a corner
+/// read out of a model lands once it has been placed is here too, because it is
+/// what a caller has to use instead of moving the point itself (§31.3).
+pub use rcad_geom::{
+    CORNER_AFTER_MOVING_ROUNDOFF, MeetOfThree, ROUND_A_CROSSING, WHERE_THREE_SURFACES_MEET,
+    meet_of_three_surfaces, where_a_corner_lands_after_moving, which_comes_first_round_a_crossing,
 };
 
 pub use rcad_geom::{
@@ -335,6 +359,7 @@ pub use rcad_predicates::{
 };
 pub use rcad_topo::{
     CoedgeKey, CoedgeView, Containment, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef,
-    FaceView, Fused, Invalid, Measurement, Mesh, MeshTriangle, Model, Profile, ProfileBuilder,
-    Rule, ShellKey, ShellView, SolidKey, SolidView, VertexKey, VertexView, WireKey, WireView,
+    FaceView, Fused, Invalid, Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile,
+    ProfileBuilder, Rule, ShellKey, ShellView, SolidKey, SolidView, VertexKey, VertexView, WireKey,
+    WireView,
 };
