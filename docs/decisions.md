@@ -8870,3 +8870,283 @@ it came down to **12**, because the gathering step stopped asking
 and started asking `intersect`, which settles the same three cases in one call
 and gives up in fewer places on the way. The assertion is on the leading cause
 and the margin widened rather than narrowed.
+
+### 36.11 The gate is off, and what that cost
+
+Lane 5 of §31.6: `select.rs`, `assemble.rs`, `mod.rs` and `history.rs`, and the
+five lines at the top of `Model::fuse` that §31.1 calls M4's one deliverable.
+They are gone, `Error::FuseNeedsFlatFaces` is deleted, and **a block with a round
+hole taken out of it is one solid that validates and meshes** under all three
+rules, both ways round.
+
+| | | |
+|---|---|---|
+| **11** | the gate gone, and a block with a round hole is one solid | met. `the_fuse_takes_a_curved_solid_now`, and `Error::FuseNeedsFlatFaces` has no variant left to assert on — what stands in its place is the operation working |
+| **13** | a fused curved solid meshes and passes §23.4's oracle | met for the first of its two shapes. `a_block_with_a_round_hole_meshes_into_a_closed_surface`, through `the_mesh_closes_up`, for Union, Intersection and Difference — **and the volume of each**, which is the strongest thing there is to say about a curved answer and is what says the tube is not inside out. `a_ball_with_a_pipe_through_it` is refused by §36.9's first row and stays refused |
+| **16** | the two rates, family by family | met, and stronger than asked. Four families, three rules, both ways round, **0.00% refused and nothing recorded** on all four — including the turned one. §36.14 |
+| **12** | the pieces cover the face and overlap nowhere | met by lane 4 |
+
+Three things a curved answer needed that a flat one never did.
+
+**Which way a face walks a closed edge is not something its two ends can say**,
+because they are one corner. It is read off which side of the partner the
+material is on — §36.6's identity, already in the arrangement — and *turned round
+for whichever of the two faces did not create the edge*, because "forward" is
+`∇S × ∇T` for that face's own surface and the two faces name `S` and `T` the
+other way round from each other. Without that, both coedges of every cap circle
+came out forward.
+
+**Which surface a face is on is geometry and which way round it is used is
+topology, and only a plane welds them together** (§31.3's ON split, arriving in
+the commit). A plane turned round is four negated numbers and the answer stores
+it that way; a sphere has no reversed form, so a curved face that a rule turns
+round carries the turn on its *shell* instead. The same split settles the ON
+columns: for a flat pair `Plane::agreement_with` answers "one surface" and "same
+way" together, and for a curved pair `intersect` answers the first and the two
+faces' own orientations answer the second.
+
+**A candidate point inside a curved piece has to be put back onto the surface**,
+because a blend of corners on a sphere is not on it. That goes through the
+surface's own two coordinates, which is `atan2` and is allowed for the reason §5
+gives — *choosing* which point to look at decides nothing, and what follows
+proves it is inside the piece with signs that never see a coordinate. What comes
+back is a **box** [`Surface::ROUND_TRIP_ROUNDOFF`] wide, and the width is not
+slop anybody accepted: a candidate a rounding off a curved face would be
+classified confidently against a solid whose own face it is lying on, and `ON` is
+the one column a ray was never what settled.
+
+And a piece bounded by **one** closed curve has one corner, so every blend of its
+corners is that corner and every one of them is on the boundary. Two families
+were added for it: the middle of a round wire, which for a flat piece is where
+the ball or pipe that cut it has its axis, and six points spread round a curved
+surface from the middle of what corners there are.
+
+### 36.12 The seam a fuse cannot invent, and where it went instead
+
+A fuse's answer contains a **tube**: a ring of a bar's wall between two planes,
+bounded by two curves that each go right round the cylinder and by nothing else.
+It is the first face in this kernel with a hole in it that is not flat, and
+§35.7 predicted lane 5 would make one.
+
+**It has no seam and cannot be given one.** A seam is an edge between two corners
+at a single longitude, and the two curves bounding a tube start wherever the pair
+that cut each of them starts — which is `where_a_closed_crossing_starts`'s answer
+for each pair separately and is not the same longitude twice. Inventing a corner
+at a chosen longitude does not help either: the plane the seam would run in has
+to hold both corners *provably*, and a plane built through two rounded points
+holds neither.
+
+So the seam went into the mesher, where it is a cut in the surface's own two
+coordinates and not topology anybody has to hold. `cut_a_ring_across` cuts a ring
+at four longitudes at once and hands back four patches with one loop each, which
+is the shape everything below it already expected. **The rule §35.7 and §31.10
+item 5 said lane 5 would falsify is falsified in exactly one place**: the
+sentence *"nothing this kernel builds is such a face"* is gone, and what is still
+refused is a face with a hole that is **not** a ring — one curve right round and
+another that is not — because then there is nowhere to cut across to.
+
+Three things that had to be right for the ring cut, each of them a fact about a
+chain that goes right round rather than an arithmetic bound:
+
+- **A corner's distance to a longitude is not measured modulo a whole turn.** A
+  chain that goes right round has a first corner and a last a whole turn apart,
+  and modulo a turn they are equally near everything — so which came back decided
+  whether the next stretch went a quarter of the way round or three quarters.
+- **The two chains are walked in longitude frames of their own**, a whole number
+  of turns apart, and one is put into the other's frame before anything is
+  measured. A patch that took them as they came stepped a whole turn crossing
+  from one to the other, which in the surface's two coordinates is a boundary
+  folded across itself.
+- **Every stretch is put on the end unwrapped against what is already there**,
+  which is what `arrive` does one level up and for the same reason.
+
+**What is still refused, and it is the shape M4 does not reach:** a cap a plane
+cuts off a **ball**. Its whole boundary is one circle of latitude, and its patch
+is a rectangle whose top edge is the pole and whose two sides are one meridian
+used twice — and the model says neither of those about the face. A ring has
+somewhere to cut *to* and a cap does not.
+`a_ball_cut_by_a_plane_is_refused_by_name_rather_than_meshed_wrongly` asserts it
+of the whole family and not of one shape, because a refusal that only fires
+sometimes is one somebody has to characterise (§14.7).
+
+### 36.13 A confident wrong answer, and two corners that could not be exact
+
+**The worst thing found in this milestone, and the fuse is what asked the
+question in anger.** `classify_point` said a point outside a bar of radius two
+was inside it. §4.1 ranks that below a crash.
+
+`gap_enclosing(a, b)` is the step *from* `a` *to* `b`, and the two callers in
+`classify.rs`'s `gradient_at` never turned it round — so a ball's and a pipe's
+gradient pointed at the middle instead of away from it, and *which way a ray
+crosses a curved face* came out backwards every time.
+
+**It cancels for a solid whose faces are all curved**, which is why lane 3's
+grids of 9826 points against a bar and a ball never showed it: reversing every
+crossing flips the total, and `winding == 0` is still `winding == 0`. What shows
+it is a ray that crosses **one curved face and one flat one** — a ray through a
+bar's wall and out of its cap — and there the two contributions that should
+cancel add instead. Nothing in the kernel fired such a ray until selection asked
+where a piece of a block's face sits relative to a bar.
+
+Two more, and both are corners a fuse builds that a builder never did:
+
+- **A corner of a curved face is asked for a sign and never for a distance**
+  (§35), so a *constructed* corner — which every corner a fuse solves for is —
+  could not pass `check_curved_face` at all: it is a rounding off its own
+  surface and the exact level says so. What it can be asked is whether the box
+  it already carries straddles that surface, which is §17.2 read literally. An
+  exactly placed corner is still asked exactly what it always was, because the
+  box is only consulted after the exact point has failed.
+- **Where a closed crossing starts is a walked point and not an exact one.** §34
+  says so in as many words — *"it is a point and not a box, and that is not a
+  promise it is exact"* — and reading it as exact made it a corner of a curved
+  face that the sweep could certify was off that face's own surface. It is a box
+  [`POINT_ALONG_A_CROSSING_ROUNDOFF`] wide, unless **both** surfaces certify the
+  triple `Zero`, which on the lattice they do — and there the box would have
+  turned every sign the arrangement asks about it into a refusal.
+
+One thing changed shape rather than being fixed. `Assembly::commit` re-validates
+what it wrote, but only in a debug build and only as a *panic*: it is there to
+catch a bug in this crate, and a release build writes the answer out regardless.
+A curved answer whose two faces along one side disagree which way they face is
+exactly that, so **the skin is checked for balance before anything is written**
+and comes back as a refusal. Refusing beats corrupting, and both beat crashing on
+a caller's solid.
+
+### 36.14 The numbers
+
+Family by family and never blended (§17.7). 64 drawn pairs per family, three
+rules, both ways round — 384 fuses each — under `Policy::certified()`.
+
+| Family | fuses | refused | recorded anything |
+|---|---|---|---|
+| lattice, a bar through a block | 384 | **0.00%** | 0 |
+| turned about an awkward axis | 384 | **0.00%** | 0 |
+| written at `2^k` | 384 | **0.00%** | 0 |
+| a ball resting on a block | 384 | **100%**, one named reason | — |
+
+**The turned row is the one to read twice.** A turned curved pair refusing
+nothing is stronger than §31.7 asked for, and it is not luck: lane 4 took the
+arrangement's own turned rate to zero by dropping cuts that reach no part of the
+face (§36.4), and everything above it is signs about boxes that either prove or
+give up — and none of these draws reaches one that gives up. The families here
+are deliberately clear of knife edges, which is what a *control* is for; the
+catalogue entries live in `degenerate_fuses.rs` and are lane 6's.
+
+**The ball row is a refusal and not a rate.** Every fuse of it refuses, for the
+one reason §36.12 gives, and the test asserts both — that the reason is the only
+one and that it fires every time.
+
+The intersector's and the classifier's own rates are unchanged by this lane
+except where §36.13's defect moved an *answer* rather than a rate.
+
+| | at §36.10 | now |
+|---|---|---|
+| tests (`cargo nextest`, whole workspace) | 1062 | **1067** |
+| of those, in `rcad-topo` | 324 | **329** |
+| suite duration | 2.9 s | 2.9 s |
+| doc tests | 19 | 19 |
+| `FORMAT_VERSION` | 3 | 3 |
+
+`just default` is green, `cargo-deny` included. **`rcad-predicates` is still at 0
+files changed for the whole milestone**, across six lanes.
+
+**One prediction settled.** §30.8 item 11 said M4 would make `Undecidable` out of
+`mesh` reachable through a fuse's constructed corner; §31.8 predicted it would
+not, because `write_into` stores `middle_of(point)` and a committed vertex has
+always been an exact triple. **§31.8 is right.** `Assembly::Corner::point` is a
+`Point`, `write_into` hands it to `add_vertex` unchanged, and the mesher reads
+vertices and walked points that are ordinary `f64` triples — so a mesh domain
+still holds no constructed corner after M4. The width goes on the vertex as an
+`Approximation`, which is where §17.2 says it goes and where §36.13 now reads it
+back from.
+
+**§31.8 item 9 is still not reached.** `MOST_POINTS_A_MESH_WILL_HOLD` is four
+million and the largest thing built here is a block with a round hole meshed at a
+deflection of a hundredth. §35.9 already corrected the watch and nothing here
+moves it.
+
+**§30.8 item 6 did not come due.** A crossing that runs through itself needs two
+equal pipes whose axes meet, or a ball reaching exactly across a pipe; the first
+is refused by `intersect` and the second by the quartic ordering, both before
+anything could reach the third `EdgeRun` variant. §31.9's deferral stands and its
+consumer is still not this fuse.
+
+**§35.6's two refusals hold with the gate off.** `select.rs`'s
+`CannotFollowAFacesTrimming → Ok(None)` and `assemble.rs`'s abandon-a-corner are
+both about a face of a *caller's* solid, and taking the gate off does not make
+either of them a broken invariant — what changed is that they are now reachable,
+by a fused curved solid handed back to the fuse. Neither fires in §36.14's four
+families.
+
+### 36.15 What lanes 6 and 7 have to be told
+
+Both are test-only, in `rcad-topo/tests/`, and both build on this.
+
+- **Three shapes work and two refuse, and the line between them is one
+  sentence:** an answer whose every curved edge is a **whole closed curve** is
+  built, and one with an *arc* of a curved crossing in it is refused. A block
+  with a round hole through it, a bar cut square across by a block, and a blind
+  hole are the first; a bar notched by a block and a ball cut by a plane are the
+  second. Write the catalogue against that line rather than around it.
+- **A ball cut by a plane refuses**, so roadmap §7.4's tangent-sphere entries
+  reach `ACurvedFaceGoesRightRoundWithNoSeam` before they reach anything about
+  tangency. That is a real answer for the table and not a hole in it, but it
+  means the entry is measuring the seam and not the tangency.
+- **The metamorphic suite's generators are flat** (`tests/pairs/mod.rs` builds
+  profiles and extrusions), and a curved family needs a `Shape` arm of its own. A
+  bar through a block, with the bar a whole unit clear of the block's walls, is
+  the family §36.14 measured and the one that refuses nothing.
+- **A turned curved pair refuses nothing at all**, so the properties that hand
+  back `Ok(())` when there is no answer will really run over it. That makes the
+  *comparison count* guard (`SOME_COMPARISONS_MUST_HAPPEN`) worth setting high
+  for a curved family rather than low.
+- **Two coincident curved faces are kept as two.** The joiner only ever joins two
+  flat faces, because the walk that rebuilds a joined face's rings winds corners
+  about a plane's normal and has no curved twin. A curved answer is therefore
+  sound but cut into more faces than it has, and a property that counts faces
+  will see it. What used to make joining urgent no longer does: §17.1 could not
+  re-derive a corner with two surfaces round it and §31.3's second route reads
+  one out of the model.
+- **`Model::fuse` is no longer gated on anything**, so a test that asserted a
+  refusal by name has nothing to assert. `the_fuse_takes_a_curved_solid_now`
+  replaced the last one.
+
+### 36.16 Every refusal this lane can produce, classified
+
+| Refusal | Cause | | Demonstration |
+|---|---|---|---|
+| `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` | an edge of the answer runs along part of a curved crossing | **gap** | `a_bar_notched_by_a_block_is_refused_by_name`. Two corners on a circle leave two arcs with the same two ends, and what tells them apart is a half-space through the chord square to the crossing's own plane — which exists, and which cannot be *built* here, because both ends have to be provably on it once its offset is rounded and nothing rounds it in a direction it can prove |
+| `ACurvedFaceGoesRightRoundWithNoSeam` | a curved face is bounded by one curve right round its surface and nothing else | **gap** | `a_ball_cut_by_a_plane_is_refused_by_name_rather_than_meshed_wrongly`. The patch is a rectangle with a pole along its top and one meridian up both sides; a commit that put a `WireStep::Pole` and a seam on such a piece closes it, and that is the same construction §36.12 says a tube's seam would have needed |
+| `ACurvedFaceCannotBeCutSmallEnoughToMesh` | cutting a curved face is not making the pieces narrower | **gap, and no generator reaches it** | it was an `assert!` until this lane, on the grounds that no builder makes such a face; `validate` walks it and `Model` is `Deserialize`, so what reaches it is a caller's bytes |
+| `Invalid::FacesDoNotAgreeWhichWayTheyFace` out of the fuse | the skin the answer would have does not balance | **not a refusal about arithmetic** — it is this crate saying it cannot assemble what it cut, before writing anything. A release build would otherwise have committed it |
+| `Invalid::VolumeIsNotPositive` | a shell of the answer encloses nothing | unchanged from §17, and now summed over a **mesh** for a curved shell, because a bar's wall fans into two triangles on its seam and a round cap into none at all |
+| `Undecidable` naming `a point inside a piece of a face` | no candidate could be proved inside a piece and placed | **gap**, unchanged from §17.4, and now with four families of candidate rather than two |
+| everything lane 4 can produce | | | §36.8 |
+
+### 36.17 Corrections to §31 and §35
+
+- **§35.6** says `select.rs:420` and `assemble.rs:943` are refusals rather than
+  panics because what reaches them is a face of a caller's solid. That reasoning
+  was written against a gate that was still on; with the gate off it holds
+  unchanged, and §36.14 records that neither fires in the measured families.
+- **§35.7** says `CurvedFaceWithAHoleGoesTooFarRound`'s claim is untouched by a
+  washer and that what falsifies it is a ball with a pipe through it. What
+  falsifies it is a **tube**, which is what a block with a round hole leaves of
+  the bar's wall — a simpler shape than the one predicted, and one this lane
+  builds on its first try.
+- **§31.10 item 5** watches two claims in `mesh.rs`. Both are now false as
+  written: the face-with-a-hole one because a ring is cut across (§36.12), and
+  `MOST_PIECES_A_FACE_IS_CUT_INTO`'s because it was an `assert!` on a path
+  `validate` walks — a panic on a caller's bytes, which §16.11 says it may not
+  be. It is a named refusal now.
+- **§35's `check_curved_face`** asks a corner for a sign and never for a
+  distance, "and that is the point". It still does, and what §36.13 adds is that
+  a corner carrying recorded slop is asked about the *box* it carries when the
+  exact point fails. Nothing is loosened for a corner a builder placed.
+- **§30.8 item 11** predicted M4 reaches `Undecidable` out of `mesh`. It does
+  not, and §31.8's competing prediction is the right one. §36.14.
+- **§31.3's ON row** is settled in the commit as well as in selection: two faces
+  on one surface facing the same way is `intersect` plus the two orientations,
+  and for a plane it stays `Plane::agreement_with` because a reversed plane is a
+  different four numbers.
