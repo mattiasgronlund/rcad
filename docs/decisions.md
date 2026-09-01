@@ -9607,6 +9607,15 @@ triangulator for a boundary that crosses itself.
   arcs of a cap circle correctly here only because this lane taught the join to
   re-name what it made. Anything else added to `Edge` that depends on its two ends
   has the same problem and will not announce itself.
+- **A notched bar works on the lattice and a turned one does not**, and the
+  reason is not the arc. Measured over twelve rotations about `(1, 2, 3)`, every
+  one of them refuses inside the *arrangement* with `Undecidable` naming **order
+  along a crossing** — which runs before anything names an edge, and refuses
+  under `Policy::tolerant` as well as a certified one, so it is not a budget
+  question. §34.5's determinant orders three points round a conic and a turned
+  cap circle cut at seven places is where it stops. The turned family in the
+  table above is at 0.00% because its bar passes *through* the block a whole unit
+  clear of every wall and its cap circles are cut nowhere.
 - **`select.rs` cannot place a point inside a flat piece bounded by one chord and
   one arc.** Two corners leave no polygon to wind and every candidate is rejected,
   so a bar cut by a single plane not through its axis refuses with `Undecidable`

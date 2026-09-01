@@ -1806,11 +1806,13 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
 /// numbers involved and doubles, until the predicate itself says so. How far
 /// down it went is a number nobody needs.
 ///
-/// It stops once the total is past twice the size of the arithmetic, which is
-/// past any reading `facing · p` can have by Cauchy–Schwarz, so a half-space
-/// that has not been found by then does not exist. Reaching that means `facing`
-/// had no length to point along: the chord ran along the crossing's own
-/// direction, which a conic's chord does not.
+/// The loop stops once the total is past twice the size of the arithmetic. That
+/// is past any reading `facing · p` can have by Cauchy–Schwarz, so by then both
+/// ends read in front and the loop has already returned — which is why the one
+/// way out of here is `facing` having no length to point along. That is a chord
+/// lying along the crossing's own direction, which for a conic means an arc so
+/// short its chord rounds onto its own tangent
+/// (`an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`).
 fn the_half_space_both_ends_are_on(facing: Vector, ends: [Point; 2]) -> Option<Picker> {
     let readings = ends.map(|end| facing.dot(end - Point::origin()));
     let size = facing.length()
