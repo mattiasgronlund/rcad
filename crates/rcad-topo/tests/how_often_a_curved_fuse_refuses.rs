@@ -199,16 +199,17 @@ fn how_often_a_certified_fuse_of_a_turned_curved_pair_refuses() {
 /// that makes a face trimmed by a *piece* of a crossing.
 ///
 /// The wall of the bar ends up bounded by a stretch of the block's planes and
-/// then stops, and an edge along part of a curved crossing is one nothing can
-/// name: two corners on a circle leave two arcs with the same two ends, and the
-/// half-spaces that would tell them apart cannot be built with both ends
-/// provably on them.
+/// then stops. Naming which stretch was `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`
+/// until §36.23, and what closes it is the half-space through the chord square
+/// to the plane the crossing lies in — which needs neither plane built.
 ///
-/// A **gap**, refused by name, and the two things that would close it are named
-/// in §36: the arc's own picker, and lane 3's `holds` learning to follow a face
-/// trimmed by a piece.
+/// What this file asserts about it is the *rate*: a certified fuse of it decides
+/// everything and records nothing, the same claim the four families above make.
+/// That it also validates, meshes and comes to the right volume is §31.7
+/// criterion 13, and `a_bar_notched_by_a_block_meshes_into_a_closed_surface`
+/// is where that lives.
 #[test]
-fn a_bar_notched_by_a_block_is_refused_by_name() {
+fn a_bar_notched_by_a_block_is_decided_and_records_nothing() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let bar = model
         .add_round_bar(2.0, 8.0, &Isometry::identity())
@@ -221,18 +222,22 @@ fn a_bar_notched_by_a_block_is_refused_by_name() {
         &Isometry::translation(Vector::new(1.0, -1.0, 3.0)).expect("a shift"),
     );
 
-    let refusal = model.fuse(
-        &[bar],
-        &[block],
-        Rule::Difference,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(
+            &[bar],
+            &[block],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("a notch in a bar's wall is a face trimmed by a piece of a crossing, and it is \
+                 named");
 
+    assert_eq!(fused.solids().len(), 1, "a notched bar is one solid");
     assert!(
-        refusal.is_err(),
-        "a notch in a bar's wall is a face trimmed by a piece of a crossing, and this gave \
-         {refusal:?}"
+        log.records().is_empty(),
+        "nothing here had to go unsettled, got {:?}",
+        log.records()
     );
-    println!("a bar notched by a block: {refusal:?}");
 }

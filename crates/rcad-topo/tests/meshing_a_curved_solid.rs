@@ -1089,3 +1089,105 @@ fn a_ball_cut_by_a_plane_meshes_into_a_closed_surface() {
         );
     }
 }
+
+/// §31.7 criterion 13 for the shape §36.19 left open: a **bar notched by a
+/// block**, whose answer has faces trimmed by *part* of a curved crossing.
+///
+/// Two corners on a cap circle leave two arcs with the same two ends, and until
+/// this lane naming which one was `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`.
+/// The volume is what says the right one was named: taking the other one round
+/// the cylinder would leave a wall that bounds the wrong side of the notch.
+///
+/// **The second row is where getting it wrong would not cancel**, and it is the
+/// row this test exists for. Every arc a block leaves on a bar of this size is
+/// shorter than half a turn, so a picker that always took the shorter of the two
+/// would pass the first row and never be asked. The wedge leaves one of **228
+/// degrees**: joined out of three stretches, longer than its own sibling, and
+/// the only arc in this file where "the shorter one" is the wrong answer.
+#[test]
+fn a_bar_notched_by_a_block_meshes_into_a_closed_surface() {
+    const RADIUS: f64 = 2.0;
+    // Where the wedge's two faces cut the bar's wall, which is `(−1 + √7)/2`.
+    let cut_at = (7.0_f64.sqrt() - 1.0) / 2.0;
+    let wedge_takes = 2.0
+        * ((cut_at + 1.0) * (cut_at + 1.0) + 4.0 * (cut_at / 2.0).acos()
+            - cut_at * (4.0 - cut_at * cut_at).sqrt());
+    for (what, wedge, taken) in [
+        (
+            "a bar notched by a block",
+            false,
+            // A slab two thick over the part of the disk with `x ≥ 1` and
+            // `|y| ≤ 1`, which is `∫√(4 − y²) dy − 2` across that strip.
+            2.0 * (3.0_f64.sqrt() + 2.0 * core::f64::consts::PI / 3.0 - 2.0),
+        ),
+        ("a bar notched by a wedge", true, wedge_takes),
+    ] {
+        let mut model = a_model();
+        let bar = model
+            .add_round_bar(RADIUS, 8.0, &Isometry::identity())
+            .expect("a bar of radius two");
+        let cutter = if wedge {
+            let outline = ProfileBuilder::new(vec![[-1.0, 0.0], [5.0, 6.0], [5.0, -6.0]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a wedge with its point on the bar's axis side");
+            model
+                .add_extrusion(
+                    &outline,
+                    2.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, 3.0)).expect("a shift"),
+                )
+                .expect("a wedge two thick")
+        } else {
+            let block = model
+                .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a small block");
+            model.place_solid(
+                block,
+                &Isometry::translation(Vector::new(1.0, -1.0, 3.0)).expect("a shift"),
+            );
+            block
+        };
+
+        let mut log = ProvenanceLog::new();
+        let fused = model
+            .fuse(
+                &[bar],
+                &[cutter],
+                Rule::Difference,
+                &Policy::certified(),
+                &mut log,
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        assert!(
+            log.records().is_empty(),
+            "{what}: a lattice-aligned pair needs nothing approximated, got {:?}",
+            log.records()
+        );
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what} validates: {why}"));
+
+        let solids = fused.solids();
+        assert_eq!(solids.len(), 1, "{what} is one solid");
+        let solid = solids[0];
+        let mesh = meshed(&model, solid, 0.02);
+        the_mesh_closes_up(&model, solid, &mesh, 0.02);
+
+        let should_be = core::f64::consts::PI * RADIUS * RADIUS * 8.0 - taken;
+        let measured = model
+            .solid(solid)
+            .measure(
+                Deflection::of(0.001).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what} measures: {why}"));
+        let out_by = (measured.volume() - should_be).abs();
+        assert!(
+            out_by < 0.001 * should_be,
+            "{what}: {} against the {should_be} the bar less the notch comes to, which is \
+             {out_by} out",
+            measured.volume()
+        );
+    }
+}
