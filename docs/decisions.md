@@ -8553,3 +8553,320 @@ per face rather than once per query.
 | `Containment::CannotFollowAFacesTrimming` | any of the three above, met while counting a ray | **gap** | the three above, one layer up |
 | `Invalid::AFaceStraddlesSomethingTrimmingIt` | a curved face stands on both sides of a whole crossing that bounds it | **not a refusal at all** — a model whose topology and geometry disagree, which arrives from a file. `a_curved_face_standing_on_both_sides_of_something_that_trims_it_is_caught` |
 | `Undecidable` out of `face_holds_the_point` | a sign about a box could not be settled | **limit** where the box straddles the surface and a **gap** where the arithmetic ran out; no generator here reaches either, and §35.8's four families refuse none of it |
+
+## 36. The curved arrangement, recorded 2026-09-01
+
+Lane 4 of §31.6: `fuse/bake.rs`, `fuse/cuts.rs` and `fuse/arrange.rs`, splitting
+curved faces at their crossings, built under `Error::FuseNeedsFlatFaces` and
+leaving it on for lane 5.
+
+The headline is one sentence and it is §31.7 criterion 12: **a block with a bar
+through it comes apart into a square with a round hole in it, the disk that came
+out, and a wall in three rings**, and the same pair turned about an awkward axis
+does the same with ellipses everywhere and nothing approximated.
+
+§31.10's prediction was that M4's money goes to `fuse/arrange.rs`, *and not the
+parts about lines*. **It is right, and §36.2 scores it line by line.** The
+straight-line ideas were not where the names said they were.
+
+### 36.1 What a face is now, and the two things §31.3 got wrong
+
+§17.4's "everything that matters to a face is a pair of planes" is now the same
+sentence with one word changed, all the way through: `BakedFace` carries a
+`Surface`, `BakedFace::cuts` is a list of `Surface`, `BakedEdge::across` is the
+surface of the face on the other side, `Piece` carries a `Surface`, and
+`FaceMeet::carried_by` is a pair of them. `cuts.rs` no longer asks
+`Plane::agreement_with` and then `planes_are_parallel`; it asks `intersect`,
+which is the one authority on how two surfaces meet (§24.3) and settles the same
+three cases in one call. Two faces on one **cylinder** are the coincident case
+for free, which is what §31.3 predicted and it cost nothing.
+
+**§31.3 is wrong about the seam, and the demonstration is `seams_are_left_out`.**
+That section says a seam is an ordinary boundary edge whose second surface is
+read out of its own `EdgeRun::PartOfWhereItCrosses::and`. It cannot be one: a
+seam is used **twice by one face**, so both uses run along one arc of one
+crossing in opposite directions, and an arrangement that took it as boundary
+would have one stretch of one curve claimed by two sides of one wire at once — a
+winding count reads that as `+1` and `−1` about the same region. What a seam is,
+is where the surface's own two coordinates were cut open and not where the face
+stops, which is the sentence `holds.rs` already says on the other side of the
+crate. So it is left out, and a bar's wall comes back bounded by its two cap
+circles and a ball's skin by nothing at all.
+
+**§31.3 is also wrong that a corner has two routes and not three.** It settles
+"three or more surfaces round it is re-derived, two is read out of the model".
+A **pole of a ball** has *one* face round it and one surface, and the old
+`planes_around_a_vertex` asserted at least three. What landed is "three or more
+is re-derived, fewer is read and moved", with a pole handing the same surface
+over twice — which is honest rather than a fudge, because the box round a moved
+corner is derived over two chains and a pole's two chains are the same one.
+
+One correction inside that: **a solid that has not been moved is not moved**.
+`where_a_corner_lands_after_moving` publishes a worst-case reach and applies it
+whatever the movement is, so a bar standing where it was built would have come
+back as a box — and §17.7's whole lattice control is that a lattice model decides
+exactly. Baking checks for the identity first.
+
+### 36.2 §31.10's prediction, scored line by line
+
+The prediction names three functions and says the vocabulary of `Line::axis`,
+`forward_climbs_the_axis` and `first_arc_met` is "a straight-line idea sitting
+inside a function whose name says nothing about it". Every one of those is a
+**real** assumption. So are three the prediction does not name, and they are the
+expensive ones. And two things that look like straight-line ideas turned out to
+be nothing of the kind.
+
+| What it was | Real assumption, or only a name | What it cost |
+|---|---|---|
+| `Line::axis`, `forward_climbs_the_axis` | **real** | `Crossing::order` is now `AlongAnAxis` or `RoundAClosedCurve`, and a closed one is ordered by `which_comes_first_round_a_crossing` from the place §34.4 made a function of the pair |
+| `nodes_along`, `order_along` | **real**, and they are the axis rule again | a cyclic order is not a total one until somewhere is called first, so a closed crossing sorts by insertion against its own start |
+| `first_arc_met`, `piece_around` | **real** | a ray needs a direction to fire along and a bounded face to hit, and a closed curve has neither. Kept for lumps that hold an endless curve, and a second route added beside it |
+| `drop_the_lumps_that_are_only_cuts` | **real, and the name says nothing at all about it** | its argument is *"a cut line that runs through the face crosses its boundary to get there"*, which is true of a line and false of a circle. The circle a bar cuts in a block's face lies wholly inside it and touches no boundary, and dropping it lost the hole. Now "lumps of **straight** cuts alone" |
+| `pieces`, `the_cycle_of_the_lump_that_is_wound_once`, `outer_lump` | **real, and the deepest of them** | a piece was one wire and its holes, read off the lump the face's first wire is in. A bar's wall between two cap circles has two boundary curves in two lumps and neither is outer (§31.3). A piece is now a **cell of the surface**: a group of walks, joined across lumps by which side of every closed curve each lies on |
+| `cut_the_lines_into_arcs` | **real, in one word** | a closed crossing wraps, so `n` nodes leave `n` arcs and not `n − 1`, and one node on its own leaves one arc that starts and ends there. That one word is what a cap circle and a round hole are made of |
+| `turns_anticlockwise` | **only a name**, exactly as §31.2 row 9 predicted | `orient3d` of three stored normals became `orient3d` of three gradients, and for three planes the gradients *are* the stored normals, so the arithmetic is bit for bit what it was |
+| the cycle walk — `walk_the_cycles`, `next_around_the_cell`, `sorted_anticlockwise`, `half_of_the_turn` | **only a name**, and it is the largest single piece of the file | not one line changed for curvature. Keeping the region on the left and taking the next half-edge clockwise from the way back is a statement about a graph drawn on a surface and never about which surface |
+| `count_the_windings`, `spread_the_winding` | **only a name** | crossing a boundary arc from the right of its wire to the left adds one, on a sphere as on a plane. What changed is what it counts *over* — cells instead of walks — and that is the row above, not this one |
+| `relation_of_two_lines` | **only a name, and it is still the right answer** | §31.2 row 7: all planes and it is four exact minors, otherwise it is "are the two partners one surface" and `intersect` answers. Both are there and the planar path is untouched |
+
+**So the money went where §31.10 said and not to what it named.** The two
+functions it calls out by name — `piece_around` and `first_arc_met` — are still
+in the file and still work; what had to be rewritten around them is what decides
+*which walks bound one region*, which the prediction does not mention and which
+is a third of `arrange.rs`.
+
+### 36.3 Two walks bound one cell exactly when they agree about every closed curve
+
+This is the new idea and it is worth stating on its own, because it is what
+replaces the ray for everything a ray cannot reach.
+
+A curve drawn on a face is **drawn in full** when it closes and none of its arcs
+was thrown away. Such a curve cuts the surface into exactly two, so *which side
+of it* is a sign — read off the half-edge where a walk uses it, and off any of
+the walk's own nodes where it does not. Two walks in different lumps of the
+drawing bound the same cell exactly when they agree about every curve drawn in
+full.
+
+A curve that runs on for ever is never drawn in full, and that is the load-
+bearing word rather than a caveat: the stretch of a line past its outermost node
+is not drawn, so the sign of it says the same thing on both sides of a face's own
+rim and cannot tell the inside from the outside. Two things stand in for it. A
+lump holding an endless curve is placed by `piece_around`'s ray, unchanged. And a
+lump of closed cuts on a **flat** face is placed by counting how often the face's
+own rim winds round one of its nodes.
+
+Both of the ways that count can fail turned out to matter, and both are the same
+shape as §35.2's regression — *a fact about the drawing that arithmetic cannot
+see*:
+
+- **A fan cannot answer about a point on one of its own chords, and every chord
+  of a square runs through its centre.** `select.rs`'s `winding_around` fans from
+  each corner in turn, and for a rectangle the chords are the two diagonals, so
+  no apex helps. The circle a bar cuts in the middle of a block's face starts at
+  a point that is often exactly there. What stands in its place is a crossing
+  count along a half-line, which is `holds.rs`'s route over boxes — **a third
+  spelling of one question**, and §36.7 hands the unification on.
+- **The corner a half-line is aimed at is on it by construction**, and saying so
+  is not an optimisation. The determinant that would work it out has the same box
+  in two of its rows, and an interval evaluation of one like that straddles zero
+  however far away everything is. Every corner of a placed solid is such a box,
+  so before this was written down the count refused on every turned pair.
+
+### 36.4 Four families, and none of them refuses
+
+Family by family and never blended (§17.7). 256 drawn pairs per family, every
+face of both solids cut, `Policy::certified()`.
+
+| Family | faces cut | refused | what they named |
+|---|---|---|---|
+| lattice | 2304 | **0.00%** | — |
+| turned | 2304 | **0.00%** | — |
+| leaning | 2304 | **0.00%** | — |
+| written at `2^k` | 2304 | **0.00%** | — |
+
+**A zero that is luck is a zero that moves, so here is why this one does not.**
+The turned family started at **22.09%** and every one of those refusals was about
+a curve that reaches no part of the face it was hung on. A block wall a hair off
+parallel to a bar's axis cuts that bar's cylinder in an ellipse **ten
+quadrillion** across — the measured node was at `−4.2e16` — and three points on
+one are so nearly in a line that ordering them is an honest refusal. The same
+wall *exactly* parallel to it cuts two straight lines whose direction has to be
+read off a gradient at a box that far out, and that is the other half:
+`which way a crossing runs` at 235 of 2304, `order along a crossing` at 274.
+
+A **cut** all of whose nodes are provably clear of the box round the face cuts
+nothing off it, and is left undrawn. It is a proof and not a shortcut: a curve
+that crossed the face's boundary would share a node with one of the crossings the
+boundary runs along, and every meet of every pair has been worked out by then.
+
+**The word "cut" in that sentence is load-bearing and was measured to be.**
+Written as "a crossing", it drops curves the face's own rim runs along — and the
+rim of a face is not optional however far its nodes are. Eight tests of the
+planar suite said so, and they are the demonstration.
+
+Two families were re-measured rather than drawn fresh, because the generator's
+first version drew knife edges: a bar exactly tangent to a block's wall is
+roadmap §7.4's own catalogue entry and not what a *control* is for (§17.7). The
+bar is kept a whole unit clear, and the entry stays in the catalogue where it
+belongs.
+
+The intersector's own rates are untouched by this lane, which is what they should
+be — `rcad-geom` has **0 files changed** — and so are §35.8's classification
+rates.
+
+### 36.5 `Picker` did not come due, and that is a finding rather than a reprieve
+
+§33.8 and §34.9 both hand lane 4 the same trap: *"`Picker` has no `transformed`,
+and this comes due at you, when a fused solid holds edges from two placed
+arguments."* **It did not, and the reason generalises.**
+
+Nothing in the arrangement ever moves a picker. Where two surfaces cross in more
+than one curve, the arrangement asks `intersect` about the two surfaces *already
+placed* and is handed the pickers of the moved crossing — so the only stored
+picker a fuse could have read is the one saying which half of a meridian a seam
+is, and §36.1 leaves seams out. The rule to carry forward is one sentence:
+**ask the intersector about the surfaces where they are, rather than moving what
+it said about them where they were.**
+
+That leaves §33.8's warning intact rather than discharged. A `HalfSpace` still has
+no canonical form, still must never be compared or deduped or keyed on, and
+`Picker::side_of_point`'s `Undecidable` still rules nothing out — which is why a
+boundary edge whose corner is held by two curves of one pair, or by none, is
+`CannotTellWhichCurveOfACrossingAFaceRunsAlong` and never a guess.
+
+### 36.6 What each criterion in this lane's reach cost
+
+| | | |
+|---|---|---|
+| **12** | the pieces a curved face is cut into cover it and overlap nowhere | met. `the_pieces_a_curved_face_is_cut_into_cover_it_and_overlap_nowhere`, over every face of a block with a bar through it. The oracle needs no area and so reads the same on a curved face as on a flat one: every side is walked once, a side two pieces share is walked once each way, and a side nobody walks back along is on the rim |
+| **16** | a lattice curved control at 0% | met for this lane, and the other three families are at 0% too. §36.4 |
+| **11** | `Error::FuseNeedsFlatFaces` gone | **not this lane's**, and it stands. Everything under it is built |
+| **13** | a fused curved solid meshes | not this lane's; nothing is committed yet |
+| §30.8 item 10 | a closed edge that is a hole in a curved face has no direction rule | **closed**, and it cost one line of algebra rather than a predicate. `(∇S × ∇T)` crossed with `∇S` and dotted with `∇T` is `−‖∇S × ∇T‖²` by Cauchy–Schwarz, so **left of forward is always the negative side of the partner**, everywhere, with no case analysis — and a wire walks a closed edge forward exactly when the face's material is inside the partner. `a_bar_wall_is_bounded_by_two_cap_circles_that_run_opposite_ways` |
+| §30.8 item 11 | is `Undecidable` out of `mesh` reachable | **still not**, and §31.8 keeps its lead. Nothing here changes what a committed vertex is |
+
+### 36.7 What lane 5 has to be told
+
+Written for a stranger, because the same head reading it a day later is one.
+
+- **The gate is still on.** `Model::fuse` refuses a curved solid at
+  `fuse/mod.rs`, and `Piece::plane()`, `select.rs`'s `outward_plane_of_face` and
+  `assemble.rs`'s whole `Face` are still written in `Plane` behind it. Each of
+  those `expect`s says so in its own doc. Taking the gate off is taking those
+  three with it.
+- **A piece may have no outer wire, and `Piece::wires` says so.** On a flat piece
+  the first is outer and the rest are holes, which is what `Model::validate`
+  reads. On a closed surface the order is the order the walks were found in and
+  nothing claims more (§31.3). `check_curved_face` has no winding check and
+  §35.8 records that half of criterion 15 as open; this lane did not close it.
+- **The seam is gone from every piece and has to be put back.** A piece of a
+  bar's wall that goes right round the cylinder needs one to be meshable, and
+  `mesh.rs` is where that bites. Nothing in the arrangement can invent it,
+  because a seam is a *choice* of where to cut the surface open, and the commit
+  is the first place that choice belongs.
+- **Three refusals are the shape of what is left, and all three are gaps.**
+  `ACrossingThisCannotBeOrderedAlong` for a quartic — a ball with a pipe through
+  it, and §34.9 named this lane as where it arrives. `CannotTellTheCellsOfAFaceApart`
+  for two regions the sign rule joined that the surface keeps apart.
+  `CannotTellWhichCurveOfACrossingAFaceRunsAlong` for a corner two curves of one
+  pair both hold. §36.8 classifies every one.
+- **A quartic closes, and finding a place to start on one is not being able to
+  order it.** Reading those two as the same question gave a ball with a pipe
+  through it **four** pieces where it has three, in silence, until they were told
+  apart. Whatever else changes, `how_a_crossing_runs` must keep dispatching on
+  the *pair* and not on whether a start could be found.
+- **There are now three spellings of "how often does this wire wind round this
+  point".** `holds.rs`'s crossing count over model corners, `select.rs`'s fan over
+  the arrangement's boxes, and `arrange.rs`'s crossing count over the same boxes.
+  §35.10's last trap asked for one and there are three. The fan is the one that
+  cannot answer at a rectangle's centre; the two counts are the same algorithm
+  over two point types. Whoever unifies them should keep the count.
+- **`Bounds::provably_misses` is a proof and the box behind it has to stay one.**
+  `SolidView::box_around_one_face` bounds a curved face by an argument per surface
+  kind, and a flat face by its corners *plus the box of every face across a side
+  of it that is not straight*. Tighten either and the drop in §36.4 stops being
+  sound.
+- **`stretches_of_a_line_inside` says nothing about a curved pair.** It measures
+  stretches along an axis and a closed crossing has none, so it comes back empty
+  and the self-crossing check `cuts.rs` runs is silent about a solid whose curved
+  faces run through each other. A **gap**, and what closes it is a way to say
+  where two arcs of one closed curve overlap.
+- **The coplanar joiner is only asked about a wholly flat solid.** It is written
+  in planes, and nothing in this milestone builds a curved solid with two faces on
+  one surface. A curved *answer* of this fuse could have one, and it arrives as
+  `AFaceMeetsItsNeighbourOnItsOwnSurface` rather than as a wrong arrangement.
+- **`rcad-predicates` is still frozen**, at 0 files changed for five lanes now,
+  and `rcad-geom` is at 0 for this one.
+
+### 36.8 Every refusal this lane can produce, classified
+
+| Refusal | Cause | | Demonstration |
+|---|---|---|---|
+| `ACrossingThisCannotBeOrderedAlong` | the two surfaces cross in a quartic — a ball against a pipe, or two pipes | **gap** | `a_ball_with_a_pipe_through_it_is_refused_rather_than_cut_wrongly`. The curve is there and closes; what is missing is an order along it, which takes the marcher rather than a determinant. §34.10 files the same one dimension down |
+| `CannotTellTheCellsOfAFaceApart` | two regions of one face were joined that the surface keeps apart | **gap** | telling them apart takes a point inside each, which is a construction this arrangement does not make. Not a broken invariant, because a face that really did overlap itself looks the same from here and only one of the two is a bug in this crate |
+| `CannotTellWhichCurveOfACrossingAFaceRunsAlong` | a boundary edge's corner is held by two of the curves its pair names, or by none | **gap** | a picker's `Undecidable` rules nothing out (§33.8), so both come back held. What closes it is a picker that decides, which is §33.5's own four rows |
+| `AFaceMeetsItsNeighbourOnItsOwnSurface` | two faces on one surface with an edge between them | **gap** | they carry no curve for that edge to run along. The joiner takes such a pair apart for a flat solid and is not asked about a curved one; what closes it is a joiner written in surfaces |
+| `AFaceMeetsItsNeighbourNowhere` | a face has an edge along a curve its two surfaces do not have | **not a refusal at all** — a model whose topology and geometry disagree |
+| `TwoCurvesTouchWithoutCrossing` | two curves on one face are tangent at a node | **gap** | there is no anticlockwise order round such a node and so no way round the cell it bounds. Following one of the curves past the touch closes it |
+| `Undecidable` naming `where three surfaces meet` | no triple of surfaces round a corner could be shown to meet at a point | **gap** | inherited from `meet_of_three_surfaces`, and §34.10 classifies it there |
+| `Undecidable` naming `order along a crossing` | two points on one crossing could not be told apart or put in order | **limit** where the two are one point and a **gap** where the arithmetic ran out; §36.4's four families reach neither |
+| `Undecidable` naming `which way a crossing runs` | the direction of a crossing worked out at a box straddles every axis | **gap** | it was the turned family's whole budget and is now unreached, because the curves that provoked it reach no face |
+| `Undecidable` naming `which piece of a face a hole is in` | no ray through a lump of endless curves gave an answer | **gap**, unchanged from §17 |
+
+### 36.9 Corrections to §31, §33 and §34
+
+- **§31.3's seam.** A seam is *not* an ordinary boundary edge and its second
+  surface is not read out of its own run. §36.1, with the demonstration.
+- **§31.3's two routes for a corner.** There are three cases and not two: three or
+  more surfaces round it, exactly two, and **one** — a pole of a ball, which the
+  old code asserted could not happen.
+- **§31.3's "a corner read out of the model and then moved is a box".** True of a
+  corner that was moved. A solid standing where it was built is not moved, and
+  giving it a box anyway costs §17.7's lattice control its exactness.
+- **§31.10's prediction** is right about the file and wrong about the parts.
+  §36.2 scores it: `turns_anticlockwise` and the whole cycle walk are only names,
+  and what had to be rewritten is which walks bound one region, which the
+  prediction does not mention.
+- **§33.8's first trap and §34.9's last** say `Picker::transformed` comes due at
+  lane 4. It does not, and §36.5 says why the reason generalises.
+- **§34.9** says `Plane::meet_of_three` can be switched for
+  `meet_of_three_surfaces` and nothing lost. True, and one thing gained that the
+  trap does not mention: **three surfaces meet at two points and the old check
+  kept the first.** `place_the_crossings` skipped a place if *any* node lay on
+  both curves rather than if one lay *here*, which was right while three planes
+  met once. A cap plane cutting a bar's own cap circle is the shape it shows on,
+  and what it left behind was a line that entered a closed curve and never came
+  out.
+- **§35.10's second trap** — `bake.rs`'s box round a face has no guard — is
+  closed, and the box now hangs off the solid because the neighbour across a
+  curved side has to be found already placed. `SolidView::box_around_its_corners`
+  still has no kernel caller and this lane did not delete it.
+
+### 36.10 The numbers
+
+| | at §35 | now |
+|---|---|---|
+| tests (`cargo nextest`, whole workspace) | 1046 | **1062** |
+| of those, in `rcad-topo` | 312 | **324** |
+| suite duration | 2.9 s | 2.9 s |
+| doc tests | 19 | 19 |
+| `FORMAT_VERSION` | 3 | 3 |
+| fuzz corpus | 746 | **775** |
+
+`just default` is green, `cargo-deny` included.
+
+`just fuzz 180` ran 5 274 327 executions in 181 seconds, found **29 new seeds**
+and **no crash**. Coverage stayed at 2506 edges, which is what it should be:
+`rcad-geom` has 0 files changed, so there is no new arithmetic for the corpus to
+reach.
+
+**One test had its number re-derived.** `how_often_a_certified_fuse_of_a_skew_pair_refuses`
+asserts which predicate the skew family's refusals mostly name, and the doc
+beside it records "30 naming it against 21 naming `side of plane`". The 30 has
+not moved — it is the same question about the same straight crossings, under the
+name `"order along a crossing"` rather than `"order along a line"`. The 21 beside
+it came down to **12**, because the gathering step stopped asking
+`Plane::agreement_with` and then `planes_are_parallel` about every pair of faces
+and started asking `intersect`, which settles the same three cases in one call
+and gives up in fewer places on the way. The assertion is on the leading cause
+and the margin widened rather than narrowed.
