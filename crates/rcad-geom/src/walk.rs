@@ -30,15 +30,15 @@
 
 use rcad_predicates::{
     Approximation, Cause, Decision, Interval, Level, Measures, Point as PredicatePoint, Policy,
-    ProvenanceLog, Record, SideOfSurface,
+    ProvenanceLog, Record,
 };
 
 use crate::exact::Exact;
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
-    Cylinder, Deflection, EdgeRun, Error, NamedRun, Plane, Point, Result, SIDE_OF_CYLINDER,
-    SIDE_OF_PLANE, SIDE_OF_SPHERE, Sphere, Surface, Vector,
+    Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere, Surface,
+    Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -290,7 +290,7 @@ fn follow_the_quartic(
 ) -> Result<PointsAlongACrossing> {
     let half_the_budget = deflection.length() / 2.0;
     let surfaces = [&pair[0], &pair[1]];
-    let picked_by: &[Surface] = match run.run() {
+    let picked_by: &[Picker] = match run.run() {
         EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
         _ => &[],
     };
@@ -469,15 +469,15 @@ fn how_far_a_pipe_reaches_from(
 /// Whether the box `at` is known to be inside is on or outside every one of
 /// `picked_by`.
 fn every_half_space_holds(
-    picked_by: &[Surface],
+    picked_by: &[Picker],
     at: Point,
     deviation: f64,
     log: &mut ProvenanceLog,
 ) -> bool {
     let at = somewhere_within(at, deviation);
     let mut on_or_outside = true;
-    for half_space in picked_by {
-        if which_side_of(half_space, at, log) == Decision::Neg {
+    for picker in picked_by {
+        if which_side_of(picker, at, log) == Decision::Neg {
             on_or_outside = false;
         }
     }
@@ -683,7 +683,7 @@ impl Conic {
     /// `picked_by`.
     fn picked_by_all(
         &self,
-        picked_by: &[Surface],
+        picked_by: &[Picker],
         middle: f64,
         deviation: f64,
         log: &mut ProvenanceLog,
@@ -699,11 +699,12 @@ impl Conic {
 /// picked and the caller is refused rather than handed a coin toss. It is
 /// recorded because it happened, and because the refusal that follows says
 /// nothing about which half-space gave up.
-fn which_side_of(half_space: &Surface, at: PredicatePoint, log: &mut ProvenanceLog) -> Decision {
-    let (decision, named, measures) = match half_space {
-        Surface::Plane(flat) => (flat.side_of_point(at), SIDE_OF_PLANE, Measures::Length),
-        Surface::Sphere(ball) => (ball.side_of(at), SIDE_OF_SPHERE, Measures::Area),
-        Surface::Cylinder(pipe) => (pipe.side_of(at), SIDE_OF_CYLINDER, Measures::Area),
+fn which_side_of(picker: &Picker, at: PredicatePoint, log: &mut ProvenanceLog) -> Decision {
+    let decision = picker.side_of_point(at);
+    let named = picker.predicate_name();
+    let measures = match picker {
+        Picker::InFrontOf(_) => Measures::Length,
+        Picker::OutsideABall(_) | Picker::OutsideAPipe(_) => Measures::Area,
     };
     match decision {
         Decision::Pos | Decision::Zero | Decision::Neg => (),
@@ -940,15 +941,15 @@ mod tests {
     use super::*;
     use crate::Vector;
 
-    fn a_ball_and_the_meridian_of_its_seam() -> (Surface, Surface, Surface) {
+    fn a_ball_and_the_meridian_of_its_seam() -> (Surface, Surface, Picker) {
         let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a ball"));
         let meridian = Surface::Plane(
             Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
                 .expect("the y axis is a unit normal"),
         );
-        let picker = Surface::Plane(
-            Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
-                .expect("the x axis is a unit normal"),
+        let picker = Picker::from(
+            crate::HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+                .expect("the x axis has length"),
         );
         (ball, meridian, picker)
     }

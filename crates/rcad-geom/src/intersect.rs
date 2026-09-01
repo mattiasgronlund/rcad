@@ -41,7 +41,8 @@ use crate::enclosure::{
 };
 use crate::exact::Exact;
 use crate::{
-    Cylinder, EdgeRun, Error, NamedRun, Plane, Point, Result, Sphere, Surface, SurfaceMeet, Vector,
+    Cylinder, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result, Sphere, Surface,
+    SurfaceMeet, Vector,
 };
 
 /// The name the two-plane crossing goes by in provenance records.
@@ -338,7 +339,7 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
     let normal = flat.normal();
     let along = pipe.axis().direction();
     let origin = pipe.axis().origin();
-    let picker = Plane::from_point_and_normal(origin, along.cross(normal))?;
+    let picker = HalfSpace::through_a_point_square_to(origin, along, along.cross(normal))?;
 
     // The plane runs exactly along the axis — the caller decided that — so the
     // two directions across the pipe are the plane's own normal and `w × n`,
@@ -640,19 +641,27 @@ fn two_loops_either_side_of_a_ball(
     pipe: &Cylinder,
     reach: Interval,
 ) -> Result<SurfaceMeet> {
-    let between = Plane::from_point_and_normal(ball.centre(), pipe.axis().direction())?;
+    let along = pipe.axis().direction();
+    let between = HalfSpace::through_a_point_facing(ball.centre(), along)?;
     let picker = between.normal().components();
-    let along = pipe.axis().direction().components();
+    let along = along.components();
     let squared_direction = squared_length_enclosing(exactly(along));
 
-    // How much of the picking plane's own normal runs along the axis, and how
-    // much of it does not.
+    // How much of the picking half-space's own normal runs along the axis, and
+    // how much of it does not. **The second is exactly nothing**, because the
+    // normal *is* the axis direction — a half-space stores what it is handed —
+    // and only the exact cross product says so. The same two numbers taken as
+    // `√(‖n‖² − (n·ŵ)²)` cancel to a few last bits whose square root is eight
+    // orders of magnitude bigger than the bits it came from, which is what a
+    // plane's rounded normal used to be charged (§33).
     let up_the_axis = quotient_or_everything(
         dot_enclosing(exactly(picker), exactly(along)),
         root_enclosing(squared_direction),
     );
-    let across =
-        root_enclosing(squared_length_enclosing(exactly(picker)) - up_the_axis * up_the_axis);
+    let across = quotient_or_everything(
+        root_enclosing(squared_sideways_enclosing(picker, along)),
+        root_enclosing(squared_direction),
+    );
     let off_the_plane = dot_enclosing(exactly(picker), exactly(ball.centre().coordinates()))
         - Interval::exactly(between.offset());
     let offset_slop = off_the_plane.lo().abs().max(off_the_plane.hi().abs());
@@ -671,11 +680,28 @@ fn two_loops_either_side_of_a_ball(
             .map(|half_space| {
                 NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
                     and: pipe,
-                    picked_by: smallvec![Surface::Plane(half_space)],
+                    picked_by: smallvec![Picker::from(half_space)],
                 })
             })
             .collect(),
     ))
+}
+
+/// `‖u × v‖²`, summed exactly where the arithmetic reaches it and enclosed where
+/// it does not.
+///
+/// The exact sum is what makes a normal written along a direction readable as
+/// being along it. Two vectors that really are the same triple have a cross
+/// product of exactly zero, and an interval enclosure of the same expression
+/// cannot cancel: each component comes back a couple of last bits wide, and the
+/// square root of that is eight orders of magnitude larger than the width it
+/// came from.
+fn squared_sideways_enclosing(u: [f64; 3], v: [f64; 3]) -> Interval {
+    match Exact::cross_of(&Exact::of_each(u), v).and_then(|cross| Exact::squared_length_of(&cross))
+    {
+        Some(exact) => exact.enclosure(),
+        None => squared_length_enclosing(cross_enclosing(exactly(u), exactly(v))),
+    }
 }
 
 /// The one point a ball resting against a pipe shares with it, as the box it is
@@ -887,7 +913,7 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
     let between = other.axis().origin() - here;
     let towards = between - along * (between.dot(along) / along.length_squared());
 
-    let picker = Plane::from_point_and_normal(here, along.cross(towards))?;
+    let picker = HalfSpace::through_a_point_square_to(here, along, along.cross(towards))?;
     let sideways = exactly(towards.components());
     let apart = root_enclosing(squared_length_enclosing(sideways));
     let sideways = sideways.map(|part| quotient_or_everything(part, apart));
@@ -1014,12 +1040,32 @@ fn where_two_leaning_pipes_cross(
 /// thin pipe's direction that lies across the fat one — and every point of the
 /// crossing sits at least `√(ρ₂² − (δ + ρ₁)²)` from it.
 ///
+/// # The normal is written square, and is not the direction that was asked for
+///
+/// A loop reaches a long way along the fat pipe's axis, so a picking normal that
+/// leans into that axis by even one rounding reads a different number at either
+/// end of the loop and picks nothing. The squareness has to be *arranged* and
+/// cannot be tested against, because there is no bound on how far along the axis
+/// a loop reaches (§29.8).
+///
+/// **The separating direction is usually not one a caller can write down square**
+/// — the ones that can be are that direction crossed with each coordinate axis,
+/// plus the asked-for one itself where it happens to land square, which every
+/// pair whose axes are coordinate directions does. It does not have to be. What
+/// separates the two loops is any half-space square to the axis with enough of
+/// its normal along that direction, and the best of the three is at least
+/// `1/√3` aligned with it. What that costs is a real number and it is charged
+/// below.
+///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the plane `f64` can
-/// write down is not provably that plane: its normal has to be exactly square to
-/// the fat pipe's axis, because a loop reaches a long way along that axis and a
-/// normal that leans into it reads a different number at either end.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the best of the three
+/// does not lean far enough. Writing `n̂ = α·â + β·b̂` in the two directions
+/// across the axis, a loop point sits `a` along `â` and `b` along `b̂` with
+/// `a² + b² = ρ₂²`, and it is at least `√(ρ₂² − (δ + ρ₁)²)` along `â` — so `|b|`
+/// is at most `δ + ρ₁` and the reading is at least `α·√(ρ₂² − (δ+ρ₁)²) − |β|·(δ + ρ₁)`.
+/// Still a **gap** where that does not clear the offset's own rounding: the two
+/// loops are there and they are tellable apart.
 fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<SurfaceMeet> {
     let (thin_way, fat_way) = (
         thin.axis().direction().components(),
@@ -1028,12 +1074,13 @@ fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<Su
     let leaning = Vector::from(thin_way).dot(Vector::from(fat_way));
     let squared_fat = Vector::from(fat_way).length_squared();
     let across = Vector::from(thin_way) * squared_fat - Vector::from(fat_way) * leaning;
-    let between = Plane::from_point_and_normal(fat.axis().origin(), across)?;
+    let between =
+        HalfSpace::through_a_point_square_to(fat.axis().origin(), fat.axis().direction(), across)?;
     let picker = between.normal().components();
 
-    // A loop runs a long way up the fat pipe, so a picking normal that leans
-    // into that axis at all reads a different number at either end of it and
-    // picks nothing. This one has to be square to it with nothing rounded.
+    // Arranged rather than tested, and a half-space keeps what it was handed —
+    // so this only fails where a product of two of the axis's own components
+    // lands among the subnormals and the exact level cannot run at all.
     if !matches!(
         Exact::dot_of(picker, fat_way).as_ref().map(Exact::sign),
         Some(Decision::Zero)
@@ -1043,11 +1090,14 @@ fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<Su
 
     let [thin_radius, fat_radius] = certified_radii_enclosing(thin, fat);
     let apart = how_far_apart_two_axes_are_enclosing(thin, fat);
-    let clear =
-        root_enclosing(fat_radius * fat_radius - (apart + thin_radius) * (apart + thin_radius));
-    let slop = how_far_a_picking_plane_strayed(&between, across) * fat_radius
-        + how_far_a_picking_plane_sits_off_a_point(&between, fat.axis().origin());
-    if clear.lo() <= slop.hi() {
+    let reach = apart + thin_radius;
+    let clear = root_enclosing(fat_radius * fat_radius - reach * reach);
+    let (leaning_into, leaning_away) =
+        how_a_picking_half_space_lies_across_an_axis(&between, thin, fat);
+    let margin = leaning_into * clear
+        - leaning_away * reach
+        - how_far_a_picking_half_space_sits_off_a_point(&between, fat.axis().origin());
+    if margin.lo() <= 0.0 {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
 
@@ -1058,11 +1108,53 @@ fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<Su
             .map(|half_space| {
                 NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
                     and: fat,
-                    picked_by: smallvec![Surface::Plane(half_space)],
+                    picked_by: smallvec![Picker::from(half_space)],
                 })
             })
             .collect(),
     ))
+}
+
+/// How much of a picking half-space's normal lies along the direction that tells
+/// two loops of a leaning-pipe crossing apart, and how much of it does not.
+///
+/// The separating direction is the part of the thin pipe's direction that lies
+/// across the fat one, `t‖w‖² − w(t·w)`. Two things make it cheap to measure
+/// against: the normal's dot with it is just `‖w‖²(n·t)`, because `n·w` is
+/// exactly zero, and its own length is `‖w‖·‖t × w‖`. So the first number is
+///
+/// ```text
+/// α = ‖w‖·(n·t) / (‖n‖·‖t × w‖)
+/// ```
+///
+/// Both the normal and the separating direction are exactly square to the fat
+/// axis, so the two live in one plane and the second number is `√(1 − α²)`.
+fn how_a_picking_half_space_lies_across_an_axis(
+    picker: &HalfSpace,
+    thin: &Cylinder,
+    fat: &Cylinder,
+) -> (Interval, Interval) {
+    let normal = picker.normal().components();
+    let thin_way = thin.axis().direction().components();
+    let fat_way = fat.axis().direction().components();
+
+    let along = quotient_or_everything(
+        root_enclosing(squared_length_enclosing(exactly(fat_way)))
+            * dot_enclosing(exactly(normal), exactly(thin_way)),
+        root_enclosing(squared_length_enclosing(exactly(normal)))
+            * root_enclosing(squared_sideways_enclosing(thin_way, fat_way)),
+    );
+    // A cosine is between minus one and one whatever the arithmetic says, and
+    // the whole enclosure being everything is what an underflowed length looks
+    // like. Both come out as a margin that does not clear, which is a refusal.
+    let leaning_into = along.lo().clamp(-1.0, 1.0);
+    let leaning_away = root_enclosing(
+        Interval::exactly(1.0) - Interval::exactly(leaning_into) * Interval::exactly(leaning_into),
+    );
+    (
+        Interval::exactly(leaning_into),
+        Interval::exactly(leaning_away.hi()),
+    )
 }
 
 /// The one point two leaning pipes resting against each other share, as the box
@@ -1391,43 +1483,42 @@ fn how_much_room_two_side_by_side_pipes_leave_exactly(
     )
 }
 
-/// How far the stored normal of a picking plane strayed from the direction it
-/// was asked for, as an upper bound on the length of the difference.
-fn how_far_a_picking_plane_strayed(picker: &Plane, asked_for: Vector) -> Interval {
-    let stored = exactly(picker.normal().components());
-    let wanted = exactly(asked_for.components());
-    let length = root_enclosing(squared_length_enclosing(wanted));
-    let wanted = wanted.map(|part| quotient_or_everything(part, length));
-    let strayed: [Interval; 3] = core::array::from_fn(|axis| stored[axis] - wanted[axis]);
-    root_enclosing(squared_length_enclosing(strayed))
-}
-
-/// How far a picking plane's own offset sits off the point it was built through,
-/// as an upper bound.
-fn how_far_a_picking_plane_sits_off_a_point(picker: &Plane, through: Point) -> Interval {
-    let off = dot_enclosing(
-        exactly(picker.normal().components()),
-        exactly(through.coordinates()),
-    ) - Interval::exactly(picker.offset());
-    Interval::exactly(off.lo().abs().max(off.hi().abs()))
+/// How far a picking half-space's own flat surface sits off the point it was
+/// built through, as an upper bound on a real distance.
+///
+/// A half-space's normal is whatever length its caller's was, so the reading is
+/// divided by that length to come back as a distance.
+fn how_far_a_picking_half_space_sits_off_a_point(picker: &HalfSpace, through: Point) -> Interval {
+    let normal = exactly(picker.normal().components());
+    let off =
+        dot_enclosing(normal, exactly(through.coordinates())) - Interval::exactly(picker.offset());
+    quotient_or_everything(
+        Interval::exactly(off.lo().abs().max(off.hi().abs())),
+        root_enclosing(squared_length_enclosing(normal)),
+    )
 }
 
 /// Two endless straight lines running along `along`, told apart by `picker`.
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the picking plane's
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the picking half-space's
 /// normal is not exactly square to the lines' own direction, or when the two
 /// lines are not provably either side of it.
 ///
 /// **The first of those cannot be tested away and the second can**, which is the
 /// whole of what this closes of §28.2's gap. A line is endless, so a normal that
 /// leans into its direction by even one rounding reads a different number a long
-/// way along it and the half-space holds nothing. But *where* the plane sits
-/// between the two lines is a comparison between the lines' own separation and
-/// the plane's own rounding, and that is a question with an answer.
+/// way along it and the half-space holds nothing. But *where* the flat surface
+/// sits between the two lines is a comparison between the lines' own separation
+/// and its own rounding, and that is a question with an answer.
+///
+/// The first was the whole of §29.8's remaining gap while the picker was a
+/// [`Plane`], which rounds a squareness away on the way in. A [`HalfSpace`]
+/// keeps it, so this now only refuses where a product of two of the direction's
+/// own components lands among the subnormals and the exact level cannot run.
 fn two_lines_told_apart(
-    picker: Plane,
+    picker: HalfSpace,
     along: [f64; 3],
     somewhere_on_each: [[Interval; 3]; 2],
     and: Surface,
@@ -1452,7 +1543,7 @@ fn two_lines_told_apart(
             .map(|half_space| {
                 NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
                     and,
-                    picked_by: smallvec![Surface::Plane(half_space)],
+                    picked_by: smallvec![Picker::from(half_space)],
                 })
             })
             .collect(),
@@ -1883,7 +1974,7 @@ mod tests {
         };
         assert_eq!(runs.len(), 2);
 
-        let pickers: Vec<Surface> = runs
+        let pickers: Vec<Picker> = runs
             .iter()
             .map(|run| {
                 assert!(run.is_the_whole_curve(), "each line is endless");
@@ -1902,8 +1993,8 @@ mod tests {
         let sides: Vec<Decision> = pickers
             .iter()
             .map(|picker| match picker {
-                Surface::Plane(half_space) => half_space.side_of_point(on_one_line),
-                other => panic!("the picker for two lines is a plane, not {other:?}"),
+                Picker::InFrontOf(half_space) => half_space.side_of_point(on_one_line),
+                other => panic!("the picker for two lines is flat, not {other:?}"),
             })
             .collect();
         assert_eq!(sides, [Decision::Pos, Decision::Neg]);
@@ -1987,8 +2078,8 @@ mod tests {
                 };
                 assert_eq!(and, &pipe);
                 match picked_by[0] {
-                    Surface::Plane(half_space) => half_space.side_of_point(on_the_upper_circle),
-                    other => panic!("the picker here is a plane, not {other:?}"),
+                    Picker::InFrontOf(half_space) => half_space.side_of_point(on_the_upper_circle),
+                    other => panic!("the picker here is flat, not {other:?}"),
                 }
             })
             .collect();
@@ -2109,8 +2200,8 @@ mod tests {
                     panic!("one of two lines is a piece of the crossing: {run:?}");
                 };
                 match picked_by[0] {
-                    Surface::Plane(half_space) => half_space.side_of_point(far_up_one_line),
-                    other => panic!("the picker here is a plane, not {other:?}"),
+                    Picker::InFrontOf(half_space) => half_space.side_of_point(far_up_one_line),
+                    other => panic!("the picker here is flat, not {other:?}"),
                 }
             })
             .collect();
@@ -2157,8 +2248,8 @@ mod tests {
                 };
                 assert_eq!(and, &fat, "the picked run names the pipe it goes round");
                 match picked_by[0] {
-                    Surface::Plane(half_space) => half_space.side_of_point(on_one_loop),
-                    other => panic!("the picker here is a plane, not {other:?}"),
+                    Picker::InFrontOf(half_space) => half_space.side_of_point(on_one_loop),
+                    other => panic!("the picker here is flat, not {other:?}"),
                 }
             })
             .collect();
@@ -2287,21 +2378,26 @@ mod tests {
         }
     }
 
-    /// The other refusal, and the one the arithmetic cannot be rescaled out of.
+    /// **The refusal §29.8 left standing, closed.** This is §31.7's third
+    /// criterion, and it replaces the demonstration that used to assert the
+    /// opposite.
     ///
     /// A plane exactly along a pipe's axis and inside it cuts two lines, and
     /// telling them apart needs a stored normal exactly across the axis. Here
-    /// the direction wanted is `(1,2,3) × (2,-1,0)`, and it misses twice over:
-    /// the cross product is already not exactly square to the axis when it is
-    /// computed in `f64`, and reducing and scaling it to length one would lose
-    /// the squareness even if it were.
+    /// the direction wanted is `(1,2,3) × (2,-1,0)`, and a `Plane` missed it
+    /// twice over: the cross product is already not exactly square to the axis
+    /// when it is computed in `f64`, and reducing and scaling it to length one
+    /// would lose the squareness even if it were. Both refusals are gone,
+    /// because a picker is a [`HalfSpace`] now and one of those keeps whatever
+    /// normal it is handed.
     ///
-    /// The two lines are there and they are tellable apart, so this is a
-    /// **gap** — but not one any change to `Plane` reaches, and §32 is the
-    /// demonstration of why. What reaches it is a half-space that is not a
-    /// plane, and that is a new `Surface` variant.
+    /// The three assertions are the property, the consequence and the answer.
+    /// The normal really is exactly square to the axis the pipe stores; a point
+    /// a long way along one of the two lines is therefore on the same side of
+    /// the half-space as one at its start; and the pair comes back named, where
+    /// the same call used to be `CannotNameWhichPieceOfACrossingThisIs`.
     #[test]
-    fn two_lines_no_f64_half_space_can_tell_apart_are_refused_rather_than_guessed() {
+    fn two_lines_off_the_lattice_are_told_apart_by_a_half_space_written_square_to_them() {
         let along = Vector::new(1.0, 2.0, 3.0)
             .normalized()
             .expect("a direction");
@@ -2314,32 +2410,73 @@ mod tests {
             "this plane has to be exactly along the axis, or it cuts an ellipse instead"
         );
 
-        let pipe = Surface::Cylinder(
-            Cylinder::new(Axis::new(Point::origin(), along).expect("a direction"), 2.0)
-                .expect("a radius"),
-        );
+        let axis = Axis::new(Point::origin(), along).expect("a direction");
+        let stored_way = axis.direction().components();
+        let pipe = Surface::Cylinder(Cylinder::new(axis, 2.0).expect("a radius"));
         let flat = Surface::Plane(
             Plane::from_point_and_normal(Point::new(0.2, 0.0, 0.0), normal)
                 .expect("a normal with a length"),
         );
 
-        assert_eq!(
-            intersect(
-                &flat,
-                &pipe,
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            ),
-            Err(Error::CannotNameWhichPieceOfACrossingThisIs)
-        );
-
-        // The same pair on the lattice, where the direction across both is a
-        // coordinate axis and nothing has to be scaled at all.
-        let met = crossing(
-            &a_plane([1.0, 0.0, 0.0], [0.2, 0.0, 0.0]),
-            &a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0),
-        );
+        let met = intersect(
+            &flat,
+            &pipe,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a plane down the inside of a pipe cuts two lines");
         assert_eq!(same_shape(&met), ("curves", 2));
+
+        let SurfaceMeet::Curves(runs) = &met else {
+            panic!("just checked it is two curves");
+        };
+        for run in runs {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                panic!("one of two lines is a piece of the crossing: {run:?}");
+            };
+            let Picker::InFrontOf(half_space) = picked_by[0] else {
+                panic!("the picker for two lines is flat: {picked_by:?}");
+            };
+            assert_eq!(
+                Exact::dot_of(half_space.normal().components(), stored_way)
+                    .as_ref()
+                    .map(Exact::sign),
+                Some(Decision::Zero),
+                "the picking normal has to be square to the axis with nothing rounded"
+            );
+        }
+
+        // The consequence, at the far end of a line that has no far end. The
+        // two lines run parallel to the axis a hair under two units either side
+        // of the flat surface, so a point on one of them is well clear of it —
+        // and stays clear however far along it is read, which is the whole of
+        // what the squareness buys.
+        let across = along.cross(normal).normalized().expect("a direction");
+        let foot = Point::origin() + normal * normal.dot(Vector::new(0.2, 0.0, 0.0));
+        let on_one_line = foot + across * 1.99;
+        let sides: Vec<Decision> = runs
+            .iter()
+            .map(|run| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    unreachable!("checked above")
+                };
+                let Picker::InFrontOf(half_space) = picked_by[0] else {
+                    unreachable!("checked above")
+                };
+                let near =
+                    half_space.side_of_point(PredicatePoint::from(on_one_line.coordinates()));
+                for steps in [1.0, 1e6, 1e12] {
+                    let far = on_one_line + along * steps;
+                    assert_eq!(
+                        half_space.side_of_point(PredicatePoint::from(far.coordinates())),
+                        near,
+                        "{steps} steps along the line left the half-space that picked it"
+                    );
+                }
+                near
+            })
+            .collect();
+        assert_eq!(sides, [Decision::Pos, Decision::Neg]);
     }
 
     /// The tangency questions are settled by interval arithmetic wherever the
