@@ -350,13 +350,10 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
         [between, between.reversed()]
             .into_iter()
             .map(|half_space| {
-                NamedRun::new(
-                    EdgeRun::PartOfWhereItCrosses {
-                        and: pipe,
-                        picked_by: smallvec![Surface::Plane(half_space)],
-                    },
-                    [nowhere_along_an_endless_line(); 2],
-                )
+                NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+                    and: pipe,
+                    picked_by: smallvec![Surface::Plane(half_space)],
+                })
             })
             .collect(),
     ))
@@ -637,11 +634,6 @@ fn squared_gap_exactly(here: [f64; 3], there: [f64; 3]) -> Option<Exact> {
         total = total.plus(&gap.times(&gap)?);
     }
     Some(total)
-}
-
-/// An end of a line that has none, said the only way the type can say it.
-fn nowhere_along_an_endless_line() -> PredicatePoint {
-    NamedRun::the_whole_of(EdgeRun::Straight).ends()[0]
 }
 
 /// What a surface is called in a refusal a person has to read.

@@ -44,9 +44,6 @@ use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
 use rcad_geom::{Axis, Cylinder, Isometry, Plane, Point, Sphere, Surface, Vector};
 
-/// Roughly how big a generated pair is.
-pub const WORKING_SIZE: f64 = 100.0;
-
 /// How far a surface may be placed from the origin, along each axis.
 ///
 /// Shapes reach about four across, so this puts a pair anywhere from wholly
