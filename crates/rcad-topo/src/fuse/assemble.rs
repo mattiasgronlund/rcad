@@ -527,7 +527,8 @@ impl Assembly {
         for members in groups.into_values() {
             if let [only] = members[..] {
                 joined.push(JoinedFace {
-                    plane: self.faces[only].outward_plane(),
+                    surface: self.faces[only].surface,
+                    used: self.faces[only].used,
                     rings: (0..self.faces[only].wires.len())
                         .map(|wire| self.whole_ring(only, wire))
                         .collect(),
@@ -535,11 +536,15 @@ impl Assembly {
                 });
                 continue;
             }
+            // Only flat faces are ever joined — the walk below winds corners
+            // about a plane's normal and has no curved twin — so a group with
+            // more than one member is flat throughout.
             let plane = plane_of_the_joined_face(&members, &self.faces);
             let rings = self.rings_round(&members, along, dissolved, plane)?;
             joined.push(JoinedFace {
                 members,
-                plane,
+                surface: Surface::Plane(plane),
+                used: Orientation::Forward,
                 rings,
             });
         }
@@ -686,8 +691,8 @@ impl Assembly {
                         .iter()
                         .flat_map(|&member| self.faces[member].ancestors.iter().copied()),
                 ),
-                surface: Surface::Plane(face.plane),
-                used: Orientation::Forward,
+                surface: face.surface,
+                used: face.used,
                 wires: face
                     .rings
                     .iter()
@@ -1280,7 +1285,8 @@ struct Renumbered {
 struct JoinedFace {
     /// The faces it was made of, in the order they were built.
     members: Vec<usize>,
-    plane: Plane,
+    surface: Surface,
+    used: Orientation,
     /// The outline first, then one ring per hole.
     rings: Vec<Vec<Dart>>,
 }

@@ -230,3 +230,45 @@ fn how_often_a_certified_fuse_of_a_turned_curved_pair_refuses() {
         "{refused} of {fuses} refused, over the three fifths §36 records"
     );
 }
+
+/// A bar notched by a block, which is the shape §35.10 hands lane 5 as the one
+/// that makes a face trimmed by a *piece* of a crossing.
+///
+/// The wall of the bar ends up bounded by a stretch of the block's planes and
+/// then stops, and an edge along part of a curved crossing is one nothing can
+/// name: two corners on a circle leave two arcs with the same two ends, and the
+/// half-spaces that would tell them apart cannot be built with both ends
+/// provably on them.
+///
+/// A **gap**, refused by name, and the two things that would close it are named
+/// in §36: the arc's own picker, and lane 3's `holds` learning to follow a face
+/// trimmed by a piece.
+#[test]
+fn a_bar_notched_by_a_block_is_refused_by_name() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bar = model
+        .add_round_bar(2.0, 8.0, &Isometry::identity())
+        .expect("a bar of radius two");
+    let block = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a small block");
+    model.place_solid(
+        block,
+        &Isometry::translation(Vector::new(1.0, -1.0, 3.0)).expect("a shift"),
+    );
+
+    let refusal = model.fuse(
+        &[bar],
+        &[block],
+        Rule::Difference,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+
+    assert!(
+        refusal.is_err(),
+        "a notch in a bar's wall is a face trimmed by a piece of a crossing, and this gave \
+         {refusal:?}"
+    );
+    println!("a bar notched by a block: {refusal:?}");
+}
