@@ -609,16 +609,17 @@ fn check_flat_face(view: FaceView<'_>, plane: &Plane, allowed_wobble: f64) -> Re
 /// surface, and [`Error::Undecidable`] when nothing can prove either way.
 /// Which side of `surface` this point is on, for whichever surface it is.
 ///
-/// One place, because two callers ask it — the corners of a curved face, and
-/// the ends of an edge named by a crossing — and two spellings of the same
-/// question is how they come to disagree.
+/// One place, because three callers ask it — the corners of a curved face, the
+/// ends of an edge named by a crossing, and the mesher working out which half of
+/// a meridian a seam is — and two spellings of the same question is how they
+/// come to disagree.
 ///
 /// # Panics
 ///
 /// If `surface` is a kind nothing here can ask about. `Surface` grows a variant
 /// at every milestone, and a surface checked by not being checked is worse than
 /// a stop.
-fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decision {
+pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decision {
     match surface {
         Surface::Plane(flat) => flat.side_of_point(point),
         Surface::Sphere(ball) => ball.side_of(point),
@@ -870,7 +871,10 @@ fn magnitude_of(tag: Option<Approximation>) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
+    use rcad_geom::{
+        Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
+        Vector,
+    };
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
@@ -1101,31 +1105,42 @@ mod tests {
     /// The same check, asked about a curved half-space, which is what §24.5
     /// widened the field to hold.
     ///
-    /// A ball's seam is picked out by *outside this smaller ball*, which its two
-    /// poles are; grow that ball past them and the name picks a piece the seam
-    /// is not on. Nothing but this check would notice, and while `picked_by`
-    /// held planes the question could not be asked at all.
+    /// A ball's seam is picked out by *outside a pipe standing beside it*, which
+    /// swallows the `+x` half of the meridian and leaves the `-x` half. Both
+    /// poles are well clear of that pipe, so the model is sound; grow a ball
+    /// about the origin past them instead and the name picks a piece the seam is
+    /// not on. Nothing but this check would notice, and while `picked_by` held
+    /// planes the question could not be asked at all.
     #[test]
     fn an_edge_outside_a_curved_half_space_that_picked_it_is_caught() {
-        for (radius, expected) in [(1.0, None), (5.0, Some(Invalid::EdgeOutsideWhatPickedIt))] {
+        let beside_the_ball = Axis::new(Point::new(3.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a direction with length");
+        let sound =
+            Surface::Cylinder(Cylinder::new(beside_the_ball, 2.0).expect("a pipe of radius two"));
+        let swallows_the_poles =
+            Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a ball of radius five"));
+
+        for (picker, expected) in [
+            (sound, None),
+            (swallows_the_poles, Some(Invalid::EdgeOutsideWhatPickedIt)),
+        ] {
             let mut model = an_empty_model();
             model
                 .add_ball(2.0, &Isometry::identity())
                 .expect("a ball of radius two");
 
             let edge = model.data().edges.keys().next().expect("the seam");
-            let inner = Sphere::new(Point::origin(), radius).expect("a radius");
             let EdgeRun::PartOfWhereItCrosses { picked_by, .. } =
                 &mut model.data_mut().edges[edge].run
             else {
                 panic!("a ball's seam is named by a crossing")
             };
-            picked_by[0] = Surface::Sphere(inner);
+            picked_by[0] = picker;
 
             match expected {
                 None => model
                     .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                    .expect("both poles are outside a ball of radius one"),
+                    .expect("both poles are well outside the pipe beside the ball"),
                 Some(invalid) => assert_eq!(refusal(&model), invalid),
             }
         }

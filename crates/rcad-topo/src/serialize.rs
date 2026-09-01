@@ -112,9 +112,10 @@ mod tests {
     /// reads back holding the same one.
     ///
     /// The widened field is the whole of what moved the version, so this is the
-    /// round trip §24.18's thirteenth criterion asks for. A pipe of radius one
-    /// about the `x` axis has both poles of a ball of radius two well outside
-    /// it, so the model that comes back is sound as well as identical.
+    /// round trip §24.18's thirteenth criterion asks for. The pipe swallows the
+    /// `+x` half of the meridian and leaves the `-x` half outside it, so it
+    /// really does pick one — the model that comes back validates, which means
+    /// it meshes, which means the seam it names could be found.
     #[test]
     fn a_seam_picked_out_by_a_pipe_comes_back_picked_out_by_the_same_pipe() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -122,8 +123,10 @@ mod tests {
             .add_ball(2.0, &Isometry::identity())
             .expect("a ball of radius two");
 
+        let beside_the_ball = Axis::new(Point::new(3.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a direction with length");
         let picker =
-            Surface::Cylinder(Cylinder::new(Axis::x(), 1.0).expect("a pipe of radius one"));
+            Surface::Cylinder(Cylinder::new(beside_the_ball, 2.0).expect("a pipe of radius two"));
         let edge = model.data().edges.keys().next().expect("the seam");
         let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &mut model.data_mut().edges[edge].run
         else {
@@ -135,7 +138,7 @@ mod tests {
         let after: Model = postcard::from_bytes(&bytes).expect("and reads back");
         after
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a ball whose poles sit outside a thinner pipe is sound");
+            .expect("a ball whose poles sit outside the pipe beside it is sound");
 
         let edge = after.data().edges.keys().next().expect("the seam");
         let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &after.data().edges[edge].run else {

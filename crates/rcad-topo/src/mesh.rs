@@ -12,13 +12,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rcad_geom::{Deflection, Isometry, Point, Surface};
+use rcad_geom::{Deflection, EdgeRun, Isometry, Point, Surface};
 use rcad_mesh::{CannotTriangulate, Loop, TrimmedDomain, triangulate};
 use rcad_predicates::{
-    Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
+    Approximation, Cause, Decision, Interval, Level, Measures, Point as PredicatePoint, Policy,
     ProvenanceLog, Record,
 };
 
+use crate::validate::side_of_surface;
 use crate::view::{EdgeView, FaceView, VertexView, WireStepView, WireView};
 use crate::{EdgeKey, Error, FaceKey, Result, SolidView, VertexKey};
 
@@ -131,10 +132,11 @@ impl SolidView<'_> {
     /// than one mesh holds. [`Error::CannotMeshAFace`] when the triangulator
     /// refuses a face, carrying what it said. [`Error::Undecidable`] when a
     /// predicate inside a triangulation could not settle a sign.
-    /// [`Error::AWireWillNotLieFlatOnItsFace`] and
-    /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`] for a solid that arrived
-    /// from a file with a shape no builder here makes. Both are refusals rather
-    /// than asserts precisely because
+    /// [`Error::AWireWillNotLieFlatOnItsFace`],
+    /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`] and
+    /// [`Error::ASeamBetweenTwoPolesNamesNoMeridian`] for a solid that arrived
+    /// from a file with a shape no builder here makes. All three are refusals
+    /// rather than asserts precisely because
     /// [`Model::validate`](crate::Model::validate) meshes what it is given, and
     /// a sweep over untrusted bytes has to hand back a refusal (§16.11, §4.1).
     ///
@@ -315,21 +317,8 @@ impl BuildingAMesh {
         // A pole names every longitude at once, so what it answers about its own
         // is not a fact about the surface — it is `atan2(0, 0)`. Where one end
         // is a pole, the other end says which meridian this is. Where both are,
-        // nothing does, and zero is the answer. That is right for the only edge
-        // in this kernel with a pole at each end: a ball's seam, which `add_ball`
-        // puts at `y = 0, x ≥ 0` — longitude zero in the frame the ball is
-        // stored in, and `the_seam_a_balls_mesh_is_cut_along_is_the_seam_the_model_has`
-        // is the test that says so.
-        //
-        // **A ball whose seam is recorded elsewhere gets cut here anyway, and
-        // that is a §16.10 gap rather than a limit: the longitude is in the
-        // model, on `EdgeRun::PartOfWhereItCrosses`, and this does not read it.**
-        // What comes back is a correct watertight mesh of the right sphere cut
-        // on the wrong meridian — measured, validated and Euler-counted, all
-        // clean, because a sphere looks the same from every meridian and only
-        // this one face uses that edge. It stops being invisible when a second
-        // face meets the ball along that seam, which is M3's crossings, and §24.4
-        // item 2 widens the very field the longitude would be read from.
+        // the *edge* says: its `EdgeRun` names the plane the meridian lies in
+        // and the half-spaces that pick one of the two halves that plane cuts.
         match (poles.contains(&from.key()), poles.contains(&to.key())) {
             (false, false) if edge.is_closed() => at_end = at_start + whole_turn,
             (false, false) => {
@@ -338,8 +327,8 @@ impl BuildingAMesh {
             (true, false) => at_start = at_end,
             (false, true) => at_end = at_start,
             (true, true) => {
-                at_start = 0.0;
-                at_end = 0.0;
+                at_start = which_meridian_this_seam_runs_down(edge, stored)?;
+                at_end = at_start;
             }
         }
 
@@ -856,13 +845,33 @@ impl WalkingAWire {
     ///
     /// A corner at a pole is the exception, because there the surface has no
     /// answer to give: every longitude names that one point, and the walk keeps
-    /// the one it was already at.
+    /// the one it was already at. **A pole does not start the walk either**, and
+    /// that is not the same statement. A ball's wire opens at a pole, so if a
+    /// pole could set the starting longitude the walk would set off from
+    /// `atan2(0, 0)` — zero — and every corner after it would be unwrapped
+    /// towards a meridian the face is not on. A ball whose seam is half a turn
+    /// away is where that stops being invisible and comes back as a wire that
+    /// will not lie flat.
     fn arrive(&mut self, at: u32, sits_at: (f64, f64), is_a_pole: bool) {
         let (raw, up) = sits_at;
+        if is_a_pole {
+            self.corners.push([self.longitude, up]);
+            self.points.push(at);
+            return;
+        }
         let longitude = match self.wraps {
-            _ if is_a_pole => self.longitude,
             None => raw,
-            Some(_) if !self.started => raw,
+            // Everything walked so far was a pole and had no longitude of its
+            // own, so this corner's raw one is the first fact there is. The
+            // turns `cross_the_pole` counted between those poles are still
+            // real: shift them all by the same amount rather than drop them.
+            Some(_) if !self.started => {
+                let by = raw - self.longitude;
+                for corner in &mut self.corners {
+                    corner[0] += by;
+                }
+                raw
+            }
             Some(whole) => self.longitude + the_short_way_round(raw - self.longitude, whole),
         };
         self.started = true;
@@ -936,6 +945,80 @@ fn poles_of(wire: WireView<'_>) -> HashSet<VertexKey> {
             WireStepView::Along(_) => None,
         })
         .collect()
+}
+
+/// Which meridian a seam with a pole at either end runs down.
+///
+/// Both its ends are points every longitude names, so the ends say nothing, and
+/// the faces either side of it are the same sphere, so they say nothing either.
+/// What names it is the edge's own run: `and` is the plane the meridian lies in,
+/// and `picked_by` tells the two halves that plane cuts apart.
+///
+/// **This used to answer zero, and nothing in the kernel could tell.** A ball
+/// whose seam is recorded a quarter turn round was cut at longitude zero anyway
+/// and came back watertight, correctly measured and correctly Euler-counted,
+/// because a sphere looks the same from every meridian and only that one face
+/// uses that edge (§26.5). It stops being invisible the moment a second face
+/// meets the ball along the seam, which is M3's first crossing.
+///
+/// The plane runs through both poles, so it holds the axis the longitude turns
+/// about and its normal lies flat. Its trace across the equator is the line at
+/// right angles to that normal, which meets the equator at two longitudes half a
+/// turn apart; the equator point of each is what `picked_by` is asked about.
+///
+/// # Errors
+///
+/// [`Error::ASeamBetweenTwoPolesNamesNoMeridian`] when the run is not a crossing
+/// with a plane, or when the half-spaces leave neither half or both. A refusal
+/// rather than an assert, because `validate` cannot catch either: a pole-to-pole
+/// seam's two ends satisfy every half-space that its true meridian does, so
+/// `check_edges` has nothing to look at.
+fn which_meridian_this_seam_runs_down(edge: EdgeView<'_>, stored: &Surface) -> Result<f64> {
+    let nothing_names_it = || Error::ASeamBetweenTwoPolesNamesNoMeridian { edge: edge.key() };
+    let EdgeRun::PartOfWhereItCrosses { and, picked_by } = edge.run() else {
+        return Err(nothing_names_it());
+    };
+    let Some(meridian) = and.as_plane() else {
+        return Err(nothing_names_it());
+    };
+
+    let [across, and_across, _] = meridian.normal().components();
+    let mut picked = [across.atan2(-and_across), (-across).atan2(and_across)]
+        .into_iter()
+        .filter(|&longitude| {
+            let on_the_equator = somewhere_near(stored.point_at(longitude, 0.0));
+            picked_by
+                .iter()
+                .all(|half_space| side_of_surface(half_space, on_the_equator) != Decision::Neg)
+        });
+    match (picked.next(), picked.next()) {
+        (Some(only), None) => Ok(only),
+        _ => Err(nothing_names_it()),
+    }
+}
+
+/// A point that came out of an evaluator, said as the box it is really known to
+/// be inside.
+///
+/// **A witness worked out by trigonometry is a constructed point and has to be
+/// handed over as one** (§2.5). The two halves of a meridian sit half a turn
+/// apart, and the half-space that tells them apart usually cuts cleanly between
+/// them — but where it does not, `sin(π)` coming back `2.4e-16` instead of zero
+/// is enough for an exact predicate to certify a confident sign about noise, and
+/// pick a half on the strength of it. Given the box instead it answers
+/// [`Decision::Undecidable`], neither half is ruled out, and the caller refuses
+/// rather than guessing.
+///
+/// The box is [`HOW_FAR_A_MESH_POINT_ROUNDS`] of the largest coordinate, which
+/// is what this file already charges for putting a point on a surface and
+/// carrying it into place — an evaluator that only did the first of those cannot
+/// be further out than that.
+fn somewhere_near(point: Point) -> PredicatePoint {
+    let slack = HOW_FAR_A_MESH_POINT_ROUNDS * point.largest_coordinate_magnitude();
+    PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
+        Interval::new(coordinate - slack, coordinate + slack)
+            .expect("a finite coordinate widened by a finite slack is a range")
+    }))
 }
 
 /// How far this surface's first coordinate has to run to come back to where it
@@ -1087,7 +1170,7 @@ fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceL
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Orientation, Scale};
+    use rcad_geom::{Orientation, Plane, Scale, Vector};
     use smallvec::SmallVec;
 
     use super::*;
@@ -1189,6 +1272,135 @@ mod tests {
                 .expect_err("the sweep meshes every curved solid"),
             Error::AWireWillNotLieFlatOnItsFace { .. }
         ));
+    }
+
+    /// A ball, with its seam moved to whichever half of whichever meridian.
+    ///
+    /// Every one of these is a **sound** ball: its two poles lie on any plane
+    /// through the axis and outside neither half-space, so nothing
+    /// [`Model::validate`](crate::Model::validate) checks about an edge can tell
+    /// them apart. Only the mesher can, and until M3's gate it did not look.
+    fn a_ball_seamed_along(normal: Vector, picked_by_facing: Vector) -> Model {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        model.add_ball(2.0, &Isometry::identity()).expect("a ball");
+
+        let meridian = Plane::from_point_and_normal(Point::origin(), normal).expect("a normal");
+        let picker =
+            Plane::from_point_and_normal(Point::origin(), picked_by_facing).expect("a normal");
+        let edge = model.data().edges.keys().next().expect("the seam");
+        model.data_mut().edges[edge].run = EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(meridian),
+            picked_by: SmallVec::from_buf([Surface::Plane(picker)]),
+        };
+        model
+    }
+
+    fn the_seam_of(model: &Model) -> EdgeView<'_> {
+        let slot = model.data().edges.keys().next().expect("the seam");
+        EdgeView::new(model, slot, Isometry::identity(), Orientation::Forward)
+    }
+
+    fn the_sphere_of(model: &Model) -> Surface {
+        model
+            .data()
+            .faces
+            .values()
+            .map(|face| face.surface)
+            .next()
+            .expect("a ball has one face")
+    }
+
+    /// The seam is walked down the meridian the model records, not down
+    /// longitude zero.
+    ///
+    /// Both ends of a pole-to-pole seam are points every longitude names, so
+    /// this is the only thing in the kernel that reads which meridian it is —
+    /// and it reads it off the very field §24.4 item 2 widened.
+    #[test]
+    fn a_seam_is_walked_down_the_meridian_its_own_run_names() {
+        let quarter = core::f64::consts::FRAC_PI_2;
+        for (normal, facing, expected) in [
+            (Vector::new(0.0, 1.0, 0.0), Vector::new(1.0, 0.0, 0.0), 0.0),
+            (
+                Vector::new(0.0, 1.0, 0.0),
+                Vector::new(-1.0, 0.0, 0.0),
+                2.0 * quarter,
+            ),
+            (
+                Vector::new(1.0, 0.0, 0.0),
+                Vector::new(0.0, 1.0, 0.0),
+                quarter,
+            ),
+            (
+                Vector::new(1.0, 0.0, 0.0),
+                Vector::new(0.0, -1.0, 0.0),
+                -quarter,
+            ),
+        ] {
+            let model = a_ball_seamed_along(normal, facing);
+            let stored = the_sphere_of(&model);
+            let longitude = which_meridian_this_seam_runs_down(the_seam_of(&model), &stored)
+                .expect("this seam names one half of one meridian");
+            assert!(
+                (longitude - expected).abs() < 1e-15,
+                "a seam on the plane {normal:?} picked by {facing:?} is at {longitude},                  not {expected}"
+            );
+        }
+    }
+
+    /// A ball seamed down the far half of its meridian is sound and used to mesh
+    /// into nothing at all.
+    ///
+    /// The wire of a ball opens at a pole, and a pole names every longitude —
+    /// so a walk that let the pole set its starting longitude set off from
+    /// `atan2(0, 0)` and unwrapped every corner after it towards longitude zero.
+    /// Half a turn away that is exactly the boundary
+    /// [`WalkingAWire::finish`] refuses at, and a perfectly good ball came back
+    /// [`Error::AWireWillNotLieFlatOnItsFace`].
+    #[test]
+    fn a_ball_seamed_down_the_far_meridian_still_meshes_into_a_ball() {
+        let model = a_ball_seamed_along(Vector::new(0.0, 1.0, 0.0), Vector::new(-1.0, 0.0, 0.0));
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a ball seamed down its far meridian is a sound ball");
+
+        let solid = model.solids().next().expect("the ball").key();
+        let mesh = model
+            .solid(solid)
+            .mesh(
+                Deflection::of(0.1).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a sound ball meshes whichever meridian it is cut along");
+
+        assert!(!mesh.triangles().is_empty());
+        for point in mesh.points() {
+            assert!(
+                (point.distance_to(Point::origin()) - 2.0).abs() < 1e-9,
+                "{point:?} is not on the ball"
+            );
+        }
+    }
+
+    /// A seam whose half-spaces pick neither half, or both, is refused.
+    ///
+    /// `validate` cannot catch this and never could: both ends of a pole-to-pole
+    /// seam satisfy every half-space its true meridian satisfies, so
+    /// `check_edges` has nothing to look at. Cutting at longitude zero and
+    /// carrying on is what used to happen, and it is a confident wrong answer.
+    #[test]
+    fn a_seam_that_picks_neither_half_of_its_meridian_or_both_is_refused() {
+        for facing in [Vector::new(0.0, 1.0, 0.0), Vector::new(0.0, -1.0, 0.0)] {
+            let model = a_ball_seamed_along(Vector::new(0.0, 1.0, 0.0), facing);
+            let refusal = model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect_err("the meridian plane's own normal picks neither half of it");
+            assert!(matches!(
+                refusal,
+                Error::ASeamBetweenTwoPolesNamesNoMeridian { .. }
+            ));
+        }
     }
 
     /// The other way a wire will not lie flat: a pole on a face that does not

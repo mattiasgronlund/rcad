@@ -763,6 +763,16 @@ impl<'m> EdgeView<'m> {
         self.start().point().distance_to(self.end().point())
     }
 
+    /// What this edge runs along between its two ends.
+    ///
+    /// Not public. What an edge runs along is how the *model* names it, and
+    /// there is no consumer outside this crate — a caller that wants the shape
+    /// of a crossing asks the intersector, which hands back its own
+    /// [`NamedRun`](rcad_geom::NamedRun).
+    pub(crate) fn run(self) -> &'m EdgeRun {
+        &self.data().run
+    }
+
     /// How much slop a decision put into this edge, if any.
     #[must_use]
     pub fn approximation(self) -> Option<Approximation> {
