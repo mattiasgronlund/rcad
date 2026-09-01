@@ -447,7 +447,7 @@ impl<'f> Arrangement<'f> {
         arrangement.walk_the_cycles(policy, log)?;
         arrangement.count_the_windings_inside_each_lump();
         arrangement.group_the_cycles_into_cells(policy, log)?;
-        arrangement.count_the_windings();
+        arrangement.count_the_windings()?;
         Ok(arrangement)
     }
 
@@ -726,8 +726,15 @@ impl<'f> Arrangement<'f> {
                     {
                         continue;
                     }
+                    // Only a node that is *this* place is already this place.
+                    // Asking whether any node is on both crossings was right
+                    // while three planes met once; three surfaces meet twice,
+                    // and it threw the second one away — which left a line
+                    // crossing a closed curve entering it and never coming out.
                     if self.nodes.iter().any(|node| {
-                        node.crossings.contains(&first) && node.crossings.contains(&second)
+                        node.crossings.contains(&first)
+                            && node.crossings.contains(&second)
+                            && boxes_overlap(node.point, place)
                     }) {
                         continue;
                     }
@@ -1478,8 +1485,18 @@ impl<'f> Arrangement<'f> {
                 }
             }
         }
-        for lump_of_endless_curves in self.lumps_with_a_curve_that_runs_on(&lump) {
-            let (mine, theirs) = self.piece_around(lump_of_endless_curves, &lump, log)?;
+        for which in self.lumps_with_a_curve_that_runs_on(&lump) {
+            let on_its_own = (0..self.cycles.len())
+                .filter(|&cycle| lump[cycle] == which)
+                .all(|cycle| {
+                    (0..self.cycles.len())
+                        .filter(|&other| lump[other] != which)
+                        .all(|other| same.leader(cycle) != same.leader(other))
+                });
+            if !on_its_own {
+                continue;
+            }
+            let (mine, theirs) = self.piece_around(which, &lump, log)?;
             same.join(mine, theirs);
         }
 
@@ -1555,13 +1572,22 @@ impl<'f> Arrangement<'f> {
             {
                 continue;
             }
-            let Some(at) = its_walks
-                .first()
-                .map(|&cycle| self.nodes[self.from(self.cycles[cycle][0])].point)
+            // Every node of the lump is tried and not just the first. The whole
+            // lump is inside one cell of the rest, so they all give the same
+            // answer — but a node that happens to sit on the line of one of the
+            // face's own sides is one the fan cannot decide about, and another
+            // node of the same lump is not.
+            let mut nodes: Vec<usize> = its_walks
+                .iter()
+                .flat_map(|&cycle| self.cycles[cycle].clone())
+                .map(|half_edge| self.from(half_edge))
+                .collect();
+            nodes.sort_unstable();
+            nodes.dedup();
+            let Some(held) = nodes
+                .into_iter()
+                .find_map(|node| in_plane.winding_around(&rim, self.nodes[node].point))
             else {
-                continue;
-            };
-            let Some(held) = in_plane.winding_around(&rim, at) else {
                 continue;
             };
             for cycle in its_walks {
@@ -1904,8 +1930,17 @@ impl<'f> Arrangement<'f> {
     /// If two ways round to the same cell disagree, or if a cell comes out wound
     /// more than once or less than none. A face that overlaps itself could do
     /// that, and it is not a face.
-    fn count_the_windings(&mut self) {
+    fn count_the_windings(&mut self) -> Result<()> {
         self.winding = vec![None; self.cells.len()];
+        // A face with no boundary at all is the whole of its surface, and every
+        // cell the cuts leave is inside it. That is only a closed surface — a
+        // ball's skin, whose one wire is a seam and whose seam is left out — and
+        // it is §31.3's "a split curved face may have no outer wire" met at its
+        // simplest: there is no wire at all to read one off.
+        if self.arcs.iter().all(|arc| arc.boundary.is_none()) {
+            self.winding = vec![Some(1); self.cells.len()];
+            return Ok(());
+        }
         for cycle in 0..self.cycles.len() {
             let Some(known) = self.winding_of_cycle[cycle] else {
                 continue;
@@ -1913,20 +1948,23 @@ impl<'f> Arrangement<'f> {
             let cell = self.cell_of[cycle];
             match self.winding[cell] {
                 None => self.winding[cell] = Some(known),
-                Some(already) => assert!(
-                    already == known,
-                    "two walks of one cell disagree about whether it is inside the face"
-                ),
+                Some(already) if already == known => (),
+                Some(_) => {
+                    return Err(Error::CannotTellTheCellsOfAFaceApart {
+                        face: self.face.keys[0],
+                    });
+                }
             }
         }
         for cell in 0..self.cells.len() {
             if self.winding[cell].is_some() {
-                self.spread_the_winding(cell);
+                self.spread_the_winding(cell)?;
             }
         }
+        Ok(())
     }
 
-    fn spread_the_winding(&mut self, from: usize) {
+    fn spread_the_winding(&mut self, from: usize) -> Result<()> {
         let mut waiting = vec![from];
         while let Some(cell) = waiting.pop() {
             let known = self.winding[cell].expect("only settled cells wait");
@@ -1935,25 +1973,27 @@ impl<'f> Arrangement<'f> {
                     let half_edge = self.cycles[cycle][step];
                     let across = self.cell_of[self.cycle_of[half_edge ^ 1]];
                     let theirs = known + self.climb_across(half_edge);
-                    assert!(
-                        (0..=1).contains(&theirs),
-                        "the boundary of a face winds round a point once or not at all, not \
-                         {theirs} times"
-                    );
+                    if !(0..=1).contains(&theirs) {
+                        return Err(Error::CannotTellTheCellsOfAFaceApart {
+                            face: self.face.keys[0],
+                        });
+                    }
                     match self.winding[across] {
                         None => {
                             self.winding[across] = Some(theirs);
                             waiting.push(across);
                         }
-                        Some(already) => assert!(
-                            already == theirs,
-                            "two ways round to one cell disagree about whether it is inside the \
-                             face"
-                        ),
+                        Some(already) if already == theirs => (),
+                        Some(_) => {
+                            return Err(Error::CannotTellTheCellsOfAFaceApart {
+                                face: self.face.keys[0],
+                            });
+                        }
                     }
                 }
             }
         }
+        Ok(())
     }
 
     /// Where the one cut this arrangement was built with runs through the inside
@@ -2102,6 +2142,17 @@ impl<'f> Arrangement<'f> {
     }
 }
 
+/// Whether two boxes have any point in common, so that one may be the other.
+///
+/// A conservative dedupe and nothing more: two nodes this calls apart are still
+/// folded together by [`Arrangement::merge_points_that_are_one_point`] if they
+/// turn out to be one point, which is where that decision is taken under a
+/// policy.
+fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
+    let (mine, theirs) = (one.enclosure(), other.enclosure());
+    (0..3).all(|axis| mine[axis].lo() <= theirs[axis].hi() && theirs[axis].lo() <= mine[axis].hi())
+}
+
 /// What picks one curve of a crossing out of the others.
 fn pickers_of(run: &NamedRun) -> &[Picker] {
     match run.run() {
@@ -2191,12 +2242,37 @@ fn how_a_crossing_runs(
             forward_climbs_the_axis,
         });
     }
+    // Everything left is either a conic or a quartic, and only the conic can be
+    // ordered: three points on a convex curve run round it in the order they
+    // wind, which is one determinant (§34.5). A quartic closes too — a ball
+    // crossing a pipe leaves loops — so *finding a place to start* on one says
+    // nothing about being able to order it, and reading the two as the same
+    // question is what gave a ball with a pipe through it four pieces where it
+    // has three.
+    if !a_pair_that_crosses_in_a_conic(surface, partner) {
+        return Err(Error::ACrossingThisCannotBeOrderedAlong);
+    }
     match where_a_closed_crossing_starts(run, [surface, partner], log) {
         Ok(from) => Ok(HowItRuns::RoundAClosedCurve {
             from: PredicatePoint::from(from.coordinates()),
         }),
         Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
+}
+
+/// Whether the pair crosses in one closed curve lying in a plane.
+///
+/// The same four arms [`which_comes_first_round_a_crossing`] can answer about,
+/// asked before anything is built rather than after (§34.10's last two rows).
+fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
+    matches!(
+        (one, other),
+        (Surface::Plane(_), Surface::Sphere(_))
+            | (Surface::Sphere(_), Surface::Plane(_))
+            | (Surface::Plane(_), Surface::Cylinder(_))
+            | (Surface::Cylinder(_), Surface::Plane(_))
+            | (Surface::Sphere(_), Surface::Sphere(_))
+    )
 }
 
 /// Whether the pair is a plane parallel to a pipe's axis, which crosses it in
@@ -3131,6 +3207,208 @@ mod curved {
             PredicatePoint::from([4.0, 5.0, 8.0]),
             "the point at angle zero on the circle of radius one about (4, 4), where angle zero \
              is whichever way `Plane::basis` faces and not whichever way looks natural"
+        );
+    }
+}
+
+#[cfg(test)]
+mod what_the_curved_arrangement_reaches {
+    use rcad_geom::{Axis, Isometry, Point, Scale, Surface, Vector};
+    use rcad_predicates::{Policy, ProvenanceLog};
+
+    use super::super::bake::bake;
+    use super::super::cuts;
+    use super::split_a_face;
+    use crate::{Error, Model, SolidKey};
+
+    /// What every face of a pair comes apart into, as one word per face: the
+    /// surface it sits on, how many surfaces cut it, and how many wires each
+    /// piece has.
+    ///
+    /// A refusal is a row like any other, which is the point of a table (§30.5):
+    /// what this milestone reaches and what it does not are read side by side.
+    fn what_it_cuts(model: &Model, one: SolidKey, other: SolidKey) -> Vec<String> {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut solids = match bake(model, &[one, other], &policy, &mut log) {
+            Ok(solids) => solids,
+            Err(why) => return vec![format!("baking refused {why:?}")],
+        };
+        if let Err(why) = cuts::gather(&mut solids, &policy, &mut log) {
+            return vec![format!("gathering refused {why:?}")];
+        }
+        let mut said = Vec::new();
+        for solid in &solids {
+            for face in &solid.faces {
+                let sits_on = match face.surface {
+                    Surface::Plane(_) => "plane",
+                    Surface::Sphere(_) => "ball",
+                    Surface::Cylinder(_) => "pipe",
+                    other => panic!("no {other:?} here"),
+                };
+                said.push(match split_a_face(face, &policy, &mut log) {
+                    Ok(pieces) => format!(
+                        "{sits_on} cut by {} -> {:?}",
+                        face.cuts.len(),
+                        pieces
+                            .iter()
+                            .map(|piece| piece.wires.len())
+                            .collect::<Vec<_>>()
+                    ),
+                    Err(Error::Undecidable { .. }) => format!("{sits_on} could not be decided"),
+                    Err(why) => format!("{sits_on} refused {why}"),
+                });
+            }
+        }
+        said.sort();
+        said
+    }
+
+    fn a_block(model: &mut Model) -> SolidKey {
+        model
+            .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a block eight across")
+    }
+
+    /// A round bar sitting on a block's top, cut off by it: §31.7 criterion 11's
+    /// second half, where the hole does not go all the way through.
+    ///
+    /// The wall of the bar is cut by the block's top into what is inside the
+    /// block and what is above it, and the block's *bottom* is cut too — a cut
+    /// is by a surface and a cylinder reaches past the bar carrying it, which is
+    /// what keeps the two faces either side of an edge split at the same place
+    /// (§17.4, one word changed).
+    #[test]
+    fn a_blind_hole_cuts_the_face_it_stops_short_of_as_well() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = a_block(&mut model);
+        let bar = model
+            .add_round_bar(
+                1.0,
+                5.0,
+                &Isometry::translation(Vector::new(4.0, 4.0, 5.0)).expect("a shift"),
+            )
+            .expect("a bar standing on the block's top");
+
+        assert_eq!(
+            what_it_cuts(&model, block, bar),
+            [
+                "pipe cut by 2 -> [2, 2]",
+                "plane cut by 1 -> [2, 1]",
+                "plane cut by 1 -> [2, 1]",
+                "plane cut by 2 -> [1, 1]",
+                "plane cut by 2 -> [1, 1]",
+                "plane cut by 2 -> [1, 1]",
+                "plane cut by 2 -> [1, 1]",
+                "plane cut by 4 -> [1]",
+                "plane cut by 4 -> [1]",
+            ]
+        );
+    }
+
+    /// A ball resting on a block: the first curved face this kernel cuts that is
+    /// not a pipe, and the first with no boundary of its own at all.
+    ///
+    /// A ball's one wire is its seam and a seam trims nothing, so the face is
+    /// the whole surface and every cell the cut leaves is inside it. There is no
+    /// outer wire to read that off and §31.3 says there does not have to be.
+    #[test]
+    fn a_ball_cut_by_a_plane_comes_apart_into_two_caps() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = a_block(&mut model);
+        let ball = model
+            .add_ball(
+                3.0,
+                &Isometry::translation(Vector::new(4.0, 4.0, 8.0)).expect("a shift"),
+            )
+            .expect("a ball sitting on the block's top");
+
+        assert_eq!(
+            what_it_cuts(&model, block, ball),
+            [
+                "ball cut by 1 -> [1, 1]",
+                "plane cut by 0 -> [1]",
+                "plane cut by 0 -> [1]",
+                "plane cut by 0 -> [1]",
+                "plane cut by 0 -> [1]",
+                "plane cut by 0 -> [1]",
+                "plane cut by 1 -> [2, 1]",
+            ]
+        );
+    }
+
+    /// A bar turned about an awkward axis, so that every curve it cuts on the
+    /// block is an ellipse and every curve the block cuts on it is one too.
+    ///
+    /// Nothing here is exactly representable and none of it needed a policy —
+    /// the corners of a placed curved solid are boxes, and a box is not slop
+    /// anybody failed to prove (§17.2).
+    #[test]
+    fn a_turned_bar_through_a_block_cuts_ellipses_and_nothing_has_to_be_approximated() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = a_block(&mut model);
+        let axis = Axis::new(Point::new(4.0, 4.0, 4.0), Vector::new(1.0, 2.0, 3.0))
+            .expect("a direction with length");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                20.0,
+                &Isometry::rotation(&axis, 0.7)
+                    .expect("a rotation")
+                    .compose(&Isometry::translation(Vector::new(4.0, 4.0, -6.0)).expect("a shift")),
+            )
+            .expect("a bar leaning through the block");
+
+        assert_eq!(
+            what_it_cuts(&model, block, bar),
+            [
+                "pipe cut by 6 -> [2, 1, 1, 2, 2]",
+                "plane cut by 3 -> [1]",
+                "plane cut by 3 -> [1]",
+                "plane cut by 3 -> [1]",
+                "plane cut by 3 -> [1]",
+                "plane cut by 3 -> [2, 1]",
+                "plane cut by 3 -> [2, 1]",
+                "plane cut by 6 -> [1, 1]",
+                "plane cut by 6 -> [1, 1]",
+            ]
+        );
+    }
+
+    /// A ball with a pipe through it, which is the shape §34.9 says this lane
+    /// meets its own refusal on, and it does.
+    ///
+    /// A ball and a pipe cross in a **quartic**, and ordering points along one
+    /// takes the marcher rather than a determinant. It closes, so a place to
+    /// start on it can be found — and reading that as "so it can be ordered" is
+    /// the mistake worth naming: it gave the ball four pieces where it has
+    /// three, silently, until the two questions were told apart.
+    ///
+    /// A **gap** (§16.10): the pieces are there. What closes it is
+    /// `which_comes_first_round_a_crossing` learning to order a marched loop.
+    #[test]
+    fn a_ball_with_a_pipe_through_it_is_refused_rather_than_cut_wrongly() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let ball = model
+            .add_ball(3.0, &Isometry::identity())
+            .expect("a ball of radius three");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                12.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -6.0)).expect("a shift"),
+            )
+            .expect("a bar right through it");
+
+        let said = what_it_cuts(&model, ball, bar);
+        assert!(
+            said.iter()
+                .any(|row| row == "ball refused nothing can put points in order along this curve"),
+            "expected the quartic to be refused by name, got {said:?}"
+        );
+        assert!(
+            said.iter().any(|row| row.starts_with("pipe refused")),
+            "and the wall of the bar with it, got {said:?}"
         );
     }
 }

@@ -401,6 +401,27 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// Two walks on one face could not be told apart into the cells they bound.
+    ///
+    /// The walks the arrangement leaves have to be grouped into the regions of
+    /// the surface they bound, and two of them in different lumps of the drawing
+    /// are the same region exactly when they lie on the same side of every curve
+    /// that is drawn in full. A curve that runs on for ever is never drawn in
+    /// full, so a face bounded by straight lines has to be placed some other way
+    /// — and where neither route settles it, two regions come out joined that
+    /// the surface keeps apart, and the winding count says so.
+    ///
+    /// A **gap**: the regions are there and telling them apart takes a point
+    /// inside each one, which is a construction this arrangement does not make.
+    /// It is deliberately not a broken invariant, because a face that really did
+    /// overlap itself would look the same from here and only one of the two is a
+    /// bug in this crate.
+    #[error("two regions of one face could not be told apart")]
+    CannotTellTheCellsOfAFaceApart {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
     /// Points along a curve a face is cut by cannot be put in order.
     ///
     /// A straight crossing is ordered by the axis it climbs fastest along and a
