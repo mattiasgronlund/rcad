@@ -48,7 +48,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, PlaneAgreement, Point, Surface, Vector};
+use rcad_geom::{
+    EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point, Surface,
+    Vector,
+};
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
 };
@@ -303,6 +306,7 @@ impl Assembly {
                                 // one of these is, and nothing on this path
                                 // reads it back.
                                 carried_by: [face.surface(); 2],
+                                arc: WhichArc::TheOnlyOne,
                                 from: vec![used.key()],
                             });
                             edge_of_input_edge.insert(slot, edges.len() - 1);
@@ -780,35 +784,93 @@ impl Assembly {
                 continue;
             }
             let lump = renumbered.lump_of_edge[leader].expect("an edge that stays is in a lump");
-            let mut ends = Vec::new();
+            let mut kept = Vec::new();
+            let mut dropped = Vec::new();
+            let mut arcs = Vec::new();
             let mut from = Vec::new();
             for (edge, along) in self.edges.iter().enumerate() {
                 if renumbered.lump_of_edge[edge].is_none() || renumbered.runs.leader(edge) != leader
                 {
                     continue;
                 }
-                ends.extend(
-                    along
-                        .ends
-                        .iter()
-                        .filter(|&&end| !renumbered.straight_through.contains(&(lump, end)))
-                        .map(|&end| renumbered.corner_now[end].expect("an end is still a corner")),
-                );
+                for end in along.ends {
+                    if renumbered.straight_through.contains(&(lump, end)) {
+                        dropped.push(end);
+                    } else {
+                        kept.push(end);
+                    }
+                }
+                arcs.push(along.arc);
                 from.extend(along.from.iter().copied());
             }
-            let ends = <[usize; 2]>::try_from(ends.as_slice())
+            let ends = <[usize; 2]>::try_from(kept.as_slice())
                 .expect("a run of edges that became one edge has two ends left");
             assert!(
                 ends[0] != ends[1],
                 "a piece of a face has a side with no length"
             );
             made.push(Edge {
-                ends,
+                ends: ends.map(|end| {
+                    renumbered.corner_now[end].expect("an end is still a corner")
+                }),
                 carried_by: self.edges[leader].carried_by,
+                arc: self.arc_of_a_joined_run(&arcs, ends, &dropped, renumbered),
                 from: each_one_once(from.into_iter()),
             });
         }
         made
+    }
+
+    /// Which arc a run of edges joined into one is.
+    ///
+    /// The pieces of a run are consecutive stretches of one arc, so the joined
+    /// arc is named the same way any one of them is: a corner of it, and a
+    /// direction from there into it. **A corner the joining dissolved is a point
+    /// on the joined arc**, so the direction from a surviving end towards one of
+    /// them points into it — and a corner the arrangement placed is not a point
+    /// this had to build.
+    ///
+    /// # Panics
+    ///
+    /// If a run of one edge dissolved a corner, or a run of several dissolved
+    /// none. Joining is what drops a corner and it drops exactly the ones
+    /// between the pieces, so either would mean this and
+    /// [`Assembly::what_is_left`] have stopped agreeing.
+    fn arc_of_a_joined_run(
+        &self,
+        arcs: &[WhichArc],
+        ends: [usize; 2],
+        dropped: &[usize],
+        renumbered: &Renumbered,
+    ) -> WhichArc {
+        let renumber = |corner: usize| {
+            renumbered.corner_now[corner].expect("an end of a joined run is still a corner")
+        };
+        let Some(&inside) = dropped.first() else {
+            assert!(
+                arcs.len() == 1,
+                "{} edges joined into one with no corner dissolved between them",
+                arcs.len()
+            );
+            return match arcs[0] {
+                WhichArc::TheOnlyOne => WhichArc::TheOnlyOne,
+                WhichArc::LeavingACorner { corner, towards } => WhichArc::LeavingACorner {
+                    corner: renumber(corner),
+                    towards,
+                },
+            };
+        };
+        assert!(
+            arcs.len() > 1,
+            "one edge on its own dissolved a corner of itself"
+        );
+        if arcs.iter().all(|arc| matches!(arc, WhichArc::TheOnlyOne)) {
+            return WhichArc::TheOnlyOne;
+        }
+        WhichArc::LeavingACorner {
+            corner: renumber(ends[0]),
+            towards: self.corners[inside].point - self.corners[ends[0]].point,
+        }
     }
 
     fn sides_of(&self, ring: &[Dart], renumbered: &Renumbered, edges: &[Edge]) -> Vec<Side> {
@@ -1003,7 +1065,10 @@ impl Assembly {
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
     /// curved crossing.
     fn how_each_edge_runs(&self) -> Result<Vec<EdgeRun>> {
-        self.edges.iter().map(Edge::how_it_runs).collect()
+        self.edges
+            .iter()
+            .map(|edge| edge.how_it_runs(&self.corners))
+            .collect()
     }
 
     /// Build every entity of the result in `model`, in a fixed order.
@@ -1176,9 +1241,30 @@ struct Edge {
     /// The two surfaces either side of it. Together they *are* where it runs
     /// (§17.4, §31.3), and they are what says which [`EdgeRun`] it is.
     carried_by: [Surface; 2],
+    /// Which of the two arcs between [`Edge::ends`] this is. See
+    /// [`which_arc_this_is`].
+    arc: WhichArc,
     /// The input edges this is a piece of. Empty for boundary the result
     /// invents.
     from: Vec<EdgeKey>,
+}
+
+/// Which of the two arcs between one pair of corners a piece of a curved
+/// crossing is.
+#[derive(Clone, Copy)]
+enum WhichArc {
+    /// There is only one to be: the crossing runs straight between the two
+    /// corners, or the edge is the whole of a closed curve.
+    TheOnlyOne,
+    /// The one that leaves `corner` towards `towards`. See
+    /// [`which_arc_this_is`].
+    LeavingACorner {
+        /// Which of the edge's two corners the direction is measured from.
+        corner: usize,
+        /// A direction from that corner into this arc, along the crossing and
+        /// not along the chord.
+        towards: Vector,
+    },
 }
 
 impl Edge {
@@ -1186,15 +1272,14 @@ impl Edge {
     ///
     /// Two planes with two different ends run straight. A pair naming one closed
     /// curve, with one corner twice, runs right round it. Everything else is a
-    /// *piece* of a crossing and needs saying which piece, which takes a
-    /// half-space this cannot build — see
-    /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`].
+    /// *piece* of a crossing, and which piece is
+    /// [`Edge::arc`](which_arc_this_is).
     ///
     /// # Errors
     ///
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
-    /// curved crossing.
-    fn how_it_runs(&self) -> Result<EdgeRun> {
+    /// curved crossing that nothing told from its sibling.
+    fn how_it_runs(&self, corners: &[Corner]) -> Result<EdgeRun> {
         let flat = self
             .carried_by
             .iter()
@@ -1202,8 +1287,49 @@ impl Edge {
         match (flat, self.ends[0] == self.ends[1]) {
             (true, false) => Ok(EdgeRun::Straight),
             (_, true) => Ok(EdgeRun::RightRoundWhereItsFacesCross),
-            (false, false) => Err(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed),
+            (false, false) => match self.arc {
+                WhichArc::TheOnlyOne => Ok(EdgeRun::Straight),
+                WhichArc::LeavingACorner { corner, towards } => {
+                    let ends = self.ends.map(|end| corners[end].point);
+                    let chord = corners[self.other_end_than(corner)].point - corners[corner].point;
+                    let facing = towards * chord.dot(chord) - chord * chord.dot(towards);
+                    let picker = the_half_space_both_ends_are_on(facing, ends)
+                        .ok_or(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed)?;
+                    Ok(EdgeRun::PartOfWhereItCrosses {
+                        and: self.the_surface_that_names_it_twice(),
+                        picked_by: SmallVec::from_buf([picker]),
+                    })
+                }
+            },
         }
+    }
+
+    /// The end of this edge that is not `corner`.
+    ///
+    /// # Panics
+    ///
+    /// If `corner` is not an end of it, which would mean the arc was named
+    /// against an edge it is not on.
+    fn other_end_than(&self, corner: usize) -> usize {
+        match self.ends {
+            [one, other] if one == corner => other,
+            [one, other] if other == corner => one,
+            ends => panic!("an arc named from corner {corner}, which is not an end of {ends:?}"),
+        }
+    }
+
+    /// Which of the two surfaces either side goes in
+    /// [`EdgeRun::PartOfWhereItCrosses`]'s `and`.
+    ///
+    /// That field is there for a run whose two faces are the *same* surface — a
+    /// ball's seam — and names the second one. An arc's two faces already name
+    /// both, so either will do and what matters is that the choice does not
+    /// depend on which of the two faces reached this edge first. The bits are
+    /// what sorts them, the same order `which_curve_it_is` uses.
+    fn the_surface_that_names_it_twice(&self) -> Surface {
+        let mut either = self.carried_by;
+        either.sort_by_key(name_of_surface_bits);
+        either[0]
     }
 }
 
@@ -1527,7 +1653,7 @@ impl Edges {
     /// filtering it out afterwards, so one reaching here means the splitter is
     /// wrong — and a *closed* side is not one, which is why the two ends being
     /// the same corner is checked against what carries it.
-    fn of(&mut self, meet: &FaceMeet, from: usize, to: usize, at: Point) -> Side {
+    fn of(&mut self, meet: &FaceMeet, from: usize, to: usize) -> Side {
         let (carried_by, along) = (meet.carried_by, meet.along.as_slice());
         assert!(
             from != to
@@ -1536,12 +1662,18 @@ impl Edges {
                     .any(|surface| surface.as_plane().is_none()),
             "a piece of a flat face has a side with no length"
         );
+        let at = middle_of(meet.ends[0].point());
         let named = which_curve_it_is(from, to, carried_by);
         let key = ([from.min(to), from.max(to)], named);
         let edge = *self.between.entry(key).or_insert_with(|| {
             self.made.push(Edge {
                 ends: [from.min(to), from.max(to)],
                 carried_by,
+                arc: if from == to {
+                    WhichArc::TheOnlyOne
+                } else {
+                    which_arc_this_is(meet, from, at)
+                },
                 from: along.to_vec(),
             });
             self.made.len() - 1
@@ -1585,6 +1717,114 @@ fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> bool {
     let longitude = the_way_it_is_parametrised_about(&curved).cross(gradient_of(&curved, at));
     let runs_along_stored = along_the_crossing.dot(longitude) > 0.0;
     (meet.material_side == Decision::Neg) == runs_along_stored
+}
+
+/// Which of the two arcs between an edge's two corners this face walks, as the
+/// direction the wire leaves its first corner along.
+///
+/// Two corners on a closed crossing leave two arcs with the same two ends, and
+/// a direction into one of them is the whole of what tells them apart — see
+/// [`the_half_space_both_ends_are_on`] for what it is turned into.
+///
+/// **The direction is a sign and not a search.** Left of `∇S × ∇T` is always the
+/// partner's negative side (§36.6), so the wire leaves its first corner along
+/// that direction exactly when its material is inside the partner — which
+/// [`FaceMeet::material_side`] already holds. **No point on the arc is built.**
+///
+/// # Panics
+///
+/// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`].
+/// [`FaceMeet::material_side`] is written from which way round the arrangement
+/// walked the arc and costs no arithmetic, so anything else is a bug here.
+fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> WhichArc {
+    if the_crossing_of_these_runs_straight(&meet.carried_by) {
+        return WhichArc::TheOnlyOne;
+    }
+    let [mine, partner] = meet.carried_by;
+    let along_the_crossing = gradient_of(&mine, from).cross(gradient_of(&partner, from));
+    WhichArc::LeavingACorner {
+        corner: starts_at,
+        towards: match meet.material_side {
+            Decision::Neg => along_the_crossing,
+            Decision::Pos => along_the_crossing * -1.0,
+            other => panic!("a side of a face was walked with no material side: {other:?}"),
+        },
+    }
+}
+
+/// Whether these two surfaces cross in straight lines, so that two corners on
+/// one leave one piece and not two.
+///
+/// The same three cases [`walk`](rcad_geom::walk) has nothing to put between the
+/// ends of, spelled the same way — a second spelling of this is how the two come
+/// to disagree about how many pieces there are. **Read off the surfaces and
+/// never off the chord**: a short enough arc has a chord that rounds to its own
+/// tangent, and this question has to stay one about the pair.
+fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
+    match carried_by {
+        [Surface::Plane(_), Surface::Plane(_)] => true,
+        [Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)] => {
+            flat.normal().dot(pipe.axis().direction()) == 0.0
+        }
+        [Surface::Cylinder(one), Surface::Cylinder(other)] => {
+            one.axis().direction().cross(other.axis().direction()) == Vector::zero()
+        }
+        _ => false,
+    }
+}
+
+/// The half-space that holds one of the two arcs between a pair of corners and
+/// not the other, or `None` when none can be found.
+///
+/// What tells them apart is the half-space through the chord **square to the
+/// plane the crossing lies in**: that plane meets the crossing's own plane in
+/// the chord line, and a line meets a conic at exactly two points, so the two
+/// arcs are strictly either side of it whichever one is the longer.
+///
+/// **The crossing's own plane is never built.** A direction `v` from one end
+/// into this arc and the chord `c` both lie in it, so `v × c` is that plane's
+/// normal and `c × (v × c)` is the one wanted. Written out that is
+/// `v(c·c) − c(c·v)`, whose dot with `v` is `|c|²|v|² − (c·v)²` — never
+/// negative, by Cauchy–Schwarz. So the normal already faces the way the arc
+/// goes and there is no sign to case out.
+///
+/// **The offset is proved rather than rounded.** `Model::validate` asks the
+/// predicate whether each end is on or in front, and the predicate is exact
+/// where the dot products here are not — so the offset comes *down* from the
+/// smaller of the two readings, by a step that starts at one rounding of the
+/// numbers involved and doubles, until the predicate itself says so. How far
+/// down it went is a number nobody needs.
+///
+/// It stops once the total is past twice the size of the arithmetic, which is
+/// past any reading `facing · p` can have by Cauchy–Schwarz, so a half-space
+/// that has not been found by then does not exist. Reaching that means `facing`
+/// had no length to point along: the chord ran along the crossing's own
+/// direction, which a conic's chord does not.
+fn the_half_space_both_ends_are_on(facing: Vector, ends: [Point; 2]) -> Option<Picker> {
+    let readings = ends.map(|end| facing.dot(end - Point::origin()));
+    let size = facing.length()
+        * ends
+            .iter()
+            .map(|end| (*end - Point::origin()).length())
+            .fold(0.0, f64::max);
+    let from_here = readings[0].min(readings[1]);
+    let asked = ends.map(|end| PredicatePoint::from(end.coordinates()));
+
+    let mut down_by = 0.0;
+    let mut step = (size * f64::EPSILON).max(f64::MIN_POSITIVE);
+    while down_by <= 2.0 * size {
+        let picker = Picker::from(HalfSpace::new(facing, from_here - down_by).ok()?);
+        if asked
+            .iter()
+            .all(|end| picker.side_of_point(*end) != Decision::Neg)
+        {
+            return Some(picker);
+        }
+        down_by += step;
+        step *= 2.0;
+    }
+    None
 }
 
 /// Which of the two surfaces either side of an edge names which way it runs.
@@ -1670,8 +1910,7 @@ fn sides_of(
     for meet in wire {
         let from = corners.of(model, &meet.ends[0]);
         let to = corners.of(model, &meet.ends[1]);
-        let at = middle_of(meet.ends[0].point());
-        sides.push(edges.of(meet, from, to, at));
+        sides.push(edges.of(meet, from, to));
     }
     if turned_round {
         sides.reverse();
