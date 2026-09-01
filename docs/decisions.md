@@ -6046,15 +6046,15 @@ it is a number M4 can decide whether to spend.
 
 | | at §28 | now |
 |---|---|---|
-| tests (`cargo nextest`) | 931 | 971 |
-| suite duration | 16.9 s | 18.6 s |
+| tests (`cargo nextest`) | 931 | 973 |
+| suite duration | 16.9 s | 18.1 s |
 | doc tests | 19 | 19 |
 | `FORMAT_VERSION` | 2 | 2 |
 | fuzz corpus | — | 562 inputs |
 
-Forty tests and one and three quarter seconds, and about half of that second is
-the marcher: a marched point costs eighty times a parametrized one, and three of
-the rows above walk tens of thousands of them.
+Forty-two tests and a second and a fifth, and most of that second is the
+marcher: a marched point costs eighty times a parametrized one, and three of the
+measured rows walk tens of thousands of them.
 
 ### 29.13 What the closing gate inherits
 
