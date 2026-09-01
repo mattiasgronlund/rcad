@@ -2024,7 +2024,6 @@ impl<'f> Arrangement<'f> {
                 None => self.winding[cell] = Some(known),
                 Some(already) if already == known => (),
                 Some(_) => {
-                    self.dump("two walks of one cell disagree");
                     return Err(Error::CannotTellTheCellsOfAFaceApart {
                         face: self.face.keys[0],
                     });
@@ -2049,7 +2048,6 @@ impl<'f> Arrangement<'f> {
                     let across = self.cell_of[self.cycle_of[half_edge ^ 1]];
                     let theirs = known + self.climb_across(half_edge);
                     if !(0..=1).contains(&theirs) {
-                        self.dump(&format!("winding {theirs}"));
                         return Err(Error::CannotTellTheCellsOfAFaceApart {
                             face: self.face.keys[0],
                         });
@@ -2061,7 +2059,6 @@ impl<'f> Arrangement<'f> {
                         }
                         Some(already) if already == theirs => (),
                         Some(_) => {
-                            self.dump(&format!("two ways to cell {across}"));
                             return Err(Error::CannotTellTheCellsOfAFaceApart {
                                 face: self.face.keys[0],
                             });
@@ -2201,47 +2198,6 @@ impl<'f> Arrangement<'f> {
                 point: self.nodes[node].point,
             },
         }
-    }
-
-    fn dump(&self, why: &str) {
-        if std::env::var("DUMP").is_err() {
-            return;
-        }
-        println!("--- {why}");
-        for (index, crossing) in self.crossings.iter().enumerate() {
-            println!(
-                "  crossing {index}: {:?} closes={} cuts={} full={}",
-                crossing.partner,
-                crossing.order.closes(),
-                crossing.cuts,
-                self.drawn_in_full[index]
-            );
-        }
-        for (index, node) in self.nodes.iter().enumerate() {
-            println!(
-                "  node {index}: {:?} on {:?} vertex={:?}",
-                super::middle_of(node.point).coordinates(),
-                node.crossings,
-                node.vertex.is_some()
-            );
-        }
-        for (index, arc) in self.arcs.iter().enumerate() {
-            println!(
-                "  arc {index}: crossing {} ends {:?} boundary {:?}",
-                arc.crossing,
-                arc.ends,
-                arc.boundary.map(|b| (b.wire, b.runs_forward, b.position))
-            );
-        }
-        for (index, cycle) in self.cycles.iter().enumerate() {
-            println!(
-                "  cycle {index}: {:?} winding {:?} cell {:?}",
-                cycle,
-                self.winding_of_cycle[index],
-                self.cell_of.get(index)
-            );
-        }
-        println!("  windings {:?}", self.winding);
     }
 
     fn direction(&self, half_edge: usize) -> Direction {
