@@ -147,6 +147,61 @@ mod tests {
         assert_eq!(picked_by.as_slice(), [picker]);
     }
 
+    /// Every run a computed crossing actually hands back, written out and read
+    /// in.
+    ///
+    /// The test above puts a curved half-space on an edge by hand, which is the
+    /// widened field exercised at its widest. This one asks the other question —
+    /// what does the intersector *really* produce — and the answer is a run
+    /// whose `and` is a pipe and whose `picked_by` is a plane, which nothing had
+    /// round-tripped. A ball reaching into the side of a pipe leaves two loops
+    /// and names each of them that way.
+    ///
+    /// An `EdgeRun` on its own rather than one on a model, because a model
+    /// holding this run needs corners on the crossing and putting them there is
+    /// M4's fuse (§29.13). What the format has to carry is the run.
+    #[test]
+    fn a_run_the_intersector_hands_back_writes_out_and_reads_in_unchanged() {
+        let ball = Surface::Sphere(rcad_geom::Sphere::new(Point::origin(), 3.0).expect("a ball"));
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+                2.0,
+            )
+            .expect("a pipe"),
+        );
+
+        let met = rcad_geom::intersect(
+            &ball,
+            &pipe,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a ball threaded on a pipe is named");
+        let rcad_geom::SurfaceMeet::Curves(runs) = met else {
+            panic!("this pair crosses in two loops, and came back {met:?}")
+        };
+        assert_eq!(runs.len(), 2, "two loops either side of the centre plane");
+
+        for run in runs {
+            let EdgeRun::PartOfWhereItCrosses { and, picked_by } = run.run() else {
+                panic!("a loop of a quartic is picked out by a half-space")
+            };
+            assert!(and.as_plane().is_none(), "the second surface is the pipe");
+            let bytes = postcard::to_allocvec(run.run()).expect("a run writes out");
+            let after: EdgeRun = postcard::from_bytes(&bytes).expect("and reads back");
+            let EdgeRun::PartOfWhereItCrosses {
+                and: back,
+                picked_by: pickers,
+            } = &after
+            else {
+                panic!("it came back a different kind of run")
+            };
+            assert_eq!(back, and);
+            assert_eq!(pickers.as_slice(), picked_by.as_slice());
+        }
+    }
+
     /// Why the version had to move, in bytes.
     ///
     /// A plane and a surface holding that plane are not the same run of bytes,
