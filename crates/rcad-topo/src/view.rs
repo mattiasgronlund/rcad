@@ -1,10 +1,10 @@
-use rcad_geom::{Isometry, Orientation, Plane, Point, Segment, Surface, Vector};
+use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Segment, Surface, Vector};
 use rcad_predicates::Approximation;
 use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{
-    CoedgeData, EdgeData, EdgeRun, FaceData, ShellData, SolidData, VertexData, WireData, WireStep,
+    CoedgeData, EdgeData, FaceData, ShellData, SolidData, VertexData, WireData, WireStep,
 };
 use crate::{CoedgeKey, EdgeKey, FaceKey, Model, ShellKey, SolidKey, VertexKey, WireKey};
 
@@ -761,6 +761,16 @@ impl<'m> EdgeView<'m> {
     #[must_use]
     pub fn distance_between_its_ends(self) -> f64 {
         self.start().point().distance_to(self.end().point())
+    }
+
+    /// What this edge runs along between its two ends.
+    ///
+    /// Not public. What an edge runs along is how the *model* names it, and
+    /// there is no consumer outside this crate — a caller that wants the shape
+    /// of a crossing asks the intersector, which hands back its own
+    /// [`NamedRun`](rcad_geom::NamedRun).
+    pub(crate) fn run(self) -> &'m EdgeRun {
+        &self.data().run
     }
 
     /// How much slop a decision put into this edge, if any.

@@ -235,6 +235,42 @@ impl Vector {
         self.normalized_as("vector")
     }
 
+    /// The same direction, scaled to length one, for a vector whose own squared
+    /// length is not a number `f64` can hold.
+    ///
+    /// [`Vector::normalized`] divides by `√(x² + y² + z²)`, and that squaring is
+    /// where it stops working: a direction whose components are around `1e-180`
+    /// squares into the subnormals and back out again as noise, so what comes
+    /// back is not a unit vector at all — it is merely near one, and the caller
+    /// has no way to tell.
+    ///
+    /// This divides by the largest component first, which is exact, and then
+    /// normalizes what is left. Every component is then in `[-1, 1]` with the
+    /// largest exactly one, so the squared length is between one and three and
+    /// nothing underflows. A **gap** closed rather than a limit met, and the
+    /// same technique `Plane::reduced_by_largest_component` already uses for the
+    /// same reason (`docs/decisions.md` §16.10).
+    ///
+    /// It is not [`Vector::normalized`] itself, because that one's answer is
+    /// stored on every plane and axis in the kernel and dividing twice rounds
+    /// differently from dividing once.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if any component is infinite or not a number, and
+    /// [`Error::ZeroLength`] if every component is exactly zero.
+    pub(crate) fn scaled_to_length_one_from_anywhere(&self, what: &'static str) -> Result<Vector> {
+        if !self.is_finite() {
+            return Err(Error::NotFinite { what });
+        }
+        let [x, y, z] = self.components();
+        let widest = x.abs().max(y.abs()).max(z.abs());
+        if widest == 0.0 {
+            return Err(Error::ZeroLength { what });
+        }
+        Vector::new(x / widest, y / widest, z / widest).normalized_as(what)
+    }
+
     pub(crate) fn normalized_as(&self, what: &'static str) -> Result<Vector> {
         if !self.is_finite() {
             return Err(Error::NotFinite { what });

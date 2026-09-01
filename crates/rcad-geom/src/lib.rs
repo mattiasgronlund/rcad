@@ -64,10 +64,14 @@ mod conic;
 mod cylinder;
 mod de_boor;
 mod deflection;
+mod enclosure;
 mod error;
 mod exact;
+mod intersect;
 mod isometry;
 mod knot_vector;
+mod march;
+mod meet;
 mod orientation;
 mod plane;
 mod point;
@@ -75,6 +79,7 @@ mod scale;
 mod segment;
 mod sphere;
 mod surface;
+mod walk;
 
 pub use crate::bspline_curve::{BSplineCurve, REFINEMENT_ROUNDOFF};
 pub use crate::bspline_surface::BSplineSurface;
@@ -82,8 +87,13 @@ pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
 pub use crate::de_boor::EVALUATION_ROUNDOFF;
 pub use crate::deflection::Deflection;
 pub use crate::error::{Error, Result};
+pub use crate::intersect::{
+    WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
+    WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS, WHERE_TWO_PLANES_CROSS, intersect,
+};
 pub use crate::isometry::Isometry;
 pub use crate::knot_vector::{KnotVector, MAX_DEGREE};
+pub use crate::meet::{EdgeRun, NamedRun, SurfaceMeet};
 pub use crate::orientation::Orientation;
 pub use crate::plane::{Plane, PlaneAgreement, SIDE_OF_PLANE};
 pub use crate::point::{Axis, Point, Vector};
@@ -91,3 +101,6 @@ pub use crate::scale::{DYNAMIC_RANGE_CHECK, DynamicRange, Scale, Unit};
 pub use crate::segment::Segment;
 pub use crate::sphere::{SIDE_OF_SPHERE, Sphere};
 pub use crate::surface::Surface;
+pub use crate::walk::{
+    MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing, walk,
+};

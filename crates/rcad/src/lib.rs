@@ -210,9 +210,14 @@
 //! outline with holes in it and hands back a [`Profile`];
 //! [`Model::add_extrusion`] turns that into a solid and places it with an
 //! [`Isometry`]. [`Model::add_cube`] is the short way to the obvious case.
-//! M0's geometry is planar: [`Plane`] and straight edges
-//! (`docs/decisions.md` §3.1). [`Sphere`] and [`Cylinder`] exist as types that
-//! answer [`SideOfSurface::side_of`] but do not carry a face yet.
+//!
+//! Curved solids come three ways and the third is the one that is not a
+//! declaration. [`Model::add_round_bar`] and [`Model::add_ball`] *say* what
+//! their edges run along, out of a person's knowledge that a plane square to a
+//! pipe cuts a circle. [`Model::add_bar_cut_off_by`] **asks** — it puts each cap
+//! plane and the wall to [`intersect`] and writes down whatever comes back — so
+//! it reaches a shape the other two cannot make: a bar cut off at an angle,
+//! whose cap edge is an ellipse (`docs/decisions.md` §24.2).
 //!
 //! **Look.** Every accessor hands back a *view* — [`SolidView`], [`FaceView`],
 //! [`EdgeView`], [`VertexView`] and the rest — which carries the borrow
@@ -295,6 +300,28 @@ pub use rcad_topo::Error as TopologyError;
 /// `rcad-mesh` — the dependency this facade exists to hide
 /// (`docs/decisions.md` §3.6, §7.2).
 pub use rcad_mesh::CannotTriangulate;
+
+/// What crossing two surfaces comes back with.
+///
+/// Out here ahead of the intersector that produces it, because these are the
+/// shapes M3's two stages both write against and §13 rule 4 says a meaning two
+/// people settle separately gets settled twice, differently. Quadric
+/// intersection with certified results and an explicit refusal has users who are
+/// not kernel users, which is §24.15's argument for exporting it at all.
+pub use rcad_geom::{EdgeRun, NamedRun, SurfaceMeet};
+
+/// Naming where two surfaces cross, and working out points along it.
+///
+/// §24.15: the entry point has no topology in its signature, so exporting it
+/// costs nothing, and quadric intersection with certified results and an
+/// explicit `Undecidable` has users who are not kernel users. The `along`
+/// bookkeeping — which input edges a piece of a crossing runs along — stays
+/// inside `rcad-topo`, because those name keys.
+pub use rcad_geom::{
+    MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing,
+    WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
+    WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS, WHERE_TWO_PLANES_CROSS, intersect, walk,
+};
 
 pub use rcad_geom::{
     Axis, BSplineCurve, BSplineSurface, Cylinder, Deflection, EVALUATION_ROUNDOFF, Isometry,

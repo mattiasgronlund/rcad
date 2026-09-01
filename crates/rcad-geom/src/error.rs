@@ -2,16 +2,19 @@
 
 /// Everything this crate refuses to build, and why.
 ///
-/// All of these are bad caller input: numbers that cannot describe the shape
-/// they are meant to describe. A broken invariant *inside* an already-valid
-/// value is not here — that is a bug, and it panics
+/// Almost all of these are bad caller input: numbers that cannot describe the
+/// shape they are meant to describe. A broken invariant *inside* an
+/// already-valid value is not here — that is a bug, and it panics
 /// (`docs/decisions.md` §4.1).
 ///
-/// `Undecidable` is not here either. A predicate that cannot decide returns a
-/// `Decision`; it is an operation that cannot decide which is a failure, and
-/// operations live above this crate.
+/// [`Error::Undecidable`] is the exception, and it is new. Until M3 this crate
+/// held nothing but bad input, because it had no *operation* that could give up:
+/// a predicate that cannot decide returns a `Decision`, which is a result and
+/// not a failure. Naming where two surfaces cross is an operation, it is a chain
+/// of sign decisions, and a chain with a link missing has nothing to hand back
+/// (§24.10).
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum Error {
     /// A coordinate was infinite or not a number.
     #[error("the {what} has a coordinate that is not a finite number")]
@@ -231,10 +234,145 @@ pub enum Error {
         hi: f64,
     },
 
+    /// Two surfaces tangent along their crossing rather than at a point, so
+    /// what they cross in is one curve that runs through itself.
+    ///
+    /// A ball resting on the inside of a pipe from the far side, or two pipes of
+    /// equal radius whose axes meet: the two loops the crossing would otherwise
+    /// come in touch each other, and there is no half-space that picks one of
+    /// them, because at the touching point they share a point.
+    ///
+    /// **A limit of the naming half taken with the evaluator, and a gap of the
+    /// naming half on its own** (§16.10, §29.6). [`EdgeRun`](crate::EdgeRun)
+    /// *can* say this: the two loops of a pinch are the two sides of one
+    /// half-space, and the two ellipses are the parts lying in one plane, which
+    /// is a pair of opposite half-spaces. What cannot be written down is either
+    /// of those planes, which is the same gap
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] is about.
+    ///
+    /// The reason to refuse here rather than there is the evaluator. Where a
+    /// crossing runs through itself the two surfaces are **tangent**, so the
+    /// crossing has no direction and the marcher has nothing to follow — and
+    /// naming two pieces nothing can draw is the half-answer §24.10 refuses
+    /// whole. `marching_from_where_a_crossing_runs_through_itself_has_no_direction_to_follow`
+    /// is the demonstration.
+    ///
+    /// The family of fixes: a marcher that can be told to start away from a
+    /// singular point and stop at it, and a third `EdgeRun` variant that hands a
+    /// fuse the crossing point rather than making it notice. Both have one
+    /// consumer and it is M4's fuse.
+    #[error(
+        "these two surfaces are tangent along where they cross, so what they cross in is one \
+         curve that runs through itself"
+    )]
+    ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo,
+
+    /// A crossing came in two pieces and no half-space could be written down
+    /// that picks one of them out and holds along the whole of it.
+    ///
+    /// A **gap** and not a limit (§16.10): the two pieces are there and they are
+    /// tellable apart, and what runs out is `f64`'s supply of unit vectors
+    /// exactly square to a given direction. The families of fixes weighed are on
+    /// `two_lines_along_a_pipe`.
+    #[error(
+        "this crossing comes in two pieces and no half-space square to both surfaces can be \
+         written down in f64 to tell them apart"
+    )]
+    CannotNameWhichPieceOfACrossingThisIs,
+
+    /// A point cannot be worked out as close to a crossing as was asked for.
+    ///
+    /// Two knobs meet here and they do different jobs: the deflection says how
+    /// close, and the policy says what happens when the arithmetic cannot prove
+    /// it (§23.5). A certified caller is refused; a tolerant one — which has
+    /// already said how far out of place it will let a point be — gets its
+    /// points with the deviation reported beside them.
+    #[error(
+        "a point along this crossing can only be placed within {closest} of it, and {asked} was \
+         asked for"
+    )]
+    CannotPlaceAPointThatCloseToACrossing {
+        /// The deflection the caller asked for.
+        asked: f64,
+        /// The closest a point can actually be placed.
+        closest: f64,
+    },
+
+    /// An end of a run does not say where it is.
+    ///
+    /// A run's ends are [`Point`](rcad_predicates::Point)s, so an end may be a
+    /// box rather than a triple — and one particular box, the one whose every
+    /// side runs the whole number line, is how a pair of surfaces says it names a
+    /// curve and nothing on it. **Every other end has to have a middle.** A
+    /// caller who hands over a box with one infinite side, or an exact triple
+    /// with a coordinate that is not a number, has said nothing about where the
+    /// run starts, and the angle worked out from it is not a number either.
+    ///
+    /// Bad caller input rather than a broken invariant (§4.1). [`walk`] is
+    /// public, [`NamedRun`] has a public constructor, and nothing between them
+    /// narrows what an end may be — which is §16.10's rule about checking the
+    /// public API rather than today's callers.
+    ///
+    /// [`walk`]: crate::walk
+    /// [`NamedRun`]: crate::NamedRun
+    #[error("an end of this run does not say where it is")]
+    AnEndOfARunNamesNoPlace,
+
+    /// How big the curve where two surfaces cross is could not be worked out,
+    /// because a product it needs falls out of `f64`'s range.
+    ///
+    /// A **gap** and not a limit, and the same one the naming half has: the same
+    /// two surfaces written higher up the number line are walked without
+    /// complaint.
+    #[error("how big this crossing is needs a product that falls out of f64's range")]
+    CannotWorkOutHowBigACrossingIs,
+
+    /// A crossing could not be followed because the two surfaces are too nearly
+    /// parallel where it runs.
+    ///
+    /// The marcher's near-tangency branch, and the one roadmap §6.3 names as the
+    /// place kernels produce silent garbage. Following a crossing needs a
+    /// direction, and two surfaces that lean against each other at a shrinking
+    /// angle give a shrinking direction and a growing bound on where the points
+    /// really are. Past the point where either can be worked out at all, this.
+    ///
+    /// A **gap** where the crossing is a real curve and the arithmetic ran out
+    /// of angle, and a **limit** where the two surfaces are genuinely tangent
+    /// along it, because then there is no direction to be had at any precision.
+    /// The two are told apart by the naming half:
+    /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] is what a
+    /// tangency along a whole curve comes back as before anything is walked.
+    #[error("this crossing runs where its two surfaces are too nearly parallel to follow it")]
+    CannotFollowACrossingWhereItsSurfacesAreTangent,
+
+    /// A crossing was asked to be walked into more points than one is allowed to
+    /// hold.
+    #[error("walking this crossing that finely would take more than {most} points")]
+    TooManyPointsAlongOneCrossing {
+        /// The most one crossing is walked into.
+        most: usize,
+    },
+
     /// A predicate refused the input it was handed — three planes with no
     /// single meeting point, for instance.
     #[error(transparent)]
     Predicate(#[from] rcad_predicates::Error),
+
+    /// The operation ran out of things it could prove.
+    ///
+    /// Carries the records of every decision that could not be settled, so the
+    /// caller can see which predicate gave up and how wide its enclosure was.
+    ///
+    /// **A different tier from every variant above it**, and the two read very
+    /// differently in a breakdown of what gave up (§17.7). Everything else here
+    /// says the caller handed over numbers that describe no shape; this says the
+    /// shape is fine and the arithmetic could not reach the answer. Only one of
+    /// those is worth going and fixing.
+    #[error("could not settle {} decisions the answer depends on", records.len())]
+    Undecidable {
+        /// The decisions that could not be settled.
+        records: rcad_predicates::ProvenanceLog,
+    },
 }
 
 /// The result of anything in this crate that can refuse.

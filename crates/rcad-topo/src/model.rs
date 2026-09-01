@@ -1,4 +1,4 @@
-use rcad_geom::{Isometry, Orientation, Plane, Point, Scale, Surface};
+use rcad_geom::{EdgeRun, Isometry, Orientation, Point, Scale, Surface};
 use rcad_predicates::Approximation;
 use serde::{Deserialize, Serialize};
 use slotmap::{SecondaryMap, SlotMap};
@@ -818,50 +818,6 @@ pub(crate) struct EdgeData {
     pub end: VertexSlot,
     pub run: EdgeRun,
     pub approximation: Option<Approximation>,
-}
-
-/// What an edge runs along between its two ends.
-///
-/// The two faces either side of an edge each sit on a surface, and those two
-/// surfaces name where the edge is with no arithmetic at all — the same
-/// argument decisions.md §15.9 makes for a pair of planes naming their line.
-/// What the pair does *not* say is which piece of the crossing this edge is,
-/// and that is the whole of what this enum adds.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) enum EdgeRun {
-    /// Straight between its two ends, which are the whole of it.
-    Straight,
-    /// Right round the closed curve where the faces either side of it cross,
-    /// so it starts and ends at the same vertex.
-    ///
-    /// A cap of a round bar is this: the cylinder crosses the cap's plane in
-    /// one circle, and the edge is the whole of that circle. There is nothing
-    /// to disambiguate, which is why this variant carries nothing.
-    RightRoundWhereItsFacesCross,
-    /// Part of the curve where the face also crosses `and`, cut down to this
-    /// one piece by `picked_by`.
-    ///
-    /// A ball's seam is why this exists, and it is worth saying exactly why
-    /// neither simpler variant can hold it.
-    ///
-    /// The seam runs pole to pole down one meridian, so the faces either side
-    /// of it are the *same* sphere — and a sphere crossed with itself names
-    /// nothing at all. `and` is the missing second surface: the plane the
-    /// meridian lies in.
-    ///
-    /// The endpoints do not finish the job either, and this is the case that
-    /// forced the design. A plane crosses a sphere in one circle; cutting a
-    /// circle at two points leaves **two** arcs with the same two ends. So
-    /// naming the crossing and naming the ends still names two things.
-    /// `picked_by` settles it: half-spaces this edge lies in, each one exact,
-    /// each answering with a `Decision` rather than with a rounded witness
-    /// point somebody had to construct.
-    PartOfWhereItCrosses {
-        /// The second surface, when the faces either side do not name it.
-        and: Surface,
-        /// Half-spaces this edge lies in, enough of them to pick one piece.
-        picked_by: SmallVec<[Plane; 1]>,
-    },
 }
 
 /// One use of an edge by one wire, running one way round.

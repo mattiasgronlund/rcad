@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Cause, Policy, ProvenanceLog};
 use rcad_topo::{Error, Mesh, Model, ProfileBuilder, SolidKey};
 
@@ -339,6 +339,216 @@ fn an_edges_points_are_worked_out_once_and_both_faces_along_it_name_the_same_one
     assert!(caps[0].is_disjoint(caps[1]));
 }
 
+/// The cap plane at `height` facing `outward` along the axis.
+fn a_cap_square_to_the_axis(height: f64, outward: f64) -> Plane {
+    Plane::from_point_and_normal(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, outward))
+        .expect("the z axis is a unit normal")
+}
+
+/// **§24.18's criterion 8, the easier half.** The same bar, with its cap circles
+/// computed by the intersector rather than declared, meshes into the same mesh.
+///
+/// §24.2: *"M2 builds a round bar by declaring its edges; M3 computes the same
+/// bar's cap circle from the cylinder and the cap's plane."* Nobody told
+/// `add_bar_cut_off_by` that a plane square to a pipe cuts a circle — it asked,
+/// and the answer came back as the same `EdgeRun` `add_round_bar` writes down
+/// from a person's knowledge.
+///
+/// **Bit for bit and not within a tolerance**, and that is the sharpest form
+/// this claim has. The two solids differ only in how their cap edges were
+/// named; if computing an edge landed anywhere other than exactly where
+/// declaring it does, the whole point table would drift and the meshes would be
+/// two different meshes that agreed to nine figures.
+#[test]
+fn a_bar_whose_cap_circles_were_computed_meshes_exactly_as_the_declared_one_does() {
+    let mut declared = a_model();
+    let bar = a_round_bar(&mut declared, &Isometry::identity());
+
+    let mut computed = a_model();
+    let mut log = ProvenanceLog::new();
+    let same = computed
+        .add_bar_cut_off_by(
+            RADIUS,
+            [
+                a_cap_square_to_the_axis(0.0, -1.0),
+                a_cap_square_to_the_axis(HEIGHT, 1.0),
+            ],
+            &Isometry::identity(),
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("a plane square to a pipe cuts one closed curve out of it");
+    assert!(
+        log.is_empty(),
+        "naming a cap circle of a bar this size proves everything, got {:?}",
+        log.records()
+    );
+    computed
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a bar whose caps were worked out is a sound bar");
+
+    assert_eq!(euler_characteristic_of(&computed, same), 2);
+    let theirs = meshed(&declared, bar, 0.1);
+    let ours = meshed(&computed, same, 0.1);
+    assert_eq!(ours.points(), theirs.points());
+    assert_eq!(
+        ours.triangles().len(),
+        theirs.triangles().len(),
+        "computing a cap circle put a different number of triangles on the bar"
+    );
+}
+
+/// **§24.18's criterion 8, and the shape M2 could not declare at all.** A bar
+/// cut off at an angle, whose cap edge is an ellipse, meshes into a closed
+/// surface.
+///
+/// §24.2 names this as the thing M3 reaches that M2 could not: an edge no
+/// builder can write an `EdgeRun` for out of a person's knowledge, because
+/// which conic a leaning plane cuts out of a pipe is a question rather than a
+/// fact. It is also the first edge the old mesher could not have walked — a
+/// straight line through the pipe's own two coordinates is a line of constant
+/// height, and this one climbs.
+///
+/// The oracle is the same one every other mesh here passes, with no distance in
+/// it: every side used both ways round, and χ of the mesh equal to χ of the
+/// solid.
+#[test]
+fn a_bar_cut_off_at_an_angle_meshes_into_a_closed_surface() {
+    let mut model = a_model();
+    let leaning =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, HEIGHT), Vector::new(1.0, 0.0, 2.0))
+            .expect("a direction with length");
+    let bar = model
+        .add_bar_cut_off_by(
+            RADIUS,
+            [a_cap_square_to_the_axis(0.0, -1.0), leaning],
+            &Isometry::identity(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a leaning plane cuts an ellipse out of a pipe");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a bar cut off at an angle is a sound bar");
+    assert_eq!(euler_characteristic_of(&model, bar), 2);
+
+    let mesh = meshed(&model, bar, 0.05);
+    let on_the_slope: Vec<f64> = mesh
+        .points()
+        .iter()
+        .filter(|point| leaning.signed_distance_to(**point).abs() < 1e-9)
+        .map(Point::z)
+        .collect();
+    let (lowest, highest) = on_the_slope
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(low, high), &z| {
+            (low.min(z), high.max(z))
+        });
+    assert!(
+        (highest - lowest - RADIUS).abs() < 0.01,
+        "a plane leaning one in two across a bar three across cuts an ellipse \
+         spanning three in height, and this one spans {}",
+        highest - lowest
+    );
+
+    for point in mesh.points() {
+        let across = point.x().hypot(point.y());
+        assert!(
+            across <= RADIUS + 1e-9,
+            "the mesh point {point:?} is outside the bar's wall"
+        );
+    }
+
+    // §19 for the shape M3 added: where it sits does not change what it is.
+    // A turn about the origin leaves the solid the same distance out, so the
+    // same mesh comes back; a move a thousand units away costs room off the
+    // deflection and may take fewer pieces, and all that is asked of it is the
+    // oracle, which `meshed` runs.
+    for (placement, the_same_size) in [
+        (
+            Isometry::translation(Vector::new(17.5, -3.25, 1000.0)).expect("a shift"),
+            false,
+        ),
+        (a_third_of_a_turn_about_a_slanted_axis(), true),
+    ] {
+        let mut moved = a_model();
+        let solid = moved
+            .add_bar_cut_off_by(
+                RADIUS,
+                [a_cap_square_to_the_axis(0.0, -1.0), leaning],
+                &placement,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar cut off at an angle can be put anywhere");
+        moved
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("and is still sound there");
+        let there = meshed(&moved, solid, 0.05);
+        assert!(!there.triangles().is_empty());
+        if the_same_size {
+            assert_eq!(
+                there.triangles().len(),
+                mesh.triangles().len(),
+                "turning the bar came out a different mesh"
+            );
+        }
+    }
+}
+
+/// The two caps of a bar have to cut right round it, face out of it, and leave
+/// a body between them.
+///
+/// Every one of these is bad caller input rather than a broken shape, so every
+/// one is an `Err` (§4.1) — and the first is the one the intersector answers
+/// rather than the builder: a plane running down the inside of a pipe cuts two
+/// straight lines, and no assumption in the builder had to know that.
+#[test]
+fn a_bar_whose_caps_are_not_caps_is_refused() {
+    let down_the_middle = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+        .expect("a unit normal");
+    let refused = |caps: [Plane; 2]| {
+        a_model()
+            .add_bar_cut_off_by(
+                RADIUS,
+                caps,
+                &Isometry::identity(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("these two planes do not cut a bar")
+    };
+
+    assert!(matches!(
+        refused([a_cap_square_to_the_axis(0.0, -1.0), down_the_middle]),
+        Error::ACapDoesNotCutRightRoundABar { which: 1 }
+    ));
+    assert!(matches!(
+        refused([
+            a_cap_square_to_the_axis(0.0, 1.0),
+            a_cap_square_to_the_axis(HEIGHT, 1.0),
+        ]),
+        Error::ACapOfABarFacesIntoIt { which: 0 }
+    ));
+    assert!(matches!(
+        refused([
+            a_cap_square_to_the_axis(HEIGHT, -1.0),
+            a_cap_square_to_the_axis(0.0, 1.0),
+        ]),
+        Error::TheCapsOfABarMeetInsideIt
+    ));
+    // Square to each other at the top and bottom of the same seam, so they meet
+    // over the far side of the bar and only just.
+    assert!(matches!(
+        refused([
+            a_cap_square_to_the_axis(0.0, -1.0),
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 1.0), Vector::new(1.0, 0.0, 0.2))
+                .expect("a direction with length"),
+        ]),
+        Error::TheCapsOfABarMeetInsideIt
+    ));
+}
+
 /// A coarse deflection is a request and not a failure (§23.5), so a coarse mesh
 /// has to pass the same oracle a fine one does.
 ///
@@ -620,26 +830,40 @@ fn a_tolerant_caller_gets_the_finest_mesh_the_arithmetic_reaches() {
     the_mesh_closes_up(&model, bar, &mesh, mesh.deviation().magnitude());
 }
 
-/// A request for more points than a mesh will hold is refused rather than
-/// waited out (§25.3).
+/// A request for more points than can be held is refused rather than waited out
+/// (§25.3).
 ///
 /// Counted before the points are made, so this comes back at once. Above the
 /// floor, so it is not the refusal the test before this one is about.
+///
+/// **Which cap answers moved when the mesher stopped walking its own edges.**
+/// There are two: `MOST_POINTS_A_MESH_WILL_HOLD` over a whole solid, and
+/// `rcad_geom::MOST_POINTS_ALONG_ONE_CROSSING` over one edge, which is four
+/// times smaller. A ball has exactly one curved edge, so the second is what
+/// answers here and always will be — the first would need five curved edges on
+/// one solid and no builder makes a shape with more than three. They are the
+/// same refusal in the sense that matters, which is that it comes back at once
+/// instead of running.
 #[test]
-fn a_deflection_needing_more_points_than_a_mesh_holds_is_refused() {
+fn a_deflection_needing_more_points_than_can_be_held_is_refused() {
     let mut model = a_model();
     let ball = model
         .add_ball(1.0, &Isometry::identity())
         .expect("a unit ball");
 
     let refusal = model.solid(ball).mesh(
-        Deflection::of(1e-13).expect("a length"),
+        Deflection::of(1e-12).expect("a length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     );
     assert!(
-        matches!(refusal, Err(Error::MoreMeshPointsThanASolidWillHold { .. })),
-        "a ball meshed to a tenth of a picometre gave {refusal:?}"
+        matches!(
+            refusal,
+            Err(Error::Geometry(
+                rcad_geom::Error::TooManyPointsAlongOneCrossing { .. }
+            ))
+        ),
+        "a ball meshed to a picometre gave {refusal:?}"
     );
 }
 

@@ -5102,3 +5102,1428 @@ to become arc-aware. Nothing in M3 needs one.
   curved solid's volume are both checked over the mesh in
   `check_shells_and_solids`; arcs in a profile are deferred again, at item 3
   above.
+
+---
+
+## 27. What opening M3's gate settled
+
+*Recorded 2026-09-01, before either stage opens. §24 is the specification and it
+stands; this is what its four gate items turned out to be once somebody read the
+discriminants, plus the six things §26.6 handed over that §24 did not know about.
+A gate and not a milestone, so it is short.*
+
+### 27.1 The two stages on paper: every sign question, and what it costs
+
+§24.4 item 4 cannot be done without knowing what the stages will ask, so here is
+the whole list. Every question is a **sign**, every one is a polynomial in the
+numbers a `Surface` stores, and none of them is a distance compared against a
+tolerance.
+
+Write `N = n·n` for a plane's normal, `W = w·w` for a pipe's axis direction —
+both about one and exactly one only for a coordinate direction.
+
+| The question | The polynomial | Degree | Dimension | Who decides it |
+|---|---|---|---|---|
+| are two directions parallel | three 2×2 minors of `w₁, w₂` | 2 | ratio | exact, `orient2d`'s shape |
+| is a plane parallel to an axis | `n·w` | 2 | ratio | exact, two products |
+| do two axes meet | `(o₂−o₁)·(w₁×w₂)` | 3 | volume | `orient3d`'s determinant, over stored numbers |
+| is a centre on an axis | three components of `(c−o)×w` | 2 | length | exact, `orient2d`'s shape |
+| plane against ball | `N·R² − (n·c−d)²` | 6 | area | new, in `rcad-geom` |
+| plane against pipe, parallel to it | `N·r² − W·(n·o−d)²` | 6 | area | new |
+| ball against ball | `(R₁±R₂)² − ‖c₂−c₁‖²` | 2 | area | new |
+| ball against pipe, centre on the axis | `W·R² − r²` | 4 | area | new |
+| ball against pipe, in general | `V² − 4r²A`, with `A = ‖(c−o)×w‖²` and `V = A + r² − W·R²` | 8 | **four lengths** | new |
+| pipe against pipe, parallel axes | `(A·W₂ − r₁²W₂ − r₂²W₁)² − 4r₁²r₂²W₁W₂` | 12 | **four lengths** | new |
+| pipe against pipe, one surface | `A = 0` and `r₁²W₂ = r₂²W₁` | 4 | area | new |
+
+Four things fall out of that table, and three of them are corrections to §24.
+
+One row needs a note. "Do two axes meet" is `orient3d`'s three-by-three
+determinant exactly, but not `orient3d`'s *signature*: feeding it four points
+means adding a direction to an origin, and that sum rounds. The determinant is
+written over the stored numbers instead, which is what every other row does too.
+
+**The discriminant has to carry `n·n` and `w·w`, and the textbook one does not.**
+A plane's normal is scaled to length one on the way in and that division rounds,
+so `Plane::side_of_point` is certified against the plane those *stored* numbers
+name; the same is true of a pipe, where `Cylinder`'s own doc says the certified
+radius is `r / ‖w‖`. Write the discriminant as `R² − (n·c−d)²` and it answers
+about a ball of radius `R/‖n‖` — a different ball, by about `1e-16·R`. Then
+criterion 3, which wants every evaluated point certified **ON** both surfaces by
+`SideOfSurface`, fails by exactly that much on any surface that is not
+axis-aligned. Multiplying through by `N` costs three products and two sums.
+**The rule, and it is the load-bearing one: an intersector's discriminants are
+polynomials in the same stored numbers `SideOfSurface` reads, with no
+normalization anywhere.** Otherwise the two halves of M3 are certified about two
+different solids.
+
+**There is no near-tangency band because there is no constructed input.** §24.10
+says the band exists only for constructed inputs and inside the marcher. Sharper:
+`intersect` takes two `Surface`s, a `Surface` is made of `f64`, and level 3
+decides any polynomial in exact `f64`. The naming half of M3 has **no**
+constructed input at all. Its only way to refuse is exact arithmetic declining
+because a product would overflow or fall into the subnormals — which §16.10 calls
+a **gap** wherever a rescaling reaches the answer, and
+`the_same_pipe_and_point_scaled_up_to_fit_put_the_point_outside` already
+demonstrates that shape one degree down. So criterion 5's 0% is not a hope about
+a narrow band; it is structural, and a refusal from the closed-form pairs at
+ordinary magnitudes is a bug rather than a close call.
+
+**The two quartic pairs do not fit the expansion buffers this workspace uses, and
+that is the schedule risk nobody had listed.** `square_of_expansion` refuses more
+than eight entries; a pipe's `‖(c−o)×w‖²` alone runs to 384. Squaring a
+400-entry expansion needs `2·400²` — about 320 000 `f64`, 2.6 MB — and that is
+not a stack array. The family of fixes considered: **(i)** a heap scratch used
+only at level 3, which runs rarely, costs one allocation and refuses nothing;
+**(ii)** decline past some length and report `Undecidable`, which trades
+criterion 5's 0% away for a buffer size; **(iii)** drop the degree, which needs
+`√A` and so leaves polynomial arithmetic altogether. **(i) is the answer**, and
+it belongs to stage 2 — but `expansion`'s crate doc says *"every function writes
+into a caller-supplied slice, so a predicate that knows its own sizes never
+allocates"*, and a predicate that cannot know its own size within a stack budget
+is a case that sentence did not have. Zero elimination keeps the drawn lengths
+tiny; it is the worst case a fixed buffer would have to hold.
+
+**None of the four planar pairs constructs a plane.** §24.5 files sphere ∩ sphere
+as *"named exactly, by reduction to the row above"*, through the radical plane.
+The reduction is needed to *evaluate points along* the circle and not to *name*
+it: two spheres name their circle between them, so the run is
+`RightRoundWhereItsFacesCross` and nothing is built. Plane ∩ sphere and the
+ellipse of plane ∩ cylinder are the same. `picked_by` is only ever needed where a
+crossing comes in **two pieces** — two lines from a plane parallel to a pipe's
+axis, two circles from a ball centred on a pipe's axis, two loops of a quartic —
+and in the first two the picking plane is exactly representable.
+
+### 27.2 What went into `rcad-predicates`, and what was weighed and put down
+
+Two things, and the crate is frozen from here until M3 closes.
+
+1. **`Measures::ManyLengths { how_many }`.** The table above has two entries at
+   the fourth power of a length, and `Measures` stopped at a volume. An
+   enclosure from one of them filed as a `Volume` reads a whole working size too
+   wide — so a decision the policy would have taken comes back undecided
+   instead, which is the timid filter §24.10 says a 0% control cannot tell from
+   genuine undecidability. §15.3's units bug, one degree above where §15.3 could
+   see it.
+2. **`Cause::PointAlongACrossing`.** §15.7 said the `Approximation` field for how
+   far a computed curve strays has no producer yet and §24.3 answers that the
+   fidelity belongs to *evaluating points along* a crossing. That is a point put
+   where a curve is, and `Cause::FlatStandIn` is a triangle put where a surface
+   is — one dimension apart, in the same mesh, and only the cause tells them
+   apart. Last in the enum, per §25.8.
+
+Weighed and **not** taken:
+
+- **Multiplying one expansion by another.** Every discriminant of degree six and
+  up needs it. It is not a `rcad-predicates` change: `rcad-geom` already owns
+  `square_of_expansion` privately, §7.2 puts the quadric predicates in that crate
+  because the quadric types are there, and the freeze does not reach it.
+- **A public `Interval` divide.** The marcher will divide ranges.
+  `Interval::divided_by` is `pub(crate)` and `rcad-geom` has `quotient_enclosing`
+  of its own; both stages live in `rcad-geom`, so moving that function inside
+  that crate is stage work and costs the freeze nothing.
+- **`Measures` for a dimensionless value.** "Are these two axes parallel" and "is
+  this plane parallel to that axis" have no units. Their inputs are direction
+  components of order one, every product is exact, level 3 always decides, so no
+  record is ever written and no arm would ever be read. §13 rule 3.
+- **A fifth `Decision` for "tangent".** Tangency is a certified `Zero` on a
+  discriminant. A variant for it would be a second answer to a settled question,
+  which is §1.5's shape.
+- **`Policy` knobs for the marcher.** §24.7 asks for two, and they exist: how
+  fine is `Deflection`, which is not a policy, and what happens when the
+  deviation cannot be proven, which is `Policy::wobble_is_acceptable`.
+- **Provenance name constants for the new questions.** `&'static str` at the call
+  site in `rcad-geom`, exactly as `SIDE_OF_SPHERE` is.
+
+### 27.3 The type split, and three places §24.9 needs amending
+
+`EdgeRun` **moves to `rcad-geom` whole**, which §24.9 left open. Nothing in it
+names a key: it holds a second `Surface` and the half-spaces that pick one piece,
+and both are geometry. `EdgeData` — which holds vertex slots — stays where it is.
+`EdgeRun` therefore becomes public, so §24.15's export list is three names and
+not two.
+
+Three amendments:
+
+- **`Curves` carries a `Vec`, not a `SmallVec<[NamedRun; 2]>`.** Two `NamedRun`s
+  inline come to over five hundred bytes, every arm of an enum is as wide as its
+  widest, and `SurfaceMeet::Nothing` is what most pairs of faces in a fuse
+  answer. Widening the common answer to save an allocation on the rare one is
+  backwards.
+- **`RightRoundWhereItsFacesCross` still carries nothing.** §24.5 calls this gate
+  work, and what landed is the corrected *claim* rather than a field: the variant
+  says "one closed curve", which is true of every crossing the four planar pairs
+  produce and false of a quartic that leaves two loops. The families of fixes are
+  half-spaces on the closed variant, or a variant of its own. Neither is built,
+  because the only consumer is stage 2, stage 2 is one owner in one worktree
+  (§24.12), and §13 rule 4's settle-it-twice hazard needs two people. The format
+  is versioned and explicitly unstable, so a third version is cheap.
+- **The fuse's `FaceMeet` did not move and did not change.** It is a plane–plane
+  meet whose ends are `MeetPoint`s naming input vertices, and it belongs to
+  M2.5's planar fuse. §24.9's "`rcad-topo` wraps it with the `along` bookkeeping"
+  describes M4's shape, and M4 is where a fuse over curved crossings is the first
+  consumer that has to merge the two.
+
+`NamedRun`'s ends are `rcad_predicates::Point`, so they may be a box rather than
+a point. That is what makes §26.6 item 4 reachable, and it is deliberate: an end
+handed over as an exact triple would buy a certified answer to the wrong question
+(§2.5).
+
+### 27.4 §24.12's prediction is aimed at a divide M3 does not call
+
+§24.12 predicts the money goes to `SideOfSurface` for sphere and cylinder and to
+the local interval divide beneath it. Both were read at the gate.
+
+`SideOfSurface` needs no work. What needs the care is its *caller*: §27.1's first
+finding is exactly the way to get a sphere predicate right and a sphere
+intersector wrong.
+
+**There is no interval divide beneath `SideOfSurface`.** Neither `Sphere::side_of`
+nor `Cylinder::side_of` divides at any of the three levels — they are products,
+sums and differences all the way down. `quotient_enclosing` sits beneath
+`BSplineCurve::evaluate_with_enclosure` and its surface twin, and §24.1 dropped
+the free-form half of M3, so **nothing in this milestone calls it**. §16.8's "M3
+is the first caller that will care" is right that a marcher divides ranges and
+wrong that this is the divide it will use: the marcher's is a new one, over a
+different expression. So half of §24.12's prediction is misaimed before the work
+starts, and the honest scoring at M3's close is against the marcher's own divide
+and against `SideOfSurface`'s callers.
+
+### 27.5 Who walks an edge, and what crosses that seam
+
+§26.6 item 1: the mesher walks an edge by stepping in a straight line through the
+surface's own two coordinates, which is right for a pipe's ruling, a cap circle
+and a ball's meridian and wrong for the ellipse a tilted plane cuts out of a
+pipe. Criterion 8 needs a solid whose edges were *computed* to mesh, so this is a
+seam between M3's two stages and M2's mesher, and §13 rule 4 says settle it now.
+
+**Settled: the evaluator in `rcad-geom` walks every edge, and `rcad-topo` walks
+none.** Two authorities on where the points along an edge are is the shape §23.8
+kept finding, and the mesher's straight line is one of them.
+
+What crosses the seam:
+
+- The mesher hands over a **`NamedRun`** — the edge's own run and its two ends,
+  which §27.3's test shows every edge the kernel builds already is — together
+  with **the surfaces of the two faces either side** (the run names the second
+  surface only when the faces do not), and a **`Deflection`**, a `&Policy` and a
+  log.
+- It gets back **3D points**, in the edge's stored direction, ends not included,
+  and one `Approximation` blaming `Cause::PointAlongACrossing`.
+- It does **not** get a `(u, v)`. A shared edge lands in two different coordinate
+  systems and the mesher already reads each with `Surface::coordinates_of`. That
+  is what keeps the seam narrow: everything downstream of `walk` works from 3D
+  points and needs no change at all.
+- §23.4 is unchanged: the points are worked out **once** and the identical values
+  go to both faces. The evaluator is the single authority; neither face
+  re-derives.
+
+Nothing of this is built at the gate. What the gate checked is that the types can
+say it: `every_edge_the_kernel_builds_is_already_a_named_run`.
+
+### 27.6 §26.6's six items, sorted
+
+| | | |
+|---|---|---|
+| 1 | the mesher cannot walk a curved edge | **gate** for the seam, stage for the code — §27.5 |
+| 2 | a ball's seam longitude is not read | **gate**, done — §27.7 |
+| 3 | a new `Surface` variant is nine stops | **stage**, and nothing is due: §24.6 keeps the surface set fixed |
+| 4 | `Undecidable` out of `mesh` becomes reachable | **stage**; the gate only had to make the ends of a run able to be a box, and they are |
+| 5 | the evaluator bound over-charges a pipe on its own axis | **stage**, and only if a stage hands the mesher a surface that did not come from a `Model` |
+| 6 | `measure` still asserts `six_volumes > 0.0` | **stage**, watched: §26.6 says to look again when a new kind of surface arrives, and M3 brings none |
+
+### 27.7 What the gate found that the plan did not
+
+**A pole set the walk's starting longitude, and a sound ball could not be
+meshed.** Reading the meridian out of `EdgeRun` (§26.6 item 2) turned up a second
+defect the first one was hiding. A ball's wire opens at a pole; a pole names
+every longitude, so `coordinates_of` answers `atan2(0, 0)`; the walk took that
+zero as where it started and unwrapped every corner after it towards longitude
+zero. Half a turn away that is exactly the boundary the wire check refuses at, so
+a ball seamed down the far half of its own meridian — a perfectly sound solid —
+came back `AWireWillNotLieFlatOnItsFace`. A pole no longer starts a walk, and the
+turns counted between poles are shifted rather than dropped. That is §23.8's
+pattern for the eighth time, and the new kind of input was neither a solid nor a
+number: it was **a field that had never been read**.
+
+**The witness on the equator had to be handed over as a box.** Working out which
+half of a meridian a seam is on means asking a half-space about a point on the
+equator, and that point comes out of trigonometry. Given to the predicate as an
+exact triple, `sin(π)` coming back `2.4e-16` instead of zero is enough to certify
+a confident sign about noise and pick a half on the strength of it — §15.5's
+mistake by a new road. Given the box it is really known to be inside, the
+predicate answers `Undecidable`, neither half is ruled out and the mesher refuses.
+`Error::ASeamBetweenTwoPolesNamesNoMeridian` is that refusal, and it has to be a
+refusal rather than an assert because `validate` cannot catch it: both ends of a
+pole-to-pole seam satisfy every half-space its true meridian satisfies, so
+`check_edges` has nothing to look at.
+
+**`Measures` had three arms and the pair table needs four.** §27.2 item 1. Worth
+naming separately because it is the one gate item that would otherwise have been
+taken *inside* the frozen window, which is what §15.9's precedent is about.
+
+### 27.8 The numbers, and corrections to earlier sections
+
+| | at §26 | now |
+|---|---|---|
+| tests (`cargo nextest`) | 860 | 878 |
+| `FORMAT_VERSION` | 1 | 2 |
+
+Corrections:
+
+- **§24.4 item 1**: `EdgeRun` had to move to `rcad-geom` for `NamedRun` to hold
+  one, and it could. §24.9 did not say where it would land.
+- **§24.9**: the curve list is a `Vec`; `RightRoundWhereItsFacesCross` keeps
+  carrying nothing and the gap is named instead; `FaceMeet` is M4's to merge.
+  See §27.3.
+- **§24.10**: "there is no near-tangency band for exact inputs" is true and
+  understated — the naming half has no constructed input at all, so the only
+  refusal it has is exact arithmetic running out of range. See §27.1.
+- **§24.10 again**: the discriminants are not the textbook ones. They carry `n·n`
+  and `w·w`, or the intersector and `SideOfSurface` are certified about two
+  different solids.
+- **§24.12**: `SideOfSurface` has no interval divide beneath it and M3 never
+  calls the one §16.8 measured. See §27.4.
+- **§26.4**: the doc-test count is 19 by `cargo test --workspace --doc`, not 24.
+  It has not moved at this gate.
+
+---
+
+## 28. What M3's first stage cost, recorded 2026-09-01
+
+*The four pairs whose crossing lies in a plane, named exactly, plus the
+evaluator that puts certified points along one. §27 is the model for the shape:
+a stage and not a milestone, so it is short. The marcher, the fuzz target, the
+cost benchmark and the claim audit are the second stage's and the closing
+gate's.*
+
+### 28.1 §27.1's prediction was right, and it moves the headline to zero
+
+§24.10 called the rotated refusal rate "the headline" and expected it above
+zero. §27.1 argued, **before any of this was written**, that there is nothing
+for a turned pair to be undecided about: `intersect` takes two `Surface`s, a
+`Surface` is made of `f64`, every discriminant is a polynomial in those, and
+level 3 decides. Measured, on 2048 pairs per family:
+
+| Family | `Error::Undecidable` | Second refusal | Threshold recorded |
+|---|---|---|---|
+| lattice — the control | **0.00%** | 0.00% | zero, asserted |
+| turned — the headline | **0.00%** | 0.54% | zero, asserted |
+| leaning whole-number directions | 0.00% | 0.63% | zero, asserted |
+| written at `2^k`, `k` from −620 to 620 | 10.50% | 0.00% | 25% |
+
+**Criterion 6's threshold is zero**, recorded here and asserted in
+`how_often_naming_a_crossing_refuses.rs`. That is a strong assertion on purpose:
+if a change ever makes a turned pair refuse, the answer is to find which product
+left the range and not to raise the number.
+
+Three predictions were scored before this stage and two were right; this is the
+fourth, the second made in advance, and it holds.
+
+### 28.2 There are two refusals and §24 predicted one of them
+
+The first is the one §27.1 named: exact arithmetic declining a product that
+would round its low half onto the subnormal grid, or overflow. Measured, one
+pair of each kind: every family answers from `2^-538` to `2^509`, and two planes
+answer everywhere, because their discriminants multiply two direction components
+or two offsets rather than a radius by itself. A **gap**, demonstrated and not
+argued — all 215 refusals in the shipped corpus are named the moment the same two
+surfaces are written back on the lattice.
+
+The second was not on anyone's list. **A plane exactly along a pipe's axis and
+inside it cuts two lines, and telling them apart needs a `Plane` whose unit
+normal is exactly square to both the axis and the cutting plane's normal.**
+`Plane` scales every normal to length one and that division rounds, so the
+normal we can write down is exactly square to both only sometimes — and a *line*
+is endless, so a half-space it only stays inside near the origin has not picked
+it at all. `Error::CannotNameWhichPieceOfACrossingThisIs`, 0.5% of turned pairs
+and none at all on the lattice, where that direction is a coordinate axis.
+
+Also a **gap**, and the families of fixes weighed: a `Plane` that stores its
+normal unscaled, which is a second kind of plane for every predicate in the
+kernel to be certified about and so M4's business; a curved half-space, which
+buys nothing because `Cylinder` normalizes its axis the same way; and testing
+the separation instead of arranging it, which compares the picking plane's own
+offset rounding against the half-distance between the two lines and is a sign
+question of about the fourteenth degree. **The third is the fix and it needs the
+second stage's expansion buffer**, so it lands there.
+
+### 28.3 Two ends is the wrong shape for a crossing of two surfaces
+
+§24.3 says a crossing comes back as "two surfaces, the half-spaces that pick one
+piece, and two ends", and §24.9 gives every `NamedRun` a pair of ends. Writing
+`intersect` found that **a pair of surfaces names a curve and nothing on it**.
+The circle where a plane cuts a ball has no start; the line where two planes
+cross has no end at either side. Ends are what *topology* adds — the vertices
+that cut a curve into edges — and an intersector handed two surfaces has none to
+give.
+
+Two of the four pairs answer with an endless line, and one of those is criterion
+4's own row ("a plane tangent to a cylinder gives one line"), so this is not a
+corner case the type could be left silent about.
+
+`NamedRun::the_whole_of` is the answer and it widened nothing: both ends come
+back as the box that says *nothing at all is known about where this is*. That
+can never be confused with an end a predicate gave up on, because §24.10 refuses
+such an answer whole — an undecided end comes back as `Err` and never inside a
+run. `EdgeRun` did not grow a variant and the format did not move.
+
+### 28.4 "Certified ON" has to mean "never certified OFF"
+
+§24.7 calls criterion 3 one sentence: *every point the evaluator produces must be
+certified ON both surfaces by `SideOfSurface`*. Taken literally it is
+unreachable, and not because the evaluator is weak. A point on the circle where
+a plane cuts a ball is at coordinates no `f64` can name, so `Decision::Zero`
+about it is not something any amount of precision reaches; handed over as an
+exact triple it gets a certified `Pos` or `Neg`, which is §2.5's exact answer to
+the wrong question.
+
+The reachable form is the one
+`a_point_exactly_on_a_circle_is_never_certified_off_it.rs` already argues one
+milestone down, and it has two halves rather than one: handed over as **the box
+it is really known to be inside**, no point may be certified *off* either
+surface, and separately every point must be certified *off* a surface it is
+plainly not on. The second half is what stops the first passing for an evaluator
+whose bound is a mile wide.
+
+Measured over about thirty thousand points on three families: the furthest any
+point sits off its own curve is **1.2% of the bound published for it**.
+
+### 28.5 The published bound needed two steps that are not roundings
+
+`POINT_ALONG_A_CROSSING_ROUNDOFF` is `256 · f64::EPSILON` of the largest number
+involved, against a derivation of about `34 · f64::EPSILON` — the same seven-fold
+room `Surface::ROUND_TRIP_ROUNDOFF` leaves next door, and for the same reason,
+that Rust does not say how accurate `sin`, `cos` and `atan2` are.
+
+Two steps of the chain are things that had to be *put there* rather than counted,
+and without either the constant is not a bound at all:
+
+1. **A nearly-tangent circle's radius comes from a difference of two large
+   squares.** `n·n · R² − (n·c − d)²` in `f64` cancels to noise, and the radius
+   that comes out is wrong by about `ε·L²/radius`, which grows without bound as
+   the circle shrinks. Summed through the exact expansion instead — the very
+   discriminant that named the crossing — it is right to a rounding or two and
+   the bound stays *relative*.
+2. **`axis × normal` for a plane nearly square to a pipe is tilted out of the
+   plane** by about `ε / sin`, so every point built on it misses the plane by the
+   radius times that. What gets used is the part of it lying in the plane, which
+   leaves a tilt of order `ε²`.
+
+Neither would have been caught by the drawn corpus. The first needs a tangency
+approached rather than hit; the second needs two directions nearly but not
+exactly parallel, which the lattice family cannot draw — turning a plane and a
+pipe that were exactly parallel turns them by the *same* rotation and leaves them
+exactly parallel, so the corpus has the two cases and not the band between them.
+That is worth writing down as a shape rather than as an incident: **a generator
+built out of exact configurations and one rotation reaches the on-case and the
+far-off case and skips the near-case**, and §17.7 already says a nudge of `1e-9`
+is not the answer.
+
+### 28.6 Corrections to §24 and §27
+
+- **§24.10, criterion 9.** "The same pair under a general rotation names the
+  same kind of crossing" is not true of a pair on a knife edge, and should not
+  be: every predicate here is exact about the numbers *as stored* (§17.1), and
+  turning rounds them, so a plane that rested exactly on a ball genuinely no
+  longer does. The knife edges are named, skipped and counted. The surprising
+  one is not the tangency: **a plane not parallel to an endless pipe cuts an
+  ellipse however far away it is**, so "parallel and well clear of it" answers
+  `Nothing`, and the smallest tilt turns that into an enormous ellipse. There the
+  knife edge is the whole of the `Nothing` answer rather than a near miss. 1485
+  of 2048 pairs are compared and 564 skipped, which is high because the control's
+  directions are all coordinate axes.
+- **§27.2's fourth "weighed and not taken".** It declines a `Measures` arm for a
+  dimensionless value on the grounds that "level 3 always decides such a
+  question, so no record is ever written". It can be written: a direction with a
+  component down among the subnormals underflows its own product, and "is this
+  plane parallel to this axis" then gives up.
+  `a_direction_with_a_subnormal_component_cannot_be_told_from_square_to_a_plane`
+  is the demonstration. It is filed as `Measures::Length`, whose conversion is
+  the identity, which is the *right* conversion for a value with no units; the
+  **name** is wrong, and `Measures::Dimensionless` is one line at M4's gate.
+  The freeze held: nothing in `rcad-predicates` moved.
+- **§24.9's four arms are enough.** `Nothing`, `TouchAtOnePoint`, `Curves` and
+  `SameSurface` cover every answer the four planar pairs give, including one
+  ball swallowed by another and a plane clear of a pipe it runs alongside. The
+  `Vec` in `Curves` is never longer than two.
+- **§24.5's row for plane ∩ cylinder** lists "an ellipse; a circle, one line or
+  two lines in special position". The circle needs no naming of its own — a
+  circle and an ellipse are both one closed curve and neither is drawn, so they
+  are the same answer. What does need its own path is the *evaluator*, where a
+  plane square to the axis has no `axis × normal` to take a direction from at
+  all, and the pipe's own `basis` is what stands in.
+
+### 28.7 What went into the code, and what it cost
+
+Four error variants in `rcad-geom` beyond the gate's `Undecidable`:
+`CrossingRunsToAQuartic`, `CannotNameWhichPieceOfACrossingThisIs`,
+`CannotPlaceAPointThatCloseToACrossing` and `CannotWorkOutHowBigACrossingIs`.
+The first is a deferral said out loud, which is not the same thing as a wrong
+answer; the middle two are the two refusals of §28.2 and §28.4's policy
+question; the last is the gap again, met while working out how big a conic is.
+
+**Level 1 of the cascade is deliberately not implemented for any of the new
+questions.** A forward error bound is a derived claim about a polynomial and
+§15.6 says a published bound needs a test; deriving and testing one for each of
+seven questions buys speed on a path nothing has measured, which is the shape
+§1.4 and §24.16 both turn down. Level 2 decides everything level 1 would have,
+by construction rather than by derivation. If M4 measures the intersector and
+wants the filter, the derivations are the work and they are not large.
+
+**`Exact` is a heap-backed expansion**, which is §27.1's fix (i) landing one
+degree below where §27.1 assigned it. `n·n · r² − w·w · (n·o − d)²` multiplies a
+six-entry expansion by a ninety-eight-entry one, and a fixed buffer for that is
+over a thousand `f64` on a level that runs on a small minority of calls. The
+existing `square_of_expansion` is untouched: the two predicates that call it know
+their own sizes, which is exactly the case `expansion`'s crate doc describes.
+
+### 28.8 The numbers
+
+| | at §27 | now |
+|---|---|---|
+| tests (`cargo nextest`) | 878 | 931 |
+| suite duration | 16.6 s | 16.9 s |
+| doc tests | 19 | 19 |
+| `FORMAT_VERSION` | 2 | 2 |
+
+The suite grew by fifty-three tests and by three tenths of a second, because a
+crossing is a handful of sign decisions rather than a fuse — which is why the
+measured rows here run 2048 configurations where `rcad-topo`'s run 128.
+
+### 28.9 What the second stage inherits
+
+1. **`Exact` is already there.** The eighth- and twelfth-degree discriminants of
+   §27.1 can be written straight into it with no buffer arithmetic anywhere.
+2. **The arms are in place.** `intersect` and the evaluator's
+   `the_conic_between` each have a `CrossingRunsToAQuartic` arm holding the two
+   quartic pairs, so the second stage fills them in rather than restructuring
+   what the first shipped.
+3. **`EdgeRun::RightRoundWhereItsFacesCross` still says "one closed curve"**,
+   which is true of every crossing the four planar pairs produce and false of a
+   quartic that leaves two loops. §27.3 named the two families of fixes and
+   built neither; the second stage is the consumer that decides.
+4. **The two-lines gap of §28.2** is fixed by a fourteenth-degree separation
+   test, which needs the buffer the second stage is building anyway.
+5. **The mesher does not call `walk` yet.** §27.5 settled who walks an edge and
+   this stage built the evaluator, but swapping the mesher over changes how many
+   points every curved mesh gets and moves the pole and seam handling down a
+   layer. `every_curved_edge_the_kernel_builds_is_walked_into_points_on_both_its_faces`
+   is the evidence that what is left is wiring: every curved edge the kernel
+   builds already crosses that seam and comes back with points on both faces.
+   Criterion 8 needs the wiring and a solid whose edges are computed, and both
+   are the closing gate's.
+6. **The marcher's own interval divide** is still the thing to measure, per
+   §27.4, and `Interval::divided_by` is still `pub(crate)` in a frozen crate
+   while `quotient_enclosing` in `rcad-geom` is now `pub(crate)` to that whole
+   crate rather than to one module. That was the move §27.2 said would cost the
+   freeze nothing, and it did not.
+
+---
+
+## 29. What M3's second stage cost, recorded 2026-09-01
+
+*The two rows whose crossing is a degree-four space curve, plus the marcher that
+draws what no conic stands in for. §28 is the model for the shape. Longer than
+§28 is, because §24.17 asks this stage to make the milestone's largest claim
+stand up and a claim of that size does not fit in a paragraph.*
+
+### 29.1 The pair table is finished, and one of the six rows is finished twice
+
+| Pair | What it answers | Where |
+|---|---|---|
+| plane ∩ plane, plane ∩ ball, plane ∩ pipe, ball ∩ ball | named exactly | stage one |
+| ball ∩ pipe | **named exactly, in all five shapes**; the quartic ones marched | here |
+| pipe ∩ pipe, axes along one direction | **named exactly** | here |
+| pipe ∩ pipe, axes leaning | **named as far as an enclosure reaches** | here |
+
+The ball-and-pipe row came out stronger than §24.5 wrote it. That section files
+it as *"special cases named; the rest marched"*, and the special case it had in
+mind is the ball threaded on the axis, which cuts two circles. What is actually
+true is that **every** ball-and-pipe crossing is named exactly, quartic or not:
+§27.1's eighth-degree discriminant settles which of five shapes it is, and the
+marcher is needed only to *draw* the two that do not lie in a plane. Naming and
+drawing came apart exactly where §24.3 said they would.
+
+The five shapes, and the one that has no name:
+
+```text
+A = ‖(c−o)×w‖²    V = A + r² − W·R²    Δ = V² − 4r²A
+```
+
+`W(R² − (ρ∓a)²) = −V ± 2r√A`, so the pair `(sign V, sign Δ)` settles both
+tangency discriminants without ever taking the root that stands between them.
+Nothing, one touching point, one closed loop, two closed loops — and, where the
+two loops touch, **one loop that runs through itself**, which
+`EdgeRun` has no variant for and this stage refuses by name.
+
+### 29.2 Two leaning pipes, and where the exact level stops
+
+Two pipes whose axes lean against each other come down to one clean statement.
+Walk the thinner pipe's cross-section round by an angle `θ` and ask how far
+along its own axis the other pipe reaches; that is a quadratic, and its
+discriminant is
+
+```text
+sin²α · [ ρ₂² − (δ + ρ₁·cos θ)² ]
+```
+
+with `α` the angle between the axes, `δ` the distance between them and `ρᵢ` the
+certified radii. **The whole shape of the crossing is where `ρ₂` sits against
+`δ ± ρ₁`** — above both and the fat pipe swallows the thin one's whole
+cross-section and leaves two loops; between them, one; below both, two again
+with the pipes' roles the other way round; past `δ − ρ₁` on the far side,
+nothing at all. Three comparisons, and each is a **length against a length**.
+
+That is why the exact level runs out here and nowhere else in the file. Those
+lengths are `rᵢ/√Wᵢ` and `|T|/√K` for polynomials `T` and `K` in the stored
+numbers — three square roots in three different metrics. Clearing them costs
+eight degrees, and §29.6 measures what happens then. So the comparison is
+**enclosed** instead, which decides it wherever the two sides are not on a knife
+edge, and the exact level runs where the two stored directions have exactly the
+same squared length — which is every pair whose axes are coordinate directions,
+and so the whole of criterion 5's control.
+
+### 29.3 The marcher, and why its bound is measured rather than derived
+
+The closed form knows its per-point bound before it starts: a count of roundings
+along a chain, published as `POINT_ALONG_A_CROSSING_ROUNDOFF` and multiplied by
+the size of the shapes. The marcher cannot work that way, because how far one of
+its points sits off the curve is something it *finds out* by settling the point.
+
+So it measures. After each point is settled onto both surfaces by Newton in the
+plane the two normals span, an enclosure of how far it really sits from each of
+them is worked out, and the two are divided by the sine of the angle between the
+surfaces. That is the radius of the region a point that close to both surfaces
+can be in, and the largest of them along a run is what `walk` publishes.
+
+**Which is why near-tangency refuses rather than drifting.** As two surfaces come
+parallel that sine goes to nothing and the bound goes up without limit, so the
+marcher does not quietly hand back points nobody can judge — it says how far out
+they could be and lets the policy decide, and past the point where the sine
+cannot be told from zero it refuses by name. Roadmap §6.3 calls near-tangential
+contact the place kernels produce silent garbage; that is the branch §24.1 built
+this to be able to watch, and it is the branch criterion 7 measures.
+
+The step rule is the same shape. **How far it bends** is measured and not
+derived: the middle of each straight piece is settled onto the curve and how far
+it moved is that piece's sagitta, and a step that spends more than three
+quarters of the deflection on it is halved and tried again. **How far it turns**
+is capped at a quarter turn, because past a half turn a step cannot be told from
+one the other way. Termination: every accepted step moves the point at least one
+step along a curve of finite length, so a run takes finitely many — and because
+that argument is about the curve rather than about the arithmetic, it is not
+left to stand alone. `MOST_POINTS_ALONG_ONE_CROSSING` caps the count outright
+and reaching it is a refusal rather than a truncated answer (§24.10).
+
+### 29.4 Criterion 7, the load-bearing one: 0.577, and the same at every scale
+
+§24.5 promised the oracle would exist by construction, and it does. A ball
+threaded on a pipe's axis **is a ball and a pipe**, so the evaluator marches it
+like any other degree-four crossing and nothing in it knows the answer is
+special — and the answer is two circles of the pipe's own certified radius at
+`±√(R² − ρ²)` along the axis, which is a formula anybody can write down. The
+marcher is therefore differenced against a written-down answer and not against
+another of our own implementations.
+
+| | worst share of its own published bound |
+|---|---|
+| marched, drawn where they stand | **0.577** |
+| marched, written at `2^k` for `k` from −200 to 200 | **0.577** |
+| the same circles parametrized instead | 0.008 |
+
+**Criterion 7's ceiling is three quarters**, recorded here and asserted in
+`how_far_the_marcher_strays_from_a_crossing_that_is_a_circle.rs`. One would be
+the point at which the published bound stops being a bound.
+
+The gap between the two arms is not a weakness and it is worth saying why, or
+the next person will try to close it. The parametrized arm publishes `256·ε`
+against a derivation of about `34·ε`, so a drawn case uses under a hundredth of
+it. The marcher publishes what it measured, and what it measured is
+`(d₁ + d₂)/sin ψ` where the true distance to the crossing is
+`√(d₁² + d₂² − 2d₁d₂cos ψ)/sin ψ`. For two surfaces meeting square on with equal
+residuals those differ by exactly `1/√2 = 0.707`, and the measured 0.577 sits
+just under it. **A ratio near 0.58 is the bound being nearly tight. A ratio near
+zero would have meant the marcher was publishing a number it had not earned.**
+
+That the figure is *identical* across four hundred binary orders of magnitude is
+§16.8's argument for a ratio arriving as a measurement.
+
+### 29.5 The numbers, family by family
+
+Criterion 5's control and criterion 6's headline, on 2048 pairs per family.
+Reported apart from stage one's four planar pairs for §17.7's reason: the two
+kinds of pair refuse for reasons the other does not have.
+
+| Family | `Undecidable` | no half-space | runs through itself | threshold |
+|---|---|---|---|---|
+| lattice, planar pairs — the control | 0.00% | 0.00% | 0.00% | zero, asserted |
+| lattice, quartic pairs — **the control** | **0.00%** | **0.00%** | 4.25% | zero, asserted |
+| turned, planar pairs | 0.00% | 0.44% | 0.00% | zero / 2% |
+| turned, quartic pairs | **4.64%** | **10.93%** | 0.00% | 8% / 15% |
+| leaning | 0.00% | 0.24% | 0.00% | zero / 2% |
+| **the band** — drawn tangent, moved a few last bits off it | **0.00%** | 10.79% | 1.07% | 5% |
+| written at `2^k` | 10.49% | 3.95% | 0.00% | 25% |
+
+Criterion 3, over about a hundred and thirty thousand points:
+
+| Family | furthest a point sat off its own curve |
+|---|---|
+| lattice / leaning / turned, parametrized | 0.006 / 0.008 / 0.012 of the bound |
+| lattice / turned, quartic pairs, **marched** | 0.738 / 0.355 of the bound |
+| the band | 0.410 of the bound |
+
+Three things in those tables are worth reading twice.
+
+**The quartic control is 0% and it did not have to be.** Two leaning pipes are
+the one pair whose comparison is not a polynomial, and on the lattice the exact
+level still reaches every one of them — because there both stored directions
+have the same squared length and the awkward root is rational.
+
+**4.64% of turned quartic pairs refuse, and every one of them is a knife edge
+the turn made.** The generator draws radii up to five and places up to six apart
+in whole numbers, so a lattice pipe pair is exactly tangent surprisingly often —
+five apart with radii of two and three is one — and §28.6 already recorded that
+turning such a pair leaves it genuinely no longer tangent, by a few last bits.
+`every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn`
+is the demonstration and not the paragraph: all 95 of them are settled by the
+same code before the turn.
+
+**The band refuses nothing for want of a sign, which was not the expectation.**
+§29.7 says what closed it.
+
+### 29.6 §24.17's structural claim, and what it turns out to be
+
+§24.17 asks for the largest of M3's limit-or-gap claims to be made to stand up:
+*"the general quartic has no exact naming"*. It is not one claim. It is three,
+they have three different answers, and only one of them is a limit.
+
+**One: naming which of the five shapes a degree-four crossing takes.** Not a
+limit at all — §29.1 does it exactly for a ball and a pipe, at the eighth degree,
+and §29.2 does it for two pipes wherever the arithmetic reaches. §24.17 expected
+this to be the hard part and it was the easy one.
+
+**Two: reaching that answer for two leaning pipes at any scale.** A **gap**, and
+this is the one with a measurement behind it. The comparison needs
+`M = r₁²W₂K + r₂²W₁K − T²W₁W₂` squared. Measured on two perfectly ordinary
+turned directions and an offset of order one: `M` comes to **22 entries spanning
+505 binary orders**, and squaring it asks for the product of its smallest entry
+with itself, which lands a thousand orders down — past the bottom of `f64`, so
+`Exact::times` declines and level 3 cannot run.
+
+That is a different kind of refusal from every other one in this milestone, and
+the difference is the point. §28.2's range refusals are cured by a rescale
+because the *whole number* is too small; here the number is fine and its own
+internal spread is too wide, and a spread is invariant under scaling. What a
+scaling can still do is slide the doubled spread into the window `f64` leaves,
+and `the_question_two_leaning_pipes_ask_is_too_wide_to_square_where_it_stands`
+shows it doing exactly that: the same expansion written `2^300` higher squares
+without complaint. So the answer exists, this arithmetic at this scale could not
+reach it, and the fix is the working frame §24.8 defers for want of a figure to
+beat. **A gap, and now the first thing with a figure asking for that frame.**
+
+Weighed and put down, with the reason each was put down:
+
+- **The pencil's characteristic polynomial and the Segre classification.**
+  `det(λM₁ + μM₂)` for two quadric matrices is a degree-four binary form whose
+  real root structure classifies the intersection, and its coefficients *are*
+  polynomials in the stored numbers. Put down because reading a real
+  intersection type off it is the Dupont–Lazard–Lazard–Petitjean machinery, and
+  because the determinant of a 4×4 whose entries are already degree four is
+  degree sixteen before anything is compared — the same wall as above, reached
+  by a longer road.
+- **Sturm chains on the trigonometric discriminant.** §29.2's `Dsc(θ)` is a
+  trigonometric polynomial of degree two, so counting its sign changes is
+  counting the real roots of a quartic in `tan(θ/2)`, which is textbook. Put
+  down because writing that quartic down needs an orthonormal frame across the
+  pipe, and `Cylinder::basis` normalizes — so its coefficients are not
+  polynomials in the stored numbers and §27.1's load-bearing rule would be
+  broken to get them. This one is worth remembering: it is not that the algebra
+  is hard, it is that the frame is not exact.
+- **An exact algebraic representation of the curve.** Would make the naming
+  question trivial and the *evaluation* question no easier, because a mesher
+  still needs points and points still round. §24.3 already refuses to carry a
+  curve beside the surfaces that name it, and this would be that with more
+  degrees.
+- **The Steiner special cases.** Two of the three are built — coaxial and
+  parallel axes are §29.1's row. The third is not, and see below.
+
+**Three: a crossing that runs through itself.** Two equal pipes whose axes meet
+leave two ellipses that cross each other twice; a ball reaching exactly across a
+pipe's whole width leaves two loops that pinch together at one point. Both come
+back `Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`, and classifying
+that refusal took two goes, because the obvious answer is wrong.
+
+The obvious answer is that `EdgeRun` cannot say it. That is **false**, and saying
+so and moving on would have been the paragraph §24.17 warns against. The two
+loops of a pinch are exactly `{n̂·(p − c) ≥ 0}` and its opposite for the plane
+through the ball's centre square to the axis, which is one `picked_by` each; the
+two ellipses are exactly the parts lying *in* a bisector plane, which is a pair
+of opposite half-spaces, and `picked_by` takes as many as it is given. The
+vocabulary is sufficient. What is not reachable is writing either plane down —
+the same `Plane`-stores-a-unit-normal gap §29.8 is about, and on the lattice,
+where those directions are coordinate axes, even that is reachable.
+
+**The real reason to refuse is the evaluator, and it is demonstrable.** At the
+point where a crossing runs through itself the two surfaces are *tangent*, so the
+crossing has no direction there and the marcher has nothing to follow:
+`marching_from_where_a_crossing_runs_through_itself_has_no_direction_to_follow`
+is that, in four lines. §24.10 says a partly undecidable answer refuses whole,
+and naming two pieces the evaluator cannot draw is that shape exactly — so the
+refusal happens where it can still be one refusal instead of two half-answers.
+
+So: a **limit** of the naming half taken together with the evaluator, and a
+**gap** of the naming half on its own. The family of fixes is a marcher that can
+be told to start away from a singular point and stop at it, plus a third
+`EdgeRun` variant that hands a fuse the crossing point rather than making it
+notice. Both have one consumer and it is M4's fuse.
+
+### 29.7 The expansion buffer cost almost nothing, and the useful thing was elsewhere
+
+§27.1 filed a schedule risk here: the eighth- and twelfth-degree discriminants
+need an expansion squared, `square_of_expansion` caps at eight entries, and a
+pipe's `‖(c−o)×w‖²` runs to 384 with a worst case around 2.6 MB. §28.7 then
+landed the fix a degree early — `Exact` is heap-backed — and left this stage
+with nothing to build.
+
+Measured, so that the risk is closed with a number rather than a shrug. For a
+ball against a pipe at ordinary sizes: `A` is **8 entries**, `V` is **5**, `V²`
+is **16**, `r²A` is **4**. The worst case a fixed buffer would have had to hold
+is thousands; the drawn case is tens, because zero elimination keeps expansions
+short whenever the terms are of similar size — which §27.1 predicted and nobody
+had checked. **The buffer cost one allocation on a level that runs on a minority
+of calls, and no refusals at all.**
+
+What did turn out to matter was the opposite move: `Exact::enclosure`, which
+sums an expansion's entries in interval arithmetic instead of taking the nearest
+`f64`. An expansion's entries do not overlap, so enclosing it costs a rounding
+or two **of the answer**, where the same expression built out of intervals from
+the start carries a rounding of the *inputs*. Two axes a last bit from parallel
+cross into something whose every component cancelled away: enclosed from the
+expansion, `‖w₁ × w₂‖²` is known to full relative accuracy; built from
+intervals, it reaches down to zero, and the distance between the axes — which
+divides by its root — comes back as everything. That one change took the band
+family from refusing 0.2% to refusing none.
+
+### 29.8 The half-space gap: half of it closed, and the other half is `Plane`'s
+
+§28.2 left `CannotNameWhichPieceOfACrossingThisIs` with a named fix: *"testing
+the separation instead of arranging it"*. Instrumented before the work, stage
+one's refusals broke down as: 13 of 24 failed because the picking normal was not
+exactly square to the endless direction, and 11 of 24 failed only on the two
+conditions that did not have to be exact.
+
+So the fix was applied where it works and it closed that 11. A picking plane no
+longer has to be square to the cutting plane's normal, nor to pass through the
+axis with nothing rounded; where the two lines sit either side of it is now a
+comparison between their own separation `√(ρ² − g²)` and how far the plane
+strayed. The same test, in its bounded form, is what tells two loops of a
+ball-and-pipe crossing apart — there the pieces sit on a sphere of known radius,
+so what could move the reading is bounded by `‖n̂ × ŵ‖·R` and the comparison is
+ordinary.
+
+**The other half stays, and it is a gap.** For a piece that runs endlessly along
+a direction — two lines down a pipe, two loops running the length of a fat pipe —
+the picking normal must be exactly square to that direction or it reads a
+different number at either end, and testing cannot stand in for arranging when
+the thing being tested is unbounded. Every `Plane` constructor scales its normal
+to length one and that division rounds, so **which normals come out exactly
+square to a given direction is not something a caller chooses**; on the lattice
+it is a coordinate axis and comes out right, and off it, sometimes.
+`two_lines_no_f64_half_space_can_tell_apart_are_refused_rather_than_guessed`
+is the demonstration that it is a gap and not a limit: the same configuration
+written on the lattice is named without complaint.
+
+§28.2's first family is the fix — a plane that stores its normal unscaled — and
+it is a change to a type every predicate in the kernel is certified about, so it
+is M4's. Measured cost of leaving it: 0.44% of turned planar pairs, 10.9% of
+turned quartic ones.
+
+### 29.9 Criterion 10: what runs in CI and what does not, said plainly
+
+`cargo-fuzz` builds with a sanitizer that needs a nightly compiler and
+`rust-toolchain.toml` pins a stable one, so **`just default` does not run the
+fuzz target**. `just fuzz` does, on a compiler the repo does not pin, and
+`mise.toml` now pins `cargo-fuzz` itself. Two things had to be worked around and
+both are written into the recipe: `cargo-fuzz` sets `RUSTFLAGS` as an
+environment variable, which shadows the `.cargo/config.toml` entry `inari` needs
+to build at all (§2.4), and the shared property module is reached with `#[path]`
+rather than `include!` because it opens with a module doc comment.
+
+What runs on every commit is the same property over the same decoder:
+`every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs` replays the
+checked-in corpus and soaks two hundred thousand pseudo-random byte strings,
+about seven hundred thousand points, in five seconds.
+
+**Run duration: 901 seconds, 23 037 787 executions at about 25 600 a second**,
+corpus grown and then minimised to 562 inputs — 530 the fuzzer kept and 32
+written out by hand and named for the configuration each one is. It found two
+things in its first five minutes, both real, and nothing in the fourteen minutes
+after them:
+
+1. **A conic drawn near the top of `f64`'s range published a bound of infinity**,
+   and `Approximation::new` asserts a magnitude is a real amount. Now
+   `Error::CannotWorkOutHowBigACrossingIs`, which is the same refusal the naming
+   half has one step earlier.
+2. **`where_two_balls_cut` put the circle's centre nowhere near its own
+   published bound**, for two balls of almost the same size whose centres are
+   almost in the same place. `D² + R₁² − R₂²` cancels to a millionth of either
+   square and is then divided by a `D²` smaller still, so a relative rounding of
+   the difference comes out of the division magnified by however many times `D`
+   goes into the radius. Summed through `Exact` like the radius beside it, which
+   is what §28.5's second finding had already done for the radius and nobody had
+   done for the centre. `two_balls_of_almost_one_size_almost_in_one_place` is
+   the seed, checked in.
+
+Both are stage one's, both are in the band §28.5 named, and neither was
+reachable by any generator in the suite. That is the argument for criterion 10
+having been worth the trouble, and it is a measurement rather than a hope.
+
+A third came out of the soak before the fuzzer ran: `quotient_enclosing`
+asserts its divisor is away from zero, which is right for the spline evaluator
+where every caller has proved it and wrong for an intersector whose divisors are
+lengths a caller handed over. A direction whose squared length underflows is bad
+input and not a broken invariant, so it now divides into a box that says nothing
+is known and turns into a refusal (§4.1).
+
+### 29.10 Criterion 11: the divide is 4% of a marched point, and §24.12 was wrong
+
+Human-read, no target, and labelled as such — §24.16 said this should not need
+writing a third time and this is the third time.
+
+| | |
+|---|---|
+| one certified marched point | **2.58 µs** (643 µs for a 249-point run) |
+| one parametrized point | 33 ns (2.3 µs for a 70-point run) |
+| naming the whole crossing, drawing none of it | 1.22 µs |
+| one interval divide | 11.3 ns |
+| **the interval divide's share of a marched point** | **9 divides × 11.3 ns = 4%** |
+
+So **§24.12's prediction is scored and it is wrong in both halves.** §27.4
+already found the first half misaimed — neither sign predicate divides at any
+level. The second half said the money would go to the divide beneath it, and
+measured against the marcher's own divide, which is the one §27.4 said to score
+it against, it is 4%. The money goes to settling: two Newton corrections per
+trial step, each of them six dot products and a two-by-two solve, and a certified
+enclosure of the deviation on top.
+
+Marching costs about **eighty times** what parametrizing the same curve costs.
+That is the price of criterion 3 holding for a curve nobody can write down, and
+it is a number M4 can decide whether to spend.
+
+### 29.11 Corrections to §24, §27 and §28
+
+- **§24.5's ball-and-pipe row** says "special cases named; the rest marched".
+  Every ball-and-pipe crossing is *named*; only two of the five shapes need
+  marching to be *drawn*. See §29.1.
+- **§24.5's pipe-and-pipe row**, same sentence, and here the correction goes the
+  other way: the coaxial and parallel-axis special cases are named exactly, and
+  the third one §24.5 lists — equal radii with crossing axes — **cannot be
+  named at all**, because what it produces is one curve that runs through
+  itself. See §29.6.
+- **§24.5's claim that the oracle exists by construction** holds, but not for
+  the reason it gives. It is the ball threaded on the axis that provides it, not
+  the equal-radii pipes.
+- **§24.12's prediction is wrong in both halves.** §29.10.
+- **§24.17's structural claim splits three ways**, and only one third of it is a
+  limit. §29.6.
+- **§27.1's schedule risk did not materialise.** The expansions that had to be
+  squared came to tens of entries and not thousands. §29.7.
+- **§27.2's "a public `Interval` divide" was weighed and not taken**, on the
+  grounds that `rcad-geom` has `quotient_enclosing` of its own. True, and it
+  turned out that function's *contract* was the thing that needed changing
+  rather than its visibility. §29.9.
+- **§28.2's fix closes half the gap** and the other half is a limit of `Plane`
+  rather than of the arithmetic. §29.8.
+- **§28.5's finding is now a generator.** `a_crossing_a_hair_from_the_knife_edge`
+  draws seven ways two of these surfaces can rest against each other, exactly
+  tangent in whole numbers, then moves the second one a handful of its own last
+  bits off it and optionally leans it by `2^-k`. Both halves are relative, for
+  §17.7's reason.
+- **§28.7's `Exact` is the right shape and was missing one method.** §29.7.
+
+### 29.12 The numbers
+
+| | at §28 | now |
+|---|---|---|
+| tests (`cargo nextest`) | 931 | 973 |
+| suite duration | 16.9 s | 18.1 s |
+| doc tests | 19 | 19 |
+| `FORMAT_VERSION` | 2 | 2 |
+| fuzz corpus | — | 562 inputs |
+
+Forty-two tests and a second and a fifth, and most of that second is the
+marcher: a marched point costs eighty times a parametrized one, and three of the
+measured rows walk tens of thousands of them.
+
+### 29.13 What the closing gate inherits
+
+1. **Criterion 8 is not done**, and §28.9 item 5 already said why: the mesher
+   still walks its own edges, and swapping it over to `walk` changes how many
+   points every curved mesh gets. A curved solid whose edges are *computed*
+   needs that wiring plus a builder that takes two surfaces instead of an edge.
+2. **Criterion 12, the claim audit**, has not run. §29.6 is written to be
+   audited rather than to pass one.
+3. **The two `EdgeRun` gaps are now one.** §27.3 left
+   `RightRoundWhereItsFacesCross` saying "one closed curve" with a quartic's two
+   loops as the counterexample; those are named as two `PartOfWhereItCrosses`
+   runs, so the variant's claim is true again. What is left is the curve that
+   runs through itself, and §29.6 says its consumer is M4's fuse.
+4. **A working frame now has a figure asking for it**, which §24.8 said was the
+   condition. It is the 505-order spread of §29.6, and the ask is specific:
+   squaring the two-pipe discriminant needs the expansion slid up the range, not
+   the inputs centred.
+5. **`Plane` storing an unscaled normal has a measured cost of not doing it**:
+   10.9% of turned quartic pairs. That is §28.2's first family with a number
+   against it for the first time.
+6. **`Measures::Dimensionless` is still one line**, per §28.6, and the leaning
+   pipes' three comparisons are lengths, which is the right arm and the right
+   name.
+
+---
+
+## 30. What M3 actually cost, recorded 2026-09-01
+
+*Written by M3's closing gate. §12 did this for M0, §16 for M1, §17.8 for the
+fuse and §26 for M2. §24.12's shape was "gate, two stages, gate"; this is the
+second gate.*
+
+M3 is complete. `rcad-geom` names where any two of a plane, a ball and a pipe
+cross, refuses by name where it cannot, walks certified points along the answer,
+and marches the two rows no conic stands in for. The mesher no longer walks its
+own edges. A solid whose edges were **computed** meshes and passes §23.4's
+oracle, and one of them is a shape M2 could not declare at all. The suite went
+from 860 tests at M2's close to 985.
+
+`rcad-predicates` was touched once, at the gate, for `Measures::ManyLengths` and
+`Cause::PointAlongACrossing`. §24.4 item 4's freeze held through both stages and
+through this gate.
+
+### 30.1 The fourteen criteria, and the test that discharges each
+
+§17's table of "criterion → the test that discharges it" is the precedent, and
+it is the most useful thing these sections contain. Every row names a test that
+fails if the claim stops holding.
+
+| | Criterion | Discharged by |
+|---|---|---|
+| 1 | the four planar pairs name their crossing exactly | `two_planes_leaning_against_each_other_cross_in_one_endless_line`, `a_plane_through_a_ball_cuts_one_circle`, `a_plane_that_leans_across_a_pipe_cuts_one_closed_curve`, `two_balls_that_overlap_cross_in_one_circle` |
+| 2 | every named run passes `validate`'s check | `every_point_of_a_picked_run_is_inside_every_half_space_that_picked_it` — the whole run and not only its two ends — with `an_edge_named_by_a_crossing_it_is_not_on_is_caught` and `an_edge_outside_a_curved_half_space_that_picked_it_is_caught` for the check itself |
+| 3 | every evaluated point certified ON both surfaces | `every_point_along_a_crossing_is_on_both_surfaces.rs`, six families, about 130 000 points |
+| 4 | `TouchAtOnePoint` and `SameSurface` are answers; roadmap §7.4 is a table | `the_degeneracies_a_crossing_has_to_answer.rs`, fourteen rows, one test each |
+| 5 | lattice control: **0%** | `a_certified_naming_of_a_lattice_crossing_never_refuses` and `a_certified_naming_of_a_quartic_lattice_crossing_never_refuses`, both asserted at zero |
+| 6 | rotated rate measured and under a recorded threshold | `how_often_naming_a_crossing_refuses.rs`, five families, thresholds in §28.1 and §29.5 |
+| 7 | marcher against closed form, as a ratio | `a_marched_circle_stays_inside_the_bound_the_marcher_published_for_it` and `..._written_anywhere_in_f64_stays_inside_the_same_share_of_its_bound` |
+| 8 | a computed-edge solid meshes and passes §23.4's oracle | `a_bar_whose_cap_circles_were_computed_meshes_exactly_as_the_declared_one_does` and `a_bar_cut_off_at_an_angle_meshes_into_a_closed_surface`, both through `the_mesh_closes_up`; `a_bar_cut_off_at_an_angle_is_built_and_meshed_from_the_front_door` out at the facade |
+| 9 | transform invariance | `turning_a_pair_of_surfaces_names_the_same_kind_of_crossing` **and** `turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing` — the second added at this gate, see §30.4 |
+| 10 | a `cargo-fuzz` target over `(Surface, Surface)`, corpus checked in | `fuzz/fuzz_targets/where_two_surfaces_cross.rs`; on every commit, `every_seed_in_the_checked_in_corpus_names_its_crossing_honestly` and `a_soak_over_pseudo_random_bytes_names_every_crossing_honestly` |
+| 11 | cost per marched point, divide broken out | `what_a_marched_point_costs.rs`. Human-read, no target (§24.16) |
+| 12 | the claim audit passes; every refusal classified | §30.4 and §30.5 |
+| 13 | `FORMAT_VERSION` at 2 with a round trip | `a_seam_picked_out_by_a_pipe_comes_back_picked_out_by_the_same_pipe`, `a_run_the_intersector_hands_back_writes_out_and_reads_in_unchanged`, `a_plane_and_a_surface_holding_that_plane_are_different_bytes` |
+| 14 | the facade exports the intersector, `SurfaceMeet`, `NamedRun`, `EdgeRun`; `FaceMeet` stays private | `naming_a_crossing_from_the_front_door.rs`: `the_hardest_edge_the_kernel_builds_can_be_said_in_this_vocabulary`, `every_way_two_surfaces_can_meet_is_something_a_caller_can_match_on`, `a_caller_out_here_can_cross_two_surfaces_and_walk_the_answer` |
+
+**All fourteen are met.** Two of them were not when this gate opened: criterion 8
+had no builder and no wiring (§29.13 item 1), and criterion 9 was discharged for
+four of the six pairs and said it was discharged for all of them.
+
+One thing handed to M3 and **not** done, which is not a criterion and is said
+here rather than buried: §26.6 item 4 predicted that `Undecidable` out of `mesh`
+would become reachable when a mesh domain first held a constructed corner, and
+named M3 as the milestone that could write the test. It cannot. `walk` hands the
+mesher 3D points and the mesher reads them back through `Surface::coordinates_of`,
+so every corner the triangulator sees is still an ordinary `f64` pair. The first
+constructed corner in a mesh domain is a fuse's, and that is M4's.
+
+### 30.2 §24.12's prediction, scored: wrong in both halves
+
+§24.12 named `SideOfSurface` for sphere and cylinder, and the local interval
+divide beneath it, as where M3's money would go. It was recorded before the work
+on purpose.
+
+- **First half, misaimed before a line was written.** §27.4 read both functions
+  at the gate. `SideOfSurface` needed no work at all; what needed care was its
+  *callers*, because a discriminant written the textbook way is certified about a
+  different ball than the predicate is (§27.1).
+- **Second half, wrong by measurement.** There is no interval divide beneath
+  `SideOfSurface` — neither sphere nor cylinder divides at any of the three
+  levels. §16.8's divide is the spline evaluator's and M3 never calls it. Scored
+  against the divide the marcher actually built, which is what §27.4 said to
+  score it against: **9 divides at 11.2 ns is 4% of a 2.66 µs marched point**
+  (§29.10, re-measured at this gate).
+
+The money went to **settling**: two Newton corrections per trial step, six dot
+products and a two-by-two solve each, and a certified enclosure of the deviation
+on top.
+
+**The running score.** §26.2 corrected this once already and it stands: §12.1
+stated its lesson after the fact and predicted nothing; §17.6 predicted and was
+right; §23.7 predicted and was half right, in the sense that acting on the
+prediction is what stopped it coming true. §24.12 is the fourth and it is wrong.
+**Three predictions made in advance, one right, one half right, one wrong.**
+
+**What the project should conclude, and it is not "stop predicting".** §12.1's
+lesson is that the money goes to code that was already written and looked
+finished. That held for M0 and M1 and half held for M2, and every one of those
+milestones spent most of its time *rewiring* code that existed. M3 wrote
+`intersect.rs`, `walk.rs` and `march.rs` from nothing, and the money went to the
+new code — to a settling loop that did not exist when the prediction was made.
+So §12.1's lesson has a precondition nobody had written down: **it is a claim
+about milestones that mostly rewire, and a milestone that mostly writes will not
+obey it.** The prediction is what exposed that, which is the second-best thing a
+prediction can do.
+
+The other half of the conclusion is cheaper and more immediately useful. Half of
+§24.12 was scored *at the gate*, by reading two functions for an hour, before any
+of the work it was about. A prediction made in advance is worth what the next
+gate can spend checking it against the code, and that checking is far cheaper
+than the prediction is accurate. Keep making them; check them at the next gate
+rather than at the milestone's end.
+
+### 30.3 What §24 got wrong, and what a settling document is for
+
+Gathered rather than re-derived. §24 was written before anybody had read the
+discriminants, and it shows in a particular way.
+
+- **The discriminants are not the textbook ones** (§27.1). They have to carry
+  `n·n` and `w·w`, or the intersector and `SideOfSurface` are certified about two
+  different solids.
+- **There is no near-tangency band, because there is no constructed input**
+  (§27.1). §24.10 said the band exists only for constructed inputs; sharper, the
+  naming half has none at all, so criterion 5's 0% is structural rather than
+  hopeful.
+- **"Two ends" is the wrong shape for a run** (§28.3). A pair of surfaces names a
+  curve and nothing on it; ends are what topology adds.
+- **"Certified ON" is unreachable as written** (§28.4). It has to mean "never
+  certified off, and certified off a surface it is plainly not on", which is two
+  halves rather than one.
+- **§24.5's ball-and-pipe row is entirely nameable** and its pipe-and-pipe row
+  less so (§29.11). Every ball-and-pipe crossing is named exactly; the
+  equal-radii pipe pair §24.5 lists as a named special case cannot be named at
+  all, because it produces one curve that runs through itself.
+- **Criterion 7's oracle came from a threaded ball, not from equal pipes**
+  (§29.11). §24.5's claim that the oracle exists by construction holds, for a
+  different reason than it gives.
+- **§24.17's structural claim splits three ways** (§29.6), and only one third of
+  it is a limit.
+- **Criterion 9's wording outran its generator**, and that one is this gate's.
+  §30.4.
+
+**Every one of those except the last is about arithmetic, and every one of them
+cost almost nothing.** Four were found in a day at the gate before any code, two
+while writing the code, and two by the answer coming out better than promised.
+That is §26.3's split arriving a second time: a settling document is wrong about
+numbers and right about meanings, and the numbers are cheap to be wrong about
+because the first person to need one does the arithmetic. §26.3 ended with *"It
+should stop suggesting numbers"*, and §24 suggested numbers anyway. Two
+milestones is enough: the convention should be a rule and not an observation.
+
+**The one that cost something is the one that reads like a test.** Criterion 9
+says *"the same pair under a general rotation names the same kind of crossing"*.
+That is not a claim about a number, so nobody did arithmetic on it; it is a
+specification of a property, a property with that name existed, and the property
+was green. It survived a gate, two stages and a claim audit's worth of review,
+and what found it was enumerating what the generator draws. **The dangerous
+sentences in a settling document are the ones that specify a test rather than
+claim a number**, because a number gets checked by the first person who needs it
+and a test that already exists does not.
+
+### 30.4 What the claim audit found
+
+The audit (`claim-audit`, per §16.10) ran over M3's seven new files in
+`rcad-geom` and the mesher wiring in `rcad-topo`. §24.17 said M3 makes more of
+these claims than any milestone so far, and it does. Three defects and four
+sentences.
+
+**Defects.**
+
+1. **Criterion 9 covered four of the six pairs.** `a_lattice_crossing`'s own doc
+   says a ball crossing a pipe and a pipe crossing a pipe are drawn by
+   `a_quartic_pair` instead, and nothing was handing that strategy to the
+   invariance property. A **sufficiency** claim, broken by enumerating what the
+   generator ranges over. The quartic pairs have one knife edge the planar ones
+   do not — a crossing that runs through itself is a tangency, so a turn moves it
+   off — and it is skipped alongside the others. Measured: **1594 of 2048
+   compared, 455 skipped**, against 1485 and 564 for the planar family.
+2. **`walk` panicked on a caller's argument.** A run's ends are `Point`s, so an
+   end may be a box; the box whose every side runs the whole number line is how a
+   pair of surfaces says it names a curve and nothing on it, and **every other
+   end has to have a middle**. `NamedRun::new` takes an exact triple with a `NaN`
+   in it, and a box with one infinite side, and both make the angle round the
+   conic not a number — down to `Interval::new(NaN, NaN)` and a panic. An
+   **unreachability** claim by silence: `walk` is public, `NamedRun::new` is
+   public, and nothing between them narrows what an end may be, which is §16.10's
+   rule about checking the public API rather than today's callers.
+   `Error::AnEndOfARunNamesNoPlace`.
+3. **A refusal the second stage made unreachable and left behind.**
+   `CrossingRunsToAQuartic`'s doc said the evaluator still raised it. It does
+   not: `walk` matches the three quartic pairs and hands every one of them to the
+   marcher before the closed form is reached, so the arm that produced the
+   variant covers exactly the set that never arrives. Removed; the arm is a panic
+   naming the invariant.
+
+**Sentences, corrected rather than fixed.**
+
+4. **"Fifty halvings puts any step below the smallest normal number"** is out by
+   twenty binary orders: `2^-50` of a step of one is `9e-16` and the smallest
+   normal number is `2e-308`. Fifty is the right number for a different reason —
+   the sagitta falls with the *square* of the step, so fifty halvings ask a piece
+   to bend `1e-30` of what the first one did — and the doc says that now.
+5. **"Every accepted step moves the point at least `step` along the curve"** is
+   not what the code checks. The trial point is settled onto both surfaces
+   afterwards, so what a step covers is whatever the settling left, and all that
+   is asked is that it is not nothing. The termination argument leans on the
+   count cap, which the same paragraph already said.
+6. **"Level 3 decides the rest"** is false for the one question that is not a
+   polynomial. Two leaning pipes compare a length against a length in three
+   different metrics; clearing the roots costs eight degrees and runs past what
+   `f64` can square, so the exact arm answers `None` and the enclosure is the
+   whole of the answer (§29.2).
+7. **"Nothing builds a quartic yet"**, on `EdgeRun::RightRoundWhereItsFacesCross`,
+   stopped being true when the second stage built them. §29.13 item 3 had
+   noticed; the doc comment had not.
+
+**What it could not break.** The hardest push went at §29.6's structural claim —
+*an expansion whose entries span more than about half of `f64`'s range cannot be
+squared at any scale*. Squaring needs every pairwise product exact, so the
+smallest entry must be above `2^-484` and the largest below `2^512`, which is a
+spread of about 996 binary orders; scaling by a power of two slides both together
+and cannot change the spread. The claim is right, "about half of `f64`'s range"
+is a fair reading of 996 against 2098, and §29.6's measured 505-order spread is
+correctly a **gap** rather than a limit. The second-hardest went at
+`how_many_steps`'s bound `reach · (1 − cos(step/2))` for an *ellipse* rather than
+a circle: it holds, and it is tight at a half turn and at two thirds of one for a
+degenerate ellipse, because the two semi-axes are square to each other and the
+second derivative of the parametrization is never longer than the larger of them.
+
+### 30.5 Every refusal M3 can produce, limit or gap
+
+§24.17: *"The claim audit runs before the closing gate, and every refusal is
+classified."* Fourteen rows, because four refusals have two causes each and
+§17.7 says families are reported separately. **Six are gaps and seven are
+limits, and one is filed as both**, because §29.6 says the naming half and the
+evaluator classify it differently.
+
+| Refusal | Cause | | Demonstration |
+|---|---|---|---|
+| `Undecidable` | a product leaves `f64`'s range while naming | **gap** | `a_ball_too_small_for_its_own_squares_cannot_be_crossed_and_the_same_one_scaled_up_can`; all 215 refusals in the shipped corpus are named on the lattice by `every_crossing_a_scaling_refuses_is_one_the_same_shapes_on_the_lattice_can_name` |
+| `Undecidable` | a direction with a subnormal component underflows its own product | **gap** | `a_direction_with_a_subnormal_component_cannot_be_told_from_square_to_a_plane` |
+| `Undecidable` | two leaning pipes' comparison is too wide to square where it stands | **gap** | `the_question_two_leaning_pipes_ask_is_too_wide_to_square_where_it_stands` — the same expansion written `2^300` higher squares |
+| `CannotNameWhichPieceOfACrossingThisIs` | a picking normal must be exactly square to an endless direction and `Plane` scales every normal | **gap** | `two_lines_no_f64_half_space_can_tell_apart_are_refused_rather_than_guessed`; the same pair on the lattice is named. §29.8, and M4's to close |
+| `CannotNameWhichPieceOfACrossingThisIs` | the half-spaces on a run pick both arcs between its ends, or neither | **limit** | `a_seam_that_picks_neither_half_of_its_meridian_or_both_is_refused` — the two halves of that meridian are genuinely alike |
+| `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo` | the two surfaces are tangent along the curve | **limit** of the naming half taken with the evaluator; **gap** of the naming half alone | `marching_from_where_a_crossing_runs_through_itself_has_no_direction_to_follow`; §29.6 |
+| `CannotWorkOutHowBigACrossingIs` | the conic's own size runs past the top of `f64` | **gap** | `a_crossing_too_big_to_put_a_bound_on_is_refused_and_the_same_one_smaller_is_walked` |
+| `CannotFollowACrossingWhereItsSurfacesAreTangent` | the two surfaces really are tangent where the marcher stands | **limit** | `marching_along_a_crossing_where_the_two_surfaces_are_tangent_refuses_by_name` |
+| `CannotFollowACrossingWhereItsSurfacesAreTangent` | the sine of the angle between them cannot be told from zero, though they do cross | **gap**, and **no generator reaches it** | Named and not demonstrated. §29.7's `Exact::enclosure` took the band family from refusing 0.2% to refusing none, and nothing in the suite has reached this arm since |
+| `CannotPlaceAPointThatCloseToACrossing` | the deflection asks for closer than a point can be placed | **limit** | `a_tolerant_caller_gets_the_finest_mesh_the_arithmetic_reaches` — a certified caller is refused and a tolerant one is told what it got |
+| `TooManyPointsAlongOneCrossing` | the request needs more points than one run holds | **limit** of the request | `a_crossing_that_takes_more_points_than_it_is_allowed_refuses_rather_than_stopping_short`, `a_deflection_needing_more_points_than_can_be_held_is_refused` |
+| `AnEndOfARunNamesNoPlace` | an end that is neither "nowhere in particular" nor a box with a middle | **limit** | `an_end_that_does_not_say_where_it_is_is_refused_rather_than_walked` |
+| `ACapDoesNotCutRightRoundABar`, `ACapOfABarFacesIntoIt`, `TheCapsOfABarMeetInsideIt` | two planes that do not cut a bar | **limit** | `a_bar_whose_caps_are_not_caps_is_refused` |
+| `AnEdgeWithoutTwoFacesAlongItCannotBeWalked` | three or more faces meet along one edge, so no pair says where it runs | **limit** | `an_edge_with_three_faces_along_it_is_refused_rather_than_asserted_against` |
+
+`DeflectionBelowWhatAMeshCanReach` is M2's and §26.5 item 3 already classified it
+a **limit**. M3 moved its floor and §30.6 says by how much.
+
+**The one row worth reading twice is the ninth**, because it is the only refusal
+in the milestone that is named, classified and undemonstrated. It is a gap by
+construction — two surfaces that cross have a direction to follow, and only the
+arithmetic loses it — and the generator built to reach exactly that band
+(§29.11's `a_crossing_a_hair_from_the_knife_edge`) does not, because
+`Exact::enclosure` made the sine decidable at scales nobody expected. That is a
+claim about unreachability with a measurement behind it rather than a paragraph,
+which is what §16.10 asks for, but it is not a demonstration and it should not be
+written up as one.
+
+### 30.6 What wiring the mesher to `walk` moved
+
+§28.9 item 5 left this to the closing gate and predicted that swapping the mesher
+over "changes how many points every curved mesh gets". Measured, before and
+after, at a 100 mm working size:
+
+| | before | after |
+|---|---|---|
+| bar, radius 3, height 5, deflection 0.1 | 58 points, 112 triangles | **58, 112** |
+| the same bar at 0.01 | 178, 352 | **178, 352** |
+| ball, radius 3, deflection 0.1 | 422 points, 840 triangles | **424, 844** |
+| the same ball at 0.01 | 4463, 8922 | **4429, 8854** |
+
+**The bar did not move at all and the ball did**, and the reason is worth having.
+The two layers measure the same arc differently: the evaluator sizes a step by
+the true sagitta of the curve, `reach · (1 − cos(step/2))`, and `rcad-mesh` judges
+what comes out by `chord² / (3 · radius)`, the bound it derives for a flat piece
+with its corners on any surface. Those differ by exactly eight thirds, because
+`sin²x = (1 − cos x)(1 + cos x) ≤ 2(1 − cos x)` — so a boundary is refined to
+three eighths of what the triangulator will allow, and that factor is an
+inequality turned round rather than a fudge. With it in place a bar's cap circle
+comes out at the same count either way. A ball's seam does not, because it is
+half a great circle and the old walk sized it off the ball's radius through the
+chord formula while the new one sizes it off the conic's own reach. Both meshes
+pass the oracle at both deflections, and the ball's **measured volume moved
+towards the exact `4πr³/3` in both directions**: 111.27610 → 111.29357 and
+112.89652 → 112.89801, against 113.09734.
+
+Three things came out of the wiring that were not wiring.
+
+1. **A conic carried one number where it needed two.** The size everything was
+   worked out from — a plane's offset, a ball's centre, an axis origin — is the
+   right scale for a *rounding* and the wrong one for a *bend*. Charged against
+   it, the cap circle ten up a bar was walked into more pieces than the one at the
+   bottom, and the middle of a meshed bar was no longer half way up it. §19 for
+   the evaluator, and it is `how_finely_a_crossing_is_walked_is_about_its_size_
+   not_its_place.rs` now.
+2. **The floor under a deflection is two chains in two frames.** The evaluator
+   follows a crossing in the frame the face is *stored* in and the placement
+   rounds against where the solid *sits*, and charging both against the far one
+   would have put the floor fifty times higher than the arithmetic asks for.
+3. **Which meridian a pole-to-pole seam runs down is no longer read in
+   `rcad-topo`.** It is the same question `walk` already asks — which of the two
+   arcs between the same two ends is this — and asking it twice is the shape §23.8
+   kept finding. `Error::ASeamBetweenTwoPolesNamesNoMeridian` is gone and the
+   refusal comes from the evaluator.
+
+So §28.9 item 5's "what is left is wiring" was right about the seam and the
+types, and wrong that nothing would be found: a defect in `walk`, a derivation
+that had to be done, and a floor that had to be split.
+
+### 30.7 The numbers
+
+Reported family by family and never blended, per §17.7.
+
+**Criterion 5, the control.** 2048 pairs per family, `Policy::certified()`.
+
+| Family | `Undecidable` | Threshold |
+|---|---|---|
+| lattice, planar pairs | **0.00%** | zero, asserted |
+| lattice, quartic pairs | **0.00%** | zero, asserted |
+
+**Criterion 6, the headline.** Same 2048 per family. "No half-space" is
+`CannotNameWhichPieceOfACrossingThisIs` and is counted apart because it refuses
+for a reason `Undecidable` does not have.
+
+| Family | `Undecidable` | no half-space | runs through itself | thresholds |
+|---|---|---|---|---|
+| turned, planar | 0.00% | 0.44% | 0.00% | zero / 2% |
+| turned, quartic | **4.64%** | **10.93%** | 0.00% | 8% / 15% |
+| leaning | 0.00% | 0.24% | 0.00% | zero / 2% |
+| the band | 0.00% | 10.79% | 1.07% | 5% |
+| written at `2^k` | 10.49% | 3.95% | 0.00% | 25% |
+
+**Criterion 3**, over about 130 000 points: the furthest any point sat off its
+own curve, as a share of the bound published for it.
+
+| | |
+|---|---|
+| lattice / leaning / turned, parametrized | 0.006 / 0.008 / 0.012 |
+| lattice / turned quartic, marched | 0.738 / 0.355 |
+| the band | 0.410 |
+
+**Criterion 7**, the load-bearing one: **0.577** of the marcher's own published
+bound, and **the same figure at every scale** from `2^-200` to `2^200`. The
+ceiling is three quarters. The parametrized arm of the same circles is 0.008,
+and §29.4 says why the gap between them is the bound being nearly tight rather
+than a weakness.
+
+**Criterion 10**: **901 seconds, 23 037 787 executions at about 25 600 a
+second**, corpus minimised to **562 inputs — 529 the fuzzer kept and 33 written
+by hand**. On every commit the same property runs over the same decoder: the
+whole corpus, plus 200 000 pseudo-random byte strings and about 700 000 points,
+in five seconds.
+
+**Criterion 11**, human-read and no target (§24.16), re-measured at this gate:
+
+| | |
+|---|---|
+| one certified marched point | **2.66 µs** (662 µs for a 249-point run) |
+| one parametrized point | 34 ns (2.35 µs for a 69-point run) |
+| naming the whole crossing, drawing none of it | 1.48 µs |
+| one interval divide | 11.2 ns |
+| **the interval divide's share of a marched point** | **9 × 11.2 ns = 4%** |
+
+Within a few percent of §29.10 on every row. Marching still costs about eighty
+times parametrizing the same curve.
+
+**The suite.**
+
+| | at §29 | now |
+|---|---|---|
+| tests (`cargo nextest`) | 973 | **985** |
+| suite duration | 18.1 s | 18.0 s |
+| doc tests | 19 | 19 |
+| `FORMAT_VERSION` | 2 | 2 |
+| fuzz corpus | 562 | 562 |
+
+Twelve tests and no time at all, which is what a gate that fixes things rather
+than building them looks like. Across the milestone: **860 → 985 tests, 17.0 s →
+18.0 s.**
+
+### 30.8 What M3 hands to M4
+
+§24.19 wrote five items before the work. Corrected and extended.
+
+1. **`classify` and `fuse` stay gated on `is_wholly_flat`** (§24.19 item 1,
+   unchanged). M4 is where a fuse over curved crossings is the first consumer
+   that can remove the gate.
+2. **The interval divide is measured and it is not where the money is.** §24.19
+   item 2 said M4 would be the first caller with a figure to beat. The figure
+   exists and it says 4%; what to optimise, if anything, is **settling** — two
+   Newton corrections per trial step, each six dot products and a two-by-two
+   solve, with a certified enclosure of the deviation on top.
+3. **The general quartic is named and only ever marched**, so a fuse over two
+   crossing pipes is where criterion 7's 0.577 is first spent in anger (§24.19
+   item 3, unchanged).
+4. **A working frame now has a figure asking for it**, and §24.8 deferred it on
+   the explicit grounds that it had none. The figure is §29.6's **505-order
+   spread**, and the ask is specific: the two-pipe discriminant needs its
+   *expansion slid up the range*, not its inputs centred. That deferral has come
+   due. `rkyv`, the bump arena, cone and torus and the B-spline fit stay deferred
+   with their consumers named.
+5. **`Plane` storing an unscaled normal** has a measured cost of not doing it:
+   0.44% of turned planar pairs and 10.9% of turned quartic ones. It is a change
+   to a type every predicate in the kernel is certified about, which is why it is
+   M4's.
+6. **A crossing that runs through itself** needs a third `EdgeRun` variant and a
+   marcher that can be told to start away from a singular point and stop at it.
+   One consumer, and it is M4's fuse (§29.6).
+7. **`Measures::Dimensionless` is still one line** (§28.6), and the leaning
+   pipes' three comparisons are lengths, which is the right arm and the wrong
+   name.
+8. **The mesher's floor moved by a factor of about fifty.** A boundary point is
+   placed by the evaluator now, which publishes `256 · ε` where the mesher
+   charged `8 · ε`, so the finest mesh of a solid at the origin is that much
+   coarser than it was. Nothing needs it finer today. The way back is a tighter
+   derivation of `POINT_ALONG_A_CROSSING_ROUNDOFF`, which has seven times the
+   room its own chain needs (§28.5) and is wide for the trigonometry.
+9. **`MOST_POINTS_A_MESH_WILL_HOLD` is shadowed by the per-crossing cap.** A ball
+   has one curved edge and `MOST_POINTS_ALONG_ONE_CROSSING` is four times
+   smaller, so the whole-mesh cap is now only reachable through the cutting of a
+   face. The first solid with five curved edges is a fused one.
+10. **A closed edge that is a *hole* in a curved face has no direction rule.**
+    The mesher picks a closed edge's direction by the sign of its turn round the
+    face, which is what makes a bar's wall close; a hole that does not wind round
+    the face gets the evaluator's own direction, and nothing says that is the one
+    which reads as a hole. No builder makes such a face. M4's ball with a pipe
+    through it is the first.
+11. **`Undecidable` out of `mesh` is still unreachable**, and §26.6 item 4 named
+    M3 as the milestone that would reach it. §30.1 says why it did not, and the
+    first constructed corner in a mesh domain is a fuse's.
+
+### 30.9 Corrections to earlier sections
+
+- **§24.19 item 2** said M4 would be the first caller with a figure the interval
+  divide has to beat. The figure arrived in M3 and it says the divide is 4%. See
+  §30.8 item 2.
+- **§24.18 criterion 9** reads "the same pair", and the property that discharged
+  it drew four of the six pairs. Both are drawn now. §30.4.
+- **§26.6 item 4** is not closed and M3 could not close it. §30.1.
+- **§28.9 item 5**'s "what is left is wiring" was right about the seam and the
+  types and wrong that the wiring would find nothing. §30.6.
+- **§28.7** lists `CrossingRunsToAQuartic` among the four error variants stage
+  one added. The second stage made it unreachable; it is gone. §30.4 item 3.
+- **§29.9** says the corpus is "530 the fuzzer kept and 32 written out by hand".
+  It is **529 and 33**; the total of 562 is right.
+- **§29.10**'s benchmark figures are confirmed within a few percent. The
+  parametrized run is 69 points and not 70, because §30.6 item 1 changed which
+  number the step rule reads.
+- **§29.13 item 1** says criterion 8 is not done and **item 2** says the claim
+  audit has not run. Both are done. **Item 3** stands: the curve that runs
+  through itself is still outside `EdgeRun`'s vocabulary, and §30.8 item 6 hands
+  it on. **Items 4 and 5** are carried into §30.8 items 4 and 5.

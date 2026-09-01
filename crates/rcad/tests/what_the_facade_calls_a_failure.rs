@@ -67,6 +67,42 @@ fn an_operation_that_could_not_decide_keeps_its_own_variant_at_the_facade() {
     }
 }
 
+/// The same promise, from the layer that only learned to give up at M3's gate.
+///
+/// `rcad-geom` held twenty-odd variants and every one was bad caller input,
+/// because until naming where two surfaces cross there was no *operation* in it
+/// that could give up. Buried inside [`Error::Geometry`] an undecided one would
+/// be filed under "the caller handed over numbers that describe no shape", which
+/// is the opposite of what happened.
+#[test]
+fn an_undecided_crossing_is_not_filed_as_bad_geometry() {
+    let mut records = ProvenanceLog::new();
+    records.push(Record::new(
+        "where a plane and a sphere cross",
+        &[],
+        Level::Interval,
+        Decision::Undecidable { enclosure: 4e-13 },
+        Measures::ManyLengths { how_many: 4 },
+    ));
+
+    match Error::from(GeometryError::Undecidable { records }) {
+        Error::Undecidable { records } => {
+            assert_eq!(records.len(), 1);
+            assert_eq!(
+                records.records()[0].measures(),
+                Measures::ManyLengths { how_many: 4 }
+            );
+        }
+        other => panic!("an undecided operation must stay undecided: {other:?}"),
+    }
+
+    // Everything else in that crate still is bad input, and still says so.
+    assert!(matches!(
+        Error::from(GeometryError::RadiusNotPositive { radius: 0.0 }),
+        Error::Geometry(GeometryError::RadiusNotPositive { .. })
+    ));
+}
+
 #[test]
 fn a_model_that_refuses_a_tag_says_which_invariant_it_would_break() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));

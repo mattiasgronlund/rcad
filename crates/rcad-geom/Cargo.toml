@@ -12,6 +12,7 @@ repository.workspace = true
 nalgebra.workspace = true
 rcad-predicates.workspace = true
 serde.workspace = true
+smallvec.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
@@ -24,4 +25,8 @@ workspace = true
 
 [[bench]]
 name = "how_wide_the_enclosure_gets"
+harness = false
+
+[[bench]]
+name = "what_a_marched_point_costs"
 harness = false

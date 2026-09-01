@@ -161,6 +161,21 @@ pub enum Measures {
     Area,
     /// A volume. `orient3d`.
     Volume,
+    /// More lengths multiplied together than there is an everyday word for.
+    ///
+    /// A quadric's tangency discriminant is the first predicate here that goes
+    /// past a volume. Asking whether a ball touches a pipe squares a value that
+    /// is already an area, so what comes back grows with the *fourth* power of
+    /// the model (decisions.md §27.4). Filed as a [`Measures::Volume`] it would
+    /// be a whole working size out — ten thousandfold at 100 mm — which is the
+    /// units mistake §15.3 exists to stop, arriving one degree above where that
+    /// section could see it.
+    ManyLengths {
+        /// How many lengths are multiplied together. Four or more: one, two and
+        /// three have names above, and two ways of spelling the same dimension
+        /// is how a units bug hides.
+        how_many: u32,
+    },
 }
 
 impl Measures {
@@ -201,18 +216,29 @@ impl Measures {
     ///
     /// # Panics
     ///
-    /// If `working_size` is not a positive finite number.
+    /// If `working_size` is not a positive finite number, or if a
+    /// [`Measures::ManyLengths`] names a dimension one of the three above it
+    /// already has a word for.
     #[must_use]
     pub fn wobble_of(self, value: f64, working_size: f64) -> f64 {
         assert!(
             working_size.is_finite() && working_size > 0.0,
             "a wobble needs a positive working size, got {working_size}"
         );
-        match self {
-            Measures::Length => value,
-            Measures::Area => value / working_size,
-            Measures::Volume => value / working_size / working_size,
-        }
+        let dimension = match self {
+            Measures::Length => 1,
+            Measures::Area => 2,
+            Measures::Volume => 3,
+            Measures::ManyLengths { how_many } => {
+                assert!(
+                    how_many >= 4,
+                    "{how_many} lengths multiplied together is a {}, which has its own name",
+                    ["nothing", "length", "area", "volume"][how_many as usize]
+                );
+                how_many
+            }
+        };
+        (1..dimension).fold(value, |so_far, _| so_far / working_size)
     }
 
     /// How much a predicate's value moves when a corner moves by one, at a
@@ -225,11 +251,13 @@ impl Measures {
     /// power that overflows, which is why nothing in the kernel does.
     #[cfg(test)]
     fn value_per_wobble(self, working_size: f64) -> f64 {
-        match self {
-            Measures::Length => 1.0,
-            Measures::Area => working_size,
-            Measures::Volume => working_size * working_size,
-        }
+        let dimension = match self {
+            Measures::Length => 1,
+            Measures::Area => 2,
+            Measures::Volume => 3,
+            Measures::ManyLengths { how_many } => how_many,
+        };
+        (1..dimension).fold(1.0, |so_far, _| so_far * working_size)
     }
 }
 
@@ -365,7 +393,7 @@ mod tests {
         let policy = Policy::tolerant(100.0);
         let budget = policy.max_wobble();
 
-        for measures in [Measures::Length, Measures::Area, Measures::Volume] {
+        for measures in every_dimension() {
             let widest_enclosure = measures.value_per_wobble(100.0) * budget;
             assert_eq!(measures.wobble_of(widest_enclosure, 100.0), budget);
             assert!(policy.wobble_is_acceptable(measures.wobble_of(widest_enclosure, 100.0)));
@@ -377,6 +405,53 @@ mod tests {
             Measures::Volume.value_per_wobble(100.0),
             Measures::Area.value_per_wobble(100.0) * 100.0
         );
+    }
+
+    /// Every dimension a predicate in this workspace hands back a value in.
+    ///
+    /// The fourth is M3's: a tangency discriminant squares a value that is
+    /// already an area (decisions.md §27.4).
+    fn every_dimension() -> [Measures; 4] {
+        [
+            Measures::Length,
+            Measures::Area,
+            Measures::Volume,
+            Measures::ManyLengths { how_many: 4 },
+        ]
+    }
+
+    /// The units mistake one degree above where §15.3 could see it, and it goes
+    /// the other way: it refuses what it should accept.
+    ///
+    /// A tangency discriminant is four lengths deep. Filed as a volume its
+    /// enclosure reads a whole working size too wide, so a decision the policy
+    /// would have taken comes back undecided instead — a timid filter, which
+    /// §24.10 says is the one thing a 0% control cannot tell apart from genuine
+    /// undecidability. The other direction is the familiar one: a volume filed
+    /// as four lengths is waved through.
+    #[test]
+    fn a_tangency_discriminant_filed_as_a_volume_refuses_what_the_policy_accepts() {
+        let working_size = 100.0;
+        let policy = Policy::tolerant(working_size);
+        let four_lengths = Measures::ManyLengths { how_many: 4 };
+        let at_the_edge = four_lengths.value_per_wobble(working_size) * policy.max_wobble();
+
+        assert!(policy.wobble_is_acceptable(four_lengths.wobble_of(at_the_edge, working_size)));
+        assert!(
+            !policy.wobble_is_acceptable(Measures::Volume.wobble_of(at_the_edge, working_size))
+        );
+
+        let a_volume = Measures::Volume.value_per_wobble(working_size) * policy.max_wobble() * 50.0;
+        assert!(!policy.wobble_is_acceptable(Measures::Volume.wobble_of(a_volume, working_size)));
+        assert!(policy.wobble_is_acceptable(four_lengths.wobble_of(a_volume, working_size)));
+    }
+
+    /// Two ways to spell "an area" is how a units bug hides, so there is only
+    /// one.
+    #[test]
+    #[should_panic(expected = "which has its own name")]
+    fn a_dimension_that_already_has_a_word_may_not_be_spelled_as_a_count() {
+        let _ = Measures::ManyLengths { how_many: 2 }.wobble_of(1.0, 100.0);
     }
 
     /// The bug this whole arrangement exists to stop, now at the tagging end.
@@ -450,7 +525,7 @@ mod tests {
     fn anything_a_policy_resolves_is_something_the_same_policy_still_accepts() {
         for working_size in [1.0, 100.0, 1e6] {
             let policy = Policy::tolerant(working_size);
-            for measures in [Measures::Length, Measures::Area, Measures::Volume] {
+            for measures in every_dimension() {
                 let at_the_edge = measures.value_per_wobble(working_size) * policy.max_wobble();
                 for enclosure in [
                     at_the_edge * 0.5,
