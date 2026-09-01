@@ -1170,7 +1170,7 @@ fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceL
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Orientation, Plane, Scale, Vector};
+    use rcad_geom::{NamedRun, Orientation, Plane, Scale, Vector};
     use smallvec::SmallVec;
 
     use super::*;
@@ -1343,9 +1343,56 @@ mod tests {
                 .expect("this seam names one half of one meridian");
             assert!(
                 (longitude - expected).abs() < 1e-15,
-                "a seam on the plane {normal:?} picked by {facing:?} is at {longitude},                  not {expected}"
+                "a seam on the plane {normal:?} picked by {facing:?} is at {longitude}, \
+                 not {expected}"
             );
         }
+    }
+
+    /// Everything the mesher would have to hand an evaluator, said in the
+    /// vocabulary that evaluator takes.
+    ///
+    /// M3's first crossing is the first edge this mesher cannot walk: it steps
+    /// in a straight line through the surface's own two coordinates, which is
+    /// right for a ruling, a cap circle and a meridian and wrong for the ellipse
+    /// a tilted plane cuts out of a pipe (§26.6 item 1). §27.5 settles that the
+    /// evaluator in `rcad-geom` walks every edge and this layer walks none — so
+    /// what crosses that seam is a [`NamedRun`], the two surfaces either side of
+    /// the edge, and a deflection, and what comes back is 3D points.
+    ///
+    /// Nothing here builds an evaluator. What this says is that the half of the
+    /// seam this crate owns can already be spoken: every edge of every solid the
+    /// kernel builds turns into a `NamedRun` with nothing translated, and the
+    /// closed-run invariant `NamedRun::new` asserts is one the model keeps.
+    #[test]
+    fn every_edge_the_kernel_builds_is_already_a_named_run() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        model
+            .add_round_bar(3.0, 5.0, &Isometry::identity())
+            .expect("a bar");
+        model.add_ball(2.0, &Isometry::identity()).expect("a ball");
+        model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube");
+
+        let mut closed = 0;
+        for slot in model.data().edges.keys() {
+            let edge = EdgeView::new(&model, slot, Isometry::identity(), Orientation::Forward);
+            let (from, to) = ends_in_the_stored_order(edge);
+            let run = NamedRun::new(
+                edge.run().clone(),
+                [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
+            );
+            if run.run() == &EdgeRun::RightRoundWhereItsFacesCross {
+                closed += 1;
+                assert_eq!(
+                    run.ends()[0],
+                    run.ends()[1],
+                    "a closed edge of the model comes back to the corner it left"
+                );
+            }
+        }
+        assert_eq!(closed, 2, "only a bar's two cap circles are closed edges");
     }
 
     /// A ball seamed down the far half of its meridian is sound and used to mesh
