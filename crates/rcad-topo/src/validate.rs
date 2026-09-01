@@ -395,12 +395,14 @@ impl Model {
                     let outward = |used: FaceView<'_>| {
                         gradient_of(&used.surface(), at) * used.orientation().sign()
                     };
-                    let walks_it_forward = a_closed_crossing_is_walked_the_way_it_is_stored(
+                    let Some(walks_it_forward) = a_closed_crossing_is_walked_the_way_it_is_stored(
                         [&face.surface(), &across.surface()],
                         [outward(face), outward(across)],
                         at,
                         turned_by(material, across.orientation()),
-                    );
+                    ) else {
+                        continue;
+                    };
                     if walks_it_forward
                         != (coedge.orientation_on_its_edge() == Orientation::Forward)
                     {
@@ -792,16 +794,25 @@ pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     outward: [Vector; 2],
     at: Point,
     material_side: Decision,
-) -> bool {
+) -> Option<bool> {
     let curved = the_curved_one_of(&[*pair[0], *pair[1]])
         .expect("two planes cross in a straight line, which never closes");
     let longitude = the_way_it_is_parametrised_about(&curved).cross(gradient_of(&curved, at));
+    // **At a pole there is no longitude to compare against** (§38.3). Every
+    // longitude runs through the one point there, so `ẑ × ∇C` is exactly the
+    // zero vector and the sign of a dot with it is not a fact about the shape.
+    // Nothing is guessed: the caller that writes an edge refuses, and the caller
+    // that reads one back skips, the same way it skips a face with no corner off
+    // its partner.
+    if longitude == Vector::zero() {
+        return None;
+    }
     let runs_along_stored = outward[0].cross(outward[1]).dot(longitude) > 0.0;
-    match material_side {
+    Some(match material_side {
         Decision::Neg => runs_along_stored,
         Decision::Pos => !runs_along_stored,
         other => panic!("a face with no side to its material: {other:?}"),
-    }
+    })
 }
 
 /// A side read against a surface, turned round when the face on it is used

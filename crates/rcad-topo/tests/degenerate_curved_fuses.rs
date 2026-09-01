@@ -5,21 +5,25 @@
 //! §31.7 criterion 14. The planar file next door is the shape this follows, and
 //! two things about it are deliberately not followed.
 //!
-//! # A row that refuses is a result; a row that answers wrongly is not
+//! # Two outcomes, which is what §38 left this file with
 //!
-//! The planar catalogue has two outcomes, answered and refused, and says a
-//! refusal is as good an outcome as an answer provided it is right on its own
-//! terms. Over curved solids there is a third, and it is the reason this file
-//! exists rather than four more rows next door: **some of these pairs come back
-//! with `Ok` and the wrong answer.** A ball that nothing cuts is dropped, with
-//! no refusal and an empty log, and every entry about a ball that does not cross
-//! its partner inherits that. Those rows are pinned here by tests whose names
-//! say they are wrong, so that the day the kernel stops doing it something goes
-//! red. **Nothing in this file blesses them.** §37 classifies each one.
+//! The planar catalogue has two, answered and refused, and says a refusal is as
+//! good an outcome as an answer provided it is right on its own terms. When §37
+//! wrote this file it had four: those two, a **wrong answer** — a ball nothing
+//! cuts came back `Ok` and empty, and every entry about a ball that does not
+//! cross its partner inherited it — and a **panic**, on input a caller builds
+//! through the public API, which §16.11 says may not happen.
 //!
-//! A fourth outcome is a **panic**, on input a caller can build through the
-//! public API, which §16.11 says may not happen. Three of them are pinned the
-//! only way a panic can be, with `#[should_panic]` and the message.
+//! §38 closed all four defects, and this file is back to the planar file's two.
+//! Every row that was a wrong answer is now the answer, and every row that was a
+//! panic is a refusal by name or an answer. **The tests that pinned the wrong
+//! behaviour were re-derived and not deleted** — §19's way round is that a test
+//! asserts what the code does so that a fix fails it loudly, and each of the
+//! seven that went red is now the same shape with the right assertion and a doc
+//! saying which defect it was.
+//!
+//! What is left where a row refuses is classified in §38.5, `limit` or `gap`,
+//! with the demonstration §16.10 asks for.
 //!
 //! # How each entry is known to reach what it is about
 //!
@@ -596,29 +600,83 @@ fn a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name() {
     }
 }
 
-/// **A defect, pinned rather than blessed.** The same ball cut by the plane its
-/// seam lies in panics.
+/// A ball cut by a plane down its polar axis is refused by name, which is
+/// §38.3's fix of the panic §37.4 pinned here.
 ///
-/// `x = 0` is the meridian plane, so the crossing does not cross the seam at a
-/// point — it runs right along it. The fuse gets far enough to build an edge
-/// with both its coedges the same way round and then trips the invariant that
-/// says they may not be. **A panic on a solid a caller can build through the
-/// public API**, which §16.11 says may not happen: this is a refusal that has
-/// not been written yet.
+/// §37.4 called `x = 0` "the plane the seam lies in". It is not — the seam lies
+/// in `y = 0` — and what the two planes have in common is the thing that
+/// matters: **both contain the ball's polar axis**, so the great circle each of
+/// them cuts runs through both poles, and the one corner the arrangement puts on
+/// that circle is a pole. A closed edge's two ends are one corner and say nothing
+/// about which way it runs; only the surface's own longitude does, and at a pole
+/// every longitude runs through the one point, so the vector the rule reads is
+/// exactly zero. Both faces along the edge then came back walking it the same
+/// way, and the arena asserted.
+///
+/// **A gap and not a limit** (§16.10), and the direction rule is not what makes
+/// it one. Given a direction the rule cannot derive, the same fuse goes two steps
+/// further and refuses `ACurvedFaceGoesRightRoundWithNoSeam` under `Union` and
+/// `Difference` and `CannotMeshAFace` under `Intersection`: the piece is half a
+/// ball bounded by one curve right round its skin with the poles *on* that curve
+/// rather than inside the piece, which no face of this kernel holds. §38.3
+/// records that run.
 #[test]
-#[should_panic(expected = "the two coedges of an edge must run opposite ways")]
-fn a_ball_cut_by_the_very_plane_its_seam_lies_in_panics() {
+fn a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name() {
+    for at in [Vector::new(0.0, -6.0, -6.0), Vector::new(-6.0, 0.0, -6.0)] {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let mut model = a_model();
+            let ball = model
+                .add_ball(4.0, &Isometry::identity())
+                .expect("a ball of radius four");
+            let knife = block(&mut model, [12.0, 12.0, 12.0], at);
+            match refusal(
+                &mut model,
+                &Pair::of(ball, knife),
+                rule,
+                &Policy::certified(),
+            ) {
+                Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { .. } => (),
+                other => panic!("a cut down the polar axis refused with {other:?}"),
+            }
+        }
+    }
+}
+
+/// The controls, and they are what say the refusal above is about the **polar
+/// axis** and not about cutting through the middle of a ball.
+///
+/// `z = 0` cuts the same ball through the same centre and is answered: the great
+/// circle is the equator, which runs through no pole, so each half is a cap with
+/// a pole inside it and the mesher cuts it up to that pole. A plane through the
+/// centre leaning by 0.4 of a radian is answered for the same reason. Two
+/// answers either side of one incidence, with the same ball and the same knife
+/// moved, is what says the entry reaches its subject.
+#[test]
+fn a_ball_cut_through_its_middle_by_a_plane_off_its_polar_axis_is_answered() {
+    let half_a_ball = 2.0 / 3.0 * PI * 64.0;
+
     let mut model = a_model();
     let ball = model
         .add_ball(4.0, &Isometry::identity())
         .expect("a ball of radius four");
-    let knife = block(&mut model, [12.0, 12.0, 12.0], Vector::new(0.0, -6.0, -6.0));
-    let _ = model.fuse(
-        &[ball],
-        &[knife],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
+    let knife = block(&mut model, [12.0, 12.0, 12.0], Vector::new(-6.0, -6.0, 0.0));
+    let above = fused(&mut model, &Pair::of(ball, knife), Rule::Intersection);
+    assert_eq!(above.solids().len(), 1);
+    measures(volume_of(&model, above.solids()), half_a_ball, Side::Under);
+
+    let mut model = a_model();
+    let ball = model
+        .add_ball(4.0, &Isometry::identity())
+        .expect("a ball of radius four");
+    let knife = block(&mut model, [12.0, 12.0, 12.0], Vector::new(-6.0, -6.0, 0.0));
+    let axis = Axis::new(Point::origin(), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
+    model.place_solid(knife, &Isometry::rotation(&axis, 0.4).expect("a lean"));
+    let leaning = fused(&mut model, &Pair::of(ball, knife), Rule::Intersection);
+    assert_eq!(leaning.solids().len(), 1);
+    measures(
+        volume_of(&model, leaning.solids()),
+        half_a_ball,
+        Side::Under,
     );
 }
 
@@ -1287,7 +1345,6 @@ fn print_the_table(entries: &[Entry]) {
                 );
                 format!("{rule:?} | {}", outcome.said())
             }
-            Case::Panics { rule, test } => format!("{rule:?} | **panics**, by `{test}`"),
             Case::Elsewhere { rule, test } => format!("{rule:?} | by `{test}`"),
         };
         println!("| {} | {} | {said} |", entry.degeneracy, entry.pair);
@@ -1311,24 +1368,19 @@ enum Case {
         rule: Rule,
         outcome: Outcome,
     },
-    /// The fuse panics, so the row cannot be run alongside the others and names
-    /// the `#[should_panic]` test that pins it instead.
-    Panics { rule: Rule, test: &'static str },
     /// Discharged by a test that is not a plain fuse of a plain pair.
     Elsewhere { rule: Rule, test: &'static str },
 }
 
 /// What a certified fuse of a catalogue pair came back with.
 ///
-/// [`Outcome::Nothing`] is the variant the planar catalogue has no need of and
-/// this one cannot do without: an answer, proved, and empty, where the geometry
-/// plainly has something in it.
+/// §37 needed a fourth, [`Outcome::Nothing`] — an answer, proved, and empty,
+/// where the geometry plainly had something in it. §38 left no row that says it,
+/// so it is gone: an outcome nothing reaches is a row nobody can read.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Outcome {
     /// An answer, with every decision in it proved.
     Answered,
-    /// An answer, proved, with no solids in it — and wrong.
-    Nothing,
     /// A refusal naming a decision nothing could settle.
     GaveUp(&'static str),
     /// A refusal naming a shape this milestone does not build.
@@ -1339,7 +1391,6 @@ impl Outcome {
     fn said(self) -> String {
         match self {
             Outcome::Answered => "answered".to_owned(),
-            Outcome::Nothing => "**answered with nothing, which is wrong**".to_owned(),
             Outcome::GaveUp(predicate) => format!("refused, `Undecidable` on \"{predicate}\""),
             Outcome::Refused(named) => format!("refused, `{named}`"),
         }
@@ -1402,10 +1453,10 @@ fn criterion_fourteens_four() -> Vec<Entry> {
         },
         Entry {
             degeneracy: "seam-crossing intersections",
-            pair: "a ball cut by the very plane its seam lies in",
-            case: Case::Panics {
+            pair: "a ball cut by a plane down its polar axis",
+            case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_ball_cut_by_the_very_plane_its_seam_lies_in_panics",
+                test: "a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name",
             },
         },
         Entry {
@@ -1538,11 +1589,11 @@ fn what_happened(build: fn(&mut Model) -> Pair, rule: Rule) -> Outcome {
                 log.records().is_empty(),
                 "a certified fuse of an exactly written pair records nothing at all"
             );
-            if fused.solids().is_empty() {
-                Outcome::Nothing
-            } else {
-                Outcome::Answered
-            }
+            assert!(
+                !fused.solids().is_empty(),
+                "an answer with no solids in it is the wrong answer §38.1 closed"
+            );
+            Outcome::Answered
         }
         Err(Error::Undecidable { records }) => Outcome::GaveUp(
             match records
@@ -1564,6 +1615,9 @@ fn what_happened(build: fn(&mut Model) -> Pair, rule: Rule) -> Outcome {
         }
         Err(Error::ACrossingThisCannotBeOrderedAlong) => {
             Outcome::Refused("ACrossingThisCannotBeOrderedAlong")
+        }
+        Err(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { .. }) => {
+            Outcome::Refused("AClosedEdgeOfTheAnswerWouldStartAtAPole")
         }
         Err(why) => panic!("no row of this table expects {why:?}"),
     }

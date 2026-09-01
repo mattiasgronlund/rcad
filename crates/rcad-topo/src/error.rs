@@ -224,6 +224,38 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// A closed edge of the answer would start at a **pole** of the surface it is
+    /// drawn on, where nothing says which way it runs.
+    ///
+    /// A closed edge has one corner, so its two ends say nothing about its
+    /// direction and only the surface's own parametrisation does: the way its
+    /// longitude takes the points along it, which is
+    /// `a_closed_crossing_is_walked_the_way_it_is_stored` and is what the mesher
+    /// reads back. At a pole every longitude runs through the one point, so the
+    /// vector that rule dots against is exactly the zero vector — not nearly —
+    /// and both faces along the edge come back walking it the same way, which is
+    /// not a solid.
+    ///
+    /// A ball cut by any plane through its centre reaches it, because a great
+    /// circle of a ball whose frame is the world's runs through both poles.
+    ///
+    /// **A gap and not a limit** (§16.10), and the direction rule is not what
+    /// makes it one. Handed a direction the rule cannot derive, the same fuse
+    /// gets two steps further and refuses
+    /// [`Error::ACurvedFaceGoesRightRoundWithNoSeam`]: the piece is half a ball
+    /// bounded by one curve right round its skin, with the poles on that curve
+    /// rather than inside the piece, and no face of this kernel holds that shape.
+    /// §38.3 records the run that measured it. Closing it takes the other half of
+    /// what §38.1 built — a *cut* closed face written out with a seam and poles
+    /// of its own.
+    #[error(
+        "a closed edge of the answer would start at a pole, where nothing says which way it runs"
+    )]
+    AClosedEdgeOfTheAnswerWouldStartAtAPole {
+        /// Which face of the input the piece was cut from.
+        face: crate::FaceKey,
+    },
+
     /// A curved face is bounded by one curve that goes right round its surface —
     /// **or by nothing at all** — and the surface does not pinch to a point for
     /// the face to close on.

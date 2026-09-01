@@ -82,8 +82,10 @@ use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
 ///
 /// [`Error::ResultIsNotManifold`] when an edge of the result would have other
 /// than two faces along it, [`Error::Invalid`] when a shell encloses no space or
-/// a void has nothing round it, and [`Error::Undecidable`] when one shell could
-/// not be placed inside or outside another.
+/// a void has nothing round it, [`Error::Undecidable`] when one shell could not
+/// be placed inside or outside another, and
+/// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's one
+/// corner is a pole of the surface it is drawn on.
 pub(crate) fn assemble(
     model: &Model,
     scratch: &Scratch,
@@ -91,7 +93,7 @@ pub(crate) fn assemble(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Assembly> {
-    let mut assembly = Assembly::from_the_pieces(model, scratch, chosen);
+    let mut assembly = Assembly::from_the_pieces(model, scratch, chosen)?;
     assembly.join_up_what_is_one_face(log)?;
     assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
@@ -237,7 +239,13 @@ impl Assembly {
     }
 
     /// One face per kept piece, and the corners and edges they share.
-    fn from_the_pieces(model: &Model, scratch: &Scratch, chosen: &[Chosen]) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's
+    /// one corner is a pole of the surface it is drawn on, where nothing says
+    /// which way it runs.
+    fn from_the_pieces(model: &Model, scratch: &Scratch, chosen: &[Chosen]) -> Result<Self> {
         let mut corners = Corners::default();
         let mut edges = Edges::default();
         let mut faces = Vec::new();
@@ -247,8 +255,17 @@ impl Assembly {
             let wires = piece
                 .wires
                 .iter()
-                .map(|wire| sides_of(wire, turned_round, model, &mut corners, &mut edges))
-                .collect();
+                .map(|wire| {
+                    sides_of(
+                        wire,
+                        turned_round,
+                        piece.ancestors[0],
+                        model,
+                        &mut corners,
+                        &mut edges,
+                    )
+                })
+                .collect::<Result<_>>()?;
             let (surface, used) = match (piece.surface.as_plane(), turned_round) {
                 (Some(flat), true) => (Surface::Plane(flat.reversed()), Orientation::Forward),
                 (Some(_) | None, false) => (piece.surface, Orientation::Forward),
@@ -262,14 +279,14 @@ impl Assembly {
                 is_a_whole_closed_surface: piece.is_the_whole_surface,
             });
         }
-        Self {
+        Ok(Self {
             corners: corners.made,
             edges: edges.made,
             runs: Vec::new(),
             faces,
             shells: Vec::new(),
             solids: Vec::new(),
-        }
+        })
     }
 
     /// One face per face of an input solid, ready to be joined.
@@ -1737,7 +1754,7 @@ impl Edges {
     /// filtering it out afterwards, so one reaching here means the splitter is
     /// wrong — and a *closed* side is not one, which is why the two ends being
     /// the same corner is checked against what carries it.
-    fn of(&mut self, meet: &FaceMeet, from: usize, to: usize) -> Side {
+    fn of(&mut self, meet: &FaceMeet, from: usize, to: usize, face: FaceKey) -> Result<Side> {
         let (carried_by, along) = (meet.carried_by, meet.along.as_slice());
         assert!(
             from != to
@@ -1764,10 +1781,11 @@ impl Edges {
         });
         let forward = if from == to {
             which_way_a_closed_edge_is_walked(meet, at)
+                .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?
         } else {
             self.made[edge].ends[0] == from
         };
-        Side { edge, forward }
+        Ok(Side { edge, forward })
     }
 }
 
@@ -1788,13 +1806,13 @@ impl Edges {
 /// as the used gradients are the stored ones. Where the rule turns the piece
 /// round, `sides_of` turns every side of it round with it and the face's use
 /// says so — which is what the sweep reads.
-fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> bool {
+fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Option<bool> {
     let [mine, partner] = meet.carried_by;
     if the_curved_one_of(&meet.carried_by).is_none() {
         // Two planes cross in a straight line, which does not close, so nothing
         // reaches here — and a wire with no curved surface either side of it has
         // no longitude to run along.
-        return true;
+        return Some(true);
     }
     a_closed_crossing_is_walked_the_way_it_is_stored(
         [&mine, &partner],
@@ -1950,15 +1968,16 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 fn sides_of(
     wire: &[FaceMeet],
     turned_round: bool,
+    face: FaceKey,
     model: &Model,
     corners: &mut Corners,
     edges: &mut Edges,
-) -> Vec<Side> {
+) -> Result<Vec<Side>> {
     let mut sides = Vec::new();
     for meet in wire {
         let from = corners.of(model, &meet.ends[0]);
         let to = corners.of(model, &meet.ends[1]);
-        sides.push(edges.of(meet, from, to));
+        sides.push(edges.of(meet, from, to, face)?);
     }
     if turned_round {
         sides.reverse();
@@ -1966,7 +1985,7 @@ fn sides_of(
             side.forward = !side.forward;
         }
     }
-    sides
+    Ok(sides)
 }
 
 #[cfg(test)]
