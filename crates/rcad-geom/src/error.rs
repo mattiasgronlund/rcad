@@ -353,6 +353,27 @@ pub enum Error {
         most: usize,
     },
 
+    /// Three surfaces of which fewer than two are flat.
+    ///
+    /// Two planes cross in a line, and where a quadric cuts that line is a
+    /// quadratic in one unknown whose discriminant is a polynomial in the stored
+    /// numbers. One plane and two quadrics is a quartic, and three quadrics is a
+    /// degree-eight system.
+    ///
+    /// A **gap** and not a limit (§16.10): the points are there, and a real
+    /// algebraic solver reaches them. The family of fixes is the
+    /// Dupont–Lazard–Lazard–Petitjean machinery or a certified numerical solver
+    /// with a separation bound of its own, and both are a milestone rather than
+    /// a lane (`docs/decisions.md` §31.2). The consumer that calls it due is
+    /// named there too: two capped bars crossing near one of their caps.
+    /// `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`
+    /// is the demonstration that the points exist.
+    #[error(
+        "where three surfaces meet is only worked out when two of them are flat, and fewer than \
+         two of these are"
+    )]
+    WhereThreeSurfacesMeetNeedsTwoOfThemFlat,
+
     /// A predicate refused the input it was handed — three planes with no
     /// single meeting point, for instance.
     #[error(transparent)]

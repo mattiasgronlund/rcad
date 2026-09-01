@@ -232,9 +232,14 @@ impl Exact {
 
     /// `u · u` for an already-exact triple, exactly.
     pub(crate) fn squared_length_of(value: &[Exact; 3]) -> Option<Exact> {
+        Self::dot_of_two_exact(value, value)
+    }
+
+    /// `u · v` for two already-exact triples, exactly.
+    pub(crate) fn dot_of_two_exact(u: &[Exact; 3], v: &[Exact; 3]) -> Option<Exact> {
         let mut total = Self::of(0.0);
-        for part in value {
-            total = total.plus(&part.times(part)?);
+        for axis in 0..3 {
+            total = total.plus(&u[axis].times(&v[axis])?);
         }
         Some(total)
     }

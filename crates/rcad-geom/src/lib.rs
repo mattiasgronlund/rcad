@@ -80,6 +80,7 @@ mod scale;
 mod segment;
 mod sphere;
 mod surface;
+mod three_surfaces;
 mod walk;
 
 pub use crate::bspline_curve::{BSplineCurve, REFINEMENT_ROUNDOFF};
@@ -103,6 +104,7 @@ pub use crate::scale::{DYNAMIC_RANGE_CHECK, DynamicRange, Scale, Unit};
 pub use crate::segment::Segment;
 pub use crate::sphere::{SIDE_OF_SPHERE, Sphere};
 pub use crate::surface::Surface;
+pub use crate::three_surfaces::{MeetOfThree, WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces};
 pub use crate::walk::{
     MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing, walk,
 };

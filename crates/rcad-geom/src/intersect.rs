@@ -1607,7 +1607,7 @@ fn where_two_balls_touch(one: &Sphere, other: &Sphere, gap: f64) -> PredicatePoi
 ///
 /// [`Error::Undecidable`] when neither the cascade nor the policy could settle
 /// the sign, carrying the one record that gave up.
-fn ask<P: Predicate>(
+pub(crate) fn ask<P: Predicate>(
     question: &P,
     measures: Measures,
     inputs: &[PredicatePoint],
@@ -1637,10 +1637,10 @@ fn ask<P: Predicate>(
 /// A closure pair rather than seven near-identical structs: what differs
 /// between the questions above is the expression and nothing else, and
 /// `docs/decisions.md` §27.1's table is the readable form of the list.
-struct Question<E, X> {
-    named: &'static str,
-    enclosing: E,
-    exactly: X,
+pub(crate) struct Question<E, X> {
+    pub(crate) named: &'static str,
+    pub(crate) enclosing: E,
+    pub(crate) exactly: X,
 }
 
 impl<E, X> Predicate for Question<E, X>
@@ -1674,7 +1674,7 @@ where
 }
 
 /// `‖u × v‖²`, which is zero exactly when the two point along one line.
-fn squared_length_of_a_cross_product(
+pub(crate) fn squared_length_of_a_cross_product(
     named: &'static str,
     u: [f64; 3],
     v: [f64; 3],
