@@ -7972,7 +7972,7 @@ be — nothing here changes a sign question about a pair:
 
 | | at §33 | now |
 |---|---|---|
-| tests in `rcad-geom`, which is all this lane owns | 481 | **509** |
+| tests in `rcad-geom`, which is all this lane owns | 481 | **510** |
 | tests (`cargo nextest`, whole workspace) | 1001 | **1045**, and still moving — lane 3 is committing beside this |
 | suite duration | 94.4 s | 96.7 s |
 | doc tests | 19 | 19 |
@@ -8036,6 +8036,19 @@ called it a repo-wide tooling decision. Reported rather than taken, the way
   dimension up, so the oracle is M3's: never certified *off*, plus a control
   moved comfortably clear that must be decided. **On the lattice the literal
   reading is met as well**, 315 corners of 571.
+- **`meet_of_three_planes` in `rcad-predicates` hands back a box that is not a
+  place, and says `Ok`.** Cramer's rule there divides one interval determinant by
+  another and checks neither for overflow, so three planes whose offsets are near
+  the top of the range and whose normals lean at a small angle come back as
+  `Ok(Constructed([…, […, −inf]]))` — a box a caller reads as a corner. Measured
+  on `x = 1e300`, `y = 1e300` and a plane leaning by `2^-50`: the `z` side is
+  `[−inf, −1.8e308]`. **This lane does not fix it, because §31.5 freezes that
+  crate**, and reports it the way that section says a lane should. What lands in
+  `rcad-geom` instead is that `meet_of_three_surfaces` reads such a box as the
+  refusal it is;
+  `three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere`
+  is the demonstration, and the same three planes written lower down are placed,
+  so it is a **gap**.
 - **§31.7 criterion 8** names `three_points_on_a_conic_come_back_in_the_order_they_run_round_it`.
   It is `three_points_on_a_circle_come_back_in_the_order_they_run_round_it`, with
   one beside it per remaining conic pair — a bar's cap circle and the circle
@@ -8090,6 +8103,7 @@ can produce, limit or gap by name (§16.10):
 | `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` | fewer than two of the three are planes | **gap** | `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved` exhibits `(3, 0, 4)` exactly on a pipe, two balls and a plane in whole numbers, and refuses two triples through it. §31.2 defers it and names the consumer |
 | `Undecidable` out of `meet_of_three_surfaces` | a product the exact arithmetic needs falls out of `f64`'s range | **gap** | the `2^k` family's 10.83%; the same triples on the lattice refuse none of it |
 | `Predicate(PlanesDoNotMeetInAPoint)` | three planes meet at a point neither Cramer's rule nor the line route can bound | **gap** | inherited from `meet_of_three_planes`, and now reached far less often, because the line route divides by a determinant known to full relative accuracy rather than by an interval one |
+| `Undecidable` out of `meet_of_three_planes`'s own `Ok` | three planes meet past the top of `f64`'s range, and Cramer's rule says `Ok` holding a box with an infinite side | **gap** | `three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere`; the same three written lower down are placed |
 | `TheseTwoSurfacesDoNotCrossInAConic` | two planes, or a plane down a pipe's own axis | **limit** | the question is a different one and the arrangement's dominant-axis rule answers it |
 | `TheseTwoSurfacesDoNotCrossInAConic` | a ball against a pipe, or two pipes | **gap** | the curve is there and ordering points along it takes the marcher |
 | `TheCrossingOfTheseTwoSurfacesIsNotClosed` | a crossing that runs on for ever | **limit** | the vertex does not exist: such an edge is cut by corners at both ends rather than closing on itself |

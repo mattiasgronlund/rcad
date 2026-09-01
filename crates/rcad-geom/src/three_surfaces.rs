@@ -150,6 +150,15 @@ fn the_places_these_three_sit(
 /// really do meet at a point, the point is placed off the line the first two
 /// planes cross in, which divides by that same well-known determinant instead of
 /// by an interval one.
+///
+/// **A box with a side that runs on for ever is read as a refusal too.** Cramer's
+/// rule divides one interval determinant by another and neither is checked for
+/// overflow, so three planes whose offsets are near the top of the range and
+/// whose normals lean at a small angle come back as `Ok` holding a box that says
+/// nothing at all — and a caller would read that as a place. It is treated
+/// exactly as a refusal is, which is what
+/// `three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere`
+/// demonstrates.
 fn where_three_planes_meet(
     one: &Plane,
     other: &Plane,
@@ -157,16 +166,21 @@ fn where_three_planes_meet(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<MeetOfThree> {
-    let refused = match Plane::meet_of_three(one, other, last) {
-        Ok(point) => return Ok(MeetOfThree::At(smallvec![point])),
-        Err(refused) => refused,
-    };
-
     let at = the_places_these_three_sit(
         &Surface::Plane(*one),
         &Surface::Plane(*other),
         &Surface::Plane(*last),
     );
+    let by_cramers_rule = Plane::meet_of_three(one, other, last);
+    if let Ok(point) = by_cramers_rule
+        && point.uncertainty().is_finite()
+    {
+        return Ok(MeetOfThree::At(smallvec![point]));
+    }
+    let refused = by_cramers_rule
+        .err()
+        .unwrap_or_else(|| an_exact_step_could_not_be_taken(&at));
+
     let Some(line) = the_line_two_planes_cross_in(one, other, &at, policy, log)? else {
         return what_a_third_surface_leaves_of_one_plane(
             one,
@@ -196,9 +210,12 @@ fn where_three_planes_meet(
         Decision::Pos | Decision::Neg => {
             let step = quotient_or_everything(-across.enclosure(), along.enclosure());
             let placed = the_point_at(&line, step);
-            // A determinant known to full relative accuracy still divides into
-            // a box that says nothing when the numerator is out of range.
-            if placed == nothing_is_known_about_where_it_is() {
+            // Three planes leaning at a shrinking angle meet further and further
+            // away, and past the top of `f64`'s range there is nothing left for
+            // a box to be around — so this route runs out where Cramer's did,
+            // and what is passed on is the first refusal rather than a second
+            // one saying the same thing.
+            if !placed.uncertainty().is_finite() {
                 return Err(refused);
             }
             Ok(MeetOfThree::At(smallvec![placed]))
@@ -545,11 +562,6 @@ fn the_point_at(line: &WhereTwoPlanesCross, step: Interval) -> PredicatePoint {
     }))
 }
 
-/// The box that says nothing at all is known about where a point is.
-fn nothing_is_known_about_where_it_is() -> PredicatePoint {
-    PredicatePoint::Constructed([Interval::ENTIRE; 3])
-}
-
 /// The sign of an exact number, as a question the cascade can ask.
 fn the_sign_of(
     value: &Exact,
@@ -755,6 +767,50 @@ mod tests {
 
         let elsewhere = flat([0.0, 0.0, 1.0], [0.0, 0.0, 9.0]);
         assert_eq!(meet([&wall, &elsewhere, &ball]), Ok(MeetOfThree::Nowhere));
+    }
+
+    /// Three planes that do meet at a point, and meet it past the top of the
+    /// range, come back as a refusal rather than as a box that says nothing.
+    ///
+    /// Cramer's rule divides one interval determinant by another and checks
+    /// neither for overflow, so `Plane::meet_of_three` hands back `Ok` holding a
+    /// box whose every side runs the whole number line — which a caller would
+    /// read as a place. The two planes below cross in a line at the top of the
+    /// range and the third leans across it by about `1e-16`, so the meet is at
+    /// about `1e315` and no `f64` holds it.
+    ///
+    /// A **gap** and not a limit: the same three planes written lower down the
+    /// range are placed, and the second half of this is what says so.
+    #[test]
+    fn three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere() {
+        let leaning = [1.0, 1.0, 2f64.powi(-50)];
+        let triple = |reach: f64| {
+            [
+                flat([1.0, 0.0, 0.0], [reach, 0.0, 0.0]),
+                flat([0.0, 1.0, 0.0], [0.0, reach, 0.0]),
+                flat(leaning, [0.0, 0.0, 0.0]),
+            ]
+        };
+
+        let far = triple(1e300);
+        let answer = meet([&far[0], &far[1], &far[2]]);
+        assert!(
+            matches!(
+                answer,
+                Err(Error::Predicate(_)) | Err(Error::Undecidable { .. })
+            ),
+            "three planes meeting past the top of the range came back as {answer:?}"
+        );
+
+        // The same three planes written lower down are placed, so what ran out
+        // is the range and not the geometry.
+        let near = triple(1.0);
+        let placed = meet([&near[0], &near[1], &near[2]]).expect("these three meet at a point");
+        let MeetOfThree::At(points) = &placed else {
+            panic!("expected one point, got {placed:?}");
+        };
+        assert_eq!(points.len(), 1);
+        assert!(points[0].uncertainty().is_finite());
     }
 
     #[test]
