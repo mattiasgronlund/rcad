@@ -1891,3 +1891,34 @@ fn sides_of(
     }
     sides
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Point, Vector, the_half_space_both_ends_are_on};
+
+    /// The whole of what
+    /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] is left refusing,
+    /// and a **gap** rather than a limit: the half-space exists and `f64` cannot
+    /// reach it.
+    ///
+    /// Two corners a hair apart on the unit circle. The chord to a point that
+    /// far round is `(cos δ − 1, sin δ)`, and for `δ` under an `f64` rounding
+    /// `cos δ` is exactly one — so the chord lies exactly along the tangent, the
+    /// normal `v(c·c) − c(c·v)` cancels to exactly nothing, and there is no
+    /// direction left to separate the two arcs along.
+    #[test]
+    fn an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name() {
+        let from = Point::new(1.0, 0.0, 0.0);
+        let to = Point::new(1.0, 1e-16, 0.0);
+        let leaving = Vector::new(0.0, 1.0, 0.0);
+        let chord = to - from;
+
+        let facing = leaving * chord.dot(chord) - chord * chord.dot(leaving);
+        assert_eq!(
+            facing,
+            Vector::zero(),
+            "an arc this short has a chord along its own tangent"
+        );
+        assert!(the_half_space_both_ends_are_on(facing, [from, to]).is_none());
+    }
+}

@@ -9366,3 +9366,252 @@ same order is exactly what §23.4's promise is made of.
   one that hand-builds a closed edge with the coedges the other way round will
   not be caught by `validate` and may mesh a cap to the wrong pole. Say so rather
   than assume it.
+
+### 36.23 The arc, closed, and what was really in the way
+
+§36.19 measured how far the last lane got and named two candidates for the rest.
+**Neither was the cause**, and the localisation it asked for is one sentence: the
+naming was right, the walk was right, and what threw it away was the
+**coplanar joiner**.
+
+An arc built by `Edges::of` carried the half-space that named it. Then
+`join_up_what_is_one_face` ran, joined runs of arcs into one edge at every corner
+only two edges leave, and handed the joined edge ends the half-space had never
+been built for. §36.19's two candidates — a midpoint too near the chord, and a
+picker's `Undecidable` ruling nothing out — are both about *reading* the
+half-space, and the half-space that reached `walk` was for a different pair of
+ends. Measured: a bar notched by a block joins exactly two arcs into one, twice,
+and both of them are on the bar's cap circles where the block's planes cut them
+and nothing else does.
+
+**Both of §36.19's candidates are still true statements and neither fires.** With
+the joined arcs named, the four families are at 0.00% and the notched bar records
+nothing at all.
+
+#### What names an arc, and why nothing on it is built
+
+The half-space is the one through the chord **square to the plane the crossing
+lies in**: that plane meets the crossing's plane in the chord line, a line meets
+a conic at exactly two points, so the two arcs are strictly either side of it
+whichever is longer.
+
+Neither plane is ever constructed. For `v` a direction from one end **into** the
+arc and `c` the chord, both lie in the crossing's plane, so `v × c` is that
+plane's normal and `c × (v × c)` is the one wanted — which written out is
+
+    facing = v(c·c) − c(c·v)
+
+and whose dot with `v` is `|c|²|v|² − (c·v)²`, never negative by Cauchy–Schwarz.
+**So the normal already faces the way the arc goes and there is no sign to case
+out.** §36.19 wrote this with `v` the tangent `∇S × ∇T`; the generalisation to any
+`v` into the arc is what makes joining work, and it costs nothing.
+
+Which way the wire leaves its first corner is a sign and not a search: left of
+`∇S × ∇T` is always the partner's negative side (§36.6), so it leaves along that
+direction exactly when its material is inside the partner — which
+`FaceMeet::material_side` already holds, written from which way round the
+arrangement walked the arc and costing no arithmetic.
+
+The offset is proved and not rounded, exactly as §36.19 said: it comes down from
+the smaller of the two `f64` readings by a step that starts at one rounding of
+the numbers involved and doubles, until the predicate itself says both ends read
+*on or in front*. It stops once the total is past twice `|facing| · max|p|`,
+which Cauchy–Schwarz puts past any reading there is, so a half-space not found by
+then does not exist.
+
+#### The joined arc, and the corner that is a point on it
+
+A run of arcs joined into one is named the same way any one of its pieces is —
+and **a corner the joining dissolved is a point on the joined arc**. So `v` is the
+direction from a surviving end towards one of them, and still nothing is built:
+that corner is one the arrangement placed.
+
+An unjoined arc uses its own stored direction, which is the tangent. Two arms,
+and both are walked by the shapes below: every arc of the notched bar's own
+notch is unjoined and every arc of its cap circles is joined.
+
+#### What is left of the refusal
+
+`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` is still there and is now
+one case: `facing` with no length, which means the chord lies along the
+crossing's own direction. For a conic that is an arc so short the chord rounds
+onto its own tangent — two corners a hair apart on the unit circle, where
+`cos δ` is exactly one and `v(c·c) − c(c·v)` cancels to exactly nothing. A
+**gap** (§16.10): the half-space exists and `f64` cannot reach it.
+`an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`.
+
+#### Two things §36.19 did not see
+
+**A straight piece of a crossing is not an arc and must not be named as one.** A
+block's `y = 1` plane cuts a bar's wall in two straight lines, and those are edges
+between a plane and a cylinder with two different ends — which the old table sent
+to the refusal. They are `EdgeRun::Straight`, whose own doc has always said
+"straight between its two ends, which are the whole of it", and `walk` has always
+had nothing to put between them. **The test is read off the surfaces and never off
+the chord**, in the same three cases and the same spelling `walk` uses, because a
+short enough arc has a chord that rounds onto its own tangent and this question
+has to stay one about the pair.
+
+That is also worth more than it costs: `holds.rs` refuses a wire with any
+non-straight coedge, `classify.rs` fans a face whose every side is straight, and
+`view.rs` widens a flat face's box for every side that is not. Calling a straight
+side straight is right in all three.
+
+**Which surface goes in `and` is decided by a check and not by taste.** The field
+names the second surface for a run whose two faces are the *same* surface — a
+ball's seam — and an arc's two faces already name both, so either is true. What
+picks between them is that `Model::validate` asks both ends to read exactly `Zero`
+against `and`, and a corner this fuse solved for is exactly on a plane it was
+solved from and only within its own box on a quadric. The flat one goes in, and
+`name_of_surface_bits` gives that for free by sorting a plane ahead of a ball or a
+pipe.
+
+A crossing with **two** curved surfaces and two ends is a pair of balls cut twice,
+and nothing builds one: measured, two balls united refuse at
+`ACurvedFaceGoesRightRoundWithNoSeam` long before an arc of them is named. When
+that stops being true what has to give is the *check* — the same slop
+`check_curved_face` already reads off a solved corner (§36.13), read in
+`check_edges` too — and not the choice. Lanes 6 and 7 are told.
+
+### 36.24 The direction rule stops being a rule, and the two things it was wrong about
+
+§36.22 said the closed-edge direction rule was a rule and that `Model::validate`
+did not ask a closed edge whether it obeyed it. It does now, with the very
+function the fuse chooses by — `a_closed_crossing_is_walked_the_way_it_is_stored`
+— because two spellings of one question is how those two come to disagree
+(§23.8). `a_closed_edge_walked_the_wrong_way_round_its_surface_is_caught`, with a
+control that flips *one* coedge and is caught by the older check instead.
+
+Reading it back found two things the rule as written in §36.6 got wrong.
+
+**The face's own orientation does come into it.** §36.6 says it does not: "a wire
+winds about the surface's stored normal whichever way round its solid uses the
+face". A sphere and a pipe have no reversed form, so a curved face the rule turned
+round is *the same surface* with its wire stored walked the other way and
+`FaceUse::orient` saying so. The rule has to be asked about the gradients the
+**solid uses**, and compared against the coedge's turn **as stored** — the turn a
+view composes back is the un-turned one. Both halves are load-bearing: the
+block-with-a-round-hole answer fails the check on either one alone.
+
+**`a_washer` had its hole's circles walked backwards**, both coedges of each, and
+the comment in the fixture argued that it should. It survives every other check
+because a wire that is one closed curve has no polygon to wind, so the outline and
+the hole ran the same way round the cap and nothing looked. A hole runs the other
+way round a face than its outline does, and this is the first thing in the tree
+that can say so. §36.22's own warning — "may mesh a cap to the wrong pole" — was
+about a property nobody had written, and the thing it warned about was already in
+the tree.
+
+**A ball turned inside out is still caught by the volume and not by this.** A ball
+has no closed edge at all: its one seam runs pole to pole. So
+`a_curved_solid_turned_inside_out_is_caught` is a two-row table now, and §23.9's
+own claim — a negative meshed volume — is measured in it rather than waited for.
+
+### 36.25 What each criterion in these two lanes cost
+
+| | | |
+|---|---|---|
+| **13** | a fused curved solid validates, meshes and passes §23.4's oracle | **met for all three shapes in this lane's reach**. `a_bar_notched_by_a_block_meshes_into_a_closed_surface`, beside §36.18's ball cap and §36.12's block with a round hole. A ball with a pipe through it is still the quartic (§36.20) |
+| **16** | the four families at 0.00% | met, unmoved, and the notched bar joins them as a fifth shape that decides everything and records nothing |
+| §30.8 item 10 | a closed edge has no direction rule | **the rule became a check** (§36.24), and it found a fixture that had been wrong since it was written |
+
+### 36.26 Every refusal these two lanes can produce, classified
+
+§36.16's first row is **withdrawn**: it says the half-space that tells two arcs
+apart cannot be built here, in all three of its clauses, and §36.19 already
+corrected the clauses. What it refuses now is one case and not the shape.
+
+| Refusal | Cause | | Demonstration |
+|---|---|---|---|
+| `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` | the chord of an arc lies along the crossing's own direction | **gap** | `an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`. The half-space exists; `f64` cannot reach it at that separation |
+| `Invalid::AClosedEdgeIsWalkedAgainstItsSurface` | a face walks a closed edge against the way its surface winds | **not a refusal about arithmetic** — it is the sweep saying the model's topology and its geometry disagree, which §16.11 says arrives from a file |
+| everything §36.16 lists apart from its first row | | | unchanged |
+
+### 36.27 The numbers
+
+Family by family and never blended (§17.7), the same four families at 384 fuses
+each so the rows are comparable with §36.21's.
+
+| Family | fuses | refused | recorded anything |
+|---|---|---|---|
+| lattice, a bar through a block | 384 | **0.00%** | 0 |
+| turned about an awkward axis | 384 | **0.00%** | 0 |
+| a ball resting on a block | 384 | **0.00%** | 0 |
+| written at `2^k` | 384 | **0.00%** | 0 |
+
+Not one of them moved, which is the point: an arc that used to refuse by name
+appears in none of the four, and naming it broke none of them.
+
+| | at §36.21 | now |
+|---|---|---|
+| tests (`cargo nextest`, whole workspace) | 1067 | **1070** |
+| suite duration | 2.9 s | 2.9 s |
+| doc tests | 19 | 19 |
+| `FORMAT_VERSION` | 3 | 3 |
+| fuzz corpus | 805 | **815** |
+
+Three tests net: the notched bar's mesh, the direction-rule check, and the arc
+refusal's own demonstration. A fourth changed hands — the test that asserted the
+notched bar was refused by name now asserts it is decided and records nothing.
+
+`just fuzz 180` ran 5 210 761 executions in 181 seconds, found **10 new seeds**
+and **no crash**. Coverage moved by one edge, 2507 to 2508, and that is a longer
+run rather than new arithmetic: `rcad-geom` is untouched by these lanes.
+
+`just default` is green, `cargo-deny` included. **`rcad-predicates` is still at 0
+files changed for the whole milestone**, seven lanes now, and **`rcad-geom` is at
+0 for lanes 4, 5, 5b and 5c together**. That is worth a line of its own: §36.19
+said what was left was "one function in `rcad-geom` deciding which arc a picker
+picks", and the answer was in `rcad-topo` — the picker was right and the joiner
+threw it away.
+
+**The notched bar, measured.** A bar of radius 2 and height 8 with a 2-cube
+notched out of its wall meshes into 436 triangles at a deflection of 0.02, closes
+up under §23.4's oracle in full, and measures **96.8665** against the
+**96.8781** the closed form gives — 0.012% under, and under is where an inscribed
+mesh belongs. Refined ten times it comes to 96.8769, which is 0.0012%.
+
+**And the shape where the error would not cancel.** Every arc a block leaves on a
+bar of that size is shorter than half a turn, so a picker that always took the
+shorter of two would pass the notched bar and never be asked — the same shape of
+hole as the north cap that meshed correctly with the pole read backwards
+(§36.18). A wedge with its point at `(−1, 0)` opening in `+x` leaves an arc of
+**228 degrees**, joined out of three stretches, longer than its own sibling. It
+measures **87.6998** against **87.7111**, 0.013% out. Both rows are in one test
+and the second is why the first is worth anything: with the direction into the
+arc read backwards, **both** shapes stop being solids at all, refused by the
+triangulator for a boundary that crosses itself.
+
+### 36.28 What lanes 6 and 7 have to be told, corrected again
+
+§36.22 stands except where these two lanes moved it.
+
+- **A bar notched by a block works**, so the line §36.22 drew at "a whole closed
+  curve" has moved: an edge along *part* of a curved crossing is built and named.
+  Its third bullet is withdrawn.
+- **The closed-edge direction rule is a check now**, so §36.22's last bullet is
+  withdrawn too — and the thing it warned about was in the tree, in `a_washer`,
+  and had been since that fixture was written. A hand-built curved solid is worth
+  running `Model::validate` over before it is trusted, and two of the ones in the
+  tree were not.
+- **A ball with a pipe through it is still the quartic** (§36.20), and it is now
+  the *only* shape in roadmap §7.4's reach that a curved fuse refuses for a reason
+  of its own.
+- **`check_edges` asks an arc's ends for an exact `Zero` against `and`.** That is
+  what makes the flat surface of the pair the one stored there (§36.23), and it is
+  a check a pair of *two* curved surfaces would fail on a corner that is only
+  within its box. Nothing builds such a pair today. Whoever makes two balls
+  fuseable closes `ACurvedFaceGoesRightRoundWithNoSeam` first and inherits this on
+  the same day.
+- **The coplanar joiner reaches curved edges and is written in planes.** It joined
+  arcs of a cap circle correctly here only because this lane taught the join to
+  re-name what it made. Anything else added to `Edge` that depends on its two ends
+  has the same problem and will not announce itself.
+- **`select.rs` cannot place a point inside a flat piece bounded by one chord and
+  one arc.** Two corners leave no polygon to wind and every candidate is rejected,
+  so a bar cut by a single plane not through its axis refuses with `Undecidable`
+  naming *a point inside a piece of a face*. §36.16 already lists that refusal;
+  what is new is that arcs make it reachable from a shape as plain as that. A
+  **gap**, and what closes it is a piece that is read by which side of each of its
+  bounding surfaces it lies on rather than by winding — which is the rule
+  `the_piece_holds` already uses for a *curved* piece, one dimension across.

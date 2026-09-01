@@ -475,11 +475,19 @@ pub enum Error {
     /// A crossing of two surfaces that closes and is cut at two corners leaves
     /// two arcs with the same two ends, so the ends do not name one of them and
     /// [`EdgeRun::PartOfWhereItCrosses`](crate::model::EdgeRun) wants the
-    /// half-spaces that do. A **gap**: the arc is there and a plane through the
-    /// chord perpendicular to the crossing's own plane separates the two — what
-    /// stops it being built here is that both ends have to be provably *on* that
-    /// plane once its offset is rounded, and nothing here rounds it in a
-    /// direction it can prove.
+    /// half-space that does.
+    ///
+    /// **Which arc is no longer what this refuses** (`docs/decisions.md` §36.23).
+    /// The half-space through the chord square to the crossing's own plane tells
+    /// them apart, its normal is `v(c·c) − c(c·v)` for `v` a direction into the
+    /// arc, and its offset is proved down until the predicate says both ends are
+    /// on or in front. What is left is the one case where that normal has no
+    /// length to point along: a chord that lies along the crossing's own
+    /// direction, which for a conic means an arc so short the chord rounds onto
+    /// its own tangent. A **gap** — the arc is there and the half-space exists;
+    /// what cannot reach it is `f64` at that separation.
+    ///
+    /// `an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`.
     #[error("an edge of the answer runs along part of a curved crossing and cannot be named")]
     ACurvedEdgeThatIsPartOfACrossingCannotBeNamed,
 
