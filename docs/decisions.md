@@ -10818,6 +10818,19 @@ list: an importer's whole job is to turn a stranger's bytes into a `Model`.
    same answer wherever the pair is put. §38.3 already wants the machinery — a
    cut closed face written out with a seam and poles of its own — and this says
    how much rests on it. **Consumer: the first imported ball anybody cuts.**
+
+   **It wears three faces and not two, and this gate found the third only after
+   §39.3 was written.** The same ball of radius four, the same slab with its
+   face one unit from the centre, along the three axes: `z` answers, `y` refuses
+   `ACurvedFaceGoesRightRoundWithNoSeam`, and **`x` refuses `CannotMeshAFace`** —
+   there the fuse gets past naming the faces and the *triangulator* is what
+   gives up, on a boundary that crosses itself. A fix that only stops the `y`
+   refusal leaves the `x` one standing, so anyone scoping this from §39.3 alone
+   would size it at two thirds of what it is.
+   `the_same_ball_cut_the_same_way_along_three_axes_gives_three_different_answers`
+   pins all three §19's way round, so closing this fails it loudly rather than
+   quietly agreeing with it. What it should say once that lands is `Answered` on
+   all three rows, one solid each, and the same spherical cap's volume in each.
 2. **The fuse bakes a solid's placement into its stored surface, and the mesh
    floor goes up 77-fold for it.** §39.3, measured. A boolean that removes no
    material must not make the answer coarser than the input. Two families of fix

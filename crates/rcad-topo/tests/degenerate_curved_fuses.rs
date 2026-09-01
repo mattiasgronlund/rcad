@@ -1677,3 +1677,65 @@ fn what_happened(build: fn(&mut Model) -> Pair, rule: Rule) -> Outcome {
         Err(why) => panic!("no row of this table expects {why:?}"),
     }
 }
+
+/// The same ball, the same slab, three axes, three different outcomes.
+///
+/// §39.7 item 1 says a ball cut anywhere but through a pole is refused and that
+/// a rigid motion of both operands changes the answer. It found that along `y`.
+/// Along `x` the answer is neither of the two it knew about: the fuse gets past
+/// naming the faces and the *triangulator* is what gives up, on a boundary that
+/// crosses itself. So the one defect wears three faces, and a fix that only
+/// stops the `y` refusal will leave the `x` one standing.
+///
+/// **This pins what happens today, §19's way round**, so whoever closes §39.7
+/// item 1 is failed loudly by it rather than quietly agreeing with it. What it
+/// should say when that lands is `Answered` on all three rows, one solid each,
+/// every volume the same spherical cap.
+#[test]
+fn the_same_ball_cut_the_same_way_along_three_axes_gives_three_different_answers() {
+    let cut_one_unit_from_the_centre_along = |shift: Vector| {
+        let mut model = a_model();
+        let ball = model
+            .add_ball(4.0, &Isometry::identity())
+            .expect("a ball of radius four");
+        let block = model
+            .add_cube(20.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a block round it");
+        model.place_solid(block, &Isometry::translation(shift).expect("a shift"));
+        model.fuse(
+            &[ball],
+            &[block],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+    };
+
+    let along_z = cut_one_unit_from_the_centre_along(Vector::new(-10.0, -10.0, 1.0));
+    match along_z {
+        Ok(ref fused) => assert_eq!(
+            fused.solids().len(),
+            1,
+            "a cut square to the polar axis is the one that works"
+        ),
+        Err(ref why) => panic!("the polar axis used to answer, and now says {why:?}"),
+    }
+
+    let along_y = cut_one_unit_from_the_centre_along(Vector::new(-10.0, 1.0, -10.0));
+    assert!(
+        matches!(
+            along_y,
+            Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
+        ),
+        "pinning what happens today: the same cut along y is refused for want of \
+         a seam, got {along_y:?}"
+    );
+
+    let along_x = cut_one_unit_from_the_centre_along(Vector::new(1.0, -10.0, -10.0));
+    assert!(
+        matches!(along_x, Err(Error::CannotMeshAFace { .. })),
+        "pinning what happens today, and it is not the refusal along y: the cut \
+         along x reaches the triangulator and hands it a boundary that crosses \
+         itself, got {along_x:?}"
+    );
+}
