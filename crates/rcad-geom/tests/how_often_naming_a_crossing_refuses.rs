@@ -57,6 +57,14 @@ use crossings::{
 /// `rcad-topo` without costing anything.
 const MEASURED_CASES: u32 = 2048;
 
+/// How many times over [`MEASURED_CASES`] the knife-edge demonstration draws.
+///
+/// Twenty, and the number follows a rate rather than a preference:
+/// `every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn`
+/// is about a refusal that used to be 4.64% of its family and is now 0.03% of
+/// it, so the draws had to go up by about the same factor to keep reaching one.
+const DRAWS_A_KNIFE_EDGE_NOW_TAKES: u32 = 20;
+
 /// The environment variable that multiplies [`MEASURED_CASES`] for a soak.
 ///
 /// ```text
@@ -137,24 +145,27 @@ const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.15;
 
 /// How much of the quartic pairs' turned family may refuse for want of a sign.
 ///
-/// **Not zero, and §29 says why.** The four planar pairs are polynomials in
-/// exact `f64` all the way down, so level 3 decides every one of them; two pipes
-/// leaning against each other are not. Deciding which of the four shapes that
-/// crossing takes compares `ρ₁ ± ρ₂` against `δ`, and those are `rᵢ/√Wᵢ` and
-/// `|T|/√K` — three square roots in three metrics. The enclosure settles it
-/// wherever the comparison is not on a knife edge, and the exact level backs it
-/// up only where the two stored directions have the same squared length, which
-/// a general rotation takes away.
+/// **Two tenths of a percent, down from eight, and §32 is what moved it.**
+/// Deciding which of the four shapes two leaning pipes cross in compares
+/// `ρ₁ ± ρ₂` against `δ`, and those are `rᵢ/√Wᵢ` and `|T|/√K` — three square
+/// roots in three metrics. Clearing the roots takes squaring an expansion five
+/// hundred binary orders wide. That does not fit where it stands and does fit
+/// somewhere else, so the comparison is slid up the range before it is squared
+/// and slid nowhere back: a sign is unchanged by multiplying by a positive power
+/// of two, so nothing about the answer is approximate.
 ///
-/// **Eight percent, and every one of them is a knife edge a rotation made.**
-/// Measured on the shipped corpus: 0% on the lattice and 4.64% turned. The
-/// generator draws radii up to five and places up to six apart in whole numbers,
-/// so a lattice pipe pair is *exactly* tangent surprisingly often — five apart
-/// with radii of two and three is one of them — and §28.6 already recorded that
-/// turning such a pair leaves it genuinely no longer tangent, by a few last bits.
+/// Measured on the shipped corpus: 0% on the lattice, **0.00% turned**, and
+/// 0.03% over twenty times as many draws. What is left is the expansion whose
+/// own spread is past the window a slide has to land in, which is a spread no
+/// scale narrows — and every one of those is still a knife edge a rotation made,
+/// which
 /// `every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn`
-/// is the demonstration that this is what the number is made of.
-const A_TURNED_QUARTIC_CROSSING_MAY_REFUSE: f64 = 0.08;
+/// demonstrates. The generator draws radii up to five and places up to six apart
+/// in whole numbers, so a lattice pipe pair is *exactly* tangent surprisingly
+/// often — five apart with radii of two and three is one of them — and §28.6
+/// already recorded that turning such a pair leaves it genuinely no longer
+/// tangent, by a few last bits.
+const A_TURNED_QUARTIC_CROSSING_MAY_REFUSE: f64 = 0.002;
 
 /// How much of the knife-edge family may refuse for want of a sign.
 ///
@@ -261,9 +272,17 @@ fn how_often_a_certified_naming_of_a_turned_quartic_crossing_refuses() {
 /// of the two configurations whose crossing runs through itself, which is a
 /// knife edge as much as a tangency is. That is what tells this rate apart from
 /// a timid filter (§14.7).
+///
+/// **It draws twenty times what the rows above do**, because the refusal it is
+/// about is now 0.03% of the family rather than 4.64% and 2048 draws reach none
+/// of it. A property with nothing to measure passes for the wrong reason, which
+/// is the failure §14.7 is about, so the draws follow the rate down.
 #[test]
 fn every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn() {
-    let mut runner = TestRunner::new_with_rng(configured(measured_cases()), fresh_seeded_soak());
+    let mut runner = TestRunner::new_with_rng(
+        configured(measured_cases() * DRAWS_A_KNIFE_EDGE_NOW_TAKES),
+        fresh_seeded_soak(),
+    );
     let refused = Cell::new(0usize);
     let steady = Cell::new(0usize);
 

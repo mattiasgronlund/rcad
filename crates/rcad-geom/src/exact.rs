@@ -130,6 +130,80 @@ impl Exact {
         self.plus(&Exact(other.0.iter().map(|entry| -entry).collect()))
     }
 
+    /// `self² − already_squared`, multiplied by whatever positive power of two
+    /// the squaring needed — so **a sign and never a value**.
+    ///
+    /// [`Exact::times`] refuses as soon as one product's low half would land
+    /// among the subnormals, and squaring doubles the spread between an
+    /// expansion's largest entry and its smallest. A number whose own spread
+    /// fits inside the window `WIDEST_SQUARABLE_SPREAD` names but which sits too low or too
+    /// high in the range for its own square to fit is refused where it stands
+    /// and squares without complaint somewhere else, because **multiplying an
+    /// expansion by a power of two is exact and moves every entry together**
+    /// (`docs/decisions.md` §31.4).
+    ///
+    /// So this slides `self` into the window before squaring it, slides
+    /// `already_squared` by twice as much so the two stay comparable, and slides
+    /// nothing back. Both were multiplied by the same positive number, so the
+    /// difference has the sign the caller asked for and a size the caller must
+    /// not read.
+    ///
+    /// The slide is zero wherever the square already fits, so a comparison that
+    /// decides today decides through exactly the same arithmetic.
+    ///
+    /// `None` when `self` is wider than the window at any scale, or when
+    /// `already_squared` cannot follow it.
+    pub(crate) fn square_minus(&self, already_squared: &Exact) -> Option<Exact> {
+        let up = self.exponent_that_makes_its_square_exact()?;
+        let slid = self.slid_by(up)?;
+        Some(slid.times(&slid)?.minus(&already_squared.slid_by(2 * up)?))
+    }
+
+    /// The exponent that slides this number into the window where squaring it is
+    /// exact, or `None` when its own spread is wider than the window.
+    ///
+    /// Zero whenever the square already fits. Otherwise the smallest move that
+    /// does, so a slide never travels further than it has to.
+    fn exponent_that_makes_its_square_exact(&self) -> Option<i32> {
+        let (Some(&smallest), Some(&largest)) = (self.0.first(), self.0.last()) else {
+            return Some(0);
+        };
+        if smallest == 0.0 {
+            return Some(0);
+        }
+        let lift_the_bottom = SMALLEST_ENTRY_A_SQUARE_CAN_HOLD - binary_exponent(smallest);
+        let hold_the_top = LARGEST_ENTRY_A_SQUARE_CAN_HOLD - binary_exponent(largest);
+        if lift_the_bottom > hold_the_top {
+            return None;
+        }
+        Some(0.clamp(lift_the_bottom, hold_the_top))
+    }
+
+    /// This number multiplied by `2^exponent`, exactly, or `None` when that
+    /// would push an entry out of the range where the multiplication is exact.
+    ///
+    /// A power of two only changes an entry's exponent field, so nothing rounds
+    /// while the result is a normal number. Past the top it is infinity and
+    /// below the bottom it is rounded onto the subnormal grid, and either way the
+    /// slid copy stands for a different number than the one that was slid.
+    fn slid_by(&self, exponent: i32) -> Option<Exact> {
+        if exponent == 0 {
+            return Some(self.clone());
+        }
+        let mut slid = self.0.clone();
+        for entry in &mut slid {
+            if *entry == 0.0 {
+                continue;
+            }
+            let moved = multiplied_by_a_power_of_two(*entry, exponent);
+            if !moved.is_normal() {
+                return None;
+            }
+            *entry = moved;
+        }
+        Some(Exact(slid))
+    }
+
     /// This times `other`, exactly, or `None` when one of the products it needs
     /// would round.
     pub(crate) fn times(&self, other: &Exact) -> Option<Exact> {
@@ -244,6 +318,69 @@ impl Exact {
     pub(crate) fn nearest_f64(&self) -> f64 {
         self.0.iter().sum()
     }
+}
+
+/// The smallest binary order an entry may sit at and still be squarable.
+///
+/// [`product_is_exact`] wants a product of at least `2^-969`, which is the
+/// smallest one whose half-ulp is still a normal number. An entry at `2^-484`
+/// squares to `2^-968`, and one binade lower does not.
+const SMALLEST_ENTRY_A_SQUARE_CAN_HOLD: i32 = -484;
+
+/// The largest binary order an entry may sit at and still be squarable.
+///
+/// An entry below `2^512` squares to something below `2^1024`, which is the
+/// first size `f64` cannot hold at all.
+const LARGEST_ENTRY_A_SQUARE_CAN_HOLD: i32 = 511;
+
+/// How far an expansion's largest entry may stand above its smallest and still
+/// have a square somewhere in `f64`.
+///
+/// **This is the published window, and `an_expansion_wider_than_the_window_cannot_be_squared_at_any_scale`
+/// is the test §15.6 asks for.** The two ends above leave room for magnitudes
+/// from `2^-484` up to `2^512` — 996 binary orders — and an expansion whose own
+/// ends are 995 binades apart is the widest that fits between them. A slide
+/// moves every entry together and so cannot narrow a spread by even one order,
+/// which is why past this there is no scale that helps and the refusal stops
+/// being a gap (`docs/decisions.md` §29.6, §30.4).
+#[cfg(test)]
+pub(crate) const WIDEST_SQUARABLE_SPREAD: i32 =
+    LARGEST_ENTRY_A_SQUARE_CAN_HOLD - SMALLEST_ENTRY_A_SQUARE_CAN_HOLD;
+
+/// The `e` with `2^e <= |value| < 2^(e+1)`, read straight out of the bits.
+///
+/// Read rather than computed, because `log2` rounds and this has to be the
+/// exact binade: one out and a slide that would have worked is refused, or one
+/// that overflows is tried. `rcad-predicates` keeps the same three lines for its
+/// own scaling and they are private to it (§31.5 freezes that crate), so the
+/// seam is paid for in nine lines rather than reopened.
+///
+/// # Panics
+///
+/// If `value` is zero, which has no such exponent. An expansion's entries are
+/// non-zero except for the single zero entry that stands for the number zero,
+/// and callers here drop that first.
+fn binary_exponent(value: f64) -> i32 {
+    assert!(value != 0.0, "zero has no binary exponent");
+    let bits = value.abs().to_bits();
+    let stored = (bits >> 52) as i32;
+    if stored > 0 {
+        return stored - 1023;
+    }
+    let mantissa = bits & ((1 << 52) - 1);
+    63 - mantissa.leading_zeros() as i32 - 1074
+}
+
+/// `value * 2^exponent`, in two steps so the factor itself never leaves the
+/// range.
+///
+/// `2f64.powi(1074)` is infinity, and a single multiplication by it throws away
+/// products that would have been ordinary numbers. Halving the exponent keeps
+/// both factors well inside what `f64` holds, and each step moves the magnitude
+/// the same way, so neither intermediate is further out than the answer.
+fn multiplied_by_a_power_of_two(value: f64, exponent: i32) -> f64 {
+    let half = exponent / 2;
+    value * 2f64.powi(half) * 2f64.powi(exponent - half)
 }
 
 #[cfg(test)]
@@ -454,7 +591,9 @@ mod an_exact_number {
 /// pipes at unit size.
 #[cfg(test)]
 mod how_far_exact_arithmetic_reaches {
-    use super::Exact;
+    use rcad_predicates::Decision;
+
+    use super::{Exact, WIDEST_SQUARABLE_SPREAD};
 
     /// Two turned unit directions and an offset between them, none of whose
     /// coordinates is anything but a full-precision `f64`. Nothing about them is
@@ -538,8 +677,10 @@ mod how_far_exact_arithmetic_reaches {
     /// leaves, and the second half of this test shows that it does: the same
     /// expansion written far enough up the range squares without complaint. So
     /// the refusal is a **gap** and not a limit — the answer exists and this
-    /// arithmetic, at this scale, could not reach it — and its fix is the
-    /// working frame §24.8 defers for want of a figure to beat.
+    /// arithmetic, at this scale, could not reach it — and its fix is
+    /// [`Exact::square_minus`], which does that slide for the caller.
+    /// `a_comparison_too_wide_to_square_is_decided_after_it_is_slid_up_the_range`
+    /// is the same numbers going through it.
     #[test]
     fn the_question_two_leaning_pipes_ask_is_too_wide_to_square_where_it_stands() {
         let (volume, squared_sideways, squared_direction) = a_leaning_pair();
@@ -588,6 +729,140 @@ mod how_far_exact_arithmetic_reaches {
         assert!(
             higher.times(&higher).is_some(),
             "the answer was there to be had, one scaling away"
+        );
+    }
+
+    /// The answer that was one scaling away, taken.
+    ///
+    /// `M² − N²` for the same two leaning pipes, where `M` is the expansion the
+    /// test above cannot square where it stands. [`Exact::square_minus`] slides
+    /// `M` up until the square fits and `N²` up by twice as much, so both sides
+    /// are multiplied by the same positive number and the difference keeps its
+    /// sign.
+    ///
+    /// The oracle is a **second slide, by a different exponent**. A sign that
+    /// depended on how far the comparison was slid would not be a sign, so
+    /// asking twice from two different heights is what says this is arithmetic
+    /// rather than luck.
+    #[test]
+    fn a_comparison_too_wide_to_square_is_decided_after_it_is_slid_up_the_range() {
+        let (volume, squared_sideways, squared_direction) = a_leaning_pair();
+        let radii = |radius: f64| {
+            Exact::product_of(radius, radius)
+                .expect("a radius squared")
+                .times(&squared_direction)
+                .expect("both are of order one")
+                .times(&squared_sideways)
+                .expect("and so is this")
+        };
+        let room = radii(1.0).plus(&radii(2.0)).minus(
+            &volume
+                .times(&volume)
+                .expect("an offset squared")
+                .times(&squared_direction)
+                .expect("times a unit direction squared")
+                .times(&squared_direction)
+                .expect("and the other one"),
+        );
+        // `N² = 4r₁²r₂²K²W₁W₂`, with the radii one and two.
+        let together_squared = Exact::product_of(4.0, 4.0)
+            .expect("four times a radius times a radius")
+            .times(&squared_sideways)
+            .expect("K")
+            .times(&squared_sideways)
+            .expect("K again")
+            .times(&squared_direction)
+            .expect("W₁")
+            .times(&squared_direction)
+            .expect("W₂");
+
+        assert_eq!(
+            room.times(&room).map(|_| ()),
+            None,
+            "the whole point is that this one cannot be squared where it stands"
+        );
+
+        let slid = room
+            .square_minus(&together_squared)
+            .expect("the answer is inside the window");
+        assert!(
+            matches!(slid.sign(), Decision::Pos | Decision::Neg | Decision::Zero),
+            "a slid comparison is a certified sign: {:?}",
+            slid.sign()
+        );
+
+        let up = Exact::of(2f64.powi(300));
+        let by_hand = {
+            let higher = room.times(&up).expect("a power of two rounds nothing");
+            higher
+                .times(&higher)
+                .expect("and up here the square fits")
+                .minus(
+                    &together_squared
+                        .times(&up)
+                        .expect("the other side follows")
+                        .times(&up)
+                        .expect("by twice as much"),
+                )
+        };
+        assert_eq!(
+            slid.sign(),
+            by_hand.sign(),
+            "two slides of different heights have to agree, or the sign was never there"
+        );
+    }
+
+    /// The published window, tried at every height `f64` has rather than argued.
+    ///
+    /// §30.4 published it — every pairwise product exact needs the smallest entry
+    /// above `2^-484` and the largest below `2^512` — and §15.6 says a published
+    /// bound needs a test. This is that test, and it is a demonstration in
+    /// CLAUDE.md's sense: an expansion one binary order wider than the window is
+    /// written at **every** placement in the normal range and refused at all of
+    /// them, and one exactly as wide as the window is squared at every one.
+    #[test]
+    fn an_expansion_wider_than_the_window_cannot_be_squared_at_any_scale() {
+        let two_entries_apart = |high: i32, spread: i32| {
+            Exact::of(2f64.powi(high)).plus(&Exact::of(2f64.powi(high - spread)))
+        };
+        let lowest_normal = -1022;
+
+        let too_wide = WIDEST_SQUARABLE_SPREAD + 1;
+        let mut refused = 0;
+        for high in (lowest_normal + too_wide)..=1023 {
+            let wide = two_entries_apart(high, too_wide);
+            assert_eq!(wide.spread(), too_wide, "written at 2^{high}");
+            assert_eq!(
+                wide.square_minus(&Exact::of(0.0)).map(|_| ()),
+                None,
+                "an expansion {too_wide} orders wide has no square at 2^{high} either"
+            );
+            refused += 1;
+        }
+        assert!(refused > 1000, "only {refused} placements were tried");
+
+        let widest = WIDEST_SQUARABLE_SPREAD;
+        for high in (lowest_normal + widest)..=1023 {
+            let fits = two_entries_apart(high, widest);
+            assert!(
+                fits.square_minus(&Exact::of(0.0)).is_some(),
+                "an expansion exactly as wide as the window has a square somewhere, and at \
+                 2^{high} this one did not find it"
+            );
+        }
+    }
+
+    /// A comparison that already fits is not moved, so nothing this lane did
+    /// changes the arithmetic of a question that was being answered yesterday.
+    #[test]
+    fn a_square_that_already_fits_is_worked_out_exactly_where_it_stands() {
+        let ordinary = Exact::of(3.0).plus(&Exact::of(0.25));
+        assert_eq!(
+            ordinary
+                .square_minus(&Exact::of(0.0))
+                .expect("of order one")
+                .nearest_f64(),
+            3.25 * 3.25
         );
     }
 }

@@ -1333,13 +1333,16 @@ fn how_two_squares_compare_exactly(
         return Some(radii_apart.sign());
     }
 
-    // `M² − N²`, with `N² = 4r₁²r₂²K²W₁W₂`.
+    // `M² − N²`, with `N² = 4r₁²r₂²K²W₁W₂`. `M` for two ordinary leaning pipes
+    // is five hundred binary orders wide, so its square does not fit where it
+    // stands; `square_minus` slides both sides up together, which cannot change
+    // a sign (`docs/decisions.md` §31.4).
     let together_squared = Exact::product_of(2.0 * one.radius(), 2.0 * other.radius())?
         .times(&Exact::product_of(one.radius(), other.radius())?)?
         .times(squared_sideways)?
         .times(squared_sideways)?
         .times(squared_gap)?;
-    let against = radii_apart.times(&radii_apart)?.minus(&together_squared);
+    let against = radii_apart.square_minus(&together_squared)?;
     Some(
         match (against.sign(), radii_apart.sign() == Decision::Pos) {
             (Decision::Zero, _) => Decision::Zero,
