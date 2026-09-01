@@ -44,8 +44,8 @@ use rcad_predicates::{
 
 use crate::classify::decide;
 use crate::validate::side_of_surface;
-use crate::view::{EdgeView, FaceView, WireView};
-use crate::{Error, FaceKey, Result, SolidView};
+use crate::view::{CoedgeView, EdgeView, FaceView, WireView};
+use crate::{Error, FaceKey, Invalid, Result, SolidView};
 
 /// Where a point sits relative to one face of a solid.
 ///
@@ -312,12 +312,20 @@ fn what_a_curved_face_holds(
     log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
     let mut on_its_boundary = false;
-    for (partner, edges) in what_trims_this_face(solid, face)? {
-        if !every_piece_of_that_crossing_is_an_edge(surface, &partner, edges, policy, log)? {
+    for trimming in what_trims_this_face(solid, face)? {
+        if !every_piece_of_that_crossing_is_an_edge(
+            surface,
+            &trimming.surface,
+            trimming.edges,
+            policy,
+            log,
+        )? {
             return Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face: face.key() });
         }
-        let inwards = the_side_this_face_lies_on(face, &partner)?;
-        let side = side_of_surface(&partner, point);
+        let inwards = the_side_this_face_lies_on(face, &trimming)?.ok_or(
+            Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() },
+        )?;
+        let side = side_of_surface(&trimming.surface, point);
         match side {
             Decision::Zero => on_its_boundary = true,
             Decision::Pos | Decision::Neg if side == inwards => (),
@@ -345,8 +353,11 @@ fn what_a_curved_face_holds(
 /// not a whole closed curve. An edge with two different ends is a piece of a
 /// crossing rather than the whole of it, and which piece is a question about
 /// where a curve runs rather than about a sign.
-fn what_trims_this_face(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<(Surface, usize)>> {
-    let mut trimming: Vec<(Surface, usize)> = Vec::new();
+pub(crate) fn what_trims_this_face(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+) -> Result<Vec<Trimming>> {
+    let mut trimming: Vec<Trimming> = Vec::new();
     for wire in face.wires() {
         for coedge in wire.coedges() {
             let edge = coedge.edge();
@@ -357,13 +368,40 @@ fn what_trims_this_face(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<
                 return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() });
             }
             let surface = partner.surface();
-            match trimming.iter_mut().find(|(known, _)| *known == surface) {
-                Some((_, count)) => *count += 1,
-                None => trimming.push((surface, 1)),
+            let corner = edge.start().key();
+            match trimming.iter_mut().find(|known| known.surface == surface) {
+                Some(known) => {
+                    known.edges += 1;
+                    known.corners_on_it.push(corner);
+                }
+                None => trimming.push(Trimming {
+                    surface,
+                    edges: 1,
+                    corners_on_it: vec![corner],
+                }),
             }
         }
     }
     Ok(trimming)
+}
+
+/// One surface trimming a face: which surface, how many edges of the face run
+/// along it, and which corners of the face those edges hold.
+///
+/// **The corners are the load-bearing part, and it is topology and not
+/// arithmetic.** A corner of one of those edges is on that surface because it is
+/// on that edge, which no rounding can take away. Asking a predicate instead
+/// works on a solid stored where it sits and fails on one that has been placed:
+/// the corner is carried there by an [`Isometry`](rcad_geom::Isometry) that
+/// rounds, so it lands a hair off the surface it is on and the sign that comes
+/// back is whichever way the rounding went (§19.1).
+pub(crate) struct Trimming {
+    /// The surface, already moved into place.
+    pub surface: Surface,
+    /// How many edges of the face run along it.
+    pub edges: usize,
+    /// The corners those edges hold, which are on it by construction.
+    pub corners_on_it: Vec<crate::VertexKey>,
 }
 
 /// What is on the other side of one edge of a face.
@@ -438,32 +476,40 @@ fn every_piece_of_that_crossing_is_an_edge(
 ///
 /// # Errors
 ///
-/// [`Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`] when no corner is off
-/// `partner`, or two corners are off it on opposite sides — which is a face that
-/// straddles something trimming it, and then it is not one of the two pieces at
-/// all.
+/// [`Invalid::AFaceStraddlesSomethingTrimmingIt`] when two corners are off
+/// `partner` on opposite sides. A crossing that goes right round cuts a surface
+/// into exactly two pieces, so a face bounded by the whole of one and standing
+/// on both sides of it is a model whose topology and geometry disagree — which
+/// arrives from a file and not from a builder (§16.11).
+///
+/// `Ok(None)` when no corner is off `partner` at all. That is not a broken model
+/// — a disk cut out of a ball has its one corner on the pipe that cut it — it is
+/// a face this cannot read the side of, and the caller says so.
 ///
 /// [`Error::Undecidable`] when a corner's side could not be settled.
-fn the_side_this_face_lies_on(face: FaceView<'_>, partner: &Surface) -> Result<Decision> {
+pub(crate) fn the_side_this_face_lies_on(
+    face: FaceView<'_>,
+    trimming: &Trimming,
+) -> Result<Option<Decision>> {
+    let partner = &trimming.surface;
     let mut found: Option<Decision> = None;
-    for corner in face.wires().flat_map(WireView::points) {
-        let at = PredicatePoint::from(corner.coordinates());
+    for corner in face.wires().flat_map(WireView::coedges).map(CoedgeView::start) {
+        if trimming.corners_on_it.contains(&corner.key()) {
+            continue;
+        }
+        let at = PredicatePoint::from(corner.point().coordinates());
         let side = side_of_surface(partner, at);
         match side {
             Decision::Zero => (),
             Decision::Pos | Decision::Neg => match found {
                 None => found = Some(side),
                 Some(already) if already == side => (),
-                Some(_) => {
-                    return Err(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn {
-                        face: face.key(),
-                    });
-                }
+                Some(_) => return Err(Invalid::AFaceStraddlesSomethingTrimmingIt.into()),
             },
             other => return Err(gave_up_on_a_side(at, other)),
         }
     }
-    found.ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })
+    Ok(found)
 }
 
 /// Whether `point`, already shown to be on the line through `from` and `to`, is

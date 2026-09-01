@@ -438,6 +438,23 @@ pub enum Invalid {
     #[error("both coedges of an edge run the same way round")]
     CoedgesRunTheSameWay,
 
+    /// A curved face stands on both sides of a surface that trims it.
+    ///
+    /// This is the curved twin of [`Invalid::OuterWireWindsAgainstTheNormal`],
+    /// and it is the part of "every wire keeps the face's material on its left"
+    /// (`docs/decisions.md` §31.3) that can be asked without a direction rule for
+    /// a closed edge. A crossing that goes right round cuts a surface into
+    /// exactly two pieces; a face whose whole boundary is that crossing is one of
+    /// them, so a corner on each side is a model whose topology and geometry
+    /// disagree.
+    ///
+    /// Only asked of a face whose every side is a whole closed crossing. A face
+    /// trimmed by a *piece* of one straddles that piece's surface quite properly
+    /// — a bar with a notch cut in its wall does — and §35 says what is still
+    /// owed there.
+    #[error("a curved face stands on both sides of a surface that trims it")]
+    AFaceStraddlesSomethingTrimmingIt,
+
     /// A wire has fewer than three coedges.
     #[error("a wire has {count} coedges; a closed wire needs at least three")]
     WireTooShort {

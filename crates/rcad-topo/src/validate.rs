@@ -17,6 +17,7 @@ use slotmap::SecondaryMap;
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
+use crate::holds::{the_side_this_face_lies_on, what_trims_this_face};
 use crate::view::{FaceView, SolidView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
 
@@ -76,6 +77,7 @@ impl Model {
         self.check_coedges()?;
         self.check_wires()?;
         self.check_faces()?;
+        self.check_which_side_of_its_trimming_each_curved_face_lies_on()?;
         self.check_shells_and_solids(policy, log)?;
         self.check_approximation_ordering()?;
         self.check_dynamic_range(policy, log)
@@ -283,6 +285,48 @@ impl Model {
                         count,
                     }
                     .into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Every curved face on one side of everything that trims it.
+    ///
+    /// **The curved twin of the winding check**, and what is left of §31.3's
+    /// "every wire keeps the face's material on its left" once you notice there
+    /// is no direction rule to read a closed edge's own sense from (§30.8 item
+    /// 10). What *can* be asked without one is this: a crossing that goes right
+    /// round cuts a surface into exactly two pieces, so a face whose whole
+    /// boundary is such crossings is one of those pieces, and one corner on each
+    /// side of one of them is a model whose topology and geometry disagree.
+    ///
+    /// **Only asked of a face whose every side is a whole closed crossing**, and
+    /// not because the rest is hard. A face trimmed by a *piece* of a crossing
+    /// straddles that piece's surface quite properly — a bar with a notch cut in
+    /// its wall does — so asking there would refuse sound solids.
+    ///
+    /// It is the invariant [`SolidView::face_holds_the_point`] rests on, asked
+    /// once over the whole model rather than trusted at each call, which is what
+    /// §4.3 means by the sweep being where the expensive questions live.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::AFaceStraddlesSomethingTrimmingIt`], and
+    /// [`Error::Undecidable`] when a corner's side could not be settled.
+    fn check_which_side_of_its_trimming_each_curved_face_lies_on(&self) -> Result<()> {
+        for (slot, _) in &self.data().solids {
+            let solid = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
+            for face in solid.faces() {
+                let surface = face.surface();
+                if surface.as_plane().is_some() {
+                    continue;
+                }
+                let Ok(trimming) = what_trims_this_face(solid, face) else {
+                    continue;
+                };
+                for one in &trimming {
+                    the_side_this_face_lies_on(face, one)?;
                 }
             }
         }
@@ -1148,6 +1192,71 @@ mod tests {
                 Some(invalid) => assert_eq!(refusal(&model), invalid),
             }
         }
+    }
+
+    /// A curved face standing on both sides of something that trims it is
+    /// caught.
+    ///
+    /// **The curved twin of `a_face_whose_outer_wire_winds_against_its_normal`**
+    /// and the only part of "the material is on the left" that can be asked
+    /// while a closed edge has no direction rule (§30.8 item 10).
+    ///
+    /// One cylinder and three flat faces cutting it at three heights, with all
+    /// three circles claimed by the one curved face. Every corner of it is
+    /// certified onto the cylinder and every corner of each flat face is on its
+    /// own plane, so nothing before this notices; what is wrong is that the
+    /// middle plane has a corner of the curved face on each side of it, and a
+    /// crossing that goes right round leaves two pieces and not three. **The
+    /// route is `Deserialize`**: no builder makes this and the fuse will not,
+    /// but the arenas hold it and `validate` is the untrusted-import boundary
+    /// (§16.11).
+    #[test]
+    fn a_curved_face_standing_on_both_sides_of_something_that_trims_it_is_caught() {
+        let mut model = an_empty_model();
+        let radius = 3.0;
+        let pipe = Cylinder::new(rcad_geom::Axis::z(), radius).expect("a pipe");
+
+        let mut round_it: SmallVec<[WireSlot; 1]> = SmallVec::new();
+        let mut caps = Vec::new();
+        for height in [-1.0, 0.0, 1.0] {
+            let corner = model.add_vertex(Point::new(radius, 0.0, height));
+            let circle = model.add_closed_edge(corner);
+            let mine = model.add_coedge(circle, Orientation::Forward);
+            round_it.push(model.add_wire(smallvec::smallvec![mine]));
+
+            let flat =
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0))
+                    .expect("the z axis is a unit normal");
+            let theirs = model.add_coedge(circle, Orientation::Reversed);
+            let wire = model.add_wire(smallvec::smallvec![theirs]);
+            caps.push(model.add_face(Surface::Plane(flat), SmallVec::from_buf([wire])));
+        }
+        let wall = model.add_face(Surface::Cylinder(pipe), round_it);
+
+        let shell = model.add_shell(
+            caps.into_iter()
+                .chain(core::iter::once(wall))
+                .map(|face| crate::model::FaceUse {
+                    face,
+                    loc: Isometry::identity(),
+                    orient: Orientation::Forward,
+                })
+                .collect(),
+        );
+        model.add_solid(SmallVec::from_buf([crate::model::ShellUse {
+            shell,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]));
+
+        assert!(
+            matches!(
+                refusal(&model),
+                Invalid::AFaceStraddlesSomethingTrimmingIt
+            ),
+            "got {:?}",
+            refusal(&model)
+        );
     }
 
     #[test]
