@@ -61,7 +61,7 @@ use crate::{
     Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
 };
 
-use super::arrange::agreement_of_two_planes;
+use super::arrange::{agreement_of_two_planes, name_of_surface_bits};
 use super::select::Chosen;
 use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
 
@@ -239,9 +239,9 @@ impl Assembly {
             faces.push(Face {
                 ancestors: piece.ancestors.clone(),
                 plane: if turned_round {
-                    piece.plane.reversed()
+                    piece.plane().reversed()
                 } else {
-                    piece.plane
+                    piece.plane()
                 },
                 wires,
             });
@@ -1265,27 +1265,41 @@ struct Corners {
 
 /// What two faces agree to call the same corner.
 ///
-/// Never a coordinate. Two faces solving the same three planes in a different
+/// Never a coordinate. Two faces solving the same three surfaces in a different
 /// order round differently, so comparing what they rounded to would either miss
-/// a join or invent one; comparing the *names* of the planes cannot.
+/// a join or invent one; comparing the *names* of the surfaces cannot.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CornerName {
     /// A corner the input already had.
     Vertex(VertexSlot),
-    /// The meet of three planes, each written out as the bits of its four
-    /// coefficients, sorted so the three arrive the same way round whichever
-    /// face asked.
-    Meet([[u64; 4]; 3]),
+    /// One of the places three surfaces meet, each surface written out as the
+    /// bits it stores and sorted so the three arrive the same way round
+    /// whichever face asked, and **which** of their meeting points this is.
+    ///
+    /// Three surfaces can meet at more than one point, so the three names do not
+    /// pick a corner on their own; §31.3 is where that field comes from and it
+    /// is what stops two different corners being joined into one.
+    Meet([[u64; 8]; 3], u8),
+    /// The one point on a closed crossing that nothing else cuts, named by the
+    /// two surfaces it runs between.
+    RoundACurve([[u64; 8]; 2]),
 }
 
 impl Corners {
     fn of(&mut self, model: &Model, end: &MeetPoint) -> usize {
         let name = match end {
             MeetPoint::Existing { vertex, .. } => CornerName::Vertex(vertex.slot_in(model.id())),
-            MeetPoint::OfThreePlanes { planes, .. } => {
-                let mut named = planes.map(|plane| plane.coefficients().map(f64::to_bits));
+            MeetPoint::OfThreeSurfaces {
+                surfaces, which, ..
+            } => {
+                let mut named = surfaces.map(|surface| name_of_surface_bits(&surface));
                 named.sort_unstable();
-                CornerName::Meet(named)
+                CornerName::Meet(named, *which)
+            }
+            MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => {
+                let mut named = carried_by.map(|surface| name_of_surface_bits(&surface));
+                named.sort_unstable();
+                CornerName::RoundACurve(named)
             }
         };
         if let Some(&already) = self.named.get(&name) {
@@ -1295,7 +1309,7 @@ impl Corners {
         let at = middle_of(point);
         let was = match end {
             MeetPoint::Existing { vertex, .. } => Some(*vertex),
-            MeetPoint::OfThreePlanes { .. } => None,
+            MeetPoint::OfThreeSurfaces { .. } | MeetPoint::WhereAClosedCurveStarts { .. } => None,
         };
         let index = match self.at.get(&exactly_at(at)) {
             Some(&already) => {

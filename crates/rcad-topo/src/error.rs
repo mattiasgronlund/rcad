@@ -349,6 +349,68 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// A face's boundary edge runs along a curve where its own surface and the
+    /// one across that edge do not meet at all.
+    ///
+    /// Two faces that share an edge cross along it by definition, so this is a
+    /// model whose topology and geometry disagree — a plane and a ball that miss
+    /// each other with an edge drawn between them.
+    #[error("a face has an edge along a curve its two surfaces do not have")]
+    AFaceMeetsItsNeighbourNowhere {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// A face's boundary edge runs between two faces that are on **one**
+    /// surface.
+    ///
+    /// Two faces on one surface with an edge between them carry no curve for
+    /// that edge to run along. The joiner in the fuse's baking step takes such a
+    /// pair apart before the arrangement sees it, and a pair it does not reach —
+    /// two faces on one *cylinder*, which nothing joins yet — is refused rather
+    /// than arranged wrongly.
+    #[error("a face and the face across one of its edges are on the same surface")]
+    AFaceMeetsItsNeighbourOnItsOwnSurface {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Two surfaces cross in more than one curve and nothing says which of them
+    /// an edge of a face runs along.
+    ///
+    /// A plane down the inside of a pipe cuts two straight lines and a ball
+    /// crossing a pipe off-axis leaves two loops; which one an edge is, is the
+    /// half-spaces on its own run. A picker that could not decide rules out
+    /// nothing (§33.8), so a corner held by both curves — or by neither — is a
+    /// refusal here and never a guess.
+    #[error("nothing says which of the curves two surfaces cross in an edge of a face runs along")]
+    CannotTellWhichCurveOfACrossingAFaceRunsAlong {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Two curves drawn on one face meet at a point without crossing there.
+    ///
+    /// Two curves tangent at a node leave the arrangement with no anticlockwise
+    /// order round it, so there is no way round the cell they bound. A **gap**:
+    /// the pieces are there and telling them apart takes following one of the
+    /// curves past the touch, which nothing in this kernel does.
+    #[error("two curves on one face touch without crossing")]
+    TwoCurvesTouchWithoutCrossing {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Points along a curve a face is cut by cannot be put in order.
+    ///
+    /// A straight crossing is ordered by the axis it climbs fastest along and a
+    /// closed conic by the area three of its points sweep. A ball against a
+    /// pipe, or two pipes, is neither: the curve is a quartic, and ordering
+    /// points along one takes the marcher rather than a determinant. A **gap**,
+    /// and §34.10's own row records the same one dimension down.
+    #[error("nothing can put points in order along this curve")]
+    ACrossingThisCannotBeOrderedAlong,
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the

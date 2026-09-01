@@ -1011,7 +1011,7 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// something the total cannot. §17.7 records that every refusal the turned
 /// family has ever produced named `"side of plane"`, with
 /// `"a point inside a piece of a face"` turning up rarely and no seed ever
-/// naming a third. This family's leading cause is `"order along a line"`, which
+/// naming a third. This family's leading cause is `"order along a crossing"`, which
 /// that corpus essentially never reaches — and reaching it is the point. Three
 /// cut lines through one point put two intersections at the same place on a
 /// line, and an ordering that is a tie is not a comparison any amount of
@@ -1131,12 +1131,16 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
     );
 }
 
-/// The predicate that settles which of two points on a line comes first.
+/// The predicate that settles which of two points on a crossing comes first.
 ///
 /// Named here because [`how_often_a_certified_fuse_of_a_skew_pair_refuses`]
 /// asserts on it rather than only printing it, and a bare string in an
 /// assertion is a thing that goes stale silently.
-const ORDER_ALONG_A_LINE: &str = "order along a line";
+///
+/// It was `"order along a line"` until the arrangement learned to draw a curve
+/// that closes, and the same question about a straight crossing is still the
+/// same question — the count this family asserts on did not move.
+const ORDER_ALONG_A_LINE: &str = "order along a crossing";
 
 /// Whether this run is the shipped measurement rather than a soak.
 ///
@@ -1459,10 +1463,16 @@ impl Tally {
     /// and its headline number is measuring the tilt over again.
     ///
     /// Judged on the shipped corpus only, for the same reason the thresholds
-    /// are: this is deterministic there — 30 naming it against 21 naming
+    /// are: this is deterministic there — 30 naming it against 12 naming
     /// `"side of plane"` — while a soak is a different corpus with a spread of
     /// its own. Four soaked seeds put the margin far wider than the shipped one
     /// rather than narrower, so this is the conservative place to judge it.
+    ///
+    /// The 30 has not moved since §17.7; the 21 beside it came down to 12 when
+    /// the gathering step stopped asking `Plane::agreement_with` and then
+    /// `planes_are_parallel` about every pair of faces and started asking
+    /// [`intersect`](rcad_geom::intersect), which settles the same three cases
+    /// in one call and gives up in fewer places on the way (§36).
     fn the_cause_named_most_often_is(&self, predicate: &str) {
         let gave_up = self.gave_up.borrow();
         let most = gave_up

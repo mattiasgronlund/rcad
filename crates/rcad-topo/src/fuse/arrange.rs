@@ -1,98 +1,124 @@
-//! One face against every line that cuts it, all at once.
+//! One face against every crossing that cuts it, all at once.
 //!
-//! Never one line and then the next: the pieces would depend on the order the
-//! lines arrived in, which depends on the order of the arguments, and §14.8's
-//! commutativity and associativity oracles would fail by construction (§17.4).
-//! The cut planes are sorted into a canonical order on the way in, so what comes
-//! out is a function of the face and the *set* of planes cutting it.
+//! Never one crossing and then the next: the pieces would depend on the order
+//! the crossings arrived in, which depends on the order of the arguments, and
+//! §14.8's commutativity and associativity oracles would fail by construction
+//! (§17.4). The cut surfaces are sorted into a canonical order on the way in, so
+//! what comes out is a function of the face and the *set* of surfaces cutting
+//! it.
 //!
-//! # Everything here is a pair of planes
+//! # Everything here is a pair of surfaces
 //!
-//! A face `F` sits on a plane `p`. Every line that matters to it is `p ∩ Q`:
-//! `Q` is the plane of the face across a boundary edge, or the plane of a face
-//! cutting it. So:
+//! A face `F` sits on a surface `S`. Every curve that matters to it is
+//! `S ∩ Q`: `Q` is the surface of the face across a boundary edge, or the
+//! surface of a face cutting it. §17.4 said "pair of planes" and §31.3 changes
+//! the one word. So:
 //!
-//! - every corner of the arrangement is [`Plane::meet_of_three`], and no
-//!   two-plane meet is needed anywhere (§17.5);
-//! - whether two lines cross, run parallel or are the same line is the rank of a
-//!   three-by-four matrix of stored coefficients, which is four exact
-//!   determinants ([`relation_of_two_lines`]);
-//! - the anticlockwise order of two lines round a corner is one more exact
-//!   determinant ([`Arrangement::turns_anticlockwise`]);
-//! - the order of points along a line is an interval comparison on the
-//!   direction's dominant axis, and two points whose intervals overlap are
-//!   undecidable, which is exactly the coincidence case that gets merged
-//!   ([`Arrangement::order_along`]).
+//! - every node of the arrangement is [`meet_of_three_surfaces`], which for
+//!   three planes is bit-for-bit the Cramer solve that used to be here (§34.9);
+//! - the anticlockwise order of two curves round a node is one exact
+//!   determinant of the three surfaces' **gradients** there — §17.4's
+//!   determinant of three normals, with `∇S` in each normal's place, which is
+//!   the same derivation with flatness never used (§31.2 row 9);
+//! - the order of points along a crossing is a comparison on the direction's
+//!   dominant axis where the crossing is straight, and
+//!   [`which_comes_first_round_a_crossing`] where it closes.
 //!
-//! # How the pieces are found
+//! # How the pieces are found, and what a closed curve changes
 //!
-//! The arcs of the arrangement are drawn on the plane; each one is walked from
+//! The arcs of the arrangement are drawn on the surface; each one is walked from
 //! both sides, and the walks close into cycles with the region they bound on the
 //! left. How many times the face's boundary winds round each cycle's region is
 //! then a count that propagates across the arcs: crossing a boundary arc from
 //! its right to its left adds one, crossing a cut arc adds nothing. The cells
 //! wound once are the pieces.
 //!
-//! A hole of the face that no cut line touches is a lump of the drawing that
-//! nothing joins to the rest, so which piece it belongs to is the one question
-//! the walk cannot answer, and [`Arrangement::piece_around`] answers it by
-//! following one of the hole's own lines until it runs into another lump.
+//! **That much is unchanged and none of it was ever about straight lines.** What
+//! *was* about straight lines is how the walks are joined up, and it took three
+//! forms, every one of them under a name that said nothing about it:
+//!
+//! - `drop_the_lumps_that_are_only_cuts` argued that "a cut line that runs
+//!   through the face crosses its boundary to get there". True of a line and
+//!   **false of a circle**: the circle a bar's wall cuts in a block's face lies
+//!   wholly inside it and touches no boundary. Gone.
+//! - `piece_around` followed one of a lump's own lines until it ran into an arc
+//!   of the rest of the drawing, comparing positions along one axis at every
+//!   turn. A closed curve has no axis to climb and the ray has nowhere to start.
+//!   Gone.
+//! - `pieces` read the first wire of the face as the outer one and everything
+//!   else as a hole inside it. A ball's skin with a pipe through it has two
+//!   boundary curves and neither is outer (§31.3). Gone.
+//!
+//! What replaces all three is one rule and it needs no ray and no construction:
+//! **two walks in different lumps of the drawing bound the same cell exactly
+//! when they lie on the same side of every crossing that is drawn in full.** A
+//! crossing is drawn in full when none of its arcs was thrown away, which is
+//! every cut crossing and every closed boundary edge; the side a walk lies on is
+//! read off the half-edge where the walk uses that crossing, and off any of its
+//! own nodes where it does not. Both are signs the kernel already had.
 
 use core::cmp::Ordering;
 
-use rcad_geom::{Orientation, Plane, PlaneAgreement, SIDE_OF_PLANE};
+use rcad_geom::{
+    EdgeRun, MeetOfThree, NamedRun, Orientation, Picker, Plane, PlaneAgreement, Surface,
+    SurfaceMeet, intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
+    which_comes_first_round_a_crossing,
+};
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
-    ProvenanceLog, orient2d, orient3d,
+    ProvenanceLog, orient2d, orient3d, orient3d_of_points,
 };
 
 use smallvec::SmallVec;
 
-use crate::{FaceKey, Invalid, Result, VertexKey};
+use crate::validate::{name_of_surface, side_of_surface};
+use crate::{Error, FaceKey, Invalid, Result, VertexKey};
 
 use super::bake::BakedFace;
 use super::{
-    FaceMeet, MeetPoint, Sameness, WHERE_THREE_PLANES_MEET, as_exact_as_it_is, gave_up,
-    must_decide, the_other_way,
+    FaceMeet, MeetPoint, Sameness, as_exact_as_it_is, gave_up, must_decide, the_other_way,
 };
 
-/// Cut one face into the pieces its cut lines leave behind.
+/// Cut one face into the pieces its cut surfaces leave behind.
 ///
 /// A face with nothing cutting it comes back as one piece: itself.
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`](crate::Error::Undecidable) when a decision the split depends on could not be
-/// settled under `policy`, and [`Error::Invalid`](crate::Error::Invalid) when the face turns out to be
+/// [`Error::Undecidable`](crate::Error::Undecidable) when a decision the split
+/// depends on could not be settled under `policy`,
+/// [`Error::ACrossingThisCannotBeOrderedAlong`] when a curve the face is cut by
+/// is one nothing here can put points in order along, and
+/// [`Error::Invalid`](crate::Error::Invalid) when the face turns out to be
 /// broken — two of its corners in the same place, say.
 ///
 /// # Panics
 ///
 /// If the arrangement comes out contradicting itself: a cell that is both inside
-/// and outside the face, a piece with fewer than three sides, or a hole that
-/// does not sit in any piece. Those are broken internal invariants, and a
-/// corrupt solid is worse than a crash (§4.1).
+/// and outside the face, or a piece with no sides at all. Those are broken
+/// internal invariants, and a corrupt solid is worse than a crash (§4.1).
 pub(crate) fn split_a_face(
     face: &BakedFace,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Vec<Piece>> {
-    let arrangement = Arrangement::of(face, &canonical_cut_planes(face), policy, log)?;
-    arrangement.pieces(log)
+    let cuts = canonical_cut_surfaces(face);
+    let arrangement = Arrangement::of(face, &cuts, policy, log)?;
+    arrangement.pieces()
 }
 
-/// The stretches of the line `face.plane ∩ partner` that run through the inside
-/// of `face`.
+/// The stretches of the crossing `face.surface ∩ partner` that run through the
+/// inside of `face`.
 ///
 /// Used to tell a solid that crosses itself from one that merely has two faces
-/// whose planes cross somewhere out in space (§17.4).
+/// whose surfaces cross somewhere out in space (§17.4).
 ///
 /// # Errors
 ///
 /// The same as [`split_a_face`].
 pub(crate) fn stretches_of_a_line_inside(
     face: &BakedFace,
-    partner: &Plane,
+    partner: &Surface,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Stretches> {
@@ -108,23 +134,44 @@ pub(crate) struct Piece {
     /// one when coplanar faces of the input were joined into a single face on
     /// the way in. They are all faces of one solid.
     pub(crate) ancestors: Vec<FaceKey>,
-    /// The plane, inherited from the ancestor bit for bit (§17.1).
-    pub(crate) plane: Plane,
+    /// The surface, inherited from the ancestor bit for bit (§17.1, §31.3).
+    pub(crate) surface: Surface,
     /// Which way round the ancestor's solid used it.
     pub(crate) orientation: Orientation,
-    /// The boundary: the outer wire first, then one wire per hole. The outer one
-    /// runs anticlockwise round [`Piece::plane`]'s normal and the holes run
-    /// clockwise, which is the winding [`Model::validate`] asks for.
+    /// The boundary, every wire keeping the piece's material on its left.
+    ///
+    /// On a **flat** piece the first wire is the outer one and the rest are
+    /// holes, which is the winding [`Model::validate`] asks for there. On a
+    /// closed surface neither is outer and the order is the order the walks were
+    /// found in — §31.3 settles that "outline and holes" is a thing a face
+    /// stores rather than a fact about the geometry.
     ///
     /// [`Model::validate`]: crate::Model::validate
     pub(crate) wires: Vec<Vec<FaceMeet>>,
 }
 
-/// Where a line runs through the inside of a face, as ranges of one coordinate.
+impl Piece {
+    /// The plane this piece sits on.
+    ///
+    /// # Panics
+    ///
+    /// If the piece is curved. Selection and the commit are still gated on
+    /// [`Error::FuseNeedsFlatFaces`](crate::Error::FuseNeedsFlatFaces), which
+    /// lane 5 of §31.6 takes off; until then no curved piece reaches them.
+    pub(crate) fn plane(&self) -> Plane {
+        *self
+            .surface
+            .as_plane()
+            .expect("the fuse is still gated on every face being flat")
+    }
+}
+
+/// Where a straight crossing runs through the inside of a face, as ranges of one
+/// coordinate.
 #[derive(Clone, Debug)]
 pub(crate) struct Stretches {
-    /// The coordinate axis the ranges are measured on: the one the line climbs
-    /// fastest along.
+    /// The coordinate axis the ranges are measured on: the one the crossing
+    /// climbs fastest along.
     axis: usize,
     /// One range per stretch, each a pair of enclosures of its two ends.
     spans: Vec<[Interval; 2]>,
@@ -141,7 +188,7 @@ impl Stretches {
     /// # Panics
     ///
     /// If the two were measured on different axes, which would make the numbers
-    /// incomparable. Both come from the same pair of planes, so both pick the
+    /// incomparable. Both come from the same pair of surfaces, so both pick the
     /// same axis, and an empty set of stretches has no axis to disagree about.
     pub(crate) fn provably_overlap(&self, other: &Stretches) -> bool {
         if self.spans.is_empty() || other.spans.is_empty() {
@@ -149,7 +196,7 @@ impl Stretches {
         }
         assert!(
             self.axis == other.axis,
-            "two stretches of the same line must be measured on the same axis"
+            "two stretches of the same crossing must be measured on the same axis"
         );
         self.spans.iter().any(|mine| {
             other.spans.iter().any(|theirs| {
@@ -171,41 +218,83 @@ fn certain_part([from, to]: [Interval; 2]) -> (f64, f64) {
     (low, high)
 }
 
-/// The cut planes of a face, in an order that depends on the set and nothing
+/// The cut surfaces of a face, in an order that depends on the set and nothing
 /// else.
 ///
-/// Sorted on the four coefficients so that the same set of planes always
-/// arrives the same way round, and the arrangement is therefore a function of
-/// the face and the set (§17.4). Planes that are equal as four numbers are
-/// dropped; two *different* planes that happen to cut `p` in the same line are
-/// found later by [`relation_of_two_lines`], which is exact.
-fn canonical_cut_planes(face: &BakedFace) -> Vec<Plane> {
-    let mut planes: Vec<Plane> = face.cuts.clone();
-    planes.sort_by(|one, other| {
-        let (one, other) = (one.coefficients(), other.coefficients());
-        (0..4)
-            .map(|index| one[index].total_cmp(&other[index]))
-            .find(|order| order.is_ne())
-            .unwrap_or(Ordering::Equal)
-    });
-    planes.dedup();
-    planes
+/// Sorted on the numbers each one stores so that the same set always arrives the
+/// same way round, and the arrangement is therefore a function of the face and
+/// the set (§17.4). Surfaces that are equal as stored numbers are dropped; two
+/// *different* surfaces that happen to cut `S` in the same curve are found later
+/// by [`Arrangement::the_same_crossing`].
+fn canonical_cut_surfaces(face: &BakedFace) -> Vec<Surface> {
+    let mut surfaces: Vec<Surface> = face.cuts.clone();
+    surfaces.sort_by_key(name_of_surface_bits);
+    surfaces.dedup();
+    surfaces
 }
 
-/// A face, the lines drawn on it, and everything that follows from them.
+/// The numbers a surface stores, as bits, with its kind first.
+///
+/// A total order over surfaces that depends on nothing but what each one holds.
+/// Sound for exactly the reason §32.5's trap gives — two faces that are the same
+/// plane hold the same four numbers — and **not** sound for a
+/// [`HalfSpace`](rcad_geom::HalfSpace), which §33.8 says has no canonical form
+/// at all.
+pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
+    let mut bits = [0u64; 8];
+    let mut fill = |kind: u64, numbers: &[f64]| {
+        bits[0] = kind;
+        for (slot, number) in numbers.iter().enumerate() {
+            bits[slot + 1] = number.to_bits();
+        }
+    };
+    match surface {
+        Surface::Plane(flat) => fill(0, &flat.coefficients()),
+        Surface::Sphere(ball) => {
+            let centre = ball.centre().coordinates();
+            fill(1, &[centre[0], centre[1], centre[2], ball.radius()]);
+        }
+        Surface::Cylinder(pipe) => {
+            let origin = pipe.axis().origin().coordinates();
+            let along = pipe.axis().direction().components();
+            fill(
+                2,
+                &[
+                    origin[0],
+                    origin[1],
+                    origin[2],
+                    along[0],
+                    along[1],
+                    along[2],
+                    pipe.radius(),
+                ],
+            );
+        }
+        other => panic!("a surface nothing here can name: {other:?}"),
+    }
+    bits
+}
+
+/// A face, the crossings drawn on it, and everything that follows from them.
 struct Arrangement<'f> {
     face: &'f BakedFace,
-    plane: Plane,
-    lines: Vec<Line>,
+    surface: Surface,
+    crossings: Vec<Crossing>,
     nodes: Vec<Node>,
     arcs: Vec<Arc>,
-    /// Which line each cut plane handed in turned into, in the order they were
-    /// handed in. `None` when the plane is parallel to the face and cuts
+    /// Whether the *whole* of each crossing is drawn: it closes, and none of its
+    /// arcs was thrown away. Only such a crossing can say which side of itself a
+    /// walk elsewhere on the surface is on — a straight one runs on past its
+    /// outermost node, and two walks either side of that stretch are one cell
+    /// with two different signs.
+    drawn_in_full: Vec<bool>,
+    /// Which crossing each cut surface handed in turned into, in the order they
+    /// were handed in. `None` when the surface misses the face's own and cuts
     /// nothing.
-    cut_lines: Vec<Option<usize>>,
-    /// Which line each boundary edge lies on, by wire and position.
-    line_of_edge: Vec<Vec<usize>>,
-    /// Which node each corner is, by wire and position.
+    cut_crossings: Vec<Option<usize>>,
+    /// Which crossing each boundary edge lies on, by wire and position.
+    crossing_of_edge: Vec<Vec<usize>>,
+    /// Which node each edge of each wire starts at, by wire and position.
     node_of_corner: Vec<Vec<usize>>,
     /// The half-edges leaving each node, sorted anticlockwise.
     leaving: Vec<Vec<usize>>,
@@ -213,24 +302,62 @@ struct Arrangement<'f> {
     cycle_of: Vec<usize>,
     /// The cycles, each a chain of half-edges with its region on the left.
     cycles: Vec<Vec<usize>>,
-    /// Which lump of the drawing each cycle belongs to.
-    lump_of: Vec<usize>,
-    /// How many times the face's boundary winds round the region each cycle
-    /// bounds.
+    /// How many times the face's boundary winds round each walk, counted inside
+    /// its own lump alone. What a lump has no boundary arc in it cannot say, and
+    /// that is what joining the lumps up settles.
+    winding_of_cycle: Vec<Option<i32>>,
+    /// Which cell of the surface each cycle bounds.
+    cell_of: Vec<usize>,
+    /// The cells, each one or more cycles.
+    cells: Vec<Vec<usize>>,
+    /// How many times the face's boundary winds round the region each cell is.
     winding: Vec<Option<i32>>,
 }
 
-/// One line on the face: the meet of the face's plane with one other.
-struct Line {
-    partner: Plane,
-    /// The axis the line climbs fastest along, which is the one to order points
-    /// on. The choice is made in `f64` because choosing an axis decides nothing;
-    /// that the chosen component is really not zero is proved exactly.
-    axis: usize,
-    /// Whether `n_p × n_partner` points up that axis rather than down it.
-    forward_climbs_the_axis: bool,
-    /// Whether a face of the other group put this line here.
+/// One curve on the face: one of the curves where the face's surface crosses
+/// another.
+struct Crossing {
+    partner: Surface,
+    /// Which curve of the pair this is, as [`intersect`] named it. Carried
+    /// rather than taken apart, because [`where_a_closed_crossing_starts`] wants
+    /// exactly this and a second spelling of it is §23.8's shape again.
+    run: NamedRun,
+    /// How points on it are put in order.
+    order: HowItRuns,
+    /// Whether a face of the other group put this crossing here.
     cuts: bool,
+}
+
+impl Crossing {
+    /// What picks this curve out of the others the pair names. Empty when the
+    /// pair names one curve and there is nothing to pick.
+    fn picked_by(&self) -> &[Picker] {
+        match self.run.run() {
+            EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+            _ => &[],
+        }
+    }
+}
+
+/// How points along one crossing are put in order.
+enum HowItRuns {
+    /// It runs on for ever, so the order is a comparison on the axis it climbs
+    /// fastest along. `forward_climbs_the_axis` says whether `∇S × ∇Q` points up
+    /// that axis rather than down it.
+    AlongAnAxis {
+        axis: usize,
+        forward_climbs_the_axis: bool,
+    },
+    /// It closes, so the order is a cyclic one and needs somewhere to start.
+    /// `from` is where [`walk`](rcad_geom::walk) starts, which depends on the
+    /// unordered pair of surfaces and on nothing else (§34.4).
+    RoundAClosedCurve { from: PredicatePoint },
+}
+
+impl HowItRuns {
+    fn closes(&self) -> bool {
+        matches!(self, HowItRuns::RoundAClosedCurve { .. })
+    }
 }
 
 /// A point of the arrangement.
@@ -238,16 +365,19 @@ struct Node {
     point: PredicatePoint,
     /// The input corner this is, when it is one.
     vertex: Option<VertexKey>,
-    /// The three planes that placed it, the face's own first.
-    planes: [Plane; 3],
-    /// The lines running through it, in increasing order.
-    lines: Vec<usize>,
+    /// The three surfaces that placed it, in [`meet_of_three_surfaces`]'s own
+    /// fixed order, and which of their meeting points this is. `None` for a
+    /// corner the input already had.
+    made_of: Option<([Surface; 3], u8)>,
+    /// The crossings running through it, in increasing order.
+    crossings: Vec<usize>,
 }
 
-/// A piece of one line between two neighbouring nodes on it.
+/// A piece of one crossing between two neighbouring nodes on it.
 struct Arc {
-    line: usize,
-    /// The two ends, the first one earlier along the line's forward direction.
+    crossing: usize,
+    /// The two ends, the first one earlier along the crossing's forward
+    /// direction.
     ends: [usize; 2],
     /// Which wire of the face walks along here, and which way.
     boundary: Option<Boundary>,
@@ -256,9 +386,9 @@ struct Arc {
 /// How the face's own boundary uses an arc.
 #[derive(Clone, Copy, PartialEq)]
 struct Boundary {
-    /// Which wire: zero is the outer one.
+    /// Which wire.
     wire: usize,
-    /// Whether the wire walks this arc in the line's forward direction.
+    /// Whether the wire walks this arc in the crossing's forward direction.
     runs_forward: bool,
     /// How far round the wire the side this stretch is part of sits. The input
     /// edges are named there rather than copied here, because joining coplanar
@@ -266,180 +396,249 @@ struct Boundary {
     position: usize,
 }
 
-/// A way to leave a node: along a line, one way or the other.
+/// A way to leave a node: along a crossing, one way or the other.
 #[derive(Clone, Copy, PartialEq)]
 struct Direction {
-    line: usize,
-    /// `true` for `n_p × n_partner`, `false` for the other way.
+    crossing: usize,
+    /// `true` for `∇S × ∇Q`, `false` for the other way.
     forward: bool,
 }
 
 impl<'f> Arrangement<'f> {
     fn of(
         face: &'f BakedFace,
-        cuts: &[Plane],
+        cuts: &[Surface],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
         let mut arrangement = Self {
             face,
-            plane: face.plane,
-            lines: Vec::new(),
+            surface: face.surface,
+            crossings: Vec::new(),
             nodes: Vec::new(),
             arcs: Vec::new(),
-            cut_lines: Vec::new(),
-            line_of_edge: Vec::new(),
+            drawn_in_full: Vec::new(),
+            cut_crossings: Vec::new(),
+            crossing_of_edge: Vec::new(),
             node_of_corner: Vec::new(),
             leaving: Vec::new(),
             cycle_of: Vec::new(),
             cycles: Vec::new(),
-            lump_of: Vec::new(),
+            winding_of_cycle: Vec::new(),
+            cell_of: Vec::new(),
+            cells: Vec::new(),
             winding: Vec::new(),
         };
-        arrangement.draw_the_lines(cuts, policy, log)?;
+        arrangement.draw_the_crossings(cuts, policy, log)?;
         arrangement.place_the_corners(policy, log)?;
-        arrangement.place_the_crossings(policy, log)?;
+        arrangement.place_the_meets(policy, log)?;
+        arrangement.start_every_closed_crossing_that_has_no_node(log)?;
+        arrangement.work_out_how_each_crossing_runs(log)?;
         arrangement.merge_points_that_are_one_point(policy, log)?;
-        arrangement.cut_the_lines_into_arcs();
+        arrangement.cut_the_crossings_into_arcs(policy, log)?;
         arrangement.walk_the_cycles(policy, log)?;
+        arrangement.count_the_windings_inside_each_lump();
+        arrangement.group_the_cycles_into_cells(policy, log)?;
         arrangement.count_the_windings();
         Ok(arrangement)
     }
 
     /// The pieces: the cells the face's boundary winds once round.
     ///
-    /// A cell of the lump the outer wire is in is a piece. A lump nothing joins
-    /// to that one is a hole of the face that no cut line touched, and it turns
-    /// into a hole of whichever piece surrounds it.
-    fn pieces(&self, log: &mut ProvenanceLog) -> Result<Vec<Piece>> {
-        let outer_lump = self.lump_of[self.cycle_of[self.a_half_edge_of_the_outer_wire()]];
-
-        let mut wires_of: Vec<(usize, Vec<usize>)> = (0..self.cycles.len())
-            .filter(|&cycle| self.winding[cycle] == Some(1) && self.lump_of[cycle] == outer_lump)
-            .map(|cycle| (cycle, Vec::new()))
-            .collect();
-
-        let mut lumps = self.lump_of.clone();
-        lumps.sort_unstable();
-        lumps.dedup();
-        for lump in lumps {
-            if lump == outer_lump {
-                continue;
-            }
-            let hole = self.the_cycle_of_the_lump_that_is_wound_once(lump);
-            let piece = self.piece_around(lump, outer_lump, log)?;
-            let holder = wires_of
-                .iter_mut()
-                .find(|(cycle, _)| *cycle == piece)
-                .expect("a hole of a face is surrounded by a piece of that face");
-            holder.1.push(hole);
-        }
-
-        Ok(wires_of
-            .into_iter()
-            .map(|(outer, holes)| self.piece_from(outer, &holes))
-            .collect())
+    /// # Panics
+    ///
+    /// If a piece has no sides at all, or if a flat piece has fewer than three
+    /// straight ones. Two straight lines enclose no area, so a piece like that
+    /// is a zero-area face, which §17.4 prevents rather than filters: reaching
+    /// here means the splitter is wrong.
+    fn pieces(&self) -> Result<Vec<Piece>> {
+        (0..self.cells.len())
+            .filter(|&cell| self.winding[cell] == Some(1))
+            .map(|cell| self.piece_from(cell))
+            .collect()
     }
 
-    /// One line per plane that matters to this face, with the ones that are
-    /// really the same line folded together.
-    fn draw_the_lines(
+    /// One crossing per curve that matters to this face, with the ones that are
+    /// really the same curve folded together.
+    fn draw_the_crossings(
         &mut self,
-        cuts: &[Plane],
+        cuts: &[Surface],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
-        for wire in &self.face.wires {
-            let mut lines = Vec::new();
-            for edge in wire {
-                let line = self
-                    .line_for(edge.across, false, policy, log)?
-                    .expect("a face and the face across one of its edges are never parallel");
-                lines.push(line);
+        for wire in 0..self.face.wires.len() {
+            let mut along = Vec::new();
+            for position in 0..self.face.wires[wire].len() {
+                let edge = &self.face.wires[wire][position];
+                let (across, at) = (edge.across, edge.start.point);
+                let crossing = self
+                    .crossing_for(across, false, Some(at), policy, log)?
+                    .ok_or(Error::AFaceMeetsItsNeighbourNowhere {
+                        face: self.face.keys[0],
+                    })?;
+                along.push(crossing);
             }
-            self.line_of_edge.push(lines);
+            self.crossing_of_edge.push(along);
         }
         for &cut in cuts {
-            let line = self.line_for(cut, true, policy, log)?;
-            self.cut_lines.push(line);
+            let crossing = self.crossing_for(cut, true, None, policy, log)?;
+            self.cut_crossings.push(crossing);
         }
         Ok(())
     }
 
-    /// The line `plane ∩ partner`, adding it if it is not there yet.
+    /// The crossing `surface ∩ partner`, adding it if it is not there yet.
     ///
-    /// `None` when `partner` is parallel to the face's plane, so there is no
-    /// line at all.
-    fn line_for(
+    /// `None` when the pair names no curve at all — two parallel planes, a ball
+    /// clear of the face's own surface.
+    ///
+    /// A pair can name **two** curves: a plane down the inside of a pipe cuts
+    /// two straight lines, and a ball crossing a pipe off-axis leaves two loops.
+    /// When it does, `through` is what says which of them is meant: a boundary
+    /// edge runs along the one its own corner lies on. A cut surface means all
+    /// of them, and hands over `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotTellWhichCurveOfACrossingAFaceRunsAlong`] when the point
+    /// handed over is picked by more than one of the curves, or by none. A
+    /// picker's [`Decision::Undecidable`] rules out nothing (§33.8), so an
+    /// ambiguous answer is a refusal and never a guess.
+    ///
+    /// [`Error::AFaceMeetsItsNeighbourOnItsOwnSurface`] when the two are one
+    /// surface. Two faces on one surface with an edge between them carry no
+    /// curve for that edge to run along; the joiner in
+    /// [`bake`](super::bake) takes such a pair apart before it gets here, and a
+    /// pair it does not reach is refused rather than arranged wrongly.
+    fn crossing_for(
         &mut self,
-        partner: Plane,
+        partner: Surface,
         cuts: bool,
+        through: Option<PredicatePoint>,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Option<usize>> {
-        if planes_are_parallel(&self.plane, &partner, policy, log)? {
-            return Ok(None);
+        let runs = match intersect(&self.surface, &partner, policy, log)? {
+            SurfaceMeet::Curves(runs) => runs,
+            SurfaceMeet::Nothing | SurfaceMeet::TouchAtOnePoint { .. } => return Ok(None),
+            SurfaceMeet::SameSurface => {
+                return Err(Error::AFaceMeetsItsNeighbourOnItsOwnSurface {
+                    face: self.face.keys[0],
+                });
+            }
+            other => panic!("two surfaces crossed in a way nothing here knows: {other:?}"),
+        };
+
+        let mut wanted = runs;
+        if let Some(at) = through {
+            wanted.retain(|run| nothing_rules_the_point_out(pickers_of(run), at));
+            if wanted.len() != 1 {
+                return Err(Error::CannotTellWhichCurveOfACrossingAFaceRunsAlong {
+                    face: self.face.keys[0],
+                });
+            }
         }
-        for index in 0..self.lines.len() {
-            if let LineRelation::Same = relation_of_two_lines(
-                &self.plane,
-                &self.lines[index].partner,
-                &partner,
-                policy,
-                log,
-            )? {
-                self.lines[index].cuts |= cuts;
+
+        let mut first = None;
+        for run in wanted {
+            let index = match self.crossing_like(&partner, pickers_of(&run), policy, log)? {
+                Some(already) => {
+                    self.crossings[already].cuts |= cuts;
+                    already
+                }
+                None => {
+                    self.crossings.push(Crossing {
+                        partner,
+                        run,
+                        // Filled in once there is a node to read it at.
+                        order: HowItRuns::AlongAnAxis {
+                            axis: 0,
+                            forward_climbs_the_axis: true,
+                        },
+                        cuts,
+                    });
+                    self.crossings.len() - 1
+                }
+            };
+            first = first.or(Some(index));
+        }
+        Ok(first)
+    }
+
+    /// Which crossing already drawn is this same curve, if any.
+    ///
+    /// Two *different* surfaces can cut one face in one curve: two planes
+    /// through the same line, or two spheres through the same circle. All
+    /// planes, and it is the rank of a three-by-four matrix of stored
+    /// coefficients, which is four exact determinants
+    /// ([`relation_of_two_lines`]). Otherwise the question is whether the two
+    /// partners are one surface, which [`intersect`] answers (§31.2 row 7).
+    fn crossing_like(
+        &mut self,
+        partner: &Surface,
+        picked_by: &[Picker],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Option<usize>> {
+        for index in 0..self.crossings.len() {
+            let mine = self.crossings[index].partner;
+            let same = match (self.surface.as_plane(), mine.as_plane(), partner.as_plane()) {
+                (Some(here), Some(one), Some(other)) => {
+                    matches!(
+                        relation_of_two_lines(here, one, other, policy, log)?,
+                        LineRelation::Same
+                    )
+                }
+                _ => {
+                    mine == *partner
+                        || matches!(
+                            intersect(&mine, partner, policy, log)?,
+                            SurfaceMeet::SameSurface
+                        )
+                }
+            };
+            if same && self.crossings[index].picked_by() == picked_by {
                 return Ok(Some(index));
             }
         }
-        let (axis, forward_climbs_the_axis) = dominant_axis(&self.plane, &partner, log)?;
-        self.lines.push(Line {
-            partner,
-            axis,
-            forward_climbs_the_axis,
-            cuts,
-        });
-        Ok(Some(self.lines.len() - 1))
+        Ok(None)
     }
 
-    /// One node per corner of the face, re-derived rather than read (§17.1).
+    /// One node per corner of the face, read out of the baked solid.
     ///
-    /// Which lines run through a corner is mostly a question about the model:
-    /// the two edges either side of it, and, where four or more faces meet
-    /// there, every other plane the corner already knows about. Only a cut line
-    /// has to be *asked*, and asking is [`Plane::side_of_point`].
+    /// Which crossings run through a corner is mostly a question about the
+    /// model: the two edges either side of it, and, where more faces meet there,
+    /// every other surface the corner already knows about. Only a cut has to be
+    /// *asked*, and asking is [`side_of_surface`].
     fn place_the_corners(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
-        for (wire, edges) in self.face.wires.iter().enumerate() {
+        for wire in 0..self.face.wires.len() {
             let mut corners = Vec::new();
-            for (position, edge) in edges.iter().enumerate() {
-                let before = (position + edges.len() - 1) % edges.len();
-                let mut lines = vec![
-                    self.line_of_edge[wire][before],
-                    self.line_of_edge[wire][position],
+            let count = self.face.wires[wire].len();
+            for position in 0..count {
+                let before = (position + count - 1) % count;
+                let mut through = vec![
+                    self.crossing_of_edge[wire][before],
+                    self.crossing_of_edge[wire][position],
                 ];
-                for index in 0..self.lines.len() {
-                    if lines.contains(&index) {
+                let at = self.face.wires[wire][position].start.point;
+                let around = self.face.wires[wire][position].start.around.clone();
+                for index in 0..self.crossings.len() {
+                    if through.contains(&index) {
                         continue;
                     }
-                    let known_from_the_model = edge
-                        .start
-                        .around
-                        .iter()
-                        .any(|around| *around == self.lines[index].partner);
-                    if known_from_the_model
-                        || self.passes_through(index, edge.start.point, policy, log)?
-                    {
-                        lines.push(index);
+                    let known_from_the_model = around.contains(&self.crossings[index].partner);
+                    if known_from_the_model || self.passes_through(index, at, policy, log)? {
+                        through.push(index);
                     }
                 }
-                lines.sort_unstable();
-                lines.dedup();
+                through.sort_unstable();
+                through.dedup();
                 corners.push(self.nodes.len());
                 self.nodes.push(Node {
-                    point: edge.start.point,
-                    vertex: Some(edge.start.vertex),
-                    planes: edge.start.planes,
-                    lines,
+                    point: at,
+                    vertex: Some(self.face.wires[wire][position].start.vertex),
+                    made_of: None,
+                    crossings: through,
                 });
             }
             self.node_of_corner.push(corners);
@@ -447,79 +646,154 @@ impl<'f> Arrangement<'f> {
         Ok(())
     }
 
+    /// Whether a point is on one crossing: on its partner surface, and picked by
+    /// whichever curve of the pair this crossing is.
     fn passes_through(
         &self,
-        line: usize,
+        crossing: usize,
         point: PredicatePoint,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
-        let decision = self.lines[line].partner.side_of_point(point);
+        let partner = self.crossings[crossing].partner;
         let settled = must_decide(
-            decision,
-            SIDE_OF_PLANE,
+            side_of_surface(&partner, point),
+            name_of_surface(&partner),
             &[point],
             Measures::Length,
             policy,
             log,
         )?;
-        Ok(settled == Decision::Zero)
+        Ok(settled == Decision::Zero
+            && nothing_rules_the_point_out(self.crossings[crossing].picked_by(), point))
     }
 
-    /// One node per pair of lines that cross, unless a corner already is that
-    /// crossing.
-    fn place_the_crossings(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
-        for first in 0..self.lines.len() {
-            for second in (first + 1)..self.lines.len() {
-                if self
-                    .nodes
-                    .iter()
-                    .any(|node| node.lines.contains(&first) && node.lines.contains(&second))
-                {
+    /// One node per place two crossings meet, unless a corner already is that
+    /// place.
+    ///
+    /// Three surfaces can meet at two points, and both are nodes.
+    /// [`MeetOfThree::MoreThanAPoint`] is an answer and not a refusal (§34.9):
+    /// two faces on one plane with a curved surface across them share a whole
+    /// curve, and there is no node there rather than a node nothing can place.
+    fn place_the_meets(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+        for first in 0..self.crossings.len() {
+            for second in (first + 1)..self.crossings.len() {
+                if self.crossings[first].partner == self.crossings[second].partner {
                     continue;
                 }
-                let relation = relation_of_two_lines(
-                    &self.plane,
-                    &self.lines[first].partner,
-                    &self.lines[second].partner,
+                let surfaces = [
+                    self.surface,
+                    self.crossings[first].partner,
+                    self.crossings[second].partner,
+                ];
+                let meet = meet_of_three_surfaces(
+                    [&surfaces[0], &surfaces[1], &surfaces[2]],
                     policy,
                     log,
                 )?;
-                let LineRelation::CrossSomewhere = relation else {
+                let MeetOfThree::At(places) = meet else {
                     continue;
                 };
-                let planes = in_a_fixed_order([
-                    self.plane,
-                    self.lines[first].partner,
-                    self.lines[second].partner,
-                ]);
-                let Ok(point) = Plane::meet_of_three(&planes[0], &planes[1], &planes[2]) else {
-                    return Err(gave_up(
-                        WHERE_THREE_PLANES_MEET,
-                        &planes.map(|plane| PredicatePoint::from(plane.normal().components())),
-                        Measures::Volume,
-                        log,
-                    ));
-                };
-                self.nodes.push(Node {
-                    point: as_exact_as_it_is(point),
-                    vertex: None,
-                    planes,
-                    lines: vec![first, second],
-                });
+                for (which, place) in places.into_iter().enumerate() {
+                    let place = as_exact_as_it_is(place);
+                    // Being *on* both surfaces is what the meet just worked out,
+                    // and asking a predicate to confirm it would be a second
+                    // opinion about a fact this line already holds — one that a
+                    // box straddling the surface cannot prove and would refuse.
+                    // What is still open is which curve of each pair it is on,
+                    // and only a pair naming more than one has anything to say.
+                    if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
+                        || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
+                    {
+                        continue;
+                    }
+                    if self.nodes.iter().any(|node| {
+                        node.crossings.contains(&first) && node.crossings.contains(&second)
+                    }) {
+                        continue;
+                    }
+                    let mut sorted = surfaces;
+                    sorted.sort_by(|one, other| {
+                        name_of_surface_bits(one).cmp(&name_of_surface_bits(other))
+                    });
+                    let which = u8::try_from(which).expect("three surfaces meet at most twice");
+                    self.nodes.push(Node {
+                        point: place,
+                        vertex: None,
+                        made_of: Some((sorted, which)),
+                        crossings: vec![first, second],
+                    });
+                }
             }
+        }
+        Ok(())
+    }
+
+    /// A closed crossing with no node on it still needs one.
+    ///
+    /// A wire needs a coedge, an edge needs two ends, and a wire that closes on
+    /// one edge needs both ends to be one vertex. Where the vertex goes must
+    /// depend on the two surfaces and on nothing else, or `fuse(A, B)` and
+    /// `fuse(B, A)` disagree — so it goes where
+    /// [`walk`](rcad_geom::walk) starts, which §34.4 made a function of the
+    /// unordered pair (§31.3).
+    fn start_every_closed_crossing_that_has_no_node(
+        &mut self,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        for crossing in 0..self.crossings.len() {
+            if self
+                .nodes
+                .iter()
+                .any(|node| node.crossings.contains(&crossing))
+            {
+                continue;
+            }
+            let partner = self.crossings[crossing].partner;
+            let Ok(from) = where_a_closed_crossing_starts(
+                &self.crossings[crossing].run,
+                [&self.surface, &partner],
+                log,
+            ) else {
+                continue;
+            };
+            self.nodes.push(Node {
+                point: as_exact_as_it_is(PredicatePoint::from(from.coordinates())),
+                vertex: None,
+                made_of: None,
+                crossings: vec![crossing],
+            });
+        }
+        Ok(())
+    }
+
+    /// How points along each crossing are ordered, now that there is a node on
+    /// it to read the direction at.
+    fn work_out_how_each_crossing_runs(&mut self, log: &mut ProvenanceLog) -> Result<()> {
+        for crossing in 0..self.crossings.len() {
+            let Some(at) = self
+                .nodes
+                .iter()
+                .find(|node| node.crossings.contains(&crossing))
+                .map(|node| node.point)
+            else {
+                continue;
+            };
+            let partner = self.crossings[crossing].partner;
+            let run = self.crossings[crossing].run.clone();
+            self.crossings[crossing].order =
+                how_a_crossing_runs(&self.surface, &partner, &run, at, log)?;
         }
         Ok(())
     }
 
     /// Fold together the nodes that are one point.
     ///
-    /// Two nodes are compared only where it matters, which is along a line they
-    /// share — and every coincidence shows up there, because two nodes that are
-    /// the same point are both crossings of lines through it, and every pair of
-    /// those lines has a node of its own. Overlapping enclosures are exactly the
-    /// coincidence case (§17.4): the policy decides whether they merge or the
-    /// operation gives up.
+    /// Two nodes are compared only where it matters, which is along a crossing
+    /// they share — and every coincidence shows up there, because two nodes that
+    /// are the same point are both meets of curves through it. Overlapping
+    /// enclosures are exactly the coincidence case (§17.4): the policy decides
+    /// whether they merge or the operation gives up.
     fn merge_points_that_are_one_point(
         &mut self,
         policy: &Policy,
@@ -527,10 +801,11 @@ impl<'f> Arrangement<'f> {
     ) -> Result<()> {
         loop {
             let mut same = Sameness::of(self.nodes.len());
-            for line in 0..self.lines.len() {
-                let order = self.nodes_along(line);
+            for crossing in 0..self.crossings.len() {
+                let order = self.nodes_along(crossing, policy, log)?;
                 for pair in order.windows(2) {
-                    if self.order_along(line, pair[0], pair[1], policy, log)? == Decision::Zero {
+                    if self.order_along(crossing, pair[0], pair[1], policy, log)? == Decision::Zero
+                    {
                         same.join(pair[0], pair[1]);
                     }
                 }
@@ -554,8 +829,8 @@ impl<'f> Arrangement<'f> {
                     nodes.push(Node {
                         point: self.nodes[index].point,
                         vertex: self.nodes[index].vertex,
-                        planes: self.nodes[index].planes,
-                        lines: self.nodes[index].lines.clone(),
+                        made_of: self.nodes[index].made_of,
+                        crossings: self.nodes[index].crossings.clone(),
                     });
                 }
                 Some(into) => {
@@ -576,12 +851,12 @@ impl<'f> Arrangement<'f> {
                     if takes_over {
                         nodes[into].vertex = mine.vertex;
                         nodes[into].point = mine.point;
-                        nodes[into].planes = mine.planes;
+                        nodes[into].made_of = mine.made_of;
                     }
-                    let lines = mine.lines.clone();
-                    nodes[into].lines.extend(lines);
-                    nodes[into].lines.sort_unstable();
-                    nodes[into].lines.dedup();
+                    let crossings = mine.crossings.clone();
+                    nodes[into].crossings.extend(crossings);
+                    nodes[into].crossings.sort_unstable();
+                    nodes[into].crossings.dedup();
                 }
             }
         }
@@ -594,75 +869,170 @@ impl<'f> Arrangement<'f> {
         Ok(())
     }
 
-    /// The nodes on one line, ordered along its forward direction.
+    /// The nodes on one crossing, in the order they run along it.
     ///
-    /// Sorted on the low end of each enclosure, which settles nothing on its
-    /// own; every neighbouring pair is then *proved* to be in that order or
-    /// merged, and proved order between neighbours is order all the way along.
-    fn nodes_along(&self, line: usize) -> Vec<usize> {
+    /// Sorted on something that settles nothing on its own — the low end of each
+    /// enclosure along the dominant axis for a straight crossing, and the cyclic
+    /// order from the crossing's own start for a closed one. Every neighbouring
+    /// pair is then *proved* to be in that order or merged, and proved order
+    /// between neighbours is order all the way along.
+    fn nodes_along(
+        &self,
+        crossing: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Vec<usize>> {
         let mut order: Vec<usize> = (0..self.nodes.len())
-            .filter(|&node| self.nodes[node].lines.contains(&line))
+            .filter(|&node| self.nodes[node].crossings.contains(&crossing))
             .collect();
-        let axis = self.lines[line].axis;
-        order.sort_by(|&one, &other| {
-            let low = |node: usize| self.nodes[node].point.enclosure()[axis].lo();
-            low(one).total_cmp(&low(other))
-        });
-        if !self.lines[line].forward_climbs_the_axis {
-            order.reverse();
+        match self.crossings[crossing].order {
+            HowItRuns::AlongAnAxis {
+                axis,
+                forward_climbs_the_axis,
+            } => {
+                order.sort_by(|&one, &other| {
+                    let low = |node: usize| self.nodes[node].point.enclosure()[axis].lo();
+                    low(one).total_cmp(&low(other))
+                });
+                if !forward_climbs_the_axis {
+                    order.reverse();
+                }
+            }
+            HowItRuns::RoundAClosedCurve { .. } => {
+                // A cyclic order is not a total one until somewhere is called
+                // first, and the crossing's own start is that somewhere. Sorting
+                // by insertion keeps the number of comparisons finite and every
+                // one of them is asked of the same three points whichever face
+                // is asking.
+                let mut sorted: Vec<usize> = Vec::with_capacity(order.len());
+                for node in order {
+                    let mut place = sorted.len();
+                    for (index, &placed) in sorted.iter().enumerate() {
+                        if self.order_along(crossing, node, placed, policy, log)? == Decision::Pos {
+                            place = index;
+                            break;
+                        }
+                    }
+                    sorted.insert(place, node);
+                }
+                order = sorted;
+            }
         }
-        order
+        Ok(order)
     }
 
-    /// Which of two nodes on a line comes first along it: [`Decision::Pos`] when
-    /// `first` does, [`Decision::Zero`] when they are the same point.
+    /// The same, without asking a policy: [`Decision::Undecidable`] comes back
+    /// as `None` for a caller that has another route to try.
+    fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
+        let (one, other) = (self.nodes[first].point, self.nodes[second].point);
+        let decided = match self.crossings[crossing].order {
+            HowItRuns::AlongAnAxis {
+                axis,
+                forward_climbs_the_axis,
+            } => {
+                let mut apart = other.enclosure()[axis] - one.enclosure()[axis];
+                if !forward_climbs_the_axis {
+                    apart = -apart;
+                }
+                apart.sign()
+            }
+            HowItRuns::RoundAClosedCurve { from } => {
+                let partner = self.crossings[crossing].partner;
+                which_comes_first_round_a_crossing([&self.surface, &partner], from, one, other)
+                    .ok()?
+            }
+        };
+        matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
+    }
+
+    /// Which of two nodes on a crossing comes first along it: [`Decision::Pos`]
+    /// when `first` does, [`Decision::Zero`] when they are the same point.
     fn order_along(
         &self,
-        line: usize,
+        crossing: usize,
         first: usize,
         second: usize,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Decision> {
-        let axis = self.lines[line].axis;
-        let at = |node: usize| self.nodes[node].point.enclosure()[axis];
-        let mut apart = at(second) - at(first);
-        if !self.lines[line].forward_climbs_the_axis {
-            apart = -apart;
+        let (one, other) = (self.nodes[first].point, self.nodes[second].point);
+        match self.crossings[crossing].order {
+            HowItRuns::AlongAnAxis {
+                axis,
+                forward_climbs_the_axis,
+            } => {
+                let mut apart = other.enclosure()[axis] - one.enclosure()[axis];
+                if !forward_climbs_the_axis {
+                    apart = -apart;
+                }
+                must_decide(
+                    apart.sign(),
+                    ALONG_A_CROSSING,
+                    &[one, other],
+                    Measures::Length,
+                    policy,
+                    log,
+                )
+            }
+            HowItRuns::RoundAClosedCurve { from } => {
+                let partner = self.crossings[crossing].partner;
+                let decided = which_comes_first_round_a_crossing(
+                    [&self.surface, &partner],
+                    from,
+                    one,
+                    other,
+                )?;
+                must_decide(
+                    decided,
+                    ALONG_A_CROSSING,
+                    &[one, other],
+                    Measures::Volume,
+                    policy,
+                    log,
+                )
+            }
         }
-        must_decide(
-            apart.sign(),
-            ALONG_A_LINE,
-            &[self.nodes[first].point, self.nodes[second].point],
-            Measures::Length,
-            policy,
-            log,
-        )
     }
 
-    /// Cut every line into the arcs between neighbouring nodes on it, and throw
-    /// away the ones that carry nothing.
-    fn cut_the_lines_into_arcs(&mut self) {
-        for line in 0..self.lines.len() {
-            let order = self.nodes_along(line);
-            let mut boundary: Vec<Option<Boundary>> = vec![None; order.len().saturating_sub(1)];
-            let mut present = vec![self.lines[line].cuts; order.len().saturating_sub(1)];
+    /// Cut every crossing into the arcs between neighbouring nodes on it, and
+    /// throw away the ones that carry nothing.
+    ///
+    /// A **closed** crossing wraps: the last node runs on into the first, so `n`
+    /// nodes leave `n` arcs rather than `n − 1`, and one node on its own leaves
+    /// one arc that starts and ends there. That is the whole of the difference,
+    /// and it is the difference a cap circle and a round hole are made of.
+    fn cut_the_crossings_into_arcs(
+        &mut self,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        self.drawn_in_full = (0..self.crossings.len())
+            .map(|crossing| self.crossings[crossing].order.closes())
+            .collect();
+        for crossing in 0..self.crossings.len() {
+            let order = self.nodes_along(crossing, policy, log)?;
+            let closes = self.crossings[crossing].order.closes();
+            let steps = if closes {
+                order.len()
+            } else {
+                order.len().saturating_sub(1)
+            };
+            let mut boundary: Vec<Option<Boundary>> = vec![None; steps];
+            let mut present = vec![self.crossings[crossing].cuts; steps];
 
-            for (wire, edges) in self.face.wires.iter().enumerate() {
-                for position in 0..edges.len() {
-                    if self.line_of_edge[wire][position] != line {
+            for wire in 0..self.face.wires.len() {
+                let count = self.face.wires[wire].len();
+                for position in 0..count {
+                    if self.crossing_of_edge[wire][position] != crossing {
                         continue;
                     }
                     let from = at_in(&order, self.node_of_corner[wire][position]);
-                    let to = at_in(
-                        &order,
-                        self.node_of_corner[wire][(position + 1) % edges.len()],
-                    );
-                    let runs_forward = from < to;
-                    for step in from.min(to)..from.max(to) {
+                    let to = at_in(&order, self.node_of_corner[wire][(position + 1) % count]);
+                    let walked = self.arcs_an_edge_covers(crossing, &order, from, to);
+                    for (step, runs_forward) in walked {
                         assert!(
                             boundary[step].is_none(),
-                            "two edges of one face run along the same stretch of one line"
+                            "two edges of one face run along the same stretch of one crossing"
                         );
                         boundary[step] = Some(Boundary {
                             wire,
@@ -674,28 +1044,37 @@ impl<'f> Arrangement<'f> {
                 }
             }
 
-            for step in 0..present.len() {
+            for step in 0..steps {
                 if present[step] {
                     self.arcs.push(Arc {
-                        line,
-                        ends: [order[step], order[step + 1]],
+                        crossing,
+                        ends: [order[step], order[(step + 1) % order.len()]],
                         boundary: boundary[step],
                     });
+                } else {
+                    self.drawn_in_full[crossing] = false;
                 }
             }
         }
-        self.drop_the_lumps_that_are_only_cuts();
+        self.drop_the_lumps_of_straight_cuts_alone();
         self.join_arcs_that_meet_at_nothing();
+        Ok(())
     }
 
-    /// Throw away lumps of the drawing made of cut arcs alone.
+    /// Throw away lumps of the drawing made of straight cut arcs alone.
     ///
-    /// A cut line that runs through the face crosses its boundary to get there,
-    /// and a crossing is a node the boundary shares, so a lump with no boundary
-    /// arc in it never touches the inside of the face. It bounds nothing that
-    /// gets kept and it winds nothing round anything, so it can go — and once it
-    /// is gone every remaining lump has a boundary arc to count windings from.
-    fn drop_the_lumps_that_are_only_cuts(&mut self) {
+    /// A cut that runs on for ever and passes through the face crosses its
+    /// boundary to get there, and a crossing is a node the boundary shares — so
+    /// a lump of endless cuts with no boundary arc in it never touches the
+    /// inside of the face. It bounds nothing that gets kept and it winds nothing
+    /// round anything, so it can go.
+    ///
+    /// **The word "endless" is the whole of what this lane changed here**, and
+    /// leaving it out was a straight-line assumption sitting inside a name that
+    /// said nothing about straight lines. A cut that *closes* — the circle a
+    /// bar's wall cuts in a block's face — lies wholly inside the face and
+    /// touches no boundary at all, and dropping it would lose the hole.
+    fn drop_the_lumps_of_straight_cuts_alone(&mut self) {
         let mut same = Sameness::of(self.nodes.len());
         for arc in &self.arcs {
             same.join(arc.ends[0], arc.ends[1]);
@@ -703,16 +1082,80 @@ impl<'f> Arrangement<'f> {
         let keep: Vec<usize> = self
             .arcs
             .iter()
-            .filter(|arc| arc.boundary.is_some())
+            .filter(|arc| arc.boundary.is_some() || self.crossings[arc.crossing].order.closes())
             .map(|arc| same.leader(arc.ends[0]))
             .collect();
         self.arcs
             .retain(|arc| keep.contains(&same.leader(arc.ends[0])));
     }
 
+    /// Which arcs of a crossing one boundary edge covers, and which way round it
+    /// walks each.
+    ///
+    /// A **closed** edge starts and ends at the same corner and covers the whole
+    /// curve, so it walks every arc; a `∇S × ∇Q` direction is the crossing's own
+    /// and which way the wire runs along it is the direction that keeps the
+    /// face's material on the left. §31.3 settles that rule and §30.8 item 10 is
+    /// what it closes: `(∇S × ∇T)` crossed with the surface normal always points
+    /// *into* the partner, so a wire walks a closed edge forward exactly when
+    /// the face's material lies on the partner's negative side — which is what
+    /// the corner off that partner already says, and what
+    /// [`the_side_this_face_lies_on`](crate::holds) reads.
+    fn arcs_an_edge_covers(
+        &self,
+        crossing: usize,
+        order: &[usize],
+        from: usize,
+        to: usize,
+    ) -> Vec<(usize, bool)> {
+        if from != to {
+            let runs_forward = from < to;
+            return (from.min(to)..from.max(to))
+                .map(|step| (step, runs_forward))
+                .collect();
+        }
+        assert!(
+            self.crossings[crossing].order.closes(),
+            "an edge that starts and ends at one corner runs right round a closed curve"
+        );
+        let runs_forward = self.material_is_left_of_forward(crossing);
+        (0..order.len()).map(|step| (step, runs_forward)).collect()
+    }
+
+    /// Whether the face's material lies on the left of a closed crossing's
+    /// forward direction.
+    ///
+    /// The identity is `(o × d)·∇Q = −|∇S × ∇Q|²` for `d = ∇S × ∇Q` and
+    /// `o = ∇S`, which is Cauchy–Schwarz and holds everywhere with no case
+    /// analysis: **left of forward is always the negative side of the partner**.
+    /// So the wire walks a closed edge forward exactly when the material is
+    /// inside the partner, and that is read off a corner of the face that is off
+    /// it.
+    ///
+    /// Where every corner sits on the partner there is nothing to read and the
+    /// answer is the crossing's forward direction — a face whose whole boundary
+    /// is one closed curve is the piece of its surface the curve leaves, and
+    /// both pieces have the same wire. That is
+    /// [`NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`](crate::Error) one layer
+    /// down, and it is the case §35.10 hands on.
+    fn material_is_left_of_forward(&self, crossing: usize) -> bool {
+        let partner = self.crossings[crossing].partner;
+        for side in self.face.wires.iter().flatten() {
+            if side.start.around.contains(&partner) {
+                continue;
+            }
+            match side_of_surface(&partner, side.start.point) {
+                Decision::Neg => return true,
+                Decision::Pos => return false,
+                _ => (),
+            }
+        }
+        true
+    }
+
     /// Join two arcs that meet at a node nothing else touches.
     ///
-    /// A cut line crosses the *line* of a far edge at a point that is not on the
+    /// A cut crosses the *curve* of a far edge at a point that is not on the
     /// edge itself, and that crossing is a node with nothing else through it. It
     /// would come out as a corner of a piece where the piece has no corner, so
     /// the two arcs either side of it become one. A node the input already had
@@ -753,7 +1196,13 @@ impl<'f> Arrangement<'f> {
                 continue;
             }
             let (first, second) = (&self.arcs[touching[0]], &self.arcs[touching[1]]);
-            if first.line == second.line && first.boundary == second.boundary {
+            // A closed crossing with one node is one arc that starts and ends
+            // there, and joining it to itself would leave a curve with no point
+            // on it at all.
+            if first.crossing == second.crossing
+                && first.boundary == second.boundary
+                && !self.crossings[first.crossing].order.closes()
+            {
                 return Some((node, touching[0], touching[1]));
             }
         }
@@ -770,7 +1219,7 @@ impl<'f> Arrangement<'f> {
         }
         for node in 0..self.nodes.len() {
             let round_here = core::mem::take(&mut self.leaving[node]);
-            self.leaving[node] = self.sorted_anticlockwise(&round_here, policy, log)?;
+            self.leaving[node] = self.sorted_anticlockwise(node, &round_here, policy, log)?;
         }
 
         self.cycle_of = vec![usize::MAX; 2 * self.arcs.len()];
@@ -794,16 +1243,6 @@ impl<'f> Arrangement<'f> {
             }
             self.cycles.push(chain);
         }
-
-        let mut same = Sameness::of(self.nodes.len());
-        for arc in &self.arcs {
-            same.join(arc.ends[0], arc.ends[1]);
-        }
-        self.lump_of = self
-            .cycles
-            .iter()
-            .map(|chain| same.leader(self.from(chain[0])))
-            .collect();
         Ok(())
     }
 
@@ -829,13 +1268,12 @@ impl<'f> Arrangement<'f> {
     /// A sign from [`Arrangement::turns_anticlockwise`] compares two directions
     /// only when they are less than half a turn apart, so it is not an order on
     /// its own. Splitting the directions into the two halves of the turn that
-    /// starts at the first line through the node makes it one: inside a half
+    /// starts at the first crossing through the node makes it one: inside a half
     /// nothing is more than half a turn from anything else, so the sign is a
     /// genuine total order there, and the two halves are then laid end to end.
-    /// Both steps are exact determinants of stored normals — no angle is ever
-    /// worked out.
     fn sorted_anticlockwise(
         &self,
+        node: usize,
         half_edges: &[usize],
         policy: &Policy,
         log: &mut ProvenanceLog,
@@ -844,9 +1282,9 @@ impl<'f> Arrangement<'f> {
             return Ok(half_edges.to_vec());
         }
         let reference = Direction {
-            line: half_edges
+            crossing: half_edges
                 .iter()
-                .map(|&half_edge| self.direction(half_edge).line)
+                .map(|&half_edge| self.direction(half_edge).crossing)
                 .min()
                 .expect("there is at least one way out of this node"),
             forward: true,
@@ -854,16 +1292,18 @@ impl<'f> Arrangement<'f> {
 
         let mut sorted: Vec<usize> = Vec::with_capacity(half_edges.len());
         for &half_edge in half_edges {
-            let mine = self.half_of_the_turn(reference, self.direction(half_edge), policy, log)?;
+            let mine =
+                self.half_of_the_turn(node, reference, self.direction(half_edge), policy, log)?;
             let mut place = sorted.len();
             for (index, &placed) in sorted.iter().enumerate() {
                 let theirs =
-                    self.half_of_the_turn(reference, self.direction(placed), policy, log)?;
+                    self.half_of_the_turn(node, reference, self.direction(placed), policy, log)?;
                 let before = match mine.cmp(&theirs) {
                     Ordering::Less => true,
                     Ordering::Greater => false,
                     Ordering::Equal => {
                         let turn = self.turns_anticlockwise(
+                            node,
                             self.direction(half_edge),
                             self.direction(placed),
                             policy,
@@ -890,61 +1330,61 @@ impl<'f> Arrangement<'f> {
     /// the half that starts at `reference` itself, `1` for the other.
     fn half_of_the_turn(
         &self,
+        node: usize,
         reference: Direction,
         direction: Direction,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<u8> {
-        match self.turns_anticlockwise(reference, direction, policy, log)? {
+        match self.turns_anticlockwise(node, reference, direction, policy, log)? {
             Decision::Pos => Ok(0),
             Decision::Neg => Ok(1),
-            // Two different lines through one node are never parallel, so a
-            // turn of nothing at all means this is the reference's own line,
-            // pointing one way or the other.
+            // Two different curves through one node are never tangent there, or
+            // the arrangement could not be walked at all, so a turn of nothing
+            // at all means this is the reference's own crossing, one way or the
+            // other.
             Decision::Zero => {
-                assert!(
-                    direction.line == reference.line,
-                    "two different lines through a node cannot be parallel"
-                );
+                if direction.crossing != reference.crossing {
+                    return Err(Error::TwoCurvesTouchWithoutCrossing {
+                        face: self.face.keys[0],
+                    });
+                }
                 Ok(u8::from(direction.forward != reference.forward))
             }
             other => panic!("a turn came back with a decision nothing here knows: {other:?}"),
         }
     }
 
-    /// Whether `second` is anticlockwise of `first` about the face's normal, by
-    /// less than half a turn.
+    /// Whether `second` is anticlockwise of `first` about the face's own
+    /// gradient at this node, by less than half a turn.
     ///
-    /// An arc on the line `p ∩ Q` runs along `±(n_p × n_Q)`, so for two of them
-    /// `(n_p × n_Q1) × (n_p × n_Q2) = det(n_p, n_Q1, n_Q2) · n_p`, using
-    /// `(a×b)×(a×c) = a·((a×b)·c)` with `a = n_p`. Dotting that with `n_p` gives
-    /// `det(n_p, n_Q1, n_Q2) · |n_p|²`, and `|n_p|²` is positive, so the sign of
-    /// the turn is the sign of that determinant — with a change of sign for each
-    /// direction that runs the other way down its line.
+    /// An arc of `S ∩ Q` runs along `±(∇S × ∇Q)`, so for two of them
+    /// `(∇S × ∇Q₁) × (∇S × ∇Q₂) = det(∇S, ∇Q₁, ∇Q₂) · ∇S`, using
+    /// `(a×b)×(a×c) = a·((a×b)·c)` with `a = ∇S`. Dotting that with `∇S` gives
+    /// `det(∇S, ∇Q₁, ∇Q₂) · |∇S|²`, and `|∇S|²` is positive, so the sign of the
+    /// turn is the sign of that determinant — with a change of sign for each
+    /// direction that runs the other way.
     ///
-    /// `orient3d(a, b, c, d)` is the determinant of the rows `a-d`, `b-d`,
-    /// `c-d`, so putting the origin last makes it exactly
-    /// `det(n_p, n_Q1, n_Q2)` on the stored normals. No new predicate, no
-    /// arithmetic of our own, and exact. The test at the bottom of this file
-    /// pins the convention down against a determinant worked out by hand.
+    /// **Neither step used flatness anywhere** (§31.2 row 9), so this is §17.4's
+    /// determinant of three stored normals with a gradient in each normal's
+    /// place. For three planes the gradients *are* the stored normals and the
+    /// arithmetic is bit for bit what it was.
     fn turns_anticlockwise(
         &self,
+        node: usize,
         first: Direction,
         second: Direction,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Decision> {
-        let normal = self.plane.normal().components();
-        let one = self.lines[first.line].partner.normal().components();
-        let other = self.lines[second.line].partner.normal().components();
+        let at = self.nodes[node].point;
+        let mine = gradient_at(&self.surface, at);
+        let one = gradient_at(&self.crossings[first.crossing].partner, at);
+        let other = gradient_at(&self.crossings[second.crossing].partner, at);
         let decision = must_decide(
-            orient3d(normal, one, other, [0.0; 3]),
+            orient3d_of_points(mine, one, other, PredicatePoint::from([0.0; 3])),
             ORIENT3D,
-            &[
-                PredicatePoint::from(normal),
-                PredicatePoint::from(one),
-                PredicatePoint::from(other),
-            ],
+            &[mine, one, other],
             Measures::Volume,
             policy,
             log,
@@ -956,92 +1396,118 @@ impl<'f> Arrangement<'f> {
         })
     }
 
-    /// How many times the face's boundary winds round the region each cycle
-    /// bounds.
+    /// Which cell of the surface each walk bounds.
     ///
-    /// One inside the face and nothing outside it. Crossing a boundary arc from
-    /// the right of the way its wire runs to the left adds one, because the face
-    /// is on the left of its own boundary; crossing a cut arc adds nothing.
-    /// Every lump of the drawing has a boundary arc in it, and the material side
-    /// of any boundary arc is inside the face, so every lump has somewhere to
-    /// start counting from.
+    /// Two walks that share a node are joined by the drawing itself and the walk
+    /// already told them apart. What is left is joining up walks in different
+    /// lumps, and a lump comes in two shapes.
     ///
-    /// # Panics
+    /// **A lump every one of whose curves closes** — a hole a cut left in the
+    /// middle of a face, or a cap circle of a bar's wall — is placed by which
+    /// side of it everything else lies on. A closed curve cuts the surface into
+    /// exactly two, so the side is a sign, and two walks bound one cell exactly
+    /// when they agree about every such curve.
     ///
-    /// If two ways round to the same cell disagree, or if a cell comes out wound
-    /// more than once or less than none. A face that overlaps itself could do
-    /// that, and it is not a face.
-    fn count_the_windings(&mut self) {
-        self.winding = vec![None; self.cycles.len()];
-        for arc in 0..self.arcs.len() {
-            let Some(boundary) = self.arcs[arc].boundary else {
-                continue;
-            };
-            let material = self.cycle_of[2 * arc + usize::from(!boundary.runs_forward)];
-            if self.winding[material].is_some() {
-                continue;
-            }
-            self.winding[material] = Some(1);
-            self.spread_the_winding(material);
+    /// **A lump with a curve that runs on for ever** is placed by following one
+    /// of them until it runs into the rest of the drawing, which is what
+    /// [`Arrangement::piece_around`] does. That route needs a direction to fire
+    /// along and a bounded face to hit, and a closed curve has neither — which
+    /// is why there are two and not one.
+    fn group_the_cycles_into_cells(
+        &mut self,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let lump = self.lump_of_each_cycle();
+        let mut sides: Vec<Vec<Option<Decision>>> = Vec::with_capacity(self.cycles.len());
+        for cycle in 0..self.cycles.len() {
+            sides.push(self.which_side_of_everything(cycle, policy, log)?);
         }
-    }
 
-    fn spread_the_winding(&mut self, from: usize) {
-        let mut waiting = vec![from];
-        while let Some(cycle) = waiting.pop() {
-            let known = self.winding[cycle].expect("only settled cycles wait");
-            for step in 0..self.cycles[cycle].len() {
-                let half_edge = self.cycles[cycle][step];
-                let arc = half_edge / 2;
-                let across = self.cycle_of[half_edge ^ 1];
-                let climb = match self.arcs[arc].boundary {
-                    None => 0,
-                    Some(boundary) => {
-                        let material = 2 * arc + usize::from(!boundary.runs_forward);
-                        if material == half_edge { -1 } else { 1 }
+        let mut same = Sameness::of(self.cycles.len());
+        for one in 0..self.cycles.len() {
+            for other in (one + 1)..self.cycles.len() {
+                if lump[one] == lump[other] {
+                    continue;
+                }
+                let mut agreed = 0;
+                let mut differed = false;
+                for (mine, theirs) in sides[one].iter().zip(&sides[other]) {
+                    match (mine, theirs) {
+                        (Some(mine), Some(theirs)) if mine == theirs => agreed += 1,
+                        (Some(_), Some(_)) => differed = true,
+                        _ => (),
                     }
-                };
-                let theirs = known + climb;
-                assert!(
-                    (0..=1).contains(&theirs),
-                    "the boundary of a face winds round a point once or not at all, not {theirs} \
-                     times"
-                );
-                match self.winding[across] {
-                    None => {
-                        self.winding[across] = Some(theirs);
-                        waiting.push(across);
-                    }
-                    Some(already) => assert!(
-                        already == theirs,
-                        "two ways round to one cell disagree about whether it is inside the face"
-                    ),
+                }
+                if agreed > 0 && !differed {
+                    same.join(one, other);
                 }
             }
         }
+        for lump_of_endless_curves in self.lumps_with_a_curve_that_runs_on(&lump) {
+            let (mine, theirs) = self.piece_around(lump_of_endless_curves, &lump, log)?;
+            same.join(mine, theirs);
+        }
+
+        self.cell_of = vec![usize::MAX; self.cycles.len()];
+        for cycle in 0..self.cycles.len() {
+            let leader = same.leader(cycle);
+            if self.cell_of[leader] == usize::MAX {
+                self.cell_of[leader] = self.cells.len();
+                self.cells.push(Vec::new());
+            }
+            self.cell_of[cycle] = self.cell_of[leader];
+            let cell = self.cell_of[cycle];
+            self.cells[cell].push(cycle);
+        }
+        Ok(())
     }
 
-    /// Which piece a lump of the drawing that nothing joins to the rest sits in.
+    /// The lumps of the drawing holding a curve that runs on for ever, other
+    /// than the one the face's own first wire is in.
     ///
-    /// Follow one of the lump's own lines away from one of its nodes. Nothing
+    /// Those are the ones a sign cannot place: a walk elsewhere on the surface
+    /// is on one side of an endless curve or the other, but the stretch of that
+    /// curve past its outermost node is not drawn, so the two sides there are
+    /// one cell.
+    fn lumps_with_a_curve_that_runs_on(&self, lump: &[usize]) -> Vec<usize> {
+        let home = self.a_lump_of_the_faces_first_wire();
+        let mut found: Vec<usize> = self
+            .arcs
+            .iter()
+            .filter(|arc| !self.crossings[arc.crossing].order.closes())
+            .map(|arc| lump[self.cycle_of[2 * self.position_of(arc)]])
+            .filter(|&which| Some(which) != home)
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+
+    fn position_of(&self, arc: &Arc) -> usize {
+        self.arcs
+            .iter()
+            .position(|other| core::ptr::eq(other, arc))
+            .expect("an arc of this arrangement")
+    }
+
+    /// Which walk elsewhere in the drawing a lump of endless curves sits inside,
+    /// and which of the lump's own walks faces it.
+    ///
+    /// Follow one of the lump's own curves away from one of its nodes. Nothing
     /// changes which cell of the rest of the drawing we are in until we run into
-    /// an arc of it, so the first arc we meet is a boundary of the cell we
-    /// started in, and which side of that arc we came from says which cell that
-    /// is.
+    /// an arc of it, so the first arc we meet bounds the cell we started in, and
+    /// which side of that arc we came from says which walk that is.
     ///
     /// Every node of the lump is tried, not just the first. The whole lump is
     /// inside one cell of the rest of the drawing, so every node of it gives the
     /// same answer, and a corner where every ray runs into the end of an arc is
     /// no reason to give up while another corner has a ray that does not.
     ///
-    /// Only the arcs of the lump the outer wire is in are looked at. Another
-    /// hole that no cut line touches is inside the same cell we are, so running
-    /// into its ring says nothing about which cell that is — and taking it as
-    /// the answer would hand back a cycle that is no piece at all.
-    ///
     /// # Errors
     ///
-    /// [`Error::Undecidable`](crate::Error::Undecidable) when no line through the lump gives an answer.
+    /// [`Error::Undecidable`](crate::Error::Undecidable) when no ray through the
+    /// lump gives an answer.
     ///
     /// A ray that cannot be followed — one that runs along an arc, or that
     /// reaches an arc's end, or whose distances cannot be told apart — is
@@ -1049,19 +1515,15 @@ impl<'f> Arrangement<'f> {
     /// route is not a decision anybody failed to prove, and a record of a way we
     /// did not go would be noise in a log whose emptiness is supposed to mean
     /// something (§5).
-    ///
-    /// # Panics
-    ///
-    /// If the cell the ray lands in is not a piece. A hole of a face is inside
-    /// that face, so the cell round it is always one.
     fn piece_around(
         &self,
         lump: usize,
-        outer_lump: usize,
+        lump_of: &[usize],
         log: &mut ProvenanceLog,
-    ) -> Result<usize> {
+    ) -> Result<(usize, usize)> {
+        let home = self.a_lump_of_the_faces_first_wire();
         let mut corners: Vec<usize> = (0..self.arcs.len())
-            .filter(|&arc| self.lump_of[self.cycle_of[2 * arc]] == lump)
+            .filter(|&arc| lump_of[self.cycle_of[2 * arc]] == lump)
             .flat_map(|arc| self.arcs[arc].ends)
             .collect();
         corners.sort_unstable();
@@ -1069,12 +1531,12 @@ impl<'f> Arrangement<'f> {
         assert!(!corners.is_empty(), "a lump has an arc in it");
 
         for &from in &corners {
-            for line in self.nodes[from].lines.clone() {
+            for crossing in self.nodes[from].crossings.clone() {
                 for forward in [true, false] {
-                    if let Some(cycle) =
-                        self.first_arc_met(from, Direction { line, forward }, outer_lump)
+                    if let Some(found) =
+                        self.first_arc_met(from, Direction { crossing, forward }, home, lump_of)
                     {
-                        return Ok(cycle);
+                        return Ok(found);
                     }
                 }
             }
@@ -1087,135 +1549,332 @@ impl<'f> Arrangement<'f> {
         ))
     }
 
-    /// The cell of `outer_lump`'s drawing that a ray from `from` along
-    /// `direction` starts in, or `None` when this ray cannot say.
-    fn first_arc_met(&self, from: usize, direction: Direction, outer_lump: usize) -> Option<usize> {
-        let axis = self.lines[direction.line].axis;
-        let climbs = self.lines[direction.line].forward_climbs_the_axis == direction.forward;
-        let onwards = |from_here: Interval| if climbs { from_here } else { -from_here };
-
-        let mut nearest: Option<(Interval, usize)> = None;
+    /// The walk of `home`'s drawing that a ray from `from` along `direction`
+    /// starts in, together with the walk of the ray's own lump that faces it —
+    /// or `None` when this ray cannot say.
+    fn first_arc_met(
+        &self,
+        from: usize,
+        direction: Direction,
+        home: Option<usize>,
+        lump_of: &[usize],
+    ) -> Option<(usize, usize)> {
+        if self.crossings[direction.crossing].order.closes() {
+            return None;
+        }
+        let mut nearest: Option<(usize, usize)> = None;
         for arc in 0..self.arcs.len() {
-            // Asked of every arc, the lump's own included: a ray that runs
-            // along an arc cannot say which side of it we are on, and one of
-            // the lump's own arcs is as much in the way as anybody else's. An
-            // arc that only touches the ray at the corner it starts from, and
+            // Asked of every arc, the lump's own included: a ray that runs along
+            // an arc cannot say which side of it we are on, and one of the
+            // lump's own arcs is as much in the way as anybody else's. An arc
+            // that only touches the ray at the corner it starts from, and
             // otherwise lies behind, is not in the way at all — and it is the
             // ordinary case, because the corner a ray starts from is a corner of
             // the ring the ray is trying to place.
-            if self.arcs[arc].line == direction.line {
+            if self.arcs[arc].crossing == direction.crossing {
                 let not_behind_us = |end: usize| {
-                    end != from
-                        && onwards(
-                            self.nodes[end].point.enclosure()[axis]
-                                - self.nodes[from].point.enclosure()[axis],
-                        )
-                        .sign()
-                            != Decision::Neg
+                    end != from && self.along_the_ray(direction, from, end) != Some(Decision::Neg)
                 };
                 if self.arcs[arc].ends.iter().copied().any(not_behind_us) {
                     return None;
                 }
                 continue;
             }
-            if self.lump_of[self.cycle_of[2 * arc]] != outer_lump {
+            if Some(lump_of[self.cycle_of[2 * arc]]) != home {
                 continue;
             }
-            let at = match self.crossing_of(direction.line, arc) {
-                Crossing::Misses => continue,
+            let at = match self.where_the_ray_crosses(direction.crossing, arc) {
+                MetAt::Nowhere => continue,
                 // Touching an arc's end says nothing about which side of it we
                 // are on — but only where the touch is ahead of us. An arc the
-                // ray's line grazes behind our back is out of the story.
-                Crossing::AtAnEnd(at) => {
-                    match onwards(at - self.nodes[from].point.enclosure()[axis]).sign() {
-                        Decision::Neg => continue,
-                        _ => return None,
-                    }
-                }
-                Crossing::At(at) => at,
+                // ray grazes behind our back is out of the story.
+                MetAt::AnEnd(at) => match self.along_the_ray(direction, from, at) {
+                    Some(Decision::Neg) => continue,
+                    _ => return None,
+                },
+                MetAt::Between(at) => at,
             };
-            match onwards(at - self.nodes[from].point.enclosure()[axis]).sign() {
-                Decision::Pos => (),
-                Decision::Neg => continue,
+            match self.along_the_ray(direction, from, at) {
+                Some(Decision::Pos) => (),
+                Some(Decision::Neg) => continue,
                 _ => return None,
             }
             nearest = match nearest {
                 None => Some((at, arc)),
-                Some((best, best_arc)) => match onwards(at - best).sign() {
-                    Decision::Neg => Some((at, arc)),
-                    Decision::Pos => Some((best, best_arc)),
+                Some((best, best_arc)) => match self.along_the_ray(direction, best, at) {
+                    Some(Decision::Neg) => Some((at, arc)),
+                    Some(Decision::Pos) => Some((best, best_arc)),
                     _ => return None,
                 },
             };
         }
         let (_, arc) = nearest?;
-        // An arc's forward half-edge has the negative side of its partner plane
-        // on its left: on the plane `z = 0` the line `x = 0` runs along
-        // `z × x = +y`, and walking up `y` with `z` overhead leaves `x < 0` on
-        // the left.
-        let half_edge = match self.lines[self.arcs[arc].line]
-            .partner
-            .side_of_point(self.nodes[from].point)
-        {
+        // An arc's forward half-edge has the negative side of its partner on its
+        // left: on the plane `z = 0` the line `x = 0` runs along `z × x = +y`,
+        // and walking up `y` with `z` overhead leaves `x < 0` on the left.
+        let partner = self.crossings[self.arcs[arc].crossing].partner;
+        let half_edge = match side_of_surface(&partner, self.nodes[from].point) {
             Decision::Neg => 2 * arc,
             Decision::Pos => 2 * arc + 1,
             _ => return None,
         };
-        Some(self.cycle_of[half_edge])
+        let facing = self.the_walk_of_a_lump_that_is_wound_once(
+            lump_of[self.cycle_of
+                [2 * (0..self.arcs.len()).find(|&arc| self.arcs[arc].ends.contains(&from))?]],
+        )?;
+        Some((facing, self.cycle_of[half_edge]))
     }
 
-    /// Where a line crosses an arc, as a coordinate on the line's own axis.
-    fn crossing_of(&self, line: usize, arc: usize) -> Crossing {
-        let other = self.arcs[arc].line;
-        let normals = |of: usize| self.lines[of].partner.normal().components();
-        if orient3d(
-            self.plane.normal().components(),
-            normals(line),
-            normals(other),
-            [0.0; 3],
-        ) == Decision::Zero
-        {
-            return Crossing::Misses;
-        }
-        let Ok(at) = Plane::meet_of_three(
-            &self.plane,
-            &self.lines[line].partner,
-            &self.lines[other].partner,
-        ) else {
-            return Crossing::Misses;
-        };
-        let at = as_exact_as_it_is(at);
-        let along = self.lines[other].axis;
-        let past =
-            |end: usize| (at.enclosure()[along] - self.nodes[end].point.enclosure()[along]).sign();
-        match (past(self.arcs[arc].ends[0]), past(self.arcs[arc].ends[1])) {
-            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => {
-                Crossing::At(at.enclosure()[self.lines[line].axis])
-            }
-            (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => Crossing::Misses,
-            _ => Crossing::AtAnEnd(at.enclosure()[self.lines[line].axis]),
-        }
-    }
-
-    /// Where the one cut line this arrangement was built with runs through the
-    /// inside of the face.
+    /// The walk of a lump that the face's boundary winds once round.
     ///
-    /// A cut line that turned out to be a line the face's own boundary already
-    /// runs along has no cut arcs at all, and the answer is that it goes nowhere
-    /// near the inside — which is right: the boundary is not the inside.
-    fn stretches_inside(&self) -> Stretches {
-        let Some(line) = self.cut_lines[0] else {
-            return Stretches {
-                axis: 0,
-                spans: Vec::new(),
-            };
+    /// A hole of the face has a material side and a hollow side, and it is the
+    /// material side that becomes a wire of the piece round it. A lump with two
+    /// of them, or none, is not a hole of this face and there is nothing to
+    /// place.
+    fn the_walk_of_a_lump_that_is_wound_once(&self, lump: usize) -> Option<usize> {
+        let lump_of = self.lump_of_each_cycle();
+        let mut wound = (0..self.cycles.len())
+            .filter(|&cycle| lump_of[cycle] == lump && self.winding_of_cycle[cycle] == Some(1));
+        let only = wound.next()?;
+        wound.next().is_none().then_some(only)
+    }
+
+    /// Where the ray's crossing meets an arc.
+    ///
+    /// Every place two crossings meet already has a node
+    /// ([`Arrangement::place_the_meets`]), so nothing is worked out again here.
+    fn where_the_ray_crosses(&self, crossing: usize, arc: usize) -> MetAt {
+        let other = self.arcs[arc].crossing;
+        let Some(at) = (0..self.nodes.len()).find(|&node| {
+            self.nodes[node].crossings.contains(&crossing)
+                && self.nodes[node].crossings.contains(&other)
+        }) else {
+            return MetAt::Nowhere;
         };
-        let axis = self.lines[line].axis;
+        let past = |end: usize| self.which_comes_first(other, at, end);
+        match (past(self.arcs[arc].ends[0]), past(self.arcs[arc].ends[1])) {
+            (Some(Decision::Neg), Some(Decision::Pos))
+            | (Some(Decision::Pos), Some(Decision::Neg)) => MetAt::Between(at),
+            (Some(Decision::Neg), Some(Decision::Neg))
+            | (Some(Decision::Pos), Some(Decision::Pos)) => MetAt::Nowhere,
+            _ => MetAt::AnEnd(at),
+        }
+    }
+
+    /// Whether `to` is ahead of `from` along a ray, without asking a policy.
+    ///
+    /// A ray that cannot be followed is abandoned and another is tried, so a
+    /// decision nobody could prove is a reason to give up on this route and
+    /// never a reason to refuse the operation.
+    fn along_the_ray(&self, direction: Direction, from: usize, to: usize) -> Option<Decision> {
+        let decided = self.which_comes_first(direction.crossing, from, to)?;
+        Some(if direction.forward {
+            decided
+        } else {
+            the_other_way(decided)
+        })
+    }
+
+    /// Which lump of the drawing each walk belongs to.
+    fn lump_of_each_cycle(&self) -> Vec<usize> {
+        let mut same = Sameness::of(self.nodes.len());
+        for arc in &self.arcs {
+            same.join(arc.ends[0], arc.ends[1]);
+        }
+        self.cycles
+            .iter()
+            .map(|chain| same.leader(self.from(chain[0])))
+            .collect()
+    }
+
+    /// Which side of every crossing drawn in full one walk lies on, or `None`
+    /// where nothing here can say.
+    ///
+    /// Read off the half-edge where the walk uses that crossing — the region
+    /// left of a forward half-edge is the partner's negative side, which is the
+    /// same identity [`Arrangement::material_is_left_of_forward`] rests on — and
+    /// off the walk's own nodes where it does not. A crossing that does not
+    /// touch this lump at all leaves the whole lump on one side of itself, so
+    /// any node of the walk answers for all of them.
+    fn which_side_of_everything(
+        &self,
+        cycle: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Vec<Option<Decision>>> {
+        let mut sides = vec![None; self.crossings.len()];
+        for &half_edge in &self.cycles[cycle] {
+            let crossing = self.arcs[half_edge / 2].crossing;
+            if !self.drawn_in_full[crossing] {
+                continue;
+            }
+            sides[crossing] = Some(if half_edge.is_multiple_of(2) {
+                Decision::Neg
+            } else {
+                Decision::Pos
+            });
+        }
+        for (crossing, side) in sides.iter_mut().enumerate() {
+            if !self.drawn_in_full[crossing] || side.is_some() {
+                continue;
+            }
+            let partner = self.crossings[crossing].partner;
+            for &half_edge in &self.cycles[cycle] {
+                let at = self.nodes[self.arcs[half_edge / 2].ends[half_edge % 2]].point;
+                let found = must_decide(
+                    side_of_surface(&partner, at),
+                    name_of_surface(&partner),
+                    &[at],
+                    Measures::Length,
+                    policy,
+                    log,
+                )?;
+                if found != Decision::Zero {
+                    *side = Some(found);
+                    break;
+                }
+            }
+        }
+        Ok(sides)
+    }
+
+    /// How many times the face's boundary winds round each walk, counting only
+    /// what one lump of the drawing can say on its own.
+    ///
+    /// The face is on the left of its own boundary, so the walk on that side of
+    /// a boundary arc is wound once; crossing a boundary arc the other way takes
+    /// one off and crossing a cut arc takes nothing. A lump with no boundary arc
+    /// in it — a hole a cut left in the middle of a face — has nowhere to start,
+    /// and says nothing until it is joined to a lump that has.
+    fn count_the_windings_inside_each_lump(&mut self) {
+        self.winding_of_cycle = vec![None; self.cycles.len()];
+        for arc in 0..self.arcs.len() {
+            let Some(boundary) = self.arcs[arc].boundary else {
+                continue;
+            };
+            let material = self.cycle_of[2 * arc + usize::from(!boundary.runs_forward)];
+            if self.winding_of_cycle[material].is_some() {
+                continue;
+            }
+            self.winding_of_cycle[material] = Some(1);
+            let mut waiting = vec![material];
+            while let Some(cycle) = waiting.pop() {
+                let known = self.winding_of_cycle[cycle].expect("only settled walks wait");
+                for step in 0..self.cycles[cycle].len() {
+                    let half_edge = self.cycles[cycle][step];
+                    let across = self.cycle_of[half_edge ^ 1];
+                    let theirs = known + self.climb_across(half_edge);
+                    if self.winding_of_cycle[across].is_none() {
+                        self.winding_of_cycle[across] = Some(theirs);
+                        waiting.push(across);
+                    }
+                }
+            }
+        }
+    }
+
+    /// What crossing one half-edge into the walk on its other side adds to the
+    /// winding count.
+    fn climb_across(&self, half_edge: usize) -> i32 {
+        let arc = half_edge / 2;
+        match self.arcs[arc].boundary {
+            None => 0,
+            Some(boundary) => {
+                let material = 2 * arc + usize::from(!boundary.runs_forward);
+                if material == half_edge { -1 } else { 1 }
+            }
+        }
+    }
+
+    /// How many times the face's boundary winds round each cell.
+    ///
+    /// One inside the face and nothing outside it. Crossing a boundary arc from
+    /// the right of the way its wire runs to the left adds one, because the face
+    /// is on the left of its own boundary; crossing a cut arc adds nothing.
+    ///
+    /// # Panics
+    ///
+    /// If two ways round to the same cell disagree, or if a cell comes out wound
+    /// more than once or less than none. A face that overlaps itself could do
+    /// that, and it is not a face.
+    fn count_the_windings(&mut self) {
+        self.winding = vec![None; self.cells.len()];
+        for cycle in 0..self.cycles.len() {
+            let Some(known) = self.winding_of_cycle[cycle] else {
+                continue;
+            };
+            let cell = self.cell_of[cycle];
+            match self.winding[cell] {
+                None => self.winding[cell] = Some(known),
+                Some(already) => assert!(
+                    already == known,
+                    "two walks of one cell disagree about whether it is inside the face"
+                ),
+            }
+        }
+        for cell in 0..self.cells.len() {
+            if self.winding[cell].is_some() {
+                self.spread_the_winding(cell);
+            }
+        }
+    }
+
+    fn spread_the_winding(&mut self, from: usize) {
+        let mut waiting = vec![from];
+        while let Some(cell) = waiting.pop() {
+            let known = self.winding[cell].expect("only settled cells wait");
+            for cycle in self.cells[cell].clone() {
+                for step in 0..self.cycles[cycle].len() {
+                    let half_edge = self.cycles[cycle][step];
+                    let across = self.cell_of[self.cycle_of[half_edge ^ 1]];
+                    let theirs = known + self.climb_across(half_edge);
+                    assert!(
+                        (0..=1).contains(&theirs),
+                        "the boundary of a face winds round a point once or not at all, not \
+                         {theirs} times"
+                    );
+                    match self.winding[across] {
+                        None => {
+                            self.winding[across] = Some(theirs);
+                            waiting.push(across);
+                        }
+                        Some(already) => assert!(
+                            already == theirs,
+                            "two ways round to one cell disagree about whether it is inside the \
+                             face"
+                        ),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Where the one cut this arrangement was built with runs through the inside
+    /// of the face.
+    ///
+    /// A cut that turned out to be a curve the face's own boundary already runs
+    /// along has no cut arcs at all, and the answer is that it goes nowhere near
+    /// the inside — which is right: the boundary is not the inside.
+    ///
+    /// **A crossing that closes has no axis to measure along and comes back
+    /// empty.** That makes the self-crossing check say nothing about a curved
+    /// pair rather than the wrong thing, and §36 files it as a gap.
+    fn stretches_inside(&self) -> Stretches {
+        let nothing = Stretches {
+            axis: 0,
+            spans: Vec::new(),
+        };
+        let Some(crossing) = self.cut_crossings[0] else {
+            return nothing;
+        };
+        let HowItRuns::AlongAnAxis { axis, .. } = self.crossings[crossing].order else {
+            return nothing;
+        };
         let spans = (0..self.arcs.len())
             .filter(|&arc| {
-                self.arcs[arc].line == line
+                self.arcs[arc].crossing == crossing
                     && self.arcs[arc].boundary.is_none()
-                    && self.winding[self.cycle_of[2 * arc]] == Some(1)
+                    && self.winding[self.cell_of[self.cycle_of[2 * arc]]] == Some(1)
             })
             .map(|arc| {
                 self.arcs[arc]
@@ -1226,82 +1885,95 @@ impl<'f> Arrangement<'f> {
         Stretches { axis, spans }
     }
 
-    fn the_cycle_of_the_lump_that_is_wound_once(&self, lump: usize) -> usize {
-        let mut wound = (0..self.cycles.len())
-            .filter(|&cycle| self.lump_of[cycle] == lump && self.winding[cycle] == Some(1));
-        let only = wound.next().expect("a hole has a material side");
-        assert!(
-            wound.next().is_none(),
-            "a hole of a face that no cut line touches has one material side"
-        );
-        only
+    /// # Panics
+    ///
+    /// If the piece has no wires, or if a wire made only of straight sides has
+    /// fewer than three of them. Two straight lines enclose no area, so a piece
+    /// like that is a zero-area face, which §17.4 prevents rather than filters:
+    /// reaching here means the splitter is wrong.
+    fn piece_from(&self, cell: usize) -> Result<Piece> {
+        let mut cycles = self.cells[cell].clone();
+        // A flat piece has an outer wire and holes, and `Model::validate` reads
+        // the first as the outer one. The outer wire is the walk that keeps the
+        // face's own outer boundary, which is the lump the face's first wire is
+        // in. On a closed surface neither is outer (§31.3) and this leaves the
+        // order the walks were found in.
+        let outer = self.a_lump_of_the_faces_first_wire();
+        let lump = self.lump_of_each_cycle();
+        cycles.sort_by_key(|&cycle| usize::from(Some(lump[cycle]) != outer));
+
+        let wires: Vec<Vec<FaceMeet>> = cycles
+            .iter()
+            .map(|&cycle| self.wire_from(cycle))
+            .collect::<Result<_>>()?;
+        assert!(!wires.is_empty(), "a piece of a face has a boundary");
+        Ok(Piece {
+            ancestors: self.face.keys.clone(),
+            surface: self.surface,
+            orientation: self.face.orientation,
+            wires,
+        })
     }
 
-    fn a_half_edge_of_the_outer_wire(&self) -> usize {
+    fn a_lump_of_the_faces_first_wire(&self) -> Option<usize> {
+        let lump = self.lump_of_each_cycle();
         (0..2 * self.arcs.len())
             .find(|&half_edge| {
                 self.arcs[half_edge / 2]
                     .boundary
                     .is_some_and(|boundary| boundary.wire == 0)
             })
-            .expect("a face has an outer wire")
+            .map(|half_edge| lump[self.cycle_of[half_edge]])
     }
 
-    fn piece_from(&self, outer: usize, holes: &[usize]) -> Piece {
-        let wires = core::iter::once(outer)
-            .chain(holes.iter().copied())
-            .map(|cycle| self.wire_from(cycle))
-            .collect();
-        Piece {
-            ancestors: self.face.keys.clone(),
-            plane: self.plane,
-            orientation: self.face.orientation,
-            wires,
-        }
-    }
-
-    /// # Panics
-    ///
-    /// If the wire has fewer than three sides. Two straight lines enclose no
-    /// area, so a piece like that is a zero-area face, which §17.4 prevents
-    /// rather than filters: reaching here means the splitter is wrong.
-    fn wire_from(&self, cycle: usize) -> Vec<FaceMeet> {
+    fn wire_from(&self, cycle: usize) -> Result<Vec<FaceMeet>> {
+        let all_straight = self.cycles[cycle].iter().all(|&half_edge| {
+            !self.crossings[self.arcs[half_edge / 2].crossing]
+                .order
+                .closes()
+        });
         assert!(
-            self.cycles[cycle].len() >= 3,
-            "a piece of a face has at least three sides, this one has {}",
+            !all_straight || self.cycles[cycle].len() >= 3,
+            "a piece bounded by straight sides has at least three of them, this one has {}",
             self.cycles[cycle].len()
         );
         self.cycles[cycle]
             .iter()
-            .map(|&half_edge| FaceMeet {
-                carried_by: [
-                    self.plane,
-                    self.lines[self.arcs[half_edge / 2].line].partner,
-                ],
-                ends: [
-                    self.meet_point(self.from(half_edge)),
-                    self.meet_point(self.to(half_edge)),
-                ],
-                along: self.arcs[half_edge / 2]
-                    .boundary
-                    .map_or_else(SmallVec::new, |boundary| {
+            .map(|&half_edge| {
+                let arc = &self.arcs[half_edge / 2];
+                Ok(FaceMeet {
+                    carried_by: [self.surface, self.crossings[arc.crossing].partner],
+                    ends: [
+                        self.meet_point(self.from(half_edge)),
+                        self.meet_point(self.to(half_edge)),
+                    ],
+                    along: arc.boundary.map_or_else(SmallVec::new, |boundary| {
                         self.face.wires[boundary.wire][boundary.position]
                             .keys
                             .clone()
                     }),
-                approximation: None,
+                    approximation: None,
+                })
             })
             .collect()
     }
 
     fn meet_point(&self, node: usize) -> MeetPoint {
-        match self.nodes[node].vertex {
-            Some(vertex) => MeetPoint::Existing {
+        match (self.nodes[node].vertex, self.nodes[node].made_of) {
+            (Some(vertex), _) => MeetPoint::Existing {
                 vertex,
                 point: self.nodes[node].point,
             },
-            None => MeetPoint::OfThreePlanes {
-                planes: self.nodes[node].planes,
+            (None, Some((surfaces, which))) => MeetPoint::OfThreeSurfaces {
+                surfaces,
+                which,
+                point: self.nodes[node].point,
+            },
+            (None, None) => MeetPoint::WhereAClosedCurveStarts {
+                carried_by: [
+                    self.surface,
+                    self.crossings[self.nodes[node].crossings[0]].partner,
+                ],
                 point: self.nodes[node].point,
             },
         }
@@ -1309,7 +1981,7 @@ impl<'f> Arrangement<'f> {
 
     fn direction(&self, half_edge: usize) -> Direction {
         Direction {
-            line: self.arcs[half_edge / 2].line,
+            crossing: self.arcs[half_edge / 2].crossing,
             forward: half_edge.is_multiple_of(2),
         }
     }
@@ -1323,45 +1995,147 @@ impl<'f> Arrangement<'f> {
     }
 }
 
-/// Three planes sorted on their coefficients, so that whichever face asks for
-/// their meeting point asks for it the same way round.
-///
-/// Cramer's rule rounds differently when its rows are permuted, so a corner
-/// solved as `meet(p, q, r)` by one face and as `meet(q, p, r)` by the face next
-/// to it comes out a bit apart and the two faces stop agreeing about where their
-/// shared corner is. Which face gets there first depends on which side of the
-/// fuse its solid was on, so this is §14.8's commutativity oracle again. The
-/// order is the one [`Corners::of`](super::assemble) already names the corner
-/// by, so the name and the numbers are settled the same way.
-fn in_a_fixed_order(mut planes: [Plane; 3]) -> [Plane; 3] {
-    planes.sort_unstable_by_key(|plane| plane.coefficients().map(f64::to_bits));
-    planes
+/// What picks one curve of a crossing out of the others.
+fn pickers_of(run: &NamedRun) -> &[Picker] {
+    match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+        _ => &[],
+    }
 }
 
-/// The name the ordering of two points along a line goes by in provenance
+/// Whether nothing among `picked_by` rules `at` out.
+///
+/// A picker's [`Decision::Undecidable`] is a real answer and rules out nothing
+/// (§33.8), so a point nothing could decide about comes back held by every
+/// curve of the pair — and the caller refuses rather than picking the wrong one.
+fn nothing_rules_the_point_out(picked_by: &[Picker], at: PredicatePoint) -> bool {
+    picked_by
+        .iter()
+        .all(|picker| picker.side_of_point(at) != Decision::Neg)
+}
+
+/// The gradient of a surface at a point, as a box.
+///
+/// A polynomial in the stored numbers with no normalization in it (§31.2): the
+/// normal for a plane, `x − c` for a ball, and `|w|²(x − o) − (w·(x − o))w` for
+/// a pipe. For a plane it does not depend on the point at all, which is why the
+/// planar arithmetic here is exactly what it was.
+fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
+    match surface {
+        Surface::Plane(flat) => PredicatePoint::from(flat.normal().components()),
+        Surface::Sphere(ball) => {
+            let centre = ball.centre().coordinates();
+            let box_of_it = at.enclosure();
+            PredicatePoint::Constructed(
+                [0, 1, 2].map(|axis| box_of_it[axis] - Interval::exactly(centre[axis])),
+            )
+        }
+        Surface::Cylinder(pipe) => {
+            let origin = pipe.axis().origin().coordinates();
+            let along = pipe.axis().direction().components();
+            let box_of_it = at.enclosure();
+            let step = [0, 1, 2].map(|axis| box_of_it[axis] - Interval::exactly(origin[axis]));
+            let squared = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * Interval::exactly(along[axis]))
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let shadow = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * step[axis])
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            PredicatePoint::Constructed(
+                [0, 1, 2]
+                    .map(|axis| squared * step[axis] - shadow * Interval::exactly(along[axis])),
+            )
+        }
+        other => panic!("a surface whose gradient nothing here knows: {other:?}"),
+    }
+}
+
+/// How points along `surface ∩ partner` are put in order, read at a point `at`
+/// that is already known to be on both.
+///
+/// # Errors
+///
+/// [`Error::ACrossingThisCannotBeOrderedAlong`] for a pair whose crossing is
+/// neither an endless straight line nor one closed curve lying in a plane — a
+/// ball against a pipe, or two pipes. That is a **gap**: the curve is there and
+/// ordering points along it takes the marcher rather than a determinant
+/// (§34.10).
+fn how_a_crossing_runs(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+    at: PredicatePoint,
+    log: &mut ProvenanceLog,
+) -> Result<HowItRuns> {
+    if let (Some(one), Some(other)) = (surface.as_plane(), partner.as_plane()) {
+        let (axis, forward_climbs_the_axis) = dominant_axis(one, other, log)?;
+        return Ok(HowItRuns::AlongAnAxis {
+            axis,
+            forward_climbs_the_axis,
+        });
+    }
+    if a_plane_along_a_pipes_axis(surface, partner) {
+        let (axis, forward_climbs_the_axis) = dominant_axis_of_a_direction(
+            cross_of(gradient_at(surface, at), gradient_at(partner, at)),
+            log,
+        )?;
+        return Ok(HowItRuns::AlongAnAxis {
+            axis,
+            forward_climbs_the_axis,
+        });
+    }
+    match where_a_closed_crossing_starts(run, [surface, partner], log) {
+        Ok(from) => Ok(HowItRuns::RoundAClosedCurve {
+            from: PredicatePoint::from(from.coordinates()),
+        }),
+        Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
+    }
+}
+
+/// Whether the pair is a plane parallel to a pipe's axis, which crosses it in
+/// straight lines rather than in a closed curve.
+fn a_plane_along_a_pipes_axis(one: &Surface, other: &Surface) -> bool {
+    match (one, other) {
+        (Surface::Plane(flat), Surface::Cylinder(pipe))
+        | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
+            flat.normal().dot(pipe.axis().direction()) == 0.0
+        }
+        _ => false,
+    }
+}
+
+/// The cross product of two boxes.
+fn cross_of(one: PredicatePoint, other: PredicatePoint) -> [Interval; 3] {
+    let (mine, theirs) = (one.enclosure(), other.enclosure());
+    [0, 1, 2].map(|axis| {
+        let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
+        mine[next] * theirs[last] - mine[last] * theirs[next]
+    })
+}
+
+/// The name the ordering of two points along a crossing goes by in provenance
 /// records.
-const ALONG_A_LINE: &str = "order along a line";
+const ALONG_A_CROSSING: &str = "order along a crossing";
 
 /// The name the search for the piece a hole sits in goes by in provenance
 /// records.
 const AROUND_A_HOLE: &str = "which piece of a face a hole is in";
 
-/// Where a line meets an arc.
-enum Crossing {
+/// Where a ray's own curve meets one arc of the drawing.
+enum MetAt {
     /// Nowhere along it.
-    Misses,
-    /// At this coordinate on the line's own axis.
-    At(Interval),
-    /// At one of the arc's ends, or too close to one to say. Carries where, on
-    /// the line's own axis.
-    AtAnEnd(Interval),
+    Nowhere,
+    /// At this node, strictly between the arc's two ends.
+    Between(usize),
+    /// At one of the arc's ends, or too close to one to say.
+    AnEnd(usize),
 }
 
 fn at_in(order: &[usize], node: usize) -> usize {
     order
         .iter()
         .position(|&other| other == node)
-        .expect("a corner is one of the nodes on the line its edge runs along")
+        .expect("a corner is one of the nodes on the crossing its edge runs along")
 }
 
 /// Which axis the line `p ∩ q` climbs fastest along, and whether
@@ -1407,6 +2181,67 @@ fn dominant_axis(plane: &Plane, partner: &Plane, log: &mut ProvenanceLog) -> Res
             Measures::Area,
             log,
         )),
+    }
+}
+
+/// The same, for a direction that had to be worked out rather than read off two
+/// stored normals.
+///
+/// The components are ranges, so an axis is only usable when its range is
+/// **proved** clear of zero. Widest first, for the same reason as above: any
+/// proved axis orders the points correctly and the widest separates them most.
+fn dominant_axis_of_a_direction(
+    direction: [Interval; 3],
+    log: &mut ProvenanceLog,
+) -> Result<(usize, bool)> {
+    let mut best: Option<(usize, bool, f64)> = None;
+    for (axis, along) in direction.iter().enumerate() {
+        let climbs = match along.sign() {
+            Decision::Pos => true,
+            Decision::Neg => false,
+            _ => continue,
+        };
+        let size = along.lo().abs().min(along.hi().abs());
+        if best.is_none_or(|(_, _, so_far)| so_far < size) {
+            best = Some((axis, climbs, size));
+        }
+    }
+    match best {
+        Some((axis, climbs, _)) => Ok((axis, climbs)),
+        None => Err(gave_up(
+            ORIENT2D,
+            &[PredicatePoint::Constructed(direction)],
+            Measures::Area,
+            log,
+        )),
+    }
+}
+
+/// Whether two planes are the same plane, refusing when nothing can tell.
+///
+/// [`PlaneAgreement::CannotTell`] takes coefficients whose products fall out of
+/// the range `f64` multiplication can be undone in — §3.5's dynamic-range check
+/// is what keeps models like that out. Nothing can bound how wrong the answer
+/// would be, so the record says so rather than naming a width it does not have.
+pub(crate) fn agreement_of_two_planes(
+    plane: &Plane,
+    other: &Plane,
+    log: &mut ProvenanceLog,
+) -> Result<PlaneAgreement> {
+    match plane.agreement_with(other) {
+        settled @ (PlaneAgreement::SameWay
+        | PlaneAgreement::OppositeWay
+        | PlaneAgreement::Different) => Ok(settled),
+        PlaneAgreement::CannotTell => Err(gave_up(
+            ORIENT2D,
+            &[
+                PredicatePoint::from(plane.normal().components()),
+                PredicatePoint::from(other.normal().components()),
+            ],
+            Measures::Area,
+            log,
+        )),
+        other => panic!("plane agreement came back with an answer nothing here knows: {other:?}"),
     }
 }
 
@@ -1467,70 +2302,9 @@ fn relation_of_two_lines(
     }
     Ok(LineRelation::Same)
 }
-
-/// Whether two planes never meet, or are the same plane.
-///
-/// The normals are parallel exactly when all three two-by-two minors of them
-/// vanish, which [`orient2d`] measured from the origin decides exactly.
-pub(crate) fn planes_are_parallel(
-    plane: &Plane,
-    other: &Plane,
-    policy: &Policy,
-    log: &mut ProvenanceLog,
-) -> Result<bool> {
-    let (mine, theirs) = (plane.normal().components(), other.normal().components());
-    for axis in 0..3 {
-        let (one, other) = ((axis + 1) % 3, (axis + 2) % 3);
-        let decision = must_decide(
-            orient2d(
-                [0.0, 0.0],
-                [mine[one], mine[other]],
-                [theirs[one], theirs[other]],
-            ),
-            ORIENT2D,
-            &[PredicatePoint::from(mine), PredicatePoint::from(theirs)],
-            Measures::Area,
-            policy,
-            log,
-        )?;
-        if decision != Decision::Zero {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-/// Whether two planes are the same plane, refusing when nothing can tell.
-///
-/// [`PlaneAgreement::CannotTell`] takes coefficients whose products fall out of
-/// the range `f64` multiplication can be undone in — §3.5's dynamic-range check
-/// is what keeps models like that out. Nothing can bound how wrong the answer
-/// would be, so the record says so rather than naming a width it does not have.
-pub(crate) fn agreement_of_two_planes(
-    plane: &Plane,
-    other: &Plane,
-    log: &mut ProvenanceLog,
-) -> Result<PlaneAgreement> {
-    match plane.agreement_with(other) {
-        settled @ (PlaneAgreement::SameWay
-        | PlaneAgreement::OppositeWay
-        | PlaneAgreement::Different) => Ok(settled),
-        PlaneAgreement::CannotTell => Err(gave_up(
-            ORIENT2D,
-            &[
-                PredicatePoint::from(plane.normal().components()),
-                PredicatePoint::from(other.normal().components()),
-            ],
-            Measures::Area,
-            log,
-        )),
-        other => panic!("plane agreement came back with an answer nothing here knows: {other:?}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Isometry, Plane, Scale, Vector};
+    use rcad_geom::{Isometry, Plane, Scale, Surface, Vector};
     use rcad_predicates::{Decision, Policy, ProvenanceLog, orient3d};
 
     use super::{Piece, split_a_face, the_other_way};
@@ -1578,6 +2352,13 @@ mod tests {
         }
     }
 
+    /// Whether a baked face is the flat one pointing up the z axis.
+    fn facing_up(face: &BakedFace) -> bool {
+        face.surface
+            .as_plane()
+            .is_some_and(|flat| flat.normal() == Vector::new(0.0, 0.0, 1.0))
+    }
+
     fn a_cube_of_side_two() -> (Model, SolidKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let cube = model
@@ -1589,14 +2370,20 @@ mod tests {
     /// The top of the cube: the square from `(0, 0, 2)` to `(2, 2, 2)`, facing
     /// up.
     fn the_top_of_a_cube(model: &Model, cube: SolidKey) -> BakedFace {
-        let baked = bake(model, &[cube], &mut ProvenanceLog::new()).expect("a cube bakes");
+        let baked = bake(
+            model,
+            &[cube],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a cube bakes");
         baked
             .into_iter()
             .next()
             .expect("one solid was baked")
             .faces
             .into_iter()
-            .find(|face| face.plane.normal() == Vector::new(0.0, 0.0, 1.0))
+            .find(facing_up)
             .expect("a cube has a face pointing up")
     }
 
@@ -1609,20 +2396,27 @@ mod tests {
         let solid = model
             .add_extrusion(&profile, 1.0, &Isometry::identity())
             .expect("an extrusion");
-        bake(&model, &[solid], &mut ProvenanceLog::new())
-            .expect("it bakes")
-            .swap_remove(0)
-            .faces
-            .into_iter()
-            .find(|face| face.plane.normal() == Vector::new(0.0, 0.0, 1.0))
-            .expect("an extrusion has a top")
+        bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("it bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(facing_up)
+        .expect("an extrusion has a top")
     }
 
     fn cut_by(face: &BakedFace, planes: &[[f64; 4]]) -> BakedFace {
         let mut cut = face.clone();
         cut.cuts = planes
             .iter()
-            .map(|&coefficients| Plane::from_coefficients(coefficients).expect("a plane"))
+            .map(|&coefficients| {
+                Surface::Plane(Plane::from_coefficients(coefficients).expect("a plane"))
+            })
             .collect();
         cut
     }
@@ -1669,7 +2463,7 @@ mod tests {
         piece
             .wires
             .iter()
-            .map(|wire| twice_the_area(wire, piece.plane.normal().components()))
+            .map(|wire| twice_the_area(wire, piece.plane().normal().components()))
             .sum()
     }
 
@@ -1694,7 +2488,7 @@ mod tests {
 
         assert_eq!(pieces.len(), 1);
         assert_eq!(pieces[0].ancestors, top.keys);
-        assert_eq!(pieces[0].plane, top.plane);
+        assert_eq!(pieces[0].surface, top.surface);
         assert_eq!(pieces[0].wires.len(), 1);
         assert_eq!(pieces[0].wires[0].len(), 4);
         assert_eq!(twice_the_area_of(&pieces[0]), 8.0, "a square of side two");
@@ -1779,9 +2573,9 @@ mod tests {
             &the_top_of_a_cube(&model, cube),
             &[[1.0, 0.0, 0.0, -1.0], [0.0, 1.0, 0.0, -1.0]],
         );
-        let rim: Vec<Plane> = top.wires.iter().flatten().map(|edge| edge.across).collect();
+        let rim: Vec<Surface> = top.wires.iter().flatten().map(|edge| edge.across).collect();
 
-        let mut walked: Vec<([f64; 3], [f64; 3], Plane)> = Vec::new();
+        let mut walked: Vec<([f64; 3], [f64; 3], Surface)> = Vec::new();
         for piece in &split(&top) {
             every_wire_closes(piece);
             for wire in &piece.wires {
@@ -1859,13 +2653,18 @@ mod tests {
         let solid = model
             .add_extrusion(&plate, 1.0, &Isometry::identity())
             .expect("an extrusion");
-        let top = bake(&model, &[solid], &mut ProvenanceLog::new())
-            .expect("the plate bakes")
-            .swap_remove(0)
-            .faces
-            .into_iter()
-            .find(|face| face.plane.normal() == Vector::new(0.0, 0.0, 1.0))
-            .expect("the plate has a top");
+        let top = bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the plate bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(facing_up)
+        .expect("the plate has a top");
         let cut = cut_by(&top, &[[1.0, 0.0, 0.0, -2.0]]);
 
         let pieces = split(&cut);

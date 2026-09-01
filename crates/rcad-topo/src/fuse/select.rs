@@ -109,7 +109,7 @@ pub(crate) fn choose(
         };
         let facing = outward_plane_of(piece);
         let corners = corners_of(piece);
-        let Some(in_plane) = InPlane::of(&piece.plane) else {
+        let Some(in_plane) = InPlane::of(&piece.plane()) else {
             return Err(nothing_to_measure_from(piece, log));
         };
         let candidates = candidate_points(&corners);
@@ -490,17 +490,28 @@ fn coincident_face(
 /// same thing.
 fn outward_plane_of(piece: &Piece) -> Plane {
     if piece.orientation.is_reversed() {
-        piece.plane.reversed()
+        piece.plane().reversed()
     } else {
-        piece.plane
+        piece.plane()
     }
 }
 
+/// The plane of an input face, turned to point out of the material.
+///
+/// # Panics
+///
+/// If the face is curved. Selection is still gated on
+/// [`Error::FuseNeedsFlatFaces`](crate::Error::FuseNeedsFlatFaces), which lane 5
+/// takes off; until then a curved face never reaches here.
 fn outward_plane_of_face(face: &BakedFace) -> Plane {
+    let plane = *face
+        .surface
+        .as_plane()
+        .expect("selection is still gated on every face being flat");
     if face.orientation.is_reversed() {
-        face.plane.reversed()
+        plane.reversed()
     } else {
-        face.plane
+        plane
     }
 }
 
@@ -735,7 +746,7 @@ const INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 const OFF_A_PLANE: &str = "a point off a face's plane";
 
 fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
-    let normal = piece.plane.normal().components();
+    let normal = piece.plane().normal().components();
     gave_up(
         OFF_A_PLANE,
         &[PredicatePoint::from(normal)],
