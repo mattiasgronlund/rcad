@@ -192,9 +192,23 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 /// two §17.7 names are about 3.5 points apiece, and §19.1's plane reader was
 /// worth 4.4, which is what took this number from 28 to 24 when it was fixed.
 ///
-/// **Six fuses is thin and the thinness is the measurement moving, not the
-/// threshold slipping** (§38.8). It read 20.71% of 420 when it was written and
-/// reads 22.70% of 423 now, and the corpus grew because the generator did.
+/// **Six fuses is thin, and §39 says where the room went.** §38.8 read the
+/// stale prose beside it — 20.71% of 420 — and put the difference down to the
+/// generator growing. Measured at M3's close the corpus was already 423 and the
+/// rate was **20.6%, 87 refusals**; it is 96 now, and the nine arrived at
+/// `c1e713e`, where `Axis::new` learned to reduce before it normalises. Every
+/// configuration in this family is turned about an `Axis`, so that commit
+/// changed the rotation each one is built with: this is a **different corpus**
+/// and not the same corpus refusing more, which is why no answer got worse and
+/// no property here noticed.
+///
+/// The threshold is deliberately **not** re-derived for it. Twenty-four per cent
+/// still fires on anything 1.3 points above the measurement, which is well
+/// inside the 3.5 points the smallest undeserved refusal on record was worth, so
+/// it is doing its job and doing it more sharply than it has to. What a red run
+/// asks for is the attribution above and not a bigger number — and a soak cannot
+/// supply one, because a soak is a different corpus with a distribution of its
+/// own and judging one by the other is the blending §17.7 forbids.
 ///
 /// **It is judged on the shipped corpus only** — see
 /// [`this_is_the_shipped_corpus`]. A soak is a different measurement with a
