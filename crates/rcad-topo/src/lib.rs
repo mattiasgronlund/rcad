@@ -88,6 +88,7 @@
 
 mod build;
 mod classify;
+mod cross;
 mod error;
 mod fuse;
 mod key;

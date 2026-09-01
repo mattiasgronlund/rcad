@@ -1395,6 +1395,98 @@ mod tests {
         assert_eq!(closed, 2, "only a bar's two cap circles are closed edges");
     }
 
+    /// The other half of the same seam: the evaluator answers about every one of
+    /// those runs, and the points it hands back are on both faces.
+    ///
+    /// The gate checked the types could say it; this checks the arithmetic
+    /// behind it answers. **The mesher still does not call `walk`** — swapping
+    /// it over changes how many points every curved mesh gets and moves the pole
+    /// and seam handling down a layer, which belongs with the milestone's
+    /// closing gate rather than in the middle of its first stage (§28). What
+    /// this says is that the swap is a wiring job and not a discovery: every
+    /// curved edge the kernel builds already crosses the seam and comes back
+    /// with points on the surfaces the mesher would have put them on.
+    #[test]
+    fn every_curved_edge_the_kernel_builds_is_walked_into_points_on_both_its_faces() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let somewhere = Isometry::translation(Vector::new(4.0, -2.0, 1.0)).expect("a move");
+        model.add_round_bar(3.0, 5.0, &somewhere).expect("a bar");
+        model.add_ball(2.0, &somewhere).expect("a ball");
+        model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube");
+
+        let mut curved = 0;
+        let mut straight = 0;
+        for slot in model.data().edges.keys() {
+            let edge = EdgeView::new(&model, slot, Isometry::identity(), Orientation::Forward);
+            let (from, to) = ends_in_the_stored_order(edge);
+            let run = NamedRun::new(
+                edge.run().clone(),
+                [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
+            );
+            let faces: Vec<Surface> = model
+                .faces_along_edge(slot)
+                .map(|face| model.data().faces[face].surface)
+                .collect();
+            let along = match faces.as_slice() {
+                // A seam has the same face both sides, listed once.
+                [only] => [*only, *only],
+                [first, second] => [*first, *second],
+                other => panic!("an edge has one face or two along it, not {}", other.len()),
+            };
+
+            let along_it = rcad_geom::walk(
+                &run,
+                [&along[0], &along[1]],
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| {
+                panic!("this edge came out of a model and would not walk: {why}")
+            });
+
+            if run.run() == &EdgeRun::Straight {
+                straight += 1;
+                assert!(along_it.points().is_empty(), "a line needs no filling in");
+                assert_eq!(along_it.deviation().magnitude(), 0.0);
+                continue;
+            }
+
+            curved += 1;
+            assert!(
+                along_it.points().len() > 8,
+                "a curved edge of a shape this size takes more than eight pieces"
+            );
+            let slack = along_it.deviation().magnitude();
+            let has_to_be_on: Vec<Surface> = match run.run() {
+                EdgeRun::PartOfWhereItCrosses { and, .. } if along[0] == along[1] => {
+                    vec![along[0], *and]
+                }
+                _ => vec![along[0], along[1]],
+            };
+            for &point in along_it.points() {
+                let at = PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
+                    Interval::new(coordinate - slack, coordinate + slack)
+                        .expect("a bound is a length")
+                }));
+                for surface in &has_to_be_on {
+                    let decision = side_of_surface(surface, at);
+                    assert!(
+                        !matches!(decision, Decision::Pos | Decision::Neg),
+                        "this point is on {surface:?} and came back {decision:?}: {point:?}"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            curved, 3,
+            "a bar's two cap circles and a ball's seam; a bar's own seam is a straight ruling"
+        );
+        assert_eq!(straight, 13, "that ruling and a cube's twelve edges");
+    }
+
     /// A ball seamed down the far half of its meridian is sound and used to mesh
     /// into nothing at all.
     ///

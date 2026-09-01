@@ -15,7 +15,8 @@
 //! Nothing in this file imports anything but `rcad`. That is the test.
 
 use rcad::{
-    Cylinder, EdgeRun, NamedRun, Plane, Point, PredicatePoint, Sphere, Surface, SurfaceMeet, Vector,
+    Cause, Cylinder, Deflection, EdgeRun, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point,
+    Policy, PredicatePoint, ProvenanceLog, Sphere, Surface, SurfaceMeet, Vector,
 };
 
 /// A ball's seam, said in the vocabulary a crossing comes back in.
@@ -97,4 +98,53 @@ fn every_way_two_surfaces_can_meet_is_something_a_caller_can_match_on() {
         named,
         ["nothing", "one point", "curves", "the same surface"]
     );
+}
+
+/// The intersector itself, named from out here and nowhere else.
+///
+/// §24.15's argument for exporting it: it has no topology in its signature, so
+/// it costs nothing, and quadric intersection with certified results and an
+/// explicit refusal has users who are not kernel users. What stays inside
+/// `rcad-topo` is the `along` bookkeeping, because that names `EdgeKey`s — and
+/// nothing in this file can name one.
+#[test]
+fn a_caller_out_here_can_cross_two_surfaces_and_walk_the_answer() {
+    let pipe = Surface::Cylinder(
+        Cylinder::new(
+            rcad::Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+            3.0,
+        )
+        .expect("a pipe of radius three"),
+    );
+    let cut = Surface::Plane(
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 5.0), Vector::new(0.0, 1.0, 1.0))
+            .expect("a normal with a length"),
+    );
+
+    let mut log = ProvenanceLog::new();
+    let met = rcad::intersect(&pipe, &cut, &Policy::certified(), &mut log)
+        .expect("a pipe cut at an angle crosses in one ellipse");
+    assert!(log.is_empty(), "nothing here needs approximating");
+
+    let SurfaceMeet::Curves(runs) = met else {
+        panic!("a tilted cut across a pipe is one closed curve");
+    };
+    assert_eq!(runs.len(), 1);
+
+    let along_it = rcad::walk(
+        &runs[0],
+        [&pipe, &cut],
+        Deflection::of(0.01).expect("a length"),
+        &Policy::certified(),
+        &mut log,
+    )
+    .expect("a shape this size is walked without complaint");
+
+    assert!(along_it.points().len() > 20);
+    assert_eq!(
+        along_it.deviation().cause(),
+        Cause::PointAlongACrossing,
+        "a point put where a curve is, and not a triangle put where a surface is"
+    );
+    assert!(along_it.deviation().magnitude() <= POINT_ALONG_A_CROSSING_ROUNDOFF * 20.0);
 }

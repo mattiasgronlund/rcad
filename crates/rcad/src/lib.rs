@@ -305,6 +305,19 @@ pub use rcad_mesh::CannotTriangulate;
 /// not kernel users, which is §24.15's argument for exporting it at all.
 pub use rcad_geom::{EdgeRun, NamedRun, SurfaceMeet};
 
+/// Naming where two surfaces cross, and working out points along it.
+///
+/// §24.15: the entry point has no topology in its signature, so exporting it
+/// costs nothing, and quadric intersection with certified results and an
+/// explicit `Undecidable` has users who are not kernel users. The `along`
+/// bookkeeping — which input edges a piece of a crossing runs along — stays
+/// inside `rcad-topo`, because those name keys.
+pub use rcad_geom::{
+    MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing,
+    WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_BALLS_CROSS,
+    WHERE_TWO_PLANES_CROSS, intersect, walk,
+};
+
 pub use rcad_geom::{
     Axis, BSplineCurve, BSplineSurface, Cylinder, Deflection, EVALUATION_ROUNDOFF, Isometry,
     KnotVector, MAX_DEGREE, Orientation, Plane, PlaneAgreement, Point, REFINEMENT_ROUNDOFF, Scale,
