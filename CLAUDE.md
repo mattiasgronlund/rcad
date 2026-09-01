@@ -28,7 +28,12 @@ These are the ones that are expensive to notice late.
 - **Provenance is recorded per decision, not per coordinate.** Detailed records
   only on non-certified outcomes; a fully certified operation logs nothing.
 - **`#![forbid(unsafe_code)]`** in every crate here.
-- **`#[non_exhaustive]` on every public enum.** They all grow each milestone.
+- **`#[non_exhaustive]` on every public enum.** They all grow each milestone. The
+  cost of that is a wildcard arm at every match outside the owning crate, and a
+  wildcard is where the next variant goes to be ignored — so when you write one,
+  name the variants that exist and keep `_` for the ones that do not. An enum
+  that is deliberately exhaustive says **"Exhaustive on purpose"** in its doc
+  comment; `just check-enums` accepts nothing else. `docs/decisions.md` §40.
 - **No LGPL runtime dependencies.** `cargo-deny` enforces it; don't work around it.
 - Validity checks after a mutation are **local to touched entities**. The full
   sweep is `Model::validate()`, called at test and import boundaries. A full sweep

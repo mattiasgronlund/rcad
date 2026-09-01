@@ -1,7 +1,23 @@
-default: check lint test deny
+default: check check-enums lint test deny
 
 check:
     cargo check --workspace --all-targets
+
+# Every public enum either grows or says why it does not (docs/decisions.md §40).
+#
+# `#[non_exhaustive]`, or a doc comment saying "Exhaustive on purpose" — which
+# `Orientation` is, and is the only one (§3.6). A new public enum written
+# without either compiles, passes every test, and nothing else would notice.
+#
+# A `pub enum` is judged against what stands between it and the blank line above
+# it, which is where rustfmt puts the item's own attributes and doc comment.
+check-enums:
+    @! awk '/^$/ {ok = 0} \
+            /^#\[non_exhaustive\]/ {ok = 1} \
+            /Exhaustive on purpose/ {ok = 1} \
+            /^[ \t]*pub enum/ {if (!ok) print FILENAME ":" FNR ": " $0; ok = 0}' \
+            $(find crates -path '*/src/*' -name '*.rs') | grep . \
+        || (echo "^ a public enum that neither grows nor says why not (docs/decisions.md §40)"; exit 1)
 
 test:
     cargo nextest run --workspace
