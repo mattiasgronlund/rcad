@@ -8375,18 +8375,27 @@ certified policy accepts nothing, so a predicate handed a box either proves its
 sign and says nothing or gives up. A record there would mean a decision had been
 taken on something nobody proved.
 
-| | at §34 | now |
+| | when this lane opened | now |
 |---|---|---|
-| tests (`cargo nextest`) | 1029 | **1045** |
-| suite duration | 97.9 s | 98.1 s |
+| tests (`cargo nextest`, whole workspace) | 1009 | **1045** |
+| of those, this lane's | — | **16** |
+| suite duration | 96.5 s | 98.1 s |
 | doc tests | 19 | 19 |
 | `FORMAT_VERSION` | 3 | 3 |
-| fuzz corpus | 746 | 746 |
+| fuzz corpus | 699 | 746 |
 
-Sixteen of the new tests are this lane's and they come to about nine seconds of
-processor time, seven and a half of which is criterion 9's mesh oracle. The
-suite's own ninety-seven seconds are still the one `rcad-geom` row §33.5 and
-§34.8 describe, and nothing here touches it.
+**Lanes 2 and 3 share a working tree, and the workspace counts cannot be split
+by reading them.** §34.7 records 1045 as well, and says so in its own row: the
+two lanes commit into the same branch from the same directory, so each has
+swept the other's files into a commit at least once. Nothing was lost — the
+later commit carries the later content — but a lane in this position should
+stage by path rather than by `--all`, and this one learned that after two
+commits rather than before.
+
+The sixteen tests come to about nine seconds of processor time, seven and a half
+of which is criterion 9's mesh oracle. The suite's own ninety-seven seconds are
+still the one `rcad-geom` row §33.5 and §34.8 describe, and nothing here touches
+it.
 
 **One cost is not in that table and lane 5 should know it.** Asking whether a
 face holds a point calls `intersect` once per surface trimming it, to count the
@@ -8413,14 +8422,20 @@ per face rather than once per query.
   determinant at each corner, in which case it is cheap". It is not row 9's
   determinant, because row 9 needs the arc's direction and a closed edge has
   none. What is checkable without one is §35.2's side agreement, and it is cheap.
-- **§31.2 row 10** leaves the polynomial and the degree unsettled. There is no
-  polynomial: the row is answered by other rows' predicates and adds no
-  arithmetic of its own. Rows 11 and 12 are degree **2 in the ray's parameter**
-  for both curved kinds and degree 1 for a plane, against §31.2's guessed 4 and 6
-  — those are the degrees in the *stored numbers*, which is a different count and
-  is not what a caller pays here.
+- **§31.2 row 10** leaves its polynomial and its degree unsettled with a "?".
+  **There is no polynomial**, and that is the shape of the answer rather than a
+  gap in it: the row is decided by other rows' predicates — `side_of_surface`,
+  and `intersect` to count loops — and adds no arithmetic of its own. That is
+  the whole reason it costs what it costs.
+- **§31.2 row 11** marks its degrees 4 for a ball and 6 for a pipe as guesses.
+  They are guesses about the *discriminant in the stored numbers* and this lane
+  did not need one: what it solves is the quadratic in the ray's own parameter,
+  which is degree **2** for both curved kinds and degree 1 for a plane, and the
+  discriminant's sign is read as an interval and never expanded. So the row's
+  number is neither confirmed nor corrected here, and the caller does not pay it.
 - **§31.8 item 9** watches `MOST_POINTS_A_MESH_WILL_HOLD` for the first solid
-  with five curved edges. A washer has six, and it meshes without coming near it.
+  with five edges on a curved surface. A washer has six of those — four circles
+  and two seams — and it meshes without coming near the cap.
 - **§33.8's third trap** — a picker's `Undecidable` rules out nothing — did not
   fire, because nothing in this lane reads `picked_by`. It is still true and lane
   4 still meets it.
@@ -8436,12 +8451,16 @@ per face rather than once per query.
   **That is the single change that widens row 10 most**, and it is lane 4's.
 - **`for_each_triangle` reads every wire as a polygon**, and the fan of a face
   with a curved side is wrong in two different ways (§35.4). Ray casting no longer
-  uses it for such a face. **`SolidView::signed_volume`, `measure`'s planar sums
-  and `box_around_its_corners` still do**, and each is sound only while the faces
-  it is asked about are polygons — which for the volume sums is enforced by
-  `solid_is_wholly_flat`, and for `box_around_its_corners` by the name. A lane
-  that fuses a curved solid and then measures it goes through the mesh, which is
-  right; a lane that reaches for the fan will get a confident wrong number.
+  uses it for such a face. **`measure`'s planar sums, `box_around_its_corners`
+  and `bake.rs`'s box round a face still do**, and each is sound only while the
+  faces it is asked about are polygons — which `measure` enforces with
+  `is_wholly_flat` and `box_around_its_corners` says in its own name.
+  **`bake.rs`'s `bake_one_face` has no such guard**, and lane 4 is what first
+  hands it a curved face. Measured against a bar: the box it builds round the
+  wall is the box round the seam, a line the wall bulges a whole radius out of,
+  and the box round a round cap is `Bounds::nothing()`, because one corner fans
+  into no triangles at all. A broad phase reading either will skip a pair that
+  crosses. `SolidView::box_around_it` (§35.5) is the box to read instead.
 - **The five enclosure helpers are written twice**, once `pub(crate)` in
   `rcad-geom` and once in `rcad-topo/src/classify.rs` (§35.3). Whoever opens
   `rcad-geom` next should export them and delete the copy; until then, a change to
