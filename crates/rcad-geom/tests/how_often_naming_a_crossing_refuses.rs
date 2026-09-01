@@ -116,12 +116,22 @@ const A_CROSSING_SOMEWHERE_ELSE_MAY_REFUSE: f64 = 0.25;
 /// The *other* refusal, counted separately because it gives up on a different
 /// question: not "what is the sign of this discriminant" but "which of these two
 /// lines is this". A plane exactly along a pipe's axis and inside it cuts two
-/// lines, and telling them apart needs a unit normal exactly across both the
-/// axis and the plane's normal, which `f64` does not always have. A **gap**, and
-/// its fix is the fourteenth-degree separation test §27.1 hands to the second
-/// stage.
+/// lines, and telling them apart needs a `Plane` whose *stored* normal is
+/// exactly square to the axis. A line is endless, so a normal that leans into
+/// its direction by even one rounding reads a different number a long way along
+/// it and the half-space holds nothing — the squareness has to be arranged and
+/// cannot be tested (§29.8).
 ///
-/// Two percent. Measured on the shipped corpus: 0.44% turned, 0.24% leaning,
+/// A **gap**, and §32 says what it is a gap in. It is not a gap a change to
+/// `Plane` reaches: a plane that stores a canonical normal cannot hold a square
+/// one, and a plane that holds a square one is not canonical, so two faces that
+/// are one wall stop being one plane the moment the model is turned.
+/// `a_power_of_two_reduction_keeps_a_normal_square_and_stops_one_wall_being_one_plane`
+/// is that demonstration. What reaches it is a half-space that is not a plane,
+/// which is a new `Surface` variant and so a milestone's decision rather than a
+/// lane's.
+///
+/// Two percent. Measured on the shipped corpus: 0.44% turned, 0.20% leaning,
 /// none at all on the lattice, where that direction is a coordinate axis.
 const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.02;
 
@@ -136,11 +146,16 @@ const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.02;
 ///
 /// A **gap**, and this crate has no construction that reaches it: the set of
 /// `f64` unit vectors exactly square to a given `f64` direction is not something
-/// `Plane::from_point_and_normal` can be steered to. The fix is §28.2's first
-/// family — a plane that stores its normal unscaled — which is a change to a
-/// type every predicate in the kernel is certified about, and so M4's.
+/// `Plane::from_point_and_normal` can be steered to. §28.2 named the fix as a
+/// plane that stores its normal unscaled and §32 demonstrates that it is not
+/// one — see [`A_CROSSING_MAY_LACK_A_HALF_SPACE`].
 ///
-/// Measured on the shipped corpus: 0% on the lattice, 10.9% turned.
+/// Measured on the shipped corpus: 0% on the lattice, **11.86% turned**, up from
+/// 10.93% because sliding the two-pipe comparison up the range (§32) takes
+/// nineteen pairs that used to refuse for want of a sign and gets them as far as
+/// being told they are two loops — where they refuse for want of a half-space
+/// instead. Taken together the turned quartic family's refusals fell from 15.57%
+/// to 11.86%.
 const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.15;
 
 /// How much of the quartic pairs' turned family may refuse for want of a sign.

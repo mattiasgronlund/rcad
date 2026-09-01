@@ -2290,12 +2290,16 @@ mod tests {
     /// The other refusal, and the one the arithmetic cannot be rescaled out of.
     ///
     /// A plane exactly along a pipe's axis and inside it cuts two lines, and
-    /// telling them apart needs a unit normal exactly across both the axis and
-    /// the plane's own normal. Here that direction is `(1,2,3) × (2,-1,0)`
-    /// scaled to length one, and the scaling rounds it off square. The two lines
-    /// are there and they are tellable apart; what runs out is `f64`'s supply of
-    /// unit vectors — a **gap**, and one whose fix is the fourteenth-degree
-    /// separation test §27.1 hands to the second stage.
+    /// telling them apart needs a stored normal exactly across the axis. Here
+    /// the direction wanted is `(1,2,3) × (2,-1,0)`, and it misses twice over:
+    /// the cross product is already not exactly square to the axis when it is
+    /// computed in `f64`, and reducing and scaling it to length one would lose
+    /// the squareness even if it were.
+    ///
+    /// The two lines are there and they are tellable apart, so this is a
+    /// **gap** — but not one any change to `Plane` reaches, and §32 is the
+    /// demonstration of why. What reaches it is a half-space that is not a
+    /// plane, and that is a new `Surface` variant.
     #[test]
     fn two_lines_no_f64_half_space_can_tell_apart_are_refused_rather_than_guessed() {
         let along = Vector::new(1.0, 2.0, 3.0)
