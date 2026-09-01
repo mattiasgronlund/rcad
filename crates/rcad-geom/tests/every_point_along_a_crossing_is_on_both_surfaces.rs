@@ -71,14 +71,6 @@ const CASES: u32 = 512;
 /// stay where they are and the cost is recorded rather than trimmed.
 const CASES_ON_A_KNIFE_EDGE: u32 = 128;
 
-/// How many tests the band's draws are shared between.
-///
-/// Eight. One test walking all 128 took ninety seconds of the suite's
-/// ninety-six; eight walking sixteen draws each run side by side on a machine
-/// with cores to spare, and the suite comes back to about a quarter of that.
-/// **No draw is cut and none is moved** — see [`Shard`].
-const HOW_MANY_TESTS_THE_BAND_IS_WALKED_BY: u32 = 8;
-
 /// How fine the walks in this file are, as a share of how big the shapes are.
 ///
 /// A thousandth, matching `Deflection::RELATIVE_DEFAULT`. It is a share and not
@@ -148,72 +140,12 @@ fn every_point_along_a_quartic_turned_crossing_is_on_both_the_surfaces_that_name
 /// marcher's answer stops being obvious. What has to hold is what holds
 /// everywhere else: no point may be certified *off* either surface, and the same
 /// points against a surface they are plainly not on must be decided.
-///
-/// # Why this is eight tests and not one
-///
-/// It used to be one, and it took ninety of the suite's ninety-six seconds
-/// (§33.5). The thousand marched points that cost the eighty-eight are the most
-/// valuable in the file — they are exactly the pieces M4's first lane learned to
-/// name — so cutting draws to buy CI time back would be §14.7's failure on
-/// purpose, and §33.5 said the honest fix was a tooling decision.
-///
-/// **It is not.** The whole family is still drawn, in the same order, from the
-/// same seed, and every one of the 128 draws is still walked; what changed is
-/// that the eight tests each walk one draw in eight of it, and the test runner
-/// puts them on eight cores. The counts the eight print add up to what the one
-/// printed, because [`Shard`] decides which draws a test *works on* and never
-/// which draws the runner *makes* — the strategy is sampled 128 times in every
-/// one of them.
 #[test]
-fn every_point_along_the_first_eighth_of_the_band_is_on_both_the_surfaces_that_named_it() {
-    walk_one_eighth_of_the_band(0);
-}
-
-#[test]
-fn every_point_along_the_second_eighth_of_the_band_is_on_both_the_surfaces_that_named_it() {
-    walk_one_eighth_of_the_band(1);
-}
-
-#[test]
-fn every_point_along_the_third_eighth_of_the_band_is_on_both_the_surfaces_that_named_it() {
-    walk_one_eighth_of_the_band(2);
-}
-
-#[test]
-fn every_point_along_the_fourth_eighth_of_the_band_is_on_both_the_surfaces_that_named_it() {
-    walk_one_eighth_of_the_band(3);
-}
-
-#[test]
-fn every_point_along_the_fifth_eighth_of_the_band_is_on_both_the_surfaces_that_named_it() {
-    walk_one_eighth_of_the_band(4);
-}
-
-#[test]
-fn every_point_along_the_sixth_eighth_of_the_band_is_on_both_the_surfaces_that_named_it() {
-    walk_one_eighth_of_the_band(5);
-}
-
-#[test]
-fn every_point_along_the_seventh_eighth_of_the_band_is_on_both_the_surfaces_that_named_it() {
-    walk_one_eighth_of_the_band(6);
-}
-
-#[test]
-fn every_point_along_the_last_eighth_of_the_band_is_on_both_the_surfaces_that_named_it() {
-    walk_one_eighth_of_the_band(7);
-}
-
-/// One eighth of the band's draws, walked and checked like every other row.
-fn walk_one_eighth_of_the_band(which: u32) {
+fn every_point_along_a_crossing_a_hair_from_tangency_is_on_both_the_surfaces_that_named_it() {
     let worst = walk_them_all(
         a_crossing_a_hair_from_the_knife_edge(),
-        &format!("the band, eighth {}", which + 1),
+        "the band",
         CASES_ON_A_KNIFE_EDGE,
-        Shard {
-            which,
-            of: HOW_MANY_TESTS_THE_BAND_IS_WALKED_BY,
-        },
     );
     assert!(worst < NO_POINT_MAY_USE_ALL_OF_ITS_BOUND);
 }
@@ -415,39 +347,14 @@ fn a_deflection_finer_than_a_point_can_be_placed_is_a_policy_question() {
 /// Walk every crossing a family draws, and hand back the worst share of its own
 /// published bound any point was found to use.
 fn walk_every_crossing(strategy: impl Strategy<Value = crossings::Crossing>, what: &str) -> f64 {
-    walk_them_all(strategy, what, CASES, Shard::THE_WHOLE_FAMILY)
+    walk_them_all(strategy, what, CASES)
 }
 
-/// Which draws of a family one test does the work for.
-///
-/// **This picks which draws are *walked* and never which are *made*.** The
-/// runner samples the strategy `cases` times whatever this says, so every test
-/// sharing a family sees the identical sequence from the identical seed, and the
-/// shards partition it exactly: draw `n` is walked by the one test whose `which`
-/// is `n % of`. Splitting a family this way therefore loses nothing and moves
-/// nothing — the union of the shards is the family, draw for draw.
-#[derive(Clone, Copy)]
-struct Shard {
-    which: u32,
-    of: u32,
-}
-
-impl Shard {
-    /// Every draw, in one test. What every row but the band uses.
-    const THE_WHOLE_FAMILY: Self = Self { which: 0, of: 1 };
-
-    /// Whether this test does the work for the draw at `drawn`.
-    fn holds(self, drawn: u32) -> bool {
-        drawn % self.of == self.which
-    }
-}
-
-/// The same, at a case count this row chooses and over one slice of its draws.
+/// The same, at a case count this row chooses.
 fn walk_them_all(
     strategy: impl Strategy<Value = crossings::Crossing>,
     what: &str,
     cases: u32,
-    shard: Shard,
 ) -> f64 {
     let mut runner = TestRunner::new_with_rng(
         Config {
@@ -464,13 +371,7 @@ fn walk_them_all(
     let worst = std::cell::Cell::new(0.0f64);
     let walked = std::cell::Cell::new(0usize);
     let points = std::cell::Cell::new(0usize);
-    let drawn = std::cell::Cell::new(0u32);
     let outcome = runner.run(&strategy, |crossing| {
-        let index = drawn.get();
-        drawn.set(index + 1);
-        if !shard.holds(index) {
-            return Ok(());
-        }
         let surfaces = crossing.surfaces();
         let Ok(SurfaceMeet::Curves(runs)) = intersect(
             &surfaces[0],
@@ -516,11 +417,8 @@ fn walk_them_all(
         points.get(),
         worst.get()
     );
-    // A hundred points for the family, shared out. A row split into shards is
-    // still one family and the floor is still the family's; what each of its
-    // tests owes is its share of it.
     assert!(
-        points.get() * shard.of as usize > 100,
+        points.get() > 100,
         "{what} walked {} points, which is not enough to be measuring anything",
         points.get()
     );
