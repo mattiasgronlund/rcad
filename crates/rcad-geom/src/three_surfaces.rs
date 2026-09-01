@@ -117,39 +117,8 @@ pub fn meet_of_three_surfaces(
 /// and §33.8 says why, which is the other half of the same rule.
 fn in_a_fixed_order(surfaces: [&Surface; 3]) -> [Surface; 3] {
     let mut sorted = surfaces.map(|surface| *surface);
-    sorted.sort_by(|one, other| {
-        let (mine, my_numbers) = how_a_surface_sorts(one);
-        let (theirs, their_numbers) = how_a_surface_sorts(other);
-        mine.cmp(&theirs).then_with(|| {
-            (0..my_numbers.len())
-                .map(|slot| my_numbers[slot].total_cmp(&their_numbers[slot]))
-                .find(|order| order.is_ne())
-                .unwrap_or(core::cmp::Ordering::Equal)
-        })
-    });
+    sorted.sort_by(Surface::how_it_sorts_against);
     sorted
-}
-
-/// Which kind a surface is, and the numbers it places itself with.
-///
-/// Planes come first, so a triple with two of them has them in the first two
-/// slots and the one question this file can answer is the one it is asked.
-fn how_a_surface_sorts(surface: &Surface) -> (u8, [f64; 7]) {
-    match surface {
-        Surface::Plane(flat) => {
-            let [a, b, c, d] = flat.coefficients();
-            (0, [a, b, c, d, 0.0, 0.0, 0.0])
-        }
-        Surface::Sphere(ball) => {
-            let [x, y, z] = ball.centre().coordinates();
-            (1, [x, y, z, ball.radius(), 0.0, 0.0, 0.0])
-        }
-        Surface::Cylinder(pipe) => {
-            let [x, y, z] = pipe.axis().origin().coordinates();
-            let [u, v, w] = pipe.axis().direction().components();
-            (2, [x, y, z, u, v, w, pipe.radius()])
-        }
-    }
 }
 
 /// The three points a provenance record names these surfaces by.

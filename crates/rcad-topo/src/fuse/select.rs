@@ -414,11 +414,13 @@ fn settle_against_each(
         match placed {
             Containment::Inside => return Ok(Some(Placement::Inside)),
             Containment::Outside => (),
-            // `Model::fuse` refuses a curved solid before any pair is looked at,
-            // so reaching here is a broken invariant inside this crate.
-            Containment::NeedsFlatFaces => {
-                unreachable!("the fuse refuses curved solids at entry")
-            }
+            // A face nobody can follow is not a piece that could be placed
+            // somewhere else, and reading it as `Outside` would drop material.
+            // This was `unreachable!`, on the grounds that the fuse refuses
+            // curved solids at entry; `docs/decisions.md` §35 records why that
+            // argument stops holding and why what replaces it is a refusal
+            // about a caller's solid rather than a panic.
+            Containment::CannotFollowAFacesTrimming { .. } => return Ok(None),
             Containment::OnBoundary | Containment::Undecidable { .. } => {
                 let Some(face) = coincident_face(solids[index], in_plane, facing, point, log)?
                 else {

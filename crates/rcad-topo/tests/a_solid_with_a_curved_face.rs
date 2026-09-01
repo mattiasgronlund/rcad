@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use rcad_geom::{Deflection, Isometry, Point, Scale, Surface};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
-use rcad_topo::{Containment, Error, Model, Rule};
+use rcad_topo::{Error, Model, Rule};
 
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 5.0;
@@ -336,11 +336,16 @@ fn a_ball_refuses_a_radius_that_is_not_a_positive_number() {
 /// bar were the handful of chords its corners happen to span. §4.1 ranks that
 /// second one below the crash.
 ///
-/// **`measure` used to be on this list and is not any more.** It refused a
-/// curved solid at M2's gate because a bar has no fan to sum (§25.5); it now
-/// sums over a mesh instead, and `measuring.rs` is where that is checked.
+/// **Two operations have come off this list, in two different milestones, and
+/// the pattern is worth naming.** `measure` refused a curved solid at M2's gate
+/// because a bar has no fan to sum (§25.5); it sums over a mesh now, and
+/// `measuring.rs` is where that is checked. **The classifier came off at M4**:
+/// it fires rays at curved surfaces and asks each face what it holds, so what
+/// used to be asserted here as `Containment::NeedsFlatFaces` is a real answer
+/// now and `point_in_a_curved_solid.rs` is where it is asserted (§35). The fuse
+/// is what is left.
 #[test]
-fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
+fn the_fuse_still_needs_flat_faces_and_refuses_a_round_bar_by_name() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let bar = model
         .add_round_bar(RADIUS, HEIGHT, &Isometry::identity())
@@ -353,16 +358,6 @@ fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
         .expect("a cube of side two");
 
     for (curved, what) in [(bar, "bar"), (ball, "ball")] {
-        assert_eq!(
-            model.solid(curved).classify_point(
-                Point::origin(),
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            ),
-            Containment::NeedsFlatFaces,
-            "the classifier casts rays at flat faces, and a {what} has none"
-        );
-
         for rule in [Rule::Union, Rule::Difference, Rule::Intersection] {
             // Both ways round, because refusing lazily would make which answer
             // comes back depend on which side was walked first.

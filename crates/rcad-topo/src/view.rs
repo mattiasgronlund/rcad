@@ -134,6 +134,67 @@ impl<'m> SolidView<'m> {
         seen.then(|| (Point::from(low), Point::from(high)))
     }
 
+    /// An axis-aligned box the whole solid fits inside, or `None` when it has no
+    /// faces at all.
+    ///
+    /// **This is the one [`SolidView::box_around_its_corners`] is not**, and the
+    /// difference is what a ray caster needs: a point outside this box is
+    /// outside the solid with nothing left over, which is a proof and not a
+    /// shortcut, and a ray target picked from it is clear of every face.
+    ///
+    /// A flat face is the box round its own corners, exactly as before. The two
+    /// curved ones bulge away from theirs and each is bounded by an argument
+    /// rather than by a fudge factor:
+    ///
+    /// - A **ball**'s skin is inside the box round its centre a radius each way,
+    ///   whatever the face is trimmed down to. Nothing tighter is available
+    ///   without knowing where the trimming runs, and a ball's face may reach
+    ///   right round.
+    /// - A **pipe**'s skin is a radius from its axis, and how far *along* that
+    ///   axis a face reaches is settled by its corners: the distance along the
+    ///   axis grows steadily everywhere on a pipe, so it has no high or low spot
+    ///   in the middle of a face and reaches its own furthest on the boundary.
+    ///   So the box round the corners' shadows on the axis, opened out by the
+    ///   radius, holds the face.
+    ///
+    /// # Panics
+    ///
+    /// On a surface this has not been taught. [`Surface`] grows a variant at
+    /// every milestone, and a solid measured by not being measured is worse than
+    /// a stop.
+    #[must_use]
+    pub fn box_around_it(self) -> Option<(Point, Point)> {
+        let mut low = [f64::INFINITY; 3];
+        let mut high = [f64::NEG_INFINITY; 3];
+        let mut seen = false;
+        let mut open_out = |at: [f64; 3], by: f64| {
+            seen = true;
+            for axis in 0..3 {
+                low[axis] = low[axis].min(at[axis] - by);
+                high[axis] = high[axis].max(at[axis] + by);
+            }
+        };
+        for face in self.faces() {
+            match face.surface() {
+                Surface::Plane(_) => {
+                    for corner in face.wires().flat_map(WireView::points) {
+                        open_out(corner.coordinates(), 0.0);
+                    }
+                }
+                Surface::Sphere(ball) => open_out(ball.centre().coordinates(), ball.radius()),
+                Surface::Cylinder(pipe) => {
+                    let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
+                    for corner in face.wires().flat_map(WireView::points) {
+                        let shadow = origin + along * along.dot(corner - origin);
+                        open_out(shadow.coordinates(), pipe.radius());
+                    }
+                }
+                other => panic!("this crate cannot say how far {other:?} reaches"),
+            }
+        }
+        seen.then(|| (Point::from(low), Point::from(high)))
+    }
+
     fn data(self) -> &'m SolidData {
         &self.model.data().solids[self.slot]
     }

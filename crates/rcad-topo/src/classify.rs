@@ -41,7 +41,7 @@
 //! straddled. Under a tolerant policy the same query resolves instead, and the
 //! log picks up a record of what was accepted to get there.
 
-use rcad_geom::{Cylinder, Point, Sphere, Surface, Vector};
+use rcad_geom::{Cylinder, Point, Sphere, Surface};
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
 };
@@ -135,7 +135,7 @@ impl SolidView<'_> {
     /// boundary and that answer wins. One triangle of the fan holding the point
     /// is not that question: the fan overlaps itself and covers a hole twice
     /// over, once each way, so only the whole outline can say (see
-    /// [`face_holds_the_point`]).
+    /// [`SolidView::face_holds_the_point`]).
     ///
     /// The three corners of a triangle are coordinates stored in the model and
     /// stay exact. The ray's far target is picked from the solid's bounding box
@@ -319,8 +319,8 @@ impl SolidView<'_> {
                     tally.grazed(0.0);
                     continue;
                 }
-                Err(Error::Undecidable { records }) => {
-                    log.extend_from(records);
+                Err(Error::Undecidable { mut records }) => {
+                    records.drain_into(log);
                     tally.grazed(0.0);
                     continue;
                 }
@@ -500,123 +500,211 @@ fn look_at_triangle(
     }
 }
 
-/// Whether the material of `face` holds `point`, which lies on the face's
-/// plane, or `None` when a predicate could not settle it.
-///
-/// [`FaceView::for_each_triangle`] cannot answer this. Its triangles overlap
-/// wherever the face is not convex and its spokes are edges of nothing, so one
-/// triangle holding the point says nothing about the face: the fan over a frame
-/// covers the frame's own hole twice, once each way, and the two only cancel
-/// once they are added up.
-///
-/// So the outline itself is walked. A half-line is run from `point` towards the
-/// first corner and the edges crossing it are counted, `+1` for one way round
-/// and `-1` for the other; a hole subtracts itself because it runs the other
-/// way, and the count is non-zero exactly on the material. Which side of that
-/// half-line's line each corner falls is read as a half-open range — a corner
-/// exactly on the line counts as below it — and that is what leaves no tie to
-/// break and no second try to make. The one case a crossing count cannot see is
-/// the point sitting on an edge, and that is looked for as we go.
-///
-/// Every test is an [`orient3d`](orient3d_tolerantly) against `target`, which
-/// the caller has already shown is off the face's plane: had it been on the
-/// plane, every edge test in [`look_at_triangle`] would have come out zero and
-/// no triangle would have reported [`Hit::StartsOnThePlane`]. Three points on a
-/// plane turn one way about its normal exactly when they turn that way about a
-/// fourth point off it, so nothing is projected into the plane's own two
-/// coordinates (decisions.md §15.5).
-fn face_holds_the_point(
-    face: FaceView<'_>,
-    point: PredicatePoint,
-    target: Point,
-    policy: &Policy,
-    log: &mut ProvenanceLog,
-) -> Option<bool> {
-    let wires: Vec<Vec<Point>> = face.wires().map(|wire| wire.points().collect()).collect();
-    let aim = *wires.first()?.first()?;
-
-    let mut winding = 0i64;
-    for wire in &wires {
-        let sides: Vec<Decision> = wire
-            .iter()
-            .map(|&corner| decide(corner, aim, target, point, policy, log))
-            .collect();
-        for (index, &from) in wire.iter().enumerate() {
-            let next = (index + 1) % wire.len();
-            let along = decide(from, wire[next], target, point, policy, log);
-            match along {
-                Decision::Zero => {
-                    if lies_between(from, wire[next], point)? {
-                        return Some(true);
-                    }
-                }
-                Decision::Pos | Decision::Neg => (),
-                Decision::Undecidable { .. } => return None,
-                other => {
-                    panic!("orient3d came back with a decision nothing here knows: {other:?}")
-                }
-            }
-            winding += crossing(sides[index], sides[next], along)?;
-        }
-    }
-    Some(winding != 0)
+/// Where a ray meets one curved surface, at one of the two roots.
+enum Meeting {
+    /// Ahead of the point being classified, somewhere in this box.
+    Ahead {
+        /// Where it landed.
+        at: [Interval; 3],
+    },
+    /// At the point itself or behind it, so the ray crosses nothing here.
+    Behind,
+    /// The root's box straddles the point, or a coefficient of the quadratic
+    /// did. Nothing this ray says can be trusted.
+    CouldNotTell,
 }
 
-/// Whether `point`, already shown to be on the line through `from` and `to`, is
-/// on the segment between them. `None` when its box straddles an end.
-///
-/// The comparison runs along whichever axis the segment reaches furthest, which
-/// is decisions.md §17.4's rule for ordering points along a line and needs no
-/// predicate of its own.
-fn lies_between(from: Point, to: Point, point: PredicatePoint) -> Option<bool> {
-    let (from, to) = (from.coordinates(), to.coordinates());
-    let axis = (0..3)
-        .max_by(|&one, &other| {
-            (to[one] - from[one])
-                .abs()
-                .total_cmp(&(to[other] - from[other]).abs())
-        })
-        .expect("three axes");
-    let (low, high) = (from[axis].min(to[axis]), from[axis].max(to[axis]));
-    let span = point.enclosure()[axis];
-    if span.lo() >= low && span.hi() <= high {
-        Some(true)
-    } else if span.hi() < low || span.lo() > high {
-        Some(false)
-    } else {
-        None
-    }
+/// The step from `from` to `target`, as a box.
+fn travel(from: [Interval; 3], target: Point) -> [Interval; 3] {
+    let target = target.coordinates();
+    core::array::from_fn(|axis| Interval::exactly(target[axis]) - from[axis])
 }
 
-/// `1` or `-1` when the edge crosses the half-line, signed by which way it
-/// crosses, and `0` when it does not.
+/// Where the ray from `from` along `along` meets `surface`.
 ///
-/// `from_side` and `to_side` say which side of the half-line's line each end of
-/// the edge falls on, and `along` says which side of the edge the point falls
-/// on — which is what tells a crossing ahead of the point from one behind it.
-fn crossing(from_side: Decision, to_side: Decision, along: Decision) -> Option<i64> {
-    Some(
-        match (above_the_line(from_side)?, above_the_line(to_side)?, along) {
-            (false, true, Decision::Pos) => 1,
-            (true, false, Decision::Neg) => -1,
-            _ => 0,
-        },
+/// **A quadratic in one unknown, and the same one twice** — §31.2's row 11. Put
+/// `x = from + t·along` into `|x − centre|² − radius²` for a ball, or into
+/// `|(x − origin) × direction|² − radius²` for a pipe, and what comes out is
+/// `a·t² + b·t + k` either way; the pipe is the ball with the axis crossed out of
+/// every vector first. Both expressions are the ones
+/// [`side_of_surface`] already decides signs of, so the surface a root is worked
+/// out from and the surface it is later tested against are the same one written
+/// the same way.
+///
+/// The roots are the only thing in the whole of classification that is *built*
+/// rather than read out of a model, and they are built as boxes and handed on as
+/// boxes. A ray that grazes the surface leaves a discriminant that straddles
+/// zero, and that is [`Meeting::CouldNotTell`] rather than a guess at a tangent.
+///
+/// # Panics
+///
+/// On a plane, which is counted by its triangles and never reaches here, and on
+/// a surface kind this has not been taught. [`Surface`] grows a variant at every
+/// milestone.
+fn where_the_ray_meets(
+    surface: &Surface,
+    from: [Interval; 3],
+    along: [Interval; 3],
+) -> [Meeting; 2] {
+    let (a, b, k) = match surface {
+        Surface::Sphere(ball) => how_a_ray_meets_a_ball(ball, from, along),
+        Surface::Cylinder(pipe) => how_a_ray_meets_a_pipe(pipe, from, along),
+        other => panic!("this crate cannot fire a ray at {other:?}"),
+    };
+
+    let twice_a = Interval::exactly(2.0) * a;
+    if twice_a.contains_zero() {
+        return [Meeting::CouldNotTell, Meeting::CouldNotTell];
+    }
+    let discriminant = b * b - Interval::exactly(4.0) * a * k;
+    if discriminant.hi() < 0.0 {
+        return [Meeting::Behind, Meeting::Behind];
+    }
+    if discriminant.contains_zero() {
+        return [Meeting::CouldNotTell, Meeting::CouldNotTell];
+    }
+    let spread = root_enclosing(discriminant);
+    [-b - spread, -b + spread].map(|top| where_it_lands(quotient(top, twice_a), from, along))
+}
+
+/// `a`, `b` and `k` of the quadratic a ray puts a ball to.
+fn how_a_ray_meets_a_ball(
+    ball: &Sphere,
+    from: [Interval; 3],
+    along: [Interval; 3],
+) -> (Interval, Interval, Interval) {
+    let out = gap_enclosing(from, ball.centre());
+    let radius = Interval::exactly(ball.radius());
+    (
+        dot_enclosing(along, along),
+        Interval::exactly(2.0) * dot_enclosing(along, out),
+        dot_enclosing(out, out) - radius * radius,
     )
 }
 
-/// Whether a corner is above the half-line's line, counting a corner exactly on
-/// it as below.
+/// `a`, `b` and `k` of the quadratic a ray puts a pipe to.
 ///
-/// Half-open on purpose. It is what gives every edge two ends on definite sides
-/// and leaves the crossing count with no tie to break, however many corners the
-/// line happens to run through.
-fn above_the_line(side: Decision) -> Option<bool> {
-    match side {
-        Decision::Pos => Some(true),
-        Decision::Neg | Decision::Zero => Some(false),
-        Decision::Undecidable { .. } => None,
-        other => panic!("orient3d came back with a decision nothing here knows: {other:?}"),
+/// The same three as a ball's, with the axis direction crossed out of both
+/// vectors first — which is exactly how [`Cylinder`]'s own side predicate
+/// measures the distance from the axis, so the two agree by construction rather
+/// than by a rounding.
+fn how_a_ray_meets_a_pipe(
+    pipe: &Cylinder,
+    from: [Interval; 3],
+    along: [Interval; 3],
+) -> (Interval, Interval, Interval) {
+    let direction = exactly(pipe.axis().direction().components());
+    let out = cross_enclosing(gap_enclosing(from, pipe.axis().origin()), direction);
+    let across = cross_enclosing(along, direction);
+    let radius = Interval::exactly(pipe.radius());
+    (
+        dot_enclosing(across, across),
+        Interval::exactly(2.0) * dot_enclosing(across, out),
+        dot_enclosing(out, out) - radius * radius,
+    )
+}
+
+/// What a root at `t` along the ray comes to.
+///
+/// A root at exactly zero is where the ray *starts*, which is the point sitting
+/// on this face's own surface: the ray crosses nothing there, and whether the
+/// point is on the face is asked separately. A root whose box merely covers zero
+/// is a different thing — nobody can say whether the crossing is ahead — and it
+/// is a graze.
+fn where_it_lands(t: Interval, from: [Interval; 3], along: [Interval; 3]) -> Meeting {
+    if t.hi() < 0.0 || (t.lo() == 0.0 && t.hi() == 0.0) {
+        return Meeting::Behind;
     }
+    if t.lo() <= 0.0 {
+        return Meeting::CouldNotTell;
+    }
+    Meeting::Ahead {
+        at: core::array::from_fn(|axis| from[axis] + t * along[axis]),
+    }
+}
+
+/// Which way the surface faces outwards at `at`, as a box.
+///
+/// A polynomial in the stored numbers with no normalization anywhere in it, so
+/// the sign of anything dotted with it is the sign of the real thing (§31.2's
+/// row 12).
+///
+/// # Panics
+///
+/// On a surface this has not been taught, for the reason
+/// [`where_the_ray_meets`] gives.
+fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
+    match surface {
+        Surface::Sphere(ball) => gap_enclosing_from(ball.centre(), at),
+        Surface::Cylinder(pipe) => {
+            let direction = exactly(pipe.axis().direction().components());
+            let out = gap_enclosing_from(pipe.axis().origin(), at);
+            let up = dot_enclosing(out, direction);
+            core::array::from_fn(|axis| out[axis] - up * direction[axis])
+        }
+        other => panic!("this crate cannot say which way {other:?} faces"),
+    }
+}
+
+/// `here − there`, componentwise, as a box.
+fn gap_enclosing(here: [Interval; 3], there: Point) -> [Interval; 3] {
+    let there = there.coordinates();
+    core::array::from_fn(|axis| here[axis] - Interval::exactly(there[axis]))
+}
+
+/// `there − here`, componentwise, as a box.
+fn gap_enclosing_from(here: Point, there: [Interval; 3]) -> [Interval; 3] {
+    let here = here.coordinates();
+    core::array::from_fn(|axis| there[axis] - Interval::exactly(here[axis]))
+}
+
+/// Three stored numbers as a box of no width at all.
+fn exactly(value: [f64; 3]) -> [Interval; 3] {
+    value.map(Interval::exactly)
+}
+
+/// `u · v` as a box.
+fn dot_enclosing(u: [Interval; 3], v: [Interval; 3]) -> Interval {
+    (0..3).fold(Interval::exactly(0.0), |so_far, axis| {
+        so_far + u[axis] * v[axis]
+    })
+}
+
+/// `u × v` as a box.
+fn cross_enclosing(u: [Interval; 3], v: [Interval; 3]) -> [Interval; 3] {
+    core::array::from_fn(|axis| {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        u[next] * v[after] - u[after] * v[next]
+    })
+}
+
+/// `√value` as a box, for a value already shown to be above zero.
+///
+/// One `f64` outwards at each end. `f64::sqrt` is correctly rounded, so the true
+/// root is within half a step of what it hands back and a whole step covers it.
+/// **Widening every root costs the exact cases their exactness**, which
+/// `rcad-geom`'s own enclosure is careful about; nothing here is one, because the
+/// three ray targets are picked so that no ray runs square-on to anything and a
+/// discriminant that comes out a perfect square would be that coincidence.
+fn root_enclosing(value: Interval) -> Interval {
+    let (lo, hi) = (value.lo().max(0.0).sqrt(), value.hi().sqrt());
+    Interval::new(lo.next_down().max(0.0), hi.next_up()).unwrap_or(Interval::ENTIRE)
+}
+
+/// `over / under` as a box, for a divisor already shown to be clear of zero.
+fn quotient(over: Interval, under: Interval) -> Interval {
+    let ends = [
+        over.lo() / under.lo(),
+        over.lo() / under.hi(),
+        over.hi() / under.lo(),
+        over.hi() / under.hi(),
+    ];
+    if !ends.iter().all(|end| end.is_finite()) {
+        return Interval::ENTIRE;
+    }
+    let lo = ends.iter().copied().fold(f64::INFINITY, f64::min);
+    let hi = ends.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    Interval::new(lo.next_down(), hi.next_up()).unwrap_or(Interval::ENTIRE)
 }
 
 /// Which side of the plane through `a`, `b` and `c` the point `d` is on.

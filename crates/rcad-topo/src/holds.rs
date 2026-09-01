@@ -175,11 +175,11 @@ fn what_a_flat_face_holds(
     for (position, wire) in face.wires().enumerate() {
         let inwards = if position == 0 { 1 } else { -1 };
         if wire.closes_on_one_edge() {
-            match what_a_round_wire_encloses(solid, face, wire, point, log)? {
+            match what_a_round_wire_encloses(solid, face, wire, point)? {
                 Decision::Neg => winding += inwards,
                 Decision::Pos => (),
                 Decision::Zero => return Ok(OnAFace::OnItsBoundary),
-                other => return Err(gave_up_on_a_side(point, other, log)),
+                other => return Err(gave_up_on_a_side(point, other)),
             }
             continue;
         }
@@ -218,7 +218,6 @@ fn what_a_round_wire_encloses(
     face: FaceView<'_>,
     wire: WireView<'_>,
     point: PredicatePoint,
-    log: &mut ProvenanceLog,
 ) -> Result<Decision> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let coedge = wire.coedges().next().ok_or_else(cannot)?;
@@ -235,7 +234,7 @@ fn what_a_round_wire_encloses(
     }
     let side = side_of_surface(&surface, point);
     if let Decision::Undecidable { .. } = side {
-        return Err(gave_up_on_a_side(point, side, log));
+        return Err(gave_up_on_a_side(point, side));
     }
     Ok(side)
 }
@@ -273,14 +272,14 @@ fn walk_one_outline(
             Decision::Zero => match lies_between(from, corners[next], point) {
                 Some(true) => return Ok(None),
                 Some(false) => (),
-                None => return Err(gave_up_on_a_side(point, along, log)),
+                None => return Err(gave_up_on_a_side(point, along)),
             },
             Decision::Pos | Decision::Neg => (),
-            other => return Err(gave_up_on_a_side(point, other, log)),
+            other => return Err(gave_up_on_a_side(point, other)),
         }
         match crossing(sides[index], sides[next], along) {
             Some(count) => winding += count,
-            None => return Err(gave_up_on_a_side(point, sides[index], log)),
+            None => return Err(gave_up_on_a_side(point, sides[index])),
         }
     }
     Ok(Some(winding))
@@ -317,13 +316,13 @@ fn what_a_curved_face_holds(
         if !every_piece_of_that_crossing_is_an_edge(surface, &partner, edges, policy, log)? {
             return Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face: face.key() });
         }
-        let inwards = the_side_this_face_lies_on(face, &partner, log)?;
+        let inwards = the_side_this_face_lies_on(face, &partner)?;
         let side = side_of_surface(&partner, point);
         match side {
             Decision::Zero => on_its_boundary = true,
             Decision::Pos | Decision::Neg if side == inwards => (),
             Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
-            other => return Err(gave_up_on_a_side(point, other, log)),
+            other => return Err(gave_up_on_a_side(point, other)),
         }
     }
     Ok(if on_its_boundary {
@@ -445,11 +444,7 @@ fn every_piece_of_that_crossing_is_an_edge(
 /// all.
 ///
 /// [`Error::Undecidable`] when a corner's side could not be settled.
-fn the_side_this_face_lies_on(
-    face: FaceView<'_>,
-    partner: &Surface,
-    log: &mut ProvenanceLog,
-) -> Result<Decision> {
+fn the_side_this_face_lies_on(face: FaceView<'_>, partner: &Surface) -> Result<Decision> {
     let mut found: Option<Decision> = None;
     for corner in face.wires().flat_map(WireView::points) {
         let at = PredicatePoint::from(corner.coordinates());
@@ -465,7 +460,7 @@ fn the_side_this_face_lies_on(
                     });
                 }
             },
-            other => return Err(gave_up_on_a_side(at, other, log)),
+            other => return Err(gave_up_on_a_side(at, other)),
         }
     }
     found.ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })
@@ -532,15 +527,19 @@ fn above_the_line(side: Decision) -> Option<bool> {
 const WHICH_SIDE_OF_A_FACE: &str = "which side of a face a point is on";
 
 /// What to hand back when a sign this needed could not be settled.
-fn gave_up_on_a_side(point: PredicatePoint, decision: Decision, log: &mut ProvenanceLog) -> Error {
-    log.push(Record::new(
+///
+/// **The caller's log is left alone**, and the one record travels with the
+/// refusal in a fresh one. Whoever asked may well carry on — a ray that grazes
+/// one face tries the next target — and emptying their log on the way past would
+/// take the records of every decision that *was* settled with it.
+fn gave_up_on_a_side(point: PredicatePoint, decision: Decision) -> Error {
+    let mut records = ProvenanceLog::new();
+    records.push(Record::new(
         WHICH_SIDE_OF_A_FACE,
         &[point],
         Level::Exact,
         decision,
         Measures::Volume,
     ));
-    Error::Undecidable {
-        records: core::mem::take(log),
-    }
+    Error::Undecidable { records }
 }

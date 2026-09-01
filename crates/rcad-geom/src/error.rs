@@ -353,6 +353,20 @@ pub enum Error {
         most: usize,
     },
 
+    /// Two surfaces that cross in straight lines rather than in a closed curve.
+    ///
+    /// A closed edge needs one vertex on it and
+    /// [`where_a_closed_crossing_starts`](crate::where_a_closed_crossing_starts)
+    /// is where it goes. Two planes, a plane down a pipe's own axis, and two
+    /// pipes pointing the same way cross in lines that run on for ever, and a
+    /// line has no place on it that the pair alone picks out.
+    ///
+    /// A **limit** and not a gap (§16.10): the vertex this would name does not
+    /// exist, because the edge those pairs contribute is cut by corners at both
+    /// ends rather than closing on itself.
+    #[error("these two surfaces cross in straight lines rather than in a closed curve")]
+    TheCrossingOfTheseTwoSurfacesIsNotClosed,
+
     /// Two surfaces whose crossing is not one closed curve lying in a plane.
     ///
     /// Ordering points round a closed crossing rests on the curve being convex,

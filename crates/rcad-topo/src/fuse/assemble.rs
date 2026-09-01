@@ -935,13 +935,15 @@ impl Assembly {
                         trial.drain_into(log);
                         return Ok(false);
                     }
-                    Containment::OnBoundary | Containment::Undecidable { .. } => (),
-                    // `Model::fuse` refuses a curved solid before any pair is
-                    // looked at, so a face reaching here is a broken
-                    // invariant inside this crate and not bad input.
-                    Containment::NeedsFlatFaces => {
-                        unreachable!("the fuse refuses curved solids at entry")
-                    }
+                    // A corner nothing could place is abandoned for the next one,
+                    // and a face nobody can follow is the same kind of silence:
+                    // running out of corners is already a refusal, so nothing
+                    // here has to be a panic. This was `unreachable!` on the
+                    // grounds that the fuse refuses curved solids at entry —
+                    // `docs/decisions.md` §35 records why that stops holding.
+                    Containment::OnBoundary
+                    | Containment::Undecidable { .. }
+                    | Containment::CannotFollowAFacesTrimming { .. } => (),
                 }
             }
         }

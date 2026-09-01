@@ -109,4 +109,5 @@ pub use crate::surface::Surface;
 pub use crate::three_surfaces::{MeetOfThree, WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces};
 pub use crate::walk::{
     MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing, walk,
+    where_a_closed_crossing_starts,
 };
