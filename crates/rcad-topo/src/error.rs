@@ -62,6 +62,30 @@ pub enum Error {
         height: f64,
     },
 
+    /// A cap plane does not cut one closed curve out of the bar's wall.
+    ///
+    /// A plane running down the inside of a pipe cuts two straight lines, one
+    /// along its skin cuts one, and one clear of it cuts nothing. None of the
+    /// three is a cap, and which of them it is came back from the intersector
+    /// rather than from anybody's assumption.
+    #[error("cap {which} does not cut right round the bar")]
+    ACapDoesNotCutRightRoundABar {
+        /// Which cap: 0 is the bottom and 1 the top.
+        which: usize,
+    },
+
+    /// A cap plane's normal points along the axis towards the other cap, so the
+    /// bar it would make is inside out.
+    #[error("cap {which} faces into the bar rather than out of it")]
+    ACapOfABarFacesIntoIt {
+        /// Which cap: 0 is the bottom and 1 the top.
+        which: usize,
+    },
+
+    /// The two caps of a bar cross inside it, so there is no body between them.
+    #[error("the two caps of this bar meet inside it")]
+    TheCapsOfABarMeetInsideIt,
+
     /// A solid encloses more space than an `f64` can hold.
     ///
     /// Not a broken model. A cube of side `1e300` has its faces pointing

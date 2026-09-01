@@ -210,9 +210,14 @@
 //! outline with holes in it and hands back a [`Profile`];
 //! [`Model::add_extrusion`] turns that into a solid and places it with an
 //! [`Isometry`]. [`Model::add_cube`] is the short way to the obvious case.
-//! M0's geometry is planar: [`Plane`] and straight edges
-//! (`docs/decisions.md` §3.1). [`Sphere`] and [`Cylinder`] exist as types that
-//! answer [`SideOfSurface::side_of`] but do not carry a face yet.
+//!
+//! Curved solids come three ways and the third is the one that is not a
+//! declaration. [`Model::add_round_bar`] and [`Model::add_ball`] *say* what
+//! their edges run along, out of a person's knowledge that a plane square to a
+//! pipe cuts a circle. [`Model::add_bar_cut_off_by`] **asks** — it puts each cap
+//! plane and the wall to [`intersect`] and writes down whatever comes back — so
+//! it reaches a shape the other two cannot make: a bar cut off at an angle,
+//! whose cap edge is an ellipse (`docs/decisions.md` §24.2).
 //!
 //! **Look.** Every accessor hands back a *view* — [`SolidView`], [`FaceView`],
 //! [`EdgeView`], [`VertexView`] and the rest — which carries the borrow

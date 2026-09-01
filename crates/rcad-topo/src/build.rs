@@ -1,5 +1,6 @@
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Sphere, Surface, Vector,
+    Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Sphere, Surface, SurfaceMeet,
+    Vector,
 };
 use rcad_predicates::{
     Approximation, Decision, Policy, ProvenanceLog, Record, orient2d_tolerantly,
@@ -762,7 +763,116 @@ impl Model {
         Ok(self.key_for_solid(solid))
     }
 
-    /// The bottom or top cap, one wire per ring.
+    /// A round bar of `radius` about the z axis cut off by two planes, with its
+    /// cap edges **worked out rather than declared**.
+    ///
+    /// [`Model::add_round_bar`] says its caps are circles and nothing checks it.
+    /// This asks [`intersect`](rcad_geom::intersect) where the wall and each cap
+    /// plane cross and puts the answer on the edge. Two planes square to the
+    /// axis give that same bar, computed instead of asserted; one of them
+    /// leaning gives a shape `add_round_bar` cannot make at all — a bar cut off
+    /// at an angle, whose cap edge is an ellipse. `docs/decisions.md` §24.2 names
+    /// exactly that pair as M3's own consumer, and §24.18's criterion 8 is what
+    /// the mesh of it has to pass.
+    ///
+    /// `caps[0]` is the bottom and `caps[1]` the top, each facing **out** of the
+    /// bar: the bottom's normal points down the axis and the top's up it.
+    ///
+    /// The seam is the ruling at `x = radius, y = 0`, so both corners are exact
+    /// on the wall for any radius `f64` can hold — `x² + y² − r²` cancels to
+    /// zero — which is what `Model::validate` asks of every corner of a curved
+    /// face. How far up the seam each of them sits comes from the cap plane it
+    /// is on, and that division rounds, so a corner is on its cap to a rounding
+    /// rather than exactly. A flat face is checked against a tolerance and a
+    /// curved one against a predicate, which is the right way round: the wall is
+    /// where an error would put a corner off the shape.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Cylinder::new`] makes of the radius, and whatever
+    /// [`intersect`](rcad_geom::intersect) makes of the pair.
+    /// [`Error::ACapDoesNotCutRightRoundABar`] when a cap plane runs down the
+    /// bar rather than across it, misses it, or only touches it,
+    /// [`Error::ACapOfABarFacesIntoIt`] when a cap's normal points along the
+    /// axis towards the other cap, and [`Error::TheCapsOfABarMeetInsideIt`] when
+    /// the two caps leave no body between them.
+    ///
+    /// # Panics
+    ///
+    /// If the solid it just built breaks one of the invariants checked on
+    /// touched entities. That is a bug here, not bad input.
+    pub fn add_bar_cut_off_by(
+        &mut self,
+        radius: f64,
+        caps: [Plane; 2],
+        placement: &Isometry,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<SolidKey> {
+        let wall = Cylinder::new(Axis::z(), radius)?;
+        let mut runs = Vec::with_capacity(2);
+        for (which, cap) in caps.iter().enumerate() {
+            runs.push(right_round_where_a_cap_cuts_a_bar(
+                &wall, cap, which, policy, log,
+            )?);
+        }
+        for (which, cap) in caps.iter().enumerate() {
+            let facing = cap.normal().components()[2];
+            if (which == 0) != (facing < 0.0) {
+                return Err(Error::ACapOfABarFacesIntoIt { which });
+            }
+        }
+        if how_much_body_the_caps_leave(radius, &caps) <= 0.0 {
+            return Err(Error::TheCapsOfABarMeetInsideIt);
+        }
+        let approximation_before = self.worst_approximation();
+
+        let heights = [0, 1].map(|which| how_far_up_the_seam_a_cap_cuts(radius, &caps[which]));
+        let corners = heights.map(|height| self.add_vertex(Point::new(radius, 0.0, height)));
+        let seam = self.add_edge(corners[0], corners[1]);
+        let circles = [0, 1].map(|which| {
+            self.add_edge_running(corners[which], corners[which], runs[which].clone())
+        });
+
+        let cap = |model: &mut Self, plane, edge, turn| {
+            let coedge = model.add_coedge(edge, turn);
+            let wire = model.add_wire(smallvec::smallvec![coedge]);
+            model.add_face(Surface::Plane(plane), SmallVec::from_buf([wire]))
+        };
+        let bottom = cap(self, caps[0], circles[0], Orientation::Reversed);
+        let top = cap(self, caps[1], circles[1], Orientation::Forward);
+
+        let round_the_wall: SmallVec<[CoedgeSlot; 4]> = SmallVec::from_buf([
+            self.add_coedge(circles[0], Orientation::Forward),
+            self.add_coedge(seam, Orientation::Forward),
+            self.add_coedge(circles[1], Orientation::Reversed),
+            self.add_coedge(seam, Orientation::Reversed),
+        ]);
+        let wire = self.add_wire(round_the_wall);
+        let side = self.add_face(Surface::Cylinder(wall), SmallVec::from_buf([wire]));
+
+        let shell = self.add_shell(
+            [bottom, top, side]
+                .into_iter()
+                .map(|face| FaceUse {
+                    face,
+                    loc: Isometry::identity(),
+                    orient: Orientation::Forward,
+                })
+                .collect(),
+        );
+        let solid = self.add_solid(SmallVec::from_buf([ShellUse {
+            shell,
+            loc: *placement,
+            orient: Orientation::Forward,
+        }]));
+
+        self.check_touched_solid(solid);
+        self.assert_approximation_did_not_grow(approximation_before);
+        Ok(self.key_for_solid(solid))
+    }
+
+    /// The bottom or top cap of an extrusion, one wire per ring.
     fn build_flat_face(&mut self, ladders: &[Ladder], height: f64, side: Side) -> FaceSlot {
         let plane = Plane::from_point_and_normal(
             Point::new(0.0, 0.0, side.z(height)),
@@ -854,6 +964,77 @@ impl Model {
                 .expect("the edges were tagged with the same amount just now");
         }
     }
+}
+
+/// What a cap plane cuts out of a bar's wall, which has to be one closed curve.
+///
+/// **Computed and not declared**, which is the whole point of the builder above.
+/// [`Model::add_round_bar`] writes [`EdgeRun::RightRoundWhereItsFacesCross`] on
+/// its cap edges because a person knew a plane square to a pipe cuts a circle;
+/// this asks. A plane running down the inside of the pipe cuts two straight
+/// lines and one along its skin cuts one, and neither is a cap — so the answer
+/// is read rather than assumed.
+///
+/// # Errors
+///
+/// [`Error::ACapDoesNotCutRightRoundABar`] for every other answer, and whatever
+/// [`intersect`](rcad_geom::intersect) itself refuses.
+fn right_round_where_a_cap_cuts_a_bar(
+    wall: &Cylinder,
+    cap: &Plane,
+    which: usize,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<EdgeRun> {
+    let meet = rcad_geom::intersect(
+        &Surface::Cylinder(*wall),
+        &Surface::Plane(*cap),
+        policy,
+        log,
+    )?;
+    let SurfaceMeet::Curves(runs) = &meet else {
+        return Err(Error::ACapDoesNotCutRightRoundABar { which });
+    };
+    match runs.as_slice() {
+        [only] if only.run() == &EdgeRun::RightRoundWhereItsFacesCross => Ok(only.run().clone()),
+        _ => Err(Error::ACapDoesNotCutRightRoundABar { which }),
+    }
+}
+
+/// How far up the seam at `x = radius, y = 0` a cap plane cuts it.
+///
+/// # Panics
+///
+/// If the plane is parallel to the axis. The caller has already had
+/// [`intersect`](rcad_geom::intersect) answer "one closed curve" about this
+/// pair, and a plane parallel to the axis cannot: it cuts two lines, or one, or
+/// nothing.
+fn how_far_up_the_seam_a_cap_cuts(radius: f64, cap: &Plane) -> f64 {
+    let [across, _, up] = cap.normal().components();
+    assert!(
+        up != 0.0,
+        "a plane along a pipe's axis does not cut one closed curve out of it"
+    );
+    (cap.offset() - across * radius) / up
+}
+
+/// How thick the bar between two caps is at its thinnest, which is negative
+/// where they cross inside it.
+///
+/// Each cap meets the wall at a height that goes round as
+/// `(d − r(nₓ cos θ + n_y sin θ)) / n_z`, so the gap between them is a constant
+/// less a single sinusoid, and its smallest value is that constant less the
+/// sinusoid's own size. **Ordinary `f64` and no predicate**, because this is a
+/// question about the caller's request rather than about the shape that comes
+/// out: a bar too thin to be one is bad input and a bar that is merely thin is a
+/// bar (§4.1).
+fn how_much_body_the_caps_leave(radius: f64, caps: &[Plane; 2]) -> f64 {
+    let leaning = |cap: &Plane| {
+        let [across, and_across, up] = cap.normal().components();
+        [cap.offset() / up, across / up, and_across / up]
+    };
+    let [bottom, top] = [leaning(&caps[0]), leaning(&caps[1])];
+    (top[0] - bottom[0]) - radius * (top[1] - bottom[1]).hypot(top[2] - bottom[2])
 }
 
 /// Which cap of the extrusion.
