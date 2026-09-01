@@ -1002,6 +1002,49 @@ mod tests {
         }
     }
 
+    /// A conic too big to publish a bound for is refused, and the same pair
+    /// written smaller is walked.
+    ///
+    /// **A gap and not a limit**, which is what the refusal table at §30 needs a
+    /// demonstration for. An ellipse a plane cuts out of a pipe it is nearly
+    /// parallel to is stretched by `‖n‖ / |n·w|` down the slope, so a fat enough
+    /// pipe and a shallow enough tilt put its long semi-axis past the top of
+    /// `f64` — and a bound of infinity is not a bound, so
+    /// [`Approximation::new`]'s "a magnitude is a real amount" would be the next
+    /// thing to fail. The answer exists; this arithmetic at this scale could not
+    /// reach it, and the second half of the test is what says so.
+    #[test]
+    fn a_crossing_too_big_to_put_a_bound_on_is_refused_and_the_same_one_smaller_is_walked() {
+        let shallow = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 1e-20))
+                .expect("a direction with length"),
+        );
+        // The deflection scales with the shape, because "written smaller" means
+        // the whole question and not only the pipe.
+        let walked = |radius: f64, deflection: f64| {
+            let pipe =
+                Surface::Cylinder(Cylinder::new(crate::Axis::z(), radius).expect("a radius"));
+            walk(
+                &NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross),
+                [&pipe, &shallow],
+                Deflection::of(deflection).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .map(|along| along.points().len())
+        };
+
+        assert_eq!(
+            walked(1e300, 1e298),
+            Err(Error::CannotWorkOutHowBigACrossingIs)
+        );
+        assert!(
+            walked(1e10, 1e28).is_ok_and(|points| points > 8),
+            "the same pipe and plane written smaller are walked: {:?}",
+            walked(1e10, 1e28)
+        );
+    }
+
     /// The whole of a curve still walks, and that is what stops the check above
     /// from being a check that nothing gets through.
     #[test]
