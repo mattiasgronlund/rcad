@@ -153,6 +153,18 @@ impl Exact {
     pub(crate) fn sign(&self) -> Decision {
         expansion_sign(&self.0)
     }
+
+    /// The nearest `f64` to this number, or as near as adding its entries up
+    /// gets.
+    ///
+    /// An expansion is stored smallest first and its entries do not overlap, so
+    /// adding them in that order is right to within a rounding or two of the
+    /// total. That is far tighter than the same expression evaluated in `f64`
+    /// from the start, which is what lets [`crate::walk`] publish a bound that
+    /// holds for a nearly-tangent crossing as well as for an ordinary one.
+    pub(crate) fn nearest_f64(&self) -> f64 {
+        self.0.iter().sum()
+    }
 }
 
 #[cfg(test)]

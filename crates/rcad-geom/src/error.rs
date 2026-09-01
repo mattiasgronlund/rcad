@@ -283,6 +283,23 @@ pub enum Error {
         closest: f64,
     },
 
+    /// How big the curve where two surfaces cross is could not be worked out,
+    /// because a product it needs falls out of `f64`'s range.
+    ///
+    /// A **gap** and not a limit, and the same one the naming half has: the same
+    /// two surfaces written higher up the number line are walked without
+    /// complaint.
+    #[error("how big this crossing is needs a product that falls out of f64's range")]
+    CannotWorkOutHowBigACrossingIs,
+
+    /// A crossing was asked to be walked into more points than one is allowed to
+    /// hold.
+    #[error("walking this crossing that finely would take more than {most} points")]
+    TooManyPointsAlongOneCrossing {
+        /// The most one crossing is walked into.
+        most: usize,
+    },
+
     /// A predicate refused the input it was handed — three planes with no
     /// single meeting point, for instance.
     #[error(transparent)]
