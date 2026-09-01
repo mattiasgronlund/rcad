@@ -407,7 +407,7 @@ fn the_piece_holds(
         );
     };
     // **A flat piece's corners are a polygon and its sides need not be**
-    // (§38.4). Where a bar's wall cuts a plane the side between two corners is an
+    // (§38.5). Where a bar's wall cuts a plane the side between two corners is an
     // arc, and the chord across it is on the other side of the crossing: the
     // midway point of the chord is inside the bar where the piece is outside it,
     // so a winding count over the corners alone hands classification a point the

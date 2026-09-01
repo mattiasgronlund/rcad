@@ -22,7 +22,7 @@
 //! seven that went red is now the same shape with the right assertion and a doc
 //! saying which defect it was.
 //!
-//! What is left where a row refuses is classified in §38.5, `limit` or `gap`,
+//! What is left where a row refuses is classified in §38.6, `limit` or `gap`,
 //! with the demonstration §16.10 asks for.
 //!
 //! # How each entry is known to reach what it is about
@@ -355,10 +355,12 @@ fn a_ball_that_nothing_cuts_comes_back_whole() {
 /// **What is *not* load-bearing, measured rather than argued.** Naming the other
 /// half of the meridian changes nothing anywhere: both halves run pole to pole,
 /// so both cut the surface open along a meridian and the patch is the same
-/// rectangle shifted. Flipping it leaves all 365 tests of this crate green.
-/// Putting the poles anywhere but at `centre ± (0, 0, r)` is caught by the
-/// plainest ball there is — the triangulator refuses a patch whose corner stands
-/// on an earlier one — so it needs no shape of its own.
+/// rectangle shifted. Flipping it leaves all 368 tests of this crate green.
+/// Putting the poles on the equator instead — still on the ball and still on the
+/// meridian plane, so every check about *where* they are passes — is caught by
+/// the plainest ball there is: the triangulator refuses a patch whose corner
+/// stands on an earlier one, and every ball row in this file goes red at once. So
+/// that one needs no shape of its own either.
 #[test]
 fn a_turned_ball_and_a_far_one_come_back_with_the_volume_of_a_ball() {
     let closed_form = 4.0 / 3.0 * PI * 8.0;
@@ -1011,7 +1013,7 @@ fn a_bar_wholly_inside_a_block_unites_and_intersects() {
     measures(volume_of(&model, shared.solids()), PI * 4.0, Side::Under);
 }
 
-/// The third rule leaves one solid with a bubble in it, which is §38.2's fix of
+/// The third rule leaves one solid with a bubble in it, which is §38.4's fix of
 /// the panic §37.4 pinned here.
 ///
 /// The planar catalogue's `a_cube_wholly_inside_another_under_all_three_rules`
@@ -1020,13 +1022,15 @@ fn a_bar_wholly_inside_a_block_unites_and_intersects() {
 /// closed form because the bubble's wall is meshed inside the true cylinder, so
 /// the bubble the mesh describes is smaller than the one that is there.
 ///
-/// **The bubble is where a winding error would not cancel.** Its wall is a
-/// closed edge walked by two faces, and a closed edge's two ends are one corner,
-/// so nothing about the corner says which way either face walks it. Get it
-/// backwards and the void's shell comes out wound the same way as the outer one
-/// — its volume adds instead of subtracting, and the number below is `512 + 4π`
-/// rather than `512 − 4π`. A mesh that merely closes says nothing about that;
-/// the closed form does.
+/// **Both ways of getting a closed edge's direction wrong are caught before a
+/// volume is read**, which is worth saying because the volume is the obvious
+/// thing to lean on. Its wall is a closed edge walked by two faces and a closed
+/// edge's two ends are one corner, so nothing about the corner says which way
+/// either face walks it; get it backwards and the arena's own rule that two
+/// coedges run opposite ways trips. Measured: putting the corner test back
+/// leaves every other test in the crate green and panics here and on the blind
+/// hole below. What the closed form adds is that this is the **right** solid and
+/// not merely a valid one.
 #[test]
 fn hollowing_a_block_out_with_a_bar_inside_it_leaves_a_bubble() {
     let mut model = a_model();
@@ -1060,11 +1064,12 @@ fn hollowing_a_block_out_with_a_bar_inside_it_leaves_a_bubble() {
 /// difference is the block with a hole three deep in its top, and the hole's
 /// floor is that buried cap.
 ///
-/// **This is the shape where the fix does not cancel**, and the bubble above is
-/// the other: the hole has one cap inside the material and one outside, so a
-/// wall walked the wrong way round takes the hole's volume off the block twice
-/// instead of once and lands at `512 − 6π`. A hole through the block would have
-/// the same wall wound the same way at both ends and could hide it.
+/// The hole has one cap inside the material and one outside, which is what makes
+/// it the shape §36.15 named and the one a user reaches first. It is not a shape
+/// that tells a winding error from a right one — the arena catches that before a
+/// volume is read, and the bubble above records the measurement — but it is the
+/// shape that says the answer is a hole three deep and not a hole all the way
+/// through, which is `512 − 3π` against `512 − 8π`.
 #[test]
 fn a_blind_hole_is_committed_and_not_only_arranged() {
     let mut model = a_model();
@@ -1103,10 +1108,15 @@ fn a_blind_hole_is_committed_and_not_only_arranged() {
 /// block with a bubble in it and used to come back as the whole block. Both were
 /// [`a_ball_that_nothing_cuts_comes_back_whole`] again.
 ///
-/// **The bubble is where the ball's own winding does not cancel.** A void shell
-/// has to measure negative for the block to lose its volume rather than gain it,
-/// so `512 − ball` is a different number from `512 + ball` and this row tells
-/// them apart.
+/// **This is the row where §38.1's fix does not cancel**, and a ball fused on
+/// its own is the row where it does. Fusing a ball alone never asks selection to
+/// place a point inside the whole-surface piece — with no other solid there is
+/// nothing to place it against — and never turns the piece round. Both happen
+/// here, and the difference is where they show: a void shell has to measure
+/// negative for the block to lose its volume rather than gain it. Measured, with
+/// the whole-surface piece left unturned, this row is the **only** one in the
+/// crate that goes red, and it goes red on two solids where there should be
+/// one.
 #[test]
 fn a_ball_wholly_inside_a_block_answers_all_three_rules() {
     let ball_of_two = 4.0 / 3.0 * PI * 8.0;
@@ -1192,12 +1202,15 @@ fn a_ball_resting_on_a_block_at_one_point_keeps_both() {
 /// **This is the row that says a whole closed surface is trimmed by nothing.**
 /// A piece is kept by classifying one point provably inside it, and a whole
 /// sphere has exactly one corner pair — its two poles — so the candidates are
-/// blends of those and six points spread from the middle. Of the twelve, eleven
-/// land on the seam's own meridian plane or on the wrong side of it, and the one
-/// left is `centre + (0, r, 0)`. Put a wall exactly there and it comes back
-/// `OnBoundary`, which is a candidate that says nothing and is abandoned — so
-/// reading the seam as a trimming leaves selection with no candidate at all and
-/// the fuse refuses a pair it can plainly answer.
+/// three blends of those, all of them the centre, and six points spread a radius
+/// from the middle along each axis. All nine are put back onto the ball, and
+/// eight of the nine land on the seam's own meridian plane or on the wrong side
+/// of it: the blends and the two spread along `x` land on the prime meridian, the
+/// two along `z` land on the poles, and one of the two along `y` is on the far
+/// side. The ninth is `centre + (0, r, 0)`. Put a wall exactly there and it comes
+/// back `OnBoundary`, which is a candidate that says nothing and is abandoned —
+/// so reading the seam as a trimming leaves selection with no candidate at all
+/// and the fuse refuses a pair it can plainly answer.
 ///
 /// Measured: with the seam read as a trimming this refuses `Undecidable` on
 /// *a point inside a piece of a face*, and every other row in this file stays
@@ -1244,7 +1257,7 @@ fn a_block_sitting_on_a_bars_cap_is_refused_by_name() {
 // §37.5's one unclassified refusal, classified and closed.
 
 /// A bar with a rectangular tab on it: `ResultIsNotManifold { count: 1 }`
-/// classified, and it was **the chord standing in for an arc** (§38.4).
+/// classified, and it was **the chord standing in for an arc** (§38.5).
 ///
 /// §37.5 reached an edge used *once* rather than four times — a hole in the
 /// skin, not §17.4's four faces along an edge — and left it unclassified because

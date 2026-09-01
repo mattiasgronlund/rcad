@@ -933,8 +933,10 @@ impl Assembly {
             // A dart whose corner the joining dissolved is the rest of the side
             // before it and not a side of its own. Skipping on the *corner*
             // rather than on the edge is what leaves a seam alone: a seam is one
-            // edge walked twice by one wire, and neither of its poles is a
-            // corner anything dissolved.
+            // edge walked twice by one wire, so each of its poles has exactly one
+            // edge of this lump leaving it and neither is a corner anything
+            // dissolved. A corner is counted per lump, so another solid's vertex
+            // landing on a pole is a corner of *its* lump and not of this one.
             if renumbered
                 .straight_through
                 .contains(&(lump, self.starts_at(dart)))

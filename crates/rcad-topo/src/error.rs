@@ -232,12 +232,18 @@ pub enum Error {
     /// longitude takes the points along it, which is
     /// `a_closed_crossing_is_walked_the_way_it_is_stored` and is what the mesher
     /// reads back. At a pole every longitude runs through the one point, so the
-    /// vector that rule dots against is exactly the zero vector — not nearly —
-    /// and both faces along the edge come back walking it the same way, which is
-    /// not a solid.
+    /// vector that rule dots against is the zero vector exactly, and both faces
+    /// along the edge come back walking it the same way, which is not a solid.
+    /// This is about that exact case and says nothing about a corner a rounding
+    /// *away* from a pole, where the vector is tiny and the sign of a dot with it
+    /// is decided in `f64` the way it always was.
     ///
-    /// A ball cut by any plane through its centre reaches it, because a great
-    /// circle of a ball whose frame is the world's runs through both poles.
+    /// A ball cut by a plane containing its **polar axis** reaches it, and only
+    /// that: the great circle such a plane cuts runs through both poles, so the
+    /// one corner the arrangement puts on that closed crossing is one of them.
+    /// A plane through the ball's centre that does *not* contain the polar axis
+    /// is answered — measured, at the equator and at a plane leaning 0.4 of a
+    /// radian through the middle.
     ///
     /// **A gap and not a limit** (§16.10), and the direction rule is not what
     /// makes it one. Handed a direction the rule cannot derive, the same fuse

@@ -561,8 +561,17 @@ impl<'f> Arrangement<'f> {
     /// does, and only a ball is a closed surface: a plane and a pipe both run on
     /// for ever, so a face on one of them with nothing trimming it is unbounded
     /// and no answer exists. Nothing in the public API builds one — a profile
-    /// has an outline and a bar has two cap circles — but a model read from a
-    /// file may, and §16.11 says a caller's bytes may not panic.
+    /// has an outline, a bar has two cap circles, and a face this fuse cuts is
+    /// bounded by what cut it — but a model read from a file may, and §16.11
+    /// says a caller's bytes may not panic.
+    ///
+    /// **An empty arrangement means an empty boundary and nothing else.** A
+    /// crossing carrying a boundary edge is never dropped for missing the face —
+    /// [`Arrangement::work_out_how_each_crossing_runs`] only drops one that is
+    /// `only_a_cut` — and a boundary edge with two distinct corners leaves at
+    /// least one step to become an arc, while one with the same corner twice
+    /// closes and leaves a whole curve. So a face with any baked wire in it has
+    /// an arc, and reaching here means every wire was a seam.
     fn the_whole_surface(&self) -> Result<Piece> {
         let Surface::Sphere(ball) = self.surface else {
             return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam {

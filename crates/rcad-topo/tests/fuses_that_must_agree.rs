@@ -193,7 +193,7 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 /// worth 4.4, which is what took this number from 28 to 24 when it was fixed.
 ///
 /// **Six fuses is thin and the thinness is the measurement moving, not the
-/// threshold slipping** (§38.6). It read 20.71% of 420 when it was written and
+/// threshold slipping** (§38.8). It read 20.71% of 420 when it was written and
 /// reads 22.70% of 423 now, and the corpus grew because the generator did.
 ///
 /// **It is judged on the shipped corpus only** — see
