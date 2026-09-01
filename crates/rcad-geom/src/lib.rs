@@ -74,6 +74,7 @@ mod isometry;
 mod knot_vector;
 mod march;
 mod meet;
+mod moved_corner;
 mod orientation;
 mod plane;
 mod point;
@@ -99,6 +100,7 @@ pub use crate::intersect::{
 pub use crate::isometry::Isometry;
 pub use crate::knot_vector::{KnotVector, MAX_DEGREE};
 pub use crate::meet::{EdgeRun, NamedRun, SurfaceMeet};
+pub use crate::moved_corner::{CORNER_AFTER_MOVING_ROUNDOFF, where_a_corner_lands_after_moving};
 pub use crate::orientation::Orientation;
 pub use crate::plane::{Plane, PlaneAgreement, SIDE_OF_PLANE};
 pub use crate::point::{Axis, Point, Vector};

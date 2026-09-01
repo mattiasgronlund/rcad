@@ -167,20 +167,16 @@ fn the_middle_of_a_round_cap_is_on_the_skin_and_the_rest_of_its_plane_is_not() {
     let mut log = ProvenanceLog::new();
 
     assert_eq!(
-        model.solid(bar).classify_point(
-            Point::new(0.5, 0.5, 0.0),
-            &Policy::certified(),
-            &mut log
-        ),
+        model
+            .solid(bar)
+            .classify_point(Point::new(0.5, 0.5, 0.0), &Policy::certified(), &mut log),
         Containment::OnBoundary,
         "inside the bottom cap's circle"
     );
     assert_eq!(
-        model.solid(bar).classify_point(
-            Point::new(4.0, 4.0, 0.0),
-            &Policy::certified(),
-            &mut log
-        ),
+        model
+            .solid(bar)
+            .classify_point(Point::new(4.0, 4.0, 0.0), &Policy::certified(), &mut log),
         Containment::Outside,
         "on the cap's plane and well outside its circle"
     );
@@ -197,10 +193,7 @@ fn the_middle_of_a_round_cap_is_on_the_skin_and_the_rest_of_its_plane_is_not() {
 #[test]
 fn a_grid_of_points_against_a_bar_and_a_ball_is_decided_and_records_nothing() {
     let mut counted = 0;
-    for (model, solid, what) in [
-        (a_round_bar().0, a_round_bar().1, "bar"),
-        (a_ball().0, a_ball().1, "ball"),
-    ] {
+    for ((model, solid), what) in [(a_round_bar(), "bar"), (a_ball(), "ball")] {
         let mut log = ProvenanceLog::new();
         for i in -8..=8 {
             for j in -8..=8 {
@@ -210,9 +203,10 @@ fn a_grid_of_points_against_a_bar_and_a_ball_is_decided_and_records_nothing() {
                         f64::from(j) / 2.0 + 0.125,
                         f64::from(k) / 2.0 + 0.125,
                     );
-                    let placed = model
-                        .solid(solid)
-                        .classify_point(at, &Policy::certified(), &mut log);
+                    let placed =
+                        model
+                            .solid(solid)
+                            .classify_point(at, &Policy::certified(), &mut log);
                     assert!(
                         matches!(
                             placed,
@@ -249,20 +243,20 @@ fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
     let mut compared = 0;
     let mut held = 0;
 
-    for (model, solid, what) in [
-        (a_round_bar().0, a_round_bar().1, "bar"),
-        (a_ball().0, a_ball().1, "ball"),
-    ] {
+    for ((model, solid), what) in [(a_round_bar(), "bar"), (a_ball(), "ball")] {
         let mut log = ProvenanceLog::new();
         let mesh = model
             .solid(solid)
             .mesh(fine, &Policy::certified(), &mut log)
             .expect("a bar and a ball both mesh");
-        // The mesh's own deviation, plus the longest chord a triangle of it can
-        // have — a point is that far from a mesh point even when it is squarely
-        // on the face.
-        let near = mesh.deviation().magnitude() + longest_chord(&mesh);
-        let far = 20.0 * near;
+        // What the mesh of a face promises is that every point of the face is
+        // within `deviation` of some triangle of it — the distance below is to
+        // the nearest *triangle* and not to the nearest corner, so a long thin
+        // triangle up the side of a bar costs nothing. Four times that leaves
+        // room for the drop being measured in `f64`; twenty-five times it again
+        // is the band inside which the mesh is not being asked.
+        let near = 4.0 * mesh.deviation().magnitude();
+        let far = 25.0 * near;
 
         for face in model.solid(solid).faces() {
             let surface = face.surface();
@@ -327,7 +321,8 @@ fn samples_over(surface: &Surface) -> Vec<Point> {
             }
             _ => {
                 for step in -11..=11 {
-                    points.push(surface.point_at(u, f64::from(step) * core::f64::consts::PI / 24.0));
+                    points
+                        .push(surface.point_at(u, f64::from(step) * core::f64::consts::PI / 24.0));
                 }
             }
         }
@@ -341,7 +336,9 @@ fn how_far_from_the_mesh_of(mesh: &Mesh, face: FaceKey, at: Point) -> f64 {
         .iter()
         .filter(|triangle| triangle.face() == face)
         .map(|triangle| {
-            let [a, b, c] = triangle.corners().map(|corner| mesh.points()[corner as usize]);
+            let [a, b, c] = triangle
+                .corners()
+                .map(|corner| mesh.points()[corner as usize]);
             how_far_from_a_triangle(at, a, b, c)
         })
         .fold(f64::INFINITY, f64::min)
@@ -387,12 +384,10 @@ fn longest_chord(mesh: &Mesh) -> f64 {
     mesh.triangles()
         .iter()
         .flat_map(|triangle| {
-            let [a, b, c] = triangle.corners().map(|corner| mesh.points()[corner as usize]);
-            [
-                (b - a).length(),
-                (c - b).length(),
-                (a - c).length(),
-            ]
+            let [a, b, c] = triangle
+                .corners()
+                .map(|corner| mesh.points()[corner as usize]);
+            [(b - a).length(), (c - b).length(), (a - c).length()]
         })
         .fold(0.0, f64::max)
 }

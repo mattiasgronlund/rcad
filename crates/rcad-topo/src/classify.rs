@@ -41,7 +41,8 @@
 //! straddled. Under a tolerant policy the same query resolves instead, and the
 //! log picks up a record of what was accepted to get there.
 
-use rcad_geom::{Cylinder, Point, Sphere, Surface};
+use rcad_geom::{Cylinder, EdgeRun, Point, Sphere, Surface};
+use rcad_predicates::expansion::{product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
 };
@@ -219,23 +220,37 @@ impl SolidView<'_> {
     ) -> Result<Crossings, FaceKey> {
         let mut tally = Crossings::default();
         for face in self.faces() {
-            match face.surface() {
-                Surface::Plane(_) => {
-                    self.count_a_flat_face(face, &mut tally, point, target, policy, log)?
-                }
-                curved => {
-                    self.count_a_curved_face(
-                        face, &curved, &mut tally, point, target, policy, log,
-                    )?;
-                }
+            let surface = face.surface();
+            if surface.as_plane().is_some() && every_side_of_it_is_straight(face) {
+                self.count_a_polygon(face, &mut tally, point, target, policy, log)?;
+            } else {
+                self.count_where_the_ray_meets_it(
+                    face, &surface, &mut tally, point, target, policy, log,
+                )?;
             }
         }
         Ok(tally)
     }
 
-    /// What the ray does to one flat face: its triangles, and then the outline
-    /// when the point turns out to be on its plane.
-    fn count_a_flat_face(
+    /// What the ray does to one flat face whose every side is straight: its
+    /// triangles, and then the outline when the point turns out to be on its
+    /// plane.
+    ///
+    /// **Nothing here is built**, which is the whole reason this route is kept
+    /// beside the general one rather than folded into it. Every corner is a
+    /// coordinate the model holds and every test is an `orient3d` over four of
+    /// them, so a polyhedron asked about an exact point is decided at the exact
+    /// level every time and records nothing. Working out *where* the ray met the
+    /// plane, which the general route has to, is a division, and what it hands
+    /// the predicate after it is a box.
+    ///
+    /// It only answers about a polygon. [`FaceView::for_each_triangle`] fans a
+    /// wire's corners, and a wire that is one closed curve has one corner and
+    /// fans into nothing at all — a round cap would be invisible to every ray.
+    /// A round *hole* is worse than invisible: its one corner fans into a
+    /// triangle with no area, so the outer polygon's own fan covers the hole and
+    /// the ray is counted through material that is not there.
+    fn count_a_polygon(
         self,
         face: FaceView<'_>,
         tally: &mut Crossings,
@@ -262,18 +277,23 @@ impl SolidView<'_> {
         Ok(())
     }
 
-    /// What the ray does to one curved face.
+    /// What the ray does to one face, by where it meets that face's surface.
+    ///
+    /// Every curved face goes this way, and so does a flat one with a curved
+    /// side — a bar's cap is a plane and a circle, and it has no polygon for
+    /// [`SolidView::count_a_polygon`] to fan.
     ///
     /// **The surface first and the trimming second**, and the split is what
-    /// keeps this out of `(u, v)`. Where a straight ray meets a ball or a pipe
-    /// is a quadratic in one unknown — §31.2's row 11 — and its roots are the
-    /// only thing here that is built rather than read, so they are built as
-    /// boxes and handed on as boxes. Whether a root is on the *face* is then
+    /// keeps this out of `(u, v)`. Where a straight ray meets a plane, a ball or
+    /// a pipe is one equation in one unknown of degree at most two — §31.2's row
+    /// 11 — and its roots are the only thing in the whole of classification that
+    /// is built rather than read, so they are built as boxes and handed on as
+    /// boxes. Whether a root is on the *face* is then
     /// [`SolidView::face_holds_the_point`], which is signs and nothing else.
     ///
     /// Which way the ray crosses is row 12, `v · ∇S`, taken at the root. A face
     /// used reversed turns it round, exactly as a triangle's does.
-    fn count_a_curved_face(
+    fn count_where_the_ray_meets_it(
         self,
         face: FaceView<'_>,
         surface: &Surface,
@@ -500,7 +520,16 @@ fn look_at_triangle(
     }
 }
 
-/// Where a ray meets one curved surface, at one of the two roots.
+/// Whether every side of `face` is a straight line, so that its corners fan into
+/// triangles that cover it.
+fn every_side_of_it_is_straight(face: FaceView<'_>) -> bool {
+    face.wires().all(|wire| {
+        wire.coedges()
+            .all(|coedge| coedge.edge().run() == &EdgeRun::Straight)
+    })
+}
+
+/// Where a ray meets one surface, at one of the two roots.
 enum Meeting {
     /// Ahead of the point being classified, somewhere in this box.
     Ahead {
@@ -547,6 +576,20 @@ fn where_the_ray_meets(
     along: [Interval; 3],
 ) -> [Meeting; 2] {
     let (a, b, k) = match surface {
+        // A plane is the same equation with no square in it, so it has the one
+        // root and the second place is empty rather than behind.
+        Surface::Plane(flat) => {
+            let normal = exactly(flat.normal().components());
+            let steepness = dot_enclosing(along, normal);
+            if steepness.contains_zero() {
+                return [Meeting::CouldNotTell, Meeting::Behind];
+            }
+            let height = dot_enclosing(from, normal) - Interval::exactly(flat.offset());
+            return [
+                where_it_lands(quotient(-height, steepness), from, along),
+                Meeting::Behind,
+            ];
+        }
         Surface::Sphere(ball) => how_a_ray_meets_a_ball(ball, from, along),
         Surface::Cylinder(pipe) => how_a_ray_meets_a_pipe(pipe, from, along),
         other => panic!("this crate cannot fire a ray at {other:?}"),
@@ -555,6 +598,19 @@ fn where_the_ray_meets(
     let twice_a = Interval::exactly(2.0) * a;
     if twice_a.contains_zero() {
         return [Meeting::CouldNotTell, Meeting::CouldNotTell];
+    }
+    // **A point already on the surface is a root, and the quadratic formula
+    // loses it.** With `k` exactly zero the two roots are `0` and `−b/a`, and
+    // reading them off `(−b ± √(b²))/2a` instead costs the first one its
+    // exactness: `√` of an interval steps outwards, so the root that ought to be
+    // nothing at all comes back as a box straddling zero, and every point on a
+    // bar's wall grazes its own face. Factoring is not an optimisation here, it
+    // is the difference between an answer and a refusal.
+    if k.lo() == 0.0 && k.hi() == 0.0 {
+        return [
+            Meeting::Behind,
+            where_it_lands(quotient(-b, a), from, along),
+        ];
     }
     let discriminant = b * b - Interval::exactly(4.0) * a * k;
     if discriminant.hi() < 0.0 {
@@ -635,6 +691,7 @@ fn where_it_lands(t: Interval, from: [Interval; 3], along: [Interval; 3]) -> Mee
 /// [`where_the_ray_meets`] gives.
 fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
     match surface {
+        Surface::Plane(flat) => exactly(flat.normal().components()),
         Surface::Sphere(ball) => gap_enclosing_from(ball.centre(), at),
         Surface::Cylinder(pipe) => {
             let direction = exactly(pipe.axis().direction().components());
@@ -692,19 +749,44 @@ fn root_enclosing(value: Interval) -> Interval {
 }
 
 /// `over / under` as a box, for a divisor already shown to be clear of zero.
+///
+/// **A step outwards only where one is needed**, which is the same care
+/// `rcad-geom`'s own enclosure takes about roots and for the same reason: a ray
+/// that starts exactly on a plane divides a numerator of nothing, and a widened
+/// nothing is a box straddling zero, which reads as a ray that might be about to
+/// cross the very face it is standing on.
 fn quotient(over: Interval, under: Interval) -> Interval {
     let ends = [
-        over.lo() / under.lo(),
-        over.lo() / under.hi(),
-        over.hi() / under.lo(),
-        over.hi() / under.hi(),
+        divided(over.lo(), under.lo()),
+        divided(over.lo(), under.hi()),
+        divided(over.hi(), under.lo()),
+        divided(over.hi(), under.hi()),
     ];
-    if !ends.iter().all(|end| end.is_finite()) {
-        return Interval::ENTIRE;
+    let lo = ends.iter().map(|end| end.0).fold(f64::INFINITY, f64::min);
+    let hi = ends
+        .iter()
+        .map(|end| end.1)
+        .fold(f64::NEG_INFINITY, f64::max);
+    Interval::new(lo, hi).unwrap_or(Interval::ENTIRE)
+}
+
+/// `over / under` as the two ends of a box holding it.
+///
+/// The two ends are the same number when the division came out exact, and that
+/// is *proved* rather than assumed: the quotient is multiplied back out through
+/// [`two_product`], which is exact, and compared against what was divided.
+fn divided(over: f64, under: f64) -> (f64, f64) {
+    let quotient = over / under;
+    if !quotient.is_finite() {
+        return (f64::NEG_INFINITY, f64::INFINITY);
     }
-    let lo = ends.iter().copied().fold(f64::INFINITY, f64::min);
-    let hi = ends.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    Interval::new(lo.next_down(), hi.next_up()).unwrap_or(Interval::ENTIRE)
+    if product_is_exact(quotient, under) {
+        let (high, low) = two_product(quotient, under);
+        if high == over && low == 0.0 {
+            return (quotient, quotient);
+        }
+    }
+    (quotient.next_down(), quotient.next_up())
 }
 
 /// Which side of the plane through `a`, `b` and `c` the point `d` is on.
