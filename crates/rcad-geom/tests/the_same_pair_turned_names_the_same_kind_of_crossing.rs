@@ -32,6 +32,20 @@
 //! Everything else has a discriminant clear of zero by more than a rotation can
 //! move it, and for those the kind is the same before and after. §28 records the
 //! sharpening.
+//!
+//! # Both families, and why that had to be said out loud
+//!
+//! There are two properties here and there used to be one. The four pairs whose
+//! crossing lies in a plane are `a_lattice_crossing`'s; a ball crossing a pipe
+//! and a pipe crossing a pipe are `a_quartic_lattice_crossing`'s, and nothing
+//! was handing the second strategy to this file. Criterion 9 read as discharged
+//! and covered two thirds of the pair table. The claim audit at M3's closing
+//! gate is what found it, and it found it by enumerating what the generator
+//! ranges over rather than by reading the property — which is the whole of
+//! §16.10's method (§30).
+//!
+//! Measured: **1485 of 2048 planar pairs compared and 564 skipped, 1594 of 2048
+//! quartic pairs compared and 455 skipped.**
 
 #![forbid(unsafe_code)]
 
@@ -44,12 +58,12 @@ use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRn
 use rcad_geom::{Error, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
 
-use crossings::{Turn, a_lattice_crossing};
+use crossings::{Crossing, Turn, a_lattice_crossing, a_quartic_lattice_crossing};
 
 /// How many pairs this turns.
 const CASES: u32 = 2048;
 
-/// How many of them have to survive the knife-edge skip.
+/// How many of the planar pairs have to survive the knife-edge skip.
 ///
 /// Three fifths. Without a floor the property would pass just as green if every
 /// pair were skipped, which is §14.7's vacuity trap.
@@ -58,10 +72,50 @@ const CASES: u32 = 2048;
 /// the lattice is a coordinate axis, so two of them are exactly parallel or
 /// exactly square far more often than two directions drawn at random would be.
 /// Measured on the shipped corpus: 1485 of 2048 compared, 564 skipped.
-const MOST_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
+const MOST_PLANAR_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
 
+/// How many of the quartic pairs have to survive it.
+///
+/// Half. The generator draws radii up to five and places them up to six apart in
+/// whole numbers, so a lattice pipe pair is exactly tangent surprisingly often —
+/// five apart with radii of two and three is one — and every one of those is a
+/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1594 of
+/// 2048 compared, 455 skipped.
+const MOST_QUARTIC_PAIRS_MUST_BE_COMPARED: f64 = 0.5;
+
+/// The four pairs whose crossing lies in a plane.
 #[test]
 fn turning_a_pair_of_surfaces_names_the_same_kind_of_crossing() {
+    the_same_kind_before_and_after(
+        a_lattice_crossing().boxed(),
+        MOST_PLANAR_PAIRS_MUST_BE_COMPARED,
+    );
+}
+
+/// **The two rows M3's second stage added**, which this file did not draw until
+/// the claim audit at the closing gate asked what criterion 9 was covering.
+///
+/// It was covering the four planar pairs: `a_lattice_crossing`'s own doc says a
+/// ball crossing a pipe and a pipe crossing a pipe are drawn by
+/// `a_quartic_pair` instead, and nothing was passing that strategy to this
+/// property. So criterion 9 was discharged for stage one and silently not for
+/// stage two — a sufficiency claim broken by what the generator did not draw
+/// rather than by anything the code did (§30).
+///
+/// The quartic pairs have one knife edge the planar ones do not: a crossing that
+/// **runs through itself** is two surfaces tangent at a point of the curve, so a
+/// turn moves it off exactly as it moves a tangency off. It is refused by name
+/// rather than answered, so it is skipped by [`named`] alongside the other
+/// refusals.
+#[test]
+fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
+    the_same_kind_before_and_after(
+        a_quartic_lattice_crossing().boxed(),
+        MOST_QUARTIC_PAIRS_MUST_BE_COMPARED,
+    );
+}
+
+fn the_same_kind_before_and_after(family: BoxedStrategy<Crossing>, floor: f64) {
     let mut runner = TestRunner::new_with_rng(
         Config {
             cases: CASES,
@@ -76,7 +130,7 @@ fn turning_a_pair_of_surfaces_names_the_same_kind_of_crossing() {
 
     let compared = Cell::new(0usize);
     let on_a_knife_edge = Cell::new(0usize);
-    let outcome = runner.run(&(a_lattice_crossing(), a_turn()), |(crossing, turn)| {
+    let outcome = runner.run(&(family, a_turn()), |(crossing, turn)| {
         let still = crossing;
         let mut moved = crossing;
         moved.turn = Some(turn);
@@ -110,7 +164,7 @@ fn turning_a_pair_of_surfaces_names_the_same_kind_of_crossing() {
         on_a_knife_edge.get()
     );
     assert!(
-        compared.get() as f64 >= MOST_PAIRS_MUST_BE_COMPARED * f64::from(CASES),
+        compared.get() as f64 >= floor * f64::from(CASES),
         "only {} of {CASES} pairs were off a knife edge, so this property is barely asserting \
          anything",
         compared.get()
@@ -130,9 +184,11 @@ fn named(surfaces: &[Surface; 2]) -> Result<SurfaceMeet, TestCaseError> {
         &mut ProvenanceLog::new(),
     ) {
         Ok(met) => Ok(met),
-        Err(Error::Undecidable { .. } | Error::CannotNameWhichPieceOfACrossingThisIs) => {
-            Err(TestCaseError::reject("this pair could not be named"))
-        }
+        Err(
+            Error::Undecidable { .. }
+            | Error::CannotNameWhichPieceOfACrossingThisIs
+            | Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo,
+        ) => Err(TestCaseError::reject("this pair could not be named")),
         Err(why) => Err(TestCaseError::fail(format!("unexpected refusal: {why}"))),
     }
 }
@@ -161,6 +217,16 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
         }
         [Surface::Plane(one), Surface::Plane(other)] => {
             one.normal().cross(other.normal()).length_squared() == 0.0
+        }
+        // Two pipes down one direction cross in straight lines and a lean turns
+        // that into two closed loops, so this is the quartic family's version of
+        // the plane-and-pipe surprise above.
+        [Surface::Cylinder(one), Surface::Cylinder(other)] => {
+            one.axis()
+                .direction()
+                .cross(other.axis().direction())
+                .length_squared()
+                == 0.0
         }
         _ => false,
     }

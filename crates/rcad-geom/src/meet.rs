@@ -174,14 +174,18 @@ pub enum EdgeRun {
     /// A cap of a round bar is this: the cylinder crosses the cap's plane in
     /// one circle, and the edge is the whole of that circle.
     ///
-    /// **This says "one closed curve", and the four crossings that can be named
-    /// exactly all have one.** A plane cuts a ball in a circle, a plane cuts a
-    /// pipe in an ellipse, two balls cross in a circle. A quartic is where it
-    /// stops being enough: a ball crossing a pipe off-axis can leave two
-    /// disjoint closed loops, and then this variant names both at once. The
-    /// half-spaces of [`EdgeRun::PartOfWhereItCrosses`] are what would tell them
-    /// apart, and nothing builds a quartic yet, so the gap is named here rather
-    /// than filled (§27.3).
+    /// **This says "one closed curve", and everything named with it has one.** A
+    /// plane cuts a ball in a circle, a plane cuts a pipe in an ellipse, two
+    /// balls cross in a circle, and a degree-four crossing that leaves a single
+    /// loop is one too.
+    ///
+    /// Where a quartic leaves **two** disjoint loops this variant is not what
+    /// says so: each loop comes back as a [`EdgeRun::PartOfWhereItCrosses`] with
+    /// the half-space that holds it, which is the whole of what `picked_by` is
+    /// for. §27.3 filed that as a gap while nothing built a quartic; M3's second
+    /// stage built them and named them that way, so this claim is true again
+    /// (§29.13). What is still outside the vocabulary is a crossing that runs
+    /// *through itself*, and that is refused by name rather than said badly.
     RightRoundWhereItsFacesCross,
     /// Part of the curve where the face also crosses `and`, cut down to this
     /// one piece by `picked_by`.

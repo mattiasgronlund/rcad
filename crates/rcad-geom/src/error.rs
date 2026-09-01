@@ -317,6 +317,26 @@ pub enum Error {
         closest: f64,
     },
 
+    /// An end of a run does not say where it is.
+    ///
+    /// A run's ends are [`Point`](rcad_predicates::Point)s, so an end may be a
+    /// box rather than a triple — and one particular box, the one whose every
+    /// side runs the whole number line, is how a pair of surfaces says it names a
+    /// curve and nothing on it. **Every other end has to have a middle.** A
+    /// caller who hands over a box with one infinite side, or an exact triple
+    /// with a coordinate that is not a number, has said nothing about where the
+    /// run starts, and the angle worked out from it is not a number either.
+    ///
+    /// Bad caller input rather than a broken invariant (§4.1). [`walk`] is
+    /// public, [`NamedRun`] has a public constructor, and nothing between them
+    /// narrows what an end may be — which is §16.10's rule about checking the
+    /// public API rather than today's callers.
+    ///
+    /// [`walk`]: crate::walk
+    /// [`NamedRun`]: crate::NamedRun
+    #[error("an end of this run does not say where it is")]
+    AnEndOfARunNamesNoPlace,
+
     /// How big the curve where two surfaces cross is could not be worked out,
     /// because a product it needs falls out of `f64`'s range.
     ///

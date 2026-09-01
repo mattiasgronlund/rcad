@@ -1024,10 +1024,18 @@ fn the_two_surfaces_either_side(
 /// one there is no telling a step from one the other way.
 ///
 /// Zero for a closed edge that does not go round the face at all — a small
-/// circle cut out of a ball by a plane that misses its axis. Nothing builds one,
-/// and a zero leaves the evaluator's own direction alone, which is the right
-/// answer rather than a fallback: an edge that goes nowhere round the face
-/// cannot make the face's wire fail to close whichever way it is walked.
+/// circle cut out of a ball by a plane that misses its axis — and then the
+/// evaluator's own direction is left alone.
+///
+/// **That is the right answer for the wire this is read for and not for every
+/// wire**, and the difference is worth naming rather than glossing. What the
+/// sign settles is whether a face's *outer* wire comes back to the longitude it
+/// set off from, and an edge that goes nowhere round the face cannot make it
+/// fail that whichever way it runs. A closed edge that is a **hole** in a curved
+/// face is a different question — there the direction is what makes it read as a
+/// hole rather than as a second outline — and nothing here answers it. No
+/// builder makes such a face; one arriving from a file would need a curved face
+/// with a closed-edge hole in it, which is M4's ball with a pipe through it.
 fn how_far_round_this_face_it_goes(stored: &Surface, from: Point, points: &[Point]) -> f64 {
     let Some(whole_turn) = how_far_the_longitude_wraps(stored) else {
         return 0.0;

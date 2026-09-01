@@ -1497,8 +1497,17 @@ fn where_two_balls_touch(one: &Sphere, other: &Sphere, gap: f64) -> PredicatePoi
 /// a published bound needs a test; deriving and testing one for each of the
 /// seven questions above buys speed on a path nothing has measured, which is the
 /// shape §1.4 and §24.16 both turn down. Level 2 decides everything level 1
-/// would have, by construction rather than by derivation, and level 3 decides
-/// the rest.
+/// would have, by construction rather than by derivation.
+///
+/// **What level 2 leaves is not always level 3's either**, and saying so is the
+/// difference between a cascade and a promise. Every discriminant of the four
+/// planar pairs and of a ball against a pipe is a polynomial in stored `f64`, so
+/// level 3 settles it unless a product leaves the range. The comparison two
+/// leaning pipes ask is not a polynomial — it is a length against a length in
+/// three different metrics, three square roots deep — and clearing those roots
+/// costs eight degrees and runs past what `f64` can square (§29.2, §29.6). Its
+/// exact arm answers `None` where that happens, the enclosure is then the whole
+/// of the answer, and a knife edge comes back [`Error::Undecidable`].
 ///
 /// # Errors
 ///

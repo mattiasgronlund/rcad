@@ -49,9 +49,17 @@ const SAGITTA_MAY_TAKE: f64 = 0.75;
 
 /// How many times a step may be halved before the marcher gives up on it.
 ///
-/// Fifty, which takes any starting step below the smallest normal number, so
-/// reaching the end of it means the curve is not being followed at all rather
-/// than that the budget was tight.
+/// Fifty, which is a thousandth of a millionth of a millionth of the step it
+/// started at — and the sagitta it is being judged on falls with the *square* of
+/// the step, so fifty halvings ask a piece to bend `1e-30` of what the first one
+/// did. Reaching the end of that means the curve is not being followed at all
+/// rather than that the budget was tight.
+///
+/// **Not "fifty halvings puts any step below the smallest normal number"**,
+/// which is what this used to say and is out by twenty binary orders of
+/// magnitude: `2^-50` of a step of one is `9e-16`, and the smallest normal number
+/// is `2e-308`. The claim audit caught it. Fifty is right for the reason above
+/// and the arithmetic in the old reason was wrong.
 const HALVINGS_BEFORE_GIVING_UP: usize = 50;
 
 /// How many multiples of the deflection budget one step may grow to.
@@ -101,12 +109,15 @@ pub(crate) struct Marched {
 ///
 /// # Why it terminates
 ///
-/// Every accepted step moves the point at least `step` along the curve and
-/// `step` never falls below what [`HALVINGS_BEFORE_GIVING_UP`] allows, so a run
-/// of finite length is walked in finitely many steps. That argument is about the
-/// curve and not about the arithmetic, so it is not left to stand on its own:
-/// `most` caps the count outright, and reaching that cap is a refusal rather
-/// than a truncated answer.
+/// Every accepted step moves the point somewhere it was not, and a step is only
+/// halved [`HALVINGS_BEFORE_GIVING_UP`] times before the run is refused, so a
+/// curve of finite length is walked in finitely many steps. **How far a step
+/// moves is measured and not decreed**: the trial point is settled onto both
+/// surfaces afterwards, so what the step actually covers is whatever the
+/// settling left, and all that is checked is that it is not nothing. That makes
+/// the argument one about the curve rather than about the arithmetic, so it is
+/// not left to stand on its own: `most` caps the count outright, and reaching
+/// that cap is a refusal rather than a truncated answer.
 ///
 /// # Errors
 ///

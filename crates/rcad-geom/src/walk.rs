@@ -157,6 +157,9 @@ impl PointsAlongACrossing {
 /// [`Error::CrossingRunsToAQuartic`] for the two pairs the closed form does not
 /// name, and [`Error::Undecidable`] when the conic's own size could not be
 /// worked out because a product fell out of range.
+///
+/// [`Error::AnEndOfARunNamesNoPlace`] when an end is neither the box that says
+/// nothing at all is known nor a box with a middle.
 pub fn walk(
     run: &NamedRun,
     along: [&Surface; 2],
@@ -164,6 +167,9 @@ pub fn walk(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<PointsAlongACrossing> {
+    if !run.ends().into_iter().all(an_end_that_names_a_place) {
+        return Err(Error::AnEndOfARunNamesNoPlace);
+    }
     // A straight run is the whole of what its two ends say, so there is nothing
     // to put between them.
     if run.run() == &EdgeRun::Straight {
@@ -212,6 +218,32 @@ pub fn walk(
         points,
         deviation: tag,
     })
+}
+
+/// Whether this end says where it is.
+///
+/// Two ways it can. The box whose every side runs the whole number line is how a
+/// pair of surfaces says it names a curve and nothing on it, and that is an
+/// answer rather than a gap. Anything else has to have a middle — because the
+/// middle is what the angle round the conic is worked out from, and an angle
+/// that is not a number turns every point built on it into one, right down to a
+/// box that is not a range.
+///
+/// **A caller can hand over neither**, which is why this is asked at all. An
+/// exact triple with a `NaN` coordinate, or a box with one infinite side, are
+/// both things [`NamedRun::new`] takes.
+fn an_end_that_names_a_place(end: PredicatePoint) -> bool {
+    end == nowhere_in_particular()
+        || end
+            .enclosure()
+            .iter()
+            .all(|side| middle_of(*side).is_finite())
+}
+
+/// The middle of an enclosure, which is where a point known only as a box is
+/// read as being.
+fn middle_of(side: Interval) -> f64 {
+    (side.lo() + side.hi()) / 2.0
 }
 
 /// Whether this pair crosses in a curve no conic stands in for.
@@ -613,8 +645,7 @@ impl Conic {
         log: &mut ProvenanceLog,
     ) -> Result<(f64, f64)> {
         let ends = run.ends().map(|end| {
-            (end != nowhere_in_particular())
-                .then(|| Point::from(end.enclosure().map(|side| (side.lo() + side.hi()) / 2.0)))
+            (end != nowhere_in_particular()).then(|| Point::from(end.enclosure().map(middle_of)))
         });
 
         let from = ends[0].map_or(0.0, |end| self.angle_of(end));
@@ -898,5 +929,92 @@ fn name_of(surface: &Surface) -> &'static str {
         Surface::Plane(_) => "plane",
         Surface::Sphere(_) => "ball",
         Surface::Cylinder(_) => "pipe",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use smallvec::smallvec;
+
+    use super::*;
+    use crate::Vector;
+
+    fn a_ball_and_the_meridian_of_its_seam() -> (Surface, Surface, Surface) {
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a ball"));
+        let meridian = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal"),
+        );
+        let picker = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+                .expect("the x axis is a unit normal"),
+        );
+        (ball, meridian, picker)
+    }
+
+    /// An end that does not say where it is is refused, and does not take the
+    /// arithmetic with it.
+    ///
+    /// **Found by the claim audit, and reachable from outside the workspace.**
+    /// `walk` is public and so is `NamedRun::new`, and nothing between them
+    /// narrows what an end may be: a `Point` is a triple *or a box*, and neither
+    /// `f64` nor `Interval` refuses the two shapes here. Both make the angle
+    /// round the conic not a number, which used to reach `Interval::new(NaN,
+    /// NaN)` and panic — a panic on a caller's argument, which §4.1 says is the
+    /// wrong answer.
+    ///
+    /// The box with every side running the whole number line is the case this
+    /// must *not* catch: that is how a pair of surfaces says it names a curve
+    /// and nothing on it, and `walk` has to walk the whole curve for it.
+    #[test]
+    fn an_end_that_does_not_say_where_it_is_is_refused_rather_than_walked() {
+        let (ball, meridian, picker) = a_ball_and_the_meridian_of_its_seam();
+        let north = PredicatePoint::from([0.0, 0.0, 5.0]);
+        let nowhere_useful = [
+            PredicatePoint::from([f64::NAN, 0.0, 0.0]),
+            PredicatePoint::Constructed([
+                Interval::new(0.0, f64::INFINITY).expect("a half-open range"),
+                Interval::exactly(0.0),
+                Interval::exactly(0.0),
+            ]),
+        ];
+
+        for end in nowhere_useful {
+            let run = NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: meridian,
+                    picked_by: smallvec![picker],
+                },
+                [north, end],
+            );
+            assert_eq!(
+                walk(
+                    &run,
+                    [&ball, &ball],
+                    Deflection::of(0.1).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                ),
+                Err(Error::AnEndOfARunNamesNoPlace),
+                "an end of {end:?} said where it was after all"
+            );
+        }
+    }
+
+    /// The whole of a curve still walks, and that is what stops the check above
+    /// from being a check that nothing gets through.
+    #[test]
+    fn a_run_with_no_ends_at_all_is_walked_right_round() {
+        let (ball, meridian, _) = a_ball_and_the_meridian_of_its_seam();
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross);
+        let along_it = walk(
+            &whole,
+            [&ball, &meridian],
+            Deflection::of(0.1).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a pair of surfaces names a whole circle");
+        assert!(along_it.points().len() > 8);
     }
 }
