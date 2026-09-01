@@ -8185,6 +8185,19 @@ direction rule; §31.3 settles what the rule should be and hands it to lane 4.
 Until lane 4 lands it, a closed edge's own sense is whatever `walk` produced for
 the pair in the order it happened to be handed them.
 
+**It is not the neighbouring face's own orientation either**, and that one is
+worth writing out because it is the first thing to reach for and it is nearly
+right. At an edge, the face on `S` and the face on `T` bound the same wedge of
+material; write `a` and `b` for their two outward normals. Where the edge is
+**convex** the material is `{d·a < 0} ∩ {d·b < 0}` and the `S` face carries on
+into `d·b < 0`; where it is **reflex** the material is the union of the two and
+the `S` face carries on into `d·b > 0`. So the answer is the neighbour's
+orientation, turned round exactly when the edge is reflex — and `a` and `b`
+alone cannot say which, because a dihedral angle and its explement leave the
+same pair of normals. What tells them apart is the sign of the edge's own
+direction against `a × b`, which is the direction the model does not have. The
+two routes are therefore one route, and both wait on lane 4.
+
 So it is read off a **corner of the face that is off that surface**. Every
 corner is either on the trimming surface — the corners of the very edges running
 along it are — or off it on the side the face lies on. One corner off it
