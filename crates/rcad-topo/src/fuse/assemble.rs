@@ -1483,7 +1483,8 @@ impl Edges {
     /// filtering it out afterwards, so one reaching here means the splitter is
     /// wrong — and a *closed* side is not one, which is why the two ends being
     /// the same corner is checked against what carries it.
-    fn of(&mut self, from: usize, to: usize, carried_by: [Surface; 2], along: &[EdgeKey]) -> Side {
+    fn of(&mut self, meet: &FaceMeet, from: usize, to: usize) -> Side {
+        let (carried_by, along) = (meet.carried_by, meet.along.as_slice());
         assert!(
             from != to
                 || carried_by
@@ -1501,10 +1502,21 @@ impl Edges {
             });
             self.made.len() - 1
         });
-        Side {
-            edge,
-            forward: self.made[edge].ends[0] == from,
-        }
+        // **Which way a face walks a *closed* edge is not something its two
+        // ends can say**, because they are one corner. What says it is which
+        // side of the partner the face's material is on: left of a crossing's
+        // forward direction is always the partner's negative side (§36.6). And
+        // "forward" is the direction of `∇S × ∇T` for *this* face's own surface
+        // `S`, which is the other way round for the face on the other side — so
+        // the sense is turned round for whichever of the two did not create the
+        // edge.
+        let forward = if from == to {
+            let same_sense = self.made[edge].carried_by[0] == carried_by[0];
+            (meet.material_side == Decision::Neg) == same_sense
+        } else {
+            self.made[edge].ends[0] == from
+        };
+        Side { edge, forward }
     }
 }
 
@@ -1552,7 +1564,7 @@ fn sides_of(
     for meet in wire {
         let from = corners.of(model, &meet.ends[0]);
         let to = corners.of(model, &meet.ends[1]);
-        sides.push(edges.of(from, to, meet.carried_by, &meet.along));
+        sides.push(edges.of(meet, from, to));
     }
     if turned_round {
         sides.reverse();

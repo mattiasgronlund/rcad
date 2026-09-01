@@ -2202,6 +2202,11 @@ impl<'f> Arrangement<'f> {
                 let arc = &self.arcs[half_edge / 2];
                 Ok(FaceMeet {
                     carried_by: [self.surface, self.crossings[arc.crossing].partner],
+                    material_side: if half_edge.is_multiple_of(2) {
+                        Decision::Neg
+                    } else {
+                        Decision::Pos
+                    },
                     ends: [
                         self.meet_point(self.from(half_edge)),
                         self.meet_point(self.to(half_edge)),

@@ -440,15 +440,26 @@ impl BuildingAMesh {
         if how_far_round(&walked[0]) <= widest {
             return Ok(vec![walked]);
         }
-        // Cutting a face with a hole in it would have to say which piece the
-        // hole ends up in, and nothing does. No *builder* makes such a face —
-        // `add_round_bar` and `add_ball` each give a curved face one wire,
-        // `add_extrusion` makes planes only, and the fuse refuses a curved solid
-        // outright — but `Model` is `Deserialize` and `validate` is the
-        // untrusted-import boundary (§16.11), so one arrives from a file and
-        // this is a refusal rather than an assert.
+        // A **ring** is the one face with a hole that this can cut, and it is
+        // the one the fuse makes: a tube of a bar's wall between two planes,
+        // bounded by two curves that each go right round and by nothing else.
+        // Cut across both of them at once and what comes out is four patches
+        // with one loop each, which is the shape everything below expects.
+        //
+        // §31.10 item 5 and §35.7 both say this claim is the one lane 5
+        // falsifies, and the sentence that stops being true is *"the fuse
+        // refuses a curved solid outright"*. What is still refused is a face
+        // with a hole that is **not** a ring — one loop right round and another
+        // that is not — because then there is nothing to cut across to, and
+        // nothing says which piece the hole ends up in. `Model` is
+        // `Deserialize` and `validate` is the untrusted-import boundary
+        // (§16.11), so that is a refusal rather than an assert.
         if walked.len() != 1 {
-            return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
+            let Some(patches) = self.cut_a_ring_across(face, stored, &walked, whole_turn, room)?
+            else {
+                return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
+            };
+            return Ok(patches);
         }
 
         let mut pieces = vec![walked.into_iter().next().expect("just checked")];
@@ -467,6 +478,133 @@ impl BuildingAMesh {
             }
         }
         Ok(done)
+    }
+
+    /// Cut a **ring** — two loops that each go right round the surface, with
+    /// nothing else bounding it — into four patches with one loop each.
+    ///
+    /// A tube is what a fuse leaves of a bar's wall between two planes, and it
+    /// is the first face in this kernel with a hole in it that is not flat. It
+    /// has no seam and cannot be given one: a seam wants two corners at one
+    /// longitude, and the two curves bounding a tube start wherever the pair
+    /// that cut each of them starts. So the seam is put in *here*, four times,
+    /// where it is a cut in the surface's own two coordinates and not topology
+    /// anybody has to hold.
+    ///
+    /// **A cut has to end on points both halves already have** — the same rule
+    /// [`where_to_cut`] keeps — so each cut runs between a corner one loop
+    /// already has and a corner the other already has, and the points strictly
+    /// along it are made once and handed to the two patches either side.
+    ///
+    /// `None` when the face is not a ring: two loops is not enough, they both
+    /// have to go right round, or there is nothing across to cut to.
+    fn cut_a_ring_across(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        walked: &[WalkedLoop],
+        whole_turn: f64,
+        room: f64,
+    ) -> Result<Option<Vec<Vec<WalkedLoop>>>> {
+        let [outer, hole] = walked else {
+            return Ok(None);
+        };
+        if [outer, hole]
+            .iter()
+            .any(|around| how_far_round(around) < whole_turn / 2.0)
+        {
+            return Ok(None);
+        }
+
+        // **The two loops of a ring run opposite ways round it**, which is what
+        // keeps the material between them on the left of both, and a patch is
+        // walked along the one going up and back along the one going down. Which
+        // of the two is stored first is an order the face happens to hold
+        // (§31.3), so it is asked rather than assumed.
+        let (up, turned) = if runs_up(outer, whole_turn) {
+            (outer.clone(), hole.clone())
+        } else {
+            (outer.the_other_way(), hole.clone())
+        };
+        let down = if runs_up(&turned, whole_turn) {
+            turned.the_other_way()
+        } else {
+            turned
+        };
+        let (up, down) = (&up, &down);
+
+        let from = up.corners[0][0];
+        let quarters: [f64; 4] = [0, 1, 2, 3].map(|step| from + f64::from(step) * whole_turn / 4.0);
+        let along_the_top = quarters.map(|at| nearest_longitude(up, at, whole_turn));
+        let along_the_bottom = quarters.map(|at| nearest_longitude(down, at, whole_turn));
+
+        let mut cuts = Vec::with_capacity(4);
+        for step in 0..4 {
+            let leaving = up.corners[along_the_top[step]];
+            let arriving = down.corners[along_the_bottom[step]];
+            cuts.push(self.points_along_a_cut(face, stored, leaving, arriving, room)?);
+        }
+
+        // Every stretch is put on the end **unwrapped against what is already
+        // there**. Each of the two loops was walked in a longitude frame of its
+        // own, and a patch that took them as they came would step a whole turn
+        // crossing from one to the other — which in the surface's two
+        // coordinates is a boundary folded across itself rather than a rectangle.
+        let mut patches = Vec::with_capacity(4);
+        for step in 0..4 {
+            let next = (step + 1) % 4;
+            let mut one = unwrapped(
+                &up.between(along_the_top[step], along_the_top[next]),
+                whole_turn,
+            );
+            one.take_in_unwrapped(&cuts[next], whole_turn);
+            one.take_in_unwrapped(
+                &down.between(along_the_bottom[next], along_the_bottom[step]),
+                whole_turn,
+            );
+            one.take_in_unwrapped(&cuts[step].the_other_way(), whole_turn);
+            patches.push(vec![one]);
+        }
+        Ok(Some(patches))
+    }
+
+    /// The points strictly between two corners of one face, walked along the
+    /// straight line between them in the surface's own two coordinates.
+    fn points_along_a_cut(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        leaving: [f64; 2],
+        arriving: [f64; 2],
+        room: f64,
+    ) -> Result<WalkedLoop> {
+        let steps = how_many_steps(
+            stored,
+            arriving[0] - leaving[0],
+            arriving[1] - leaving[1],
+            room,
+        );
+        if self.points.len() + steps > MOST_POINTS_A_MESH_WILL_HOLD {
+            return Err(Error::MoreMeshPointsThanASolidWillHold {
+                most: MOST_POINTS_A_MESH_WILL_HOLD,
+            });
+        }
+        let there = face.location();
+        let mut along = WalkedLoop {
+            corners: Vec::with_capacity(steps - 1),
+            points: Vec::with_capacity(steps - 1),
+        };
+        for step in 1..steps {
+            let part = step as f64 / steps as f64;
+            let sits_at =
+                [0, 1].map(|which| leaving[which] + part * (arriving[which] - leaving[which]));
+            let on_it = stored.point_at(sits_at[0], sits_at[1]);
+            along.corners.push(sits_at);
+            along
+                .points
+                .push(self.remember(there.apply_to_point(on_it)));
+        }
+        Ok(along)
     }
 
     /// Cut one piece in half across the middle of how far round it goes, or
@@ -626,7 +764,10 @@ impl BuildingAMesh {
     ) -> Option<WalkedLoop> {
         let back = face.location().inverse();
         let poles = poles_of(wire);
-        let mut walk = WalkingAWire::new(how_far_the_longitude_wraps(stored));
+        let mut walk = WalkingAWire::new(
+            how_far_the_longitude_wraps(stored),
+            wire.closes_on_one_edge(),
+        );
 
         for step in wire.steps() {
             match step {
@@ -731,12 +872,69 @@ impl WalkedLoop {
         self.points.extend_from_slice(&rest.points);
     }
 
+    /// The same, with `rest`'s longitudes moved by whole turns so that no step
+    /// in the chain jumps more than half a turn.
+    fn take_in_unwrapped(&mut self, rest: &WalkedLoop, whole: f64) {
+        let mut longitude = self.corners.last().map_or(0.0, |corner| corner[0]);
+        for corner in &rest.corners {
+            longitude += the_short_way_round(corner[0] - longitude, whole);
+            self.corners.push([longitude, corner[1]]);
+        }
+        self.points.extend_from_slice(&rest.points);
+    }
+
     /// The same corners, walked backwards.
     fn the_other_way(&self) -> WalkedLoop {
         WalkedLoop {
             corners: self.corners.iter().rev().copied().collect(),
             points: self.points.iter().rev().copied().collect(),
         }
+    }
+}
+
+/// Whether a loop is walked in the direction the longitude grows.
+fn runs_up(around: &WalkedLoop, whole: f64) -> bool {
+    let corners = &around.corners;
+    let mut climbed = 0.0;
+    for step in 0..corners.len() {
+        climbed += the_short_way_round(
+            corners[(step + 1) % corners.len()][0] - corners[step][0],
+            whole,
+        );
+    }
+    climbed > 0.0
+}
+
+/// Which corner of a loop sits nearest a longitude, counting whole turns as no
+/// distance at all.
+fn nearest_longitude(around: &WalkedLoop, at: f64, whole: f64) -> usize {
+    (0..around.corners.len())
+        .min_by(|&one, &other| {
+            let away =
+                |which: usize| the_short_way_round(around.corners[which][0] - at, whole).abs();
+            away(one).total_cmp(&away(other))
+        })
+        .expect("a walked loop has a corner")
+}
+
+/// The same corners with the whole turns put back, so that no step in the chain
+/// jumps more than half a turn.
+///
+/// A loop that goes right round is walked as one turn's worth of longitudes and
+/// then closes, so a stretch of it taken from anywhere but its own first corner
+/// runs off the end and starts again — which in the surface's two coordinates is
+/// a fold rather than a step. Unwrapping puts the jump back where it belongs, at
+/// the seam of the patch being built.
+fn unwrapped(chain: &WalkedLoop, whole: f64) -> WalkedLoop {
+    let mut corners = Vec::with_capacity(chain.corners.len());
+    let mut longitude = chain.corners.first().map_or(0.0, |corner| corner[0]);
+    for corner in &chain.corners {
+        longitude += the_short_way_round(corner[0] - longitude, whole);
+        corners.push([longitude, corner[1]]);
+    }
+    WalkedLoop {
+        corners,
+        points: chain.points.clone(),
     }
 }
 
@@ -842,6 +1040,9 @@ fn the_nearer_of(middle: f64, here: f64, next: f64) -> bool {
 /// The running state of a walk round one wire.
 struct WalkingAWire {
     wraps: Option<f64>,
+    /// Whether this wire is one whole closed curve, so that it comes back to
+    /// where it started a whole turn on rather than at the longitude it left.
+    goes_right_round: bool,
     longitude: f64,
     started: bool,
     will_not_lie_flat: bool,
@@ -851,9 +1052,10 @@ struct WalkingAWire {
 }
 
 impl WalkingAWire {
-    fn new(wraps: Option<f64>) -> Self {
+    fn new(wraps: Option<f64>, goes_right_round: bool) -> Self {
         Self {
             wraps,
+            goes_right_round,
             longitude: 0.0,
             started: false,
             will_not_lie_flat: false,
@@ -945,7 +1147,14 @@ impl WalkingAWire {
         if self.will_not_lie_flat {
             return None;
         }
+        // A wire made of one whole closed curve is *meant* to come back a whole
+        // turn on — a cap circle of a tube the fuse cut out of a bar's wall is
+        // one — so the check below is not about it. It is a fact about the wire
+        // and not a measurement: one coedge whose two ends are one corner runs
+        // right round the curve its two faces cross in, which on a periodic
+        // surface is right round the surface.
         if let (Some(whole), Some(first)) = (self.wraps, self.corners.first())
+            && !self.goes_right_round
             && (self.longitude - first[0]).abs() >= whole / 2.0
         {
             return None;

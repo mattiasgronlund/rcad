@@ -149,17 +149,6 @@ impl Model {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Fused> {
-        // Over every input before a single pair is looked at. Refusing lazily,
-        // when the splitter first met a curved face, would make *which* answer
-        // came back depend on the order the pairs happened to be walked — and
-        // the commutativity and associativity properties compare answers across
-        // exactly that reordering.
-        for &solid in arguments.iter().chain(tools) {
-            if !self.solid(solid).is_wholly_flat() {
-                return Err(Error::FuseNeedsFlatFaces);
-            }
-        }
-
         let mut mine = ProvenanceLog::new();
         let fused = self.fused_under(arguments, tools, rule, policy, &mut mine);
         mine.drain_into(log);
@@ -304,6 +293,18 @@ pub(crate) struct FaceMeet {
     pub(crate) carried_by: [Surface; 2],
     /// Where the piece starts and where it ends, in that order.
     pub(crate) ends: [MeetPoint; 2],
+    /// Which side of `carried_by[1]` the piece's material is on.
+    ///
+    /// [`Decision::Neg`] or [`Decision::Pos`], and never anything else. It costs
+    /// no arithmetic: the walk that made this side keeps the material on its
+    /// left, and left of a crossing's forward direction is always the negative
+    /// side of the partner — `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by
+    /// Cauchy–Schwarz, everywhere, with no case analysis (§36.6).
+    ///
+    /// It is what lets selection say whether a point is inside a **curved**
+    /// piece without winding anything: a piece bounded by whole closed curves is
+    /// the part of its surface on the material side of every one of them.
+    pub(crate) material_side: Decision,
     /// The input edges this runs along, when it runs along any. Empty for a
     /// piece of a cut, which is boundary the result invents, and more than one
     /// when joining coplanar input faces made two edges into one.

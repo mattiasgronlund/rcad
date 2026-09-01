@@ -8,9 +8,9 @@
 
 use std::collections::HashMap;
 
-use rcad_geom::{Deflection, Isometry, Point, Scale, Surface};
+use rcad_geom::{Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
-use rcad_topo::{Error, Model, Rule};
+use rcad_topo::{Model, Rule};
 
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 5.0;
@@ -328,80 +328,57 @@ fn a_ball_refuses_a_radius_that_is_not_a_positive_number() {
     }
 }
 
-/// Q11 and Q21: every operation that only handles flat faces refuses, through
-/// one shared check, and says so rather than crashing or guessing.
+/// Q11 and Q21's list is empty, and this is the entry that closes it.
 ///
 /// Before the guard existed the fuse **panicked** here — `FaceView::plane`
 /// unwrapped a cylinder — and the classifier silently answered as though the
 /// bar were the handful of chords its corners happen to span. §4.1 ranks that
 /// second one below the crash.
 ///
-/// **Two operations have come off this list, in two different milestones, and
-/// the pattern is worth naming.** `measure` refused a curved solid at M2's gate
-/// because a bar has no fan to sum (§25.5); it sums over a mesh now, and
+/// **Three operations have come off this list, in three different milestones,
+/// and the pattern is worth naming.** `measure` refused a curved solid at M2's
+/// gate because a bar has no fan to sum (§25.5); it sums over a mesh now, and
 /// `measuring.rs` is where that is checked. **The classifier came off at M4**:
 /// it fires rays at curved surfaces and asks each face what it holds, so what
-/// used to be asserted here as `Containment::NeedsFlatFaces` is a real answer
-/// now and `point_in_a_curved_solid.rs` is where it is asserted (§35). The fuse
-/// is what is left.
+/// used to be `Containment::NeedsFlatFaces` is a real answer now and
+/// `point_in_a_curved_solid.rs` is where it is asserted (§35). **And the fuse
+/// came off at the end of M4**, which is the whole of what that milestone was
+/// (§31.1): `Error::FuseNeedsFlatFaces` is gone and there is no variant left to
+/// assert on, so what stands in its place is the operation working.
 #[test]
-fn the_fuse_still_needs_flat_faces_and_refuses_a_round_bar_by_name() {
+fn the_fuse_takes_a_curved_solid_now() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let block = model
+        .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a block eight across");
     let bar = model
-        .add_round_bar(RADIUS, HEIGHT, &Isometry::identity())
-        .expect("a bar");
-    let ball = model
-        .add_ball(RADIUS, &Isometry::identity())
-        .expect("a ball");
-    let cube = model
-        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a cube of side two");
+        .add_round_bar(
+            1.0,
+            12.0,
+            &Isometry::translation(Vector::new(4.0, 4.0, -2.0)).expect("a shift"),
+        )
+        .expect("a bar through the middle of it");
 
-    for (curved, what) in [(bar, "bar"), (ball, "ball")] {
-        for rule in [Rule::Union, Rule::Difference, Rule::Intersection] {
-            // Both ways round, because refusing lazily would make which answer
-            // comes back depend on which side was walked first.
-            for (arguments, tools) in [([curved], [cube]), ([cube], [curved])] {
-                let refusal = model.fuse(
-                    &arguments,
-                    &tools,
-                    rule,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
-                assert!(
-                    matches!(refusal, Err(Error::FuseNeedsFlatFaces)),
-                    "{rule:?} with the {what} on one side gave {refusal:?}"
-                );
-            }
-        }
-    }
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(
+            &[block],
+            &[bar],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("a block with a round hole taken out of it");
 
-    // And the control: the guard refuses curved solids, not every solid.
-    assert_eq!(
-        model
-            .solid(cube)
-            .measure(
-                Deflection::of(0.1).expect("a length a polyhedron ignores"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            )
-            .expect("a cube measures")
-            .volume(),
-        8.0
-    );
+    assert_eq!(fused.solids().len(), 1, "a block with a hole is one solid");
     assert!(
-        model
-            .fuse(
-                &[cube],
-                &[cube],
-                Rule::Union,
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            )
-            .is_ok(),
-        "two flat solids still fuse"
+        log.records().is_empty(),
+        "a lattice-aligned curved pair needs nothing approximated, got {:?}",
+        log.records()
     );
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the answer is a sound model");
 }
 
 /// A box round the corners is not a box round a curved solid, and the name has
