@@ -225,21 +225,21 @@ pub enum Error {
     },
 
     /// A curved face is bounded by one curve that goes right round its surface,
-    /// and there is no seam and no pole to open it at.
+    /// and the surface does not pinch to a point for the face to close on.
     ///
-    /// A cap a plane cuts off a ball is the shape: its whole boundary is one
-    /// circle of latitude, and its own patch in the surface's two coordinates is
-    /// a rectangle whose top edge is the pole and whose two sides are one
-    /// meridian used twice. The model says neither — a
-    /// [`WireStep::Pole`](crate::model::WireStep) and a seam are what say them,
-    /// and a fuse has no way to invent either: a seam wants two corners at one
-    /// longitude and this face has one corner in all.
+    /// Such a face has no seam and no pole in the model — a
+    /// [`WireStep::Pole`](crate::model::WireStep) and a seam edge are what say
+    /// those, and a fuse can invent neither, because a seam wants two corners at
+    /// a single longitude and this face has one corner in all. Where the surface
+    /// **does** pinch, the mesher cuts the face up to that pole four times and
+    /// there is nothing to refuse; a cap a plane takes off a ball is that, and it
+    /// is what §36.18 closed.
     ///
-    /// A **gap**, and the shape that reaches it is a ball cut by a plane. What
-    /// closes it is a commit that puts a pole step and a seam on such a piece,
-    /// which is the same construction §36 says a tube's seam would need and did
-    /// not get. A **ring** — two curves that each go right round — is cut across
-    /// instead and is not this.
+    /// What is left is a face bounded that way on a surface with no pole, which
+    /// is half an endless tube round a cylinder — **not a face at all**, so this
+    /// is a model whose topology and geometry disagree rather than a gap in the
+    /// arithmetic. `Model` is `Deserialize` and `validate` is the untrusted
+    /// import boundary (§16.11), so it is a refusal and not an assert.
     #[error("a curved face is bounded by one curve right round it and has no seam to open at")]
     ACurvedFaceGoesRightRoundWithNoSeam {
         /// Which face.
