@@ -172,6 +172,14 @@ pub fn walk(
 
     let pair = the_two_surfaces_it_runs_between(run, along);
     if a_crossing_that_runs_to_a_quartic(&pair) {
+        // Two pipes down one direction cross in straight lines, and a run that
+        // is one of those is picked out by a half-space rather than being
+        // `Straight`, so it reaches here — with nothing to put between its ends.
+        if let [Surface::Cylinder(one), Surface::Cylinder(other)] = pair
+            && one.axis().direction().cross(other.axis().direction()) == Vector::zero()
+        {
+            return Ok(nothing_between_the_ends());
+        }
         return follow_the_quartic(run, pair, deflection, policy, log);
     }
 
@@ -179,6 +187,13 @@ pub fn walk(
         return Ok(nothing_between_the_ends());
     };
     let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * conic.how_far_it_reaches();
+    // A conic drawn near the top of `f64`'s range has a bound that overflows,
+    // and a bound of infinity is not a bound. The size of this crossing is what
+    // could not be worked out, which is the same refusal the naming half has one
+    // step earlier.
+    if !deviation.is_finite() {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
     let tag = Approximation::new(deviation, Cause::PointAlongACrossing);
     let Some(room) = room_left_over(deflection, deviation, policy)? else {
         return Ok(PointsAlongACrossing {
@@ -249,6 +264,10 @@ fn follow_the_quartic(
         _ => &[],
     };
 
+    // A run that nothing picks is the whole of a single loop, and the two seeds
+    // are two places on it — either will do. A run that *is* picked is one of
+    // two loops, and then exactly one of the seeds may pass: both or neither and
+    // the half-spaces have not told them apart after all.
     let mut seeds = Vec::new();
     for seed in where_a_quartic_can_be_picked_up(&pair)? {
         let (settled, off) = settled_with_a_bound(surfaces, seed)?;
@@ -256,8 +275,10 @@ fn follow_the_quartic(
             seeds.push(settled);
         }
     }
-    let [seed] = seeds.as_slice() else {
-        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    let seed = match (picked_by.is_empty(), seeds.as_slice()) {
+        (true, [first, ..]) => first,
+        (false, [only]) => only,
+        _ => return Err(Error::CannotNameWhichPieceOfACrossingThisIs),
     };
 
     let walked = march(
@@ -368,31 +389,25 @@ fn where_one_pipe_reaches_across_another(thin: &Cylinder, fat: &Cylinder) -> [Po
         up * up.length().recip()
     };
 
-    // The sweep that reaches furthest is the one where the fat pipe's axis is
-    // nearest, and a handful of candidates is cheaper than solving for it.
+    // The sweep that reaches furthest is the one where the fat pipe's axis comes
+    // nearest, and trying a handful of candidates is cheaper than solving for
+    // it: the two that put the axis nearest, and the three ends of the range.
     let apart = between.dot(across);
-    let best = [apart / thin_skin, -apart / thin_skin, 1.0, -1.0, 0.0]
-        .into_iter()
-        .map(|part| part.clamp(-1.0, 1.0))
-        .map(|turned| {
-            let round = foot
-                + across * (thin_skin * turned)
-                + and_up * (thin_skin * (1.0 - turned * turned).max(0.0).sqrt());
-            (
-                how_far_a_pipe_reaches_from(fat, round, thin_way, fat_skin),
-                round,
-            )
-        })
-        .fold(
-            None,
-            |so_far: Option<(f64, f64, Point)>, ((room, middle), round)| match so_far {
-                Some((best, _, _)) if best >= room => so_far,
-                _ => Some((room, middle, round)),
-            },
-        );
-    let Some((room, middle, round)) = best else {
-        unreachable!("a non-empty list of candidates has a largest")
+    let at = |turned: f64| {
+        let turned = turned.clamp(-1.0, 1.0);
+        foot + across * (thin_skin * turned)
+            + and_up * (thin_skin * (1.0 - turned * turned).max(0.0).sqrt())
     };
+    let mut round = at(apart / thin_skin);
+    let (mut room, mut middle) = how_far_a_pipe_reaches_from(fat, round, thin_way, fat_skin);
+    for turned in [-apart / thin_skin, 1.0, -1.0, 0.0] {
+        let here = at(turned);
+        let (reaches, along) = how_far_a_pipe_reaches_from(fat, here, thin_way, fat_skin);
+        if reaches > room {
+            (room, middle, round) = (reaches, along, here);
+        }
+    }
+
     let reach = room.max(0.0).sqrt();
     [
         round + thin_way * (middle + reach),
@@ -742,13 +757,20 @@ fn two_directions_in(flat: &Plane, along: Vector) -> (Vector, Vector) {
     let normal = flat.normal();
     let leaning = along.cross(normal);
     let across = leaning - normal * (leaning.dot(normal) / normal.length_squared());
-    match across.normalized() {
+    // **Scaled to length one from wherever it is**, and that is not fussiness.
+    // A plane a hair off square to the pipe crosses into something whose
+    // components are around `1e-180`, and squaring those to take a length puts
+    // them in the subnormals and brings them back as noise — so the ordinary
+    // normalize hands back a vector that is not a unit vector, the two semi-axes
+    // stop being the same length, and every point built on them misses the pipe
+    // by a share of its radius that no published bound covers.
+    match across.scaled_to_length_one_from_anywhere("direction across a crossing") {
         Ok(across) => {
             let and = across.cross(normal);
             let and = and - normal * (and.dot(normal) / normal.length_squared());
             (
                 across,
-                and.normalized()
+                and.scaled_to_length_one_from_anywhere("direction along a crossing")
                     .expect("two square directions cross into a third with a length"),
             )
         }
@@ -782,12 +804,28 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
             Some(squared_gap.minus(&reach))
         };
         let room = apart_by(1.0)?.times(&apart_by(-1.0)?)?;
-        Some((room.nearest_f64(), squared_gap.nearest_f64()))
+        // How far along the centre line the circle sits, as a numerator only:
+        // `D² + R₁² − R₂²`. **Summed exactly and for the same reason as the
+        // radius**, and this one was found by a fuzzer rather than by argument.
+        // Two balls of almost the same size whose centres are almost in the same
+        // place have `R₁² − R₂²` cancelling to a millionth of either square, and
+        // that share is then multiplied by a `D²` in the denominator which is
+        // smaller still — so a relative rounding of the difference comes out of
+        // the division magnified by however many times `D` goes into the radius,
+        // and the centre lands nowhere near the published bound of the answer.
+        let along_the_centre_line = squared_gap
+            .plus(&Exact::product_of(mine, mine)?)
+            .minus(&Exact::product_of(theirs, theirs)?);
+        Some((
+            room.nearest_f64(),
+            squared_gap.nearest_f64(),
+            along_the_centre_line.nearest_f64(),
+        ))
     };
-    let Some((room, squared_gap)) = worked_out() else {
+    let Some((room, squared_gap, along_the_centre_line)) = worked_out() else {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     };
-    let part = (squared_gap + mine * mine - theirs * theirs) / (2.0 * squared_gap);
+    let part = along_the_centre_line / (2.0 * squared_gap);
     let middle = one.centre() + apart * part;
     let radius_here = (-room / (4.0 * squared_gap)).max(0.0).sqrt();
 

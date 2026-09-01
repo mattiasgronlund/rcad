@@ -17,6 +17,8 @@
 //! of an enclosure gives an enclosure of the root.
 
 use rcad_predicates::Interval;
+
+use crate::de_boor::quotient_enclosing;
 use rcad_predicates::expansion::{product_is_exact, two_product};
 
 /// `√value`, as an enclosure, for a value that cannot be below zero.
@@ -82,6 +84,26 @@ fn squared_is_exactly(root: f64, value: f64) -> bool {
     }
     let (high, low) = two_product(root, root);
     high == value && low == 0.0
+}
+
+/// `over / under` as an enclosure, or everything where `under` touches zero.
+///
+/// [`quotient_enclosing`] panics on a divisor that straddles zero, and it is
+/// right to: every caller in the spline evaluator has already proved its divisor
+/// is away from zero, and a panic there is a broken invariant.
+///
+/// **The intersector's divisors are not like that.** They are lengths worked out
+/// from the numbers a caller handed over — a direction's own length, the
+/// distance between two axes, the reach of a cross product — and a caller is
+/// entitled to hand over a direction whose components are so small that its
+/// squared length underflows to nothing. That is bad input and not a broken
+/// invariant, so what comes back is a box that says nothing is known, which
+/// travels through the arithmetic above it and turns into a refusal (§4.1).
+pub(crate) fn quotient_or_everything(over: Interval, under: Interval) -> Interval {
+    if under.contains_zero() {
+        return Interval::ENTIRE;
+    }
+    quotient_enclosing(over, under)
 }
 
 /// `u · v` as an enclosure.
@@ -159,6 +181,21 @@ mod tests {
                 "√{value}"
             );
         }
+    }
+
+    /// A direction whose squared length underflows to nothing divides into a
+    /// box that says nothing is known, rather than into a panic.
+    #[test]
+    fn dividing_by_a_length_that_underflowed_to_nothing_says_nothing_is_known() {
+        let nothing = Interval::exactly(0.0);
+        assert_eq!(
+            quotient_or_everything(Interval::exactly(1.0), nothing),
+            Interval::ENTIRE
+        );
+        assert_eq!(
+            quotient_or_everything(Interval::exactly(6.0), Interval::exactly(2.0)),
+            Interval::exactly(3.0)
+        );
     }
 
     #[test]

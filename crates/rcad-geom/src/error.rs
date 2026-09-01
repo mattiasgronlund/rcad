@@ -261,13 +261,25 @@ pub enum Error {
     /// come in touch each other, and there is no half-space that picks one of
     /// them, because at the touching point they share a point.
     ///
-    /// A **limit** and not a gap (§16.10). [`EdgeRun`](crate::EdgeRun) has one
-    /// variant that says "right round one closed curve" and one that says "this
-    /// piece of a crossing, picked out by these half-spaces"; a curve that
-    /// crosses itself is neither, and the answer this refuses to give does not
-    /// exist in the vocabulary rather than being out of the arithmetic's reach.
-    /// The family of fixes is a third `EdgeRun` variant carrying the crossing
-    /// point, and its consumer is a fuse over curved solids, which is M4.
+    /// **A limit of the naming half taken with the evaluator, and a gap of the
+    /// naming half on its own** (§16.10, §29.6). [`EdgeRun`](crate::EdgeRun)
+    /// *can* say this: the two loops of a pinch are the two sides of one
+    /// half-space, and the two ellipses are the parts lying in one plane, which
+    /// is a pair of opposite half-spaces. What cannot be written down is either
+    /// of those planes, which is the same gap
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] is about.
+    ///
+    /// The reason to refuse here rather than there is the evaluator. Where a
+    /// crossing runs through itself the two surfaces are **tangent**, so the
+    /// crossing has no direction and the marcher has nothing to follow — and
+    /// naming two pieces nothing can draw is the half-answer §24.10 refuses
+    /// whole. `marching_from_where_a_crossing_runs_through_itself_has_no_direction_to_follow`
+    /// is the demonstration.
+    ///
+    /// The family of fixes: a marcher that can be told to start away from a
+    /// singular point and stop at it, and a third `EdgeRun` variant that hands a
+    /// fuse the crossing point rather than making it notice. Both have one
+    /// consumer and it is M4's fuse.
     #[error(
         "these two surfaces are tangent along where they cross, so what they cross in is one \
          curve that runs through itself"

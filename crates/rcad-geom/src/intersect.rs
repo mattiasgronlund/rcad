@@ -35,9 +35,8 @@ use rcad_predicates::{
 };
 use smallvec::smallvec;
 
-use crate::de_boor::quotient_enclosing;
 use crate::enclosure::{
-    cross_enclosing, dot_enclosing, exactly, gap_enclosing, root_enclosing,
+    cross_enclosing, dot_enclosing, exactly, gap_enclosing, quotient_or_everything, root_enclosing,
     squared_length_enclosing,
 };
 use crate::exact::Exact;
@@ -347,18 +346,20 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
     let squared_direction = squared_length_enclosing(exactly(along.components()));
     let squared_normal = squared_length_enclosing(exactly(normal.components()));
     let sideways = exactly(normal.components())
-        .map(|part| quotient_enclosing(part, root_enclosing(squared_normal)));
-    let up = cross_enclosing(exactly(along.components()), exactly(normal.components()))
-        .map(|part| quotient_enclosing(part, root_enclosing(squared_direction * squared_normal)));
+        .map(|part| quotient_or_everything(part, root_enclosing(squared_normal)));
+    let up =
+        cross_enclosing(exactly(along.components()), exactly(normal.components())).map(|part| {
+            quotient_or_everything(part, root_enclosing(squared_direction * squared_normal))
+        });
 
     // How far the axis sits in front of the cutting plane, and how far each of
     // the two lines sits from the plane through the axis square to it.
-    let in_front = quotient_enclosing(
+    let in_front = quotient_or_everything(
         dot_enclosing(exactly(normal.components()), exactly(origin.coordinates()))
             - Interval::exactly(flat.offset()),
         root_enclosing(squared_normal),
     );
-    let skin = quotient_enclosing(
+    let skin = quotient_or_everything(
         Interval::exactly(pipe.radius()),
         root_enclosing(squared_direction),
     );
@@ -606,7 +607,7 @@ fn how_far_apart_two_loops_are(ball: &Sphere, pipe: &Cylinder) -> Interval {
         - squared_enclosing(pipe.radius())
         - off_the_axis
         - Interval::exactly(2.0) * Interval::exactly(pipe.radius()) * root_enclosing(off_the_axis);
-    root_enclosing(quotient_enclosing(reach, squared_direction))
+    root_enclosing(quotient_or_everything(reach, squared_direction))
 }
 
 /// Two closed pieces of a ball-and-pipe crossing, told apart by the plane
@@ -646,7 +647,7 @@ fn two_loops_either_side_of_a_ball(
 
     // How much of the picking plane's own normal runs along the axis, and how
     // much of it does not.
-    let up_the_axis = quotient_enclosing(
+    let up_the_axis = quotient_or_everything(
         dot_enclosing(exactly(picker), exactly(along)),
         root_enclosing(squared_direction),
     );
@@ -691,13 +692,13 @@ fn where_a_ball_rests_against_a_pipe(ball: &Sphere, pipe: &Cylinder) -> Predicat
 
     let squared_direction = squared_length_enclosing(exactly(along));
     let direction =
-        exactly(along).map(|part| quotient_enclosing(part, root_enclosing(squared_direction)));
+        exactly(along).map(|part| quotient_or_everything(part, root_enclosing(squared_direction)));
     let from_the_origin = gap_enclosing(origin, centre);
     let up_the_axis = dot_enclosing(from_the_origin, direction);
     let sideways: [Interval; 3] =
         core::array::from_fn(|axis| from_the_origin[axis] - direction[axis] * up_the_axis);
     let off_the_axis = root_enclosing(squared_length_enclosing(sideways));
-    let skin = quotient_enclosing(
+    let skin = quotient_or_everything(
         Interval::exactly(pipe.radius()),
         root_enclosing(squared_direction),
     );
@@ -705,7 +706,7 @@ fn where_a_ball_rests_against_a_pipe(ball: &Sphere, pipe: &Cylinder) -> Predicat
     PredicatePoint::Constructed(core::array::from_fn(|axis| {
         Interval::exactly(origin[axis])
             + direction[axis] * up_the_axis
-            + quotient_enclosing(sideways[axis], off_the_axis) * skin
+            + quotient_or_everything(sideways[axis], off_the_axis) * skin
     }))
 }
 
@@ -889,19 +890,19 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
     let picker = Plane::from_point_and_normal(here, along.cross(towards))?;
     let sideways = exactly(towards.components());
     let apart = root_enclosing(squared_length_enclosing(sideways));
-    let sideways = sideways.map(|part| quotient_enclosing(part, apart));
+    let sideways = sideways.map(|part| quotient_or_everything(part, apart));
     let up = cross_enclosing(exactly(along.components()), sideways)
-        .map(|part| quotient_enclosing(part, root_enclosing(squared_direction)));
+        .map(|part| quotient_or_everything(part, root_enclosing(squared_direction)));
 
     let [mine, theirs] = [one, other].map(|pipe| {
-        quotient_enclosing(
+        quotient_or_everything(
             Interval::exactly(pipe.radius()),
             root_enclosing(squared_length_enclosing(exactly(
                 pipe.axis().direction().components(),
             ))),
         )
     });
-    let across = quotient_enclosing(
+    let across = quotient_or_everything(
         apart * apart + mine * mine - theirs * theirs,
         Interval::exactly(2.0) * apart,
     );
@@ -1044,7 +1045,7 @@ fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<Su
     let apart = how_far_apart_two_axes_are_enclosing(thin, fat);
     let clear =
         root_enclosing(fat_radius * fat_radius - (apart + thin_radius) * (apart + thin_radius));
-    let slop = how_far_a_picking_plane_strayed(&between, across, fat.axis().origin()) * fat_radius
+    let slop = how_far_a_picking_plane_strayed(&between, across) * fat_radius
         + how_far_a_picking_plane_sits_off_a_point(&between, fat.axis().origin());
     if clear.lo() <= slop.hi() {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
@@ -1079,19 +1080,19 @@ fn where_two_leaning_pipes_rest_against_each_other(
 
     let ways = [my_way, their_way].map(|way| {
         let squared = squared_length_enclosing(exactly(way));
-        exactly(way).map(|part| quotient_enclosing(part, root_enclosing(squared)))
+        exactly(way).map(|part| quotient_or_everything(part, root_enclosing(squared)))
     });
     let sideways = cross_enclosing(ways[0], ways[1]);
     let sideways = {
         let length = root_enclosing(squared_length_enclosing(sideways));
-        sideways.map(|part| quotient_enclosing(part, length))
+        sideways.map(|part| quotient_or_everything(part, length))
     };
     let between = gap_enclosing(here, there);
     let gap = dot_enclosing(between, sideways);
 
     // How far up the first axis the common perpendicular meets it.
     let leaning = dot_enclosing(ways[0], ways[1]);
-    let up = quotient_enclosing(
+    let up = quotient_or_everything(
         dot_enclosing(between, ways[0]) - dot_enclosing(between, ways[1]) * leaning,
         Interval::exactly(1.0) - leaning * leaning,
     );
@@ -1115,7 +1116,7 @@ fn certified_radii_enclosing(one: &Cylinder, other: &Cylinder) -> [Interval; 2] 
             || squared_length_enclosing(exactly(along)),
             |exact| exact.enclosure(),
         );
-        quotient_enclosing(Interval::exactly(pipe.radius()), root_enclosing(squared))
+        quotient_or_everything(Interval::exactly(pipe.radius()), root_enclosing(squared))
     })
 }
 
@@ -1155,7 +1156,7 @@ fn how_far_apart_two_axes_are_enclosing(one: &Cylinder, other: &Cylinder) -> Int
     } else {
         size
     };
-    quotient_enclosing(size, root_enclosing(squared_sideways))
+    quotient_or_everything(size, root_enclosing(squared_sideways))
 }
 
 /// `T = (o₂ − o₁)·(w₁ × w₂)` and `K = ‖w₁ × w₂‖²`, summed exactly and then
@@ -1389,11 +1390,11 @@ fn how_much_room_two_side_by_side_pipes_leave_exactly(
 
 /// How far the stored normal of a picking plane strayed from the direction it
 /// was asked for, as an upper bound on the length of the difference.
-fn how_far_a_picking_plane_strayed(picker: &Plane, asked_for: Vector, _through: Point) -> Interval {
+fn how_far_a_picking_plane_strayed(picker: &Plane, asked_for: Vector) -> Interval {
     let stored = exactly(picker.normal().components());
     let wanted = exactly(asked_for.components());
     let length = root_enclosing(squared_length_enclosing(wanted));
-    let wanted = wanted.map(|part| quotient_enclosing(part, length));
+    let wanted = wanted.map(|part| quotient_or_everything(part, length));
     let strayed: [Interval; 3] = core::array::from_fn(|axis| stored[axis] - wanted[axis]);
     root_enclosing(squared_length_enclosing(strayed))
 }
@@ -1465,7 +1466,7 @@ fn where_a_plane_is_nearest(flat: &Plane, centre: Point) -> PredicatePoint {
     let normal = flat.normal().components();
     let reach = dot_enclosing(exactly(normal), exactly(centre.coordinates()))
         - Interval::exactly(flat.offset());
-    let part = quotient_enclosing(reach, squared_length_enclosing(exactly(normal)));
+    let part = quotient_or_everything(reach, squared_length_enclosing(exactly(normal)));
     PredicatePoint::Constructed(core::array::from_fn(|axis| {
         Interval::exactly(centre.coordinates()[axis]) - part * Interval::exactly(normal[axis])
     }))
@@ -1481,7 +1482,7 @@ fn where_a_plane_is_nearest(flat: &Plane, centre: Point) -> PredicatePoint {
 /// and the same expression is right for both, sign and all.
 fn where_two_balls_touch(one: &Sphere, other: &Sphere, gap: f64) -> PredicatePoint {
     let [here, there] = [one, other].map(|ball| ball.centre().coordinates());
-    let part = quotient_enclosing(Interval::exactly(one.radius()), Interval::exactly(gap));
+    let part = quotient_or_everything(Interval::exactly(one.radius()), Interval::exactly(gap));
     PredicatePoint::Constructed(core::array::from_fn(|axis| {
         Interval::exactly(here[axis])
             + part * (Interval::exactly(there[axis]) - Interval::exactly(here[axis]))

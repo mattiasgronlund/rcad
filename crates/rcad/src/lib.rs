@@ -314,8 +314,8 @@ pub use rcad_geom::{EdgeRun, NamedRun, SurfaceMeet};
 /// inside `rcad-topo`, because those name keys.
 pub use rcad_geom::{
     MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing,
-    WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_BALLS_CROSS,
-    WHERE_TWO_PLANES_CROSS, intersect, walk,
+    WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
+    WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS, WHERE_TWO_PLANES_CROSS, intersect, walk,
 };
 
 pub use rcad_geom::{

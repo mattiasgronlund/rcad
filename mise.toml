@@ -4,5 +4,6 @@ lockfile = true
 [tools]
 "cargo:cargo-nextest" = "0.9"
 "cargo:cargo-deny" = "0.18"
+"cargo:cargo-fuzz" = "0.13"
 "cargo:just" = "1.42"
 "cargo:taplo-cli" = "0.10"

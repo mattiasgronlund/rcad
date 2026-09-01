@@ -325,6 +325,37 @@ fn a_pipe_tangent_to_a_pipe_answers_three_different_ways_and_refuses_only_the_th
     );
 }
 
+/// Two pipes side by side cut each other in straight lines, and a straight run
+/// is the whole of what its two ends say — even though the pair that named it is
+/// the one the evaluator otherwise hands to the marcher.
+///
+/// The lines come back as pieces of a crossing rather than as
+/// [`EdgeRun::Straight`], because a half-space is what tells the two of them
+/// apart, so nothing about the run itself says there is nothing to draw.
+#[test]
+fn two_pipes_side_by_side_are_walked_into_no_points_at_all_and_no_slop() {
+    let one = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
+    let other = a_pipe([0.0, 0.0, 1.0], [3.0, 0.0, 0.0], 2.0);
+    let met = crossing(&one, &other);
+    let SurfaceMeet::Curves(runs) = &met else {
+        panic!("two pipes side by side and overlapping cut two lines: {met:?}");
+    };
+    assert_eq!(runs.len(), 2);
+
+    for run in runs {
+        let walked = walk(
+            run,
+            [&one, &other],
+            Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a straight run needs nothing between its ends");
+        assert!(walked.points().is_empty());
+        assert_eq!(walked.deviation().magnitude(), 0.0);
+    }
+}
+
 /// A degree-four crossing is named *and* drawn: the naming half says there are
 /// two loops and which half-space picks each, and the marcher follows one of
 /// them right round.

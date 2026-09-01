@@ -33,9 +33,8 @@
 
 use rcad_predicates::Interval;
 
-use crate::de_boor::quotient_enclosing;
 use crate::enclosure::{
-    cross_enclosing, dot_enclosing, exactly, gap_enclosing, root_enclosing,
+    cross_enclosing, dot_enclosing, exactly, gap_enclosing, quotient_or_everything, root_enclosing,
     squared_length_enclosing,
 };
 use crate::{Cylinder, Error, Plane, Point, Result, Sphere, Surface, Vector};
@@ -54,6 +53,15 @@ const SAGITTA_MAY_TAKE: f64 = 0.75;
 /// reaching the end of it means the curve is not being followed at all rather
 /// than that the budget was tight.
 const HALVINGS_BEFORE_GIVING_UP: usize = 50;
+
+/// How many multiples of the deflection budget one step may grow to.
+///
+/// A step doubles whenever the last one's sagitta was comfortably inside the
+/// budget, so a large gentle loop is not walked at the step a tight corner
+/// needed. A million, and what it stops is a loop so gentle that the step runs
+/// past the whole curve and the walk closes on its second point without having
+/// gone anywhere.
+const MOST_A_STEP_MAY_GROW_TO: f64 = 1e6;
 
 /// How many rounds of settling a point onto both surfaces.
 ///
@@ -139,7 +147,7 @@ pub(crate) fn march(
             return Err(Error::TooManyPointsAlongOneCrossing { most });
         }
         travelled += taken;
-        step = (taken * 2.0).min(room.max(f64::MIN_POSITIVE) * 1e6);
+        step = (taken * 2.0).min(room.max(f64::MIN_POSITIVE) * MOST_A_STEP_MAY_GROW_TO);
         here = next;
     }
 }
@@ -222,7 +230,7 @@ fn how_far_off_the_crossing(surfaces: [&Surface; 2], at: Point) -> Result<f64> {
     if leaning.lo() <= 0.0 {
         return Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent);
     }
-    let reach = quotient_enclosing(first.0 + second.0, leaning);
+    let reach = quotient_or_everything(first.0 + second.0, leaning);
     if !reach.hi().is_finite() {
         return Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent);
     }
@@ -321,13 +329,13 @@ fn how_far_off_enclosing(surface: &Surface, at: Point) -> (Interval, [Interval; 
 fn how_far_off_a_plane_enclosing(flat: &Plane, at: Point) -> (Interval, [Interval; 3]) {
     let normal = exactly(flat.normal().components());
     let length = root_enclosing(squared_length_enclosing(normal));
-    let off = quotient_enclosing(
+    let off = quotient_or_everything(
         dot_enclosing(normal, exactly(at.coordinates())) - Interval::exactly(flat.offset()),
         length,
     );
     (
         furthest_from_zero(off),
-        normal.map(|part| quotient_enclosing(part, length)),
+        normal.map(|part| quotient_or_everything(part, length)),
     )
 }
 
@@ -337,7 +345,7 @@ fn how_far_off_a_ball_enclosing(ball: &Sphere, at: Point) -> (Interval, [Interva
     let reach = root_enclosing(squared_length_enclosing(out));
     (
         furthest_from_zero(reach - Interval::exactly(ball.radius())),
-        out.map(|part| quotient_enclosing(part, reach)),
+        out.map(|part| quotient_or_everything(part, reach)),
     )
 }
 
@@ -347,17 +355,17 @@ fn how_far_off_a_pipe_enclosing(pipe: &Cylinder, at: Point) -> (Interval, [Inter
     let squared_direction = squared_length_enclosing(along);
     let out = gap_enclosing(pipe.axis().origin().coordinates(), at.coordinates());
     let sideways: [Interval; 3] = {
-        let up = quotient_enclosing(dot_enclosing(out, along), squared_direction);
+        let up = quotient_or_everything(dot_enclosing(out, along), squared_direction);
         core::array::from_fn(|axis| out[axis] - along[axis] * up)
     };
     let reach = root_enclosing(squared_length_enclosing(sideways));
-    let off = quotient_enclosing(
+    let off = quotient_or_everything(
         reach * root_enclosing(squared_direction) - Interval::exactly(pipe.radius()),
         root_enclosing(squared_direction),
     );
     (
         furthest_from_zero(off),
-        sideways.map(|part| quotient_enclosing(part, reach)),
+        sideways.map(|part| quotient_or_everything(part, reach)),
     )
 }
 
@@ -443,6 +451,27 @@ mod tests {
             Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent),
             "a ball inscribed in a pipe touches it all the way round, so there is no crossing \
              to follow"
+        );
+    }
+
+    /// **The demonstration behind §29.6's third claim.**
+    ///
+    /// Where a crossing runs through itself the two surfaces are tangent at the
+    /// crossing point, so there is no direction to follow there — and that is
+    /// why the naming half refuses such a pair rather than handing back two
+    /// pieces the evaluator could not draw. §24.10: a partly undecidable answer
+    /// refuses whole.
+    ///
+    /// A ball one out from a pipe's axis with a radius of three reaches exactly
+    /// the pipe's whole width, so the two loops it would otherwise leave pinch
+    /// together at `(-2, 0, 0)`.
+    #[test]
+    fn marching_from_where_a_crossing_runs_through_itself_has_no_direction_to_follow() {
+        let ball = a_ball([1.0, 0.0, 0.0], 3.0);
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
+        assert_eq!(
+            march([&ball, &pipe], Point::new(-2.0, 0.0, 0.0), 0.01, 1 << 20),
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent)
         );
     }
 
