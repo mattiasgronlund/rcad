@@ -82,6 +82,7 @@ mod error;
 mod fuse;
 mod key;
 mod measure;
+mod mesh;
 mod model;
 pub mod serialize;
 mod validate;
@@ -93,6 +94,7 @@ pub use error::{Error, Invalid, Result};
 pub use fuse::{Fused, Rule};
 pub use key::{CoedgeKey, EdgeKey, FaceKey, ShellKey, SolidKey, VertexKey, WireKey};
 pub use measure::Measurement;
+pub use mesh::{Mesh, MeshTriangle};
 pub use model::Model;
 pub use serialize::FORMAT_VERSION;
 pub use view::{

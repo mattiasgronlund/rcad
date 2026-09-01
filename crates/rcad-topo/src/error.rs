@@ -148,6 +148,57 @@ pub enum Error {
     #[error("measuring needs every face to be flat, and this solid has a curved one")]
     MeasureNeedsFlatFaces,
 
+    /// One face of a solid could not be cut into triangles.
+    ///
+    /// Carries what the triangulator said, and every one of those is about the
+    /// *request* rather than about the surface: this deflection needs more
+    /// triangles than one patch will hold, or the loops handed over are not
+    /// loops. The fix is a coarser mesh, or a sounder solid.
+    #[error("a face of this solid could not be cut into triangles: {why}")]
+    CannotMeshAFace {
+        /// Which face.
+        face: crate::FaceKey,
+        /// What the triangulator said about it.
+        why: rcad_mesh::CannotTriangulate,
+    },
+
+    /// The deflection asks for a mesh closer to the surfaces than a point of one
+    /// can be placed.
+    ///
+    /// A point on a curved surface comes out of an evaluator that rounds, and is
+    /// then carried into place by the solid's own placement, which rounds again.
+    /// A mesh made of those points is no nearer the surface than they are, so a
+    /// deflection under that is not a request for more triangles: it is a
+    /// request for arithmetic `f64` does not have. The answer does not exist,
+    /// which makes this a *limit* and not a §16.10 gap.
+    ///
+    /// **The floor depends on where the solid sits and not only on how big it
+    /// is**, because both roundings are charged against how far out the surface
+    /// reaches. The same ball a kilometre from the origin cannot be meshed as
+    /// finely as one at the origin.
+    #[error(
+        "no mesh of this solid gets closer than {closest} to it, and the deflection asks {asked}"
+    )]
+    DeflectionBelowWhatAMeshCanReach {
+        /// What was asked for, in the model's own unit.
+        asked: f64,
+        /// The closest a mesh of this solid can be, in the same unit.
+        closest: f64,
+    },
+
+    /// Walking this solid's boundaries at this deflection needs more points than
+    /// one mesh will hold.
+    ///
+    /// Counted as the walk goes, so this is a refusal rather than a wait.
+    /// `rcad-mesh` draws the same line one patch at a time, and this one is
+    /// needed as well, because the boundaries are walked before any patch is
+    /// handed over.
+    #[error("this deflection needs more than {most} points for one solid")]
+    MoreMeshPointsThanASolidWillHold {
+        /// How many points one mesh will hold.
+        most: usize,
+    },
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the

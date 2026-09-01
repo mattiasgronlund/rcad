@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 rcad-geom.workspace = true
+rcad-mesh.workspace = true
 rcad-predicates.workspace = true
 serde.workspace = true
 slotmap.workspace = true

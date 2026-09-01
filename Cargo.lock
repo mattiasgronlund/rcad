@@ -788,6 +788,7 @@ dependencies = [
  "postcard",
  "proptest",
  "rcad-geom",
+ "rcad-mesh",
  "rcad-predicates",
  "serde",
  "slotmap",

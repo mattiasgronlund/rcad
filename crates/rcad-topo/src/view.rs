@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{
-    CoedgeData, EdgeData, EdgeRun, FaceData, ShellData, SolidData, VertexData, WireData,
+    CoedgeData, EdgeData, EdgeRun, FaceData, ShellData, SolidData, VertexData, WireData, WireStep,
 };
 use crate::{CoedgeKey, EdgeKey, FaceKey, Model, ShellKey, SolidKey, VertexKey, WireKey};
 
@@ -521,6 +521,33 @@ impl<'m> WireView<'m> {
         })
     }
 
+    /// Every step round the chain, in the order this wire is being used, poles
+    /// and all.
+    ///
+    /// [`WireView::coedges`] is the same walk with the poles left out, and that
+    /// is what almost everything wants. This is for the one caller that has to
+    /// see where the boundary stands still: a mesher, which needs the pole to
+    /// know that the side of the patch it is standing on is a whole turn wide
+    /// (`docs/decisions.md` §25.6).
+    pub(crate) fn steps(self) -> impl Iterator<Item = WireStepView<'m>> {
+        let (model, loc, orient) = (self.model, self.loc, self.orient);
+        let steps: SmallVec<[WireStep; 4]> = self.data().steps.clone();
+        let count = steps.len();
+        (0..count).map(move |step| {
+            let position = if orient.is_reversed() {
+                count - 1 - step
+            } else {
+                step
+            };
+            match steps[position] {
+                WireStep::Along(coedge) => {
+                    WireStepView::Along(CoedgeView::new(model, coedge, loc, orient))
+                }
+                WireStep::Pole(vertex) => WireStepView::Pole(VertexView::new(model, vertex, loc)),
+            }
+        })
+    }
+
     /// The corner points, in the stored order, already located.
     ///
     /// One point per coedge: the point that coedge starts at. Following them
@@ -547,6 +574,20 @@ impl<'m> WireView<'m> {
     fn data(self) -> &'m WireData {
         &self.model.data().wires[self.slot]
     }
+}
+
+/// One step round a wire, as that wire is being used.
+///
+/// A wire is almost always a chain of coedges, and was only that until a ball
+/// arrived. What a ball adds is the pole: the surface pinches to a point, the
+/// boundary has to go somewhere between arriving there and leaving, and where
+/// it goes is nowhere at all.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum WireStepView<'m> {
+    /// Along one use of an edge.
+    Along(CoedgeView<'m>),
+    /// Standing still at a pole.
+    Pole(VertexView<'m>),
 }
 
 /// A coedge, with the location and orientation it is being looked at through.
