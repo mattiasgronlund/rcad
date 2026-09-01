@@ -1,11 +1,16 @@
 //! Whether one face of a solid holds a point.
 //!
-//! # One question, three callers, one place
+//! # One question, two callers, one place
 //!
-//! Ray casting asks it of the point where a ray met a face's surface, the fuse
-//! asks it of a witness point inside a piece it is placing, and the sweep asks
-//! it of a corner. Two spellings of it is how they come to disagree
-//! (`docs/decisions.md` §23.8), so there is one, and this is it.
+//! Ray casting asks it of the point where a ray met a face's surface, and the
+//! sweep asks it of the corners of a curved face. Two spellings of it is how
+//! they come to disagree (`docs/decisions.md` §23.8), so there is one.
+//!
+//! **The fuse is not on that list yet and should be**, which is a thing to know
+//! rather than a thing to gloss. `fuse/select.rs` still winds a point round a
+//! piece's outline itself, and it cannot call this one as written: its outlines
+//! are made of [`PredicatePoint`]s the arrangement solved for, and the walk
+//! below takes corners the model holds. §35 files that as still open.
 //!
 //! # What a flat face does, and why it does not carry over
 //!
@@ -39,11 +44,11 @@
 
 use rcad_geom::{EdgeRun, Plane, Point, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{
-    Decision, Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog, Record,
+    Decision, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy, ProvenanceLog, Record,
 };
 
 use crate::classify::decide;
-use crate::validate::side_of_surface;
+use crate::validate::{name_of_surface, side_of_surface};
 use crate::view::{CoedgeView, EdgeView, FaceView, WireView};
 use crate::{Error, FaceKey, Invalid, Result, SolidView};
 
@@ -97,13 +102,31 @@ impl<'m> SolidView<'m> {
             .faces()
             .find(|used| used.key() == face)
             .ok_or(Error::NoSuchFaceInThisSolid { face })?;
-        match view.surface() {
+        self.what_this_face_holds(view, point, policy, log)
+    }
+
+    /// The same question, asked with the face already in hand.
+    ///
+    /// The ray caster walks `self.faces()` and holds a located [`FaceView`]
+    /// already; looking the same one up again by key would walk every face of
+    /// every shell and compose an [`Isometry`](rcad_geom::Isometry) per step, for
+    /// every face of every ray. The public entry point above is the only place
+    /// that pays for the lookup, and it pays once.
+    pub(crate) fn what_this_face_holds(
+        self,
+        face: FaceView<'_>,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<OnAFace> {
+        match face.surface() {
             Surface::Plane(plane) => {
-                let aim = a_point_off_the_plane(view, &plane)
-                    .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face })?;
-                what_a_flat_face_holds(self, view, point, aim, policy, log)
+                let aim = a_point_off_the_plane(face, &plane).ok_or(
+                    Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() },
+                )?;
+                what_a_flat_face_holds(self, face, point, aim, policy, log)
             }
-            curved => what_a_curved_face_holds(self, view, &curved, point, policy, log),
+            curved => what_a_curved_face_holds(self, face, &curved, point, policy, log),
         }
     }
 }
@@ -179,12 +202,17 @@ fn what_a_flat_face_holds(
                 Decision::Neg => winding += inwards,
                 Decision::Pos => (),
                 Decision::Zero => return Ok(OnAFace::OnItsBoundary),
-                other => return Err(gave_up_on_a_side(point, other)),
+                // A side nobody could settle came back as a refusal a moment
+                // ago, so what is left is a `Decision` variant a later milestone
+                // added, and guessing what it means is worse than stopping.
+                other => panic!("a side came back with a decision nothing here knows: {other:?}"),
             }
             continue;
         }
         let Some(aim) = aim else {
-            return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() });
+            // The only wires left are round ones, which the arm above took, so
+            // an aim is missing only for a wire with no corners at all.
+            continue;
         };
         match walk_one_outline(face, wire, point, aim, target, policy, log)? {
             Some(count) => winding += count,
@@ -222,10 +250,10 @@ fn what_a_round_wire_encloses(
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let coedge = wire.coedges().next().ok_or_else(cannot)?;
     let edge = coedge.edge();
-    if edge.run() != &EdgeRun::RightRoundWhereItsFacesCross {
+    if !edge.is_closed() {
         return Err(cannot());
     }
-    let Across::Face(partner) = the_face_across(solid, face, edge)? else {
+    let Some(partner) = the_face_across(solid, face, edge)? else {
         return Err(cannot());
     };
     let surface = partner.surface();
@@ -234,7 +262,7 @@ fn what_a_round_wire_encloses(
     }
     let side = side_of_surface(&surface, point);
     if let Decision::Undecidable { .. } = side {
-        return Err(gave_up_on_a_side(point, side));
+        return Err(gave_up_on_a_side(&surface, point, side));
     }
     Ok(side)
 }
@@ -272,14 +300,14 @@ fn walk_one_outline(
             Decision::Zero => match lies_between(from, corners[next], point) {
                 Some(true) => return Ok(None),
                 Some(false) => (),
-                None => return Err(gave_up_on_a_side(point, along)),
+                None => return Err(gave_up_turning_a_corner(point, along)),
             },
             Decision::Pos | Decision::Neg => (),
-            other => return Err(gave_up_on_a_side(point, other)),
+            other => return Err(gave_up_turning_a_corner(point, other)),
         }
         match crossing(sides[index], sides[next], along) {
             Some(count) => winding += count,
-            None => return Err(gave_up_on_a_side(point, sides[index])),
+            None => return Err(gave_up_turning_a_corner(point, sides[index])),
         }
     }
     Ok(Some(winding))
@@ -316,7 +344,7 @@ fn what_a_curved_face_holds(
         if !every_piece_of_that_crossing_is_an_edge(
             surface,
             &trimming.surface,
-            trimming.edges,
+            trimming.corners_on_it.len(),
             policy,
             log,
         )? {
@@ -327,9 +355,9 @@ fn what_a_curved_face_holds(
         let side = side_of_surface(&trimming.surface, point);
         match side {
             Decision::Zero => on_its_boundary = true,
-            Decision::Pos | Decision::Neg if side == inwards => (),
+            settled if settled == inwards => (),
             Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
-            other => return Err(gave_up_on_a_side(point, other)),
+            other => return Err(gave_up_on_a_side(&trimming.surface, point, other)),
         }
     }
     Ok(if on_its_boundary {
@@ -360,7 +388,7 @@ pub(crate) fn what_trims_this_face(
     for wire in face.wires() {
         for coedge in wire.coedges() {
             let edge = coedge.edge();
-            let Across::Face(partner) = the_face_across(solid, face, edge)? else {
+            let Some(partner) = the_face_across(solid, face, edge)? else {
                 continue;
             };
             if edge.start().key() != edge.end().key() {
@@ -369,13 +397,9 @@ pub(crate) fn what_trims_this_face(
             let surface = partner.surface();
             let corner = edge.start().key();
             match trimming.iter_mut().find(|known| known.surface == surface) {
-                Some(known) => {
-                    known.edges += 1;
-                    known.corners_on_it.push(corner);
-                }
+                Some(known) => known.corners_on_it.push(corner),
                 None => trimming.push(Trimming {
                     surface,
-                    edges: 1,
                     corners_on_it: vec![corner],
                 }),
             }
@@ -397,21 +421,15 @@ pub(crate) fn what_trims_this_face(
 pub(crate) struct Trimming {
     /// The surface, already moved into place.
     pub surface: Surface,
-    /// How many edges of the face run along it.
-    pub edges: usize,
-    /// The corners those edges hold, which are on it by construction.
+    /// The corner each of those edges starts at, which are on it by
+    /// construction. One per edge, so how many there are is how many edges run
+    /// along this surface.
     pub corners_on_it: Vec<crate::VertexKey>,
 }
 
-/// What is on the other side of one edge of a face.
-enum Across<'m> {
-    /// This same face, so the edge is a seam and trims nothing.
-    Seam,
-    /// Another face of the same solid.
-    Face(FaceView<'m>),
-}
-
-/// The face on the other side of `edge`, already moved into place.
+/// The face on the other side of `edge`, already moved into place, or `None`
+/// when the edge is a **seam** — this same face on both sides, which trims
+/// nothing.
 ///
 /// **A key would not do**, and that is [`Model`](crate::Model)'s whole shape: a
 /// face read out of the arena by key carries no location, and the surface read
@@ -427,14 +445,14 @@ fn the_face_across<'m>(
     solid: SolidView<'m>,
     face: FaceView<'m>,
     edge: EdgeView<'m>,
-) -> Result<Across<'m>> {
+) -> Result<Option<FaceView<'m>>> {
     let Some(other) = edge.neighbouring_faces().find(|&key| key != face.key()) else {
-        return Ok(Across::Seam);
+        return Ok(None);
     };
     solid
         .faces()
         .find(|used| used.key() == other)
-        .map(Across::Face)
+        .map(Some)
         .ok_or(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
 }
 
@@ -509,7 +527,7 @@ pub(crate) fn the_side_this_face_lies_on(
                 Some(already) if already == side => (),
                 Some(_) => return Err(Invalid::AFaceStraddlesSomethingTrimmingIt.into()),
             },
-            other => return Err(gave_up_on_a_side(at, other)),
+            other => return Err(gave_up_on_a_side(partner, at, other)),
         }
     }
     Ok(found)
@@ -572,23 +590,43 @@ fn above_the_line(side: Decision) -> Option<bool> {
     }
 }
 
-/// The name a side of a face's own surface goes by in a provenance record.
-const WHICH_SIDE_OF_A_FACE: &str = "which side of a face a point is on";
-
-/// What to hand back when a sign this needed could not be settled.
+/// What to hand back when the side of a surface could not be settled.
+///
+/// **The name and the units are the sweep's**, not a second set: `check_curved_face`
+/// records the same predicate about the same kind of point, and a log that
+/// called it one thing when the sweep asked and another when a ray did would be
+/// §23.8's two spellings arriving in the provenance rather than in the code.
 ///
 /// **The caller's log is left alone**, and the one record travels with the
 /// refusal in a fresh one. Whoever asked may well carry on — a ray that grazes
 /// one face tries the next target — and emptying their log on the way past would
 /// take the records of every decision that *was* settled with it.
-fn gave_up_on_a_side(point: PredicatePoint, decision: Decision) -> Error {
+fn gave_up_on_a_side(surface: &Surface, point: PredicatePoint, decision: Decision) -> Error {
+    gave_up(name_of_surface(surface), point, decision, Measures::Area)
+}
+
+/// The same, for an `orient3d` in the outline walk.
+///
+/// The predicate has already put its own record in the caller's log on the way
+/// past (`orient3d_tolerantly` does that for every level it could not settle),
+/// so what this adds is which *question* the walk was asking when it stopped.
+fn gave_up_turning_a_corner(point: PredicatePoint, decision: Decision) -> Error {
+    gave_up(ORIENT3D, point, decision, Measures::Volume)
+}
+
+fn gave_up(
+    named: &'static str,
+    point: PredicatePoint,
+    decision: Decision,
+    measures: Measures,
+) -> Error {
     let mut records = ProvenanceLog::new();
     records.push(Record::new(
-        WHICH_SIDE_OF_A_FACE,
+        named,
         &[point],
         Level::Exact,
         decision,
-        Measures::Volume,
+        measures,
     ));
     Error::Undecidable { records }
 }
@@ -698,30 +736,23 @@ mod tests {
             Orientation::Forward,
         );
 
-        let shell = model.add_shell(vec![
-            FaceUse {
-                face: bottom,
+        // The hole's wall faces inwards, towards the axis, because the material
+        // is outside it; everything else faces out.
+        let shell = model.add_shell(
+            [
+                (bottom, Orientation::Forward),
+                (top, Orientation::Forward),
+                (outside, Orientation::Forward),
+                (hole, Orientation::Reversed),
+            ]
+            .into_iter()
+            .map(|(face, orient)| FaceUse {
+                face,
                 loc: Isometry::identity(),
-                orient: Orientation::Forward,
-            },
-            FaceUse {
-                face: top,
-                loc: Isometry::identity(),
-                orient: Orientation::Forward,
-            },
-            FaceUse {
-                face: outside,
-                loc: Isometry::identity(),
-                orient: Orientation::Forward,
-            },
-            // The hole's wall faces inwards, towards the axis, because the
-            // material is outside it.
-            FaceUse {
-                face: hole,
-                loc: Isometry::identity(),
-                orient: Orientation::Reversed,
-            },
-        ]);
+                orient,
+            })
+            .collect(),
+        );
         let solid = model.add_solid(SmallVec::from_buf([ShellUse {
             shell,
             loc: Isometry::identity(),
@@ -911,15 +942,6 @@ mod tests {
         );
     }
 
-    fn wall_slot(model: &Model, face: FaceKey) -> crate::key::FaceSlot {
-        model
-            .data()
-            .faces
-            .keys()
-            .find(|&slot| crate::FaceKey::new(slot, model.id()) == face)
-            .expect("a face of this model")
-    }
-
     /// A face that runs along one of two loops is refused rather than named as
     /// both.
     ///
@@ -946,7 +968,7 @@ mod tests {
         let theirs = model.add_coedge(loop_edge, Orientation::Reversed);
         let cut = model.add_wire(smallvec::smallvec![mine]);
         let round_it = model.add_wire(smallvec::smallvec![theirs]);
-        let at_skin = wall_slot(&model, skin);
+        let at_skin = skin.slot_in(model.id());
         model.data_mut().faces[at_skin].wires.push(cut);
         let pipe = Cylinder::new(Axis::z(), INNER).expect("a pipe");
         let wall = model.add_face(Surface::Cylinder(pipe), SmallVec::from_buf([round_it]));

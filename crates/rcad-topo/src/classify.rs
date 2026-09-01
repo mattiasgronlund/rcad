@@ -124,30 +124,38 @@ impl SolidView<'_> {
     ///
     /// # How it works
     ///
-    /// The solid's faces are broken into triangles, which form a closed
-    /// surface. A ray is fired from `point` towards a far-off target and every
-    /// triangle it passes through is counted, `+1` for a crossing that leaves
-    /// the material and `-1` for one that enters it. The total is one inside
-    /// and zero outside. Every test on the way is an exact predicate from the
-    /// cascade — no tolerances, no epsilon.
+    /// A ray is fired from `point` towards a far-off target, and every place it
+    /// passes through the skin is counted, `+1` for a crossing that leaves the
+    /// material and `-1` for one that enters it. The total is one inside and
+    /// zero outside.
     ///
-    /// A face whose plane holds `point` is asked separately whether its
+    /// **Where those places are is asked two ways, and the second is the general
+    /// one.** A flat face whose every side is straight fans into triangles that
+    /// cover it, and a ray against a triangle is four `orient3d`s over
+    /// coordinates the model holds — nothing is built and a polyhedron is
+    /// decided at the exact level every time. Every other face — every curved
+    /// one, and every flat one with a curved side, which a round cap is — is
+    /// asked where the ray meets its *surface*, which is one equation in one
+    /// unknown of degree at most two, and then whether that place is on the
+    /// face. Those roots are the only thing here that is built rather than read,
+    /// and they are built as boxes.
+    ///
+    /// A face whose surface holds `point` is asked separately whether its
     /// material holds it too, and a face that says yes puts the point on the
     /// boundary and that answer wins. One triangle of the fan holding the point
     /// is not that question: the fan overlaps itself and covers a hole twice
     /// over, once each way, so only the whole outline can say (see
     /// [`SolidView::face_holds_the_point`]).
     ///
-    /// The three corners of a triangle are coordinates stored in the model and
-    /// stay exact. The ray's far target is picked from the solid's bounding box
-    /// and is exact too. `point` is the only thing that may be a box, and it is
-    /// handed to every predicate as it is — nothing here rounds it down to a
-    /// representative coordinate first.
+    /// The ray's far target is picked from [`SolidView::box_around_it`] and is
+    /// exact. `point` is the only thing the *caller* may hand over as a box, and
+    /// it is handed to every predicate as it is — nothing here rounds it down to
+    /// a representative coordinate first.
     ///
-    /// If the ray meets an edge of a triangle exactly, the count is not to be
-    /// trusted, so the whole ray is thrown away and the next of three fixed
-    /// targets is tried. If all three graze something, the answer is
-    /// [`Containment::Undecidable`].
+    /// If the ray meets an edge of a triangle exactly, or a root cannot be told
+    /// from the point it started at, the count is not to be trusted, so the
+    /// whole ray is thrown away and the next of three fixed targets is tried. If
+    /// all three graze something, the answer is [`Containment::Undecidable`].
     ///
     /// # Why the answer never wobbles
     ///
@@ -155,11 +163,11 @@ impl SolidView<'_> {
     /// parallel one bit for bit, so nothing here may depend on when or where it
     /// runs:
     ///
-    /// - The three ray targets come from the solid's bounding box, and `min`
-    ///   and `max` over the corner coordinates do not care what order they see
-    ///   them in.
+    /// - The three ray targets come from the solid's own box, and the `min` and
+    ///   `max` that build it do not care what order they see a face in.
     /// - Faces, wires and triangles come out in stored order, which is the same
-    ///   on every call.
+    ///   on every call, and the two roots of a quadratic come out in the order
+    ///   the sign in front of the square root puts them.
     /// - The count is an integer. There is no float sum whose result could
     ///   depend on the order it was added up in.
     /// - The model is only ever read. There is no cache to warm and nothing to
@@ -266,10 +274,7 @@ impl SolidView<'_> {
             }
         });
         if on_the_plane {
-            tally.take_in(
-                self.face_holds_the_point(face.key(), point, policy, log),
-                face,
-            )?;
+            self.ask_whether_the_face_holds_it(face, tally, point, policy, log)?;
         }
         Ok(())
     }
@@ -299,27 +304,31 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<(), FaceKey> {
-        let surface = &face.surface();
+        let surface = face.surface();
         let from = point.enclosure();
-        let along = travel(from, target);
+        let along = gap_enclosing(from, target);
 
-        match side_of_surface(surface, point) {
+        match side_of_surface(&surface, point) {
             // The point is on this face's surface, so the ray starts there and
             // crosses nothing. Whether it is on the *face* is the outline's
             // question, the same as a flat face's.
             Decision::Zero => {
-                tally.take_in(
-                    self.face_holds_the_point(face.key(), point, policy, log),
-                    face,
-                )?;
+                self.ask_whether_the_face_holds_it(face, tally, point, policy, log)?;
             }
             Decision::Pos | Decision::Neg => (),
             Decision::Undecidable { enclosure } => tally.grazed(enclosure),
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
 
-        let outward = face.orientation().sign();
-        for step in where_the_ray_meets(surface, from, along) {
+        // `+1` where the surface's own gradient points out of the material and
+        // `-1` where the face is used the other way round, which is the same
+        // turn a triangle of a reversed face gets.
+        let outward: i64 = if face.orientation().is_reversed() {
+            -1
+        } else {
+            1
+        };
+        for step in where_the_ray_meets(&surface, from, along) {
             let at = match step {
                 Meeting::Ahead { at } => at,
                 Meeting::Behind => continue,
@@ -329,7 +338,7 @@ impl SolidView<'_> {
                 }
             };
             let x = PredicatePoint::Constructed(at);
-            match self.face_holds_the_point(face.key(), x, policy, log) {
+            match self.what_this_face_holds(face, x, policy, log) {
                 Ok(OnAFace::Held) => (),
                 Ok(OnAFace::NotHeld) => continue,
                 Ok(OnAFace::OnItsBoundary) => {
@@ -343,13 +352,30 @@ impl SolidView<'_> {
                 }
                 Err(_) => return Err(face.key()),
             }
-            match dot_enclosing(along, gradient_at(surface, at)).sign() {
-                Decision::Pos => tally.winding += if outward > 0.0 { 1 } else { -1 },
-                Decision::Neg => tally.winding += if outward > 0.0 { -1 } else { 1 },
+            match dot_enclosing(along, gradient_at(&surface, at)).sign() {
+                Decision::Pos => tally.winding += outward,
+                Decision::Neg => tally.winding -= outward,
                 _ => tally.grazed(0.0),
             }
         }
         Ok(())
+    }
+
+    /// Put what the face says about a point on its own surface into the tally.
+    ///
+    /// The point is on the surface either way this is reached — a triangle of a
+    /// polygon reported it, or the surface's own predicate did — and what is
+    /// left is the outline's question.
+    fn ask_whether_the_face_holds_it(
+        self,
+        face: FaceView<'_>,
+        tally: &mut Crossings,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<(), FaceKey> {
+        let held = self.what_this_face_holds(face, point, policy, log);
+        tally.take_in(held, face.key())
     }
 }
 
@@ -357,11 +383,12 @@ impl SolidView<'_> {
 /// bounding box.
 ///
 /// This decides `Outside` without firing a ray, and it is allowed to because it
-/// is a proof rather than a shortcut. Every triangle of the solid has its three
-/// corners inside the bounding box, and an enclosure is a range the point is
-/// guaranteed to be somewhere in, so a range lying entirely past one side of
-/// the box puts the point outside the solid with nothing left over. No
-/// tolerance is involved and no sign of a rounded quantity is read.
+/// is a proof rather than a shortcut. Every point of every face is inside
+/// [`SolidView::box_around_it`] — which is what that box is for and what
+/// [`SolidView::box_around_its_corners`] is not — and an enclosure is a range
+/// the point is guaranteed to be somewhere in, so a range lying entirely past
+/// one side of the box puts the point outside the solid with nothing left over.
+/// No tolerance is involved and no sign of a rounded quantity is read.
 ///
 /// A box that overlaps the solid's bounding box proves nothing either way, so
 /// it falls through and the rays decide it. So does a coordinate with no
@@ -452,12 +479,12 @@ impl Crossings {
     /// because a face's boundary is part of the face. A sign nobody could settle
     /// is a graze and the next ray gets a go; a face whose trimming nothing can
     /// follow is not something another ray gets past, so it stops the walk.
-    fn take_in(&mut self, held: crate::Result<OnAFace>, face: FaceView<'_>) -> Result<(), FaceKey> {
+    fn take_in(&mut self, held: crate::Result<OnAFace>, face: FaceKey) -> Result<(), FaceKey> {
         match held {
             Ok(OnAFace::Held | OnAFace::OnItsBoundary) => self.on_boundary = true,
             Ok(OnAFace::NotHeld) => (),
             Err(Error::Undecidable { .. }) => self.grazed(0.0),
-            Err(_) => return Err(face.key()),
+            Err(_) => return Err(face),
         }
         Ok(())
     }
@@ -527,6 +554,10 @@ fn every_side_of_it_is_straight(face: FaceView<'_>) -> bool {
 }
 
 /// Where a ray meets one surface, at one of the two roots.
+///
+/// A plane has one root and fills its second place with [`Meeting::Behind`],
+/// which is what "there is nothing to count here" already means to every reader
+/// of the loop.
 enum Meeting {
     /// Ahead of the point being classified, somewhere in this box.
     Ahead {
@@ -540,22 +571,27 @@ enum Meeting {
     CouldNotTell,
 }
 
-/// The step from `from` to `target`, as a box.
-fn travel(from: [Interval; 3], target: Point) -> [Interval; 3] {
-    let target = target.coordinates();
-    core::array::from_fn(|axis| Interval::exactly(target[axis]) - from[axis])
+/// The step from `from` to `there`, as a box.
+fn gap_enclosing(from: [Interval; 3], there: Point) -> [Interval; 3] {
+    let there = there.coordinates();
+    core::array::from_fn(|axis| Interval::exactly(there[axis]) - from[axis])
 }
 
 /// Where the ray from `from` along `along` meets `surface`.
 ///
-/// **A quadratic in one unknown, and the same one twice** — §31.2's row 11. Put
-/// `x = from + t·along` into `|x − centre|² − radius²` for a ball, or into
-/// `|(x − origin) × direction|² − radius²` for a pipe, and what comes out is
-/// `a·t² + b·t + k` either way; the pipe is the ball with the axis crossed out of
-/// every vector first. Both expressions are the ones
-/// [`side_of_surface`] already decides signs of, so the surface a root is worked
-/// out from and the surface it is later tested against are the same one written
-/// the same way.
+/// **One equation in one unknown, and nearly the same one three times** —
+/// §31.2's row 11. Put `x = from + t·along` into `normal · x − offset` for a
+/// plane, into `|x − centre|² − radius²` for a ball, or into
+/// `|(x − origin) × direction|² − radius²` for a pipe. The last two come out
+/// `a·t² + b·t + k`, the pipe being the ball with the axis crossed out of every
+/// vector first; the plane comes out with no square in it and so has one root
+/// rather than two. All three expressions are the ones [`side_of_surface`]
+/// already decides signs of, so the surface a root is worked out from and the
+/// surface it is later tested against are the same one written the same way.
+///
+/// **A plane reaches here and it is not a mistake.** A flat face whose every
+/// side is straight is counted by its triangles, but a bar's cap is a plane and
+/// a circle and has no triangles to count (§35.4), so it comes this way.
 ///
 /// The roots are the only thing in the whole of classification that is *built*
 /// rather than read out of a model, and they are built as boxes and handed on as
@@ -564,29 +600,26 @@ fn travel(from: [Interval; 3], target: Point) -> [Interval; 3] {
 ///
 /// # Panics
 ///
-/// On a plane, which is counted by its triangles and never reaches here, and on
-/// a surface kind this has not been taught. [`Surface`] grows a variant at every
-/// milestone.
+/// On a surface kind this has not been taught. [`Surface`] grows a variant at
+/// every milestone.
 fn where_the_ray_meets(
     surface: &Surface,
     from: [Interval; 3],
     along: [Interval; 3],
 ) -> [Meeting; 2] {
-    let (a, b, k) = match surface {
-        // A plane is the same equation with no square in it, so it has the one
-        // root and the second place is empty rather than behind.
-        Surface::Plane(flat) => {
-            let normal = exactly(flat.normal().components());
-            let steepness = dot_enclosing(along, normal);
-            if steepness.contains_zero() {
-                return [Meeting::CouldNotTell, Meeting::Behind];
-            }
-            let height = dot_enclosing(from, normal) - Interval::exactly(flat.offset());
-            return [
-                where_it_lands(quotient(-height, steepness), from, along),
-                Meeting::Behind,
-            ];
+    if let Surface::Plane(flat) = surface {
+        let normal = exactly(flat.normal().components());
+        let steepness = dot_enclosing(along, normal);
+        if steepness.contains_zero() {
+            return [Meeting::CouldNotTell, Meeting::Behind];
         }
+        let height = dot_enclosing(from, normal) - Interval::exactly(flat.offset());
+        return [
+            where_it_lands(quotient(-height, steepness), from, along),
+            Meeting::Behind,
+        ];
+    }
+    let (a, b, k) = match surface {
         Surface::Sphere(ball) => how_a_ray_meets_a_ball(ball, from, along),
         Surface::Cylinder(pipe) => how_a_ray_meets_a_pipe(pipe, from, along),
         other => panic!("this crate cannot fire a ray at {other:?}"),
@@ -626,7 +659,7 @@ fn how_a_ray_meets_a_ball(
     from: [Interval; 3],
     along: [Interval; 3],
 ) -> (Interval, Interval, Interval) {
-    let out = gap_enclosing(from, ball.centre());
+    let out = negated(gap_enclosing(from, ball.centre()));
     let radius = Interval::exactly(ball.radius());
     (
         dot_enclosing(along, along),
@@ -647,7 +680,10 @@ fn how_a_ray_meets_a_pipe(
     along: [Interval; 3],
 ) -> (Interval, Interval, Interval) {
     let direction = exactly(pipe.axis().direction().components());
-    let out = cross_enclosing(gap_enclosing(from, pipe.axis().origin()), direction);
+    let out = cross_enclosing(
+        negated(gap_enclosing(from, pipe.axis().origin())),
+        direction,
+    );
     let across = cross_enclosing(along, direction);
     let radius = Interval::exactly(pipe.radius());
     (
@@ -689,27 +725,29 @@ fn where_it_lands(t: Interval, from: [Interval; 3], along: [Interval; 3]) -> Mee
 fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
     match surface {
         Surface::Plane(flat) => exactly(flat.normal().components()),
-        Surface::Sphere(ball) => gap_enclosing_from(ball.centre(), at),
+        Surface::Sphere(ball) => gap_enclosing(at, ball.centre()),
         Surface::Cylinder(pipe) => {
             let direction = exactly(pipe.axis().direction().components());
-            let out = gap_enclosing_from(pipe.axis().origin(), at);
+            let out = gap_enclosing(at, pipe.axis().origin());
             let up = dot_enclosing(out, direction);
-            core::array::from_fn(|axis| out[axis] - up * direction[axis])
+            // `|d|²`, and it is **not** one. `Cylinder::side_of` decides
+            // `|(x − o) × d|² − r²` about the direction *as stored*, whose
+            // length is one only to within the rounding `Axis::new` left in it
+            // (`Cylinder`'s own doc says so). The gradient of that expression is
+            // `2(|d|²(x − o) − ((x − o)·d)d)`, and dropping the factor would
+            // leave this the gradient of a slightly different expression from
+            // the one the sign is read from — which is the whole thing this is
+            // written to avoid.
+            let squared = dot_enclosing(direction, direction);
+            core::array::from_fn(|axis| squared * out[axis] - up * direction[axis])
         }
         other => panic!("this crate cannot say which way {other:?} faces"),
     }
 }
 
-/// `here − there`, componentwise, as a box.
-fn gap_enclosing(here: [Interval; 3], there: Point) -> [Interval; 3] {
-    let there = there.coordinates();
-    core::array::from_fn(|axis| here[axis] - Interval::exactly(there[axis]))
-}
-
-/// `there − here`, componentwise, as a box.
-fn gap_enclosing_from(here: Point, there: [Interval; 3]) -> [Interval; 3] {
-    let here = here.coordinates();
-    core::array::from_fn(|axis| there[axis] - Interval::exactly(here[axis]))
+/// The same box the other way round.
+fn negated(gap: [Interval; 3]) -> [Interval; 3] {
+    gap.map(core::ops::Neg::neg)
 }
 
 /// Three stored numbers as a box of no width at all.
@@ -734,15 +772,54 @@ fn cross_enclosing(u: [Interval; 3], v: [Interval; 3]) -> [Interval; 3] {
 
 /// `√value` as a box, for a value already shown to be above zero.
 ///
-/// One `f64` outwards at each end. `f64::sqrt` is correctly rounded, so the true
-/// root is within half a step of what it hands back and a whole step covers it.
-/// **Widening every root costs the exact cases their exactness**, which
-/// `rcad-geom`'s own enclosure is careful about; nothing here is one, because the
-/// three ray targets are picked so that no ray runs square-on to anything and a
-/// discriminant that comes out a perfect square would be that coincidence.
+/// **A step outwards only where one is needed**, the same care `rcad-geom`'s own
+/// enclosure takes and for the same reason: widening every root costs the exact
+/// cases their exactness, and an exact case here is a ray that meets a surface at
+/// a place `f64` can write down. `f64::sqrt` is correctly rounded, so squaring
+/// what it hands back through [`two_product`] — which is exact — says which side
+/// of the true root it landed, and only then is a step taken.
 fn root_enclosing(value: Interval) -> Interval {
-    let (lo, hi) = (value.lo().max(0.0).sqrt(), value.hi().sqrt());
-    Interval::new(lo.next_down().max(0.0), hi.next_up()).unwrap_or(Interval::ENTIRE)
+    let lo = rounded_down(value.lo().max(0.0));
+    let hi = rounded_up(value.hi());
+    Interval::new(lo.max(0.0), hi).unwrap_or(Interval::ENTIRE)
+}
+
+/// The largest `f64` at or below `√value`.
+fn rounded_down(value: f64) -> f64 {
+    let root = value.sqrt();
+    if squared_is_at_most(root, value) {
+        root
+    } else {
+        root.next_down()
+    }
+}
+
+/// The smallest `f64` at or above `√value`.
+fn rounded_up(value: f64) -> f64 {
+    let root = value.sqrt();
+    if squared_is_at_most(root, value) && !squared_is_exactly(root, value) {
+        root.next_up()
+    } else {
+        root
+    }
+}
+
+/// Whether `root · root` is at or below `value`, exactly.
+fn squared_is_at_most(root: f64, value: f64) -> bool {
+    if !product_is_exact(root, root) {
+        return false;
+    }
+    let (high, low) = two_product(root, root);
+    high < value || (high == value && low <= 0.0)
+}
+
+/// Whether `root · root` is exactly `value`.
+fn squared_is_exactly(root: f64, value: f64) -> bool {
+    if !product_is_exact(root, root) {
+        return false;
+    }
+    let (high, low) = two_product(root, root);
+    high == value && low == 0.0
 }
 
 /// `over / under` as a box, for a divisor already shown to be clear of zero.

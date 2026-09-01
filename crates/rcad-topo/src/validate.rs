@@ -306,9 +306,11 @@ impl Model {
     /// straddles that piece's surface quite properly — a bar with a notch cut in
     /// its wall does — so asking there would refuse sound solids.
     ///
-    /// It is the invariant [`SolidView::face_holds_the_point`] rests on, asked
-    /// once over the whole model rather than trusted at each call, which is what
-    /// §4.3 means by the sweep being where the expensive questions live.
+    /// It is the invariant [`SolidView::face_holds_the_point`] rests on, and the
+    /// sweep asks it of every face of every solid at once. **It is not a hoist**
+    /// — the query path still asks its own face on its own account, because a
+    /// model can be mutated between a sweep and a query and a check that was
+    /// trusted afterwards would be a cache with no invalidation (§4.3).
     ///
     /// # Errors
     ///
@@ -318,12 +320,18 @@ impl Model {
         for (slot, _) in &self.data().solids {
             let solid = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
             for face in solid.faces() {
-                let surface = face.surface();
-                if surface.as_plane().is_some() {
+                if face.surface().as_plane().is_some() {
                     continue;
                 }
-                let Ok(trimming) = what_trims_this_face(solid, face) else {
-                    continue;
+                // A face trimmed by part of a curve is not one this invariant is
+                // about, and saying so by name is the difference between a
+                // precondition and swallowing whatever went wrong: every other
+                // refusal `what_trims_this_face` can make is about a model this
+                // sweep exists to catch.
+                let trimming = match what_trims_this_face(solid, face) {
+                    Ok(trimming) => trimming,
+                    Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. }) => continue,
+                    Err(why) => return Err(why),
                 };
                 for one in &trimming {
                     the_side_this_face_lies_on(face, one)?;
@@ -673,7 +681,7 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 }
 
 /// What the predicate that decided a surface's sign goes by in a record.
-fn name_of_surface(surface: &Surface) -> &'static str {
+pub(crate) fn name_of_surface(surface: &Surface) -> &'static str {
     match surface {
         Surface::Plane(_) => SIDE_OF_PLANE,
         Surface::Sphere(_) => SIDE_OF_SPHERE,
