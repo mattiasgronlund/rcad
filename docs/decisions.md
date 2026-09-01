@@ -9047,9 +9047,15 @@ except where §36.13's defect moved an *answer* rather than a rate.
 | suite duration | 2.9 s | 2.9 s |
 | doc tests | 19 | 19 |
 | `FORMAT_VERSION` | 3 | 3 |
+| fuzz corpus | 775 | **793** |
 
 `just default` is green, `cargo-deny` included. **`rcad-predicates` is still at 0
 files changed for the whole milestone**, across six lanes.
+
+`just fuzz 180` ran 5 242 652 executions in 181 seconds, found **18 new seeds**
+and **no crash**. Coverage went from 2506 to 2507 edges, which is what it should
+be: `rcad-geom` is at 0 files changed for lanes 4 and 5 together, so there is no
+new arithmetic down there for the corpus to reach.
 
 **One prediction settled.** §30.8 item 11 said M4 would make `Undecidable` out of
 `mesh` reachable through a fuse's constructed corner; §31.8 predicted it would
