@@ -1017,11 +1017,7 @@ impl Assembly {
             .iter()
             .zip(runs)
             .map(|(edge, run)| {
-                model.add_edge_running(
-                    vertices[edge.ends[0]],
-                    vertices[edge.ends[1]],
-                    run.clone(),
-                )
+                model.add_edge_running(vertices[edge.ends[0]], vertices[edge.ends[1]], run.clone())
             })
             .collect();
 
@@ -1190,7 +1186,10 @@ impl Edge {
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
     /// curved crossing.
     fn how_it_runs(&self) -> Result<EdgeRun> {
-        let flat = self.carried_by.iter().all(|surface| surface.as_plane().is_some());
+        let flat = self
+            .carried_by
+            .iter()
+            .all(|surface| surface.as_plane().is_some());
         match (flat, self.ends[0] == self.ends[1]) {
             (true, false) => Ok(EdgeRun::Straight),
             (_, true) => Ok(EdgeRun::RightRoundWhereItsFacesCross),
@@ -1398,7 +1397,8 @@ impl Corners {
                 CornerName::Meet(named, *which)
             }
             MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => {
-                let mut named = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
+                let mut named =
+                    carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
                 named.sort_unstable();
                 CornerName::RoundACurve(named)
             }
@@ -1457,9 +1457,14 @@ fn exactly_at(point: Point) -> [u64; 3] {
 
 /// The edges built so far, and how to find one again.
 #[derive(Default)]
+/// What names one edge of the answer: the two corners it runs between, and —
+/// for an edge that closes, where those are one corner — the two surfaces
+/// either side of it. See [`which_curve_it_is`].
+type EdgeName = ([usize; 2], Option<[[u64; 8]; 2]>);
+
 struct Edges {
     made: Vec<Edge>,
-    between: BTreeMap<([usize; 2], Option<[[u64; 8]; 2]>), usize>,
+    between: BTreeMap<EdgeName, usize>,
 }
 
 impl Edges {
@@ -1480,7 +1485,10 @@ impl Edges {
     /// the same corner is checked against what carries it.
     fn of(&mut self, from: usize, to: usize, carried_by: [Surface; 2], along: &[EdgeKey]) -> Side {
         assert!(
-            from != to || carried_by.iter().any(|surface| surface.as_plane().is_none()),
+            from != to
+                || carried_by
+                    .iter()
+                    .any(|surface| surface.as_plane().is_none()),
             "a piece of a flat face has a side with no length"
         );
         let named = which_curve_it_is(from, to, carried_by);
