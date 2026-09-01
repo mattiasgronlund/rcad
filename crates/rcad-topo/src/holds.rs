@@ -179,7 +179,7 @@ fn what_a_flat_face_holds(
                 Decision::Neg => winding += inwards,
                 Decision::Pos => (),
                 Decision::Zero => return Ok(OnAFace::OnItsBoundary),
-                other => return Err(gave_up_on_a_side(face, point, other, log)),
+                other => return Err(gave_up_on_a_side(point, other, log)),
             }
             continue;
         }
@@ -235,7 +235,7 @@ fn what_a_round_wire_encloses(
     }
     let side = side_of_surface(&surface, point);
     if let Decision::Undecidable { .. } = side {
-        return Err(gave_up_on_a_side(face, point, side, log));
+        return Err(gave_up_on_a_side(point, side, log));
     }
     Ok(side)
 }
@@ -252,6 +252,9 @@ fn walk_one_outline(
     log: &mut ProvenanceLog,
 ) -> Result<Option<i64>> {
     let corners: Vec<Point> = wire.points().collect();
+    if corners.is_empty() {
+        return Ok(Some(0));
+    }
     for coedge in wire.coedges() {
         if coedge.edge().run() != &EdgeRun::Straight {
             return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() });
@@ -267,19 +270,17 @@ fn walk_one_outline(
         let next = (index + 1) % corners.len();
         let along = decide(from, corners[next], target, point, policy, log);
         match along {
-            Decision::Zero => {
-                match lies_between(from, corners[next], point) {
-                    Some(true) => return Ok(None),
-                    Some(false) => (),
-                    None => return Err(gave_up_on_a_side(face, point, along, log)),
-                }
-            }
+            Decision::Zero => match lies_between(from, corners[next], point) {
+                Some(true) => return Ok(None),
+                Some(false) => (),
+                None => return Err(gave_up_on_a_side(point, along, log)),
+            },
             Decision::Pos | Decision::Neg => (),
-            other => return Err(gave_up_on_a_side(face, point, other, log)),
+            other => return Err(gave_up_on_a_side(point, other, log)),
         }
         match crossing(sides[index], sides[next], along) {
             Some(count) => winding += count,
-            None => return Err(gave_up_on_a_side(face, point, sides[index], log)),
+            None => return Err(gave_up_on_a_side(point, sides[index], log)),
         }
     }
     Ok(Some(winding))
@@ -322,7 +323,7 @@ fn what_a_curved_face_holds(
             Decision::Zero => on_its_boundary = true,
             Decision::Pos | Decision::Neg if side == inwards => (),
             Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
-            other => return Err(gave_up_on_a_side(face, point, other, log)),
+            other => return Err(gave_up_on_a_side(point, other, log)),
         }
     }
     Ok(if on_its_boundary {
@@ -345,10 +346,7 @@ fn what_a_curved_face_holds(
 /// not a whole closed curve. An edge with two different ends is a piece of a
 /// crossing rather than the whole of it, and which piece is a question about
 /// where a curve runs rather than about a sign.
-fn what_trims_this_face(
-    solid: SolidView<'_>,
-    face: FaceView<'_>,
-) -> Result<Vec<(Surface, usize)>> {
+fn what_trims_this_face(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<(Surface, usize)>> {
     let mut trimming: Vec<(Surface, usize)> = Vec::new();
     for wire in face.wires() {
         for coedge in wire.coedges() {
@@ -420,9 +418,10 @@ fn every_piece_of_that_crossing_is_an_edge(
 ) -> Result<bool> {
     match intersect(surface, partner, policy, log)? {
         SurfaceMeet::Curves(runs) => Ok(runs.len() == edges),
-        SurfaceMeet::Nothing | SurfaceMeet::TouchAtOnePoint { .. } | SurfaceMeet::SameSurface => {
-            Ok(false)
-        }
+        // Nothing, a touch and one surface used twice all leave a face with an
+        // edge along a curve the pair does not have. `SurfaceMeet` grows a
+        // variant at every milestone, and whatever a new one means, a face
+        // trimmed by it is one this has not been taught.
         _ => Ok(false),
     }
 }
@@ -466,7 +465,7 @@ fn the_side_this_face_lies_on(
                     });
                 }
             },
-            other => return Err(gave_up_on_a_side(face, at, other, log)),
+            other => return Err(gave_up_on_a_side(at, other, log)),
         }
     }
     found.ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })
@@ -533,13 +532,7 @@ fn above_the_line(side: Decision) -> Option<bool> {
 const WHICH_SIDE_OF_A_FACE: &str = "which side of a face a point is on";
 
 /// What to hand back when a sign this needed could not be settled.
-fn gave_up_on_a_side(
-    face: FaceView<'_>,
-    point: PredicatePoint,
-    decision: Decision,
-    log: &mut ProvenanceLog,
-) -> Error {
-    let _ = face;
+fn gave_up_on_a_side(point: PredicatePoint, decision: Decision, log: &mut ProvenanceLog) -> Error {
     log.push(Record::new(
         WHICH_SIDE_OF_A_FACE,
         &[point],

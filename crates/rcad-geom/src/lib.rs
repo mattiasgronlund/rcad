@@ -58,6 +58,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod along_a_crossing;
 mod bspline_curve;
 mod bspline_surface;
 mod conic;
@@ -83,6 +84,7 @@ mod surface;
 mod three_surfaces;
 mod walk;
 
+pub use crate::along_a_crossing::{ROUND_A_CROSSING, which_comes_first_round_a_crossing};
 pub use crate::bspline_curve::{BSplineCurve, REFINEMENT_ROUNDOFF};
 pub use crate::bspline_surface::BSplineSurface;
 pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};

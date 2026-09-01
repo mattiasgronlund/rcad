@@ -353,6 +353,22 @@ pub enum Error {
         most: usize,
     },
 
+    /// Two surfaces whose crossing is not one closed curve lying in a plane.
+    ///
+    /// Ordering points round a closed crossing rests on the curve being convex,
+    /// which is what makes three points' cyclic order the sign of the area they
+    /// sweep. Two planes cross in a straight line, a plane along a pipe's axis
+    /// cuts two of them, and a ball against a pipe or a pipe against a pipe
+    /// crosses in a degree-four space curve that is neither flat nor convex.
+    ///
+    /// A **limit** for the straight cases — the question is a different one and
+    /// the arrangement's dominant-axis rule already answers it — and a **gap**
+    /// for the two quartic ones, where the curve is there and ordering points
+    /// along it takes the marcher rather than a determinant (§16.10, §31.2
+    /// row 8).
+    #[error("these two surfaces do not cross in one closed curve lying in a plane")]
+    TheseTwoSurfacesDoNotCrossInAConic,
+
     /// Three surfaces of which fewer than two are flat.
     ///
     /// Two planes cross in a line, and where a quadric cuts that line is a

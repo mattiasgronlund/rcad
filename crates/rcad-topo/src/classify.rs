@@ -41,12 +41,13 @@
 //! straddled. Under a tolerant policy the same query resolves instead, and the
 //! log picks up a record of what was accepted to get there.
 
-use rcad_geom::Point;
+use rcad_geom::{Cylinder, Point, Sphere, Surface, Vector};
 use rcad_predicates::{
-    Decision, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
+    Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
 };
 
-use crate::{FaceView, SolidView};
+use crate::validate::side_of_surface;
+use crate::{Error, FaceKey, FaceView, OnAFace, SolidView};
 
 /// Where a point sits relative to a solid.
 ///
@@ -72,15 +73,24 @@ pub enum Containment {
         /// tells us nothing.
         enclosure: f64,
     },
-    /// The solid has a curved face, and casting a ray at one is not something
-    /// this does yet.
+    /// One face of the solid is trimmed in a way
+    /// [`SolidView::face_holds_the_point`] cannot follow, so no ray was ever
+    /// counted.
     ///
     /// Deliberately not [`Containment::Undecidable`]. That one means every
     /// predicate was asked and none could prove an answer; this means the
     /// question was never put. Reading the second as the first would let a
     /// caller loosen a policy and expect it to help, and nothing here would get
     /// better for it (`docs/decisions.md` §4.2 keeps the two apart).
-    NeedsFlatFaces,
+    ///
+    /// This is what is left of `NeedsFlatFaces`, which said the same about every
+    /// solid with a curved face on it. A bar, a ball and a block with a round
+    /// hole through it are counted like any polyhedron now; what is left is a
+    /// face trimmed by a *piece* of a curve rather than by whole ones (§35).
+    CannotFollowAFacesTrimming {
+        /// Which face.
+        face: FaceKey,
+    },
 }
 
 impl SolidView<'_> {
@@ -166,10 +176,7 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Containment {
-        if !self.is_wholly_flat() {
-            return Containment::NeedsFlatFaces;
-        }
-        let Some((low, high)) = self.box_around_its_corners() else {
+        let Some((low, high)) = self.box_around_it() else {
             return Containment::Outside;
         };
         if is_outside_the_box(point, low, high) {
@@ -178,7 +185,10 @@ impl SolidView<'_> {
 
         let mut worst_enclosure = 0.0f64;
         for target in ray_targets(low, high) {
-            let pass = self.count_crossings(point, target, policy, log);
+            let pass = match self.count_crossings(point, target, policy, log) {
+                Ok(pass) => pass,
+                Err(face) => return Containment::CannotFollowAFacesTrimming { face },
+            };
             if pass.on_boundary {
                 return Containment::OnBoundary;
             }
@@ -196,36 +206,133 @@ impl SolidView<'_> {
         }
     }
 
+    /// One ray's tally, or which face's trimming stopped it being counted.
+    ///
+    /// A face nothing can follow is not something another ray gets past, so it
+    /// comes straight back rather than being counted as a graze.
     fn count_crossings(
         self,
         point: PredicatePoint,
         target: Point,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Crossings {
+    ) -> Result<Crossings, FaceKey> {
         let mut tally = Crossings::default();
         for face in self.faces() {
-            let mut on_the_plane = false;
-            face.for_each_triangle(|corners| {
-                match look_at_triangle(corners, point, target, policy, log) {
-                    Hit::Missed => {}
-                    Hit::WentThrough { leaving } => tally.winding += leaving,
-                    Hit::StartsOnThePlane => on_the_plane = true,
-                    Hit::Grazed { enclosure } => {
-                        tally.grazed_something = true;
-                        tally.worst_enclosure = tally.worst_enclosure.max(enclosure);
-                    }
+            match face.surface() {
+                Surface::Plane(_) => {
+                    self.count_a_flat_face(face, &mut tally, point, target, policy, log)?
                 }
-            });
-            if on_the_plane {
-                match face_holds_the_point(face, point, target, policy, log) {
-                    Some(true) => tally.on_boundary = true,
-                    Some(false) => (),
-                    None => tally.grazed_something = true,
+                curved => {
+                    self.count_a_curved_face(
+                        face, &curved, &mut tally, point, target, policy, log,
+                    )?;
                 }
             }
         }
-        tally
+        Ok(tally)
+    }
+
+    /// What the ray does to one flat face: its triangles, and then the outline
+    /// when the point turns out to be on its plane.
+    fn count_a_flat_face(
+        self,
+        face: FaceView<'_>,
+        tally: &mut Crossings,
+        point: PredicatePoint,
+        target: Point,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<(), FaceKey> {
+        let mut on_the_plane = false;
+        face.for_each_triangle(|corners| {
+            match look_at_triangle(corners, point, target, policy, log) {
+                Hit::Missed => {}
+                Hit::WentThrough { leaving } => tally.winding += leaving,
+                Hit::StartsOnThePlane => on_the_plane = true,
+                Hit::Grazed { enclosure } => tally.grazed(enclosure),
+            }
+        });
+        if on_the_plane {
+            tally.take_in(
+                self.face_holds_the_point(face.key(), point, policy, log),
+                face,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// What the ray does to one curved face.
+    ///
+    /// **The surface first and the trimming second**, and the split is what
+    /// keeps this out of `(u, v)`. Where a straight ray meets a ball or a pipe
+    /// is a quadratic in one unknown — §31.2's row 11 — and its roots are the
+    /// only thing here that is built rather than read, so they are built as
+    /// boxes and handed on as boxes. Whether a root is on the *face* is then
+    /// [`SolidView::face_holds_the_point`], which is signs and nothing else.
+    ///
+    /// Which way the ray crosses is row 12, `v · ∇S`, taken at the root. A face
+    /// used reversed turns it round, exactly as a triangle's does.
+    fn count_a_curved_face(
+        self,
+        face: FaceView<'_>,
+        surface: &Surface,
+        tally: &mut Crossings,
+        point: PredicatePoint,
+        target: Point,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<(), FaceKey> {
+        let from = point.enclosure();
+        let along = travel(from, target);
+
+        match side_of_surface(surface, point) {
+            // The point is on this face's surface, so the ray starts there and
+            // crosses nothing. Whether it is on the *face* is the outline's
+            // question, the same as a flat face's.
+            Decision::Zero => {
+                tally.take_in(
+                    self.face_holds_the_point(face.key(), point, policy, log),
+                    face,
+                )?;
+            }
+            Decision::Pos | Decision::Neg => (),
+            Decision::Undecidable { enclosure } => tally.grazed(enclosure),
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+
+        let outward = face.orientation().sign();
+        for step in where_the_ray_meets(surface, from, along) {
+            let at = match step {
+                Meeting::Ahead { at } => at,
+                Meeting::Behind => continue,
+                Meeting::CouldNotTell => {
+                    tally.grazed(0.0);
+                    continue;
+                }
+            };
+            let x = PredicatePoint::Constructed(at);
+            match self.face_holds_the_point(face.key(), x, policy, log) {
+                Ok(OnAFace::Held) => (),
+                Ok(OnAFace::NotHeld) => continue,
+                Ok(OnAFace::OnItsBoundary) => {
+                    tally.grazed(0.0);
+                    continue;
+                }
+                Err(Error::Undecidable { records }) => {
+                    log.extend_from(records);
+                    tally.grazed(0.0);
+                    continue;
+                }
+                Err(_) => return Err(face.key()),
+            }
+            match dot_enclosing(along, gradient_at(surface, at)).sign() {
+                Decision::Pos => tally.winding += if outward > 0.0 { 1 } else { -1 },
+                Decision::Neg => tally.winding += if outward > 0.0 { -1 } else { 1 },
+                _ => tally.grazed(0.0),
+            }
+        }
+        Ok(())
     }
 }
 
@@ -299,7 +406,7 @@ enum Hit {
     /// The point being classified lies on this triangle's plane, so the ray
     /// meets that plane only where it starts and crosses nothing here. Whether
     /// the point is on the *face* is a question about the whole outline, and
-    /// [`face_holds_the_point`] is what answers it.
+    /// [`SolidView::face_holds_the_point`] is what answers it.
     StartsOnThePlane,
     /// The ray met an edge or a corner of the triangle, or a predicate could
     /// not decide. Nothing this ray says can be trusted.
@@ -313,6 +420,30 @@ struct Crossings {
     on_boundary: bool,
     grazed_something: bool,
     worst_enclosure: f64,
+}
+
+impl Crossings {
+    /// Nothing this ray says can be trusted any more.
+    fn grazed(&mut self, enclosure: f64) {
+        self.grazed_something = true;
+        self.worst_enclosure = self.worst_enclosure.max(enclosure);
+    }
+
+    /// Take in what a face said about a point on its own surface.
+    ///
+    /// On the face or on its boundary both put the point on the solid's skin,
+    /// because a face's boundary is part of the face. A sign nobody could settle
+    /// is a graze and the next ray gets a go; a face whose trimming nothing can
+    /// follow is not something another ray gets past, so it stops the walk.
+    fn take_in(&mut self, held: crate::Result<OnAFace>, face: FaceView<'_>) -> Result<(), FaceKey> {
+        match held {
+            Ok(OnAFace::Held | OnAFace::OnItsBoundary) => self.on_boundary = true,
+            Ok(OnAFace::NotHeld) => (),
+            Err(Error::Undecidable { .. }) => self.grazed(0.0),
+            Err(_) => return Err(face.key()),
+        }
+        Ok(())
+    }
 }
 
 /// Work out what the ray from `point` towards `target` does to one triangle.
@@ -493,7 +624,7 @@ fn above_the_line(side: Decision) -> Option<bool> {
 /// `a`, `b` and `c` are always exact: a triangle corner read out of the model,
 /// or a ray target worked out from the bounding box. `d` is the point being
 /// classified and is the one that may be a box.
-fn decide(
+pub(crate) fn decide(
     a: Point,
     b: Point,
     c: Point,

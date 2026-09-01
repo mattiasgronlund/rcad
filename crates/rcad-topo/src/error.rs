@@ -286,6 +286,69 @@ pub enum Error {
         most: usize,
     },
 
+    /// A face was asked about against a solid that does not use it.
+    ///
+    /// What trims a face is the surfaces of the faces around it, and those are
+    /// only reachable — already moved into place — through the solid the face
+    /// sits in (§3.2). A key from somewhere else names no such thing here.
+    #[error("this solid does not use that face")]
+    NoSuchFaceInThisSolid {
+        /// The key that named nothing.
+        face: crate::FaceKey,
+    },
+
+    /// One edge of a face runs along a *piece* of a curve rather than the whole
+    /// of one, and whether the face holds a point cannot be read off a sign.
+    ///
+    /// Which piece of a curve a point is on is a question about where that curve
+    /// runs, and answering it means meeting three surfaces at once and then
+    /// ordering points along the answer — §31.2's rows 4 and 8, and neither of
+    /// them reaches a pair of quadrics (§31.2's limit under row 4).
+    ///
+    /// **A gap and not a limit** (§16.10): the point is on the piece or it is
+    /// not, and an algebraic solver says which. `docs/decisions.md` §35 names
+    /// the consumer.
+    #[error("an edge of this face runs along part of a curve rather than the whole of one")]
+    AFaceTrimmedByACurveThisCannotFollow {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// A face runs along some but not all of the curves its surface and a
+    /// neighbour's cross in.
+    ///
+    /// One of the two disks a pipe leaves in a ball's skin is the case. Its one
+    /// boundary loop is a whole closed curve, but the pair of surfaces crosses in
+    /// *two*, so "the piece of the ball inside the pipe" names both disks and not
+    /// this one. Reading the face off a sign would hold the other disk's points
+    /// as well.
+    ///
+    /// **A gap and not a limit**, and what closes it is a way to tell one loop
+    /// from another — which is what a
+    /// [`Picker`](rcad_geom::Picker) already does for an edge (§33.1).
+    #[error("this face runs along some but not all of where its surfaces cross")]
+    AFaceMissesPartOfWhereItsSurfacesCross {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
+    /// Nothing in the model says which side of a surface trimming it a face lies
+    /// on.
+    ///
+    /// A corner of the face that is off that surface says; a face whose every
+    /// corner sits on it has none, and a face with corners off it on *both*
+    /// sides is not one of the two pieces at all.
+    ///
+    /// The other place the answer could come from is which way round the wire
+    /// runs, and a closed edge has no direction rule to read it from — §30.8
+    /// item 10, which §31.3 settles on paper and hands to the lane that builds
+    /// the curved arrangement.
+    #[error("nothing says which side of the surfaces trimming it this face lies on")]
+    NothingSaysWhichSideOfItsTrimmingAFaceLiesOn {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the
