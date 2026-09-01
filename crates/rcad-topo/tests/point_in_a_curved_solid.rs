@@ -305,14 +305,12 @@ fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
         }
     }
 
-    assert!(
-        compared > 400,
-        "only {compared} samples were far enough from the boundary to compare"
-    );
-    assert!(
-        held > 100 && held < compared,
-        "{held} of {compared} were held, which is not a two-sided comparison"
-    );
+    // Every sample is compared, and the split is derived rather than eyeballed:
+    // sixteen longitudes round the bar, ten heights each, of which the four
+    // between the caps are held; sixteen round the ball, fifteen latitudes each,
+    // and a ball's one face holds every point on its sphere.
+    assert_eq!(compared, 16 * 10 + 16 * 15, "every sample is decided by both");
+    assert_eq!(held, 16 * 4 + 16 * 15);
 }
 
 /// Points on a surface to ask about, spread well past whatever the face covers.
