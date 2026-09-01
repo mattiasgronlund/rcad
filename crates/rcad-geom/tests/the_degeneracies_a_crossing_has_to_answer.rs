@@ -12,11 +12,15 @@
 //! | tangent spheres, inside | one ball resting in another | `TouchAtOnePoint` |
 //! | tangent cylinder–plane | a plane resting along a pipe | one straight line |
 //! | tangent sphere–plane | a plane resting on a ball | `TouchAtOnePoint` |
+//! | tangent sphere–cylinder, at a point | a ball resting on the outside of a pipe | `TouchAtOnePoint` |
+//! | tangent sphere–cylinder, along a curve | a ball inscribed in a pipe | one closed curve |
+//! | tangent sphere–cylinder, through itself | a ball resting on the far inside of a pipe | **refused**, and it is a limit |
+//! | tangent cylinder–cylinder, at a point | two pipes leaning and resting against each other | `TouchAtOnePoint` |
+//! | tangent cylinder–cylinder, along a line | two pipes side by side and resting | one straight line |
+//! | tangent cylinder–cylinder, through itself | two pipes of one thickness whose axes meet | **refused**, and it is a limit |
 //! | coplanar faces, one dimension up | a surface against its own copy | `SameSurface` |
 //! | closed periodic surfaces | a plane through a whole ball or pipe | one closed curve, named with no seam in it |
 //! | seam-crossing intersections | walking a crossing that runs across a face's seam | 3D points, and the seam never comes into it |
-//! | tangent sphere–cylinder | **refused**, and named: the second stage's |
-//! | tangent cylinder–cylinder | **refused**, and named: the second stage's |
 //! | two lines no `f64` half-space separates | **refused**, and it is a gap |
 //!
 //! # Why tangency is an answer and not a band
@@ -246,34 +250,137 @@ fn every_point_of_a_picked_run_is_inside_every_half_space_that_picked_it() {
     }
 }
 
-/// The rows the closed form does not answer, said out loud.
+/// Roadmap §7.4's tangent sphere–cylinder row, all three ways it can happen.
 ///
-/// A ball against a pipe and a pipe against a pipe cross in a degree-four space
-/// curve, whose sign questions run to the eighth and twelfth power and need an
-/// expansion buffer M3's second stage builds (§27.1). **They come back naming
-/// what they are** rather than answering something that looks like an answer,
-/// which is the difference between a deferral and a wrong result.
+/// **Tangency is not one row here, it is three**, and only the third refuses.
+/// Two quadrics can rest against each other at a point, along a whole curve, or
+/// at a point *on* their crossing curve — and the third is the only one this
+/// vocabulary cannot say, because a curve that runs through itself is neither
+/// one closed curve nor a piece picked out by a half-space.
 #[test]
-fn the_two_pairs_that_run_to_a_quartic_refuse_by_name() {
-    let ball = a_ball([0.0, 0.0, 0.0], 3.0);
-    let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 3.0);
-    for (first, second, named) in [
-        (&ball, &pipe, ("ball", "pipe")),
-        (&pipe, &pipe, ("pipe", "pipe")),
-    ] {
-        assert_eq!(
-            intersect(
-                first,
-                second,
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            ),
-            Err(Error::CrossingRunsToAQuartic {
-                first: named.0,
-                second: named.1
-            })
+fn a_ball_tangent_to_a_pipe_answers_three_different_ways_and_refuses_only_the_third() {
+    let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
+
+    // At a point: a ball five out with a radius of three rests on the skin.
+    let resting = a_ball([5.0, 0.0, 0.0], 3.0);
+    let SurfaceMeet::TouchAtOnePoint { at } = crossing(&resting, &pipe) else {
+        panic!("a ball five out with a radius of three rests on a pipe of radius two");
+    };
+    assert_eq!(side_of(&resting, at), Decision::Zero);
+    assert_eq!(side_of(&pipe, at), Decision::Zero);
+
+    // Along a curve: a ball inscribed in the pipe touches it all the way round
+    // one circle, and that is an answer with a curve in it.
+    let inscribed = crossing(&a_ball([0.0, 0.0, 0.0], 2.0), &pipe);
+    let SurfaceMeet::Curves(runs) = &inscribed else {
+        panic!("a ball inscribed in a pipe meets it all the way round: {inscribed:?}");
+    };
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].run(), &EdgeRun::RightRoundWhereItsFacesCross);
+
+    // Through itself: a ball one out with a radius of three reaches exactly the
+    // pipe's whole width, so the two loops it would leave pinch together.
+    assert_eq!(
+        intersect(
+            &a_ball([1.0, 0.0, 0.0], 3.0),
+            &pipe,
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        ),
+        Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+    );
+}
+
+/// Roadmap §7.4's tangent cylinder–cylinder row, the same three ways.
+#[test]
+fn a_pipe_tangent_to_a_pipe_answers_three_different_ways_and_refuses_only_the_third() {
+    let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
+
+    // At a point: two skew pipes exactly `r₁ + r₂` apart.
+    let leaning = a_pipe([1.0, 0.0, 0.0], [0.0, 5.0, 0.0], 3.0);
+    let SurfaceMeet::TouchAtOnePoint { at } = crossing(&pipe, &leaning) else {
+        panic!("five apart with radii of two and three rest against each other");
+    };
+    assert_eq!(side_of(&pipe, at), Decision::Zero);
+    assert_eq!(side_of(&leaning, at), Decision::Zero);
+
+    // Along a line: two pipes side by side, resting against each other.
+    let beside = crossing(&pipe, &a_pipe([0.0, 0.0, 1.0], [5.0, 0.0, 0.0], 3.0));
+    let SurfaceMeet::Curves(runs) = &beside else {
+        panic!("two pipes side by side and resting meet along one line: {beside:?}");
+    };
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].run(), &EdgeRun::Straight);
+
+    // Through itself: two pipes of one thickness whose axes meet cross in two
+    // ellipses, and those two cross each other twice.
+    assert_eq!(
+        intersect(
+            &pipe,
+            &a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 2.0),
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        ),
+        Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+    );
+}
+
+/// A degree-four crossing is named *and* drawn: the naming half says there are
+/// two loops and which half-space picks each, and the marcher follows one of
+/// them right round.
+#[test]
+fn a_quartic_crossing_is_named_in_two_pieces_and_each_piece_is_walked_right_round() {
+    let ball = a_ball([0.0, 0.0, 0.0], 5.0);
+    let pipe = a_pipe([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 3.0);
+    let met = crossing(&ball, &pipe);
+    let SurfaceMeet::Curves(runs) = &met else {
+        panic!("a ball this size swallows a whole cross-section of the pipe: {met:?}");
+    };
+    assert_eq!(runs.len(), 2, "one loop either side of the ball's centre");
+
+    let mut heights = Vec::new();
+    for run in runs {
+        let walked = walk(
+            run,
+            [&ball, &pipe],
+            Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a shape this size is marched without complaint");
+        assert!(
+            walked.points().len() > 20,
+            "a whole loop takes more than twenty steps, got {}",
+            walked.points().len()
+        );
+
+        let slack = walked.deviation().magnitude();
+        for point in walked.points() {
+            let at = rcad_predicates::Point::Constructed(point.coordinates().map(|coordinate| {
+                rcad_predicates::Interval::new(coordinate - slack, coordinate + slack)
+                    .expect("a bound is a length")
+            }));
+            for surface in [&ball, &pipe] {
+                assert_ne!(side_of(surface, at), Decision::Pos, "off {surface:?}");
+                assert_ne!(side_of(surface, at), Decision::Neg, "off {surface:?}");
+            }
+        }
+        heights.push(
+            walked
+                .points()
+                .iter()
+                .map(|point| point.z())
+                .fold(0.0f64, |so_far, height| so_far.max(height.abs())),
+        );
+        assert!(
+            walked
+                .points()
+                .iter()
+                .all(|point| point.z().signum() == walked.points()[0].z().signum()),
+            "a loop picked out by a half-space stays on its own side of it"
         );
     }
+    assert_eq!(heights.len(), 2);
 }
 
 /// The one refusal the closed form has that is not a deferral, and it is a

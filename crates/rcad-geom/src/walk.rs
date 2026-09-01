@@ -34,6 +34,7 @@ use rcad_predicates::{
 };
 
 use crate::exact::Exact;
+use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
     Cylinder, Deflection, EdgeRun, Error, NamedRun, Plane, Point, Result, SIDE_OF_CYLINDER,
@@ -169,7 +170,12 @@ pub fn walk(
         return Ok(nothing_between_the_ends());
     }
 
-    let Some(conic) = the_conic_between(the_two_surfaces_it_runs_between(run, along))? else {
+    let pair = the_two_surfaces_it_runs_between(run, along);
+    if a_crossing_that_runs_to_a_quartic(&pair) {
+        return follow_the_quartic(run, pair, deflection, policy, log);
+    }
+
+    let Some(conic) = the_conic_between(pair)? else {
         return Ok(nothing_between_the_ends());
     };
     let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * conic.how_far_it_reaches();
@@ -191,6 +197,245 @@ pub fn walk(
         points,
         deviation: tag,
     })
+}
+
+/// Whether this pair crosses in a curve no conic stands in for.
+///
+/// A ball against a pipe, or two pipes. Every other pair crosses in something
+/// that lies in a plane (§24.5).
+fn a_crossing_that_runs_to_a_quartic(pair: &[Surface; 2]) -> bool {
+    matches!(
+        pair,
+        [Surface::Sphere(_), Surface::Cylinder(_)]
+            | [Surface::Cylinder(_), Surface::Sphere(_)]
+            | [Surface::Cylinder(_), Surface::Cylinder(_)]
+    )
+}
+
+/// A run of a degree-four crossing, followed by the marcher.
+///
+/// # The budget is split down the middle
+///
+/// Half the deflection goes to the straight pieces between the points and half
+/// to the points themselves. The closed form works the other way round — it
+/// knows its per-point bound before it starts and spends what is left on the
+/// pieces — and the marcher cannot, because how far off a point sits is
+/// something it finds out by settling the point. So the split is fixed in
+/// advance and the half spent on the points is checked afterwards, under the
+/// policy, exactly as the closed form checks its own.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on the
+/// run pick both of the loops the crossing leaves, or neither.
+///
+/// [`Error::CannotPlaceAPointThatCloseToACrossing`] when the marcher's own bound
+/// takes more than its half of the deflection and the policy will not accept it.
+///
+/// The marcher's two refusals, and
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed cannot be worked out at
+/// all.
+fn follow_the_quartic(
+    run: &NamedRun,
+    pair: [Surface; 2],
+    deflection: Deflection,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<PointsAlongACrossing> {
+    let half_the_budget = deflection.length() / 2.0;
+    let surfaces = [&pair[0], &pair[1]];
+    let picked_by: &[Surface] = match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+        _ => &[],
+    };
+
+    let mut seeds = Vec::new();
+    for seed in where_a_quartic_can_be_picked_up(&pair)? {
+        let (settled, off) = settled_with_a_bound(surfaces, seed)?;
+        if picked_by.is_empty() || every_half_space_holds(picked_by, settled, off, log) {
+            seeds.push(settled);
+        }
+    }
+    let [seed] = seeds.as_slice() else {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    };
+
+    let walked = march(
+        surfaces,
+        *seed,
+        half_the_budget,
+        MOST_POINTS_ALONG_ONE_CROSSING,
+    )?;
+    let tag = Approximation::new(walked.deviation, Cause::PointAlongACrossing);
+    if walked.deviation > half_the_budget && !policy.wobble_is_acceptable(walked.deviation) {
+        return Err(Error::CannotPlaceAPointThatCloseToACrossing {
+            asked: deflection.length(),
+            closest: walked.deviation,
+        });
+    }
+    Ok(PointsAlongACrossing {
+        points: walked.points,
+        deviation: tag,
+    })
+}
+
+/// One point near each piece a degree-four crossing can come in, for the marcher
+/// to start from.
+///
+/// **Where the two pieces are pulled apart matters.** A ball and a pipe leave
+/// two loops either side of the plane through the centre square to the axis, so
+/// the two seeds are the far ends of the same reach along that axis. Two pipes
+/// leave two loops either side of the plane the naming half picked them apart
+/// with, and reaching both of them means walking round the **thinner** of the
+/// two: on the fatter one the same two loops show up as two arcs of the same
+/// sweep, and a pair of seeds taken there would both land on one of them.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed comes out as something
+/// that is not a point.
+fn where_a_quartic_can_be_picked_up(pair: &[Surface; 2]) -> Result<Vec<Point>> {
+    let seeds = match pair {
+        [Surface::Sphere(ball), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
+            where_a_ball_reaches_across_a_pipe(ball, pipe)
+        }
+        [Surface::Cylinder(one), Surface::Cylinder(other)] => {
+            let certified = |pipe: &Cylinder| pipe.radius() / pipe.axis().direction().length();
+            if certified(one) <= certified(other) {
+                where_one_pipe_reaches_across_another(one, other)
+            } else {
+                where_one_pipe_reaches_across_another(other, one)
+            }
+        }
+        [first, second] => panic!("{first:?} and {second:?} do not cross in a quartic"),
+    };
+    if seeds.iter().any(|seed| !seed.is_finite()) {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
+    Ok(seeds.to_vec())
+}
+
+/// The two places a ball reaches furthest along a pipe's axis, one on each of
+/// the two loops it can leave.
+///
+/// Both are on the ray from the axis out towards the ball's centre, where the
+/// crossing runs furthest from the plane through the centre square to the axis.
+/// A ball centred exactly on the axis has no such ray and any direction across
+/// the pipe will do, so the pipe's own basis stands in.
+fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point; 2] {
+    let along = pipe.axis().direction() * pipe.axis().direction().length().recip();
+    let skin = pipe.radius() / pipe.axis().direction().length();
+    let out = ball.centre() - pipe.axis().origin();
+    let up = out.dot(along);
+    let sideways = out - along * up;
+    let (towards, off_the_axis) = match sideways.normalized() {
+        Ok(towards) => (towards, sideways.length()),
+        Err(_) => (pipe.basis().0, 0.0),
+    };
+
+    let radius = ball.radius();
+    let nearest = skin - off_the_axis;
+    let reach = (radius * radius - nearest * nearest).max(0.0).sqrt();
+    let middle = pipe.axis().origin() + along * up + towards * skin;
+    [middle + along * reach, middle - along * reach]
+}
+
+/// The two places one pipe reaches furthest along its own axis through another,
+/// one on each of the two loops the pair can leave.
+///
+/// `thin` is walked round to the angle where the other pipe reaches furthest,
+/// and the two roots of the quadratic in how far along its axis the point sits
+/// are the two seeds. Where the pair leaves only one loop both roots are on it.
+fn where_one_pipe_reaches_across_another(thin: &Cylinder, fat: &Cylinder) -> [Point; 2] {
+    let [thin_way, fat_way] = [thin, fat].map(|pipe| {
+        let along = pipe.axis().direction();
+        along * along.length().recip()
+    });
+    let [thin_skin, fat_skin] =
+        [thin, fat].map(|pipe| pipe.radius() / pipe.axis().direction().length());
+    let leaning = thin_way.dot(fat_way);
+    let sideways = thin_way.cross(fat_way);
+    let across = sideways * sideways.length().recip();
+
+    // The foot of the common perpendicular on the thin pipe's axis, which is
+    // where its own sweep is measured from.
+    let between = fat.axis().origin() - thin.axis().origin();
+    let up = (between.dot(thin_way) - between.dot(fat_way) * leaning) / (1.0 - leaning * leaning);
+    let foot = thin.axis().origin() + thin_way * up;
+    let and_up = {
+        let up = fat_way - thin_way * leaning;
+        up * up.length().recip()
+    };
+
+    // The sweep that reaches furthest is the one where the fat pipe's axis is
+    // nearest, and a handful of candidates is cheaper than solving for it.
+    let apart = between.dot(across);
+    let best = [apart / thin_skin, -apart / thin_skin, 1.0, -1.0, 0.0]
+        .into_iter()
+        .map(|part| part.clamp(-1.0, 1.0))
+        .map(|turned| {
+            let round = foot
+                + across * (thin_skin * turned)
+                + and_up * (thin_skin * (1.0 - turned * turned).max(0.0).sqrt());
+            (
+                how_far_a_pipe_reaches_from(fat, round, thin_way, fat_skin),
+                round,
+            )
+        })
+        .fold(
+            None,
+            |so_far: Option<(f64, f64, Point)>, ((room, middle), round)| match so_far {
+                Some((best, _, _)) if best >= room => so_far,
+                _ => Some((room, middle, round)),
+            },
+        );
+    let Some((room, middle, round)) = best else {
+        unreachable!("a non-empty list of candidates has a largest")
+    };
+    let reach = room.max(0.0).sqrt();
+    [
+        round + thin_way * (middle + reach),
+        round + thin_way * (middle - reach),
+    ]
+}
+
+/// How far along `thin_way` from `round` the pipe `fat` is reached, as the
+/// discriminant of the quadratic and the distance to its middle.
+fn how_far_a_pipe_reaches_from(
+    fat: &Cylinder,
+    round: Point,
+    thin_way: Vector,
+    fat_skin: f64,
+) -> (f64, f64) {
+    let fat_way = fat.axis().direction() * fat.axis().direction().length().recip();
+    let out = round - fat.axis().origin();
+    let sideways = thin_way.cross(fat_way);
+    let leaning = sideways.length_squared();
+    let straight_on = out.cross(fat_way).dot(sideways);
+    let already = out.cross(fat_way).length_squared() - fat_skin * fat_skin;
+    (
+        (straight_on * straight_on - leaning * already) / (leaning * leaning),
+        -straight_on / leaning,
+    )
+}
+
+/// Whether the box `at` is known to be inside is on or outside every one of
+/// `picked_by`.
+fn every_half_space_holds(
+    picked_by: &[Surface],
+    at: Point,
+    deviation: f64,
+    log: &mut ProvenanceLog,
+) -> bool {
+    let at = somewhere_within(at, deviation);
+    let mut on_or_outside = true;
+    for half_space in picked_by {
+        if which_side_of(half_space, at, log) == Decision::Neg {
+            on_or_outside = false;
+        }
+    }
+    on_or_outside
 }
 
 /// What comes back for a run that needs no help at all: its two ends are the
@@ -372,34 +617,35 @@ impl Conic {
         deviation: f64,
         log: &mut ProvenanceLog,
     ) -> bool {
-        let at = somewhere_within(self.at(middle), deviation);
-        let mut on_or_outside = true;
-        for half_space in picked_by {
-            let (decision, named, measures) = match half_space {
-                Surface::Plane(flat) => (flat.side_of_point(at), SIDE_OF_PLANE, Measures::Length),
-                Surface::Sphere(ball) => (ball.side_of(at), SIDE_OF_SPHERE, Measures::Area),
-                Surface::Cylinder(pipe) => (pipe.side_of(at), SIDE_OF_CYLINDER, Measures::Area),
-            };
-            match decision {
-                Decision::Pos | Decision::Zero => (),
-                Decision::Neg => on_or_outside = false,
-                // A half-space that could not tell rules out neither arc, so
-                // both arcs come back picked and the caller is refused rather
-                // than handed a coin toss. It is recorded because it happened,
-                // and because the refusal that follows says nothing about which
-                // half-space gave up.
-                Decision::Undecidable { .. } => log.push(Record::new(
-                    named,
-                    &[at],
-                    Level::Interval,
-                    decision,
-                    measures,
-                )),
-                other => panic!("a half-space came back with a decision nothing knows: {other:?}"),
-            }
-        }
-        on_or_outside
+        every_half_space_holds(picked_by, self.at(middle), deviation, log)
     }
+}
+
+/// Which side of a half-space the box `at` is on, recording the answer when
+/// nothing could tell.
+///
+/// A half-space that could not tell rules out neither piece, so both come back
+/// picked and the caller is refused rather than handed a coin toss. It is
+/// recorded because it happened, and because the refusal that follows says
+/// nothing about which half-space gave up.
+fn which_side_of(half_space: &Surface, at: PredicatePoint, log: &mut ProvenanceLog) -> Decision {
+    let (decision, named, measures) = match half_space {
+        Surface::Plane(flat) => (flat.side_of_point(at), SIDE_OF_PLANE, Measures::Length),
+        Surface::Sphere(ball) => (ball.side_of(at), SIDE_OF_SPHERE, Measures::Area),
+        Surface::Cylinder(pipe) => (pipe.side_of(at), SIDE_OF_CYLINDER, Measures::Area),
+    };
+    match decision {
+        Decision::Pos | Decision::Zero | Decision::Neg => (),
+        Decision::Undecidable { .. } => log.push(Record::new(
+            named,
+            &[at],
+            Level::Interval,
+            decision,
+            measures,
+        )),
+        other => panic!("a half-space came back with a decision nothing knows: {other:?}"),
+    }
+    decision
 }
 
 /// The circle where a plane cuts a ball.

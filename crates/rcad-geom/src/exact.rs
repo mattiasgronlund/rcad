@@ -145,6 +145,36 @@ impl Exact {
         Some(running)
     }
 
+    /// `a × b`, exactly, where `a` is already exact and `b` is stored numbers.
+    pub(crate) fn cross_of(a: &[Exact; 3], b: [f64; 3]) -> Option<[Exact; 3]> {
+        let component = |axis: usize| {
+            let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+            let left = a[next].times(&Exact::of(b[after]))?;
+            let right = a[after].times(&Exact::of(b[next]))?;
+            Some(left.minus(&right))
+        };
+        Some([component(0)?, component(1)?, component(2)?])
+    }
+
+    /// `u · u` for an already-exact triple, exactly.
+    pub(crate) fn squared_length_of(value: &[Exact; 3]) -> Option<Exact> {
+        let mut total = Self::of(0.0);
+        for part in value {
+            total = total.plus(&part.times(part)?);
+        }
+        Some(total)
+    }
+
+    /// Three stored numbers, each exactly.
+    pub(crate) fn of_each(value: [f64; 3]) -> [Exact; 3] {
+        value.map(Self::of)
+    }
+
+    /// `there − here`, componentwise and exactly.
+    pub(crate) fn gap_between(here: [f64; 3], there: [f64; 3]) -> [Exact; 3] {
+        core::array::from_fn(|axis| Self::of(there[axis]).minus(&Self::of(here[axis])))
+    }
+
     /// The sign of this number.
     ///
     /// [`Decision::Undecidable`] only when an entry is not a real number, which
@@ -152,6 +182,33 @@ impl Exact {
     /// there is nothing else here for a sign to be uncertain about.
     pub(crate) fn sign(&self) -> Decision {
         expansion_sign(&self.0)
+    }
+
+    /// How many `f64` this number is held in.
+    ///
+    /// The measurement §29 records. An expansion that has to be squared is only
+    /// as squarable as its own dynamic range allows, and this is how a test
+    /// shows where that range runs out.
+    #[cfg(test)]
+    pub(crate) fn entries(&self) -> usize {
+        self.0.len()
+    }
+
+    /// How many binary orders of magnitude separate the largest entry from the
+    /// smallest, or zero for a number held in one entry or none.
+    ///
+    /// **This is what decides whether an expansion can be squared**, and it is
+    /// invariant under scaling every input by a power of two: multiplying the
+    /// number scales every entry together. Squaring doubles the spread, and
+    /// [`Exact::times`] refuses as soon as one product's low half would land
+    /// among the subnormals — so a spread past about half of `f64`'s range
+    /// cannot be squared at *any* scale (`docs/decisions.md` §29).
+    #[cfg(test)]
+    pub(crate) fn spread(&self) -> i32 {
+        let (Some(first), Some(last)) = (self.0.first(), self.0.last()) else {
+            return 0;
+        };
+        last.abs().log2().round() as i32 - first.abs().log2().round() as i32
     }
 
     /// The nearest `f64` to this number, or as near as adding its entries up
@@ -300,5 +357,157 @@ mod an_exact_number {
             None => (),
             other => panic!("an overflowed product has no sign: {other:?}"),
         }
+    }
+}
+
+/// Where exact arithmetic runs out, measured rather than argued.
+///
+/// `docs/decisions.md` §24.17 asks for the largest of M3's limit-or-gap claims
+/// to be made to stand up: *the general quartic has no exact naming*. This is
+/// the half of that argument which is a demonstration.
+///
+/// **An expansion can only be squared while its own dynamic range leaves room.**
+/// [`Exact::times`] refuses as soon as one product's low half would land among
+/// the subnormals, and squaring doubles the spread between the largest entry and
+/// the smallest. So there is a spread past which no scaling of the inputs helps
+/// — and the general two-pipe discriminant is past it for two perfectly ordinary
+/// pipes at unit size.
+#[cfg(test)]
+mod how_far_exact_arithmetic_reaches {
+    use super::Exact;
+
+    /// Two turned unit directions and an offset between them, none of whose
+    /// coordinates is anything but a full-precision `f64`. Nothing about them is
+    /// awkward: they are what one general rotation of a lattice pair leaves.
+    const ONE_WAY: [f64; 3] = [
+        0.267_261_241_912_424_4,
+        0.534_522_483_824_848_8,
+        0.801_783_725_737_273_2,
+    ];
+    const THE_OTHER_WAY: [f64; 3] = [
+        -0.408_248_290_463_863,
+        0.816_496_580_927_726,
+        -0.408_248_290_463_863,
+    ];
+    const BETWEEN: [f64; 3] = [
+        1.234_567_890_123_456_7,
+        -2.345_678_901_234_568,
+        3.456_789_012_345_679,
+    ];
+
+    /// `T = (o₂ − o₁)·(w₁ × w₂)` and `K = ‖w₁ × w₂‖²` for the pair above.
+    fn a_leaning_pair() -> (Exact, Exact, Exact) {
+        let sideways = Exact::cross_of(&Exact::of_each(ONE_WAY), THE_OTHER_WAY)
+            .expect("two unit directions cross exactly");
+        let volume = (0..3)
+            .try_fold(Exact::of(0.0), |so_far, axis| {
+                Some(so_far.plus(&Exact::of(BETWEEN[axis]).times(&sideways[axis])?))
+            })
+            .expect("an offset of order one times a direction of order one is exact");
+        let squared_sideways =
+            Exact::squared_length_of(&sideways).expect("a sum of three squares of order one");
+        let squared_direction = Exact::dot_of(ONE_WAY, ONE_WAY).expect("a unit direction squared");
+        (volume, squared_sideways, squared_direction)
+    }
+
+    /// The eighth-degree question a ball and a pipe ask stays inside twenty
+    /// entries, so squaring it costs nothing and level 3 decides it.
+    #[test]
+    fn the_eighth_degree_question_a_ball_and_a_pipe_ask_is_short_enough_to_square() {
+        let along = ONE_WAY;
+        let from = Exact::gap_between([0.5, -0.25, 0.125], BETWEEN);
+        let across = Exact::cross_of(&from, along).expect("a cross product of order one");
+        let area = Exact::squared_length_of(&across).expect("a sum of three squares");
+        let room = area
+            .plus(&Exact::product_of(2.5, 2.5).expect("a radius squared"))
+            .minus(
+                &Exact::dot_of(along, along)
+                    .expect("a unit direction squared")
+                    .times(&Exact::product_of(3.75, 3.75).expect("a radius squared"))
+                    .expect("both are of order one"),
+            );
+
+        assert!(room.entries() <= 20, "V is {} entries", room.entries());
+        let squared = room.times(&room).expect("this one squares");
+        assert!(
+            squared.entries() <= 40,
+            "V² is {} entries",
+            squared.entries()
+        );
+    }
+
+    /// The question two leaning pipes ask does **not** fit, and this is the
+    /// demonstration §24.17 asks for.
+    ///
+    /// Deciding which of the four shapes two leaning pipes cross in compares
+    /// `ρ₁ ± ρ₂` against `δ`, and those are `rᵢ/√Wᵢ` and `|T|/√K` — three square
+    /// roots in three different metrics. Clearing them takes squaring
+    /// `r₁²W₂K + r₂²W₁K − T²W₁W₂`, and that expansion is already **five hundred
+    /// binary orders wide**: its smallest entry is `2^-500` of its largest, so
+    /// the square of that entry lands a thousand orders down, past the bottom of
+    /// `f64`.
+    ///
+    /// **No scaling of the inputs reaches it.** Multiplying every length by a
+    /// power of two multiplies every entry of the expansion by the same factor,
+    /// so the spread is exactly what a scaling cannot change — which is what
+    /// makes this different in kind from
+    /// `a_ball_too_small_for_its_own_squares_cannot_be_crossed_and_the_same_one_scaled_up_can`,
+    /// where a rescale walks straight back out of the refusal.
+    ///
+    /// What a scaling *can* do is slide the doubled spread into the window `f64`
+    /// leaves, and the second half of this test shows that it does: the same
+    /// expansion written far enough up the range squares without complaint. So
+    /// the refusal is a **gap** and not a limit — the answer exists and this
+    /// arithmetic, at this scale, could not reach it — and its fix is the
+    /// working frame §24.8 defers for want of a figure to beat.
+    #[test]
+    fn the_question_two_leaning_pipes_ask_is_too_wide_to_square_where_it_stands() {
+        let (volume, squared_sideways, squared_direction) = a_leaning_pair();
+        let radii = |radius: f64| {
+            Exact::product_of(radius, radius)
+                .expect("a radius squared")
+                .times(&squared_direction)
+                .expect("both are of order one")
+                .times(&squared_sideways)
+                .expect("and so is this")
+        };
+        let against_the_gap = radii(1.0).plus(&radii(2.0)).minus(
+            &volume
+                .times(&volume)
+                .expect("an offset squared")
+                .times(&squared_direction)
+                .expect("times a unit direction squared")
+                .times(&squared_direction)
+                .expect("and the other one"),
+        );
+
+        assert!(
+            against_the_gap.spread() > 400,
+            "this expansion spans {} binary orders, which was meant to be the point",
+            against_the_gap.spread()
+        );
+        assert_eq!(
+            against_the_gap.times(&against_the_gap).map(|_| ()),
+            None,
+            "squaring an expansion this wide runs off the bottom of f64"
+        );
+
+        // The same number written far enough up the range, which multiplies
+        // every entry by one positive power of two and so cannot change its
+        // sign. There the square fits.
+        let up = Exact::of(2f64.powi(300));
+        let higher = against_the_gap
+            .times(&up)
+            .expect("scaling by a power of two rounds nothing");
+        assert!(
+            higher.spread() > 400,
+            "a scaling slides an expansion up the range; it does not narrow it, and this one \
+             is still {} orders wide",
+            higher.spread()
+        );
+        assert!(
+            higher.times(&higher).is_some(),
+            "the answer was there to be had, one scaling away"
+        );
     }
 }

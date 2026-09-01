@@ -237,10 +237,11 @@ pub enum Error {
     /// Two surfaces whose crossing is a degree-four space curve, which the
     /// closed form does not name.
     ///
-    /// A ball against a pipe, or a pipe against a pipe. Their sign questions run
-    /// to the eighth and twelfth power and need an expansion buffer M3's second
-    /// stage builds (§27.1), so the first stage names the four pairs whose
-    /// crossing lies in a plane and says so about the other two.
+    /// Kept for the evaluator, which meets a quartic where no conic can stand in
+    /// for it and hands the run to the marcher instead. The naming half no
+    /// longer raises it: a ball against a pipe is named by §27.1's eighth-degree
+    /// discriminant, and two pipes are named as far as an enclosure reaches
+    /// (§29).
     #[error(
         "where a {first} and a {second} cross is a degree-four curve, which the closed form does \
          not name"
@@ -251,6 +252,27 @@ pub enum Error {
         /// What the second surface is.
         second: &'static str,
     },
+
+    /// Two surfaces tangent along their crossing rather than at a point, so
+    /// what they cross in is one curve that runs through itself.
+    ///
+    /// A ball resting on the inside of a pipe from the far side, or two pipes of
+    /// equal radius whose axes meet: the two loops the crossing would otherwise
+    /// come in touch each other, and there is no half-space that picks one of
+    /// them, because at the touching point they share a point.
+    ///
+    /// A **limit** and not a gap (§16.10). [`EdgeRun`](crate::EdgeRun) has one
+    /// variant that says "right round one closed curve" and one that says "this
+    /// piece of a crossing, picked out by these half-spaces"; a curve that
+    /// crosses itself is neither, and the answer this refuses to give does not
+    /// exist in the vocabulary rather than being out of the arithmetic's reach.
+    /// The family of fixes is a third `EdgeRun` variant carrying the crossing
+    /// point, and its consumer is a fuse over curved solids, which is M4.
+    #[error(
+        "these two surfaces are tangent along where they cross, so what they cross in is one \
+         curve that runs through itself"
+    )]
+    ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo,
 
     /// A crossing came in two pieces and no half-space could be written down
     /// that picks one of them out and holds along the whole of it.
@@ -291,6 +313,24 @@ pub enum Error {
     /// complaint.
     #[error("how big this crossing is needs a product that falls out of f64's range")]
     CannotWorkOutHowBigACrossingIs,
+
+    /// A crossing could not be followed because the two surfaces are too nearly
+    /// parallel where it runs.
+    ///
+    /// The marcher's near-tangency branch, and the one roadmap §6.3 names as the
+    /// place kernels produce silent garbage. Following a crossing needs a
+    /// direction, and two surfaces that lean against each other at a shrinking
+    /// angle give a shrinking direction and a growing bound on where the points
+    /// really are. Past the point where either can be worked out at all, this.
+    ///
+    /// A **gap** where the crossing is a real curve and the arithmetic ran out
+    /// of angle, and a **limit** where the two surfaces are genuinely tangent
+    /// along it, because then there is no direction to be had at any precision.
+    /// The two are told apart by the naming half:
+    /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] is what a
+    /// tangency along a whole curve comes back as before anything is walked.
+    #[error("this crossing runs where its two surfaces are too nearly parallel to follow it")]
+    CannotFollowACrossingWhereItsSurfacesAreTangent,
 
     /// A crossing was asked to be walked into more points than one is allowed to
     /// hold.
