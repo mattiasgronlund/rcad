@@ -354,6 +354,20 @@ pub(crate) enum MeetPoint {
         /// Where it is.
         point: PredicatePoint,
     },
+    /// A pole of a closed surface, where it pinches to a point.
+    ///
+    /// The one end of a boundary that is not where curves meet. A ball's skin
+    /// is trimmed by nothing at all, so the answer has to cut it open along a
+    /// seam of its own, and a seam runs pole to pole (§38.1).
+    APoleOfAClosedSurface {
+        /// The surface it is a pole of.
+        surface: Surface,
+        /// Which of the two: `true` for the one the surface's second coordinate
+        /// climbs towards.
+        at_the_top: bool,
+        /// Where it is.
+        point: PredicatePoint,
+    },
 }
 
 impl MeetPoint {
@@ -362,7 +376,8 @@ impl MeetPoint {
         match self {
             MeetPoint::Existing { point, .. }
             | MeetPoint::OfThreeSurfaces { point, .. }
-            | MeetPoint::WhereAClosedCurveStarts { point, .. } => *point,
+            | MeetPoint::WhereAClosedCurveStarts { point, .. }
+            | MeetPoint::APoleOfAClosedSurface { point, .. } => *point,
         }
     }
 }

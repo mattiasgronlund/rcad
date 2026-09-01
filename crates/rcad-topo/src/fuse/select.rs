@@ -390,6 +390,13 @@ fn the_piece_holds(
     in_plane: Option<&InPlane>,
     point: PredicatePoint,
 ) -> Option<bool> {
+    // A piece that is the **whole** of a closed surface is trimmed by nothing.
+    // Its one wire is a seam — where the surface's own two coordinates were cut
+    // open, not where the face stops — so every point of the surface is in it,
+    // and reading the seam as a trimming would keep half a ball (§38.1).
+    if piece.is_the_whole_surface {
+        return Some(true);
+    }
     let Some(in_plane) = in_plane else {
         return Some(
             piece

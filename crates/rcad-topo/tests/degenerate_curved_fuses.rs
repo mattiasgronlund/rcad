@@ -228,47 +228,65 @@ fn two_balls_touching_at_one_point(model: &mut Model) -> Pair {
     Pair::of(one, other)
 }
 
-/// **A defect, pinned rather than blessed.** Two balls that touch at one point
-/// unite into nothing at all.
+/// Two balls that touch at one point unite into two solids that touch, which is
+/// §38.1's fix of the wrong answer §37.4 pinned here.
 ///
-/// The right answer is two solids that happen to touch — the planar catalogue's
-/// `two_cubes_that_only_touch_at_a_corner` is the same question with corners and
-/// gives exactly that. What comes back instead is `Ok` with an empty answer, no
-/// refusal, and an empty log: a confident wrong answer, which §4.1 ranks below
-/// both crashing and refusing.
+/// The planar catalogue's `two_cubes_that_only_touch_at_a_corner` is the same
+/// question with corners and gives exactly the same shape of answer. What comes
+/// back now is both balls under `Union`, nothing at all under `Intersection` —
+/// one point has no volume, and an empty intersection is a right answer and not
+/// a dropped solid — and the first ball alone under `Difference`.
 ///
-/// **This entry never reaches tangency.** Neither ball's face is cut by the
-/// other, and [`a_ball_that_nothing_cuts_is_dropped_by_the_fuse`] is the whole
-/// of it — the same nothing comes back when the two balls are a mile apart. So
-/// roadmap §7.4's tangent-sphere entry is not measuring tangency today, and
-/// saying it passes would be the vacuity §14.7 exists to stop.
+/// **This entry still does not reach tangency**, and saying otherwise would be
+/// the vacuity §14.7 exists to stop: neither ball's face is cut by the other, so
+/// the same three answers come back when the two balls are a mile apart. What it
+/// does now reach is the thing that was wrong — a ball nothing cuts —
+/// and [`a_ball_that_nothing_cuts_comes_back_whole`] is the root of it.
 #[test]
-fn two_balls_that_touch_at_one_point_come_back_as_nothing_which_is_wrong() {
+fn two_balls_that_touch_at_one_point_unite_into_two_solids_that_touch() {
+    let each_one = 4.0 / 3.0 * PI * 8.0;
     let mut model = a_model();
     let pair = two_balls_touching_at_one_point(&mut model);
-    let each = volume_of(&model, &pair.arguments);
-    measures(each, 4.0 / 3.0 * PI * 8.0, Side::Under);
+    measures(volume_of(&model, &pair.arguments), each_one, Side::Under);
 
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+    for (rule, how_many, closed_form) in [
+        (Rule::Union, 2, 2.0 * each_one),
+        (Rule::Difference, 1, each_one),
+    ] {
+        let mut model = a_model();
+        let pair = two_balls_touching_at_one_point(&mut model);
         let answer = fused(&mut model, &pair, rule);
-        assert!(
-            answer.solids().is_empty(),
-            "pinning what happens today: {rule:?} of two balls that touch gives nothing"
-        );
+        assert_eq!(answer.solids().len(), how_many, "{rule:?}");
+        measures(volume_of(&model, answer.solids()), closed_form, Side::Under);
     }
+
+    let mut model = a_model();
+    let pair = two_balls_touching_at_one_point(&mut model);
+    let shared = fused(&mut model, &pair, Rule::Intersection);
+    assert!(
+        shared.solids().is_empty(),
+        "what two balls touching at one point share has no volume"
+    );
 }
 
-/// The root of it, in one fuse and one solid. A ball fused with no tool at all
-/// comes back empty.
+/// The root of it, in one fuse and one solid: a ball fused with no tool at all
+/// comes back whole, seam, poles and volume.
 ///
-/// A ball is one face, its boundary is a seam with a pole at each end, and
-/// nothing cuts it — so the arrangement of that face against the empty set of
-/// cuts yields no piece the face's own boundary winds once round, and the solid
-/// is gone. **A bar in the same position comes back whole**, which is the
-/// control: a bar has three faces and its wall is bounded by a seam *and* two
-/// cap circles.
+/// A ball is one face whose one wire is a seam, and a seam is left out at the
+/// door — so the arrangement of that face against no cuts has no curve drawn on
+/// it at all, no cell, and no piece. It used to come back as `Ok` and nothing.
+/// §38.1 makes the empty arrangement mean what it says: the whole surface, cut
+/// open along a seam of the answer's own.
+///
+/// **A bar in the same position is the control** and always came back whole: a
+/// bar has three faces and its wall is bounded by a seam *and* two cap circles,
+/// so its arrangement has curves on it.
+///
+/// The four steps are what say the seam is a seam. A ball's face is one wire of
+/// two coedges — the seam walked each way — with a pole standing between them,
+/// which is what [`Model::add_ball`] builds and what the mesher reads.
 #[test]
-fn a_ball_that_nothing_cuts_is_dropped_by_the_fuse() {
+fn a_ball_that_nothing_cuts_comes_back_whole() {
     let mut model = a_model();
     let ball = model
         .add_ball(2.0, &Isometry::identity())
@@ -279,7 +297,7 @@ fn a_ball_that_nothing_cuts_is_dropped_by_the_fuse() {
         Side::Under,
     );
 
-    let gone = fused(
+    let kept = fused(
         &mut model,
         &Pair {
             arguments: vec![ball],
@@ -287,9 +305,25 @@ fn a_ball_that_nothing_cuts_is_dropped_by_the_fuse() {
         },
         Rule::Union,
     );
-    assert!(
-        gone.solids().is_empty(),
-        "pinning what happens today: a ball fused on its own is dropped"
+    assert_eq!(kept.solids().len(), 1, "a ball fused on its own comes back");
+    measures(
+        volume_of(&model, kept.solids()),
+        4.0 / 3.0 * PI * 8.0,
+        Side::Under,
+    );
+
+    let skin = model.solid(kept.solids()[0]);
+    assert_eq!(skin.faces().count(), 1, "a ball is one face");
+    let wires: Vec<_> = skin
+        .faces()
+        .flat_map(|face| face.wires().collect::<Vec<_>>())
+        .collect();
+    assert_eq!(wires.len(), 1);
+    assert_eq!(wires[0].step_count(), 4, "a seam twice and a pole between");
+    assert_eq!(
+        wires[0].coedges().count(),
+        2,
+        "two of the four are the seam"
     );
 
     let bar = a_bar(&mut model);
@@ -303,6 +337,47 @@ fn a_ball_that_nothing_cuts_is_dropped_by_the_fuse() {
     );
     assert_eq!(kept.solids().len(), 1, "a bar fused on its own comes back");
     measures(volume_of(&model, kept.solids()), A_BAR, Side::Under);
+}
+
+/// A ball turned about an awkward axis and a ball a long way from the origin
+/// both come back with a ball's volume.
+///
+/// A ball has no frame of its own, so the seam the answer carries is the one
+/// `Sphere::point_at(0, ·)` runs along in the world's axes, whatever the input
+/// was turned by. **Carrying the input's own seam through instead is the trap**,
+/// and it is invisible on a ball standing where it was built, where the two are
+/// the same meridian. This is the row where they are not.
+///
+/// **What is *not* load-bearing, measured rather than argued.** Naming the other
+/// half of the meridian changes nothing anywhere: both halves run pole to pole,
+/// so both cut the surface open along a meridian and the patch is the same
+/// rectangle shifted. Flipping it leaves all 365 tests of this crate green.
+/// Putting the poles anywhere but at `centre ± (0, 0, r)` is caught by the
+/// plainest ball there is — the triangulator refuses a patch whose corner stands
+/// on an earlier one — so it needs no shape of its own.
+#[test]
+fn a_turned_ball_and_a_far_one_come_back_with_the_volume_of_a_ball() {
+    let closed_form = 4.0 / 3.0 * PI * 8.0;
+    let axis = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("an axis");
+    for placement in [
+        Isometry::rotation(&axis, 0.4).expect("a share of a turn"),
+        Isometry::translation(Vector::new(37.0, -19.0, 23.0)).expect("a shift"),
+    ] {
+        let mut model = a_model();
+        let ball = model
+            .add_ball(2.0, &placement)
+            .expect("a ball of radius two");
+        let kept = fused(
+            &mut model,
+            &Pair {
+                arguments: vec![ball],
+                tools: Vec::new(),
+            },
+            Rule::Union,
+        );
+        assert_eq!(kept.solids().len(), 1);
+        measures(volume_of(&model, kept.solids()), closed_form, Side::Under);
+    }
 }
 
 /// The control that says the family is not empty everywhere: two balls that
@@ -948,17 +1023,21 @@ fn a_blind_hole_is_committed_and_not_only_arranged() {
     );
 }
 
-/// **A defect, pinned rather than blessed.** A ball wholly inside a block is
-/// dropped, so two of the three rules give a confident wrong answer.
+/// A ball wholly inside a block answers all three rules, which is §38.1's fix of
+/// the two wrong answers §37.4 pinned here.
 ///
-/// The union is right by luck — the block swallows the ball either way. The
-/// intersection should be the ball and comes back empty; the difference should
-/// be a block with a bubble in it and comes back as the whole block. Both are
-/// [`a_ball_that_nothing_cuts_is_dropped_by_the_fuse`] again, and the bar in the
-/// same position gets two of the three right, which is what says it is the
-/// ball's own shape and not containment.
+/// The union was right by luck — the block swallows the ball either way. The
+/// intersection is the ball and used to come back empty; the difference is a
+/// block with a bubble in it and used to come back as the whole block. Both were
+/// [`a_ball_that_nothing_cuts_comes_back_whole`] again.
+///
+/// **The bubble is where the ball's own winding does not cancel.** A void shell
+/// has to measure negative for the block to lose its volume rather than gain it,
+/// so `512 − ball` is a different number from `512 + ball` and this row tells
+/// them apart.
 #[test]
-fn a_ball_wholly_inside_a_block_is_dropped_which_is_wrong() {
+fn a_ball_wholly_inside_a_block_answers_all_three_rules() {
+    let ball_of_two = 4.0 / 3.0 * PI * 8.0;
     let build = |model: &mut Model| {
         let solid = block(model, [8.0, 8.0, 8.0], Vector::zero());
         let ball = model
@@ -972,34 +1051,51 @@ fn a_ball_wholly_inside_a_block_is_dropped_which_is_wrong() {
 
     let mut model = a_model();
     let pair = build(&mut model);
-    let shared = fused(&mut model, &pair, Rule::Intersection);
-    assert!(
-        shared.solids().is_empty(),
-        "pinning what happens today: what a block and a ball inside it share is nothing"
+    let united = fused(&mut model, &pair, Rule::Union);
+    assert_eq!(
+        volume_of(&model, united.solids()),
+        512.0,
+        "the block, whole, and a polyhedron measures exactly"
     );
 
     let mut model = a_model();
     let pair = build(&mut model);
+    let shared = fused(&mut model, &pair, Rule::Intersection);
+    assert_eq!(shared.solids().len(), 1);
+    measures(volume_of(&model, shared.solids()), ball_of_two, Side::Under);
+
+    let mut model = a_model();
+    let pair = build(&mut model);
     let hollowed = fused(&mut model, &pair, Rule::Difference);
+    assert_eq!(hollowed.solids().len(), 1);
     assert_eq!(
+        model.solid(hollowed.solids()[0]).shells().count(),
+        2,
+        "the block's own skin and the bubble inside it"
+    );
+    // The bubble's wall is meshed inside the true ball, so the bubble the mesh
+    // describes is smaller than the one that is there and what is left round it
+    // measures more.
+    measures(
         volume_of(&model, hollowed.solids()),
-        512.0,
-        "pinning what happens today: hollowing a block with a ball takes nothing away"
+        512.0 - ball_of_two,
+        Side::Over,
     );
 }
 
 // 10. Touching but not overlapping — §7.4's eighth entry, asked of a curved
 // surface.
 
-/// **A defect, pinned rather than blessed.** A ball resting on a block's top,
-/// touching it at one point, unites into the block alone.
+/// A ball resting on a block's top, touching it at one point, unites into two
+/// solids that touch — §38.1's fix of the third wrong answer §37.4 pinned here.
 ///
-/// The right answer is two solids that touch, which is what the planar
-/// catalogue's `two_cubes_that_only_touch_at_a_corner` gives. The ball's centre
-/// is at `z = 10` and the block's top is `z = 8`, both whole numbers, so the
-/// touching point `(4, 4, 8)` is exact. It is dropped for the same reason again.
+/// The planar catalogue's `two_cubes_that_only_touch_at_a_corner` gives the same
+/// shape of answer. The ball's centre is at `z = 10` and the block's top is
+/// `z = 8`, both whole numbers, so the touching point `(4, 4, 8)` is exact — and
+/// it is also the ball's own south pole, so the answer's seam ends exactly on
+/// the block's top face. The ball used to be dropped here.
 #[test]
-fn a_ball_resting_on_a_block_at_one_point_loses_the_ball_which_is_wrong() {
+fn a_ball_resting_on_a_block_at_one_point_keeps_both() {
     let mut model = a_model();
     let solid = block(&mut model, [8.0, 8.0, 8.0], Vector::zero());
     let ball = model
@@ -1010,11 +1106,48 @@ fn a_ball_resting_on_a_block_at_one_point_loses_the_ball_which_is_wrong() {
         .expect("a ball of radius two");
 
     let united = fused(&mut model, &Pair::of(solid, ball), Rule::Union);
-    assert_eq!(united.solids().len(), 1);
-    assert_eq!(
+    assert_eq!(united.solids().len(), 2, "two solids that touch at a point");
+    measures(
         volume_of(&model, united.solids()),
-        512.0,
-        "pinning what happens today: the ball is not in the union at all"
+        512.0 + 4.0 / 3.0 * PI * 8.0,
+        Side::Under,
+    );
+}
+
+/// A ball touching a wall at the one point every other candidate is ruled out
+/// at, united with it, keeps both.
+///
+/// **This is the row that says a whole closed surface is trimmed by nothing.**
+/// A piece is kept by classifying one point provably inside it, and a whole
+/// sphere has exactly one corner pair — its two poles — so the candidates are
+/// blends of those and six points spread from the middle. Of the twelve, eleven
+/// land on the seam's own meridian plane or on the wrong side of it, and the one
+/// left is `centre + (0, r, 0)`. Put a wall exactly there and it comes back
+/// `OnBoundary`, which is a candidate that says nothing and is abandoned — so
+/// reading the seam as a trimming leaves selection with no candidate at all and
+/// the fuse refuses a pair it can plainly answer.
+///
+/// Measured: with the seam read as a trimming this refuses `Undecidable` on
+/// *a point inside a piece of a face*, and every other row in this file stays
+/// green. The ball is at `(4, 4, 4)` with radius two and the wall is `y = 6`,
+/// all whole numbers, so the touch is exact.
+#[test]
+fn a_ball_touching_a_wall_at_the_one_point_that_can_place_it_keeps_both() {
+    let mut model = a_model();
+    let ball = model
+        .add_ball(
+            2.0,
+            &Isometry::translation(Vector::new(4.0, 4.0, 4.0)).expect("a shift"),
+        )
+        .expect("a ball of radius two");
+    let wall = block(&mut model, [8.0, 4.0, 8.0], Vector::new(0.0, 6.0, 0.0));
+
+    let united = fused(&mut model, &Pair::of(ball, wall), Rule::Union);
+    assert_eq!(united.solids().len(), 2, "two solids touching at one point");
+    measures(
+        volume_of(&model, united.solids()),
+        4.0 / 3.0 * PI * 8.0 + 256.0,
+        Side::Under,
     );
 }
 
@@ -1207,7 +1340,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             case: Case::Fused {
                 build: two_balls_touching_at_one_point,
                 rule: Rule::Union,
-                outcome: Outcome::Nothing,
+                outcome: Outcome::Answered,
             },
         },
         Entry {
@@ -1341,7 +1474,7 @@ fn the_rest() -> Vec<Entry> {
             pair: "a ball in the middle of a block",
             case: Case::Elsewhere {
                 rule: Rule::Intersection,
-                test: "a_ball_wholly_inside_a_block_is_dropped_which_is_wrong",
+                test: "a_ball_wholly_inside_a_block_answers_all_three_rules",
             },
         },
         Entry {
@@ -1349,7 +1482,7 @@ fn the_rest() -> Vec<Entry> {
             pair: "a ball resting on a block's top at one point",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_ball_resting_on_a_block_at_one_point_loses_the_ball_which_is_wrong",
+                test: "a_ball_resting_on_a_block_at_one_point_keeps_both",
             },
         },
         Entry {

@@ -61,7 +61,7 @@ use core::cmp::Ordering;
 
 use rcad_geom::{
     EdgeRun, MeetOfThree, NamedRun, Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane,
-    PlaneAgreement, Point, Surface, SurfaceMeet, intersect, meet_of_three_surfaces,
+    PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector, intersect, meet_of_three_surfaces,
     where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{
@@ -149,6 +149,12 @@ pub(crate) struct Piece {
     ///
     /// [`Model::validate`]: crate::Model::validate
     pub(crate) wires: Vec<Vec<FaceMeet>>,
+    /// Whether this piece is the **whole** of its surface.
+    ///
+    /// Then the one wire above is a *seam* and not a trimming: it is where the
+    /// surface's own two coordinates were cut open, so every point of the
+    /// surface is in the piece and no side of it says otherwise (§38.1).
+    pub(crate) is_the_whole_surface: bool,
 }
 
 impl Piece {
@@ -519,10 +525,84 @@ impl<'f> Arrangement<'f> {
     /// is a zero-area face, which §17.4 prevents rather than filters: reaching
     /// here means the splitter is wrong.
     fn pieces(&self) -> Result<Vec<Piece>> {
+        if self.arcs.is_empty() {
+            return Ok(vec![self.the_whole_surface()?]);
+        }
         (0..self.cells.len())
             .filter(|&cell| self.winding[cell] == Some(1))
             .map(|cell| self.piece_from(cell))
             .collect()
+    }
+
+    /// The piece a face with nothing drawn on it at all is: the whole surface,
+    /// cut open along a seam of its own.
+    ///
+    /// **§38.1, and the wrong answer it closes.** A ball's skin is one face
+    /// whose one wire is a seam, and a seam is left out at the door (`bake`'s
+    /// header), so a ball nothing cuts arrives here with no boundary and no cut
+    /// — no curve, no node, no cell, and therefore no piece. `fuse` handed that
+    /// back as `Ok` and nothing at all, which is a solid the caller passed in
+    /// silently dropped.
+    ///
+    /// The seam the answer carries is **not the input's**. The answer's face is
+    /// written with no placement of its own, so its two coordinates are read off
+    /// the surface standing where it is — and a ball has no frame of its own,
+    /// so its poles are `centre ± (0, 0, r)` in the world's axes and its
+    /// longitude runs from `+x` however the input was turned
+    /// ([`Sphere::point_at`](rcad_geom::Sphere::point_at)). A seam read back off
+    /// a turned input would name a meridian that is not one of *this* surface's,
+    /// which is the same mistake as re-using a corner without re-deriving it
+    /// (§17.1).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ACurvedFaceGoesRightRoundWithNoSeam`] when the surface does not
+    /// pinch to a point, so there is nowhere for a seam to end. Only a ball
+    /// does, and only a ball is a closed surface: a plane and a pipe both run on
+    /// for ever, so a face on one of them with nothing trimming it is unbounded
+    /// and no answer exists. Nothing in the public API builds one — a profile
+    /// has an outline and a bar has two cap circles — but a model read from a
+    /// file may, and §16.11 says a caller's bytes may not panic.
+    fn the_whole_surface(&self) -> Result<Piece> {
+        let Surface::Sphere(ball) = self.surface else {
+            return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam {
+                face: self.face.keys[0],
+            });
+        };
+        let meridian = Surface::Plane(
+            Plane::from_point_and_normal(ball.centre(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal"),
+        );
+        let pole = |at_the_top| MeetPoint::APoleOfAClosedSurface {
+            surface: self.surface,
+            at_the_top,
+            point: where_a_ball_pinches(&ball, at_the_top),
+        };
+        // **`material_side` is not about material here**, and a seam is the one
+        // place it is not: the whole surface is on both sides of the meridian,
+        // so there is no side to name. What it is read for downstream is which
+        // of the meridian's two halves this seam is — `which_arc_this_is` turns
+        // it into `∓(∇S × ∇T)`, and at the top pole `∇S` is straight up and
+        // `∇T` is `+y`, so `Pos` is the `+x` half. That is the half
+        // `Sphere::point_at(0, ·)` runs along, which is the meridian the
+        // surface's own coordinates are cut open at.
+        let along = |ends: [MeetPoint; 2]| FaceMeet {
+            carried_by: [self.surface, meridian],
+            ends,
+            material_side: Decision::Pos,
+            along: SmallVec::new(),
+            approximation: None,
+        };
+        Ok(Piece {
+            ancestors: self.face.keys.clone(),
+            surface: self.surface,
+            orientation: self.face.orientation,
+            wires: vec![vec![
+                along([pole(true), pole(false)]),
+                along([pole(false), pole(true)]),
+            ]],
+            is_the_whole_surface: true,
+        })
     }
 
     /// One crossing per curve that matters to this face, with the ones that are
@@ -2178,6 +2258,7 @@ impl<'f> Arrangement<'f> {
             surface: self.surface,
             orientation: self.face.orientation,
             wires,
+            is_the_whole_surface: false,
         })
     }
 
@@ -2264,6 +2345,30 @@ impl<'f> Arrangement<'f> {
     fn to(&self, half_edge: usize) -> usize {
         self.arcs[half_edge / 2].ends[1 - half_edge % 2]
     }
+}
+
+/// Where a ball's skin pinches to a point, as a box round it.
+///
+/// A ball has no frame of its own — it is the same ball however it is turned —
+/// so its two poles are `centre ± (0, 0, r)` in the world's axes and nowhere
+/// else, which is exactly what `Sphere::point_at` reads back.
+///
+/// The sum rounds, so it is done in intervals and the box collapses onto one
+/// triple whenever it does not round. Handing back the rounded triple as an
+/// exact one would certify a confident sign about a rounding, which is §34.6's
+/// mistake one surface over.
+fn where_a_ball_pinches(ball: &Sphere, at_the_top: bool) -> PredicatePoint {
+    let centre = ball.centre().coordinates();
+    let up = if at_the_top {
+        ball.radius()
+    } else {
+        -ball.radius()
+    };
+    as_exact_as_it_is(PredicatePoint::Constructed([
+        Interval::exactly(centre[0]),
+        Interval::exactly(centre[1]),
+        Interval::exactly(centre[2]) + Interval::exactly(up),
+    ]))
 }
 
 /// How many times a face's own rim winds round a point on its surface: one
@@ -3373,6 +3478,11 @@ mod curved {
                 surfaces, which, ..
             } => format!("{surfaces:?}/{which}"),
             MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => format!("{carried_by:?}"),
+            MeetPoint::APoleOfAClosedSurface {
+                surface,
+                at_the_top,
+                ..
+            } => format!("{surface:?}/pole {at_the_top}"),
         }
     }
 

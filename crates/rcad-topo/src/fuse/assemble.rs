@@ -57,9 +57,9 @@ use rcad_predicates::{
 };
 use smallvec::SmallVec;
 
-use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
+use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over;
-use crate::model::{FaceUse, ShellUse};
+use crate::model::{FaceUse, ShellUse, WireStep};
 use crate::validate::{
     a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets,
     every_side_of_the_skin_is_used_both_ways, gradient_of, the_curved_one_of, winding_round,
@@ -259,6 +259,7 @@ impl Assembly {
                 surface,
                 used,
                 wires,
+                is_a_whole_closed_surface: piece.is_the_whole_surface,
             });
         }
         Self {
@@ -331,6 +332,7 @@ impl Assembly {
                 }),
                 used: Orientation::Forward,
                 wires,
+                is_a_whole_closed_surface: false,
             });
         }
 
@@ -534,6 +536,7 @@ impl Assembly {
                 joined.push(JoinedFace {
                     surface: self.faces[only].surface,
                     used: self.faces[only].used,
+                    is_a_whole_closed_surface: self.faces[only].is_a_whole_closed_surface,
                     rings: (0..self.faces[only].wires.len())
                         .map(|wire| self.whole_ring(only, wire))
                         .collect(),
@@ -550,6 +553,7 @@ impl Assembly {
                 members,
                 surface: Surface::Plane(plane),
                 used: Orientation::Forward,
+                is_a_whole_closed_surface: false,
                 rings,
             });
         }
@@ -673,6 +677,11 @@ impl Assembly {
         &self.faces[dart.face].wires[dart.wire][dart.position]
     }
 
+    /// The corner a side arrives at.
+    fn stops_at(&self, side: &Side) -> usize {
+        self.edges[side.edge].ends[usize::from(side.forward)]
+    }
+
     /// Write the corners, edges and faces out again with the joined faces in
     /// place of their pieces and the corners that stopped being corners gone.
     ///
@@ -698,6 +707,7 @@ impl Assembly {
                 ),
                 surface: face.surface,
                 used: face.used,
+                is_a_whole_closed_surface: face.is_a_whole_closed_surface,
                 wires: face
                     .rings
                     .iter()
@@ -901,14 +911,20 @@ impl Assembly {
             .expect("a ring of a face has a corner on it");
 
         let mut sides: Vec<Side> = Vec::new();
-        let mut carrying: Option<usize> = None;
         for step in 0..ring.len() {
             let dart = ring[(opens + step) % ring.len()];
-            let edge = renumbered.runs.leader(self.edge_of(dart));
-            if carrying == Some(edge) {
+            // A dart whose corner the joining dissolved is the rest of the side
+            // before it and not a side of its own. Skipping on the *corner*
+            // rather than on the edge is what leaves a seam alone: a seam is one
+            // edge walked twice by one wire, and neither of its poles is a
+            // corner anything dissolved.
+            if renumbered
+                .straight_through
+                .contains(&(lump, self.starts_at(dart)))
+            {
                 continue;
             }
-            carrying = Some(edge);
+            let edge = renumbered.runs.leader(self.edge_of(dart));
             let edge = renumbered.edge_now[edge].expect("a run of edges that stays becomes one");
             let from = renumbered.corner_now[self.starts_at(dart)]
                 .expect("a run of edges starts at a corner");
@@ -928,13 +944,15 @@ impl Assembly {
         }
         // Three sides, **or one that closes on itself**, which is the rule
         // `Model::validate` reads: a cap circle and the rim of a round hole are
-        // one whole curve and have one corner between them.
+        // one whole curve and have one corner between them. A seam is the third
+        // shape a wire comes in — one edge walked both ways, with a pole between
+        // the two walks — and it has four steps once the poles are counted.
         let closes_on_one = match &sides[..] {
             [only] => edges[only.edge].ends[0] == edges[only.edge].ends[1],
             _ => false,
         };
         assert!(
-            sides.len() >= 3 || closes_on_one,
+            sides.len() >= 3 || closes_on_one || self.faces[ring[0].face].is_a_whole_closed_surface,
             "a face has at least three sides or one that closes, this one has {}",
             sides.len()
         );
@@ -1130,16 +1148,24 @@ impl Assembly {
         for face in &self.faces {
             let mut wires: SmallVec<[WireSlot; 1]> = SmallVec::new();
             for wire in &face.wires {
-                let mut coedges: SmallVec<[CoedgeSlot; 4]> = SmallVec::new();
+                let mut steps: SmallVec<[WireStep; 4]> = SmallVec::new();
                 for side in wire {
                     let turn = if side.forward {
                         Orientation::Forward
                     } else {
                         Orientation::Reversed
                     };
-                    coedges.push(model.add_coedge(edges[side.edge], turn));
+                    steps.push(WireStep::Along(model.add_coedge(edges[side.edge], turn)));
+                    // A whole closed surface is cut open along a seam, and a
+                    // seam ends where the surface pinches to a point. The
+                    // boundary has to go somewhere between arriving at a pole
+                    // and leaving it, and where it goes is nowhere at all —
+                    // which is `WireStep::Pole` and the reason it exists.
+                    if face.is_a_whole_closed_surface {
+                        steps.push(WireStep::Pole(vertices[self.stops_at(side)]));
+                    }
                 }
-                wires.push(model.add_wire(coedges));
+                wires.push(model.add_wire_of_steps(steps));
             }
             faces.push(model.add_face(face.surface, wires));
         }
@@ -1392,6 +1418,10 @@ struct Face {
     /// [`Orientation::Forward`] for a plane, because the plane above carries it.
     used: Orientation,
     wires: Vec<Vec<Side>>,
+    /// Whether this face is the **whole** of a closed surface, so that its one
+    /// wire is a seam and its two corners are poles the boundary stands still
+    /// at rather than corners it turns at (§38.1).
+    is_a_whole_closed_surface: bool,
 }
 
 impl Face {
@@ -1454,6 +1484,9 @@ struct JoinedFace {
     members: Vec<usize>,
     surface: Surface,
     used: Orientation,
+    /// Carried through the joining untouched: only flat faces are ever joined,
+    /// and a whole closed surface is a face on its own.
+    is_a_whole_closed_surface: bool,
     /// The outline first, then one ring per hole.
     rings: Vec<Vec<Dart>>,
 }
@@ -1594,6 +1627,9 @@ enum CornerName {
     /// The one point on a closed crossing that nothing else cuts, named by the
     /// two surfaces it runs between.
     RoundACurve([[u64; 8]; 2]),
+    /// A pole of a closed surface, named by that surface and which of its two
+    /// poles this is (§38.1).
+    Pole([u64; 8], bool),
 }
 
 impl Corners {
@@ -1613,6 +1649,11 @@ impl Corners {
                 named.sort_unstable();
                 CornerName::RoundACurve(named)
             }
+            MeetPoint::APoleOfAClosedSurface {
+                surface,
+                at_the_top,
+                ..
+            } => CornerName::Pole(name_of_surface_bits(surface), *at_the_top),
         };
         if let Some(&already) = self.named.get(&name) {
             return already;
@@ -1621,7 +1662,9 @@ impl Corners {
         let at = middle_of(point);
         let was = match end {
             MeetPoint::Existing { vertex, .. } => Some(*vertex),
-            MeetPoint::OfThreeSurfaces { .. } | MeetPoint::WhereAClosedCurveStarts { .. } => None,
+            MeetPoint::OfThreeSurfaces { .. }
+            | MeetPoint::WhereAClosedCurveStarts { .. }
+            | MeetPoint::APoleOfAClosedSurface { .. } => None,
         };
         let index = match self.at.get(&exactly_at(at)) {
             Some(&already) => {

@@ -224,8 +224,16 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
-    /// A curved face is bounded by one curve that goes right round its surface,
-    /// and the surface does not pinch to a point for the face to close on.
+    /// A curved face is bounded by one curve that goes right round its surface —
+    /// **or by nothing at all** — and the surface does not pinch to a point for
+    /// the face to close on.
+    ///
+    /// The second half is §38.1's. A face with no boundary once its seam is left
+    /// out is the whole of its surface, and the fuse writes one back out by
+    /// cutting it open along a seam of its own, which has to end somewhere: a
+    /// ball pinches at two poles and is answered, while a plane and a pipe run on
+    /// for ever, so a face on one of them with nothing trimming it is unbounded
+    /// and there is no answer to give.
     ///
     /// Such a face has no seam and no pole in the model — a
     /// [`WireStep::Pole`](crate::model::WireStep) and a seam edge are what say
