@@ -689,7 +689,7 @@ impl InPlane {
 
     /// Which way `first`, `second`, `third` turn about the plane's normal:
     /// [`Decision::Pos`] anticlockwise.
-    fn turn(
+    pub(crate) fn turn(
         &self,
         first: PredicatePoint,
         second: PredicatePoint,

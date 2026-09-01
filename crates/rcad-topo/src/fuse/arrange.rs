@@ -333,6 +333,9 @@ struct Crossing {
     order: HowItRuns,
     /// Whether a face of the other group put this crossing here.
     cuts: bool,
+    /// Whether any of it is inside the box round the face. A curve wholly
+    /// outside cuts nothing off it and is left undrawn.
+    reaches_the_face: bool,
 }
 
 impl Crossing {
@@ -564,6 +567,7 @@ impl<'f> Arrangement<'f> {
                             forward_climbs_the_axis: true,
                         },
                         cuts,
+                        reaches_the_face: true,
                     });
                     self.crossings.len() - 1
                 }
@@ -795,8 +799,46 @@ impl<'f> Arrangement<'f> {
 
     /// How points along each crossing are ordered, now that there is a node on
     /// it to read the direction at.
+    ///
+    /// A **cut** every node of which is provably clear of the box round the face
+    /// cuts nothing off it, and is dropped rather than ordered. That is not
+    /// keenness: a curve that crossed the face's boundary would share a node
+    /// with one of the crossings the boundary runs along, and every meet of
+    /// every pair has been worked out by now — so a cut with no node inside the
+    /// box is a cut wholly outside the face, and how points run along it is a
+    /// question about nothing.
+    ///
+    /// **A crossing the face's own boundary runs along is never dropped**,
+    /// however far its nodes are. Its arcs *are* the rim, and dropping one takes
+    /// a side off the face — measured, on the planar suite, and it is the whole
+    /// of what the word "cut" is doing in the paragraph above.
+    ///
+    /// It is worth saying because of what it buys. A block wall a hair off
+    /// parallel to a bar's axis cuts that bar's cylinder in an ellipse ten
+    /// quadrillion across, and three points on one are nearly in a line; the
+    /// same wall exactly parallel to it cuts two straight lines whose direction
+    /// has to be read off a gradient at a box that far out. Between them, those
+    /// two were the whole refusal budget of a turned curved pair, and dropping
+    /// the curves that reach nothing takes it to none.
     fn work_out_how_each_crossing_runs(&mut self, log: &mut ProvenanceLog) -> Result<()> {
         for crossing in 0..self.crossings.len() {
+            let mut on_it = self
+                .nodes
+                .iter()
+                .filter(|node| node.crossings.contains(&crossing))
+                .peekable();
+            let only_a_cut = !self
+                .crossing_of_edge
+                .iter()
+                .flatten()
+                .any(|&along| along == crossing);
+            if only_a_cut
+                && on_it.peek().is_some()
+                && on_it.all(|node| self.face.bounds.provably_misses(node.point))
+            {
+                self.crossings[crossing].reaches_the_face = false;
+                continue;
+            }
             let Some(at) = self
                 .nodes
                 .iter()
@@ -828,6 +870,9 @@ impl<'f> Arrangement<'f> {
         loop {
             let mut same = Sameness::of(self.nodes.len());
             for crossing in 0..self.crossings.len() {
+                if !self.crossings[crossing].reaches_the_face {
+                    continue;
+                }
                 let order = self.nodes_along(crossing, policy, log)?;
                 for pair in order.windows(2) {
                     if self.order_along(crossing, pair[0], pair[1], policy, log)? == Decision::Zero
@@ -1037,9 +1082,14 @@ impl<'f> Arrangement<'f> {
         log: &mut ProvenanceLog,
     ) -> Result<()> {
         self.drawn_in_full = (0..self.crossings.len())
-            .map(|crossing| self.crossings[crossing].order.closes())
+            .map(|crossing| {
+                self.crossings[crossing].order.closes() && self.crossings[crossing].reaches_the_face
+            })
             .collect();
         for crossing in 0..self.crossings.len() {
+            if !self.crossings[crossing].reaches_the_face {
+                continue;
+            }
             let order = self.nodes_along(crossing, policy, log)?;
             let closes = self.crossings[crossing].order.closes();
             let steps = if closes {
@@ -1546,12 +1596,7 @@ impl<'f> Arrangement<'f> {
     /// nothing out, and what follows either places the lump some other way or
     /// leaves it bounding no piece.
     fn say_whether_the_face_holds_each_lump_of_closed_cuts(&mut self, lump: &[usize]) {
-        let Some(flat) = self.surface.as_plane() else {
-            return;
-        };
-        let Some(in_plane) = InPlane::of(flat) else {
-            return;
-        };
+        let in_plane = self.surface.as_plane().and_then(InPlane::of);
         let rim: Vec<Vec<PredicatePoint>> = self
             .face
             .wires
@@ -1584,10 +1629,24 @@ impl<'f> Arrangement<'f> {
                 .collect();
             nodes.sort_unstable();
             nodes.dedup();
-            let Some(held) = nodes
-                .into_iter()
-                .find_map(|node| in_plane.winding_around(&rim, self.nodes[node].point))
-            else {
+            // A cut whose whole lump is clear of the box round the face holds
+            // none of it, and the box is a proof rather than a hint. That is
+            // what settles a plane a hair off parallel to a pipe's axis: the
+            // ellipse it cuts is real, and ten quadrillion across, and nothing
+            // that far away is worth deciding about more carefully.
+            let outside = nodes
+                .iter()
+                .all(|&node| self.face.bounds.provably_misses(self.nodes[node].point));
+            let held = if outside {
+                Some(0)
+            } else {
+                in_plane.as_ref().and_then(|in_plane| {
+                    nodes.iter().find_map(|&node| {
+                        how_often_the_rim_winds_round(in_plane, &rim, self.nodes[node].point)
+                    })
+                })
+            };
+            let Some(held) = held else {
                 continue;
             };
             for cycle in its_walks {
@@ -1950,6 +2009,7 @@ impl<'f> Arrangement<'f> {
                 None => self.winding[cell] = Some(known),
                 Some(already) if already == known => (),
                 Some(_) => {
+                    self.dump("two walks of one cell disagree");
                     return Err(Error::CannotTellTheCellsOfAFaceApart {
                         face: self.face.keys[0],
                     });
@@ -1974,6 +2034,7 @@ impl<'f> Arrangement<'f> {
                     let across = self.cell_of[self.cycle_of[half_edge ^ 1]];
                     let theirs = known + self.climb_across(half_edge);
                     if !(0..=1).contains(&theirs) {
+                        self.dump(&format!("winding {theirs}"));
                         return Err(Error::CannotTellTheCellsOfAFaceApart {
                             face: self.face.keys[0],
                         });
@@ -1985,6 +2046,7 @@ impl<'f> Arrangement<'f> {
                         }
                         Some(already) if already == theirs => (),
                         Some(_) => {
+                            self.dump(&format!("two ways to cell {across}"));
                             return Err(Error::CannotTellTheCellsOfAFaceApart {
                                 face: self.face.keys[0],
                             });
@@ -2126,6 +2188,47 @@ impl<'f> Arrangement<'f> {
         }
     }
 
+    fn dump(&self, why: &str) {
+        if std::env::var("DUMP").is_err() {
+            return;
+        }
+        println!("--- {why}");
+        for (index, crossing) in self.crossings.iter().enumerate() {
+            println!(
+                "  crossing {index}: {:?} closes={} cuts={} full={}",
+                crossing.partner,
+                crossing.order.closes(),
+                crossing.cuts,
+                self.drawn_in_full[index]
+            );
+        }
+        for (index, node) in self.nodes.iter().enumerate() {
+            println!(
+                "  node {index}: {:?} on {:?} vertex={:?}",
+                super::middle_of(node.point).coordinates(),
+                node.crossings,
+                node.vertex.is_some()
+            );
+        }
+        for (index, arc) in self.arcs.iter().enumerate() {
+            println!(
+                "  arc {index}: crossing {} ends {:?} boundary {:?}",
+                arc.crossing,
+                arc.ends,
+                arc.boundary.map(|b| (b.wire, b.runs_forward, b.position))
+            );
+        }
+        for (index, cycle) in self.cycles.iter().enumerate() {
+            println!(
+                "  cycle {index}: {:?} winding {:?} cell {:?}",
+                cycle,
+                self.winding_of_cycle[index],
+                self.cell_of.get(index)
+            );
+        }
+        println!("  windings {:?}", self.winding);
+    }
+
     fn direction(&self, half_edge: usize) -> Direction {
         Direction {
             crossing: self.arcs[half_edge / 2].crossing,
@@ -2140,6 +2243,68 @@ impl<'f> Arrangement<'f> {
     fn to(&self, half_edge: usize) -> usize {
         self.arcs[half_edge / 2].ends[1 - half_edge % 2]
     }
+}
+
+/// How many times a face's own rim winds round a point on its surface: one
+/// inside the material, zero outside it.
+///
+/// A half-line runs from the point towards the first corner of the rim and the
+/// sides crossing it are counted, `+1` one way round and `-1` the other, so a
+/// hole subtracts itself. Which side of the half-line's line each corner falls
+/// is read as a **half-open** range — a corner exactly on it counts as below —
+/// and that is what leaves no tie to break however many corners the line runs
+/// through.
+///
+/// **Deliberately not the fan `select.rs` uses**, and the reason is one shape:
+/// a fan from a corner cannot answer about a point on one of its own chords,
+/// and every chord of a square runs through its centre. The circle a bar cuts in
+/// the middle of a block's face starts at a point that is often exactly there.
+/// The two are the same question and §35.10's last trap already asks for one
+/// answer to it; this is a third spelling and lane 5 owes the unification.
+///
+/// `None` when the point sits on the line of one of the rim's own sides, or when
+/// a turn could not be settled. Both mean "ask about another point", which the
+/// caller has.
+fn how_often_the_rim_winds_round(
+    in_plane: &InPlane,
+    rim: &[Vec<PredicatePoint>],
+    point: PredicatePoint,
+) -> Option<i32> {
+    let aim = *rim.iter().flatten().next()?;
+    let mut winding = 0;
+    for (position, ring) in rim.iter().enumerate() {
+        let inwards = if position == 0 { 1 } else { -1 };
+        for index in 0..ring.len() {
+            let (from, to) = (ring[index], ring[(index + 1) % ring.len()]);
+            let along = in_plane.turn(from, to, point);
+            if !matches!(along, Decision::Pos | Decision::Neg) {
+                return None;
+            }
+            let above = |at: PredicatePoint| {
+                // The corner the half-line is aimed at is on it by
+                // construction, and the half-open rule counts that as below. It
+                // has to be said rather than worked out: the determinant has the
+                // same box in two of its rows, and an interval evaluation of one
+                // like that straddles zero however far the point is from
+                // anything. Every corner of a placed solid is such a box.
+                if at == aim {
+                    return Some(false);
+                }
+                match in_plane.turn(point, aim, at) {
+                    Decision::Pos => Some(true),
+                    Decision::Neg | Decision::Zero => Some(false),
+                    _ => None,
+                }
+            };
+            winding += inwards
+                * match (above(from)?, above(to)?, along) {
+                    (false, true, Decision::Pos) => 1,
+                    (true, false, Decision::Neg) => -1,
+                    _ => 0,
+                };
+        }
+    }
+    Some(winding)
 }
 
 /// Whether two boxes have any point in common, so that one may be the other.
@@ -2392,13 +2557,22 @@ fn dominant_axis_of_a_direction(
     match best {
         Some((axis, climbs, _)) => Ok((axis, climbs)),
         None => Err(gave_up(
-            ORIENT2D,
+            WHICH_WAY_A_CROSSING_RUNS,
             &[PredicatePoint::Constructed(direction)],
             Measures::Area,
             log,
         )),
     }
 }
+
+/// The name the direction of a crossing that had to be worked out goes by in
+/// provenance records.
+///
+/// Deliberately not [`ORIENT2D`], which is what the two-plane case logs. That
+/// one reads two stored normals and is exact; this one reads a *gradient at a
+/// box* and gives up where the box is wide enough to straddle an axis, so a
+/// breakdown that called them one thing would hide which of the two ran out.
+const WHICH_WAY_A_CROSSING_RUNS: &str = "which way a crossing runs";
 
 /// Whether two planes are the same plane, refusing when nothing can tell.
 ///
@@ -3410,5 +3584,199 @@ mod what_the_curved_arrangement_reaches {
             said.iter().any(|row| row.starts_with("pipe refused")),
             "and the wall of the bar with it, got {said:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod how_often_cutting_a_curved_face_refuses {
+    use std::collections::BTreeMap;
+
+    use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
+    use rcad_predicates::{Policy, ProvenanceLog};
+
+    use super::super::bake::bake;
+    use super::super::cuts;
+    use super::split_a_face;
+    use crate::{Error, Model};
+
+    /// How many pairs each family draws.
+    const DRAWS: usize = 256;
+
+    /// A deterministic sequence, so that a rate is one number and not a range.
+    ///
+    /// Nothing here is trying to be random. What it has to be is *the same every
+    /// run*, because a share of refusals that moves between runs is a share
+    /// nobody can put a threshold under (§17.7).
+    struct Draw(u64);
+
+    impl Draw {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            self.0 >> 33
+        }
+
+        /// A whole number in `low..=high`.
+        fn whole(&mut self, low: i64, high: i64) -> f64 {
+            let span = u64::try_from(high - low + 1).expect("a range that runs upwards");
+            let picked = i64::try_from(self.next() % span).expect("inside the range") + low;
+            picked as f64
+        }
+
+        /// A number between zero and one, to the nearest thousandth.
+        fn fraction(&mut self) -> f64 {
+            (self.next() % 1000) as f64 / 1000.0
+        }
+    }
+
+    /// How each family writes its pair down.
+    #[derive(Clone, Copy)]
+    enum Family {
+        /// Whole numbers, axes square to each other.
+        Lattice,
+        /// The whole pair turned about an awkward axis.
+        Turned,
+        /// The block square and the bar leaning.
+        Leaning,
+        /// The lattice pair with every number multiplied by a power of two.
+        AtAPowerOfTwo,
+    }
+
+    impl Family {
+        fn named(self) -> &'static str {
+            match self {
+                Family::Lattice => "lattice",
+                Family::Turned => "turned",
+                Family::Leaning => "leaning",
+                Family::AtAPowerOfTwo => "written at 2^k",
+            }
+        }
+    }
+
+    /// A block with a round bar somewhere through it, written the family's way.
+    fn a_block_and_a_bar(family: Family, draw: &mut Draw) -> Option<(Model, [crate::SolidKey; 2])> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let scale = match family {
+            Family::AtAPowerOfTwo => 2.0_f64.powi(i32::try_from(draw.next() % 9).ok()? - 4),
+            _ => 1.0,
+        };
+        let side = 8.0 * scale;
+        // The bar is kept a whole unit clear of the block's walls. A bar exactly
+        // touching one is a plane tangent to a cylinder, which is roadmap §7.4's
+        // own catalogue entry and not what a *control* family is for — a control
+        // that draws knife edges measures the knife edges (§17.7).
+        let radius = draw.whole(1, 2);
+        let at = [
+            draw.whole(1 + radius as i64, 7 - radius as i64) * scale,
+            draw.whole(1 + radius as i64, 7 - radius as i64) * scale,
+        ];
+        let radius = radius * scale;
+        let block = model
+            .add_cube(side, &Policy::certified(), &mut ProvenanceLog::new())
+            .ok()?;
+        let stands = Isometry::translation(Vector::new(at[0], at[1], -2.0 * scale)).ok()?;
+        let placed = match family {
+            Family::Leaning => {
+                let axis = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 9.0)).ok()?;
+                Isometry::rotation(&axis, 0.05 + draw.fraction() / 4.0)
+                    .ok()?
+                    .compose(&stands)
+            }
+            _ => stands,
+        };
+        let bar = model.add_round_bar(radius, 12.0 * scale, &placed).ok()?;
+        if let Family::Turned = family {
+            let axis = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).ok()?;
+            let turn = Isometry::rotation(&axis, 0.1 + draw.fraction()).ok()?;
+            model.place_solid(block, &turn);
+            model.place_solid(bar, &turn);
+        }
+        Some((model, [block, bar]))
+    }
+
+    /// Cut every face of a drawn pair and say what each attempt came to.
+    fn how_each_face_went(family: Family) -> (usize, BTreeMap<String, usize>) {
+        let policy = Policy::certified();
+        let mut draw = Draw(0x5EED);
+        let mut faces = 0;
+        let mut gave_up: BTreeMap<String, usize> = BTreeMap::new();
+        for _ in 0..DRAWS {
+            let Some((model, [block, bar])) = a_block_and_a_bar(family, &mut draw) else {
+                continue;
+            };
+            let mut log = ProvenanceLog::new();
+            let Ok(mut solids) = bake(&model, &[block, bar], &policy, &mut log) else {
+                *gave_up.entry("baking".to_owned()).or_default() += 1;
+                continue;
+            };
+            if cuts::gather(&mut solids, &policy, &mut log).is_err() {
+                *gave_up.entry("gathering".to_owned()).or_default() += 1;
+                continue;
+            }
+            for solid in &solids {
+                for face in &solid.faces {
+                    faces += 1;
+                    match split_a_face(face, &policy, &mut log) {
+                        Ok(_) => (),
+                        Err(Error::Undecidable { records }) => {
+                            let named = records
+                                .records()
+                                .last()
+                                .map_or("nothing named", |record| record.predicate());
+                            *gave_up.entry(named.to_owned()).or_default() += 1;
+                        }
+                        Err(why) => *gave_up.entry(format!("{why}")).or_default() += 1,
+                    }
+                }
+            }
+        }
+        (faces, gave_up)
+    }
+
+    /// §31.7 criterion 16's control, for the half this lane owns: a curved pair
+    /// written on the lattice is cut with nothing refused and nothing recorded.
+    ///
+    /// The control is what makes the headline mean anything (§17.7). A filter
+    /// that refused everything would pass every property in this file and fail
+    /// only here.
+    #[test]
+    fn every_certified_cut_of_a_lattice_curved_pair_is_decided() {
+        let (faces, gave_up) = how_each_face_went(Family::Lattice);
+        assert!(faces > 2000, "only {faces} faces were drawn");
+        assert!(
+            gave_up.is_empty(),
+            "a lattice-aligned curved pair should refuse nothing, and this one refused {gave_up:?}"
+        );
+    }
+
+    /// The other three families, measured and printed rather than judged against
+    /// a number this file made up.
+    ///
+    /// §31.7 says no threshold is offered at a gate and the lane measures it, so
+    /// the numbers are in §36 and what stands here is the shape of the answer:
+    /// every refusal is named, and none of them is a decision anybody took
+    /// without proof.
+    #[test]
+    fn how_often_a_certified_cut_of_a_turned_curved_pair_refuses() {
+        for family in [Family::Turned, Family::Leaning, Family::AtAPowerOfTwo] {
+            let (faces, gave_up) = how_each_face_went(family);
+            let refused: usize = gave_up.values().sum();
+            println!(
+                "{}: {:.2}% of {faces} faces refused {gave_up:?}",
+                family.named(),
+                100.0 * refused as f64 / faces as f64
+            );
+            assert!(
+                faces > 1000,
+                "only {faces} faces were drawn for this family"
+            );
+            assert!(
+                refused as f64 <= 0.30 * faces as f64,
+                "{}: {refused} of {faces} is more than the three tenths §36 records",
+                family.named()
+            );
+        }
     }
 }

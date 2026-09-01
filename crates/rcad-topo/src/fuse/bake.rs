@@ -179,6 +179,19 @@ impl Bounds {
         (0..3).all(|axis| self.low[axis] <= other.high[axis] && other.low[axis] <= self.high[axis])
     }
 
+    /// Whether the box provably holds no part of `point`'s own box.
+    ///
+    /// A proof and not a hint: [`Bounds`] round a face is a box the face is
+    /// certainly inside, so a point whose whole enclosure is clear of it is
+    /// certainly off the face. Plain `f64` is honest here because the comparison
+    /// only ever *widens* what is kept.
+    pub(crate) fn provably_misses(self, point: PredicatePoint) -> bool {
+        let box_of_it = point.enclosure();
+        (0..3).any(|axis| {
+            box_of_it[axis].lo() > self.high[axis] || box_of_it[axis].hi() < self.low[axis]
+        })
+    }
+
     fn nothing() -> Self {
         Self {
             low: [f64::INFINITY; 3],
