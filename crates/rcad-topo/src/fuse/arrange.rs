@@ -1032,8 +1032,7 @@ impl<'f> Arrangement<'f> {
             }
             HowItRuns::RoundAClosedCurve { from } => {
                 let partner = self.crossings[crossing].partner;
-                which_comes_first_round_a_crossing([&self.surface, &partner], from, one, other)
-                    .ok()?
+                round_a_closed_crossing([&self.surface, &partner], from, one, other).ok()?
             }
         };
         matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
@@ -1070,12 +1069,7 @@ impl<'f> Arrangement<'f> {
             }
             HowItRuns::RoundAClosedCurve { from } => {
                 let partner = self.crossings[crossing].partner;
-                let decided = which_comes_first_round_a_crossing(
-                    [&self.surface, &partner],
-                    from,
-                    one,
-                    other,
-                )?;
+                let decided = round_a_closed_crossing([&self.surface, &partner], from, one, other)?;
                 must_decide(
                     decided,
                     ALONG_A_CROSSING,
@@ -1602,18 +1596,20 @@ impl<'f> Arrangement<'f> {
     /// it and be the same lump — so one point of it answers for the whole lump,
     /// and every walk the lump bounds is wound the same number of times.
     ///
-    /// **Only a flat face needs this**, and that is not timidity. On a curved
-    /// face every boundary edge is a whole closed curve (a cap circle, a hole a
-    /// pipe left in a ball's skin), so it is drawn in full and the sign of it
-    /// places the lump on its own. What a *flat* face is bounded by is straight
-    /// lines, and the stretch of a line past the edge that lies on it is not
-    /// drawn — so the sign says the same thing on both sides of the face's own
-    /// rim and cannot tell the inside from the outside. Counting how often the
-    /// rim winds round the point can, and that is one walk that already exists.
+    /// The count is only run on a **flat** face, and what that leaves out is
+    /// worth naming rather than glossing. A curved face this kernel *builds* is
+    /// bounded by whole closed curves — a bar's wall by its two cap circles, a
+    /// ball's skin by nothing at all — and a closed curve is drawn in full, so
+    /// the sign of it places any lump without a count. A flat face is bounded by
+    /// straight lines, and the stretch of a line past the edge lying on it is
+    /// not drawn, so the sign says the same thing on both sides of the face's
+    /// own rim: the count is what tells the inside from the outside there.
     ///
-    /// A face this cannot answer for is left alone: an unknown winding rules
-    /// nothing out, and what follows either places the lump some other way or
-    /// leaves it bounding no piece.
+    /// **The first curved face with an open boundary edge falsifies the first
+    /// half of that**, and it is a face this fuse cuts and hands back — so lane
+    /// 5 of §31.6 makes one. Nothing here is wrong when it arrives: an unknown
+    /// winding rules nothing out, and what follows either places the lump some
+    /// other way or refuses by name.
     fn say_whether_the_face_holds_each_lump_of_closed_cuts(&mut self, lump: &[usize]) {
         let in_plane = self.surface.as_plane().and_then(InPlane::of);
         let rim: Vec<Vec<PredicatePoint>> = self
@@ -2335,6 +2331,32 @@ fn how_often_the_rim_winds_round(
 fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
     let (mine, theirs) = (one.enclosure(), other.enclosure());
     (0..3).all(|axis| mine[axis].lo() <= theirs[axis].hi() && theirs[axis].lo() <= mine[axis].hi())
+}
+
+/// Which of two points comes first going round a closed crossing from `from`.
+///
+/// [`which_comes_first_round_a_crossing`] answers [`Decision::Zero`] when the
+/// three points sweep no area, which on a conic means two of them are the same
+/// place on it. Two of the three may be **the start**, and then "the same place"
+/// is not what it means: a point at the start comes first, by definition of
+/// where the counting begins. Reading that as "these are one point" would fold
+/// every node of the crossing into the start.
+fn round_a_closed_crossing(
+    pair: [&Surface; 2],
+    from: PredicatePoint,
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> rcad_geom::Result<Decision> {
+    if one == other {
+        return Ok(Decision::Zero);
+    }
+    if one == from {
+        return Ok(Decision::Pos);
+    }
+    if other == from {
+        return Ok(Decision::Neg);
+    }
+    which_comes_first_round_a_crossing(pair, from, one, other)
 }
 
 /// What picks one curve of a crossing out of the others.
@@ -3566,6 +3588,68 @@ mod what_the_curved_arrangement_reaches {
                 "plane cut by 6 -> [1, 1]",
             ]
         );
+    }
+
+    /// §30.8 item 10, closed: a bar's wall with nothing cutting it comes back as
+    /// itself, bounded by its two cap circles and no seam.
+    ///
+    /// A **closed edge has no direction rule** in the model — the mesher picks
+    /// one by the sign of its turn round the face, which works for a cap circle
+    /// and says nothing about a hole — and the arrangement cannot do without
+    /// one: the two cap circles of a wall have to run *opposite* ways round the
+    /// cylinder or the wall between them is not bounded at all.
+    ///
+    /// §31.3 settles the rule and it costs no arithmetic. Write `d` for the
+    /// crossing's own direction `∇S × ∇T` and `o` for the face's own gradient
+    /// `∇S`; then `(o × d)·∇T = (∇S·∇T)² − |∇S|²|∇T|²`, which Cauchy–Schwarz
+    /// makes never positive and equal to `−|∇S × ∇T|²` exactly. So **left of
+    /// forward is always the negative side of the partner**, everywhere, with no
+    /// case analysis — and a wire walks a closed edge forward exactly when the
+    /// face's material is inside the partner, which is what a corner off that
+    /// partner already says.
+    ///
+    /// The wall's bottom cap has its normal pointing down and its top cap up, so
+    /// the wall's material is on the negative side of both and it walks both
+    /// forward; the two forward directions are `radial × down` and `radial × up`
+    /// and they are opposite. That is the whole of it, and what this test says
+    /// is that the winding count reads it: one piece, two wires, no seam.
+    #[test]
+    fn a_bar_wall_is_bounded_by_two_cap_circles_that_run_opposite_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar = model
+            .add_round_bar(1.0, 5.0, &Isometry::identity())
+            .expect("a bar");
+        let solids = bake(
+            &model,
+            &[bar],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar bakes");
+        let wall = solids[0]
+            .faces
+            .iter()
+            .find(|face| matches!(face.surface, Surface::Cylinder(_)))
+            .expect("the bar has a wall");
+
+        let pieces = split_a_face(wall, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a wall with nothing cutting it is itself");
+
+        assert_eq!(pieces.len(), 1, "nothing cuts it, so it is one piece");
+        assert_eq!(
+            pieces[0].wires.len(),
+            2,
+            "bounded by its two cap circles, and by no seam"
+        );
+        for wire in &pieces[0].wires {
+            assert_eq!(wire.len(), 1, "one closed side each");
+            assert!(matches!(wire[0].carried_by[1], Surface::Plane(_)), "a cap");
+            assert_eq!(
+                wire[0].ends[0].point(),
+                wire[0].ends[1].point(),
+                "a side that closes on itself"
+            );
+        }
     }
 
     /// A ball with a pipe through it, which is the shape §34.9 says this lane
