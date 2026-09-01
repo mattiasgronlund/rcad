@@ -355,7 +355,7 @@ impl SolidView<'_> {
             match dot_enclosing(along, gradient_at(&surface, at)).sign() {
                 Decision::Pos => tally.winding += outward,
                 Decision::Neg => tally.winding -= outward,
-                _ => tally.grazed(0.0),
+                Decision::Zero | Decision::Undecidable { .. } | _ => tally.grazed(0.0),
             }
         }
         Ok(())

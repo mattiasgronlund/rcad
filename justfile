@@ -1,4 +1,4 @@
-default: check check-enums lint test deny
+default: check check-enums check-wildcards lint test deny
 
 check:
     cargo check --workspace --all-targets
@@ -11,6 +11,33 @@ check:
 #
 # A `pub enum` is judged against what stands between it and the blank line above
 # it, which is where rustfmt puts the item's own attributes and doc comment.
+# How many wildcard match arms stand over one of our own enums
+# (docs/decisions.md §40). Raise or lower it only with the commit that does.
+#
+# A count and not a denial, because the lint cannot be turned off in place:
+# rustc resolves a lint level at the enclosing expression, so `#[allow]` on a
+# match arm never reaches it, and the only granularity left is the whole
+# function.
+#
+# The number moves for two reasons and both want looking at. A new wildcard
+# raises it. So does a new *variant*, because a site that names every variant
+# there is today starts matching a known one tomorrow — which is the whole point
+# of naming them.
+wildcard_arms := "76"
+
+check-wildcards:
+    @find crates -name lib.rs -path '*/src/*' -exec touch {} +
+    @out=$(cargo clippy --workspace --all-targets -- \
+            -W clippy::wildcard_enum_match_arm 2>&1) \
+        || { echo "$out" | grep '^error' | head -5; \
+             echo "clippy did not finish, so this counted nothing"; exit 1; }; \
+    found=$(echo "$out" | grep -c '^warning: wildcard match'); \
+    if [ "$found" != "{{wildcard_arms}}" ]; then \
+        echo "wildcard arms over our own enums: $found, expected {{wildcard_arms}}"; \
+        echo "a new one, or a new variant reaching an old one — see docs/decisions.md §40"; \
+        exit 1; \
+    fi
+
 check-enums:
     @! awk '/^$/ {ok = 0} \
             /^#\[non_exhaustive\]/ {ok = 1} \

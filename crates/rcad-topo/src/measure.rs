@@ -741,7 +741,8 @@ fn lexicographically_smaller(corner: [f64; 3], so_far: [f64; 3]) -> bool {
         .zip(&so_far)
         .find_map(|(mine, theirs)| match mine.total_cmp(theirs) {
             core::cmp::Ordering::Equal => None,
-            order => Some(order.is_lt()),
+            core::cmp::Ordering::Less => Some(true),
+            core::cmp::Ordering::Greater => Some(false),
         })
         .unwrap_or(false)
 }

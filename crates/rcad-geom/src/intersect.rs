@@ -1353,7 +1353,7 @@ fn how_two_radii_and_a_gap_compare_exactly(
         Decision::Zero => Decision::Zero,
         Decision::Pos | Decision::Neg if gap > 0.0 => Decision::Pos,
         Decision::Pos | Decision::Neg => Decision::Neg,
-        _ => return None,
+        Decision::Undecidable { .. } | _ => return None,
     };
 
     // Both pull the same way, or one of them is nothing: no squaring needed.
@@ -1385,7 +1385,7 @@ fn how_two_radii_and_a_gap_compare_exactly(
         Decision::Pos => 1.0,
         Decision::Zero => 0.0,
         Decision::Neg => -1.0,
-        _ => return None,
+        Decision::Undecidable { .. } | _ => return None,
     }))
 }
 

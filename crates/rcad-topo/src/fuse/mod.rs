@@ -457,6 +457,7 @@ fn the_other_way(decision: Decision) -> Decision {
     match decision {
         Decision::Pos => Decision::Neg,
         Decision::Neg => Decision::Pos,
+        Decision::Zero | Decision::Undecidable { .. } => decision,
         other => other,
     }
 }

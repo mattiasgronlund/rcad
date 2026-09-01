@@ -339,7 +339,7 @@ fn samples_over(surface: &Surface) -> Vec<Point> {
                     points.push(surface.point_at(u, along));
                 }
             }
-            _ => {
+            Surface::Plane(_) | Surface::Sphere(_) | _ => {
                 for step in -7..=7 {
                     points
                         .push(surface.point_at(u, f64::from(step) * core::f64::consts::PI / 16.0));

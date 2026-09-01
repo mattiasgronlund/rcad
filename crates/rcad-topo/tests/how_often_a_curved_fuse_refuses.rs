@@ -79,7 +79,7 @@ fn a_pair(family: Family, draw: &mut Draw) -> Option<(Model, SolidKey, SolidKey)
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let scale = match family {
         Family::AtAPowerOfTwo => 2.0_f64.powi(i32::try_from(draw.next() % 7).ok()? - 3),
-        _ => 1.0,
+        Family::Lattice | Family::Turned | Family::ABall => 1.0,
     };
     let side = 8.0 * scale;
     let radius = draw.whole(1, 2);
@@ -97,7 +97,7 @@ fn a_pair(family: Family, draw: &mut Draw) -> Option<(Model, SolidKey, SolidKey)
                 &Isometry::translation(Vector::new(at[0], at[1], side)).ok()?,
             )
             .ok()?,
-        _ => model
+        Family::Lattice | Family::Turned | Family::AtAPowerOfTwo => model
             .add_round_bar(
                 radius * scale,
                 12.0 * scale,

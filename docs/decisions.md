@@ -11126,15 +11126,16 @@ goes quiet. When M5 adds a variant, that site has an unnamed variant under its
 wildcard again, and the lint fires at the site — which is the arm that would
 otherwise have swallowed it.
 
-Measured across workspace libraries: **65 sites** — `rcad-geom` 27, `rcad-topo`
-36, `rcad` 2, tests not yet counted. Each wants either its variants enumerated
-or an `#[allow]` saying the arm folds them on purpose, which is a better artefact
-than the bare `_` because it is a claim a reviewer can disagree with.
+Counted over the whole workspace including tests and benches: **106 sites**.
+§40.8 is what they turned out to be and what was done about them.
 
-**That work is not done, and is not this section.** §13 rule 3 would have it
-deferred to a milestone with a consumer; the consumer here is M5's first new
-variant, so it belongs before M5 and not in it. What is recorded now is that the
-lint is the mechanism and the feature is not.
+**An `#[allow]` on the arm does not work**, which this section said it would.
+Sixty-four were written, formatted and run, and clippy reported every one of
+them anyway: rustc resolves a lint level at the enclosing *expression*, and a
+match arm is not one, so the nearest attribute the level lookup reaches is the
+whole function. Per-site granularity is not available on stable, and a
+function-wide `#[allow]` would hide the next wildcard added to that function,
+which is the thing being watched for.
 
 ### 40.5 What else was rejected
 
@@ -11175,3 +11176,49 @@ attribute compiles, passes every test, and is invisible; the rule has gone
 unchecked for four milestones and happens to have held. It is a five-line `awk`,
 and the marker it looks for is the sentence `Orientation`'s doc comment already
 had, so the exception carries its own reason at the only place it applies.
+
+### 40.8 What the 106 sites were, and what counts them now
+
+Sorting them by what happens when the next variant arrives, rather than by
+which enum they match, split them cleanly:
+
+| | sites | what a new variant does there |
+|---|---|---|
+| the arm panics or is `unreachable!` | 68 | a loud stop, naming the variant |
+| the arm returns an `Err` naming what it saw | 3 | a refusal a caller can read |
+| the arm forwards a whole `Error` enum onward | 3 | forwarded, which is what forwarding means |
+| the arm folds on purpose | 2 | correct: every surface that is not a plane is curved, including ones added later |
+| **the arm absorbs it silently** | **30** | `return None`, `continue`, `&[]`, `1.0`, `Ok(false)` — no trace at all |
+
+Only the last row is a defect, and §40.2's count of 57 was the right order and
+the wrong set: what matters is not whether the arm binds a name but whether it
+makes a noise. Binding `other` to print it in a panic message is a *symptom* of
+being loud, not the thing itself.
+
+**All 30 were fixed**, by naming the variants they fold — the one-line change
+`_ => return None` →
+`Decision::Zero | Decision::Pos | Decision::Undecidable { .. } | _ => return None`.
+Nothing else changed: all 1113 tests pass unchanged, which is what a pattern-only
+edit has to show.
+
+Two of the thirty were inside the crate that owns the enum, and there the
+compiler had the last word: with every variant named, `| _` is unreachable and
+`rustc` says so. §40.1 argued that; those two lines are it happening.
+
+**The check is a count, not a denial** — `just check-wildcards`, against
+`wildcard_arms` in the justfile, because §40.4's per-site `#[allow]` is not
+available. The count moves for both of the reasons worth knowing about:
+
+- a **new wildcard** raises it. Demonstrated: putting one back in
+  `measure.rs` reported 77 against 76 and failed.
+- a **new variant** raises it too, because the thirty sites that now name every
+  variant there is start matching a known one. The compiler gets there first
+  inside the owning crate — a variant added to `Decision` stopped
+  `rcad-predicates` compiling — so the recipe distinguishes "clippy found
+  nothing" from "clippy never ran", and prints the build errors when it is the
+  second.
+
+A count is a baseline with a baseline's failure mode: a legitimate new panicking
+wildcard fails the check until the number is committed with it. That is the same
+deal a golden file makes, and it is the reason the number lives next to the
+recipe rather than in a file nobody reads.

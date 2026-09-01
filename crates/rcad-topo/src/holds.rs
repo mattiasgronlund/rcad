@@ -485,7 +485,10 @@ fn every_piece_of_that_crossing_is_an_edge(
         // edge along a curve the pair does not have. `SurfaceMeet` grows a
         // variant at every milestone, and whatever a new one means, a face
         // trimmed by it is one this has not been taught.
-        _ => Ok(false),
+        SurfaceMeet::Nothing
+        | SurfaceMeet::TouchAtOnePoint { .. }
+        | SurfaceMeet::SameSurface
+        | _ => Ok(false),
     }
 }
 
@@ -841,7 +844,7 @@ mod tests {
             .faces()
             .find(|face| match face.surface() {
                 Surface::Cylinder(pipe) => pipe.radius() == INNER,
-                _ => false,
+                Surface::Plane(_) | Surface::Sphere(_) | _ => false,
             })
             .expect("a washer has a hole")
             .key();

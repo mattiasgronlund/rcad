@@ -421,7 +421,7 @@ fn the_piece_holds(
         match side_of_surface(&side.carried_by[1], point) {
             found if found == side.material_side => (),
             Decision::Neg | Decision::Pos | Decision::Zero => return Some(false),
-            _ => return None,
+            Decision::Undecidable { .. } | _ => return None,
         }
     }
     let mut winding = 0;
@@ -431,7 +431,7 @@ fn the_piece_holds(
             Some(partner) => match side_of_surface(&partner, point) {
                 Decision::Neg => winding += inwards,
                 Decision::Pos => (),
-                _ => return None,
+                Decision::Zero | Decision::Undecidable { .. } | _ => return None,
             },
             None => {
                 let corners: Vec<PredicatePoint> =
@@ -761,7 +761,7 @@ impl InPlane {
                         turned_round: false,
                     });
                 }
-                _ => (),
+                Decision::Zero | Decision::Undecidable { .. } | _ => (),
             }
         }
         None
@@ -834,7 +834,7 @@ impl InPlane {
                 Decision::Pos => positives += 1,
                 Decision::Neg => negatives += 1,
                 Decision::Zero => zeros += 1,
-                _ => return None,
+                Decision::Undecidable { .. } | _ => return None,
             }
         }
         if positives > 0 && negatives > 0 {
@@ -957,7 +957,7 @@ fn how_big_the_surface_is(surface: &Surface) -> f64 {
     match surface {
         Surface::Sphere(ball) => ball.radius(),
         Surface::Cylinder(pipe) => pipe.radius(),
-        _ => 1.0,
+        Surface::Plane(_) | _ => 1.0,
     }
 }
 
@@ -987,7 +987,7 @@ fn the_middle_of_a_round_wire(flat: &Plane, partner: &Surface) -> Option<Predica
                 + axis.direction()
                     * ((offset - normal.dot(axis.origin() - Point::origin())) / along)
         }
-        _ => return None,
+        Surface::Plane(_) | _ => return None,
     };
     let there =
         from + normal * ((offset - normal.dot(from - Point::origin())) / normal.dot(normal));

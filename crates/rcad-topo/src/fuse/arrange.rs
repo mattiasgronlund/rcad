@@ -406,7 +406,7 @@ impl Crossing {
     fn picked_by(&self) -> &[Picker] {
         match self.run.run() {
             EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-            _ => &[],
+            EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross | _ => &[],
         }
     }
 }
@@ -1374,7 +1374,7 @@ impl<'f> Arrangement<'f> {
             match side_of_surface(&partner, side.start.point) {
                 Decision::Neg => return true,
                 Decision::Pos => return false,
-                _ => (),
+                Decision::Zero | Decision::Undecidable { .. } | _ => (),
             }
         }
         true
@@ -1969,7 +1969,7 @@ impl<'f> Arrangement<'f> {
         let half_edge = match side_of_surface(&partner, self.nodes[from].point) {
             Decision::Neg => 2 * arc,
             Decision::Pos => 2 * arc + 1,
-            _ => return None,
+            Decision::Zero | Decision::Undecidable { .. } | _ => return None,
         };
         let facing = self.the_walk_of_a_lump_that_is_wound_once(
             lump_of[self.cycle_of
@@ -2440,7 +2440,7 @@ fn how_often_the_rim_winds_round(
                 match in_plane.turn(point, aim, at) {
                     Decision::Pos => Some(true),
                     Decision::Neg | Decision::Zero => Some(false),
-                    _ => None,
+                    Decision::Undecidable { .. } | _ => None,
                 }
             };
             winding += inwards
@@ -2522,7 +2522,7 @@ fn round_a_closed_crossing(
 fn pickers_of(run: &NamedRun) -> &[Picker] {
     match run.run() {
         EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        _ => &[],
+        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross | _ => &[],
     }
 }
 
@@ -2715,7 +2715,7 @@ fn dominant_axis(plane: &Plane, partner: &Plane, log: &mut ProvenanceLog) -> Res
         let climbs = match sign {
             Decision::Pos => true,
             Decision::Neg => false,
-            _ => continue,
+            Decision::Zero | Decision::Undecidable { .. } | _ => continue,
         };
         if best.is_none_or(|(_, _, so_far)| so_far < size) {
             best = Some((axis, climbs, size));
@@ -2747,7 +2747,7 @@ fn dominant_axis_of_a_direction(
         let climbs = match along.sign() {
             Decision::Pos => true,
             Decision::Neg => false,
-            _ => continue,
+            Decision::Zero | Decision::Undecidable { .. } | _ => continue,
         };
         let size = along.lo().abs().min(along.hi().abs());
         if best.is_none_or(|(_, _, so_far)| so_far < size) {
@@ -3927,7 +3927,7 @@ mod how_often_cutting_a_curved_face_refuses {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let scale = match family {
             Family::AtAPowerOfTwo => 2.0_f64.powi(i32::try_from(draw.next() % 9).ok()? - 4),
-            _ => 1.0,
+            Family::Lattice | Family::Turned | Family::Leaning => 1.0,
         };
         let side = 8.0 * scale;
         // The bar is kept a whole unit clear of the block's walls. A bar exactly
@@ -3951,7 +3951,7 @@ mod how_often_cutting_a_curved_face_refuses {
                     .ok()?
                     .compose(&stands)
             }
-            _ => stands,
+            Family::Lattice | Family::Turned | Family::AtAPowerOfTwo => stands,
         };
         let bar = model.add_round_bar(radius, 12.0 * scale, &placed).ok()?;
         if let Family::Turned = family {

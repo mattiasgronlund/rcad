@@ -590,7 +590,9 @@ fn derive_a_corner(
                     Surface::Plane(flat) => Invalid::VertexOffItsFacePlane {
                         distance: flat.signed_distance_to(middle_of(point)).abs(),
                     },
-                    _ => Invalid::VertexOffItsFaceSurface,
+                    Surface::Sphere(_) | Surface::Cylinder(_) | _ => {
+                        Invalid::VertexOffItsFaceSurface
+                    }
                 }
                 .into());
             }

@@ -2085,7 +2085,10 @@ mod tests {
                 EdgeRun::PartOfWhereItCrosses { and, .. } if along[0] == along[1] => {
                     vec![along[0], *and]
                 }
-                _ => vec![along[0], along[1]],
+                EdgeRun::Straight
+                | EdgeRun::RightRoundWhereItsFacesCross
+                | EdgeRun::PartOfWhereItCrosses { .. }
+                | _ => vec![along[0], along[1]],
             };
             for &point in along_it.points() {
                 let at = PredicatePoint::Constructed(point.coordinates().map(|coordinate| {

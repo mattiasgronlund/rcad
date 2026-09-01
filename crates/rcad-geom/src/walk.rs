@@ -384,7 +384,7 @@ fn the_seed_this_run_is_picked_up_at(
     let surfaces = [&pair[0], &pair[1]];
     let picked_by: &[Picker] = match run.run() {
         EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        _ => &[],
+        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
     };
 
     let mut seeds = Vec::new();
@@ -434,7 +434,8 @@ fn where_a_quartic_can_be_picked_up(pair: &[Surface; 2]) -> Result<Vec<Point>> {
                     Surface::Cylinder(*one).how_it_sorts_against(&Surface::Cylinder(*other))
                         != Ordering::Greater
                 }
-                thinner => thinner == Ordering::Less,
+                Ordering::Less => true,
+                Ordering::Greater => false,
             };
             if mine_is_thinner {
                 where_one_pipe_reaches_across_another(one, other)
@@ -582,7 +583,9 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Surface; 2] {
     match run.run() {
         EdgeRun::PartOfWhereItCrosses { and, .. } if along[0] == along[1] => [*along[0], *and],
-        _ => [*along[0], *along[1]],
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::PartOfWhereItCrosses { .. } => [*along[0], *along[1]],
     }
 }
 
