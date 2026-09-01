@@ -332,7 +332,7 @@ impl Model {
             let volume = if self.solid_is_wholly_flat(slot) {
                 view.signed_volume()
             } else {
-                let mesh = view.mesh(how_far_the_sweeps_mesh_may_stray(view)?, policy, log)?;
+                let mesh = view.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
                 every_side_of_the_skin_is_used_both_ways(&mesh)?;
                 signed_volume_over(&mesh)
             };
@@ -475,54 +475,31 @@ impl Model {
 /// space, and do the two faces along each side agree which way they face — and
 /// neither answer gets truer with more triangles. What stops a coarse mesh
 /// collapsing is not the deflection: the mesher will not step more than a
-/// quarter turn of longitude whatever it is handed (§25.7), so a bar still comes
-/// out four ways round. The sweep runs at every test boundary, and a mesh at the
+/// quarter turn of a curved surface whatever it is handed, whichever way that
+/// turn goes, so a bar still comes out four ways round and a ball still comes
+/// out an octahedron. The sweep runs at every test boundary, and a mesh at the
 /// model's own deflection would cost it a hundredfold for the same two answers.
 ///
 /// **A number and not a fraction of the solid, because a fraction has a worst
-/// case and [`AS_COARSE_AS_A_MESH_GETS`] does not.** Half a radius sounds like
-/// the coarsest sensible answer and is not: the chord a deflection allows on a
-/// pipe grows as `√(3 · radius · deflection)`, so a bar of radius `1e-8` and
-/// length one — which `an_untidy_radius_is_certified_onto_its_own_cylinder_too`
-/// builds — would want thirty-five million points along its length for a mesh
-/// nobody reads.
+/// case and this does not.** Half a radius sounds like the coarsest sensible
+/// answer and is not: the chord a deflection allows on a pipe grows as
+/// `√(3 · radius · deflection)`, so a bar of radius `1e-8` and length one —
+/// which `an_untidy_radius_is_certified_onto_its_own_cylinder_too` builds —
+/// would want thirty-five million points along its length for a mesh nobody
+/// reads.
 ///
-/// **Except where the surface pinches to a point, where the coarsest mesh is no
-/// mesh at all.** A ball's one face is a rectangle whose top and bottom sides
-/// are each a single point in space, so a mesh that never cuts it between the
-/// poles is made only of triangles standing on one point twice — every one of
-/// them dropped (§25.6), leaving a ball with no skin and no volume. The quarter
-/// turn above is a floor on *longitude* and says nothing about latitude, so this
-/// is what says it: a deflection of the smallest radius the solid bends over,
-/// which puts three steps from pole to pole.
-///
-/// # Errors
-///
-/// [`Error::Geometry`] if a sphere in the model has a radius that is not a
-/// positive finite length, which nothing else in the sweep looks at.
-fn how_far_the_sweeps_mesh_may_stray(solid: SolidView<'_>) -> Result<Deflection> {
-    let narrowest_pole = solid
-        .faces()
-        .filter_map(|face| match face.surface() {
-            Surface::Sphere(ball) => Some(ball.radius()),
-            Surface::Plane(_) | Surface::Cylinder(_) => None,
-            // A cone pinches to a point as well, and a surface answering this
-            // by not being asked is how every one of §23.8's four defects
-            // started.
-            other => panic!("a surface nothing here can ask about: {other:?}"),
-        })
-        .fold(f64::INFINITY, f64::min);
-    if narrowest_pole.is_infinite() {
-        return Ok(Deflection::of(AS_COARSE_AS_A_MESH_GETS)
-            .expect("the largest f64 is a positive finite length"));
-    }
-    Ok(Deflection::of(narrowest_pole)?)
+/// This used to make an exception for a surface that pinches to a point, on the
+/// grounds that a ball meshed this coarsely came back with no triangles at all.
+/// It did, and that was the mesher charging a step's turn to its longitude
+/// alone; a pole-to-pole step turns half a turn in latitude and none in
+/// longitude. The exception here would only ever have covered the one caller
+/// that thought of it — `SolidView::measure` did not, and panicked — so the
+/// floor went where it belongs and this went back to a constant.
+fn as_coarse_as_a_mesh_gets() -> Deflection {
+    Deflection::of(f64::MAX).expect("the largest f64 is a positive finite length")
 }
 
-/// A deflection no solid can be wider than, so nothing is refined for accuracy.
-const AS_COARSE_AS_A_MESH_GETS: f64 = f64::MAX;
-
-/// Every side of the mesh used by exactly two triangles, once each way round.
+/// Every side of the mesh used the same number of times each way round.
 ///
 /// §23.4's oracle, and the only thing in this sweep that can catch a round cap
 /// put on back to front. A cap's boundary is one closed edge and one corner, so
@@ -536,7 +513,12 @@ const AS_COARSE_AS_A_MESH_GETS: f64 = f64::MAX;
 /// leaves `πr²h/3` — still positive, still no complaint.
 ///
 /// Counted as a balance rather than as two counts, which is what makes "twice
-/// the same way round" a failure rather than a pass.
+/// the same way round" a failure rather than a pass — and is also **weaker than
+/// §23.4's oracle**, which says *exactly* two. A side used four times, twice
+/// each way, balances to zero and passes here. The suite's own copy in
+/// `meshing_a_curved_solid.rs` is the same balance, so nothing in the kernel
+/// asks for the count; saying so is cheaper than a check with no input that
+/// fails it.
 fn every_side_of_the_skin_is_used_both_ways(mesh: &Mesh) -> Result<()> {
     let mut balance: HashMap<(u32, u32), i32> = HashMap::new();
     for triangle in mesh.triangles() {

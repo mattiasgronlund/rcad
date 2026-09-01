@@ -131,13 +131,20 @@ impl SolidView<'_> {
     /// than one mesh holds. [`Error::CannotMeshAFace`] when the triangulator
     /// refuses a face, carrying what it said. [`Error::Undecidable`] when a
     /// predicate inside a triangulation could not settle a sign.
+    /// [`Error::AWireWillNotLieFlatOnItsFace`] and
+    /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`] for a solid that arrived
+    /// from a file with a shape no builder here makes. Both are refusals rather
+    /// than asserts precisely because
+    /// [`Model::validate`](crate::Model::validate) meshes what it is given, and
+    /// a sweep over untrusted bytes has to hand back a refusal (§16.11, §4.1).
     ///
     /// # Panics
     ///
-    /// If a wire of this solid does not come back to the longitude it set off
-    /// from, or fans into fewer than three corners. Both mean a model
-    /// [`Model::validate`](crate::Model::validate) would have rejected, and a
-    /// corrupt mesh is worse than a crash.
+    /// If a wire fans into fewer than three corners in the surface's own two
+    /// coordinates. Nothing does: a wire has three steps or it closes on one
+    /// edge, and a closed edge on a curved face is walked four ways round
+    /// whatever the deflection, because [`how_many_steps`] will not step past a
+    /// quarter turn.
     pub fn mesh(
         self,
         deflection: Deflection,
@@ -312,10 +319,17 @@ impl BuildingAMesh {
         // in this kernel with a pole at each end: a ball's seam, which `add_ball`
         // puts at `y = 0, x ≥ 0` — longitude zero in the frame the ball is
         // stored in, and `the_seam_a_balls_mesh_is_cut_along_is_the_seam_the_model_has`
-        // is the test that says so. A ball whose seam went elsewhere would get a
-        // watertight mesh of the right ball cut in the wrong place; reading the
-        // longitude off `EdgeRun::PartOfWhereItCrosses` is what would fix it, and
-        // there is nothing yet that could tell the difference.
+        // is the test that says so.
+        //
+        // **A ball whose seam is recorded elsewhere gets cut here anyway, and
+        // that is a §16.10 gap rather than a limit: the longitude is in the
+        // model, on `EdgeRun::PartOfWhereItCrosses`, and this does not read it.**
+        // What comes back is a correct watertight mesh of the right sphere cut
+        // on the wrong meridian — measured, validated and Euler-counted, all
+        // clean, because a sphere looks the same from every meridian and only
+        // this one face uses that edge. It stops being invisible when a second
+        // face meets the ball along that seam, which is M3's crossings, and §24.4
+        // item 2 widens the very field the longitude would be read from.
         match (poles.contains(&from.key()), poles.contains(&to.key())) {
             (false, false) if edge.is_closed() => at_end = at_start + whole_turn,
             (false, false) => {
@@ -356,7 +370,10 @@ impl BuildingAMesh {
 
         let mut walked = Vec::with_capacity(face.wire_count());
         for wire in face.wires() {
-            walked.push(self.walk_a_wire_round(wire, face, &stored));
+            walked.push(
+                self.walk_a_wire_round(wire, face, &stored)
+                    .ok_or(Error::AWireWillNotLieFlatOnItsFace { face: face.key() })?,
+            );
         }
         for patch in self.cut_off_what_goes_too_far_round(face, &stored, walked, room)? {
             self.hand_over(face, &stored, patch, room, log)?;
@@ -401,16 +418,16 @@ impl BuildingAMesh {
         if how_far_round(&walked[0]) <= widest {
             return Ok(vec![walked]);
         }
-        // The two builders that make a curved face — `add_round_bar` and
-        // `add_ball` — each give it one wire, `add_extrusion` makes planes only,
-        // and the fuse refuses a curved solid outright. So no public route
-        // reaches this, and cutting a face with a hole would have to say which
-        // piece the hole ends up in.
-        assert_eq!(
-            walked.len(),
-            1,
-            "nothing in this kernel builds a curved face with a hole in it"
-        );
+        // Cutting a face with a hole in it would have to say which piece the
+        // hole ends up in, and nothing does. No *builder* makes such a face —
+        // `add_round_bar` and `add_ball` each give a curved face one wire,
+        // `add_extrusion` makes planes only, and the fuse refuses a curved solid
+        // outright — but `Model` is `Deserialize` and `validate` is the
+        // untrusted-import boundary (§16.11), so one arrives from a file and
+        // this is a refusal rather than an assert.
+        if walked.len() != 1 {
+            return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
+        }
 
         let mut pieces = vec![walked.into_iter().next().expect("just checked")];
         let mut done: Vec<Vec<WalkedLoop>> = Vec::new();
@@ -576,12 +593,15 @@ impl BuildingAMesh {
     /// and the same point may turn up at two corners. Both ends of a seam do,
     /// and so do both corners of a pole side — which is the whole reason
     /// identity lives in this table and not in the triangulator's index (§25.6).
+    ///
+    /// `None` when the walk does not come back to the longitude it set off
+    /// from — see [`WalkingAWire::finish`].
     fn walk_a_wire_round(
         &mut self,
         wire: WireView<'_>,
         face: FaceView<'_>,
         stored: &Surface,
-    ) -> WalkedLoop {
+    ) -> Option<WalkedLoop> {
         let back = face.location().inverse();
         let poles = poles_of(wire);
         let mut walk = WalkingAWire::new(how_far_the_longitude_wraps(stored));
@@ -802,6 +822,7 @@ struct WalkingAWire {
     wraps: Option<f64>,
     longitude: f64,
     started: bool,
+    will_not_lie_flat: bool,
     pole_side: f64,
     corners: Vec<[f64; 2]>,
     points: Vec<u32>,
@@ -813,6 +834,7 @@ impl WalkingAWire {
             wraps,
             longitude: 0.0,
             started: false,
+            will_not_lie_flat: false,
             pole_side: 1.0,
             corners: Vec::new(),
             points: Vec::new(),
@@ -857,30 +879,39 @@ impl WalkingAWire {
     /// rectangle, the bottom goes one way and the top the other — which is why
     /// the sign alternates, and why the walk comes back to the longitude it
     /// started at.
+    /// A flat surface pinches to nothing, so a pole step on one is a wire that
+    /// will not lie flat, and [`WalkingAWire::finish`] says so.
     fn cross_the_pole(&mut self) {
-        let whole = self
-            .wraps
-            .expect("only a surface that wraps round can pinch to a pole");
+        let Some(whole) = self.wraps else {
+            self.will_not_lie_flat = true;
+            return;
+        };
         self.longitude += self.pole_side * whole;
         self.pole_side = -self.pole_side;
     }
 
-    /// # Panics
+    /// The loop, or `None` if it will not lie flat: the walk stood still at a
+    /// pole on a surface that does not pinch to one, or it came back to a
+    /// different longitude from the one it set off at.
     ///
-    /// If the walk did not come back to the longitude it set off from. The loop
-    /// handed over would not close, which is a bug here rather than bad input.
-    fn finish(self) -> WalkedLoop {
-        if let (Some(whole), Some(first)) = (self.wraps, self.corners.first()) {
-            let drift = (self.longitude - first[0]).abs();
-            assert!(
-                drift < whole / 2.0,
-                "a wire came back {drift} away in longitude from where it set off"
-            );
+    /// **A refusal and not an assert, and the difference is `Deserialize`.** A
+    /// wire of a face this kernel builds does neither: only a sphere here has a
+    /// pole, no step goes more than a quarter turn (see [`how_many_steps`]), and
+    /// a face's two pole sides are crossed opposite ways. A face that arrived
+    /// from a *file* has neither promise behind it.
+    fn finish(self) -> Option<WalkedLoop> {
+        if self.will_not_lie_flat {
+            return None;
         }
-        WalkedLoop {
+        if let (Some(whole), Some(first)) = (self.wraps, self.corners.first())
+            && (self.longitude - first[0]).abs() >= whole / 2.0
+        {
+            return None;
+        }
+        Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
-        }
+        })
     }
 }
 
@@ -934,26 +965,35 @@ fn the_short_way_round(angle: f64, whole_turn: f64) -> f64 {
 /// piece with its corners on the surface strays about `chord² / (3 · radius)`
 /// from it, which `rcad-mesh` derives in full beside the expression, so a chord
 /// of `√(3 · radius · room)` is the longest that stays inside `room`. **How far
-/// it turns**: a step of more than half a turn of longitude cannot be told from
-/// one the other way when the corner is read back, so no step is allowed past a
-/// quarter of one.
+/// it turns**: a step of more than half a turn cannot be told from one the other
+/// way when the corner is read back, so no step is allowed past a quarter of
+/// one.
+///
+/// **The turn is the whole angle a step sweeps and not only its longitude**,
+/// which on a ball means latitude counts too. A ball's seam runs pole to pole:
+/// half a turn of latitude and no longitude at all. Charged on longitude alone
+/// it comes back one step long, the face is then a rectangle whose only corners
+/// are its two poles, every triangle of it stands on one point twice and is
+/// dropped (§25.6), and a ball asked for a coarse mesh gets **no mesh at all**
+/// with an honest-looking deviation on it. `a_ball_asked_for_a_rough_picture_
+/// gets_a_rough_ball_and_not_an_empty_mesh` is the test.
 ///
 /// # Panics
 ///
 /// On a surface this has not been taught — see [`how_far_the_longitude_wraps`].
 fn how_many_steps(stored: &Surface, round: f64, up: f64, room: f64) -> usize {
-    let (radius, bends_over) = match stored {
+    let (radius, turns_over) = match stored {
         Surface::Plane(_) => return 1,
-        // A ball bends both ways.
-        Surface::Sphere(ball) => (ball.radius(), ball.radius() * round.hypot(up)),
+        // A ball bends both ways, so both count towards the turn as well.
+        Surface::Sphere(ball) => (ball.radius(), round.hypot(up)),
         // A pipe is flat along its axis, so a piece stretched up one bends by
         // nothing at all and only the turn counts.
-        Surface::Cylinder(pipe) => (pipe.radius(), pipe.radius() * round.abs()),
+        Surface::Cylinder(pipe) => (pipe.radius(), round.abs()),
         other => panic!("this crate cannot walk along {other:?}"),
     };
     let longest_chord = (3.0 * radius * room * WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET).sqrt();
-    let by_bending = (bends_over / longest_chord).ceil();
-    let by_turning = (round.abs() / (core::f64::consts::TAU / 4.0)).ceil();
+    let by_bending = (radius * turns_over / longest_chord).ceil();
+    let by_turning = (turns_over / (core::f64::consts::TAU / 4.0)).ceil();
     let steps = by_bending.max(by_turning).max(1.0);
     // One past the cap, which is what refuses it a moment later. Said this way
     // round rather than cast, because `as` on a number this size — or on one
@@ -1042,5 +1082,155 @@ fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceL
     ));
     Error::Undecidable {
         records: core::mem::take(log),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rcad_geom::{Orientation, Scale};
+    use smallvec::SmallVec;
+
+    use super::*;
+    use crate::Model;
+
+    /// A curved face with a hole in it is refused and does not panic.
+    ///
+    /// **The route is `Deserialize` and not a builder.** No builder here makes
+    /// such a face, and the assert this replaces said so and stopped there —
+    /// which is `docs/decisions.md` §16.10's mistake exactly: "no caller does
+    /// this" is a statement about today's callers, and [`Model`] implements
+    /// `Deserialize`, so any shape the arenas can hold arrives from a file
+    /// (§16.11 records the same thing about the coordinate range).
+    ///
+    /// A round bar with a window cut through its wall and a face plugging the
+    /// window is a **sound** solid with this shape, so the refusal is about what
+    /// the mesher can cut up and not about the model. What is built here is the
+    /// window without the plug, which the sweep's manifold check catches before
+    /// it meshes anything — so the question is put to [`SolidView::mesh`], which
+    /// is public in its own right and is where the panic was.
+    #[test]
+    fn a_curved_face_with_a_hole_is_refused_rather_than_asserted_against() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = model
+            .add_round_bar(5.0, 10.0, &Isometry::identity())
+            .expect("a bar five across and ten tall");
+
+        let wall = model
+            .data()
+            .faces
+            .iter()
+            .find(|(_, face)| face.surface.as_plane().is_none())
+            .map(|(slot, _)| slot)
+            .expect("a bar has one curved face");
+
+        // Three corners of a triangle exactly on `x² + y² = 25`, all inside a
+        // tenth of a turn of each other.
+        let corners = [
+            model.add_vertex(Point::new(5.0, 0.0, 3.0)),
+            model.add_vertex(Point::new(4.0, 3.0, 5.0)),
+            model.add_vertex(Point::new(3.0, 4.0, 7.0)),
+        ];
+        let coedges: SmallVec<[_; 4]> = (0..3)
+            .map(|at| {
+                let edge = model.add_edge(corners[at], corners[(at + 1) % 3]);
+                model.add_coedge(edge, Orientation::Forward)
+            })
+            .collect();
+        let hole = model.add_wire(coedges);
+        model.data_mut().faces[wall].wires.push(hole);
+
+        let refusal = model
+            .solid(bar)
+            .mesh(
+                Deflection::of(1.0).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a curved face with a hole cannot be cut up");
+        assert!(matches!(
+            refusal,
+            Error::CurvedFaceWithAHoleGoesTooFarRound { .. }
+        ));
+    }
+
+    /// A wire that will not lie flat is refused and does not panic.
+    ///
+    /// **The sharpest form of the same finding**, because this one reaches
+    /// [`Model::validate`](crate::Model::validate) itself. A ball missing one of
+    /// its two pole steps is three wire steps that chain up and close, so
+    /// `check_wires` has nothing to say about it, its corners are still exactly
+    /// on the sphere, and the sweep walks straight into the mesher — which used
+    /// to assert there. `validate` is the untrusted-import boundary (§16.11);
+    /// panicking is the one thing it may not do.
+    #[test]
+    fn a_wire_that_will_not_lie_flat_is_refused_rather_than_asserted_against() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let ball = model.add_ball(2.0, &Isometry::identity()).expect("a ball");
+        for wire in model.data_mut().wires.values_mut() {
+            wire.steps.pop();
+        }
+
+        let refusal = model
+            .solid(ball)
+            .mesh(
+                Deflection::of(1.0).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a ball with one pole is not a rectangle in its own coordinates");
+        assert!(matches!(
+            refusal,
+            Error::AWireWillNotLieFlatOnItsFace { .. }
+        ));
+
+        assert!(matches!(
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect_err("the sweep meshes every curved solid"),
+            Error::AWireWillNotLieFlatOnItsFace { .. }
+        ));
+    }
+
+    /// The other way a wire will not lie flat: a pole on a face that does not
+    /// pinch to one.
+    ///
+    /// A plane never does. Tacked onto a flat face's wire at a corner it already
+    /// has, a pole step chains up, closes, and leaves the winding check reading
+    /// exactly the corners it read before — so again nothing earlier in the
+    /// sweep looks at it.
+    #[test]
+    fn a_pole_on_a_flat_face_is_refused_rather_than_asserted_against() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = model
+            .add_round_bar(5.0, 10.0, &Isometry::identity())
+            .expect("a bar");
+        let cap = model
+            .data()
+            .faces
+            .iter()
+            .find(|(_, face)| face.surface.as_plane().is_some())
+            .map(|(slot, _)| slot)
+            .expect("a bar has two flat caps");
+        let wire = model.data().faces[cap].wires[0];
+        let corner = model.data().edges[model.data().coedges
+            [model.data().wires[wire].coedges().next().expect("a coedge")]
+        .edge]
+            .start;
+        model.data_mut().wires[wire]
+            .steps
+            .push(crate::model::WireStep::Pole(corner));
+
+        let refusal = model
+            .solid(bar)
+            .mesh(
+                Deflection::of(1.0).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a plane pinches to nothing");
+        assert!(matches!(
+            refusal,
+            Error::AWireWillNotLieFlatOnItsFace { .. }
+        ));
     }
 }

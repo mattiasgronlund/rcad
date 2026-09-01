@@ -849,16 +849,37 @@ pub enum CannotTriangulate {
     ///
     /// The floor is not a property of the surface alone: a ball of radius one a
     /// kilometre from the origin has its points known to a rounding of the
-    /// kilometre, so the same ball at the origin can be meshed far finer.
+    /// kilometre, so the same ball at the origin can be meshed far finer. That
+    /// is the *representable grid* speaking and not this crate — the gaps
+    /// between `f64`s near a coordinate of a thousand are what they are, and no
+    /// ordering, no rescaling and no compensated sum puts a point between two
+    /// of them. **A scaling does reach it, and only the way §18 says**: shrink
+    /// the whole model and the floor shrinks with it, in exact step, so nothing
+    /// relative is being refused.
+    ///
+    /// **What the floor is measured against is a bound and not the grid**, and
+    /// the difference shows on a pipe. [`how_far_a_point_lands_off_its_surface`]
+    /// charges the rounding against how far the whole point reaches, and a pipe
+    /// is invariant along its own axis: a pipe of radius one whose axis origin
+    /// sits at `z = 1e9` has its skin known to a rounding of *one*, and this
+    /// refuses it a deflection of `1e-9` on the strength of a rounding of the
+    /// billion. That is a §16.10 gap in the bound rather than in the answer,
+    /// and it is left standing because closing it needs the axis *direction* —
+    /// an error along `z` moves a point off a `z` pipe by nothing and off a
+    /// slanted one by all of it — and because `rcad-topo` never builds one:
+    /// `add_round_bar` puts the axis at the origin and carries the placement on
+    /// the solid.
     ///
     /// [`Surface::point_at`]: rcad_geom::Surface::point_at
     #[error(
-        "no mesh of this surface gets closer than {closest}, and the deflection is {deflection}"
+        "no mesh of this surface built from these points gets closer than {closest}, \
+         and the deflection is {deflection}"
     )]
     NoMeshCanGetThatCloseToTheSurface {
         /// What was asked for, in the model's own unit.
         deflection: f64,
-        /// The closest any mesh of this surface can be, in the same unit.
+        /// The closest a mesh of this surface built from these points can be,
+        /// in the same unit.
         closest: f64,
     },
 

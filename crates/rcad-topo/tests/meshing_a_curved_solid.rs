@@ -48,9 +48,13 @@ fn meshed(model: &Model, solid: SolidKey, deflection: f64) -> Mesh {
 ///
 /// Four claims, and every one of them is about **indices**:
 ///
-/// 1. Every side of every triangle is used by exactly two triangles, once each
-///    way round. That is watertightness: a side used once is a hole, and a side
-///    used twice the same way is a fold.
+/// 1. Every side of every triangle is used the same number of times each way
+///    round. That is watertightness: a side used once is a hole, and a side used
+///    twice the same way is a fold. It is a **balance** and not the count §23.4
+///    asks for — a side used four times, twice each way, would pass — and it is
+///    the balance because that is what makes "twice the same way round" a
+///    failure, and because no input the kernel can build fails the count without
+///    also failing this.
 /// 2. χ of the mesh is χ of the solid. Closing up the holes is not enough on its
 ///    own — a mesh that covered the ball twice over would pass the first check
 ///    and fail this one.
@@ -340,7 +344,10 @@ fn an_edges_points_are_worked_out_once_and_both_faces_along_it_name_the_same_one
 ///
 /// The coarse end is where it is most likely to break: a bar meshed to a
 /// deflection wider than its own radius comes out as a few flat plates, and a
-/// ball as a handful of triangles with a pole in each.
+/// ball as a handful of triangles with a pole in each. It goes out to a
+/// deflection a hundred thousand times the solid, because the claim audit found
+/// a ball coming back with no triangles at all past about `6.6 · radius` and the
+/// grid stopped short of it.
 #[test]
 fn a_coarse_mesh_closes_up_just_as_a_fine_one_does() {
     let mut model = a_model();
@@ -348,10 +355,10 @@ fn a_coarse_mesh_closes_up_just_as_a_fine_one_does() {
     let ball = a_ball(&mut model, &Isometry::identity());
 
     let mut coarsest = 0;
-    for deflection in [4.0, 2.0, 1.0, 0.5, 0.2, 0.05, 0.01] {
+    for deflection in [1e6, 100.0, 20.0, 4.0, 2.0, 1.0, 0.5, 0.2, 0.05, 0.01] {
         for solid in [bar, ball] {
             let mesh = meshed(&model, solid, deflection);
-            if deflection == 4.0 {
+            if deflection == 1e6 {
                 coarsest = coarsest.max(mesh.triangles().len());
             }
         }
@@ -361,6 +368,48 @@ fn a_coarse_mesh_closes_up_just_as_a_fine_one_does() {
         "a deflection wider than the solid should give a handful of triangles, \
          and gave {coarsest}"
     );
+}
+
+/// A rough picture of a ball is a rough ball, and never nothing at all.
+///
+/// **The fourth of §23.8's silent wrong answers, found by the claim audit.** A
+/// ball's one face is a rectangle in `(u, v)` whose top and bottom sides are
+/// each a single point in space. The mesher sized a step by how far it went
+/// round in *longitude*, and a step from pole to pole goes half a turn in
+/// latitude and none at all in longitude — so past a deflection of about
+/// `6.6 · radius` the seam came back one step long, every triangle of the
+/// rectangle stood on one point twice, every one was dropped (§25.6), and
+/// `mesh` handed back **two points and no triangles** with a deviation on it
+/// that looked perfectly honest. `measure` then died on its own
+/// `six_volumes > 0.0`, which is §25.5's defect a second time.
+///
+/// The floor is now the same quarter turn in either direction, so the coarsest
+/// mesh of a ball there is is an octahedron.
+#[test]
+fn a_ball_asked_for_a_rough_picture_gets_a_rough_ball_and_not_an_empty_mesh() {
+    let mut model = a_model();
+    let ball = a_ball(&mut model, &Isometry::identity());
+    for deflection in [7.0 * RADIUS, 100.0 * RADIUS, 1e12] {
+        let mesh = meshed(&model, ball, deflection);
+        assert!(
+            mesh.triangles().len() >= 8,
+            "a ball at a deflection of {deflection} came back with {} triangles",
+            mesh.triangles().len()
+        );
+        let measured = model
+            .solid(ball)
+            .measure(
+                Deflection::of(deflection).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a ball still weighs something");
+        assert!(
+            measured.volume() > 0.0,
+            "a ball at a deflection of {deflection} weighs {}",
+            measured.volume()
+        );
+    }
 }
 
 fn a_third_of_a_turn_about_a_slanted_axis() -> Isometry {
@@ -599,8 +648,8 @@ fn a_deflection_needing_more_points_than_a_mesh_holds_is_refused() {
 ///
 /// `docs/decisions.md` §13 rule 5 wants a generator whose shapes are not the
 /// ones any other lane draws, and this one is a bar and a ball across four
-/// orders of magnitude of size and from a deflection wider than the solid down
-/// to a fiftieth of it. Both refusals below are honest — a request for more
+/// orders of magnitude of size and from a deflection a thousand times the solid
+/// down to a fiftieth of it. Both refusals below are honest — a request for more
 /// points than a mesh will hold, and a deflection under what a point can be
 /// placed to — so a refusal counts as a pass and only a wrong answer does not.
 #[test]
@@ -616,7 +665,7 @@ fn every_size_of_bar_and_ball_at_every_coarseness_meshes_into_a_closed_surface()
     let mut checked = 0;
     for placement in &placements {
         for radius in [0.01, 1.0, 100.0] {
-            for part_of_the_radius in [2.0, 0.5, 0.1, 0.02] {
+            for part_of_the_radius in [1e3, 20.0, 2.0, 0.5, 0.1, 0.02] {
                 let deflection = Deflection::of(radius * part_of_the_radius).expect("a length");
                 for height in [0.001, 1.0, 20.0] {
                     let mut model = a_model();
