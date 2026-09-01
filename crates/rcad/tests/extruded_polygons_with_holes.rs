@@ -22,7 +22,7 @@
 mod shapes;
 
 use proptest::prelude::*;
-use rcad::{Containment, Model, Point, Policy, ProvenanceLog};
+use rcad::{Containment, Deflection, Model, Point, Policy, ProvenanceLog};
 use shapes::{
     Material, a_notched_polygon_with_holes, area_of, extruded, perimeter_of, where_the_point_sits,
 };
@@ -49,7 +49,7 @@ proptest! {
 
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
 
-        let measured = model.solid(solid).measure().expect("a solid this size measures");
+        let measured = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
         prop_assert!(measured.volume() > 0.0, "volume {}", measured.volume());
         prop_assert!(measured.surface_area() > 0.0);
         prop_assert_eq!(model.solid(solid).shells().count(), 1);
@@ -64,7 +64,7 @@ proptest! {
 
         let expected = area_of(&profile) * height;
         prop_assert!(expected > 0.0, "the shoelace area came out {expected}");
-        let measured = model.solid(solid).measure().expect("a solid this size measures").volume();
+        let measured = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").volume();
         prop_assert!(
             (measured - expected).abs() <= SLACK * expected,
             "volume {measured} against a shoelace area times height of {expected}"
@@ -81,7 +81,7 @@ proptest! {
         // The walls stand on the holes as well as on the outline, which is why
         // the perimeter is the total round every loop.
         let expected = 2.0 * area_of(&profile) + perimeter_of(&profile) * height;
-        let measured = model.solid(solid).measure().expect("a solid this size measures").surface_area();
+        let measured = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").surface_area();
         prop_assert!(
             (measured - expected).abs() <= SLACK * expected,
             "surface area {measured} against two caps plus walls of {expected}"
@@ -94,7 +94,7 @@ proptest! {
         height in 0.5f64..=6.0,
     ) {
         let (model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure().expect("a solid this size measures");
+        let before = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         let bytes = postcard::to_allocvec(&model)?;
         let read_back: Model = postcard::from_bytes(&bytes)?;
@@ -104,7 +104,7 @@ proptest! {
         // Exactly equal, not nearly. Coordinates go out and come back as the
         // same bits and the measurement adds them up in the same order, so
         // anything less than equality would mean something moved.
-        prop_assert_eq!(same.measure().expect("a solid this size measures"), before);
+        prop_assert_eq!(same.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures"), before);
     }
 
     #[test]
@@ -113,7 +113,7 @@ proptest! {
         height in 0.5f64..=6.0,
     ) {
         let (model, solid) = extruded(&profile, height);
-        let middle = model.solid(solid).measure().expect("a solid this size measures").centroid();
+        let middle = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").centroid();
 
         let mut log = ProvenanceLog::new();
         let sits = model
@@ -192,4 +192,13 @@ proptest! {
             }
         }
     }
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

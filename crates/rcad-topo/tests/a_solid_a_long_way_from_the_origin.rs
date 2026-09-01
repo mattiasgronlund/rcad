@@ -21,7 +21,7 @@
 //! `pairs/mod.rs` bound the generated family's own range, and carry a
 //! measurement each.
 
-use rcad_geom::{Isometry, Point, Scale, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -166,7 +166,11 @@ fn the_largest_cube_that_fits_measures_its_volume_area_and_middle() {
 
     let measured = model
         .solid(cube)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a cube of 2^1023 units of space is the largest that fits");
     assert_eq!(measured.volume(), two_to_the(1023));
     assert_eq!(measured.surface_area(), 6.0 * two_to_the(682));
@@ -231,7 +235,11 @@ fn a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses() {
             .map(|&solid| {
                 model
                     .solid(solid)
-                    .measure()
+                    .measure(
+                        a_deflection(),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
                     .expect("a solid this size measures")
                     .volume()
             })
@@ -269,4 +277,13 @@ fn a_frame_so_far_out_that_a_wall_is_thinner_than_the_spacing_is_not_a_frame() {
         matches!(refusal, Error::Invalid(Invalid::EdgeHasNoLength)),
         "the frame is what stopped being a frame, not the fuse: {refusal:?}"
     );
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

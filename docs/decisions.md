@@ -4582,6 +4582,32 @@ initialised with — §12.6's first gap exactly, the mistake §13 was written af
 `Measurement` and `measure` live in one file that one lane owns; the shape above
 is the contract, and that lane lands it in one go.
 
+**Amended 2026-09-01, while implementing. "Judged" cannot mean "refused on", and
+the arithmetic is what says so.** `Policy::max_wobble` is `64·ε·working_size` —
+`1.4e-12` for a 100 mm model — and `0.0` under `Policy::certified`. A mesh of a
+ball of radius three at a deflection of `0.1` leaves a centroid wobble of about
+`3e-1`, and the wobble falls roughly in step with the deflection, so meeting that
+budget would need a deflection near `5e-13`. A ball asked for one comes back
+`MoreMeshPointsThanASolidWillHold`. So
+`policy.wobble_is_acceptable(centroid_wobble)` is `false` for **every** curved
+solid at **every** deflection that can be met, and a `measure` that refused on it
+would have replaced §25.5's blanket refusal with another wearing a hat — the lane
+would have delivered nothing.
+
+It is also the conflation §23.5 forbids, arriving from the other side: the
+*deflection* would be deciding what the *policy* certifies, so a caller who asked
+for a rougher picture would be refused an answer rather than given a rougher one.
+§23.5's own division of labour is the one that holds — the deflection says how
+fine, and the policy decides what happens when the deviation cannot be *proven*
+under it, which is the floor `SolidView::mesh` already asks it about.
+
+So what the sentence above means is that `centroid_wobble` is the one of the
+three that is *commensurable* with `Policy::max_wobble`, and comparing them is
+the caller's to do on a number handed back for exactly that. `measure` passes
+`policy` and the log through to `mesh` and refuses nothing of its own.
+`judging_a_meshed_centroid_against_the_policy_would_refuse_every_ball` is the
+demonstration rather than the paragraph, per `CLAUDE.md`.
+
 ### 25.5 Until then, `measure` refuses a curved solid
 
 §24.4 states as a premise that `is_wholly_flat` gates `measure`. **It does not,

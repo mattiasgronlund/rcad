@@ -1050,7 +1050,11 @@ mod tests {
                 used.orient = used.orient.reversed();
             }
         }
-        let _ = model.solid(cube).measure();
+        let _ = model.solid(cube).measure(
+            rcad_geom::Deflection::of(0.1).expect("a length a polyhedron ignores"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
     }
 
     #[test]

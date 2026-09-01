@@ -14,7 +14,7 @@
 mod shapes;
 
 use proptest::prelude::*;
-use rcad::{Policy, ProfileBuilder, ProvenanceLog};
+use rcad::{Deflection, Policy, ProfileBuilder, ProvenanceLog};
 use shapes::{a_simple_polygon, area_of, extruded, perimeter_of};
 
 /// How far apart two numbers that should be equal are allowed to be, as a
@@ -47,7 +47,7 @@ proptest! {
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
 
         let flat_area = area_of(&profile);
-        let measured = model.solid(solid).measure().expect("a solid this size measures");
+        let measured = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         let expected_volume = flat_area * height;
         prop_assert!(
@@ -63,4 +63,13 @@ proptest! {
             measured.surface_area()
         );
     }
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

@@ -132,22 +132,6 @@ pub enum Error {
     #[error("the fuse needs every face to be flat, and one of these solids has a curved one")]
     FuseNeedsFlatFaces,
 
-    /// [`SolidView::measure`] was handed a solid with a curved face.
-    ///
-    /// Volume, area and centroid come out of a sum over the triangles a face
-    /// fans into, which is exact for a polyhedron and says nothing about a
-    /// round bar: its caps fan into no triangles at all and its wall into two
-    /// with no area, so the sum is a flat zero. Measuring a curved solid needs
-    /// the mesh, and the mesh is the lane after this one (decisions.md §25.5).
-    ///
-    /// A refusal and not a failure: the solid is sound and the operation is the
-    /// thing that is not ready for it, exactly as with
-    /// [`Error::FuseNeedsFlatFaces`].
-    ///
-    /// [`SolidView::measure`]: crate::SolidView::measure
-    #[error("measuring needs every face to be flat, and this solid has a curved one")]
-    MeasureNeedsFlatFaces,
-
     /// One face of a solid could not be cut into triangles.
     ///
     /// Carries what the triangulator said, and every one of those is about the
@@ -313,6 +297,18 @@ pub enum Invalid {
         /// The volume that came out of the divergence-theorem sum.
         volume: f64,
     },
+
+    /// Two faces meeting along an edge do not agree which way they face, so the
+    /// solid's skin does not close up.
+    ///
+    /// This is what catches a round cap put on back to front, and it is the
+    /// only thing that can. A cap's boundary is one closed edge and one corner,
+    /// so there is no polygon to wind and the winding check has nothing to ask;
+    /// a *tessellated* cap does have one, and a cap facing the wrong way sends
+    /// its triangles round the shared circle the same way as the wall's instead
+    /// of the opposite way (decisions.md §23.9, §23.4).
+    #[error("two faces of this solid meet along an edge without agreeing which way they face")]
+    FacesDoNotAgreeWhichWayTheyFace,
 
     /// Something in the model is not used by anything above it.
     #[error("a {entity} is not used by anything")]

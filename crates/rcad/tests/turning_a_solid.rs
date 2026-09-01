@@ -37,7 +37,7 @@ mod shapes;
 use core::f64::consts::FRAC_PI_2;
 
 use proptest::prelude::*;
-use rcad::{Axis, Isometry, Model, Point, Policy, ProvenanceLog, Scale, SolidKey};
+use rcad::{Axis, Deflection, Isometry, Model, Point, Policy, ProvenanceLog, Scale, SolidKey};
 use shapes::{a_notched_polygon_with_holes, an_arbitrary_movement, extruded};
 
 /// Room for two hundred roundings of a quantity that is cubic in the
@@ -55,7 +55,11 @@ fn a_cube_turned_a_quarter_of_the_way_round_the_z_axis_is_still_the_same_cube() 
         .expect("a cube of side ten");
     let before = model
         .solid(cube)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a solid this size measures");
     assert_eq!(before.volume(), 1000.0);
 
@@ -66,7 +70,11 @@ fn a_cube_turned_a_quarter_of_the_way_round_the_z_axis_is_still_the_same_cube() 
         .expect("turning a cube leaves it a cube");
     let after = model
         .solid(cube)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a solid this size measures");
 
     assert_eq!(after.volume(), before.volume());
@@ -87,11 +95,11 @@ proptest! {
         movement in an_arbitrary_movement(),
     ) {
         let (mut model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure().expect("a solid this size measures");
+        let before = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         model.place_solid(solid, &movement);
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
-        let after = model.solid(solid).measure().expect("a solid this size measures");
+        let after = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         prop_assert!(
             drift(after.volume(), before.volume()) <= SLACK_AFTER_A_GENERAL_TURN,
@@ -114,10 +122,10 @@ proptest! {
         movement in an_arbitrary_movement(),
     ) {
         let (mut model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure().expect("a solid this size measures").centroid();
+        let before = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").centroid();
 
         model.place_solid(solid, &movement);
-        let after = model.solid(solid).measure().expect("a solid this size measures").centroid();
+        let after = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").centroid();
 
         // The centroid is a moment divided by the volume, so it carries the
         // volume's relative error, and it is a position rather than a ratio —
@@ -143,11 +151,11 @@ proptest! {
             .expect("a whole number of quarter turns");
 
         let (mut model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure().expect("a solid this size measures");
+        let before = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         model.place_solid(solid, &turn);
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
-        let after = model.solid(solid).measure().expect("a solid this size measures");
+        let after = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         prop_assert!(
             drift(after.volume(), before.volume()) <= SLACK_AFTER_A_QUARTER_TURN,
@@ -197,4 +205,13 @@ fn largest_coordinate(point: Point) -> f64 {
         .coordinates()
         .iter()
         .fold(0.0f64, |worst, value| worst.max(value.abs()))
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

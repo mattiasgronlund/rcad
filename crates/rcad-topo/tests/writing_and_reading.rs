@@ -4,7 +4,7 @@
 //! corpus in a format you intend to break is how you end up unable to break it
 //! (decisions.md §6).
 
-use rcad_geom::{Isometry, Scale, Vector};
+use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
 use rcad_topo::{FORMAT_VERSION, Model, ProfileBuilder};
 
@@ -25,7 +25,11 @@ fn a_cube_comes_back_sound_and_measuring_the_same() {
         .expect("a cube of side two");
     let before = model
         .solid(cube)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a solid this size measures");
 
     let after = round_tripped(&model);
@@ -34,7 +38,16 @@ fn a_cube_comes_back_sound_and_measuring_the_same() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("still sound");
     let solid = after.solids().next().expect("the cube came back");
-    assert_eq!(solid.measure().expect("a solid this size measures"), before);
+    assert_eq!(
+        solid
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
+            .expect("a solid this size measures"),
+        before
+    );
     assert_eq!(after.vertex_count(), model.vertex_count());
     assert_eq!(after.edge_count(), model.edge_count());
     assert_eq!(after.face_count(), model.face_count());
@@ -54,7 +67,11 @@ fn a_plate_with_two_holes_comes_back_sound_and_measuring_the_same() {
         .expect("a plate two thick");
     let before = model
         .solid(solid)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a solid this size measures");
 
     let after = round_tripped(&model);
@@ -67,7 +84,11 @@ fn a_plate_with_two_holes_comes_back_sound_and_measuring_the_same() {
             .solids()
             .next()
             .expect("the plate came back")
-            .measure()
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
             .expect("a solid this size measures"),
         before
     );
@@ -85,7 +106,11 @@ fn a_placed_solid_comes_back_where_it_was_put() {
     );
     let before = model
         .solid(cube)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a solid this size measures");
 
     let after = round_tripped(&model);
@@ -95,7 +120,11 @@ fn a_placed_solid_comes_back_where_it_was_put() {
             .solids()
             .next()
             .expect("the cube came back")
-            .measure()
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
             .expect("a solid this size measures"),
         before
     );
@@ -204,4 +233,13 @@ fn the_keys_from_before_a_round_trip_do_not_belong_to_the_model_that_comes_back(
 
     assert_eq!(after.solid_count(), 1);
     assert_eq!(after.shell_count(), 1);
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

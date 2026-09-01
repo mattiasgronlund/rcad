@@ -1,7 +1,7 @@
 //! Building planar solids out of profiles, and refusing profiles that are not
 //! profiles.
 
-use rcad_geom::{Isometry, Point, Scale};
+use rcad_geom::{Deflection, Isometry, Point, Scale};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Profile, ProfileBuilder};
 
@@ -24,7 +24,11 @@ fn a_cube_of_side_two_holds_eight_of_space_and_twentyfour_of_skin() {
 
     let measured = model
         .solid(cube)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a solid this size measures");
 
     assert_eq!(measured.volume(), 8.0);
@@ -73,7 +77,11 @@ fn every_face_of_a_cube_points_away_from_the_middle_of_it() {
         .expect("a cube of side two");
     let middle = model
         .solid(cube)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a solid this size measures")
         .centroid();
 
@@ -117,7 +125,11 @@ fn a_plate_with_a_square_hole_has_the_hole_missing_from_its_volume() {
 
     let measured = model
         .solid(solid)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a solid this size measures");
     assert_eq!(measured.volume(), (100.0 - 4.0) * 3.0);
     assert_eq!(
@@ -146,7 +158,11 @@ fn a_plate_with_two_holes_still_has_two_coedges_on_every_edge() {
     assert_eq!(
         model
             .solid(solid)
-            .measure()
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
             .expect("a solid this size measures")
             .volume(),
         (100.0 - 8.0) * 2.0
@@ -171,7 +187,11 @@ fn a_right_triangle_is_a_perfectly_good_profile() {
     assert_eq!(
         model
             .solid(solid)
-            .measure()
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
             .expect("a solid this size measures")
             .volume(),
         1.0
@@ -193,7 +213,11 @@ fn a_parallelogram_is_a_perfectly_good_profile() {
     assert_eq!(
         model
             .solid(solid)
-            .measure()
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
             .expect("a solid this size measures")
             .volume(),
         3.0
@@ -218,7 +242,11 @@ fn a_triangular_hole_in_a_square_outline_is_a_perfectly_good_profile() {
     assert_eq!(
         model
             .solid(solid)
-            .measure()
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
             .expect("a solid this size measures")
             .volume(),
         (100.0 - 2.0) * 3.0
@@ -257,7 +285,11 @@ fn an_l_shape_is_measured_right_even_though_it_is_not_convex() {
 
     let measured = model
         .solid(solid)
-        .measure()
+        .measure(
+            a_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a solid this size measures");
     assert_eq!(measured.volume(), 3.0);
     assert!((measured.centroid().x() - 2.5 / 3.0).abs() < 1e-12);
@@ -280,7 +312,11 @@ fn a_profile_given_clockwise_is_turned_the_right_way_round() {
     assert_eq!(
         model
             .solid(solid)
-            .measure()
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
             .expect("a solid this size measures")
             .volume(),
         4.0
@@ -474,4 +510,13 @@ fn a_cube_of_no_side_is_refused() {
     let refused = model.add_cube(-1.0, &Policy::certified(), &mut ProvenanceLog::new());
 
     assert!(matches!(refused, Err(Error::HeightNotPositive { .. })));
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }

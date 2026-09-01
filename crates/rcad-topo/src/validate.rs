@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use rcad_geom::{
-    DynamicRange, Isometry, Orientation, Plane, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE,
-    Surface, Vector,
+    Deflection, DynamicRange, Isometry, Orientation, Plane, SIDE_OF_CYLINDER, SIDE_OF_PLANE,
+    SIDE_OF_SPHERE, Surface, Vector,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -13,6 +15,8 @@ use rcad_predicates::{
 use slotmap::SecondaryMap;
 
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
+use crate::measure::signed_volume_over;
+use crate::mesh::Mesh;
 use crate::model::EdgeRun;
 use crate::view::{FaceView, SolidView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
@@ -39,7 +43,10 @@ impl Model {
     /// - nothing is orphaned and nothing is used twice where it may only be
     ///   used once,
     /// - every solid encloses a positive amount of space, which is what says
-    ///   its faces point outwards,
+    ///   its faces point outwards — over its own fan when it is a polyhedron,
+    ///   and over a coarse mesh when it is not,
+    /// - every side of that mesh is used by exactly two triangles running
+    ///   opposite ways, which is what says a round cap is not on back to front,
     /// - `tol(vertex) >= tol(edge) >= tol(face)` over the entities carrying an
     ///   [`Approximation`] (roadmap §5.4, decisions.md §1.2),
     /// - the coordinate range is narrow enough to compute in, as loudly as
@@ -59,13 +66,18 @@ impl Model {
     /// [`Error::Undecidable`](crate::Error::Undecidable) if a face's wire is
     /// wound so far past what `f64` can hold that the cascade cannot say which
     /// way round it goes.
+    ///
+    /// Also whatever [`SolidView::mesh`] refuses, for a model holding a curved
+    /// solid — a refusal about the *sweep* rather than about the model, which is
+    /// why [`how_far_the_sweeps_mesh_may_stray`] asks for the coarsest mesh
+    /// there is.
     pub fn validate(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         self.check_vertices()?;
         self.check_edges()?;
         self.check_coedges()?;
         self.check_wires()?;
         self.check_faces()?;
-        self.check_shells_and_solids()?;
+        self.check_shells_and_solids(policy, log)?;
         self.check_approximation_ordering()?;
         self.check_dynamic_range(policy, log)
     }
@@ -278,7 +290,7 @@ impl Model {
         Ok(())
     }
 
-    fn check_shells_and_solids(&self) -> Result<()> {
+    fn check_shells_and_solids(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         let mut used: SecondaryMap<ShellSlot, usize> = SecondaryMap::new();
         for solid in self.data().solids.values() {
             for shell in &solid.shells {
@@ -312,20 +324,18 @@ impl Model {
                     return Err(Invalid::DanglingKey { entity: "shell" }.into());
                 }
             }
-            // A curved solid has no polyhedral volume, and `signed_volume` sums
-            // over triangles. Running it here would compare a number about a
-            // shape this solid is not against zero, so the check waits for the
-            // mesh that can give it a real one.
-            //
-            // **This is a gap and not a limit.** Nothing yet says a round bar's
-            // faces point outwards. The oracle exists — the mesh has triangles
-            // and they have a signed volume — it is the mesh that does not,
-            // and it is the first thing to run here when it lands.
-            if !self.solid_is_wholly_flat(slot) {
-                continue;
-            }
-            let volume = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward)
-                .signed_volume();
+            let view = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
+            // A polyhedron's own fan *is* its volume, so nothing is meshed for
+            // one. A curved solid has no fan — a round bar's caps fan into no
+            // triangles at all and its wall into two with no area — and until
+            // there was a mesher this check simply did not run for it.
+            let volume = if self.solid_is_wholly_flat(slot) {
+                view.signed_volume()
+            } else {
+                let mesh = view.mesh(how_far_the_sweeps_mesh_may_stray(view)?, policy, log)?;
+                every_side_of_the_skin_is_used_both_ways(&mesh)?;
+                signed_volume_over(&mesh)
+            };
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
             }
@@ -458,6 +468,90 @@ impl Model {
     }
 }
 
+/// How far the mesh the sweep checks a curved solid over may stray.
+///
+/// **As coarse as it goes, and that is not a corner cut.** What is asked of this
+/// mesh is a *sign* and a *count* — does the solid enclose a positive amount of
+/// space, and do the two faces along each side agree which way they face — and
+/// neither answer gets truer with more triangles. What stops a coarse mesh
+/// collapsing is not the deflection: the mesher will not step more than a
+/// quarter turn of longitude whatever it is handed (§25.7), so a bar still comes
+/// out four ways round. The sweep runs at every test boundary, and a mesh at the
+/// model's own deflection would cost it a hundredfold for the same two answers.
+///
+/// **A number and not a fraction of the solid, because a fraction has a worst
+/// case and [`AS_COARSE_AS_A_MESH_GETS`] does not.** Half a radius sounds like
+/// the coarsest sensible answer and is not: the chord a deflection allows on a
+/// pipe grows as `√(3 · radius · deflection)`, so a bar of radius `1e-8` and
+/// length one — which `an_untidy_radius_is_certified_onto_its_own_cylinder_too`
+/// builds — would want thirty-five million points along its length for a mesh
+/// nobody reads.
+///
+/// **Except where the surface pinches to a point, where the coarsest mesh is no
+/// mesh at all.** A ball's one face is a rectangle whose top and bottom sides
+/// are each a single point in space, so a mesh that never cuts it between the
+/// poles is made only of triangles standing on one point twice — every one of
+/// them dropped (§25.6), leaving a ball with no skin and no volume. The quarter
+/// turn above is a floor on *longitude* and says nothing about latitude, so this
+/// is what says it: a deflection of the smallest radius the solid bends over,
+/// which puts three steps from pole to pole.
+///
+/// # Errors
+///
+/// [`Error::Geometry`] if a sphere in the model has a radius that is not a
+/// positive finite length, which nothing else in the sweep looks at.
+fn how_far_the_sweeps_mesh_may_stray(solid: SolidView<'_>) -> Result<Deflection> {
+    let narrowest_pole = solid
+        .faces()
+        .filter_map(|face| match face.surface() {
+            Surface::Sphere(ball) => Some(ball.radius()),
+            Surface::Plane(_) | Surface::Cylinder(_) => None,
+            // A cone pinches to a point as well, and a surface answering this
+            // by not being asked is how every one of §23.8's four defects
+            // started.
+            other => panic!("a surface nothing here can ask about: {other:?}"),
+        })
+        .fold(f64::INFINITY, f64::min);
+    if narrowest_pole.is_infinite() {
+        return Ok(Deflection::of(AS_COARSE_AS_A_MESH_GETS)
+            .expect("the largest f64 is a positive finite length"));
+    }
+    Ok(Deflection::of(narrowest_pole)?)
+}
+
+/// A deflection no solid can be wider than, so nothing is refined for accuracy.
+const AS_COARSE_AS_A_MESH_GETS: f64 = f64::MAX;
+
+/// Every side of the mesh used by exactly two triangles, once each way round.
+///
+/// §23.4's oracle, and the only thing in this sweep that can catch a round cap
+/// put on back to front. A cap's boundary is one closed edge and one corner, so
+/// [`winding_of`] has no polygon to ask about; the tessellated cap has one, and
+/// a cap facing the wrong way runs its triangles round the shared circle the
+/// same way the wall does instead of the opposite way.
+///
+/// **The volume check does not catch it and cannot.** Hang a bar's sums from a
+/// corner of its bottom rim: the bottom cap lies in the plane it is measured
+/// from and contributes nothing whichever way it faces, and flipping the top one
+/// leaves `πr²h/3` — still positive, still no complaint.
+///
+/// Counted as a balance rather than as two counts, which is what makes "twice
+/// the same way round" a failure rather than a pass.
+fn every_side_of_the_skin_is_used_both_ways(mesh: &Mesh) -> Result<()> {
+    let mut balance: HashMap<(u32, u32), i32> = HashMap::new();
+    for triangle in mesh.triangles() {
+        let [first, second, third] = triangle.corners();
+        for (from, to) in [(first, second), (second, third), (third, first)] {
+            *balance.entry((from.min(to), from.max(to))).or_default() +=
+                if from < to { 1 } else { -1 };
+        }
+    }
+    if balance.values().any(|&count| count != 0) {
+        return Err(Invalid::FacesDoNotAgreeWhichWayTheyFace.into());
+    }
+    Ok(())
+}
+
 /// How much slack to allow on top of what reading the distance costs.
 ///
 /// [`Plane::SIGNED_DISTANCE_ROUNDOFF`] is what one reading rounds away, and it
@@ -489,9 +583,9 @@ fn check_flat_face(view: FaceView<'_>, plane: &Plane, allowed_wobble: f64) -> Re
         // no polygon to wind. Which way it goes is a fact about the circle and
         // not about the corners, and the corners are all this can see.
         //
-        // **A gap, named.** Nothing yet says a round cap faces outwards. What
-        // will is the mesh: a tessellated cap has a polygon, and this same
-        // function then has something to ask.
+        // Which way such a cap faces is asked over the mesh instead, by
+        // `every_side_of_the_skin_is_used_both_ways` — where the cap does have a
+        // polygon and its neighbour to disagree with.
         if wire.closes_on_one_edge() {
             continue;
         }
@@ -816,6 +910,22 @@ mod tests {
         model
     }
 
+    fn a_round_bar() -> Model {
+        let mut model = an_empty_model();
+        model
+            .add_round_bar(3.0, 5.0, &Isometry::identity())
+            .expect("a bar three across and five tall");
+        model
+    }
+
+    fn a_ball() -> Model {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+        model
+    }
+
     fn a_plate_with_a_hole() -> Model {
         let mut model = an_empty_model();
         let plate =
@@ -1054,6 +1164,63 @@ mod tests {
             refusal(&model),
             Invalid::VolumeIsNotPositive { .. }
         ));
+    }
+
+    /// §23.9's second gap, closed. A curved solid has no fan, so nothing used to
+    /// say a bar or a ball pointed outwards at all — the check was skipped
+    /// rather than run against a number about a shape the solid is not.
+    ///
+    /// Turned inside out, both now come back with a negative meshed volume, and
+    /// the control is that the sweep accepts them the right way round.
+    #[test]
+    fn a_curved_solid_turned_inside_out_is_caught() {
+        for build in [a_round_bar as fn() -> Model, a_ball as fn() -> Model] {
+            let mut model = build();
+            a_clean_sweep(&model);
+
+            for shell in model.data_mut().shells.values_mut() {
+                for used in &mut shell.faces {
+                    used.orient = used.orient.reversed();
+                }
+            }
+            assert!(matches!(
+                refusal(&model),
+                Invalid::VolumeIsNotPositive { .. }
+            ));
+        }
+    }
+
+    /// §23.9's first gap, closed. A round cap's wire has one corner and no
+    /// polygon, so `winding_of` has nothing to ask and `check_flat_face` skips
+    /// it; reversing the cap's plane turns the cap round and used to leave every
+    /// other check happy.
+    ///
+    /// Note what does *not* catch it. The corners are still on the plane, since
+    /// reversing one only flips the sign of a distance this reads the size of.
+    /// And the volume is still positive: hung from a corner of the bottom rim,
+    /// the bottom cap contributes nothing whichever way it faces and flipping
+    /// the top one leaves a third of `πr²h`. What catches it is the mesh, where
+    /// the cap's triangles now run round the shared circle the same way the
+    /// wall's do.
+    #[test]
+    fn a_round_cap_put_on_back_to_front_is_caught() {
+        let mut model = a_round_bar();
+        a_clean_sweep(&model);
+
+        let cap = model
+            .data()
+            .faces
+            .iter()
+            .find(|(_, face)| face.surface.as_plane().is_some())
+            .map(|(slot, _)| slot)
+            .expect("a bar has two flat caps");
+        let plane = *model.data().faces[cap]
+            .surface
+            .as_plane()
+            .expect("just found it");
+        model.data_mut().faces[cap].surface = Surface::Plane(plane.reversed());
+
+        assert_eq!(refusal(&model), Invalid::FacesDoNotAgreeWhichWayTheyFace);
     }
 
     #[test]

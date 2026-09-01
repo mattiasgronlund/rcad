@@ -1,15 +1,32 @@
-use rcad_geom::{Point, Vector};
+use std::collections::HashMap;
 
+use rcad_geom::{Deflection, Point, Surface, Vector};
+use rcad_predicates::{Policy, ProvenanceLog};
+
+use crate::mesh::{Mesh, MeshTriangle};
 use crate::view::FaceView;
-use crate::{Error, Result, SolidView};
+use crate::{Error, FaceKey, Result, SolidView};
 
-/// How much space a solid takes up, how much skin it has, and where it
-/// balances.
+/// How much space a solid takes up, how much skin it has, where it balances,
+/// and how far each of those three could be out.
+///
+/// **Three answers in three different units, and each error is in the unit of
+/// the answer it belongs to** — a cubed one, a squared one and a length
+/// (`docs/decisions.md` §25.4). Cramming a volume error into an
+/// [`Approximation`](rcad_predicates::Approximation), which is a length by
+/// §15.2, is the units mistake §12.4 says this kernel loses money on.
+///
+/// All three errors are exactly `0.0` for a solid whose faces are all flat: the
+/// divergence-theorem sum over a polyhedron's own triangles is the answer and
+/// not a picture of it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Measurement {
     volume: f64,
+    volume_error: f64,
     surface_area: f64,
+    area_error: f64,
     centroid: Point,
+    centroid_wobble: f64,
 }
 
 impl Measurement {
@@ -19,10 +36,41 @@ impl Measurement {
         self.volume
     }
 
+    /// How much more space the solid could enclose than [`Measurement::volume`]
+    /// says — a **cubed** quantity, in the model's own unit.
+    ///
+    /// The triangles a curved face is cut into are drawn through points on the
+    /// surface itself, so they lie inside the material and the sum over them is
+    /// short of the real answer. What is missing is the shell between the
+    /// triangles and the surface, and
+    /// [`how_much_space_hides_under_a_flat_stand_in`] bounds it.
+    ///
+    /// Exactly `0.0` for a wholly flat solid, and never negative.
+    #[must_use]
+    pub fn volume_error(self) -> f64 {
+        self.volume_error
+    }
+
     /// The total area of all its faces.
     #[must_use]
     pub fn surface_area(self) -> f64 {
         self.surface_area
+    }
+
+    /// How much more skin the solid could have than
+    /// [`Measurement::surface_area`] says — a **squared** quantity, in the
+    /// model's own unit.
+    ///
+    /// Two things are missing and both are counted:
+    /// [`how_much_more_surface_there_can_be`] for the curved faces, whose true
+    /// surface bulges away from the flat triangles standing in for it, and
+    /// [`rim_of_the_flat_faces`] for the flat ones, whose meshed outline is a
+    /// polygon inscribed in a curve.
+    ///
+    /// Exactly `0.0` for a wholly flat solid, and never negative.
+    #[must_use]
+    pub fn area_error(self) -> f64 {
+        self.area_error
     }
 
     /// The point the solid would balance on, if it were of even density.
@@ -30,34 +78,79 @@ impl Measurement {
     pub fn centroid(self) -> Point {
         self.centroid
     }
+
+    /// How far [`Measurement::centroid`] could be from where the solid really
+    /// balances — a **length**, in the model's own unit.
+    ///
+    /// The one of the three that is a length, so the one that is comparable
+    /// with [`Policy::max_wobble`] (§25.4). See [`SolidView::measure`] for what
+    /// that comparison is worth and who makes it.
+    ///
+    /// The missing material is no more than [`Measurement::volume_error`] of
+    /// space, and none of it is further from the centroid than the solid
+    /// reaches, so moving all of it to the far side shifts the balance point by
+    /// at most `volume_error / volume` of that reach.
+    ///
+    /// Exactly `0.0` for a wholly flat solid.
+    #[must_use]
+    pub fn centroid_wobble(self) -> f64 {
+        self.centroid_wobble
+    }
 }
 
 impl SolidView<'_> {
-    /// Measure the solid: volume, surface area and centroid in one pass.
+    /// Measure the solid: volume, surface area and centroid in one pass, each
+    /// with how far out it could be.
     ///
-    /// Straight out of the divergence theorem, over the triangles
-    /// [`FaceView::for_each_triangle`] hands out. Each triangle and the hub make
-    /// a tetrahedron whose signed volume is a determinant; add them all up and
-    /// the parts outside the solid cancel, because the face triangles form a
-    /// closed surface. Faces used the wrong way round come out negative, which
-    /// is why [`Orientation::sign`] has to be exactly ±1 — and it is.
+    /// Straight out of the divergence theorem. Each triangle and the hub make a
+    /// tetrahedron whose signed volume is a determinant; add them all up and the
+    /// parts outside the solid cancel, because the triangles form a closed
+    /// surface. Faces used the wrong way round come out negative, which is why
+    /// [`Orientation::sign`] has to be exactly ±1 — and it is.
     ///
-    /// No quadrature. Planar faces do not need any (decisions.md §3.1).
+    /// # Two paths, and a polyhedron still takes the exact one
     ///
-    /// The triangles come in a fixed order, so the sums are bit for bit
-    /// repeatable.
+    /// A solid whose faces are **all flat** is measured over the triangles
+    /// [`FaceView::for_each_triangle`] hands out, exactly as it was in M0:
+    /// `deflection` is ignored, no mesh is built, nothing is logged, and all
+    /// three error terms come back exactly `0.0`. That is not an optimisation.
+    /// Every metamorphic property in the fuse suite — inclusion–exclusion,
+    /// idempotence, absorption — reads these numbers, and putting them
+    /// downstream of a triangulator is the schedule risk §23.7 named before this
+    /// work started. `a_flat_solids_measurement_is_bit_for_bit_what_it_was` is
+    /// the test that says it did not happen.
     ///
-    /// [`FaceView::for_each_triangle`]: crate::FaceView::for_each_triangle
+    /// A solid with a curved face has no such fan — its caps fan into no
+    /// triangles at all and its wall into two with no area — so it is measured
+    /// over [`SolidView::mesh`], and the three error terms say how much of the
+    /// answer the triangles could be hiding.
+    ///
+    /// # Which knob decides what
+    ///
+    /// `deflection` decides how fine the mesh is, and a coarse one is a request
+    /// rather than a failure (§23.5). `policy` decides the one thing §23.5 gives
+    /// it: whether a deflection under what the arithmetic can reach is refused
+    /// or tagged, which is [`SolidView::mesh`]'s business and is why both travel
+    /// through to it.
+    ///
+    /// **What `policy` deliberately does not do is refuse a measurement for
+    /// being meshed.** [`Measurement::centroid_wobble`] is the one term
+    /// comparable with [`Policy::max_wobble`], and that budget is 64 roundings
+    /// at the working size — around `1e-12` for a 100 mm part. The finest mesh
+    /// this kernel will make of a ball leaves a wobble many orders above it, so
+    /// judging one against the other would refuse *every* curved solid at
+    /// *every* deflection, and this signature would have replaced one blanket
+    /// refusal with another. It would also let the deflection decide what the
+    /// policy certifies, which is the conflation §23.5 exists to stop. The
+    /// comparison is the caller's to make, on a number that is handed back for
+    /// exactly that;
+    /// `judging_a_meshed_centroid_against_the_policy_would_refuse_every_ball` is
+    /// the demonstration rather than the paragraph.
+    ///
     /// [`Orientation::sign`]: rcad_geom::Orientation::sign
+    /// [`FaceView::for_each_triangle`]: crate::FaceView::for_each_triangle
     ///
     /// # Errors
-    ///
-    /// [`Error::MeasureNeedsFlatFaces`] for a solid with a curved face. The fan
-    /// is a polyhedron's answer and a round bar is not a polyhedron — asked
-    /// anyway it sums to zero, which is not a small error but no answer at all.
-    /// Asked over **every** face before anything is summed, for the reason
-    /// [`SolidView::is_wholly_flat`] gives: which answer comes back must not
-    /// depend on the order the faces were reached.
     ///
     /// [`Error::VolumeTooLargeToMeasure`] or
     /// [`Error::SurfaceAreaTooLargeToMeasure`] when that answer is a real
@@ -65,16 +158,37 @@ impl SolidView<'_> {
     /// side `1e300` encloses `1e900`. The solid is sound; the type is the
     /// limit, so this is bad input rather than a broken model (§4.1).
     ///
+    /// For a curved solid, whatever [`SolidView::mesh`] refuses:
+    /// [`Error::DeflectionBelowWhatAMeshCanReach`],
+    /// [`Error::MoreMeshPointsThanASolidWillHold`], [`Error::CannotMeshAFace`]
+    /// or [`Error::Undecidable`].
+    ///
     /// # Panics
     ///
     /// If the solid encloses a negative amount of space, or none. A closed
     /// solid with its faces pointing outwards cannot, and
     /// [`Model::validate`](crate::Model::validate) says so, which makes this a
-    /// broken model rather than bad input.
-    pub fn measure(self) -> Result<Measurement> {
-        if !self.is_wholly_flat() {
-            return Err(Error::MeasureNeedsFlatFaces);
+    /// broken model rather than bad input. For a curved solid, also everything
+    /// [`SolidView::mesh`] panics on, and for the same reason.
+    pub fn measure(
+        self,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Measurement> {
+        if self.is_wholly_flat() {
+            return self.measured_over_its_own_fan();
         }
+        let mesh = self.mesh(deflection, policy, log)?;
+        self.measured_over(&mesh)
+    }
+
+    /// The exact answer for a polyhedron, summed over the triangles its faces
+    /// fan into.
+    ///
+    /// No quadrature. Planar faces do not need any (decisions.md §3.1). The
+    /// triangles come in a fixed order, so the sums are bit for bit repeatable.
+    fn measured_over_its_own_fan(self) -> Result<Measurement> {
         let hub = self.hub();
         let shifts = self.axis_shifts(hub);
         let (six_volumes, moment) = self.volume_and_moment(hub, shifts);
@@ -97,15 +211,87 @@ impl SolidView<'_> {
         let balance = [0, 1, 2].map(|axis| shift(moment[axis] / (4.0 * six_volumes), shifts[axis]));
         Ok(Measurement {
             volume,
+            volume_error: 0.0,
             surface_area,
+            area_error: 0.0,
             centroid: hub + Vector::from(balance),
+            centroid_wobble: 0.0,
         })
+    }
+
+    /// The same three sums over a mesh, plus how much of the solid the mesh
+    /// leaves out.
+    ///
+    /// The arithmetic is the fan's: hang the sums from a corner rather than the
+    /// origin, shrink each axis by a power of two, and undo both on the way out.
+    /// [`SolidView::volume_and_moment`] is where that is derived, and every word
+    /// of it applies here — the triangles are a different set, not a different
+    /// kind of thing.
+    fn measured_over(self, mesh: &Mesh) -> Result<Measurement> {
+        let hub = hub_of(mesh);
+        let shifts = axis_shifts_over(mesh, hub);
+        let (six_volumes, moment) = volume_and_moment_over(mesh, hub, shifts);
+
+        assert!(
+            six_volumes > 0.0,
+            "a solid must enclose a positive amount of space, this one gives {}",
+            six_volumes / 6.0
+        );
+
+        let volume = shift(six_volumes / 6.0, shifts.iter().sum());
+        if !volume.is_finite() {
+            return Err(Error::VolumeTooLargeToMeasure);
+        }
+        let skin = self.skin_of(mesh);
+        if !skin.area.is_finite() {
+            return Err(Error::SurfaceAreaTooLargeToMeasure);
+        }
+
+        let balance = [0, 1, 2].map(|axis| shift(moment[axis] / (4.0 * six_volumes), shifts[axis]));
+        let centroid = hub + Vector::from(balance);
+        Ok(Measurement {
+            volume,
+            volume_error: skin.volume_error,
+            surface_area: skin.area,
+            area_error: skin.area_error,
+            centroid,
+            centroid_wobble: (skin.volume_error / volume)
+                * how_far_the_solid_reaches_from(mesh, centroid),
+        })
+    }
+
+    /// How much skin the mesh has, and how much of the solid's own it misses.
+    ///
+    /// One walk over the faces rather than three, because the two error terms
+    /// are both a share of the very area being summed.
+    fn skin_of(self, mesh: &Mesh) -> Skin {
+        let radii = radius_of_each_face(self);
+        let deviation = mesh.deviation().magnitude();
+        let mut skin = Skin {
+            area: 0.0,
+            area_error: 0.0,
+            volume_error: 0.0,
+        };
+        for (face, area) in areas_of_each_face(mesh) {
+            skin.area += area;
+            let Some(radius) = radii[&face] else {
+                continue;
+            };
+            skin.area_error += how_much_more_surface_there_can_be(area, radius, deviation);
+            skin.volume_error +=
+                how_much_space_hides_under_a_flat_stand_in(area, radius, deviation);
+        }
+        skin.area_error += deviation * rim_of_the_flat_faces(mesh, &radii);
+        skin
     }
 
     /// The signed volume without the refusals, for
     /// [`Model::validate`](crate::Model::validate) to complain about. Infinite
     /// when the solid is too large to measure, which is a different complaint
     /// from a negative one and `validate` keeps the two apart.
+    ///
+    /// The fan, so this is for a wholly flat solid. A curved one has no fan and
+    /// `validate` reads [`signed_volume_over`] instead.
     pub(crate) fn signed_volume(self) -> f64 {
         let hub = self.hub();
         let shifts = self.axis_shifts(hub);
@@ -254,6 +440,250 @@ fn largest_edge_component(face: &FaceView<'_>) -> f64 {
         }
     });
     widest
+}
+
+/// How much skin a mesh has, and how much of its solid's own it leaves out.
+struct Skin {
+    area: f64,
+    area_error: f64,
+    volume_error: f64,
+}
+
+/// The corner the sums over a mesh hang from, picked exactly as
+/// [`SolidView::hub`] picks one: the smallest, `x` first.
+fn hub_of(mesh: &Mesh) -> Point {
+    let mut smallest: Option<[f64; 3]> = None;
+    for point in mesh.points() {
+        let corner = point.coordinates();
+        if smallest.is_none_or(|so_far| lexicographically_smaller(corner, so_far)) {
+            smallest = Some(corner);
+        }
+    }
+    Point::from(smallest.unwrap_or([0.0; 3]))
+}
+
+/// One power of two per axis over a mesh's points, for
+/// [`SolidView::axis_shifts`]'s reasons.
+fn axis_shifts_over(mesh: &Mesh, hub: Point) -> [i32; 3] {
+    let mut widest = [0.0f64; 3];
+    for point in mesh.points() {
+        let offsets = (*point - hub).components();
+        for (axis, so_far) in widest.iter_mut().enumerate() {
+            *so_far = so_far.max(offsets[axis].abs());
+        }
+    }
+    widest.map(shift_for)
+}
+
+/// Six times the signed volume of a mesh, and its first moment about `hub`.
+///
+/// The mesh's triangles in the order it stores them, which is fixed (§25.7), so
+/// two runs give the same sum bit for bit.
+fn volume_and_moment_over(mesh: &Mesh, hub: Point, shifts: [i32; 3]) -> (f64, [f64; 3]) {
+    let mut six_volumes = 0.0;
+    let mut moment = [0.0f64; 3];
+    for triangle in mesh.triangles() {
+        let [a, b, c] =
+            corners_of(mesh, triangle).map(|corner| shrink_each_axis(corner - hub, shifts));
+        let six_volume = a.dot(b.cross(c));
+        six_volumes += six_volume;
+        let offsets = [a, b, c].map(|offset| offset.components());
+        for (axis, total) in moment.iter_mut().enumerate() {
+            *total += six_volume * (offsets[0][axis] + offsets[1][axis] + offsets[2][axis]);
+        }
+    }
+    (six_volumes, moment)
+}
+
+/// The signed volume of a mesh, for
+/// [`Model::validate`](crate::Model::validate) to complain about — the curved
+/// twin of [`SolidView::signed_volume`].
+pub(crate) fn signed_volume_over(mesh: &Mesh) -> f64 {
+    let hub = hub_of(mesh);
+    let shifts = axis_shifts_over(mesh, hub);
+    let (six_volumes, _) = volume_and_moment_over(mesh, hub, shifts);
+    shift(six_volumes / 6.0, shifts.iter().sum())
+}
+
+/// Each face of the mesh and how much area its triangles have, in the order the
+/// mesh stores them.
+///
+/// A face's triangles arrive together, so this is a walk and not a lookup.
+fn areas_of_each_face(mesh: &Mesh) -> Vec<(FaceKey, f64)> {
+    let triangles = mesh.triangles();
+    let mut areas = Vec::new();
+    let mut start = 0;
+    while start < triangles.len() {
+        let face = triangles[start].face();
+        let mut end = start;
+        while end < triangles.len() && triangles[end].face() == face {
+            end += 1;
+        }
+        areas.push((face, area_of(mesh, &triangles[start..end])));
+        start = end;
+    }
+    areas
+}
+
+/// The area of one face's triangles, measured in a scale of its own for the
+/// reason [`SolidView::surface_area`] gives.
+///
+/// **Every triangle's area added, not the length of their vector sum.** A flat
+/// face's triangle normals all point the same way and the two agree there; a
+/// cylinder's wall goes right round and its vector areas cancel to nothing, so
+/// the shorter sum would say a bar has no wall.
+fn area_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> f64 {
+    let mut widest = 0.0f64;
+    for triangle in triangles {
+        let [a, b, c] = corners_of(mesh, triangle);
+        for edge in [b - a, c - a] {
+            for component in edge.components() {
+                widest = widest.max(component.abs());
+            }
+        }
+    }
+    let across = shift_for(widest);
+
+    let mut total = 0.0;
+    for triangle in triangles {
+        let [a, b, c] = corners_of(mesh, triangle);
+        let along = shrink(b - a, across);
+        let down = shrink(c - a, across);
+        total += along.cross(down).length() * 0.5;
+    }
+    shift(total, 2 * across)
+}
+
+/// How much more surface a curved face can have than the `area` of the flat
+/// triangles standing in for it.
+///
+/// **The derivation, for a face on a sphere of radius `r` cut to a deviation of
+/// `d`.** Every point of every triangle is inside the material and no further
+/// than `d` from the surface, so all of them sit between the radii `r − d` and
+/// `r`. Projecting the triangles radially in onto the sphere of radius `r − d`
+/// scales an area element by `cos θ · ((r − d) / ρ)²`, where `ρ ≥ r − d` is how
+/// far out the element is and `θ` is how far its normal leans off the radial
+/// direction — never more than one — so the solid angle the face covers is at
+/// most `area / (r − d)²`. The true surface over that solid angle has area
+/// `r²` times it, so it is at most `(r / (r − d))²` of `area`, and this is the
+/// difference.
+///
+/// **A cylinder is covered by the same number and is not derived twice.** The
+/// same argument about the axis gives `r / (r − d)`, which is the smaller of the
+/// two for every `r > d`, so the sphere's factor bounds both. One expression
+/// that is loose for pipes beats two that can disagree.
+///
+/// Infinite when the mesh may be a whole radius away from the surface: there is
+/// then no shell to trap the difference in and nothing here bounds it. A
+/// deflection that coarse is a legitimate request (§23.5) and this is what it
+/// costs.
+fn how_much_more_surface_there_can_be(area: f64, radius: f64, deviation: f64) -> f64 {
+    let inner = radius - deviation;
+    if inner <= 0.0 {
+        return f64::INFINITY;
+    }
+    area * ((radius / inner) * (radius / inner) - 1.0)
+}
+
+/// How much space can hide between a curved face's triangles and the surface
+/// they stand in for, over the `area` of those triangles.
+///
+/// The same shell as [`how_much_more_surface_there_can_be`], now measured rather
+/// than projected. The face covers a solid angle of at most `area / (r − d)²`,
+/// and the shell between the radii `r − d` and `r` over that angle holds
+/// `(r³ − (r − d)³) / 3` per unit of it.
+///
+/// **Nothing is charged to a flat face**, and that is a claim rather than an
+/// omission: a flat face is meshed in its own plane, so no space at all is
+/// enclosed between the two skins there. The sliver over a flat face's *rim* —
+/// between its inscribed outline and the curve that outline stands for — is
+/// inside the neighbouring curved face's shell and already counted — which the
+/// short wide bar in
+/// `the_published_error_bounds_cover_what_a_mesh_of_a_bar_or_a_ball_misses`
+/// checks against `πr²h`.
+///
+/// Infinite for a mesh a whole radius out, for the reason above.
+fn how_much_space_hides_under_a_flat_stand_in(area: f64, radius: f64, deviation: f64) -> f64 {
+    let inner = radius - deviation;
+    if inner <= 0.0 {
+        return f64::INFINITY;
+    }
+    area * (radius * radius * radius - inner * inner * inner) / (3.0 * inner * inner)
+}
+
+/// The total length of the mesh sides where a flat face meets another face.
+///
+/// **A flat face of a curved solid is not exact either, and this is why.** A
+/// round bar's cap is a disc, and what the mesh draws is a polygon inscribed in
+/// its rim — short of the disc by one circular segment per side. Each segment
+/// fits inside a rectangle as long as its chord and as tall as the deviation, so
+/// `deviation` times this length bounds the lot.
+///
+/// Counted once for each flat face along a side, which is what makes a bar's two
+/// caps cost twice one rim. A side used twice by the *same* face is a seam and
+/// is not a rim at all, so it is skipped by construction.
+fn rim_of_the_flat_faces(mesh: &Mesh, radii: &HashMap<FaceKey, Option<f64>>) -> f64 {
+    let mut first_seen: HashMap<(u32, u32), FaceKey> = HashMap::new();
+    let mut rim = 0.0;
+    for triangle in mesh.triangles() {
+        let [first, second, third] = triangle.corners();
+        for (from, to) in [(first, second), (second, third), (third, first)] {
+            let side = (from.min(to), from.max(to));
+            let Some(&already) = first_seen.get(&side) else {
+                first_seen.insert(side, triangle.face());
+                continue;
+            };
+            if already == triangle.face() {
+                continue;
+            }
+            let length = mesh.points()[from as usize].distance_to(mesh.points()[to as usize]);
+            for face in [already, triangle.face()] {
+                if radii[&face].is_none() {
+                    rim += length;
+                }
+            }
+        }
+    }
+    rim
+}
+
+/// How far out of `centroid` any part of the solid can be: the furthest mesh
+/// point, and the deviation on top, because the surface stands off the mesh by
+/// that much again.
+fn how_far_the_solid_reaches_from(mesh: &Mesh, centroid: Point) -> f64 {
+    let furthest = mesh
+        .points()
+        .iter()
+        .map(|point| point.distance_to(centroid))
+        .fold(0.0, f64::max);
+    furthest + mesh.deviation().magnitude()
+}
+
+/// How far each face of this solid bends, or `None` where it does not bend at
+/// all.
+///
+/// # Panics
+///
+/// On a surface this has not been taught. [`Surface`] grows a variant at every
+/// milestone, and a surface measured by not being measured is worse than a stop.
+fn radius_of_each_face(solid: SolidView<'_>) -> HashMap<FaceKey, Option<f64>> {
+    solid
+        .faces()
+        .map(|face| {
+            let radius = match face.surface() {
+                Surface::Plane(_) => None,
+                Surface::Sphere(ball) => Some(ball.radius()),
+                Surface::Cylinder(pipe) => Some(pipe.radius()),
+                other => panic!("this crate cannot say how far {other:?} bends"),
+            };
+            (face.key(), radius)
+        })
+        .collect()
+}
+
+/// Where one mesh triangle's three corners are.
+fn corners_of(mesh: &Mesh, triangle: &MeshTriangle) -> [Point; 3] {
+    triangle.corners().map(|at| mesh.points()[at as usize])
 }
 
 /// The exponent that brings `value` to between one and two, or `0` when there

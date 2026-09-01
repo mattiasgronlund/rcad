@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use rcad_geom::{Isometry, Point, Scale, Surface};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Surface};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{Containment, Error, Model, Rule};
 
@@ -335,6 +335,10 @@ fn a_ball_refuses_a_radius_that_is_not_a_positive_number() {
 /// unwrapped a cylinder — and the classifier silently answered as though the
 /// bar were the handful of chords its corners happen to span. §4.1 ranks that
 /// second one below the crash.
+///
+/// **`measure` used to be on this list and is not any more.** It refused a
+/// curved solid at M2's gate because a bar has no fan to sum (§25.5); it now
+/// sums over a mesh instead, and `measuring.rs` is where that is checked.
 #[test]
 fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -357,16 +361,6 @@ fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
             ),
             Containment::NeedsFlatFaces,
             "the classifier casts rays at flat faces, and a {what} has none"
-        );
-
-        // Without the guard this neither refuses nor answers. A bar's caps fan
-        // into no triangles at all and its wall into two with no area, so the
-        // divergence sum is a clean zero and `measure` dies on its own
-        // assertion — a crash where a refusal is the honest answer.
-        let refusal = model.solid(curved).measure();
-        assert!(
-            matches!(refusal, Err(Error::MeasureNeedsFlatFaces)),
-            "measuring a {what} gave {refusal:?}"
         );
 
         for rule in [Rule::Union, Rule::Difference, Rule::Intersection] {
@@ -392,7 +386,11 @@ fn every_operation_that_needs_flat_faces_refuses_a_round_bar() {
     assert_eq!(
         model
             .solid(cube)
-            .measure()
+            .measure(
+                Deflection::of(0.1).expect("a length a polyhedron ignores"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
             .expect("a cube measures")
             .volume(),
         8.0

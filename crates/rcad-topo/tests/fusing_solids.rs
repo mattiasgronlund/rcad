@@ -7,7 +7,7 @@
 //! here every corner is exactly representable, so the arithmetic is exact and
 //! the numbers can be compared with `==`.
 
-use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
 use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey, VertexKey};
 
@@ -56,7 +56,11 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         .map(|&solid| {
             model
                 .solid(solid)
-                .measure()
+                .measure(
+                    a_deflection(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
                 .expect("a solid this size measures")
                 .volume()
         })
@@ -143,7 +147,11 @@ fn a_cube_with_a_smaller_one_taken_out_of_the_middle_is_one_solid_with_a_void() 
     );
     assert_eq!(
         solid
-            .measure()
+            .measure(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            )
             .expect("a solid this size measures")
             .volume(),
         64.0 - 8.0
@@ -1071,4 +1079,13 @@ fn both_input_faces_that_were_joined_on_the_way_in_name_the_face_they_became() {
         6,
         "the eight walls came through as the six faces the shape actually has"
     );
+}
+
+/// The deflection the measurements here are asked for.
+///
+/// Every solid in this file is a polyhedron, and a polyhedron ignores it: its
+/// own fan is the answer rather than a picture of one (`docs/decisions.md`
+/// §25.4).
+fn a_deflection() -> Deflection {
+    Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }
