@@ -406,6 +406,24 @@ fn the_piece_holds(
                 .all(|side| side_of_surface(&side.carried_by[1], point) == side.material_side),
         );
     };
+    // **A flat piece's corners are a polygon and its sides need not be**
+    // (§38.4). Where a bar's wall cuts a plane the side between two corners is an
+    // arc, and the chord across it is on the other side of the crossing: the
+    // midway point of the chord is inside the bar where the piece is outside it,
+    // so a winding count over the corners alone hands classification a point the
+    // piece does not hold. What rules it out is the sign the arrangement already
+    // wrote down — the side of the partner this piece's material is on — read
+    // here for a flat piece exactly as the curved branch above reads it.
+    for side in piece.wires.iter().flatten() {
+        if side.carried_by[1].as_plane().is_some() {
+            continue;
+        }
+        match side_of_surface(&side.carried_by[1], point) {
+            found if found == side.material_side => (),
+            Decision::Neg | Decision::Pos | Decision::Zero => return Some(false),
+            _ => return None,
+        }
+    }
     let mut winding = 0;
     for (position, wire) in piece.wires.iter().enumerate() {
         let inwards = if position == 0 { 1 } else { -1 };

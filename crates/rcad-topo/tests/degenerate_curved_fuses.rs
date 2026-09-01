@@ -1241,6 +1241,48 @@ fn a_block_sitting_on_a_bars_cap_is_refused_by_name() {
     }
 }
 
+// §37.5's one unclassified refusal, classified and closed.
+
+/// A bar with a rectangular tab on it: `ResultIsNotManifold { count: 1 }`
+/// classified, and it was **the chord standing in for an arc** (§38.4).
+///
+/// §37.5 reached an edge used *once* rather than four times — a hole in the
+/// skin, not §17.4's four faces along an edge — and left it unclassified because
+/// nothing had worked out whether the answer exists. It does, and this is it: a
+/// bar of radius two with a block on `1 ≤ x ≤ 3`, `−1 ≤ y ≤ 7`, `3 ≤ z ≤ 5`, so
+/// the block's two inner walls cut the bar and the rest of it sticks out.
+///
+/// **A gap** (§16.10). The block's top at `z = 5` comes apart into the bit inside
+/// the bar and the bit outside it, and the outside bit has one *arc* among its
+/// sides. A piece is kept by classifying a point provably inside it, and the
+/// winding count that proves it reads the corners as a polygon — so the middle of
+/// the **chord** across that arc counted as inside the piece, when it is on the
+/// far side of the arc and inside the bar. The piece was classified `Inside`,
+/// dropped, and the arc left with one face along it. The manifold check caught
+/// the hole, so what came out was a refusal and not a corrupt solid; what it was
+/// refusing was a wrong classification.
+///
+/// The three closed forms are exact and worth writing out, because the shared
+/// piece is the one number here that is not obvious: the disc of radius two with
+/// `x ≥ 1` has area `4π/3 − √3`, the corner of it with `y ≤ −1` has area
+/// `1 − √3 + π/3`, and the difference is exactly `π − 1`.
+#[test]
+fn a_bar_with_a_tab_on_it_is_answered_rather_than_left_with_a_hole_in_its_skin() {
+    let shared = 2.0 * (PI - 1.0);
+    for (rule, closed_form) in [
+        (Rule::Union, A_BAR + 32.0 - shared),
+        (Rule::Intersection, shared),
+        (Rule::Difference, A_BAR - shared),
+    ] {
+        let mut model = a_model();
+        let bar = a_bar(&mut model);
+        let tab = block(&mut model, [2.0, 8.0, 2.0], Vector::new(1.0, -1.0, 3.0));
+        let answer = fused(&mut model, &Pair::of(bar, tab), rule);
+        assert_eq!(answer.solids().len(), 1, "{rule:?}");
+        measures(volume_of(&model, answer.solids()), closed_form, Side::Under);
+    }
+}
+
 // The gaps §36 already named, placed here so the catalogue is where they are
 // looked up rather than four sections apart.
 
