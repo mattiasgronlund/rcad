@@ -133,8 +133,8 @@ const LONGER_CASES: u32 = 24;
 /// number is the same every time.
 ///
 /// A hundred and twenty-eight, and the ceiling is the clock and not the
-/// statistics. At this count each family is 414 fuses, the whole workspace suite
-/// runs in about ten seconds, and a soak at eighty times this corpus is what
+/// statistics. At this count each family is 423 fuses, the whole workspace suite
+/// runs in about three seconds, and a soak at eighty times this corpus is what
 /// §17.7's precise figures come from. Raising the shipped number to a thousand
 /// was tried and reverted: it bought a fresh-seed spread of ±1.6 points instead
 /// of ±4, and it cost the default suite a minute of wall clock every run. §17.7
@@ -184,23 +184,26 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 ///
 /// Twenty-four per cent, chosen from measurement rather than from taste, and it
 /// is a threshold on a **deterministic** number: [`measured`] runs from a fixed
-/// seed, so the shipped corpus of 420 turned fuses refuses 87 of them, 20.71%,
+/// seed, so the shipped corpus of 423 turned fuses refuses 96 of them, 22.70%,
 /// every run on every machine. There is no sampling noise for the threshold to
-/// have to clear, so what it has to clear instead is ordinary drift — 3.3 points
-/// is fourteen fuses — and what it has to catch is a regression. The three
-/// undeserved refusals recorded so far are each worth enough to trip it on their
-/// own: the two §17.7 names are about 3.5 points apiece, and §19.1's plane
-/// reader was worth 4.4, which is what took this number from 28 to 24 when it
-/// was fixed.
+/// have to clear, so what it has to clear instead is ordinary drift — 1.3 points
+/// is six fuses — and what it has to catch is a regression. The three undeserved
+/// refusals recorded so far are each worth several times that on their own: the
+/// two §17.7 names are about 3.5 points apiece, and §19.1's plane reader was
+/// worth 4.4, which is what took this number from 28 to 24 when it was fixed.
+///
+/// **Six fuses is thin and the thinness is the measurement moving, not the
+/// threshold slipping** (§38.6). It read 20.71% of 420 when it was written and
+/// reads 22.70% of 423 now, and the corpus grew because the generator did.
 ///
 /// **It is judged on the shipped corpus only** — see
 /// [`this_is_the_shipped_corpus`]. A soak is a different measurement with a
-/// different distribution: six fresh seeds at ten times the corpus came out at
-/// 22.6%, 23.0%, 23.7%, 24.1%, 24.1% and 24.4%, so two of the six sit above this
-/// number with nothing wrong. Judging them by the shipped corpus's threshold
-/// would be treating two different numbers as one, which is the thing §17.7 is
-/// at pains not to do. A threshold is not a target — the measurement is what is
-/// recorded, and this is only here so it cannot drift unnoticed.
+/// different distribution: six fresh seeds at ten times the corpus come out at
+/// 23.4%, 23.4%, 23.9%, 24.0%, 24.0% and 24.7%, so four of the six sit above
+/// this number with nothing wrong. Judging them by the shipped corpus's
+/// threshold would be treating two different numbers as one, which is the thing
+/// §17.7 is at pains not to do. A threshold is not a target — the measurement is
+/// what is recorded, and this is only here so it cannot drift unnoticed.
 const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 
 /// How much of the skew family a certified fuse is allowed to refuse.
@@ -211,14 +214,20 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// unnoticed rather than as a target.
 ///
 /// Eighteen per cent. [`measured`] runs from a fixed seed, so the shipped corpus
-/// of 420 skew fuses refuses 60 of them, 14.29%, every run on every machine.
+/// of 423 skew fuses refuses 51 of them, 12.06%, every run on every machine.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
-/// drift — 3.7 points is fifteen fuses, the same headroom
-/// [`TURNED_REFUSALS_MUST_STAY_BELOW`] leaves — and what it has to catch is a
-/// regression in the one family that reaches a branch nothing else does.
+/// drift — 5.9 points is twenty-five fuses, four times the headroom
+/// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
+/// a regression in the one family that reaches a branch nothing else does.
 ///
 /// **Judged on the shipped corpus only**, for the reason
-/// [`this_is_the_shipped_corpus`] gives. SKEW_SOAK_PROSE
+/// [`this_is_the_shipped_corpus`] gives, and here the two numbers are further
+/// apart than for the turned family rather than nearer: six fresh seeds at ten
+/// times the corpus come out at 12.6%, 13.8%, 14.5%, 15.3%, 16.2% and 16.3%, so
+/// none of the six reaches this number but the worst of them is within 1.7
+/// points of it. A soak that did cross it would be saying the fresh-seed
+/// distribution sits higher than the shipped one, which is what
+/// [`this_is_the_shipped_corpus`] says to expect and not a regression.
 const SKEW_REFUSALS_MUST_STAY_BELOW: f64 = 0.18;
 
 /// How many of the comparisons a property set out to make it has to have made.
@@ -253,7 +262,7 @@ const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
 /// How much of the lattice control comes back as something a `Model` cannot
 /// hold.
 ///
-/// Measured at 4.8% over the shipped corpus — 20 of 414 — and the band is
+/// Measured at 4.7% over the shipped corpus — 20 of 423 — and the band is
 /// roughly half to double that. Every one of them is the case §17.7's catalogue
 /// records by hand: two solids meeting along a whole edge would put four faces
 /// along it, and an edge belongs to exactly two.
@@ -261,46 +270,49 @@ const A_LATTICE_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.02..=0.10;
 
 /// The same for the family built to share coordinates, which is full of them.
 ///
-/// Measured at 17.4% — 72 of 414 — which is what "deliberately degenerate"
+/// Measured at 17.0% — 72 of 423 — which is what "deliberately degenerate"
 /// buys: the offsets are whole extents, so edge-on-edge and corner-on-corner
 /// are the ordinary case here rather than the rare one.
 const A_FLUSH_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.10..=0.28;
 
 /// The same for the lattice pairs written somewhere else in `f64`.
 ///
-/// Measured at 4.1% — 17 of 414 — against the lattice family's 4.8%, and the two
+/// Measured at 4.0% — 17 of 423 — against the lattice family's 4.7%, and the two
 /// are the same figure rather than two. The configurations are drawn from the
 /// same generator and the same seed, but this family draws two more numbers per
-/// case, so the two corpora are not the same 138 configurations. What is exactly
+/// case, so the two corpora are not the same 128 configurations. What is exactly
 /// the same is the reason: moving everything by a power of two cannot turn an
 /// answer into one a `Model` can hold or the other way about. Same band.
 const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.02..=0.10;
 
 /// The same for the turned family.
 ///
-/// Measured at 3.9% — 16 of 414 — lower than the lattice family it is a
-/// rotation of, because a quarter of that family's fuses refuse before they get
-/// far enough to find out whether the answer is a solid.
+/// Measured at 4.0% — 17 of 423 — lower than the lattice family's 4.7%, which it
+/// is a rotation of, because getting on for a quarter of that family's fuses
+/// refuse before they get far enough to find out whether the answer is a
+/// solid.
 const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.015..=0.09;
 
 /// The same for the family whose outlines lean over.
 ///
-/// Measured at 1.2% over the shipped corpus — 5 of 420 — which is a *quarter*
-/// of the lattice family's 4.8%, and the reason is the point of the family. An
+/// Measured at 1.9% over the shipped corpus — 8 of 423 — which is **two fifths**
+/// of the lattice family's 4.7%, and the reason is the point of the family. An
 /// answer is not a solid here almost always because two solids meet along a
 /// whole edge and four faces would run along it, and that needs the two edges to
 /// be the same edge exactly. Leaning the two solids by different amounts is
-/// precisely what stops them sharing an edge.
+/// precisely what stops them sharing an edge. It is still the lowest of the six
+/// families by some way, and it is the only one where the ratio to the lattice
+/// family is what the family was built to be about.
 const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.005..=0.03;
 
 /// The same for its control, where both solids lean the same way.
 ///
-/// Measured at 3.1% — 13 of 420 — and it is the lattice family's 4.8% rather
-/// than the skew family's 1.2%, which is the arithmetic saying what the control
+/// Measured at 4.0% — 17 of 423 — and it is the lattice family's 4.7% rather
+/// than the skew family's 1.9%, which is the arithmetic saying what the control
 /// claims. Leaning both solids by the same amount is an affine map of the whole
 /// pair, and an affine map preserves incidence exactly, so the edges that
 /// coincided still coincide and the answers that were not solids still are not.
-/// It does not land on 4.8% exactly because this family draws one more number
+/// It does not land on 4.7% exactly because this family draws one more number
 /// per case, so the two corpora are not the same 128 configurations — the same
 /// caveat [`A_PAIR_ELSEWHERE_IS_NOT_A_SOLID`] carries — and because a fuse that
 /// refuses never gets far enough to find out whether its answer was a solid.
