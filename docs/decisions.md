@@ -8212,6 +8212,16 @@ same pair of normals. What tells them apart is the sign of the edge's own
 direction against `a × b`, which is the direction the model does not have. The
 two routes are therefore one route, and both wait on lane 4.
 
+**And it is not the bounded-side rule that the flat path uses either**, which
+is the third thing to reach for and the one worth being explicit about, because
+the flat path really does use it. A closed curve cut on a *plane* by a ball or a
+pipe bounds the part of the plane inside that ball or pipe — one of the two
+sides is bounded and the other runs on for ever, so which is which is settled
+without asking anything. On a **closed** surface both sides are bounded: a
+circle on a sphere leaves two caps and neither is the outer one. So the rule
+that rescues a round cap is silent about a disk cut out of a ball, which is
+exactly the face `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn` refuses.
+
 So it is read off a **corner of the face that is off that surface**. Every
 corner is either on the trimming surface — the corners of the very edges running
 along it are — or off it on the side the face lies on. One corner off it
@@ -8265,7 +8275,12 @@ inexact.
 
 **`root_enclosing`, `quotient_or_everything`, `dot_enclosing`, `cross_enclosing`
 and `gap_enclosing` are `pub(crate)` in `rcad-geom`, and this lane wrote all five
-again in `rcad-topo`.** That is five spellings of five questions and §23.8 says
+again in `rcad-topo`.** `rcad_predicates::Interval::divided_by` would have saved
+one of them and is `pub(crate)` too — deliberately, and its doc says why:
+dividing by a range that touches zero leaves an empty or unbounded interval and
+would break `Interval::sign`'s no-empty invariant for anybody who could reach
+it. So that one is not a missing export but a decision, and the copy here checks
+its divisor first exactly as every caller inside that crate does. That is five spellings of five questions and §23.8 says
 what that leads to. It is not fixed here because `rcad-geom` has one owner during
 the fan (§15.9) and this lane is not it. **The fix is one line of
 `rcad-geom/src/lib.rs`** — the module is already a module — and §35.10 hands it
@@ -8426,9 +8441,12 @@ it.
 
 **One cost is not in that table and lane 5 should know it.** Asking whether a
 face holds a point calls `intersect` once per surface trimming it, to count the
-loops. That is about 90 µs per classification of a bar, which is nothing for a
-ray caster and is not nothing for a fuse that classifies a witness point per
-piece per pair. Nothing here has a target (§24.16), so it is a figure and not a
+loops, and every one of those answers depends on the face alone rather than on
+the point. A washer classified once is 2 walls × 2 roots × 3 rays = 12 curved
+queries, each over 2 trimming planes, so **24 `intersect` calls for 4 distinct
+answers**. It comes to about 90 µs per classification of a bar, which is nothing
+for a ray caster and is not nothing for a fuse that classifies a witness point
+per piece per pair. Nothing here has a target (§24.16), so it is a figure and not a
 task; what would make it one is a curved fuse that spends measurable time in
 `intersect` naming the same pair over and over, and the fix would be to ask once
 per face rather than once per query.
@@ -8503,6 +8521,27 @@ per face rather than once per query.
   check without widening the condition will refuse sound solids.
 - **`Containment` has a fifth variant and every `match` on it has to grow an
   arm.** §35.6 says what the two in the fuse became and why neither is a panic.
+- **A round wire on a flat face takes its outer-or-hole sense from stored order,
+  and nothing checks it.** `what_a_flat_face_holds` counts the first wire `+1`
+  and the rest `−1`, which is `FaceData`'s "the first wire is the outer one by
+  fiat" read literally — and `check_flat_face` deliberately walks past a wire
+  that closes on one edge, because a circle has no polygon to wind. So a washer's
+  cap arriving from a *file* with its two wires the other way round inverts
+  silently, where the same mistake on a polygon is
+  `Invalid::OuterWireWindsAgainstTheNormal`. It is a gap in the sweep and not in
+  the answer, and closing it wants the bounded-side rule §35.2 rejects for curved
+  faces and keeps for flat ones.
+- **`SolidView::box_around_its_corners` now has no caller inside the kernel** —
+  only two tests and a benchmark, all three of which want a bounding box and
+  would be righter on `box_around_it`. Two public methods with "box" in the name
+  is §23.8's shape reproduced rather than closed, and whoever is next in `view.rs`
+  should move those three and delete it.
+- **The fuse still winds a point round a piece's outline itself.**
+  `fuse/select.rs`'s `winding_around` is a second answer to the question
+  `holds.rs` exists to be the only one of, and it cannot simply call this one:
+  its outlines are made of the `PredicatePoint`s the arrangement solved for, and
+  the walk here takes corners the model holds. Widening the walk to boxes is what
+  would close it, and it is lane 5's to weigh.
 
 ### 35.11 Every refusal this lane can produce, classified
 
