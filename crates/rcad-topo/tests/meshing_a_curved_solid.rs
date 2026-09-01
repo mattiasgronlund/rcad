@@ -734,6 +734,64 @@ fn every_triangle_names_the_face_it_came_from() {
     assert_eq!(covered, has, "every face is stood in for and no other");
 }
 
+/// A bar too thin for its own squares is refused rather than asserted against.
+///
+/// `Model::add_round_bar` accepts a radius of `1e-200` — it is a positive finite
+/// number and the builder makes the bar. Meshing it **panicked** until §39, on
+/// ordinary public input with no file anywhere near it. (`Model::validate`
+/// refuses such a bar `Undecidable` on *side of cylinder*, which is honest and
+/// is not what this is about: `SolidView::mesh` is public in its own right and
+/// nothing makes a caller sweep first.)
+/// `Conic::angle_of` divides by `and.length_squared()`, which is `1e-400` and
+/// underflows to zero, so the angle the walk turns over came back `0.0/0.0`. The
+/// guard meant to catch that could not fire: `f64::max` hands back the other
+/// operand when one is `NaN`, and the `.max(1.0)` beside it turned the `NaN`
+/// into a one — so a whole cap circle was walked in a single step, with no
+/// points at all between its ends, and the flat cap that reads those points back
+/// fanned into one corner.
+///
+/// It is `rcad-geom`'s `CannotWorkOutHowBigACrossingIs` now, whose own doc
+/// carries the classification: a **gap**, because the same bar written larger is
+/// walked without complaint, and the two controls here are that bar.
+#[test]
+fn a_bar_too_thin_for_its_own_squares_is_refused_rather_than_asserted_against() {
+    let mut model = a_model();
+    let deflection = Deflection::of(1.0).expect("a length");
+
+    for radius in [1.0, 1e-100] {
+        let ordinary = model
+            .add_round_bar(radius, 10.0, &Isometry::identity())
+            .expect("a positive radius");
+        let outcome =
+            model
+                .solid(ordinary)
+                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
+        assert!(
+            !matches!(outcome, Err(Error::Geometry(_))),
+            "a bar of radius {radius} is walked, and got {outcome:?}"
+        );
+    }
+
+    for radius in [1e-200, 1e-300] {
+        let thin = model
+            .add_round_bar(radius, 10.0, &Isometry::identity())
+            .expect("a positive finite radius is a bar this builder makes");
+        let refusal =
+            model
+                .solid(thin)
+                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
+        assert!(
+            matches!(
+                refusal,
+                Err(Error::Geometry(
+                    rcad_geom::Error::CannotWorkOutHowBigACrossingIs
+                ))
+            ),
+            "a bar of radius {radius} refuses by name, and got {refusal:?}"
+        );
+    }
+}
+
 /// §19 again, and the part of it that is a refusal rather than an answer.
 ///
 /// A mesh point is put on the surface by an evaluator that rounds against how

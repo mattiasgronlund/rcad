@@ -673,6 +673,22 @@ fn room_left_over(deflection: Deflection, deviation: f64, policy: &Policy) -> Re
 /// **How far it turns**: a step of more than half a turn cannot be told from one
 /// the other way, so none is allowed past a quarter — which is the same bound
 /// `rcad-topo`'s mesher already refuses to step past, for the same reason.
+///
+/// # The floor goes on last, and it used to go on first
+///
+/// `f64::max` hands back the *other* operand when one of them is `NaN`, so
+/// `by_bending.max(by_turning).max(1.0)` turned a `NaN` into a one and the
+/// `is_nan` check below it could never fire. What arrived that way was a whole
+/// closed cap circle walked in one step — no points at all between its ends —
+/// and a flat cap whose only wire then fanned into a single corner, which
+/// `rcad-topo`'s mesher asserts against. `Conic::angle_of` divides by
+/// `and.length_squared()`, so a bar of radius `1e-200` has that underflow to
+/// zero and hands `0.0/0.0` back as the angle it turns over.
+///
+/// So the floor goes on after the checks rather than before them, and a `NaN`
+/// is [`Error::CannotWorkOutHowBigACrossingIs`] — which is the honest name for
+/// it and already carries the classification: a **gap**, because the same two
+/// surfaces written higher up the number line are walked without complaint.
 fn how_many_steps(conic: &Conic, turns_over: f64, room: f64) -> Result<usize> {
     let widest = (1.0 - room / conic.how_far_it_reaches())
         .clamp(-1.0, 1.0)
@@ -680,13 +696,16 @@ fn how_many_steps(conic: &Conic, turns_over: f64, room: f64) -> Result<usize> {
         * 2.0;
     let by_bending = (turns_over.abs() / widest.max(f64::MIN_POSITIVE)).ceil();
     let by_turning = (turns_over.abs() / (core::f64::consts::TAU / 4.0)).ceil();
-    let steps = by_bending.max(by_turning).max(1.0);
-    if steps.is_nan() || steps > MOST_POINTS_ALONG_ONE_CROSSING as f64 {
+    let steps = by_bending.max(by_turning);
+    if steps.is_nan() {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
+    if steps > MOST_POINTS_ALONG_ONE_CROSSING as f64 {
         return Err(Error::TooManyPointsAlongOneCrossing {
             most: MOST_POINTS_ALONG_ONE_CROSSING,
         });
     }
-    Ok(steps as usize)
+    Ok(steps.max(1.0) as usize)
 }
 
 /// A conic in a plane: a centre and two semi-axis vectors square to each other.
