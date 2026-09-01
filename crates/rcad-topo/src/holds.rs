@@ -441,7 +441,7 @@ pub(crate) struct Trimming {
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the face across the edge
 /// is not a face of this solid, which a closed solid never has.
-fn the_face_across<'m>(
+pub(crate) fn the_face_across<'m>(
     solid: SolidView<'m>,
     face: FaceView<'m>,
     edge: EdgeView<'m>,
@@ -673,11 +673,15 @@ mod tests {
         let round_inner_bottom = model.add_closed_edge(inner_bottom);
         let round_inner_top = model.add_closed_edge(inner_top);
 
-        let wall = |model: &mut Model, radius: f64, bottom, seam, top| {
+        // `turn` is `Reversed` for the hole, and that is the direction rule and
+        // not a taste: the hole's wall faces the axis, so the stretch of pipe it
+        // covers is on its left only when its two cap circles are walked the
+        // other way round from the outer wall's (§36.24).
+        let wall = |model: &mut Model, radius: f64, bottom, seam, top, turn: Orientation| {
             let round_it: SmallVec<[_; 4]> = SmallVec::from_buf([
-                model.add_coedge(bottom, Orientation::Forward),
+                model.add_coedge(bottom, turn),
                 model.add_coedge(seam, Orientation::Forward),
-                model.add_coedge(top, Orientation::Reversed),
+                model.add_coedge(top, turn.reversed()),
                 model.add_coedge(seam, Orientation::Reversed),
             ]);
             let wire = model.add_wire(round_it);
@@ -690,6 +694,7 @@ mod tests {
             round_outer_bottom,
             outer_seam,
             round_outer_top,
+            Orientation::Forward,
         );
         let hole = wall(
             &mut model,
@@ -697,6 +702,7 @@ mod tests {
             round_inner_bottom,
             inner_seam,
             round_inner_top,
+            Orientation::Reversed,
         );
 
         let cap = |model: &mut Model, up: f64, outward: f64, outline, inner, turn| {
@@ -706,12 +712,11 @@ mod tests {
             )
             .expect("the z axis is a unit normal");
             let round_it = model.add_coedge(outline, turn);
-            // The same turn as the outline, not the opposite one: the wall of
-            // the hole mirrors the outer wall coedge for coedge, so what makes
-            // the hole run the other way round in space is that its face is used
-            // reversed, and what the two coedges of each circle have to be is
-            // opposite *as stored*.
-            let round_the_hole = model.add_coedge(inner, turn);
+            // The opposite turn from the outline, because a hole runs the other
+            // way round a face than its outline does — and on a wire that is one
+            // closed curve nothing but the direction rule says so, there being no
+            // polygon to wind (§36.24).
+            let round_the_hole = model.add_coedge(inner, turn.reversed());
             let outer = model.add_wire(smallvec::smallvec![round_it]);
             let cut_out = model.add_wire(smallvec::smallvec![round_the_hole]);
             model.add_face(

@@ -231,8 +231,10 @@ fn a_bar_notched_by_a_block_is_decided_and_records_nothing() {
             &Policy::certified(),
             &mut log,
         )
-        .expect("a notch in a bar's wall is a face trimmed by a piece of a crossing, and it is \
-                 named");
+        .expect(
+            "a notch in a bar's wall is a face trimmed by a piece of a crossing, and it is \
+                 named",
+        );
 
     assert_eq!(fused.solids().len(), 1, "a notched bar is one solid");
     assert!(

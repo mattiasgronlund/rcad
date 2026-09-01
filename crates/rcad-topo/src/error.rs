@@ -589,6 +589,22 @@ pub enum Invalid {
     #[error("a curved face stands on both sides of a surface that trims it")]
     AFaceStraddlesSomethingTrimmingIt,
 
+    /// A face walks a closed edge against the way that edge is stored running.
+    ///
+    /// A closed edge starts and ends at the one corner it has, so its two ends
+    /// say nothing about which way it goes and only a rule can. The rule is that
+    /// the points along it come back the way the **longitude of the curved
+    /// surface either side** increases, and that a wire walks it forward exactly
+    /// when the face's material lies on the partner's negative side — which is
+    /// `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by Cauchy–Schwarz, everywhere, with
+    /// no case analysis (`docs/decisions.md` §36.6, §36.18).
+    ///
+    /// Nothing else would notice: a bar's wall with both its cap circles walked
+    /// the same way round closes up, counts right, and is bounded by nothing at
+    /// all.
+    #[error("a face walks a closed edge against the way its surface winds")]
+    AClosedEdgeIsWalkedAgainstItsSurface,
+
     /// A wire has fewer than three coedges.
     #[error("a wire has {count} coedges; a closed wire needs at least three")]
     WireTooShort {

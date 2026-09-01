@@ -61,7 +61,8 @@ use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlo
 use crate::measure::signed_volume_over;
 use crate::model::{FaceUse, ShellUse};
 use crate::validate::{
-    as_coarse_as_a_mesh_gets, every_side_of_the_skin_is_used_both_ways, winding_round,
+    a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets,
+    every_side_of_the_skin_is_used_both_ways, gradient_of, the_curved_one_of, winding_round,
 };
 use crate::{
     Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
@@ -810,9 +811,7 @@ impl Assembly {
                 "a piece of a face has a side with no length"
             );
             made.push(Edge {
-                ends: ends.map(|end| {
-                    renumbered.corner_now[end].expect("an end is still a corner")
-                }),
+                ends: ends.map(|end| renumbered.corner_now[end].expect("an end is still a corner")),
                 carried_by: self.edges[leader].carried_by,
                 arc: self.arc_of_a_joined_run(&arcs, ends, &dropped, renumbered),
                 from: each_one_once(from.into_iter()),
@@ -1323,9 +1322,19 @@ impl Edge {
     ///
     /// That field is there for a run whose two faces are the *same* surface — a
     /// ball's seam — and names the second one. An arc's two faces already name
-    /// both, so either will do and what matters is that the choice does not
-    /// depend on which of the two faces reached this edge first. The bits are
-    /// what sorts them, the same order `which_curve_it_is` uses.
+    /// both, so either is a true answer, and what picks between them is a check:
+    /// `Model::validate` asks that both ends read **exactly** `Zero` against
+    /// `and`, and a corner this fuse solved for is exactly on a plane it was
+    /// solved from and only within its own box on a quadric. So the flat one goes
+    /// in wherever there is one, and `name_of_surface_bits` gives that for free
+    /// by sorting a plane ahead of a ball or a pipe.
+    ///
+    /// A crossing with **two** curved surfaces and two ends is a pair of balls
+    /// cut twice, and nothing builds one: `ACurvedFaceGoesRightRoundWithNoSeam`
+    /// refuses two balls united before an arc of them is ever named
+    /// (§36.24). When that stops being true, what has to give is the check — the
+    /// same slop `check_curved_face` already reads off a solved corner (§36.13),
+    /// read here too — and not this choice.
     fn the_surface_that_names_it_twice(&self) -> Surface {
         let mut either = self.carried_by;
         either.sort_by_key(name_of_surface_bits);
@@ -1696,27 +1705,28 @@ impl Edges {
 /// the partner's negative side — `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by
 /// Cauchy–Schwarz, with no case analysis (§36.6).
 ///
-/// **Which way the edge is stored running** is the way the longitude of the
-/// curved surface either side of it increases, which is the mesher's rule and is
-/// now canonical (§36.19). A surface's own longitude runs along `ẑ × ∇C` for
-/// `ẑ` the frame axis it is parametrised about, and only the *sign* of that
-/// against the crossing's direction is read here.
+/// **Which way the edge is stored running** is
+/// [`a_closed_crossing_is_walked_the_way_it_is_stored`], which `Model::validate`
+/// reads back off the finished model with the same function.
 ///
-/// The two together are the answer, and the face's own orientation does not
-/// enter into it: a wire winds about the surface's stored normal whichever way
-/// round its solid uses the face, which is what `Model::validate` reads.
+/// The piece's two surfaces already point out of its material, so what goes in
+/// as the used gradients are the stored ones. Where the rule turns the piece
+/// round, `sides_of` turns every side of it round with it and the face's use
+/// says so — which is what the sweep reads.
 fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> bool {
     let [mine, partner] = meet.carried_by;
-    let along_the_crossing = gradient_of(&mine, at).cross(gradient_of(&partner, at));
-    let Some(curved) = the_curved_one_of(&meet.carried_by) else {
+    if the_curved_one_of(&meet.carried_by).is_none() {
         // Two planes cross in a straight line, which does not close, so nothing
         // reaches here — and a wire with no curved surface either side of it has
         // no longitude to run along.
         return true;
-    };
-    let longitude = the_way_it_is_parametrised_about(&curved).cross(gradient_of(&curved, at));
-    let runs_along_stored = along_the_crossing.dot(longitude) > 0.0;
-    (meet.material_side == Decision::Neg) == runs_along_stored
+    }
+    a_closed_crossing_is_walked_the_way_it_is_stored(
+        [&mine, &partner],
+        [gradient_of(&mine, at), gradient_of(&partner, at)],
+        at,
+        meet.material_side,
+    )
 }
 
 /// Which of the two arcs between an edge's two corners this face walks, as the
@@ -1825,45 +1835,6 @@ fn the_half_space_both_ends_are_on(facing: Vector, ends: [Point; 2]) -> Option<P
         step *= 2.0;
     }
     None
-}
-
-/// Which of the two surfaces either side of an edge names which way it runs.
-fn the_curved_one_of(carried_by: &[Surface; 2]) -> Option<Surface> {
-    let mut curved: Vec<Surface> = carried_by
-        .iter()
-        .filter(|surface| surface.as_plane().is_none())
-        .copied()
-        .collect();
-    curved.sort_by_key(name_of_surface_bits);
-    curved.first().copied()
-}
-
-/// The axis a surface's own two coordinates are wound about.
-///
-/// A sphere is parametrised about the frame's own `z` — `Sphere::point_at` says
-/// so in its arithmetic — and a pipe about its stored axis direction. This is
-/// read only for the *sign* of a dot product, so nothing here is normalized.
-fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
-    match surface {
-        Surface::Sphere(_) => Vector::new(0.0, 0.0, 1.0),
-        Surface::Cylinder(pipe) => pipe.axis().direction(),
-        other => panic!("this crate cannot say what {other:?} is wound about"),
-    }
-}
-
-/// Which way a surface faces at a point, as a polynomial in the numbers it
-/// stores with no normalization in it (§31.2).
-fn gradient_of(surface: &Surface, at: Point) -> Vector {
-    match surface {
-        Surface::Plane(flat) => flat.normal(),
-        Surface::Sphere(ball) => at - ball.centre(),
-        Surface::Cylinder(pipe) => {
-            let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
-            let out = at - origin;
-            out * along.dot(along) - along * along.dot(out)
-        }
-        other => panic!("this crate cannot say which way {other:?} faces"),
-    }
 }
 
 /// What tells two edges between the same corners apart.

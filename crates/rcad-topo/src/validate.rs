@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Deflection, DynamicRange, EdgeRun, Isometry, Orientation, Plane, SIDE_OF_CYLINDER,
+    Deflection, DynamicRange, EdgeRun, Isometry, Orientation, Plane, Point, SIDE_OF_CYLINDER,
     SIDE_OF_PLANE, SIDE_OF_SPHERE, Surface, Vector,
 };
 use rcad_predicates::expansion::{
@@ -14,7 +14,8 @@ use rcad_predicates::{
 };
 use slotmap::SecondaryMap;
 
-use crate::holds::{the_side_this_face_lies_on, what_trims_this_face};
+use crate::fuse::name_of_surface_bits;
+use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on, what_trims_this_face};
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
@@ -78,6 +79,7 @@ impl Model {
         self.check_wires()?;
         self.check_faces()?;
         self.check_which_side_of_its_trimming_each_curved_face_lies_on()?;
+        self.check_closed_edges_are_walked_the_way_their_surfaces_wind()?;
         self.check_shells_and_solids(policy, log)?;
         self.check_approximation_ordering()?;
         self.check_dynamic_range(policy, log)
@@ -335,6 +337,75 @@ impl Model {
                 };
                 for one in &trimming {
                     the_side_this_face_lies_on(face, one)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Every closed edge walked the way the direction rule says.
+    ///
+    /// **This is §30.8 item 10 becoming a check rather than staying a rule.** A
+    /// closed edge starts and ends at the one corner it has, so nothing in the
+    /// model says which way it runs and only a rule can. The fuse follows the
+    /// rule when it writes one and until now nothing read it back: a bar's wall
+    /// with both its cap circles walked the same way round closes up, counts
+    /// right, and is bounded by nothing at all.
+    ///
+    /// The rule itself is [`a_closed_crossing_is_walked_the_way_it_is_stored`],
+    /// the very function the fuse chose with. What this adds is the two things
+    /// it has to be asked *about*.
+    ///
+    /// **Which side of the partner the face's material lies on** is read off a
+    /// corner of the face that is off it, which is the only place a model says it
+    /// ([`the_side_this_face_lies_on`]). A face with no such corner — a bar's cap
+    /// has its one corner *on* the wall — says nothing, and is skipped rather
+    /// than guessed at.
+    ///
+    /// **Both gradients are the ones the solid uses**, which is the clause §36.6
+    /// got wrong: it says the face's orientation does not come into it, and for a
+    /// curved face a fuse turned round it is the whole of what carries the turn —
+    /// a sphere has no reversed form, so the wire is stored walked the other way
+    /// and `FaceUse::orient` is what says so. Reading the stored gradient instead
+    /// would read the rule off a face pointing into its own material. The
+    /// coedge's own turn is read **unturned** for the same reason: it is what the
+    /// fuse stored after turning the wire round, not what a view composes back.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`], and whatever reading a
+    /// corner's side refuses.
+    fn check_closed_edges_are_walked_the_way_their_surfaces_wind(&self) -> Result<()> {
+        for (slot, _) in &self.data().solids {
+            let solid = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
+            for face in solid.faces() {
+                for coedge in face.wires().flat_map(WireView::coedges) {
+                    let edge = coedge.edge();
+                    if *edge.run() != EdgeRun::RightRoundWhereItsFacesCross {
+                        continue;
+                    }
+                    let Some(across) = the_face_across(solid, face, edge)? else {
+                        continue;
+                    };
+                    let Some(material) = which_side_of_it_this_face_lies_on(solid, face, across)?
+                    else {
+                        continue;
+                    };
+                    let at = edge.start().point();
+                    let outward = |used: FaceView<'_>| {
+                        gradient_of(&used.surface(), at) * used.orientation().sign()
+                    };
+                    let walks_it_forward = a_closed_crossing_is_walked_the_way_it_is_stored(
+                        [&face.surface(), &across.surface()],
+                        [outward(face), outward(across)],
+                        at,
+                        turned_by(material, across.orientation()),
+                    );
+                    if walks_it_forward
+                        != (coedge.orientation_on_its_edge() == Orientation::Forward)
+                    {
+                        return Err(Invalid::AClosedEdgeIsWalkedAgainstItsSurface.into());
+                    }
                 }
             }
         }
@@ -680,6 +751,149 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
     }
 }
 
+/// Whether a wire walks a closed crossing the way that edge is stored running.
+///
+/// **The closed-edge direction rule, in one place.** A closed edge starts and
+/// ends at the one corner it has, so its ends say nothing about which way it
+/// goes and only a rule can. Two facts meet.
+///
+/// **Which way the edge is stored running** is the way a surface's own second
+/// coordinate takes the points along it, which is the mesher's order and is
+/// canonical (`docs/decisions.md` §36.18). That longitude runs along `ẑ × ∇C`
+/// for `ẑ` the frame axis the curved one of `pair` is wound about, and only the
+/// *sign* of a dot against it is read — so nothing is normalized and no angle is
+/// built.
+///
+/// **Which way the wire runs in space** is the direction that keeps the face's
+/// own material on its left, and left of `∇S × ∇T` is always `T`'s negative side
+/// — `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by Cauchy–Schwarz, everywhere, with no
+/// case analysis (§36.6). So the wire runs along `outward[0] × outward[1]`
+/// exactly when its material lies inside the partner, which is what
+/// `material_side` says.
+///
+/// `outward` are the two gradients **as their faces are used**: a curved surface
+/// cannot be stored reversed, so a face a fuse turned round is the same surface
+/// with its wires walked the other way and its use saying so, and reading the
+/// stored gradient would read the rule off a face pointing into its own
+/// material.
+///
+/// Written once because the fuse chooses with it and `Model::validate` reads the
+/// answer back with it, and two spellings of one question is how those two come
+/// to disagree (§23.8).
+///
+/// # Panics
+///
+/// If neither surface is curved. Two planes cross in a straight line, which does
+/// not close, so no closed edge is named by a flat pair. And if `material_side`
+/// is neither [`Decision::Pos`] nor [`Decision::Neg`], which a side that was read
+/// at all never is.
+pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
+    pair: [&Surface; 2],
+    outward: [Vector; 2],
+    at: Point,
+    material_side: Decision,
+) -> bool {
+    let curved = the_curved_one_of(&[*pair[0], *pair[1]])
+        .expect("two planes cross in a straight line, which never closes");
+    let longitude = the_way_it_is_parametrised_about(&curved).cross(gradient_of(&curved, at));
+    let runs_along_stored = outward[0].cross(outward[1]).dot(longitude) > 0.0;
+    match material_side {
+        Decision::Neg => runs_along_stored,
+        Decision::Pos => !runs_along_stored,
+        other => panic!("a face with no side to its material: {other:?}"),
+    }
+}
+
+/// A side read against a surface, turned round when the face on it is used
+/// reversed.
+fn turned_by(side: Decision, orientation: Orientation) -> Decision {
+    match (side, orientation) {
+        (side, Orientation::Forward) => side,
+        (Decision::Pos, Orientation::Reversed) => Decision::Neg,
+        (Decision::Neg, Orientation::Reversed) => Decision::Pos,
+        (other, Orientation::Reversed) => other,
+    }
+}
+
+/// Which side of the face across an edge this face lies on, as its own corners
+/// say.
+///
+/// `None` when every corner of it is on that surface and nothing says — a bar's
+/// cap has its one corner on the wall, and that is the case §36.6 already names.
+fn which_side_of_it_this_face_lies_on(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    across: FaceView<'_>,
+) -> Result<Option<Decision>> {
+    let surface = across.surface();
+    let mut corners_on_it = Vec::new();
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        if the_face_across(solid, face, edge)?.is_some_and(|other| other.surface() == surface) {
+            corners_on_it.push(edge.start().key());
+            corners_on_it.push(edge.end().key());
+        }
+    }
+    the_side_this_face_lies_on(
+        face,
+        &Trimming {
+            surface,
+            corners_on_it,
+        },
+    )
+}
+
+/// Which of the two surfaces either side of an edge names which way it runs.
+///
+/// The bits sort them so that a pair of curved surfaces picks the same one
+/// whichever way round it is written.
+pub(crate) fn the_curved_one_of(carried_by: &[Surface; 2]) -> Option<Surface> {
+    let mut curved: Vec<Surface> = carried_by
+        .iter()
+        .filter(|surface| surface.as_plane().is_none())
+        .copied()
+        .collect();
+    curved.sort_by_key(name_of_surface_bits);
+    curved.first().copied()
+}
+
+/// The axis a surface's own two coordinates are wound about.
+///
+/// A sphere is parametrised about the frame's own `z` — `Sphere::point_at` says
+/// so in its arithmetic — and a pipe about its stored axis direction. This is
+/// read only for the *sign* of a dot product, so nothing here is normalized.
+///
+/// # Panics
+///
+/// On a flat surface, which has no longitude, and on a kind this has not been
+/// taught.
+fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
+    match surface {
+        Surface::Sphere(_) => Vector::new(0.0, 0.0, 1.0),
+        Surface::Cylinder(pipe) => pipe.axis().direction(),
+        other => panic!("this crate cannot say what {other:?} is wound about"),
+    }
+}
+
+/// Which way a surface faces at a point, as a polynomial in the numbers it
+/// stores with no normalization in it (§31.2).
+///
+/// # Panics
+///
+/// On a surface kind this has not been taught.
+pub(crate) fn gradient_of(surface: &Surface, at: Point) -> Vector {
+    match surface {
+        Surface::Plane(flat) => flat.normal(),
+        Surface::Sphere(ball) => at - ball.centre(),
+        Surface::Cylinder(pipe) => {
+            let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
+            let out = at - origin;
+            out * along.dot(along) - along * along.dot(out)
+        }
+        other => panic!("this crate cannot say which way {other:?} faces"),
+    }
+}
+
 /// What the predicate that decided a surface's sign goes by in a record.
 pub(crate) fn name_of_surface(surface: &Surface) -> &'static str {
     match surface {
@@ -966,9 +1180,10 @@ mod tests {
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
-    use super::{Decision, winding_of, winding_round};
+    use super::{Decision, as_coarse_as_a_mesh_gets, winding_of, winding_round};
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
-    use crate::{Error, FaceView, Invalid, Model, WireView};
+    use crate::measure::signed_volume_over;
+    use crate::{Error, FaceView, Invalid, Model, SolidView, WireView};
 
     fn an_empty_model() -> Model {
         Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
@@ -1356,9 +1571,22 @@ mod tests {
     ///
     /// Turned inside out, both now come back with a negative meshed volume, and
     /// the control is that the sweep accepts them the right way round.
+    ///
+    /// **The two are caught by different things now**, and which one is which is
+    /// worth the table. A bar turned inside out walks both its cap circles
+    /// against their surfaces and the direction rule refuses it before anything
+    /// is meshed. A ball has **no closed edge at all** — its one seam runs pole
+    /// to pole — so the rule has nothing to say about it and the volume is still
+    /// what catches it.
+    ///
+    /// §23.9's own claim is asserted for both all the same, by measuring the
+    /// meshed volume here rather than waiting for the sweep to reach it.
     #[test]
     fn a_curved_solid_turned_inside_out_is_caught() {
-        for build in [a_round_bar as fn() -> Model, a_ball as fn() -> Model] {
+        for (build, has_a_closed_edge) in [
+            (a_round_bar as fn() -> Model, true),
+            (a_ball as fn() -> Model, false),
+        ] {
             let mut model = build();
             a_clean_sweep(&model);
 
@@ -1367,10 +1595,65 @@ mod tests {
                     used.orient = used.orient.reversed();
                 }
             }
-            assert!(matches!(
-                refusal(&model),
-                Invalid::VolumeIsNotPositive { .. }
-            ));
+            let refused = refusal(&model);
+            if has_a_closed_edge {
+                assert_eq!(refused, Invalid::AClosedEdgeIsWalkedAgainstItsSurface);
+            } else {
+                assert!(matches!(refused, Invalid::VolumeIsNotPositive { .. }));
+            }
+
+            let solid = model.data().solids.keys().next().expect("one solid");
+            let view = SolidView::new(&model, solid, Isometry::identity(), Orientation::Forward);
+            let mesh = view
+                .mesh(
+                    as_coarse_as_a_mesh_gets(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("an inside-out solid still meshes");
+            assert!(
+                signed_volume_over(&mesh) < 0.0,
+                "a curved solid turned inside out holds a negative volume"
+            );
+        }
+    }
+
+    /// §30.8 item 10 stopped being a rule and became a check.
+    ///
+    /// A closed edge starts and ends at the one corner it has, so nothing in the
+    /// model says which way it runs. Walk a bar's bottom cap circle the other way
+    /// round — **both** of its coedges, so the two still run opposite ways and
+    /// `CoedgesRunTheSameWay` has nothing to say — and every other check passes:
+    /// the wire closes, both corners are on both surfaces, the mesh is watertight
+    /// and the volume is right. Nothing but this notices, and §36.22 said as
+    /// much while it was still a rule.
+    ///
+    /// The control is the row that flips **one** coedge, which is caught by the
+    /// older check and says this one is not doing that job over again.
+    #[test]
+    fn a_closed_edge_walked_the_wrong_way_round_its_surface_is_caught() {
+        for (both, expected) in [
+            (true, Invalid::AClosedEdgeIsWalkedAgainstItsSurface),
+            (false, Invalid::CoedgesRunTheSameWay),
+        ] {
+            let mut model = a_round_bar();
+            a_clean_sweep(&model);
+
+            let circle = model
+                .data()
+                .edges
+                .iter()
+                .find(|(_, edge)| edge.run == EdgeRun::RightRoundWhereItsFacesCross)
+                .map(|(slot, _)| slot)
+                .expect("a bar's cap is a whole circle");
+            let coedges: Vec<CoedgeSlot> = model.index().coedges_of_edge(circle).to_vec();
+            let turning = if both { &coedges[..] } else { &coedges[..1] };
+            for &coedge in turning {
+                let orientation = model.data().coedges[coedge].orientation.reversed();
+                model.data_mut().coedges[coedge].orientation = orientation;
+            }
+
+            assert_eq!(refusal(&model), expected);
         }
     }
 
