@@ -236,17 +236,25 @@ fn canonical_cut_surfaces(face: &BakedFace) -> Vec<Surface> {
 
 /// The numbers a surface stores, as bits, with its kind first.
 ///
-/// A total order over surfaces that depends on nothing but what each one holds.
-/// Sound for exactly the reason §32.5's trap gives — two faces that are the same
-/// plane hold the same four numbers — and **not** sound for a
-/// [`HalfSpace`](rcad_geom::HalfSpace), which §33.8 says has no canonical form
-/// at all.
+/// A total order over surfaces that depends on nothing but what each one holds,
+/// and a key a corner can be named by. Sound for exactly the reason §32.5's trap
+/// gives — two faces that are the same plane hold the same four numbers — and
+/// **not** sound for a [`HalfSpace`](rcad_geom::HalfSpace), which §33.8 says has
+/// no canonical form at all.
+///
+/// **It orders surfaces the same way `rcad-geom` does**, which is what stops
+/// this being a second answer to a settled question (§23.8): the meet of three
+/// surfaces puts its three in a fixed order of its own and counts `which` of
+/// their meeting points this is along it, and a `which` counted one way beside a
+/// triple sorted the other is two corners named as one. That is why the bits are
+/// flipped rather than taken raw — raw bits sort every negative number after
+/// every positive one, and `f64::total_cmp` does not.
 pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
     let mut bits = [0u64; 8];
     let mut fill = |kind: u64, numbers: &[f64]| {
         bits[0] = kind;
         for (slot, number) in numbers.iter().enumerate() {
-            bits[slot + 1] = number.to_bits();
+            bits[slot + 1] = in_the_order_a_float_compares(*number);
         }
     };
     match surface {
@@ -274,6 +282,17 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
         other => panic!("a surface nothing here can name: {other:?}"),
     }
     bits
+}
+
+/// The bits of a float, rearranged so that comparing them as whole numbers is
+/// comparing the floats.
+///
+/// The sign bit comes first and every negative number is turned inside out, so
+/// `-1.0 < 0.0 < 1.0` as `u64` exactly as it is with
+/// [`f64::total_cmp`](f64::total_cmp).
+fn in_the_order_a_float_compares(number: f64) -> u64 {
+    let bits = number.to_bits();
+    bits ^ ((((bits as i64) >> 63) as u64) | (1 << 63))
 }
 
 /// A face, the crossings drawn on it, and everything that follows from them.
@@ -3778,5 +3797,64 @@ mod how_often_cutting_a_curved_face_refuses {
                 family.named()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod naming_a_surface {
+    use rcad_geom::{Axis, Cylinder, Plane, Point, Sphere, Surface, Vector};
+
+    use super::{in_the_order_a_float_compares, name_of_surface_bits};
+
+    /// The key a corner is named by has to order surfaces the way `rcad-geom`
+    /// does, or a `which` counted along that crate's order sits beside a triple
+    /// sorted along this one and two corners are named as one.
+    ///
+    /// `rcad-geom` compares the numbers a surface stores with
+    /// [`f64::total_cmp`], so the key has to agree with that number for number.
+    /// **Raw bits do not**: every negative `f64` has its sign bit set and sorts
+    /// above every positive one, so the plane `z = 1` and the plane `z = -1`
+    /// would come out the wrong way round — and there is no more ordinary a pair
+    /// in a kernel than that.
+    #[test]
+    fn the_key_orders_numbers_the_way_they_compare() {
+        let numbers = [
+            f64::NEG_INFINITY,
+            -1e300,
+            -1.0,
+            -f64::MIN_POSITIVE,
+            -0.0,
+            0.0,
+            f64::MIN_POSITIVE,
+            1.0,
+            1e300,
+            f64::INFINITY,
+        ];
+        for (index, &one) in numbers.iter().enumerate() {
+            for &other in &numbers[index + 1..] {
+                assert!(
+                    in_the_order_a_float_compares(one) <= in_the_order_a_float_compares(other),
+                    "{one} sorts above {other} as bits and below it as a number"
+                );
+            }
+        }
+        assert!(
+            in_the_order_a_float_compares(-0.0) < in_the_order_a_float_compares(0.0),
+            "total_cmp puts negative zero below positive zero and so does this"
+        );
+    }
+
+    /// Planes before balls before pipes, which is what puts the two flat ones of
+    /// a triple at the front.
+    #[test]
+    fn a_plane_sorts_before_a_ball_and_a_ball_before_a_pipe() {
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a radius"));
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a radius"));
+        assert!(name_of_surface_bits(&flat) < name_of_surface_bits(&ball));
+        assert!(name_of_surface_bits(&ball) < name_of_surface_bits(&pipe));
     }
 }
