@@ -33,8 +33,8 @@
 #![forbid(unsafe_code)]
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, Error, NamedRun, Plane, Point, Sphere, Surface,
-    SurfaceMeet, Vector, intersect, walk,
+    Axis, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Sphere,
+    Surface, SurfaceMeet, Vector, intersect, walk,
 };
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
 use smallvec::smallvec;
@@ -209,12 +209,13 @@ fn every_point_of_a_picked_run_is_inside_every_half_space_that_picked_it() {
     let radius = 3.0;
     let ball = a_ball([0.0, 0.0, 0.0], radius);
     let meridian = a_plane([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]);
-    let facing_x = a_plane([1.0, 0.0, 0.0], [0.0, 0.0, 0.0]);
+    let facing_x = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+        .expect("the x axis has length");
 
     let seam = NamedRun::new(
         EdgeRun::PartOfWhereItCrosses {
             and: meridian,
-            picked_by: smallvec![facing_x],
+            picked_by: smallvec![Picker::from(facing_x)],
         },
         [
             rcad_predicates::Point::from([0.0, 0.0, radius]),
@@ -243,7 +244,7 @@ fn every_point_of_a_picked_run_is_inside_every_half_space_that_picked_it() {
             assert_ne!(side_of(surface, at), Decision::Neg, "off {surface:?}");
         }
         assert_ne!(
-            side_of(&facing_x, at),
+            facing_x.side_of_point(at),
             Decision::Neg,
             "outside the half-space that picked this half of the meridian: {point:?}"
         );
@@ -414,15 +415,21 @@ fn a_quartic_crossing_is_named_in_two_pieces_and_each_piece_is_walked_right_roun
     assert_eq!(heights.len(), 2);
 }
 
-/// The one refusal the closed form has that is not a deferral, and it is a
-/// **gap**: the two lines are there, and what runs out is `f64`'s supply of unit
-/// vectors exactly square to a given direction.
+/// **The refusal that used to be here is gone**, and this row is what it turned
+/// into.
 ///
-/// The same configuration on the lattice, where that direction is a coordinate
-/// axis, is named without complaint — which is the demonstration `CLAUDE.md`
-/// asks for in place of a paragraph.
+/// The closed form's one non-deferral refusal was a **gap**: two lines a plane
+/// cuts out of a pipe it runs down are there and are tellable apart, and what
+/// ran out was `f64`'s supply of *unit* vectors exactly square to a given
+/// direction. Since M4 the picker is a `HalfSpace`, which stores whatever normal
+/// it is handed, and the supply of square normals is three for every direction —
+/// so the turned pair is named exactly as the lattice one always was.
+///
+/// The name of the run is what this checks, not only that something came back:
+/// each of the two lines is picked out by a half-space whose normal is square to
+/// the pipe's stored axis direction with nothing rounded.
 #[test]
-fn two_lines_no_half_space_can_separate_refuse_and_the_same_pair_on_the_lattice_does_not() {
+fn two_lines_off_the_lattice_are_named_just_as_the_same_pair_on_it_is() {
     let along = Vector::new(1.0, 2.0, 3.0)
         .normalized()
         .expect("a direction");
@@ -436,25 +443,40 @@ fn two_lines_no_half_space_can_separate_refuse_and_the_same_pair_on_the_lattice_
     );
 
     let leaning = a_pipe(along.components(), [0.0, 0.0, 0.0], 2.0);
+    let Surface::Cylinder(pipe) = leaning else {
+        panic!("a pipe is a pipe");
+    };
     let cut = Surface::Plane(
         Plane::from_point_and_normal(Point::new(0.2, 0.0, 0.0), normal).expect("a unit normal"),
     );
-    assert_eq!(
-        intersect(
-            &cut,
-            &leaning,
-            &Policy::certified(),
-            &mut ProvenanceLog::new()
-        ),
-        Err(Error::CannotNameWhichPieceOfACrossingThisIs)
-    );
 
-    let met = crossing(
+    let met = crossing(&cut, &leaning);
+    let SurfaceMeet::Curves(runs) = &met else {
+        panic!("off the lattice this cuts two lines too: {met:?}");
+    };
+    assert_eq!(runs.len(), 2);
+    for run in runs {
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+            panic!("one of two lines is a piece of the crossing: {run:?}");
+        };
+        let Picker::InFrontOf(half_space) = picked_by[0] else {
+            panic!("the picker for two lines is flat: {picked_by:?}");
+        };
+        let stored_way = pipe.axis().direction().components();
+        let picking = half_space.normal().components();
+        assert_eq!(
+            picking[0] * stored_way[0] + picking[1] * stored_way[1] + picking[2] * stored_way[2],
+            0.0,
+            "the picking normal leans into the direction the lines run along"
+        );
+    }
+
+    let on_the_lattice = crossing(
         &a_plane([1.0, 0.0, 0.0], [0.2, 0.0, 0.0]),
         &a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0),
     );
-    let SurfaceMeet::Curves(runs) = &met else {
-        panic!("on the lattice this cuts two lines: {met:?}");
+    let SurfaceMeet::Curves(runs) = &on_the_lattice else {
+        panic!("on the lattice this cuts two lines: {on_the_lattice:?}");
     };
     assert_eq!(runs.len(), 2);
 }

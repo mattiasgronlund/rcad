@@ -39,8 +39,8 @@ mod crossings;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, Error, NamedRun, Plane, Point, PointsAlongACrossing,
-    Sphere, Surface, SurfaceMeet, Vector, intersect, walk,
+    Axis, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point,
+    PointsAlongACrossing, Sphere, Surface, SurfaceMeet, Vector, intersect, walk,
 };
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -59,8 +59,16 @@ const CASES: u32 = 512;
 ///
 /// A quarter as many, because a crossing a few last bits from tangency is a long
 /// thin loop that the marcher has to take small steps round: this row alone
-/// walks more points than every other row in the file put together, and a
-/// quarter of it still walks hundreds of thousands.
+/// walks more points than every other row in the file put together.
+///
+/// **It is also, on its own, most of what the whole suite costs**, and M4's
+/// first lane is why. Measured at 128 draws: 43 runs and 45 442 points, of which
+/// two closed conics account for 43 415 — those are cheap, because the closed
+/// form parametrizes them. The expensive nine hundred are the *marched* ones, on
+/// pieces of a nearly-tangent quartic that this crate used to refuse to name at
+/// all for want of a half-space telling them apart (§33). Naming them is the
+/// point of the lane, and walking them is what checks the naming, so the draws
+/// stay where they are and the cost is recorded rather than trimmed.
 const CASES_ON_A_KNIFE_EDGE: u32 = 128;
 
 /// How fine the walks in this file are, as a share of how big the shapes are.
@@ -231,13 +239,13 @@ fn a_balls_seam_is_walked_down_the_half_of_the_meridian_its_half_space_picks() {
     let ball = Surface::Sphere(Sphere::new(Point::origin(), radius).expect("a radius"));
     let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
         .expect("the y axis is a unit normal");
-    let facing_x = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
-        .expect("the x axis is a unit normal");
+    let facing_x = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+        .expect("the x axis has length");
 
     let seam = NamedRun::new(
         EdgeRun::PartOfWhereItCrosses {
             and: Surface::Plane(meridian),
-            picked_by: smallvec![Surface::Plane(facing_x)],
+            picked_by: smallvec![Picker::from(facing_x)],
         },
         [
             PredicatePoint::from([0.0, 0.0, radius]),

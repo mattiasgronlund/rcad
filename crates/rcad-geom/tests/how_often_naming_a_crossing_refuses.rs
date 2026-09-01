@@ -116,47 +116,47 @@ const A_CROSSING_SOMEWHERE_ELSE_MAY_REFUSE: f64 = 0.25;
 /// The *other* refusal, counted separately because it gives up on a different
 /// question: not "what is the sign of this discriminant" but "which of these two
 /// lines is this". A plane exactly along a pipe's axis and inside it cuts two
-/// lines, and telling them apart needs a `Plane` whose *stored* normal is
-/// exactly square to the axis. A line is endless, so a normal that leans into
-/// its direction by even one rounding reads a different number a long way along
-/// it and the half-space holds nothing — the squareness has to be arranged and
-/// cannot be tested (§29.8).
+/// lines, and telling them apart needs a picking normal exactly square to the
+/// axis. A line is endless, so a normal that leans into its direction by even
+/// one rounding reads a different number a long way along it and the half-space
+/// holds nothing — the squareness has to be arranged and cannot be tested
+/// (§29.8).
 ///
-/// A **gap**, and §32 says what it is a gap in. It is not a gap a change to
-/// `Plane` reaches: a plane that stores a canonical normal cannot hold a square
-/// one, and a plane that holds a square one is not canonical, so two faces that
-/// are one wall stop being one plane the moment the model is turned.
-/// `a_power_of_two_reduction_keeps_a_normal_square_and_stops_one_wall_being_one_plane`
-/// is that demonstration. What reaches it is a half-space that is not a plane,
-/// which is a new `Surface` variant and so a milestone's decision rather than a
-/// lane's.
+/// **Arranging it is what M4 did**, and the arm that could not arrange it now
+/// fires nowhere in this file. A picker is a `HalfSpace` and stores whatever
+/// normal it is handed, and a caller can always hand over one exactly square to
+/// a direction it holds — that direction crossed with a coordinate axis. §33.
 ///
-/// Two percent. Measured on the shipped corpus: 0.44% turned, 0.20% leaning,
-/// none at all on the lattice, where that direction is a coordinate axis.
-const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.02;
+/// Half a percent. Measured on the shipped corpus: **0.10% turned**, down from
+/// 0.44%; **none at all leaning**, down from 0.20%; and none on the lattice,
+/// where the direction across a pipe and a plane is a coordinate axis. What is
+/// left is the *bounded* half of the same question — where the two lines sit
+/// relative to the flat surface that separates them — on a plane so close to a
+/// pipe's wall that the two lines nearly meet.
+const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.005;
 
 /// How much of a quartic family may refuse for want of a half-space.
 ///
-/// **Fifteen percent, and it is much the largest refusal rate in this file.**
-/// Two loops of a leaning-pipe crossing are told apart by a plane through the
-/// fat pipe's axis, and a loop runs a long way *along* that axis — so unlike the
-/// bounded pieces a ball leaves, the picking normal here has to be exactly
-/// square to the axis or it reads a different number at either end. `Plane`
-/// scales every normal to length one and that division rounds.
+/// **Four percent, down from fifteen, and still the largest refusal rate in this
+/// file.** Two loops of a leaning-pipe crossing are told apart by a half-space
+/// through the fat pipe's axis, and a loop runs a long way *along* that axis —
+/// so unlike the bounded pieces a ball leaves, the picking normal here has to be
+/// exactly square to the axis or it reads a different number at either end.
 ///
-/// A **gap**, and this crate has no construction that reaches it: the set of
-/// `f64` unit vectors exactly square to a given `f64` direction is not something
-/// `Plane::from_point_and_normal` can be steered to. §28.2 named the fix as a
-/// plane that stores its normal unscaled and §32 demonstrates that it is not
-/// one — see [`A_CROSSING_MAY_LACK_A_HALF_SPACE`].
+/// That much is now arranged and never refused. What is left is the price of
+/// arranging it: **the three normals `f64` can hold exactly square to a
+/// direction are not the direction that separates the two loops**, and the best
+/// of them can be up to 45° off it. Writing `n̂ = α·â + β·b̂`, a loop is picked
+/// when `α·√(ρ₂² − (δ+ρ₁)²)` beats `|β|·(δ + ρ₁)`, and a fat pipe barely wider
+/// than the thin one inside it does not clear that.
 ///
-/// Measured on the shipped corpus: 0% on the lattice, **11.86% turned**, up from
-/// 10.93% because sliding the two-pipe comparison up the range (§32) takes
-/// nineteen pairs that used to refuse for want of a sign and gets them as far as
-/// being told they are two loops — where they refuse for want of a half-space
-/// instead. Taken together the turned quartic family's refusals fell from 15.57%
-/// to 11.86%.
-const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.15;
+/// A **gap** and not a limit: the two loops are there, they are tellable apart,
+/// and what runs out is `f64`'s supply of vectors exactly square to a given
+/// direction. §33.
+///
+/// Measured on the shipped corpus: 0% on the lattice, **2.24% turned**, down
+/// from 11.86%.
+const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.04;
 
 /// How much of the quartic pairs' turned family may refuse for want of a sign.
 ///
@@ -258,6 +258,17 @@ fn a_certified_naming_of_a_quartic_lattice_crossing_never_refuses() {
         0,
         "on the lattice both stored directions have the same squared length, so the exact \
          level runs and a refusal is a bug in our filters"
+    );
+    // The half of the control that used to go unasserted, and the half that
+    // caught this lane's own regression: on the lattice the direction that
+    // separates two loops is already exactly square to the axis they run along,
+    // so a picker built any other way is a step backwards rather than a fact
+    // about geometry.
+    assert_eq!(
+        tally.no_half_space.get(),
+        0,
+        "on the lattice the direction separating two loops is exactly square to the axis, \
+         so writing the half-space down rounds nothing"
     );
     tally.enough_of_them_crossed();
 }

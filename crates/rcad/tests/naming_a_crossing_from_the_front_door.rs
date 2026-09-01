@@ -15,8 +15,9 @@
 //! Nothing in this file imports anything but `rcad`. That is the test.
 
 use rcad::{
-    Cause, Cylinder, Deflection, EdgeRun, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point,
-    Policy, PredicatePoint, ProvenanceLog, Sphere, Surface, SurfaceMeet, Vector,
+    Cause, Cylinder, Deflection, EdgeRun, HalfSpace, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF,
+    Picker, Plane, Point, Policy, PredicatePoint, ProvenanceLog, Sphere, Surface, SurfaceMeet,
+    Vector,
 };
 
 /// A ball's seam, said in the vocabulary a crossing comes back in.
@@ -28,8 +29,8 @@ use rcad::{
 fn the_hardest_edge_the_kernel_builds_can_be_said_in_this_vocabulary() {
     let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
         .expect("the y axis is a unit normal");
-    let facing_x = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
-        .expect("the x axis is a unit normal");
+    let facing_x = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+        .expect("the x axis has length");
     let poles = [
         PredicatePoint::from([0.0, 0.0, 3.0]),
         PredicatePoint::from([0.0, 0.0, -3.0]),
@@ -38,7 +39,7 @@ fn the_hardest_edge_the_kernel_builds_can_be_said_in_this_vocabulary() {
     let seam = NamedRun::new(
         EdgeRun::PartOfWhereItCrosses {
             and: Surface::Plane(meridian),
-            picked_by: [Surface::Plane(facing_x)].into_iter().collect(),
+            picked_by: [Picker::from(facing_x)].into_iter().collect(),
         },
         poles,
     );
@@ -61,7 +62,7 @@ fn every_way_two_surfaces_can_meet_is_something_a_caller_can_match_on() {
         )
         .expect("a pipe of radius one"),
     );
-    let ball = Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a ball of radius one"));
+    let ball = Picker::from(Sphere::new(Point::origin(), 1.0).expect("a ball of radius one"));
 
     let met = [
         SurfaceMeet::Nothing,

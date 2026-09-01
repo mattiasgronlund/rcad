@@ -310,6 +310,16 @@ pub use rcad_mesh::CannotTriangulate;
 /// not kernel users, which is §24.15's argument for exporting it at all.
 pub use rcad_geom::{EdgeRun, NamedRun, SurfaceMeet};
 
+/// What picks one piece of a crossing out of the rest, and the flat kind of it.
+///
+/// A [`Picker`] is out here because [`EdgeRun::PartOfWhereItCrosses`] holds a
+/// list of them, so a caller matching on a run meets one. [`HalfSpace`] is out
+/// here because building a run means building one — and because its whole point
+/// is that it stores the four numbers it is handed, which a caller that wants a
+/// normal exactly square to a direction it holds has to be able to rely on
+/// (§33).
+pub use rcad_geom::{HalfSpace, Picker, SIDE_OF_A_HALF_SPACE};
+
 /// Naming where two surfaces cross, and working out points along it.
 ///
 /// §24.15: the entry point has no topology in its signature, so exporting it
