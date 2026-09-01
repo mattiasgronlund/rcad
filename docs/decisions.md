@@ -10347,7 +10347,7 @@ M4 is complete in the only sense §31.1 gave it: `Model::fuse` no longer refuses
 curved solid, `Containment::NeedsFlatFaces` is gone, and a block with a round
 hole through it, a bar notched by a block, a bar notched by a wedge and a ball
 cut by a plane are fused, validated, meshed and measured against their closed
-forms. The suite went from 985 tests at M3's close to **1111**.
+forms. The suite went from 985 tests at M3's close to **1112**.
 
 `rcad-predicates` is at **0 files changed for the whole milestone**, across ten
 lanes and this gate. So is `rcad-mesh`.
@@ -10455,10 +10455,13 @@ which changed **no files this milestone** and whose claims were last audited at
 `Decision`-grew-a-variant arm and all of them are dead against today's three and
 four; the facade has none outside its doc examples.
 
-It has now found real defects on five consecutive milestones. This time: **two
-behaviour defects, one of them a wrong answer handed back as a success, three
-panics on a caller's bytes, and seven sentences that read as care and answer the
-wrong question.**
+It has now found real defects on five consecutive milestones. This time: **a
+wrong answer handed back as a success, two panics on ordinary public input,
+three more on a caller's bytes, a refusal classified a limit that is a gap
+four public calls away, a regression this milestone put into somebody else's
+crate, and eight sentences that read as care and answer the wrong question.**
+That is the largest haul it has taken, against the milestone with the most new
+surface, which is what §16.10 would predict.
 
 **The worst one, and it would have merged.** `fuse/assemble.rs:1397` said, and
 §36.23 repeated: *"`Model::validate` asks that both ends read exactly `Zero`
@@ -10484,8 +10487,62 @@ square to the bar's own frame in every draw and every corner keeps a coordinate
 curved one**, in the whole of M4. The new family does, sweeps every answer
 through `Model::validate`, and fails on the tree before the fix.
 
-**Four more, each with a breaking input, none fixed here.** Three are panics
-reachable only through `Model`'s `Deserialize`, and §39.7 hands them to M5:
+**The second panic on ordinary public input, and it was fixed too.**
+`Model::add_round_bar(1e-200, 10.0)` builds a bar; meshing it panicked, with no
+file anywhere near it. `Conic::angle_of` divides by `and.length_squared()`,
+which is `1e-400` and underflows to zero, so the angle a walk turns over comes
+back `0.0/0.0`. `how_many_steps` has an `is_nan` check for exactly that and **it
+could never fire**: `f64::max` hands back the other operand when one is `NaN`,
+and the `.max(1.0)` in front of the check turned every `NaN` into a one. A whole
+cap circle was then walked in one step with no points between its ends, and the
+flat cap that reads those points back fanned into a single corner. The floor
+goes on after the checks now, and the refusal is
+`CannotWorkOutHowBigACrossingIs`, whose own doc already carries the
+classification.
+
+**What made that one worth the audit is where the claim sat.** `mesh`'s own
+`# Panics` said *"Nothing does … a closed edge on a curved face is walked four
+ways round whatever the deflection, because the evaluator will not step past a
+quarter turn either."* The argument is sound and names the guard. The guard is
+the one the `NaN` walks past.
+
+**Two more that reach a public entry point, and one regression, none fixed
+here.** Both are the milestone's own doing and both are §39.7's.
+
+**`ACurvedFaceGoesRightRoundWithNoSeam` is reachable in four public calls
+and is a gap, and §38.6 filed the family as a limit.** A closed curve on a
+sphere leaves *three* kinds of piece — one holding one pole, one holding
+none, one holding both — and only the first is handled. `add_ball(4)`
+intersected with a `add_cube(20)` placed so its face sits at `y = 1` refuses;
+the answer is a spherical cap of volume 84.823, which is the same solid
+`a_ball_cut_by_a_plane_meshes_into_a_closed_surface` certifies when the plane
+is `z = 1`. **And it is a §19 violation, which is the serious half**: turning
+the *whole arrangement* — ball and slab together — about `x` flips a working
+answer into a refusal, measured at 1.00 to 1.30 radians answered and 1.40 to
+1.50 refused, either side of `acos(1/4) = 1.3181`, which is the angle at
+which the kept cap stops holding a pole. A rigid motion of both operands is
+not allowed to change the answer. §38.9's correction — *"a plane through the
+ball's centre that does not contain the polar axis is answered"* — is true
+and answers the wrong question: through the centre every piece holds exactly
+one pole, and off-centre is where the family splits.
+
+**M4's fuse builds the pipe `rcad-mesh` says nothing builds.**
+`triangulate.rs` defers a gap in its own error bound on the grounds that
+*"`rcad-topo` never builds one: `add_round_bar` puts the axis at the origin
+and carries the placement on the solid"*. The curved fuse **bakes the
+placement into the stored surface** — measured out of the serialized model, a
+bar built at `z = 1e9` stores its axis origin at `0` before a fuse and at
+`1e9` after one. So the same bar, in the same place, put through a
+`Difference` against a block fifty units away that cuts nothing, goes from
+meshing at `1e-5` to refusing everything under `3.07e-4`: **a 77-fold rise in
+the mesh floor caused by a boolean that removed no material.** The true
+radial error of those points is about `1e-16`, so a representable answer is
+refused. A **gap**, a regression this milestone introduced, and the sentence
+that hid it is the audit's canonical shape — an unreachability escape that
+was true when written and that this milestone's headline feature falsified.
+
+**Three panics reachable only through `Model`'s `Deserialize`**, and §39.7 hands
+them to M5:
 
 1. `Model::validate` panics — *"two planes cross in a straight line, which never
    closes"* — on a cube with one extra closed edge spliced into two of its wires.
@@ -10497,12 +10554,13 @@ reachable only through `Model`'s `Deserialize`, and §39.7 hands them to M5:
 3. `SolidView::mesh` panics `TooFewCorners` on a bar whose wall face carries a
    `Plane` instead of its `Cylinder` — a four-step wire that fans into one corner
    in the plane's two coordinates.
-4. And one that is a refusal rather than a panic: `Exact::dot_of` gives up on a
-   direction with a subnormal component, and the sentence beside it said *"no
-   scaling of a **unit** direction reaches the answer"*. True, and about a family
-   nobody proposed. Multiplying both triples by `2^300` rounds nothing, cannot
-   change the sign of a dot product, and decides it. The fix is a slide inside
-   `Exact::dot_of`, which `Exact::square_minus` has had since §32.1.
+
+**And one refusal that is nobody's panic.** `Exact::dot_of` gives up on a
+direction with a subnormal component, and the sentence beside it said *"no
+scaling of a **unit** direction reaches the answer"*. True, and about a family
+nobody proposed. Multiplying both triples by `2^300` rounds nothing, cannot
+change the sign of a dot product, and decides it. The fix is a slide inside
+`Exact::dot_of`, which `Exact::square_minus` has had since §32.1.
 
 **Two behaviour defects fixed here besides the first.** `Exact::product_of`
 stored `[0.0, high]` for every product that came out exact, and
@@ -10544,8 +10602,10 @@ milestone running in which this exact species has been the audit's main catch.
 ### 39.4 Every refusal M4 can produce, limit or gap
 
 §30.5 is the precedent and §16.10 the rule: a **limit** where the answer does not
-exist, a **gap** where it does and the arithmetic could not reach it. Thirty
-rows. **Every inherited row was re-checked rather than copied, and three moved.**
+exist, a **gap** where it does and the arithmetic could not reach it. Thirty-three
+rows. **Every inherited row was re-checked rather than copied, four moved, and
+three are new at this gate** — two of them found by the claim audit after the
+rest of this section was written, which is the argument for running it last.
 
 Rows M3 could already produce are §30.5's and are not repeated except where M4
 moved them.
@@ -10563,6 +10623,8 @@ moved them.
 | `TheseTwoSurfacesDoNotCrossInAConic` | a ball against a pipe, or two pipes | **gap** | the curve is there and ordering points along it takes the marcher |
 | `TheCrossingOfTheseTwoSurfacesIsNotClosed` | a crossing that runs on for ever | **limit** | the vertex does not exist: such an edge is cut by corners at both ends rather than closing on itself |
 | `Undecidable` out of `intersect` | a direction with a subnormal component underflows its own product | **gap** | `a_direction_with_a_subnormal_component_cannot_be_told_from_square_to_a_plane`, whose second half slides both triples by `2^300` and reads the sign |
+| `CannotWorkOutHowBigACrossingIs` | **a bar too thin for its own squares** — `and.length_squared()` underflows, so the angle a walk turns over is `0.0/0.0` | **gap** | `a_bar_too_thin_for_its_own_squares_is_refused_rather_than_asserted_against`, with radius 1 and `1e-100` as the controls. It was a **panic** until this gate, on `add_round_bar` output and nothing else |
+| `DeflectionBelowWhatAMeshCanReach` | **a curved solid that has been through a fuse**, whose placement the fuse bakes into the stored surface | **gap, and a regression M4 introduced** | a bar built at `z = 1e9` meshes at `1e-5` before a `Difference` against a block fifty units away that cuts nothing, and refuses everything under `3.07e-4` after it — a 77-fold rise from a boolean that removed no material, against a true radial error of about `1e-16`. §39.3, and undemonstrated in the suite |
 
 **Whether a curved face holds a point — `rcad-topo`**
 
@@ -10589,6 +10651,7 @@ moved them.
 | `TwoCurvesTouchWithoutCrossing` | **a corner exactly on a curved face** — a `3 × 4` block corner on a bar or a ball of radius five | **gap** | `a_block_corner_exactly_on_a_bars_wall_is_refused_by_name`, `..._on_a_balls_skin_...`. The answer is the bar; the determinant is exactly zero and tolerant refuses it too. §38.2 |
 | `AClosedEdgeOfTheAnswerWouldStartAtAPole` | **a ball cut by a plane through its polar axis** | **gap** | `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`, with the equator and a leaning plane answered as controls. §38.3 |
 | `ACurvedFaceGoesRightRoundWithNoSeam` | a cut meets a ball's seam twice | **gap** | `a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name`. The answer is two caps of a ball |
+| `ACurvedFaceGoesRightRoundWithNoSeam` | **a cut leaving a piece of a ball that holds no pole, or both** | **gap, and a §19 violation** | four public calls: `add_ball(4)` intersected with `add_cube(20)` whose face sits at `y = 1`. The answer is a spherical cap of volume 84.823 — the same solid `a_ball_cut_by_a_plane_meshes_into_a_closed_surface` certifies when the plane is `z = 1`. **Turning the whole arrangement flips it**: answered from 1.00 to 1.30 radians about `x` and refused from 1.40, either side of `acos(1/4)`, which is where the kept cap stops holding a pole. §38.6 filed the family a limit; a closed curve on a sphere leaves three kinds of piece and only the one-pole cap is handled |
 | `ACurvedFaceGoesRightRoundWithNoSeam` | a face with no boundary at all on a surface that does not pinch | **limit** | such a face is unbounded and there is no answer. Reachable from `Deserialize` only |
 | `CannotTellWhichCurveOfACrossingAFaceRunsAlong` | a boundary edge's corner is held by two of the curves its pair names, or by none | **gap, undemonstrated** | a picker's `Undecidable` rules nothing out (§33.8) |
 | `CannotTellTheCellsOfAFaceApart` | two regions of one face were joined that the surface keeps apart | **gap, undemonstrated** | telling them apart takes a point inside each |
@@ -10607,17 +10670,18 @@ is the second. `Invalid::AClosedEdgeIsWalkedAgainstItsSurface`,
 geometry disagree, which §16.11 says arrive from a file.
 `ResultIsNotManifold { count: 1 }` is **withdrawn** (§38.6).
 
-**Six rows are named, classified and undemonstrated**, marked above. §30.5 had
-one such row and called it the one worth reading twice; six is a different
-quantity of the same thing, and §39.7 hands it on. Each is reachable in principle
-from `Deserialize` and each needs a hand-built broken model to reach, which is
-the reason none has one.
+**Seven rows are named, classified and undemonstrated**, marked above. §30.5 had
+one such row and called it the one worth reading twice; seven is a different
+quantity of the same thing, and §39.7 hands it on. Six are reachable in principle
+from `Deserialize` and each needs a hand-built broken model, which is the reason
+none has one. **The seventh is not**: the fused bar's mesh floor is four public
+calls away and simply has no test, which is worse.
 
 ### 39.5 The numbers
 
 | | at §30 (M3's close) | at §38 | now |
 |---|---|---|---|
-| tests (`cargo nextest`, whole workspace) | 985 | 1106 | **1111** |
+| tests (`cargo nextest`, whole workspace) | 985 | 1106 | **1112** |
 | suite duration | 18.0 s | 2.9 s | **2.9 s** |
 | doc tests | 19 | 19 | **19** |
 | `FORMAT_VERSION` | 2 | 3 | **3** |
@@ -10747,31 +10811,45 @@ rule 3 applies — a part with no named consumer is not built. Roadmap §12 says
 is **STEP import**, which changes what "named consumer" means for half of this
 list: an importer's whole job is to turn a stranger's bytes into a `Model`.
 
-1. **Three panics on a caller's bytes, demonstrated.** §39.3's list: `validate`
+1. **A ball cut anywhere but through a pole is refused, and a rigid motion of
+   both operands changes the answer.** §39.3, with the angle at which it flips.
+   This is first because it is a **§19 violation** and §19 is the property this
+   kernel sells: the same two solids in the same relative position must give the
+   same answer wherever the pair is put. §38.3 already wants the machinery — a
+   cut closed face written out with a seam and poles of its own — and this says
+   how much rests on it. **Consumer: the first imported ball anybody cuts.**
+2. **The fuse bakes a solid's placement into its stored surface, and the mesh
+   floor goes up 77-fold for it.** §39.3, measured. A boolean that removes no
+   material must not make the answer coarser than the input. Two families of fix
+   and neither is obviously right: keep the placement on the solid through a
+   fuse, or widen `rcad-mesh`'s bound so it charges the roundings the surface
+   actually has rather than the largest number in it — `triangulate.rs:860` calls
+   its own bound a §16.10 gap and says so. **Consumer: every fused curved solid,
+   today.**
+3. **Three panics on a caller's bytes, demonstrated.** §39.3's list: `validate`
    on a closed edge between two flat faces, `mesh` and `measure` on a closed edge
    with two different ends, `mesh` on a wire fanned onto the wrong surface.
    **Consumer: M5, immediately and unavoidably.** §16.11 says a caller's bytes
-   may not panic, and a STEP file is a caller's bytes. This is the first item
-   because it is the only one M5 cannot route around.
-2. **The rule that generalises them.** A `# Panics` clause on a `pub` item needs
+   may not panic, and a STEP file is a caller's bytes.
+4. **The rule that generalises them.** A `# Panics` clause on a `pub` item needs
    a demonstration that the arenas cannot hold the shape, not an argument that
    geometry forbids it. `Model` is `Deserialize`. Four milestones running, the
    claim audit's main catch has been this species; M5 should sweep every
    `# Panics` in the tree against it once, rather than meeting them one at a
    time.
-3. **`Exact::dot_of` does not slide and `Exact::square_minus` does.** §39.3's
+5. **`Exact::dot_of` does not slide and `Exact::square_minus` does.** §39.3's
    fourth item, with the input. Closing it is a change to `Exact` and therefore
    to every predicate that reaches level three, so it is a lane with its own
    re-measurement of every rate in §39.5. **Consumer: any caller wanting a
    direction with a subnormal component decided** — which a STEP file with an
    awkward unit scale can produce.
-4. **Two authorities on "is this plane along this pipe's axis".** `intersect`
+6. **Two authorities on "is this plane along this pipe's axis".** `intersect`
    decides it exactly; `along_a_crossing.rs` and `walk.rs` decide it with
    `== 0.0`. Demonstrated on `(1, 0, 3)` against `(−12, −12, 4)`. It moves
    `walk`'s dispatch and therefore the mesher, so it needs its own lane and its
    own re-measurement. **Consumer: any imported solid whose axis and cut plane
    are not both lattice-friendly**, which is most of them.
-5. **`meet_of_three_planes` hands back `Ok` holding an unbounded box**, and
+7. **`meet_of_three_planes` hands back `Ok` holding an unbounded box**, and
    refuses three mutually perpendicular planes written at `1e-200`. It is
    `rcad-predicates`', the crate has been frozen for ten lanes, and unfreezing it
    reopens the gate (§31.5) — so **this is the first item on M5's opening gate's
@@ -10779,54 +10857,58 @@ list: an importer's whole job is to turn a stranger's bytes into a `Model`.
    upstream; the scaled case is a **gap** whose fix is dividing each plane's four
    coefficients by a power of two before the determinants, which is exact and
    leaves Cramer's ratio unchanged.
-6. **Six refusals are named, classified and undemonstrated** (§39.4). Each needs
-   a hand-built broken model, which is what M5 will be building anyway.
-7. **A ball with a pipe through it is still refused**, and it is criterion 13's
+8. **Seven refusals are named, classified and undemonstrated** (§39.4). Six need
+   a hand-built broken model, which is what M5 will be building anyway; the
+   seventh — item 2's mesh floor — needs four public calls and has no test.
+9. **A ball with a pipe through it is still refused**, and it is criterion 13's
    second shape. The quartic ordering gap, §36.20 and §34.10, and it is not a
    budget question: tolerant refuses it too. **Consumer: any imported solid with
    a hole through a sphere**, and there is no shortage.
-8. **Two coincident curved faces are refused**, which is criterion 15's second
+10. **Two coincident curved faces are refused**, which is criterion 15's second
    name and roadmap §7.4's first entry. **Consumer: STEP files are full of
    coincident faces** — this is the item most likely to be the first thing an
    importer hits, because duplicated and coincident geometry is what §9.2's
    healing list is about.
-9. **A corner exactly on a curved face is refused**, and §38.2 wants a predicate
+11. **A corner exactly on a curved face is refused**, and §38.2 wants a predicate
    that says whether one branch of `S ∩ Q₁` is the same curve as one branch of
    `S ∩ Q₂`. **Consumer: an ordinary part reaches it by accident**, which is
    §37.8's own ranking.
-10. **A ball cut by a plane through its polar axis is refused**, and §38.3 wants
+12. **A ball cut by a plane through its polar axis is refused**, and §38.3 wants
     the other half of what §38.1 built: a cut closed face written out with a seam
     and poles of its own. **Consumer: the same importer**, and the road is half
     built.
-11. **A turned notched bar, and a bar cut by a single plane off its axis.** Both
+13. **A turned notched bar, and a bar cut by a single plane off its axis.** Both
     §36.28's, both refused under `Policy::tolerant` too, and §38.9 says the
     second is entangled with item 8. **Consumer: the first turned part anybody
     imports.**
-12. **Solving three curved surfaces, and a crossing that runs through itself.**
+14. **Solving three curved surfaces, and a crossing that runs through itself.**
     Unchanged from §31.9 and still deferred with their consumers named. Both are
     gaps whose family of fixes is a milestone of algebra.
-13. **Cone and torus have a consumer for the first time.** §24.6's argument —
+15. **Cone and torus have a consumer for the first time.** §24.6's argument —
     a new `Surface` variant touches `validate`, the mesher, `is_wholly_flat`, the
     fuse and serialization — was true through M4 and stays true, but roadmap
     §12's own line for M5 is *"a STEP file that holds one"*. This is the
     milestone where that stops being hypothetical.
-14. **The BVH, the bump arena and `rkyv` stay deferred**, consumers unchanged and
+16. **The BVH, the bump arena and `rkyv` stay deferred**, consumers unchanged and
     no figure asking for any of them. §30.8 item 2's interval divide at 4% is
     still not where the money is, and M4 had no performance criterion.
-15. **`Undecidable` out of `mesh` is still unreachable**, handed on for the third
+17. **`Undecidable` out of `mesh` is still unreachable**, handed on for the third
     time. §39.2 settles that it needs a `Model` whose vertices are boxes, which
     is a change to what a model *is*. **It should stop being handed on as a
     milestone item and be recorded as a design consequence**, which this sentence
     does.
 
-**What a STEP file walks straight into, said plainly.** Items 1, 6 and 2 are the
-import boundary itself and are not optional. Items 8, 9 and 11 are geometry that
+**What a STEP file walks straight into, said plainly.** Items 3, 4 and 8 are the
+import boundary itself and are not optional. Items 1, 2, 10, 11 and 13 are not
+about files at all — they are things the kernel does to solids it built itself,
+and an importer inherits every one of them. Items 10, 11 and 13 are geometry
 real files contain in quantity: coincident faces, a corner landing exactly on a
-cylinder, a part that is not axis-aligned. Item 13 is a surface kind the format
+cylinder, a part that is not axis-aligned. Item 15 is a surface kind the format
 has and the kernel does not. **A STEP importer built on this kernel today would
 load a wide class of files and refuse a wide class of ordinary parts**, and the
 refusals would be honest and named, which is the thing this kernel was built to
-do — but they would be frequent.
+do — but they would be frequent, and item 1 says some of them would depend on
+where the part happens to sit.
 
 ### 39.8 Corrections to earlier sections
 
@@ -10851,6 +10933,31 @@ do — but they would be frequent.
   §39.6.
 - **§30.8 item 11 is wrong and §31.8 is right**, and it is settled rather than
   handed on again. §39.2.
+- **§38.6's `ACurvedFaceGoesRightRoundWithNoSeam` row** says the family is a
+  limit because what is left is half an endless tube. A ball leaves it too, in
+  four public calls, and the answer is a spherical cap. §39.3, §39.4.
+- **§38.9's correction about a plane through a ball's centre** is true and
+  answers the wrong question: through the centre every piece holds exactly one
+  pole, so the family that splits is the off-centre one.
+- **§38.10 says the milestone's exit risk is closed.** It was closed for the
+  shapes §37 named. Two panics on ordinary public input, a wrong answer, a §19
+  violation and a mesh-floor regression were still in the tree, and this gate
+  found all five. The lesson is §39.9's.
+- **`rcad-mesh`'s `NoMeshCanGetThatCloseToTheSurface` defers a gap** on the
+  grounds that *"`rcad-topo` never builds one"*. The curved fuse builds one.
+  §39.3.
+- **`mesh`'s `# Panics` said "Nothing does"** and argued from the evaluator's
+  quarter-turn bound. `Model::add_round_bar(1e-200, 10.0)` walks past it. §39.3.
+- **§31.8 item 9 and §36.14's watch on `MOST_POINTS_A_MESH_WILL_HOLD`** are
+  answered, and not in the direction either expected: **the cap does not bound
+  what it is named after.** Three call sites check it — the boundary walk and the
+  two cutting steps — and `hand_over`'s loop over the triangulator's *interior*
+  points, which is the whole bulk of a fine mesh, checks nothing. So one
+  `add_ball(10)` and one `mesh` walk straight past it: measured here, 158 646
+  points at a deflection of `1e-3` and 563 998 at `3e-4`, rising as `1/d`, so the
+  four million is passed at about `4e-5` and the run takes minutes. No fused
+  solid and no five curved edges are needed. It costs a long wait and a large
+  allocation rather than a wrong answer, and it is M5's to bound.
 
 ### 39.9 Is this a kernel
 
@@ -10872,18 +10979,25 @@ gets called.
 What is not true is the sentence a user would need. **Nine of the nineteen
 catalogue rows refuse**, and they are not exotic: two coincident faces, a corner
 landing on a cylinder, a ball with a hole through it, a bar cut by one plane that
-misses its axis. A kernel is a thing you can build a part on without knowing
-which arrangements it dislikes, and this one still has arrangements it dislikes
-that an ordinary part reaches by accident — §37.8 said so of one of them and it
-is still true of four.
+misses its axis. **A ball cut by a plane that misses a pole refuses too**, and
+that one is not in the catalogue because nobody thought to put it there — it is
+four public calls, it is the plainest curved boolean there is, and §39.3 found it
+after this section was drafted. A kernel is a thing you can build a part on
+without knowing which arrangements it dislikes, and this one still has
+arrangements it dislikes that an ordinary part reaches by accident — §37.8 said
+so of one of them and it is still true of five.
 
 And the audit is the sharper answer. **This gate found `Model::fuse` returning
 `Ok` with a solid that fails its own sweep**, on a block turned against a bar,
 which is not a degenerate arrangement but the ordinary case of two parts that are
 not aligned with each other. It survived ten lanes, a green suite of 1106 tests
 and a code review, because no test in the milestone had ever turned one solid
-relative to a curved one. A kernel is not a thing whose worst defect is found by
-the last person to look.
+relative to a curved one. It also found **a §19 violation** — a rigid motion of
+both operands turning an answer into a refusal — and **a boolean that removes no
+material making its own answer 77 times coarser to mesh**. A kernel is not a
+thing whose three worst defects are found by the last person to look, and the
+right conclusion is not that this gate was clever. It is that ten lanes of
+green tests measured the things the lanes thought of.
 
 So: **the architecture is a kernel's and the coverage is not.** Everything
 roadmap §12 lists for M4 is built and measured. What M4 shows is that the list
