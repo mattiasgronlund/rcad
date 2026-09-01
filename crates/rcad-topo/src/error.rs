@@ -432,6 +432,20 @@ pub enum Error {
     #[error("nothing can put points in order along this curve")]
     ACrossingThisCannotBeOrderedAlong,
 
+    /// An edge of a fused solid runs along *part* of a curved crossing, and
+    /// nothing can say which part.
+    ///
+    /// A crossing of two surfaces that closes and is cut at two corners leaves
+    /// two arcs with the same two ends, so the ends do not name one of them and
+    /// [`EdgeRun::PartOfWhereItCrosses`](crate::model::EdgeRun) wants the
+    /// half-spaces that do. A **gap**: the arc is there and a plane through the
+    /// chord perpendicular to the crossing's own plane separates the two — what
+    /// stops it being built here is that both ends have to be provably *on* that
+    /// plane once its offset is rounded, and nothing here rounds it in a
+    /// direction it can prove.
+    #[error("an edge of the answer runs along part of a curved crossing and cannot be named")]
+    ACurvedEdgeThatIsPartOfACrossingCannotBeNamed,
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the

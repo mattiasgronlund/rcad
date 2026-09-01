@@ -284,6 +284,44 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
     bits
 }
 
+/// The numbers a surface stores, with a plane's turned round where that makes
+/// them smaller: a key for the surface's **geometry** and not for which way it
+/// faces.
+///
+/// §31.3 splits "is it one surface", which is geometry, from "does it face the
+/// same way", which is topology. This is the first half on its own, and the
+/// commit is where it is needed: the two faces along one edge of the answer may
+/// come from two solids pressed against each other, and then one names the
+/// shared plane facing up and the other names it facing down. Keyed on the
+/// stored numbers those are two edges where the model has one, and an edge with
+/// one face along it is not a solid.
+///
+/// A plane reversed is the four coefficients negated exactly
+/// ([`Plane::reversed`](rcad_geom::Plane::reversed)), so this rounds nothing —
+/// and negating turns `0.0` into `-0.0`, which is a *different* `f64` and would
+/// leave the two spellings of one plane still telling apart. Every zero is
+/// turned back the right way up, and adding zero is what does it. A ball and a
+/// pipe have no reversed form at all and are their own key.
+pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 8] {
+    let Surface::Plane(flat) = surface else {
+        return name_of_surface_bits(surface);
+    };
+    let written = flat.coefficients();
+    let backwards = written
+        .iter()
+        .find(|coefficient| **coefficient != 0.0)
+        .is_some_and(|coefficient| *coefficient < 0.0);
+    let facing = written.map(|coefficient| {
+        let turned = if backwards { -coefficient } else { coefficient };
+        turned + 0.0
+    });
+    let mut bits = [0u64; 8];
+    for (slot, number) in facing.iter().enumerate() {
+        bits[slot + 1] = in_the_order_a_float_compares(*number);
+    }
+    bits
+}
+
 /// The bits of a float, rearranged so that comparing them as whole numbers is
 /// comparing the floats.
 ///
