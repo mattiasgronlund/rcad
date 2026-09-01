@@ -6,7 +6,9 @@
 //! §4.2).
 
 use rcad_geom::{DYNAMIC_RANGE_CHECK, Isometry, Point, Scale};
-use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog, Severity};
+use rcad_predicates::{
+    Approximation, Cause, Decision, Level, Measures, Policy, ProvenanceLog, Record, Severity,
+};
 use rcad_topo::{Containment, Error, Invalid, Model, Profile, ProfileBuilder};
 
 fn empty_model() -> Model {
@@ -396,4 +398,34 @@ fn the_same_square_scaled_by_a_power_of_two_builds_to_the_same_answer() {
         .expect("this one always built");
     assert_eq!(scaled.approximation(), None);
     assert!(log.is_empty());
+}
+
+/// A crossing `rcad-geom` could not name is an undecided *operation* up here
+/// too, and not "bad geometry".
+///
+/// The one variant of `rcad_geom::Error` that is not bad caller input is the one
+/// added at M3's gate (§24.10). Wrapped in [`Error::Geometry`] it would be filed
+/// under "the caller handed over numbers that describe no shape", which is the
+/// opposite of what happened, and §17.7's breakdown of what gave up would count
+/// it in the wrong column.
+#[test]
+fn a_crossing_that_could_not_be_named_stays_undecided_and_does_not_become_bad_geometry() {
+    let mut records = ProvenanceLog::new();
+    records.push(Record::new(
+        "where a plane and a sphere cross",
+        &[],
+        Level::Interval,
+        Decision::Undecidable { enclosure: 8e-14 },
+        Measures::Area,
+    ));
+
+    match Error::from(rcad_geom::Error::Undecidable { records }) {
+        Error::Undecidable { records } => assert_eq!(records.len(), 1),
+        other => panic!("an undecided operation must stay undecided: {other:?}"),
+    }
+
+    assert!(matches!(
+        Error::from(rcad_geom::Error::RadiusNotPositive { radius: -1.0 }),
+        Error::Geometry(rcad_geom::Error::RadiusNotPositive { .. })
+    ));
 }

@@ -14,7 +14,7 @@ use rcad_predicates::ProvenanceLog;
 pub enum Error {
     /// A piece of geometry refused to be built.
     #[error("geometry: {0}")]
-    Geometry(#[from] rcad_geom::Error),
+    Geometry(rcad_geom::Error),
 
     /// A profile loop has fewer than three points, so it encloses nothing.
     #[error("a profile loop needs at least three points, this one has {count}")]
@@ -274,6 +274,24 @@ pub enum Error {
         /// The decisions that could not be settled.
         records: ProvenanceLog,
     },
+}
+
+/// An undecided *operation* down in `rcad-geom` stays undecided up here rather
+/// than being buried inside [`Error::Geometry`].
+///
+/// Naming where two surfaces cross is an operation and can give up (§24.10), and
+/// what it gives up with is `rcad_geom::Error::Undecidable`. Wrapped, a caller
+/// would have to unwrap two layers to learn that what happened was "could not
+/// decide" rather than "bad input" — and §17.7's breakdown of what gave up would
+/// file it under the wrong tier, which is the one thing that breakdown is for.
+/// [`rcad::Error`](https://docs.rs/rcad) does the same for this crate's own.
+impl From<rcad_geom::Error> for Error {
+    fn from(error: rcad_geom::Error) -> Self {
+        match error {
+            rcad_geom::Error::Undecidable { records } => Error::Undecidable { records },
+            other => Error::Geometry(other),
+        }
+    }
 }
 
 /// An invariant a model must hold and does not.

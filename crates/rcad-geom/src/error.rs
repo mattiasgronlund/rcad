@@ -2,16 +2,19 @@
 
 /// Everything this crate refuses to build, and why.
 ///
-/// All of these are bad caller input: numbers that cannot describe the shape
-/// they are meant to describe. A broken invariant *inside* an already-valid
-/// value is not here — that is a bug, and it panics
+/// Almost all of these are bad caller input: numbers that cannot describe the
+/// shape they are meant to describe. A broken invariant *inside* an
+/// already-valid value is not here — that is a bug, and it panics
 /// (`docs/decisions.md` §4.1).
 ///
-/// `Undecidable` is not here either. A predicate that cannot decide returns a
-/// `Decision`; it is an operation that cannot decide which is a failure, and
-/// operations live above this crate.
+/// [`Error::Undecidable`] is the exception, and it is new. Until M3 this crate
+/// held nothing but bad input, because it had no *operation* that could give up:
+/// a predicate that cannot decide returns a `Decision`, which is a result and
+/// not a failure. Naming where two surfaces cross is an operation, it is a chain
+/// of sign decisions, and a chain with a link missing has nothing to hand back
+/// (§24.10).
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum Error {
     /// A coordinate was infinite or not a number.
     #[error("the {what} has a coordinate that is not a finite number")]
@@ -235,6 +238,22 @@ pub enum Error {
     /// single meeting point, for instance.
     #[error(transparent)]
     Predicate(#[from] rcad_predicates::Error),
+
+    /// The operation ran out of things it could prove.
+    ///
+    /// Carries the records of every decision that could not be settled, so the
+    /// caller can see which predicate gave up and how wide its enclosure was.
+    ///
+    /// **A different tier from every variant above it**, and the two read very
+    /// differently in a breakdown of what gave up (§17.7). Everything else here
+    /// says the caller handed over numbers that describe no shape; this says the
+    /// shape is fine and the arithmetic could not reach the answer. Only one of
+    /// those is worth going and fixing.
+    #[error("could not settle {} decisions the answer depends on", records.len())]
+    Undecidable {
+        /// The decisions that could not be settled.
+        records: rcad_predicates::ProvenanceLog,
+    },
 }
 
 /// The result of anything in this crate that can refuse.

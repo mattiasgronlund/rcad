@@ -42,7 +42,7 @@ pub enum Error {
 
     /// A piece of geometry refused to be built.
     #[error(transparent)]
-    Geometry(#[from] crate::GeometryError),
+    Geometry(crate::GeometryError),
 
     /// Building, reading or checking a model went wrong.
     #[error(transparent)]
@@ -60,17 +60,30 @@ pub enum Error {
 }
 
 /// An undecided *operation* keeps its own variant here rather than being buried
-/// inside [`Error::Topology`].
+/// inside [`Error::Topology`] or [`Error::Geometry`].
 ///
 /// The facade promises that an operation which cannot decide is
-/// [`Error::Undecidable`] carrying the records. If the topology crate's own
-/// undecided error stayed wrapped, a caller would have to unwrap two layers to
-/// find out that is what happened, and the promise would be worth nothing.
+/// [`Error::Undecidable`] carrying the records. If either layer's own undecided
+/// error stayed wrapped, a caller would have to unwrap two layers to find out
+/// that is what happened, and the promise would be worth nothing.
+///
+/// Two layers can raise one now. `rcad-topo`'s fuse has since M2.5, and naming
+/// where two surfaces cross is an operation in `rcad-geom` that can give up the
+/// same way (`docs/decisions.md` §24.10).
 impl From<crate::TopologyError> for Error {
     fn from(error: crate::TopologyError) -> Self {
         match error {
             crate::TopologyError::Undecidable { records } => Error::Undecidable { records },
             other => Error::Topology(other),
+        }
+    }
+}
+
+impl From<crate::GeometryError> for Error {
+    fn from(error: crate::GeometryError) -> Self {
+        match error {
+            crate::GeometryError::Undecidable { records } => Error::Undecidable { records },
+            other => Error::Geometry(other),
         }
     }
 }
