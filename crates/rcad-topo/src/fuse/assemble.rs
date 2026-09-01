@@ -1455,13 +1455,13 @@ fn exactly_at(point: Point) -> [u64; 3] {
         .map(f64::to_bits)
 }
 
-/// The edges built so far, and how to find one again.
-#[derive(Default)]
 /// What names one edge of the answer: the two corners it runs between, and —
 /// for an edge that closes, where those are one corner — the two surfaces
 /// either side of it. See [`which_curve_it_is`].
 type EdgeName = ([usize; 2], Option<[[u64; 8]; 2]>);
 
+/// The edges built so far, and how to find one again.
+#[derive(Default)]
 struct Edges {
     made: Vec<Edge>,
     between: BTreeMap<EdgeName, usize>,
