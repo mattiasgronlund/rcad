@@ -864,37 +864,62 @@ fn a_bar_wholly_inside_a_block_unites_and_intersects() {
     measures(volume_of(&model, shared.solids()), PI * 4.0, Side::Under);
 }
 
-/// **A defect, pinned rather than blessed.** The third rule panics.
+/// The third rule leaves one solid with a bubble in it, which is §38.2's fix of
+/// the panic §37.4 pinned here.
 ///
-/// Hollowing the block out with the bar would leave one solid with two shells —
-/// the planar catalogue's `a_cube_wholly_inside_another_under_all_three_rules`
-/// is exactly that answer with boxes. What happens instead is a panic while the
-/// answer's edges are being rebuilt, on a run of edges that ends up with other
-/// than two ends.
+/// The planar catalogue's `a_cube_wholly_inside_another_under_all_three_rules`
+/// is the same answer with boxes: an outer shell and a void inside it, one
+/// solid. The volume is the block less the bar, and it measures **over** the
+/// closed form because the bubble's wall is meshed inside the true cylinder, so
+/// the bubble the mesh describes is smaller than the one that is there.
 ///
-/// **It is not confined to containment.** The same panic comes out of a bar with
-/// *one* cap inside a block — which is §36.15's own blind hole, listed there
-/// among the shapes that work, and it works in the arrangement and not through
-/// the commit.
+/// **The bubble is where a winding error would not cancel.** Its wall is a
+/// closed edge walked by two faces, and a closed edge's two ends are one corner,
+/// so nothing about the corner says which way either face walks it. Get it
+/// backwards and the void's shell comes out wound the same way as the outer one
+/// — its volume adds instead of subtracting, and the number below is `512 + 4π`
+/// rather than `512 − 4π`. A mesh that merely closes says nothing about that;
+/// the closed form does.
 #[test]
-#[should_panic(expected = "a run of edges that became one edge has two ends left")]
-fn hollowing_a_block_out_with_a_bar_inside_it_panics() {
+fn hollowing_a_block_out_with_a_bar_inside_it_leaves_a_bubble() {
     let mut model = a_model();
     let pair = a_bar_wholly_inside_a_block(&mut model);
-    let _ = model.fuse(
-        &pair.arguments,
-        &pair.tools,
-        Rule::Difference,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
+    let hollowed = fused(&mut model, &pair, Rule::Difference);
+
+    assert_eq!(hollowed.solids().len(), 1, "one solid with a void in it");
+    let solid = model.solid(hollowed.solids()[0]);
+    assert_eq!(
+        solid.shells().count(),
+        2,
+        "the block's own skin, and the bubble the bar left"
+    );
+    assert_eq!(
+        solid.faces().count(),
+        9,
+        "the block's six, the bubble's wall, and its two caps"
+    );
+    measures(
+        volume_of(&model, hollowed.solids()),
+        512.0 - PI * 4.0,
+        Side::Over,
     );
 }
 
-/// The same panic from §36.15's blind hole, which that section lists among the
-/// shapes that work.
+/// §36.15's blind hole, committed and not only arranged — the second shape
+/// §37.4's third defect reached.
+///
+/// A bar of radius one standing on the block's top with `2 ≤ z ≤ 5` of it inside
+/// the block, so its bottom cap is buried and its top cap is in the air. The
+/// difference is the block with a hole three deep in its top, and the hole's
+/// floor is that buried cap.
+///
+/// **This is the shape where the fix does not cancel**, and the bubble above is
+/// the other: the hole has one cap inside the material and one outside, so a
+/// wall walked the wrong way round takes the hole's volume off the block twice
+/// instead of once and lands at `512 − 6π`. A hole through the block would have
+/// the same wall wound the same way at both ends and could hide it.
 #[test]
-#[should_panic(expected = "a run of edges that became one edge has two ends left")]
-fn a_blind_hole_panics_when_it_is_committed_rather_than_only_arranged() {
+fn a_blind_hole_is_committed_and_not_only_arranged() {
     let mut model = a_model();
     let solid = model
         .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
@@ -906,12 +931,20 @@ fn a_blind_hole_panics_when_it_is_committed_rather_than_only_arranged() {
             &Isometry::translation(Vector::new(4.0, 4.0, 5.0)).expect("a shift"),
         )
         .expect("a bar standing on the block's top");
-    let _ = model.fuse(
-        &[solid],
-        &[bar],
-        Rule::Difference,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
+    let drilled = fused(&mut model, &Pair::of(solid, bar), Rule::Difference);
+
+    assert_eq!(drilled.solids().len(), 1);
+    let hollowed = model.solid(drilled.solids()[0]);
+    assert_eq!(hollowed.shells().count(), 1, "a blind hole is one shell");
+    assert_eq!(
+        hollowed.faces().count(),
+        8,
+        "the block's six, the hole's wall, and the cap it stops on"
+    );
+    measures(
+        volume_of(&model, drilled.solids()),
+        512.0 - PI * 3.0,
+        Side::Over,
     );
 }
 
@@ -1297,9 +1330,10 @@ fn the_rest() -> Vec<Entry> {
         Entry {
             degeneracy: "fully contained solids",
             pair: "the same, hollowed out",
-            case: Case::Panics {
+            case: Case::Fused {
+                build: a_bar_wholly_inside_a_block,
                 rule: Rule::Difference,
-                test: "hollowing_a_block_out_with_a_bar_inside_it_panics",
+                outcome: Outcome::Answered,
             },
         },
         Entry {

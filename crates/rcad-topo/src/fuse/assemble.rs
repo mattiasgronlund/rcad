@@ -756,11 +756,18 @@ impl Assembly {
         let mut straight_through: BTreeSet<(usize, usize)> = BTreeSet::new();
         let mut still_a_corner = vec![false; self.corners.len()];
         for (&(lump, corner), by) in &leaving {
-            if let [one, other] = by[..] {
-                runs.join(one, other);
-                straight_through.insert((lump, corner));
-            } else {
-                still_a_corner[corner] = true;
+            // **Two different edges**, and the word "different" is what a closed
+            // edge changes. A circle starts and ends at its one corner, so it
+            // leaves that corner twice and this list is one edge written down
+            // twice — which is not a run of two edges to fold into one, it is
+            // the only corner a closed curve has. Dissolving it leaves the
+            // joined edge with no ends at all.
+            match by[..] {
+                [one, other] if one != other => {
+                    runs.join(one, other);
+                    straight_through.insert((lump, corner));
+                }
+                _ => still_a_corner[corner] = true,
             }
         }
 
@@ -806,9 +813,18 @@ impl Assembly {
             }
             let ends = <[usize; 2]>::try_from(kept.as_slice())
                 .expect("a run of edges that became one edge has two ends left");
+            // One corner twice is a side that **closes**, not a side of no
+            // length — a cap circle and a round hole are exactly that, and
+            // `Edge::how_it_runs` reads the pair as `RightRoundWhereItsFacesCross`.
+            // What cannot happen is a *straight* side coming back to where it
+            // started: two planes cross in a line and a line does not close.
+            let flat = self.edges[leader]
+                .carried_by
+                .iter()
+                .all(|surface| surface.as_plane().is_some());
             assert!(
-                ends[0] != ends[1],
-                "a piece of a face has a side with no length"
+                ends[0] != ends[1] || !flat,
+                "a piece of a face has a straight side with no length"
             );
             made.push(Edge {
                 ends: ends.map(|end| renumbered.corner_now[end].expect("an end is still a corner")),
@@ -896,14 +912,30 @@ impl Assembly {
             let edge = renumbered.edge_now[edge].expect("a run of edges that stays becomes one");
             let from = renumbered.corner_now[self.starts_at(dart)]
                 .expect("a run of edges starts at a corner");
+            // A **closed** edge starts and ends at its one corner, so the corner
+            // says nothing about which way this face walks it and the side it
+            // already had is the only thing that does. A closed edge is always a
+            // run of one: its corner has it twice and nothing else, so nothing
+            // was ever joined onto it.
             sides.push(Side {
                 edge,
-                forward: edges[edge].ends[0] == from,
+                forward: if edges[edge].ends[0] == edges[edge].ends[1] {
+                    self.side_of(dart).forward
+                } else {
+                    edges[edge].ends[0] == from
+                },
             });
         }
+        // Three sides, **or one that closes on itself**, which is the rule
+        // `Model::validate` reads: a cap circle and the rim of a round hole are
+        // one whole curve and have one corner between them.
+        let closes_on_one = match &sides[..] {
+            [only] => edges[only.edge].ends[0] == edges[only.edge].ends[1],
+            _ => false,
+        };
         assert!(
-            sides.len() >= 3,
-            "a face has at least three sides, this one has {}",
+            sides.len() >= 3 || closes_on_one,
+            "a face has at least three sides or one that closes, this one has {}",
             sides.len()
         );
         sides
