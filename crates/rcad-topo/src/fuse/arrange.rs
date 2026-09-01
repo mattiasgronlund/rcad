@@ -1527,10 +1527,22 @@ impl<'f> Arrangement<'f> {
                             policy,
                             log,
                         )?;
-                        assert!(
-                            turn != Decision::Zero,
-                            "two arcs leave one node the same way, so they lie on top of each other"
-                        );
+                        // **The same refusal [`Arrangement::half_of_the_turn`]
+                        // gives, at the second place the same question is
+                        // asked** (§38.2). Two arcs leaving one node with no
+                        // turn between them are two curves tangent there, and
+                        // that used to be an assert here on the grounds that
+                        // the reference had already ruled it out. It had not: a
+                        // pair both anticlockwise of the reference is never
+                        // compared against it, and a `3 × 4` block corner on a
+                        // bar of radius five reaches exactly that — the block's
+                        // two walls cut the bar's along the one ruling
+                        // `(3, 4, z)`, so the two arcs are the same line.
+                        if turn == Decision::Zero {
+                            return Err(Error::TwoCurvesTouchWithoutCrossing {
+                                face: self.face.keys[0],
+                            });
+                        }
                         turn == Decision::Pos
                     }
                 };

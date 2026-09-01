@@ -434,12 +434,19 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
-    /// Two curves drawn on one face meet at a point without crossing there.
+    /// Two curves drawn on one face meet at a point without crossing there, or
+    /// run along each other from it.
     ///
     /// Two curves tangent at a node leave the arrangement with no anticlockwise
     /// order round it, so there is no way round the cell they bound. A **gap**:
     /// the pieces are there and telling them apart takes following one of the
     /// curves past the touch, which nothing in this kernel does.
+    ///
+    /// **Coincidence is the far end of the same thing** (§38.2). A `3 × 4` block
+    /// corner on a bar of radius five puts the block's two walls on the one
+    /// ruling `(3, 4, z)` of the bar's, so the two curves do not merely touch —
+    /// they are one line held by the arrangement as two crossings, and no order
+    /// round the node exists to be found.
     #[error("two curves on one face touch without crossing")]
     TwoCurvesTouchWithoutCrossing {
         /// Which face.

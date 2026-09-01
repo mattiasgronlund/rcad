@@ -725,24 +725,37 @@ fn a_block_corner_on_a_bars_wall(model: &mut Model, depth: f64) -> Pair {
     Pair::of(bar, standing)
 }
 
-/// **A defect, pinned rather than blessed.** A corner exactly on a bar's wall
-/// panics inside the arrangement.
+/// A corner exactly on a bar's wall is refused by name, which is §38.2's fix of
+/// the panic §37.4 pinned here.
 ///
-/// Two arcs of the crossing leave that corner the same way, because the corner
-/// is on the wall and on the block's two walls at once, and the walk that orders
-/// what leaves a node asserts that cannot happen. It can, from public input.
+/// Two arcs leave that corner with no turn between them, and they are not merely
+/// tangent — they are the **same line**. The plane `x = 3` cuts the bar of radius
+/// five in the two rulings `(3, ±4, z)` and the plane `y = 4` cuts it in
+/// `(±3, 4, z)`, so `(3, 4, z)` is on both, and the block touches the bar's wall
+/// along that one ruling without cutting it anywhere.
+///
+/// The arrangement holds one crossing per curve and here it has two for one, so
+/// there is no anticlockwise order round the corner and no way round the cell.
+/// That is exactly what [`Error::TwoCurvesTouchWithoutCrossing`] already says,
+/// and the same geometry one function away already refused with it; the walk
+/// asserted instead because it thought the first comparison had ruled it out.
+///
+/// **A gap and not a limit** (§16.10): the answer is the bar, since a `3 × 4`
+/// rectangle from the axis is inside a circle of radius five. §38.2 records the
+/// family of fixes and why none of them is a line of code.
+///
+/// A tolerant policy makes no difference, which says this is about the shape and
+/// not a budget: the determinant is exactly zero, not nearly.
 #[test]
-#[should_panic(expected = "two arcs leave one node the same way")]
-fn a_block_corner_exactly_on_a_bars_wall_panics() {
-    let mut model = a_model();
-    let pair = a_block_corner_on_a_bars_wall(&mut model, 4.0);
-    let _ = model.fuse(
-        &pair.arguments,
-        &pair.tools,
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
+fn a_block_corner_exactly_on_a_bars_wall_is_refused_by_name() {
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        let mut model = a_model();
+        let pair = a_block_corner_on_a_bars_wall(&mut model, 4.0);
+        match refusal(&mut model, &pair, Rule::Union, &policy) {
+            Error::TwoCurvesTouchWithoutCrossing { .. } => (),
+            other => panic!("a corner on a bar's wall refused with {other:?}"),
+        }
+    }
 }
 
 /// The controls, a tenth of a millimetre either side, and they are what make the
@@ -768,29 +781,30 @@ fn a_block_corner_a_tenth_off_a_bars_wall_is_answered_either_side() {
     }
 }
 
-/// **A defect, pinned rather than blessed.** The same corner on a *ball* panics
-/// in the same place, and its controls do not.
+/// The same corner on a *ball* is refused by the same name, and its controls are
+/// refused by a different one.
 ///
-/// `(3, 4, 0)` is on a ball of radius five for the same reason. Either side of
-/// it the fuse refuses with `Undecidable` naming order along a crossing rather
-/// than answering, so the ball case is a panic between two refusals where the
-/// bar case is a panic between two answers — the panic is the thing they have in
-/// common and the exact incidence is the only thing that reaches it.
+/// `(3, 4, 0)` is on a ball of radius five for the same reason. Either side of it
+/// the fuse refuses with `Undecidable` naming order along a crossing, so the ball
+/// case is one refusal between two others where the bar case is a refusal between
+/// two answers — the name is what they have in common and the exact incidence is
+/// the only thing that reaches it.
 #[test]
-#[should_panic(expected = "two arcs leave one node the same way")]
-fn a_block_corner_exactly_on_a_balls_skin_panics() {
+fn a_block_corner_exactly_on_a_balls_skin_is_refused_by_name() {
     let mut model = a_model();
     let ball = model
         .add_ball(5.0, &Isometry::identity())
         .expect("a ball of radius five");
     let standing = block(&mut model, [3.0, 4.0, 4.0], Vector::zero());
-    let _ = model.fuse(
-        &[ball],
-        &[standing],
+    match refusal(
+        &mut model,
+        &Pair::of(ball, standing),
         Rule::Union,
         &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
+    ) {
+        Error::TwoCurvesTouchWithoutCrossing { .. } => (),
+        other => panic!("a corner on a ball's skin refused with {other:?}"),
+    }
 }
 
 /// The ball's controls, refusing by name a tenth either side.
@@ -1420,17 +1434,18 @@ fn the_rest() -> Vec<Entry> {
         Entry {
             degeneracy: "vertex on a curved face",
             pair: "a 3x4 block corner on a bar of radius five",
-            case: Case::Panics {
+            case: Case::Fused {
+                build: |model| a_block_corner_on_a_bars_wall(model, 4.0),
                 rule: Rule::Union,
-                test: "a_block_corner_exactly_on_a_bars_wall_panics",
+                outcome: Outcome::Refused("TwoCurvesTouchWithoutCrossing"),
             },
         },
         Entry {
             degeneracy: "vertex on a curved face",
             pair: "the same corner on a ball of radius five",
-            case: Case::Panics {
+            case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_block_corner_exactly_on_a_balls_skin_panics",
+                test: "a_block_corner_exactly_on_a_balls_skin_is_refused_by_name",
             },
         },
         Entry {
