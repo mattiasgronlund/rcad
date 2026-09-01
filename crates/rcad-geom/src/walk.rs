@@ -186,7 +186,7 @@ pub fn walk(
     let Some(conic) = the_conic_between(pair)? else {
         return Ok(nothing_between_the_ends());
     };
-    let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * conic.how_far_it_reaches();
+    let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * conic.the_size_it_was_worked_out_from();
     // A conic drawn near the top of `f64`'s range has a bound that overflows,
     // and a bound of infinity is not a bound. The size of this crossing is what
     // could not be worked out, which is the same refusal the naming half has one
@@ -576,10 +576,25 @@ impl Conic {
             .atan2(from_centre.dot(self.across) / self.across.length_squared())
     }
 
-    /// The furthest from the centre this conic goes, and the size everything
-    /// about it was worked out from.
-    fn how_far_it_reaches(&self) -> f64 {
+    /// The largest magnitude anything about this conic was worked out from,
+    /// which is what [`POINT_ALONG_A_CROSSING_ROUNDOFF`] is a multiple of.
+    fn the_size_it_was_worked_out_from(&self) -> f64 {
         self.size
+    }
+
+    /// The furthest from its own centre this conic goes.
+    ///
+    /// **Not [`Conic::the_size_it_was_worked_out_from`], and the difference
+    /// decides how many pieces a stretch of it is walked into.** That one is the
+    /// biggest number in the chain — a plane's offset, a ball's centre, an axis
+    /// origin — and it is the right scale for a *rounding*. It is the wrong one
+    /// for a *bend*: the cap circle at the top of a bar ten tall bends exactly as
+    /// the one at the bottom does, and charging the top one against the ten
+    /// walked it into more pieces than the bottom, which put the middle of a
+    /// meshed bar off half way up. Where a circle sits is not allowed to change
+    /// how finely it is cut (§19).
+    fn how_far_it_reaches(&self) -> f64 {
+        self.across.length().max(self.and.length())
     }
 
     /// The stretch of angle `run` covers, as a pair the second of which may be

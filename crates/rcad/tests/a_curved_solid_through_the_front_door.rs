@@ -101,23 +101,22 @@ fn a_caller_can_read_which_refusal_the_triangulator_gave() {
         .add_ball(1.0, &rcad::Isometry::identity())
         .expect("a unit ball");
 
-    // Far below the floor a point can be placed to, so this is the one refusal
-    // that is about arithmetic rather than about the request.
+    // Fine enough that the inside of the patch asks for more points than one
+    // patch will hold, and coarse enough that its boundary does not — which is
+    // the band where the refusal a caller has to read comes from the
+    // triangulator rather than from the walk or the floor.
     let refusal = model.solid(ball).mesh(
-        Deflection::of(1e-13).expect("a length"),
+        Deflection::of(1e-6).expect("a length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     );
     match refusal {
-        Err(TopologyError::MoreMeshPointsThanASolidWillHold { most }) => {
-            assert!(most > 0, "a mesh holds some points");
-        }
         Err(TopologyError::CannotMeshAFace { why, .. }) => match why {
             CannotTriangulate::MoreTrianglesThanAPatchWillHold { would_need } => {
                 assert!(would_need > 0.0);
             }
-            other => panic!("a tenth of a picometre asks for triangles, not {other:?}"),
+            other => panic!("a millionth of the ball asks for triangles, not {other:?}"),
         },
-        other => panic!("a ball meshed to a tenth of a picometre gave {other:?}"),
+        other => panic!("a ball meshed to a millionth gave {other:?}"),
     }
 }

@@ -231,23 +231,20 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
-    /// An edge with a pole at either end does not say which meridian it runs
-    /// down.
+    /// Three or more faces meet along this edge, so no pair of them says which
+    /// two surfaces it runs between.
     ///
-    /// A pole is a point every longitude names, so an edge between two of them
-    /// gets nothing at all from its ends, and the faces either side of it are one
-    /// and the same sphere. Its
-    /// [`EdgeRun`](rcad_geom::EdgeRun) is the only thing that can say: the plane
-    /// the meridian lies in, and the half-spaces that pick one of the two halves
-    /// that plane cuts.
+    /// Where an edge is is what the surfaces either side of it say (§23.2), and
+    /// the evaluator that walks it is handed both. An edge used once has the same
+    /// face on both sides, which is what a seam is; an edge used three times has
+    /// no such pair and is not part of a closed solid at all.
     ///
-    /// **A refusal and not an assert, and `validate` cannot catch it either.**
-    /// Both ends of such an edge satisfy every half-space its true meridian
-    /// satisfies, so the check that an edge lies inside what picked it has
-    /// nothing to look at. A model that arrived from a file with a seam named by
-    /// a sphere instead of a plane, or picked out by nothing, reaches here.
-    #[error("an edge between two poles does not say which meridian it runs down")]
-    ASeamBetweenTwoPolesNamesNoMeridian {
+    /// **A refusal and not an assert.** `check_edges` refuses an edge without
+    /// two coedges, but [`SolidView::mesh`](crate::SolidView::mesh) is public in
+    /// its own right and [`Model`](crate::Model) is `Deserialize`, so a solid
+    /// that never went through the sweep reaches the mesher first (§16.11).
+    #[error("this edge does not have two faces along it to say where it runs")]
+    AnEdgeWithoutTwoFacesAlongItCannotBeWalked {
         /// Which edge.
         edge: crate::EdgeKey,
     },

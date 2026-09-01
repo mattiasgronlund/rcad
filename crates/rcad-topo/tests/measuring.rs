@@ -683,10 +683,10 @@ fn the_published_error_bounds_shrink_as_the_mesh_gets_finer() {
 /// `Policy::max_wobble` is 64 roundings at the working size — `1.4e-12` for a
 /// 100 mm model. A mesh's centroid wobble falls roughly in step with the
 /// deflection, so meeting that budget would need a deflection around `5e-13`,
-/// and a ball asked for one is refused for wanting more points than a mesh
-/// holds. So `wobble_is_acceptable(centroid_wobble)` would be `false` for every
-/// curved solid at every deflection that can be met, and judging on it would
-/// have replaced §25.5's blanket refusal with another.
+/// and a ball asked for one is refused — that is under the floor a boundary
+/// point can be placed to at all. So `wobble_is_acceptable(centroid_wobble)`
+/// would be `false` for every curved solid at every deflection that can be met,
+/// and judging on it would have replaced §25.5's blanket refusal with another.
 #[test]
 fn judging_a_meshed_centroid_against_the_policy_would_refuse_every_ball() {
     let budget = Policy::tolerant(100.0).max_wobble();
@@ -706,7 +706,7 @@ fn judging_a_meshed_centroid_against_the_policy_would_refuse_every_ball() {
         &mut ProvenanceLog::new(),
     );
     assert!(
-        matches!(refusal, Err(Error::MoreMeshPointsThanASolidWillHold { .. })),
+        matches!(refusal, Err(Error::DeflectionBelowWhatAMeshCanReach { .. })),
         "a deflection of {would_need} is what the budget asks for, and the kernel \
          answered {refusal:?}"
     );

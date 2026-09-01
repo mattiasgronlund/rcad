@@ -620,26 +620,40 @@ fn a_tolerant_caller_gets_the_finest_mesh_the_arithmetic_reaches() {
     the_mesh_closes_up(&model, bar, &mesh, mesh.deviation().magnitude());
 }
 
-/// A request for more points than a mesh will hold is refused rather than
-/// waited out (§25.3).
+/// A request for more points than can be held is refused rather than waited out
+/// (§25.3).
 ///
 /// Counted before the points are made, so this comes back at once. Above the
 /// floor, so it is not the refusal the test before this one is about.
+///
+/// **Which cap answers moved when the mesher stopped walking its own edges.**
+/// There are two: `MOST_POINTS_A_MESH_WILL_HOLD` over a whole solid, and
+/// `rcad_geom::MOST_POINTS_ALONG_ONE_CROSSING` over one edge, which is four
+/// times smaller. A ball has exactly one curved edge, so the second is what
+/// answers here and always will be — the first would need five curved edges on
+/// one solid and no builder makes a shape with more than three. They are the
+/// same refusal in the sense that matters, which is that it comes back at once
+/// instead of running.
 #[test]
-fn a_deflection_needing_more_points_than_a_mesh_holds_is_refused() {
+fn a_deflection_needing_more_points_than_can_be_held_is_refused() {
     let mut model = a_model();
     let ball = model
         .add_ball(1.0, &Isometry::identity())
         .expect("a unit ball");
 
     let refusal = model.solid(ball).mesh(
-        Deflection::of(1e-13).expect("a length"),
+        Deflection::of(1e-12).expect("a length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     );
     assert!(
-        matches!(refusal, Err(Error::MoreMeshPointsThanASolidWillHold { .. })),
-        "a ball meshed to a tenth of a picometre gave {refusal:?}"
+        matches!(
+            refusal,
+            Err(Error::Geometry(
+                rcad_geom::Error::TooManyPointsAlongOneCrossing { .. }
+            ))
+        ),
+        "a ball meshed to a picometre gave {refusal:?}"
     );
 }
 
