@@ -1110,12 +1110,12 @@ fn where_two_leaning_pipes_rest_against_each_other(
 /// The two certified radii, `rᵢ / √(wᵢ·wᵢ)`, as enclosures.
 fn certified_radii_enclosing(one: &Cylinder, other: &Cylinder) -> [Interval; 2] {
     [one, other].map(|pipe| {
-        quotient_enclosing(
-            Interval::exactly(pipe.radius()),
-            root_enclosing(squared_length_enclosing(exactly(
-                pipe.axis().direction().components(),
-            ))),
-        )
+        let along = pipe.axis().direction().components();
+        let squared = Exact::dot_of(along, along).map_or_else(
+            || squared_length_enclosing(exactly(along)),
+            |exact| exact.enclosure(),
+        );
+        quotient_enclosing(Interval::exactly(pipe.radius()), root_enclosing(squared))
     })
 }
 
@@ -1126,50 +1126,46 @@ fn certified_radii_enclosing(one: &Cylinder, other: &Cylinder) -> [Interval; 2] 
 fn how_far_apart_two_axes_are_enclosing(one: &Cylinder, other: &Cylinder) -> Interval {
     let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
     let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
-    let sideways = cross_enclosing(exactly(my_way), exactly(their_way));
-    let volume = dot_enclosing(gap_enclosing(here, there), sideways);
-    let reach = volume.lo().abs().min(volume.hi().abs());
-    let furthest = volume.lo().abs().max(volume.hi().abs());
-    let size = if volume.contains_zero() {
-        Interval::new(0.0, furthest).expect("a magnitude runs from zero upwards")
-    } else {
-        Interval::new(reach, furthest).expect("the nearer end of a magnitude is the nearer one")
+
+    // **Both of these are summed exactly before they are enclosed**, and the
+    // difference matters more here than anywhere else in the file. Two axes a
+    // rounding away from parallel have a cross product whose every component
+    // cancelled to nothing, so an interval enclosure of its squared length
+    // reaches down to zero and the division below comes back as everything.
+    // Summed through the expansion first, the same number is known to full
+    // relative accuracy and two nearly-parallel pipes are as decidable as any
+    // other pair (§29).
+    let (volume, squared_sideways) = match exactly_how_far_apart_two_axes_are(one, other) {
+        Some(both) => both,
+        None => {
+            let sideways = cross_enclosing(exactly(my_way), exactly(their_way));
+            (
+                dot_enclosing(gap_enclosing(here, there), sideways),
+                squared_length_enclosing(sideways),
+            )
+        }
     };
-    quotient_enclosing(size, root_enclosing(squared_length_enclosing(sideways)))
+    let size = Interval::new(
+        volume.lo().abs().min(volume.hi().abs()),
+        volume.lo().abs().max(volume.hi().abs()),
+    )
+    .expect("a magnitude runs from its nearer end to its further one");
+    let size = if volume.contains_zero() {
+        Interval::new(0.0, size.hi()).expect("a magnitude runs from zero upwards")
+    } else {
+        size
+    };
+    quotient_enclosing(size, root_enclosing(squared_sideways))
 }
 
-/// A number with the same sign as `mine·ρ₁ + theirs·ρ₂ + gap·δ`, exactly, where
-/// the arithmetic can reach it.
-///
-/// **A sign and not the value**, because the value is not a polynomial in the
-/// stored numbers — it is a sum of three square roots. What is a polynomial is
-/// the comparison once the roots are squared away, and that only works when the
-/// two stored directions have exactly the same squared length: then the two
-/// radii share a metric, `mine·ρ₁ + theirs·ρ₂` is `(mine·r₁ + theirs·r₂)/√W`,
-/// and comparing it against `δ = |T|/√K` is the sign of
-/// `(mine·r₁ + theirs·r₂)²·K − W·T²`. Degree eight, and short enough to square.
-/// Every pair whose axes are coordinate directions is in that case, which is the
-/// whole of §24.18's control.
-///
-/// `None` otherwise, which leaves the enclosure to decide (§29).
-fn how_two_radii_and_a_gap_compare_exactly(
+/// `T = (o₂ − o₁)·(w₁ × w₂)` and `K = ‖w₁ × w₂‖²`, summed exactly and then
+/// enclosed, or `None` where a product would round.
+fn exactly_how_far_apart_two_axes_are(
     one: &Cylinder,
     other: &Cylinder,
-    mine: f64,
-    theirs: f64,
-    gap: f64,
-) -> Option<Exact> {
+) -> Option<(Interval, Interval)> {
     let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
     let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
-    let squared_mine = Exact::dot_of(my_way, my_way)?;
-    if squared_mine
-        .minus(&Exact::dot_of(their_way, their_way)?)
-        .sign()
-        != Decision::Zero
-    {
-        return None;
-    }
-
     let sideways = Exact::cross_of(&Exact::of_each(my_way), their_way)?;
     let volume = (0..3).try_fold(Exact::of(0.0), |so_far, axis| {
         Some(
@@ -1180,35 +1176,117 @@ fn how_two_radii_and_a_gap_compare_exactly(
             ),
         )
     })?;
+    Some((
+        volume.enclosure(),
+        Exact::squared_length_of(&sideways)?.enclosure(),
+    ))
+}
 
-    let radii = Exact::of(mine * one.radius()).plus(&Exact::of(theirs * other.radius()));
-    // `radii²·K − W·T²`, which is `(radii/√W)² − δ²` scaled by `W·K`, and asked
-    // for only where the two signs in front do not already settle it.
-    let squared = || {
+/// A number with the same sign as `mine·ρ₁ + theirs·ρ₂ + gap·δ`, exactly, where
+/// the arithmetic can reach it.
+///
+/// **A sign and not the value**, because the value is not a polynomial in the
+/// stored numbers — it is a sum of three square roots, `rᵢ/√Wᵢ` and `|T|/√K`.
+/// What *is* a polynomial is the comparison once the roots are squared away, and
+/// squaring them away is where this runs out of room.
+///
+/// Write everything scaled by the positive number `W₁W₂K`:
+///
+/// ```text
+/// M = r₁²W₂K + r₂²W₁K − T²W₁W₂        (ρ₁² + ρ₂² − δ², scaled)
+/// N = 2r₁r₂K√(W₁W₂)                    (2ρ₁ρ₂, scaled)
+/// ```
+///
+/// Then `(mine·ρ₁ + theirs·ρ₂)² − δ²` is `M + mine·theirs·N`, and the sign of a
+/// sum of two numbers whose signs are known is either one of those signs or the
+/// sign of the difference of their squares. So the whole comparison comes down
+/// to `sign(M)` — degree eight — and, where that does not settle it,
+/// `sign(M² − N²)` with `N² = 4r₁²r₂²K²W₁W₂`, which is degree sixteen against
+/// M's twenty.
+///
+/// **That last one is what runs out.** `Exact::times` refuses as soon as a
+/// product's low half would land among the subnormals, and `M` for two ordinary
+/// pipes is already five hundred binary orders wide, so squaring it falls off
+/// the bottom of `f64`. Where the two stored directions have the same squared
+/// length the root `√(W₁W₂)` is rational and none of this is needed at all,
+/// which is why every pair whose axes are coordinate directions is decided here
+/// and a general rotation is not.
+/// `the_question_two_leaning_pipes_ask_is_too_wide_to_square_where_it_stands` is
+/// the demonstration, and §29 is the argument it belongs to.
+fn how_two_radii_and_a_gap_compare_exactly(
+    one: &Cylinder,
+    other: &Cylinder,
+    mine: f64,
+    theirs: f64,
+    gap: f64,
+) -> Option<Exact> {
+    let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
+    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let squared_mine = Exact::dot_of(my_way, my_way)?;
+    let squared_theirs = Exact::dot_of(their_way, their_way)?;
+    let sideways = Exact::cross_of(&Exact::of_each(my_way), their_way)?;
+    let squared_sideways = Exact::squared_length_of(&sideways)?;
+    let volume = (0..3).try_fold(Exact::of(0.0), |so_far, axis| {
         Some(
-            radii
-                .times(&radii)?
-                .times(&Exact::squared_length_of(&sideways)?)?
-                .minus(&squared_mine.times(&volume.times(&volume)?)?)
-                .sign(),
+            so_far.plus(
+                &Exact::of(there[axis])
+                    .minus(&Exact::of(here[axis]))
+                    .times(&sideways[axis])?,
+            ),
         )
+    })?;
+
+    // The sign of `mine·ρ₁ + theirs·ρ₂`, from `ρ₂² − ρ₁² = (r₂²W₁ − r₁²W₂)/W₁W₂`
+    // where the two pull against each other.
+    let squared_gap = squared_mine.times(&squared_theirs)?;
+    let radii = if mine * theirs > 0.0 {
+        if mine > 0.0 {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        }
+    } else {
+        let bigger = Exact::product_of(other.radius(), other.radius())?
+            .times(&squared_mine)?
+            .minus(&Exact::product_of(one.radius(), one.radius())?.times(&squared_theirs)?);
+        match (bigger.sign(), theirs > 0.0) {
+            (Decision::Zero, _) => Decision::Zero,
+            (Decision::Pos, true) | (Decision::Neg, false) => Decision::Pos,
+            (Decision::Pos, false) | (Decision::Neg, true) => Decision::Neg,
+            _ => return None,
+        }
+    };
+    let along_the_gap = match volume.sign() {
+        Decision::Zero => Decision::Zero,
+        Decision::Pos | Decision::Neg if gap > 0.0 => Decision::Pos,
+        Decision::Pos | Decision::Neg => Decision::Neg,
+        _ => return None,
     };
 
-    let sign = match (radii.sign(), gap > 0.0) {
-        // A sum of radii below zero, less a distance that is never below zero.
-        (Decision::Neg, false) => Decision::Neg,
-        // A sum of radii above zero, plus a distance.
-        (Decision::Pos, true) => Decision::Pos,
-        (Decision::Zero, true) if volume.sign() == Decision::Zero => Decision::Zero,
-        (Decision::Zero, true) => Decision::Pos,
-        // The two pull against each other, and squaring is what settles it.
-        (Decision::Neg, true) => match squared()? {
-            Decision::Pos => Decision::Neg,
-            Decision::Neg => Decision::Pos,
-            settled => settled,
-        },
-        (Decision::Pos | Decision::Zero, false) => squared()?,
-        _ => return None,
+    // Both pull the same way, or one of them is nothing: no squaring needed.
+    let sign = match (radii, along_the_gap) {
+        (Decision::Zero, other_sign) => other_sign,
+        (this_sign, Decision::Zero) => this_sign,
+        (Decision::Pos, Decision::Pos) => Decision::Pos,
+        (Decision::Neg, Decision::Neg) => Decision::Neg,
+        (bigger_first, _) => {
+            let squared_difference = how_two_squares_compare_exactly(
+                one,
+                other,
+                mine * theirs,
+                &squared_mine,
+                &squared_theirs,
+                &squared_sideways,
+                &squared_gap,
+                &volume,
+            )?;
+            match (squared_difference, bigger_first == Decision::Pos) {
+                (Decision::Zero, _) => Decision::Zero,
+                (Decision::Pos, true) | (Decision::Neg, false) => Decision::Pos,
+                (Decision::Pos, false) | (Decision::Neg, true) => Decision::Neg,
+                _ => return None,
+            }
+        }
     };
     Some(Exact::of(match sign {
         Decision::Pos => 1.0,
@@ -1216,6 +1294,66 @@ fn how_two_radii_and_a_gap_compare_exactly(
         Decision::Neg => -1.0,
         _ => return None,
     }))
+}
+
+/// The sign of `(mine·ρ₁ + theirs·ρ₂)² − δ²`, scaled by the positive `W₁W₂K`.
+///
+/// `M + together·N` with `M` and `N` as [`how_two_radii_and_a_gap_compare_exactly`]
+/// writes them. `N` is never below zero, so where `M` pulls the same way the
+/// sign is `M`'s; where they pull against each other it is the sign of
+/// `M² − N²`, and that is the one that can run out of range.
+#[allow(clippy::too_many_arguments)]
+fn how_two_squares_compare_exactly(
+    one: &Cylinder,
+    other: &Cylinder,
+    together: f64,
+    squared_mine: &Exact,
+    squared_theirs: &Exact,
+    squared_sideways: &Exact,
+    squared_gap: &Exact,
+    volume: &Exact,
+) -> Option<Decision> {
+    let radii_apart = Exact::product_of(one.radius(), one.radius())?
+        .times(squared_theirs)?
+        .plus(&Exact::product_of(other.radius(), other.radius())?.times(squared_mine)?)
+        .times(squared_sideways)?
+        .minus(&volume.times(volume)?.times(squared_gap)?);
+    let leaning_the_same_way = (together > 0.0) == (radii_apart.sign() != Decision::Neg);
+    if radii_apart.sign() == Decision::Zero {
+        // `M` is nothing, so the answer is `together·N`, and `N` is above zero
+        // for two real radii.
+        return Some(if together > 0.0 {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        });
+    }
+    if leaning_the_same_way {
+        return Some(radii_apart.sign());
+    }
+
+    // `M² − N²`, with `N² = 4r₁²r₂²K²W₁W₂`.
+    let together_squared = Exact::product_of(2.0 * one.radius(), 2.0 * other.radius())?
+        .times(&Exact::product_of(one.radius(), other.radius())?)?
+        .times(squared_sideways)?
+        .times(squared_sideways)?
+        .times(squared_gap)?;
+    let against = radii_apart.times(&radii_apart)?.minus(&together_squared);
+    Some(
+        match (against.sign(), radii_apart.sign() == Decision::Pos) {
+            (Decision::Zero, _) => Decision::Zero,
+            (Decision::Pos, true) => Decision::Pos,
+            (Decision::Pos, false) => Decision::Neg,
+            (Decision::Neg, _) => {
+                if together > 0.0 {
+                    Decision::Pos
+                } else {
+                    Decision::Neg
+                }
+            }
+            _ => return None,
+        },
+    )
 }
 
 /// `E = A·W₂ − r₁²W₂ − r₂²W₁` as an enclosure.

@@ -1,9 +1,9 @@
 //! Exact expansion arithmetic the quadric predicates share.
 
-use rcad_predicates::Decision;
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_diff, two_product,
 };
+use rcad_predicates::{Decision, Interval};
 
 /// `a - b` as a two-entry expansion, smallest first.
 ///
@@ -175,6 +175,28 @@ impl Exact {
         core::array::from_fn(|axis| Self::of(there[axis]).minus(&Self::of(here[axis])))
     }
 
+    /// This number as an enclosure, which is as tight as an enclosure of it
+    /// gets.
+    ///
+    /// An expansion's entries do not overlap and each of them is an exact `f64`,
+    /// so adding them up in interval arithmetic gives a box whose width is a
+    /// handful of roundings of the total — where the same expression built out
+    /// of intervals from the start carries the width of every cancellation on
+    /// the way.
+    ///
+    /// **That difference is what makes a nearly-parallel pair of axes decidable
+    /// at all.** `‖w₁ × w₂‖²` for two directions a rounding apart is a sum of
+    /// three squares of numbers that cancelled to nothing, and an interval
+    /// enclosure of it reaches down to zero — so the distance between the two
+    /// axes, which divides by its root, comes back as everything. Summed through
+    /// the expansion instead, the same quantity is known to full relative
+    /// accuracy and the division is ordinary (`docs/decisions.md` §29).
+    pub(crate) fn enclosure(&self) -> Interval {
+        self.0.iter().fold(Interval::exactly(0.0), |so_far, entry| {
+            so_far + Interval::exactly(*entry)
+        })
+    }
+
     /// The sign of this number.
     ///
     /// [`Decision::Undecidable`] only when an entry is not a real number, which
@@ -317,6 +339,64 @@ mod an_exact_number {
                 .plus(&Exact::of(1.0))
                 .sign(),
             Decision::Pos
+        );
+    }
+
+    /// An expansion enclosed is as tight as an enclosure of it gets, and that is
+    /// the whole reason two nearly-parallel axes are decidable.
+    ///
+    /// Two directions one last bit apart cross into something whose every
+    /// component cancelled almost entirely away. Summed through the expansion
+    /// the squared length of that cross product is known to full relative
+    /// accuracy; built out of intervals from the start it carries a rounding of
+    /// the *inputs* rather than of the answer, and reaches down to zero — so a
+    /// distance that divides by its root comes back as everything.
+    #[test]
+    fn an_expansion_encloses_itself_far_more_tightly_than_the_same_sum_of_intervals_does() {
+        let one: [f64; 3] = [
+            0.267_261_241_912_424_4,
+            0.534_522_483_824_848_8,
+            0.801_783_725_737_273_2,
+        ];
+        let other = [one[0], one[1], one[2].next_up()];
+        let across = |axis: usize| {
+            let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+            (one[next], other[after], one[after], other[next])
+        };
+
+        let exact = (0..3)
+            .try_fold(Exact::of(0.0), |so_far, axis| {
+                let (a, b, c, d) = across(axis);
+                let part = Exact::product_of(a, b)?.minus(&Exact::product_of(c, d)?);
+                Some(so_far.plus(&part.times(&part)?))
+            })
+            .expect("everything here is of order one");
+        let enclosed = exact.enclosure();
+        assert!(
+            enclosed.lo() > 0.0,
+            "two directions a last bit apart are not parallel, and this says so: {enclosed:?}"
+        );
+
+        let by_intervals = (0..3).fold(rcad_predicates::Interval::exactly(0.0), |so_far, axis| {
+            let (a, b, c, d) = across(axis);
+            let part = rcad_predicates::Interval::exactly(a)
+                * rcad_predicates::Interval::exactly(b)
+                - rcad_predicates::Interval::exactly(c) * rcad_predicates::Interval::exactly(d);
+            so_far + part * part
+        });
+        assert!(
+            by_intervals.lo() <= 0.0,
+            "the same sum built out of intervals carries a rounding of its inputs rather than \
+             of its answer, and this one is {by_intervals:?}"
+        );
+        assert!(
+            enclosed.width() <= enclosed.hi() * 8.0 * f64::EPSILON,
+            "the expansion already is the answer, so enclosing it costs a rounding or two of \
+             the answer and not of the inputs: {enclosed:?}"
+        );
+        assert!(
+            by_intervals.width() > enclosed.hi() * 3.0,
+            "where the interval sum is wider than the answer itself: {by_intervals:?}"
         );
     }
 

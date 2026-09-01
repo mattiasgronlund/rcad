@@ -45,7 +45,8 @@ use rcad_geom::{Error, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crossings::{
-    Crossing, a_crossing_somewhere_else, a_lattice_crossing, a_leaning_crossing, a_turned_crossing,
+    Crossing, a_crossing_a_hair_from_the_knife_edge, a_crossing_somewhere_else, a_lattice_crossing,
+    a_leaning_crossing, a_quartic_lattice_crossing, a_quartic_turned_crossing, a_turned_crossing,
 };
 
 /// How many pairs each measured row crosses.
@@ -112,9 +113,64 @@ const A_CROSSING_SOMEWHERE_ELSE_MAY_REFUSE: f64 = 0.25;
 /// its fix is the fourteenth-degree separation test §27.1 hands to the second
 /// stage.
 ///
-/// Two percent. Measured on the shipped corpus: 0.54% turned, 0.63% leaning,
+/// Two percent. Measured on the shipped corpus: 0.44% turned, 0.24% leaning,
 /// none at all on the lattice, where that direction is a coordinate axis.
 const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.02;
+
+/// How much of a quartic family may refuse for want of a half-space.
+///
+/// **Fifteen percent, and it is much the largest refusal rate in this file.**
+/// Two loops of a leaning-pipe crossing are told apart by a plane through the
+/// fat pipe's axis, and a loop runs a long way *along* that axis — so unlike the
+/// bounded pieces a ball leaves, the picking normal here has to be exactly
+/// square to the axis or it reads a different number at either end. `Plane`
+/// scales every normal to length one and that division rounds.
+///
+/// A **gap**, and this crate has no construction that reaches it: the set of
+/// `f64` unit vectors exactly square to a given `f64` direction is not something
+/// `Plane::from_point_and_normal` can be steered to. The fix is §28.2's first
+/// family — a plane that stores its normal unscaled — which is a change to a
+/// type every predicate in the kernel is certified about, and so M4's.
+///
+/// Measured on the shipped corpus: 0% on the lattice, 10.9% turned.
+const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.15;
+
+/// How much of the quartic pairs' turned family may refuse for want of a sign.
+///
+/// **Not zero, and §29 says why.** The four planar pairs are polynomials in
+/// exact `f64` all the way down, so level 3 decides every one of them; two pipes
+/// leaning against each other are not. Deciding which of the four shapes that
+/// crossing takes compares `ρ₁ ± ρ₂` against `δ`, and those are `rᵢ/√Wᵢ` and
+/// `|T|/√K` — three square roots in three metrics. The enclosure settles it
+/// wherever the comparison is not on a knife edge, and the exact level backs it
+/// up only where the two stored directions have the same squared length, which
+/// a general rotation takes away.
+///
+/// **Eight percent, and every one of them is a knife edge a rotation made.**
+/// Measured on the shipped corpus: 0% on the lattice and 4.64% turned. The
+/// generator draws radii up to five and places up to six apart in whole numbers,
+/// so a lattice pipe pair is *exactly* tangent surprisingly often — five apart
+/// with radii of two and three is one of them — and §28.6 already recorded that
+/// turning such a pair leaves it genuinely no longer tangent, by a few last bits.
+/// `every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn`
+/// is the demonstration that this is what the number is made of.
+const A_TURNED_QUARTIC_CROSSING_MAY_REFUSE: f64 = 0.08;
+
+/// How much of the knife-edge family may refuse for want of a sign.
+///
+/// **The band, and the highest number in this file by a long way.** Every pair
+/// here is drawn exactly tangent and then moved a handful of last bits off it,
+/// which is precisely where a sign question has nothing left to stand on. A
+/// family that refused none of these would not be reaching the band at all,
+/// which is why the row below also insists it refuses *something*.
+///
+/// Five percent. Measured on the shipped corpus: **0%**, which was not the
+/// expectation. Summing `T` and `K` through the expansion before enclosing them,
+/// and squaring the roots away where `f64` leaves room to, between them reach
+/// every pair drawn here — so what this row now measures is that the band is
+/// being reached at all, which the half-space and touches-itself counts below it
+/// show it is.
+const A_CROSSING_ON_A_KNIFE_EDGE_MAY_REFUSE: f64 = 0.05;
 
 /// How much of a family has to come back naming an actual curve.
 ///
@@ -162,6 +218,123 @@ fn how_often_a_certified_naming_of_a_leaning_crossing_refuses() {
     tally.report("leaning: whole-number directions, scaled to length one and rounded");
     tally.share_that_refused_is_within(A_LEANING_CROSSING_MAY_REFUSE);
     tally.share_that_lacked_a_half_space_is_within(A_CROSSING_MAY_LACK_A_HALF_SPACE);
+    tally.enough_of_them_crossed();
+}
+
+/// The two rows the second stage added, on the lattice. Exactly representable
+/// end to end, so nothing here may refuse either.
+#[test]
+fn a_certified_naming_of_a_quartic_lattice_crossing_never_refuses() {
+    let tally = measured(a_quartic_lattice_crossing());
+    tally.report("the quartic control: a ball and a pipe, and two pipes, in whole numbers");
+    assert_eq!(
+        tally.undecidable.get(),
+        0,
+        "on the lattice both stored directions have the same squared length, so the exact \
+         level runs and a refusal is a bug in our filters"
+    );
+    tally.enough_of_them_crossed();
+}
+
+/// The two new rows under one general rotation, which is where the exact level
+/// stops being able to back the enclosure up.
+#[test]
+fn how_often_a_certified_naming_of_a_turned_quartic_crossing_refuses() {
+    let tally = measured(a_quartic_turned_crossing());
+    tally.report("the quartic headline: the same two rows under one general rotation");
+    tally.share_that_refused_is_within(A_TURNED_QUARTIC_CROSSING_MAY_REFUSE);
+    tally.share_that_lacked_a_half_space_is_within(A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE);
+    tally.enough_of_them_crossed();
+}
+
+/// The turned quartic family's refusals are **knife edges a rotation made**, and
+/// this is the demonstration rather than the paragraph.
+///
+/// A lattice pipe pair five apart with radii of two and three rests exactly
+/// against itself. Turn it and the stored numbers move, so it no longer does —
+/// by a few last bits, which is exactly where the comparison between a sum of
+/// two radii and a distance has nothing left to stand on. §28.6 recorded this
+/// shape for criterion 9; here it is what a refusal rate is made of.
+///
+/// So: every turned pair that could not be named is one whose *untouched*
+/// original the same code settles — either by naming it or by saying it is one
+/// of the two configurations whose crossing runs through itself, which is a
+/// knife edge as much as a tangency is. That is what tells this rate apart from
+/// a timid filter (§14.7).
+#[test]
+fn every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn() {
+    let mut runner = TestRunner::new_with_rng(configured(measured_cases()), fresh_seeded_soak());
+    let refused = Cell::new(0usize);
+    let steady = Cell::new(0usize);
+
+    let outcome = runner.run(&a_quartic_turned_crossing(), |crossing| {
+        let [first, second] = crossing.surfaces();
+        if !matches!(
+            intersect(
+                &first,
+                &second,
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+            Err(Error::Undecidable { .. })
+        ) {
+            return Ok(());
+        }
+        refused.set(refused.get() + 1);
+
+        let mut before_the_turn = crossing;
+        before_the_turn.turn = None;
+        let [first, second] = before_the_turn.surfaces();
+        if !matches!(
+            intersect(
+                &first,
+                &second,
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+            Err(Error::Undecidable { .. })
+        ) {
+            steady.set(steady.get() + 1);
+        }
+        Ok(())
+    });
+    if let Err(why) = outcome {
+        panic!("{why}");
+    }
+
+    println!(
+        "of {} refused turned crossings, {} were settled before the turn",
+        refused.get(),
+        steady.get()
+    );
+    assert!(
+        refused.get() > 0,
+        "this property measures nothing unless the turned family actually refuses something"
+    );
+    assert_eq!(
+        steady.get(),
+        refused.get(),
+        "every one of these is a pair the turn put on a knife edge, so the same shapes \
+         untouched have to be settled one way or the other"
+    );
+}
+
+/// **The band**, and the family §28.5 said the corpus could not reach.
+///
+/// Every pair here is drawn exactly tangent and then moved a few of its own last
+/// bits off it, so the sign questions are settled — or not — a handful of
+/// roundings from zero. That it refuses *something* is as much the point as that
+/// it refuses little: a family drawn at the knife edge that never gave up would
+/// mean the nudge was not landing in the band.
+#[test]
+fn how_often_a_certified_naming_of_a_crossing_a_hair_from_tangency_refuses() {
+    let tally = measured(a_crossing_a_hair_from_the_knife_edge());
+    tally.report("the band: drawn exactly tangent, then moved a few last bits off it");
+    tally.share_that_refused_is_within(A_CROSSING_ON_A_KNIFE_EDGE_MAY_REFUSE);
+    assert!(
+        tally.undecidable.get() + tally.no_half_space.get() + tally.touches_itself.get() > 0,
+        "a family drawn on the knife edge that never gives up is not reaching the knife edge"
+    );
     tally.enough_of_them_crossed();
 }
 
@@ -243,6 +416,7 @@ struct Tally {
     named: Cell<usize>,
     undecidable: Cell<usize>,
     no_half_space: Cell<usize>,
+    touches_itself: Cell<usize>,
     crossed: Cell<usize>,
     /// Which answer came back, and how often. A rate on its own cannot tell a
     /// timid filter from a family that stopped crossing at all (§14.7).
@@ -278,6 +452,13 @@ impl Tally {
                 self.no_half_space.set(self.no_half_space.get() + 1);
                 "refused: no half-space tells the two pieces apart"
             }
+            // A limit and not a gap, so it is counted apart from both of the
+            // above: what this refuses is a shape `EdgeRun` cannot say, not an
+            // answer the arithmetic could not reach.
+            Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo) => {
+                self.touches_itself.set(self.touches_itself.get() + 1);
+                "refused: the crossing runs through itself"
+            }
             Err(why) => panic!("a pair of surfaces this generator draws should not give {why}"),
             // `SurfaceMeet` grows as the pair table does, and guessing what a
             // new arm means is worse than stopping.
@@ -290,11 +471,13 @@ impl Tally {
         let named = self.named.get();
         println!(
             "{what}: {named} pairs, {} refused for want of a sign ({:.2}%), {} for want of a \
-             half-space ({:.2}%)",
+             half-space ({:.2}%), {} for running through themselves ({:.2}%)",
             self.undecidable.get(),
             100.0 * self.undecidable.get() as f64 / named as f64,
             self.no_half_space.get(),
-            100.0 * self.no_half_space.get() as f64 / named as f64
+            100.0 * self.no_half_space.get() as f64 / named as f64,
+            self.touches_itself.get(),
+            100.0 * self.touches_itself.get() as f64 / named as f64
         );
         for (answer, count) in self.answers.borrow().iter() {
             println!(

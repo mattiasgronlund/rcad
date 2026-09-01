@@ -47,10 +47,21 @@ use rcad_predicates::{
 };
 use smallvec::smallvec;
 
-use crossings::{a_lattice_crossing, a_leaning_crossing, a_turned_crossing};
+use crossings::{
+    a_crossing_a_hair_from_the_knife_edge, a_lattice_crossing, a_leaning_crossing,
+    a_quartic_lattice_crossing, a_quartic_turned_crossing, a_turned_crossing,
+};
 
 /// How many crossings each measured row walks.
 const CASES: u32 = 512;
+
+/// How many the band walks.
+///
+/// A quarter as many, because a crossing a few last bits from tangency is a long
+/// thin loop that the marcher has to take small steps round: this row alone
+/// walks more points than every other row in the file put together, and a
+/// quarter of it still walks hundreds of thousands.
+const CASES_ON_A_KNIFE_EDGE: u32 = 128;
 
 /// How fine the walks in this file are, as a share of how big the shapes are.
 ///
@@ -92,6 +103,42 @@ fn every_point_along_a_leaning_crossing_is_on_both_the_surfaces_that_named_it() 
 #[test]
 fn every_point_along_a_turned_crossing_is_on_both_the_surfaces_that_named_it() {
     let worst = walk_every_crossing(a_turned_crossing(), "turned");
+    assert!(worst < NO_POINT_MAY_USE_ALL_OF_ITS_BOUND);
+}
+
+/// The two rows M3's second stage added, and the ones the **marcher** walks.
+///
+/// Criterion 3 asks the same of a marched point as of a parametrized one, and
+/// that is the whole reason it is worth asking twice: the closed form's bound is
+/// derived from a chain of roundings and the marcher's is measured from the two
+/// certified distances the point ends up at, so the two arms of the evaluator
+/// reach the same claim by different roads.
+#[test]
+fn every_point_along_a_quartic_lattice_crossing_is_on_both_the_surfaces_that_named_it() {
+    let worst = walk_every_crossing(a_quartic_lattice_crossing(), "the quartic control");
+    assert!(worst < NO_POINT_MAY_USE_ALL_OF_ITS_BOUND);
+}
+
+#[test]
+fn every_point_along_a_quartic_turned_crossing_is_on_both_the_surfaces_that_named_it() {
+    let worst = walk_every_crossing(a_quartic_turned_crossing(), "the quartic headline");
+    assert!(worst < NO_POINT_MAY_USE_ALL_OF_ITS_BOUND);
+}
+
+/// **The band**, and the row §24.1 says the marcher was built for.
+///
+/// Every pair here is drawn exactly tangent and moved a few last bits off it, so
+/// the crossings are the nearly-pinched loops and hair-thin arcs where a
+/// marcher's answer stops being obvious. What has to hold is what holds
+/// everywhere else: no point may be certified *off* either surface, and the same
+/// points against a surface they are plainly not on must be decided.
+#[test]
+fn every_point_along_a_crossing_a_hair_from_tangency_is_on_both_the_surfaces_that_named_it() {
+    let worst = walk_them_all(
+        a_crossing_a_hair_from_the_knife_edge(),
+        "the band",
+        CASES_ON_A_KNIFE_EDGE,
+    );
     assert!(worst < NO_POINT_MAY_USE_ALL_OF_ITS_BOUND);
 }
 
@@ -292,9 +339,18 @@ fn a_deflection_finer_than_a_point_can_be_placed_is_a_policy_question() {
 /// Walk every crossing a family draws, and hand back the worst share of its own
 /// published bound any point was found to use.
 fn walk_every_crossing(strategy: impl Strategy<Value = crossings::Crossing>, what: &str) -> f64 {
+    walk_them_all(strategy, what, CASES)
+}
+
+/// The same, at a case count this row chooses.
+fn walk_them_all(
+    strategy: impl Strategy<Value = crossings::Crossing>,
+    what: &str,
+    cases: u32,
+) -> f64 {
     let mut runner = TestRunner::new_with_rng(
         Config {
-            cases: CASES,
+            cases,
             source_file: Some(file!()),
             failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
                 "proptest-regressions",

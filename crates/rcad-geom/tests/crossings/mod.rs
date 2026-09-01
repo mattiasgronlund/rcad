@@ -29,6 +29,34 @@
 //!   A crossing is the same crossing wherever it is written, so this is where
 //!   the naming half's one refusal shows up as what it is: a gap that a rescale
 //!   walks straight back out of (§16.10).
+//! - [`a_quartic_lattice_crossing`] and [`a_quartic_turned_crossing`] are the
+//!   two rows M3's second stage added — a ball crossing a pipe, and a pipe
+//!   crossing a pipe. Reported apart from the four above for §17.7's reason:
+//!   they refuse for reasons the planar pairs do not have, and blending the two
+//!   would hide both.
+//! - [`a_crossing_a_hair_from_the_knife_edge`] is **the band**, and it is the
+//!   one family here that was written because §28.5 named its absence.
+//!
+//! # The band between the on-case and the far-off case
+//!
+//! §28.5: *"a generator built out of exact configurations and one rotation
+//! reaches the on-case and the far-off case and skips the near-case"*. Turning
+//! two exactly parallel directions by the same rotation leaves them exactly
+//! parallel, and turning a plane that rested exactly on a ball leaves it resting
+//! on it or a whole rounding clear — never a hair off. So every family above
+//! draws pairs that are exactly tangent or plainly not, and nothing in between.
+//!
+//! That band is where the marcher's tangency and near-tangency branches live,
+//! and §24.1 says those branches are the whole reason the marcher exists. A
+//! corpus that cannot reach them is a corpus that cannot fail.
+//!
+//! [`AHair`] is how this one reaches it, and neither half of it is a fixed
+//! distance — §17.7 already says a nudge of `1e-9` is not the answer, because it
+//! is the band at one scale and nowhere else. **A count of last bits** moves a
+//! number off an exact tangency by the same relative amount wherever it is
+//! written, and **a lean of `2^-k`** tilts a direction off a coordinate one by
+//! an angle that sweeps from a quarter turn down to below what `f64` can tell
+//! from square.
 //!
 //! # What shrinks, and toward what
 //!
@@ -151,6 +179,57 @@ pub struct Crossing {
     pub turn: Option<Turn>,
     /// Where in `f64` both are written.
     pub elsewhere: Elsewhere,
+    /// How far the second surface is moved off the configuration it was drawn
+    /// at, or `None` for not at all.
+    pub hair: Option<AHair>,
+}
+
+/// How far the second surface of a pair is moved off an exact configuration.
+///
+/// Both halves are relative rather than absolute, so a pair drawn at any size
+/// lands the same distance into the band (§17.7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AHair {
+    /// How many of the last bits the radius is moved by. Zero leaves the exact
+    /// configuration, which is worth drawing too.
+    pub ulps: i32,
+    /// How far the direction is tilted off the coordinate one it was drawn
+    /// along, as `2^-lean`, or `None` for not at all.
+    pub lean: Option<u32>,
+}
+
+impl AHair {
+    /// `value` moved by [`AHair::ulps`] of its own last bits.
+    #[must_use]
+    fn applied_to(self, value: f64) -> f64 {
+        let mut moved = value;
+        for _ in 0..self.ulps.unsigned_abs() {
+            moved = if self.ulps > 0 {
+                moved.next_up()
+            } else {
+                moved.next_down()
+            };
+        }
+        moved
+    }
+
+    /// `direction` tilted by `2^-lean` towards the coordinate direction it leans
+    /// on least.
+    #[must_use]
+    fn tilting(self, direction: Vector) -> Vector {
+        let Some(lean) = self.lean else {
+            return direction;
+        };
+        let [x, y, z] = direction.components().map(f64::abs);
+        let sideways = if x <= y && x <= z {
+            Vector::new(1.0, 0.0, 0.0)
+        } else if y <= z {
+            Vector::new(0.0, 1.0, 0.0)
+        } else {
+            Vector::new(0.0, 0.0, 1.0)
+        };
+        direction + sideways * two_to_the(-(lean as i32))
+    }
 }
 
 /// How far a pair is turned before it is crossed.
@@ -201,9 +280,9 @@ impl Crossing {
         let turn = self
             .turn
             .map_or_else(Isometry::identity, |turn| turn.isometry());
-        [self.first, self.second].map(|piece| {
+        [(self.first, None), (self.second, self.hair)].map(|(piece, hair)| {
             piece
-                .surface(self.elsewhere)
+                .surface(self.elsewhere, hair)
                 .expect("every generated piece is a surface")
                 .transformed(&turn)
         })
@@ -222,34 +301,44 @@ impl Crossing {
 }
 
 impl Piece {
-    /// This piece as a surface, written where `elsewhere` says.
-    fn surface(self, elsewhere: Elsewhere) -> rcad_geom::Result<Surface> {
+    /// This piece as a surface, written where `elsewhere` says and moved off it
+    /// by as much as `hair` asks.
+    fn surface(self, elsewhere: Elsewhere, hair: Option<AHair>) -> rcad_geom::Result<Surface> {
         let by = two_to_the(elsewhere.scale);
         let shift = elsewhere
             .shift
             .map_or(0.0, |shift| two_to_the(shift as i32));
         let placed = |whole: [i32; 3]| Point::from(whole.map(|step| f64::from(step) * by + shift));
-        let direction = |whole: [i32; 3]| Vector::from(whole.map(f64::from));
+        let sized = |radius: u32| {
+            let radius = f64::from(radius) * by;
+            hair.map_or(radius, |hair| hair.applied_to(radius))
+        };
+        let direction = |whole: [i32; 3]| {
+            let along = Vector::from(whole.map(f64::from));
+            hair.map_or(along, |hair| hair.tilting(along))
+        };
         match self {
             Piece::Flat { normal, at } => {
                 let facing = direction(normal);
-                let through = Point::origin() + facing * (f64::from(at) * by / facing.length());
+                let reach = hair.map_or(f64::from(at) * by, |hair| {
+                    hair.applied_to(f64::from(at) * by)
+                });
+                let through = Point::origin() + facing * (reach / facing.length());
                 let through = Point::from(through.coordinates().map(|step| step + shift));
                 Ok(Surface::Plane(Plane::from_point_and_normal(
                     through, facing,
                 )?))
             }
-            Piece::Ball { centre, radius } => Ok(Surface::Sphere(Sphere::new(
-                placed(centre),
-                f64::from(radius) * by,
-            )?)),
+            Piece::Ball { centre, radius } => {
+                Ok(Surface::Sphere(Sphere::new(placed(centre), sized(radius))?))
+            }
             Piece::Pipe {
                 along,
                 through,
                 radius,
             } => Ok(Surface::Cylinder(Cylinder::new(
                 Axis::new(placed(through), direction(along))?,
-                f64::from(radius) * by,
+                sized(radius),
             )?)),
         }
     }
@@ -320,10 +409,9 @@ pub fn a_crossing_somewhere_else() -> impl Strategy<Value = Crossing> {
 
 /// One of the four pairs whose crossing lies in a plane, either way round.
 ///
-/// **No pipe crosses a pipe and no ball crosses a pipe here.** Those two run to
-/// a quartic and are the second stage's, and a family whose refusals are all one
-/// deliberate non-build would be measuring the non-build rather than the
-/// arithmetic (§24.5).
+/// **No pipe crosses a pipe and no ball crosses a pipe here.** Those two cross
+/// in a degree-four space curve and are drawn by [`a_quartic_pair`] instead, so
+/// that the two kinds of refusal are reported apart (§17.7).
 ///
 /// Either way round, because a caller has no reason to put a pair in one order
 /// and the answer is about the pair rather than about the arguments.
@@ -346,8 +434,187 @@ fn a_pair(direction: BoxedStrategy<[i32; 3]>) -> impl Strategy<Value = Crossing>
             second,
             turn: None,
             elsewhere: Elsewhere::here(),
+            hair: None,
         }
     })
+}
+
+/// The two rows M3's second stage added, on the lattice.
+pub fn a_quartic_lattice_crossing() -> impl Strategy<Value = Crossing> {
+    a_quartic_pair(an_axis_direction().boxed())
+}
+
+/// The same two rows under one general rotation.
+pub fn a_quartic_turned_crossing() -> impl Strategy<Value = Crossing> {
+    (a_quartic_lattice_crossing(), a_turn()).prop_map(|(crossing, turn)| Crossing {
+        turn: Some(turn),
+        ..crossing
+    })
+}
+
+/// A ball crossing a pipe, or a pipe crossing a pipe, either way round.
+fn a_quartic_pair(direction: BoxedStrategy<[i32; 3]>) -> impl Strategy<Value = Crossing> {
+    let both_ways = prop_oneof![
+        (a_ball(), a_pipe(direction.clone())),
+        (a_pipe(direction.clone()), a_pipe(direction)),
+    ];
+    (both_ways, prop::bool::ANY).prop_map(|((first, second), swapped)| {
+        let (first, second) = if swapped {
+            (second, first)
+        } else {
+            (first, second)
+        };
+        Crossing {
+            first,
+            second,
+            turn: None,
+            elsewhere: Elsewhere::here(),
+            hair: None,
+        }
+    })
+}
+
+/// **The band.** Pairs drawn exactly tangent, then moved a handful of last bits
+/// off it, with an optional hair of lean between two directions that were
+/// exactly parallel.
+///
+/// Seven configurations, one for every way two of these surfaces can rest
+/// against each other, and each of them arranged in whole numbers so that the
+/// pair at `ulps = 0` is exactly on the knife edge:
+///
+/// | | tangent when |
+/// |---|---|
+/// | a plane on a ball | the plane sits a radius from the centre |
+/// | a plane along a pipe | the plane sits a radius from the axis |
+/// | two balls, outside and inside | the centres are `R₁ ± R₂` apart |
+/// | a ball on the outside of a pipe | `R = d − r`, for a centre `d` off the axis |
+/// | a ball across the whole of a pipe | `R = r + d`, where the two loops pinch |
+/// | two pipes side by side | the axes are `r₁ + r₂` apart |
+/// | two pipes leaning | the axes pass `r₁ + r₂` apart |
+///
+/// A pair drawn here and answered without complaint is a pair whose sign
+/// questions were settled a few last bits from zero, which is what none of the
+/// families above can produce.
+pub fn a_crossing_a_hair_from_the_knife_edge() -> impl Strategy<Value = Crossing> {
+    let resting =
+        (1..=LARGEST_RADIUS, 1..=LARGEST_RADIUS, 0usize..7).prop_map(|(mine, theirs, which)| {
+            let (bigger, smaller) = (mine.max(theirs), mine.min(theirs));
+            let up = [0, 0, 1];
+            let across = [1, 0, 0];
+            let out = |reach: u32| [reach as i32, 0, 0];
+            match which {
+                0 => (
+                    Piece::Flat {
+                        normal: across,
+                        at: mine as i32,
+                    },
+                    Piece::Ball {
+                        centre: [0, 0, 0],
+                        radius: mine,
+                    },
+                ),
+                1 => (
+                    Piece::Flat {
+                        normal: across,
+                        at: mine as i32,
+                    },
+                    Piece::Pipe {
+                        along: up,
+                        through: [0, 0, 0],
+                        radius: mine,
+                    },
+                ),
+                2 => (
+                    Piece::Ball {
+                        centre: [0, 0, 0],
+                        radius: mine,
+                    },
+                    Piece::Ball {
+                        centre: out(mine + theirs),
+                        radius: theirs,
+                    },
+                ),
+                3 => (
+                    Piece::Ball {
+                        centre: [0, 0, 0],
+                        radius: bigger,
+                    },
+                    Piece::Ball {
+                        centre: out(bigger - smaller),
+                        radius: smaller,
+                    },
+                ),
+                // A ball whose skin just reaches the near side of a pipe it sits
+                // clear of: `R = d − r` with the centre `d` off the axis.
+                4 => (
+                    Piece::Pipe {
+                        along: up,
+                        through: [0, 0, 0],
+                        radius: mine,
+                    },
+                    Piece::Ball {
+                        centre: out(mine + theirs + theirs),
+                        radius: mine + theirs,
+                    },
+                ),
+                // A ball reaching exactly across the whole width of a pipe, so
+                // the two loops it would leave pinch together.
+                5 => (
+                    Piece::Pipe {
+                        along: up,
+                        through: [0, 0, 0],
+                        radius: mine + theirs,
+                    },
+                    Piece::Ball {
+                        centre: out(theirs),
+                        radius: mine + theirs + theirs,
+                    },
+                ),
+                6 => (
+                    Piece::Pipe {
+                        along: up,
+                        through: [0, 0, 0],
+                        radius: mine,
+                    },
+                    Piece::Pipe {
+                        along: up,
+                        through: out(mine + theirs),
+                        radius: theirs,
+                    },
+                ),
+                _ => (
+                    Piece::Pipe {
+                        along: up,
+                        through: [0, 0, 0],
+                        radius: mine,
+                    },
+                    Piece::Pipe {
+                        along: across,
+                        through: [0, (mine + theirs) as i32, 0],
+                        radius: theirs,
+                    },
+                ),
+            }
+        });
+    (resting, a_hair(), prop::option::of(a_turn())).prop_map(|((first, second), hair, turn)| {
+        Crossing {
+            first,
+            second,
+            turn,
+            elsewhere: Elsewhere::here(),
+            hair: Some(hair),
+        }
+    })
+}
+
+/// How far off the knife edge a pair is drawn.
+///
+/// Four last bits either way, so the band is swept from one side to the other
+/// with the exact configuration in the middle of it; and a lean from a quarter
+/// turn down to `2^-60`, which is past where any `f64` dot product can tell a
+/// direction from square to another.
+fn a_hair() -> impl Strategy<Value = AHair> {
+    (-4i32..=4, prop::option::of(0u32..=60)).prop_map(|(ulps, lean)| AHair { ulps, lean })
 }
 
 fn a_flat(direction: BoxedStrategy<[i32; 3]>) -> BoxedStrategy<Piece> {
