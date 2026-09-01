@@ -1332,7 +1332,7 @@ impl Edge {
     /// A crossing with **two** curved surfaces and two ends is a pair of balls
     /// cut twice, and nothing builds one: `ACurvedFaceGoesRightRoundWithNoSeam`
     /// refuses two balls united before an arc of them is ever named
-    /// (§36.24). When that stops being true, what has to give is the check — the
+    /// (§36.23). When that stops being true, what has to give is the check — the
     /// same slop `check_curved_face` already reads off a solved corner (§36.13),
     /// read here too — and not this choice.
     fn the_surface_that_names_it_twice(&self) -> Surface {
