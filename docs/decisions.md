@@ -9156,3 +9156,213 @@ Both are test-only, in `rcad-topo/tests/`, and both build on this.
   on one surface facing the same way is `intersect` plus the two orientations,
   and for a plane it stays `Plane::agreement_with` because a reversed plane is a
   different four numbers.
+
+### 36.18 A ball cut by a plane, and the direction rule that took
+
+Lane 5b of §31.6, and it exists because CLAUDE.md says to fix a gap rather than
+defer it. §36.16 left two, both classified as gaps by the lane that wrote them,
+and between them they stopped the kernel cutting a ball with a plane — which is
+about the simplest curved boolean there is.
+
+**One of the two is closed.** `Error::ACurvedFaceGoesRightRoundWithNoSeam` is
+gone and §31.7 criterion 13 is met in full: `a_ball_cut_by_a_plane_meshes_into_a_closed_surface`
+takes the cap above and the cap below two different cuts, meshes each through
+§23.4's oracle, and checks the volume against `πh²(3R − h)/3`.
+
+**Both poles are in that table and that is the point of it rather than
+tidiness.** The lane before this one shipped an arm that never turned a step
+round, and it cancelled in every test that used only curved faces; the same trap
+is here, one shape along. An arm that read the pole backwards would still mesh a
+*north* cap into a closed surface of exactly the right volume — it would simply
+never be asked about a south one. The south rows are where getting it wrong does
+not cancel, and getting it wrong is what happened first.
+
+#### What a cap needed, and what it turned out to need
+
+A cap's patch in the sphere's own two coordinates is a rectangle whose top edge
+is the pole and whose two sides are one meridian used twice, and the model says
+neither: a [`WireStep::Pole`] and a seam are what say them and a fuse can invent
+neither. So they go into the mesher, four times, where a pole is a corner and a
+meridian is a cut — the same move §36.12 made for a ring, with the second loop
+replaced by a point.
+
+**Which of the two poles the face reaches costs no arithmetic.** A face keeps its
+material on the left of its wire, and a surface's own two coordinates are
+right-handed about its outward normal — `∂u × ∂v` is `R² cos v` times it, and
+`cos v` is positive everywhere but the poles — so the left of "longitude
+increasing" is "latitude increasing", and a loop running that way bounds the
+piece **above** it.
+
+**And that read something arbitrary, which is the finding.** Which of a closed
+edge's two coedges is the forward one says only which of the two faces along it
+came first: the two have to disagree, so within one solid it is fixed, and
+against anything outside it is a coin toss. §30.8 item 10 has recorded that a
+closed edge has no direction rule since M3 and §35.10 called giving it one *"the
+single change that widens row 10 most"*.
+
+There already was a rule and it was half of one: *"a closed edge is stored
+running the way this face's longitude increases"*, where **this face** is
+whichever of the two walked it first. A bar never showed the hole in it — its two
+cap circles are both between a plane and one cylinder, so both were stored the
+cylinder's way and the wall's rectangle closed, which is the case the rule was
+written for. A ball cut by a plane leaves two caps in **two different fuses**,
+and each was stored the way whichever face got there first ran.
+
+The rule is now: **a closed edge runs the way the longitude of the curved surface
+either side of it increases, and where both are curved `Surface`'s own fixed
+order picks one.** It depends on the edge and not on the walk, it keeps the bar
+for the reason the old rule kept it, and the fuse sets its coedge orientations
+against the same rule — `which_way_a_closed_edge_is_walked` in `assemble.rs`,
+which is §36.6's identity for the wire's direction in space and one dot product
+for the stored one.
+
+**What it does not yet do is get checked.** `Model::validate` does not ask a
+closed edge whether it is stored the way the rule says, so a solid arriving from
+a file may disagree with it — and the builders are not asserted against it
+either, because nothing they build reaches the path that reads it. That is the
+half of §30.8 item 10 still open, and it is now a *check* rather than a rule.
+
+### 36.19 The arc, and how far it got
+
+`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` is **still there**, and
+this section is the demonstration §16.10 asks for rather than the paragraph it
+forbids. It was built, it works as far as the naming goes, and it was taken out
+again — so what follows is measured rather than argued, and the next lane starts
+from the far end of it.
+
+**§36.16's own row is wrong and this corrects it.** It says the half-space that
+tells two arcs apart *"cannot be built here, because both ends have to be
+provably on that plane once its offset is rounded and nothing rounds it in a
+direction it can prove"*. All three clauses are wrong:
+
+- **The plane is nameable without constructing anything.** Two corners on a
+  closed crossing leave two arcs, and the plane through the chord *square to the
+  plane the crossing lies in* meets that plane in the chord line — which a conic
+  meets at exactly its two ends, so the two arcs are strictly either side of it
+  whichever is the longer. The crossing's own plane never has to be built: the
+  tangent `∇S × ∇T` and the chord both lie in it, so `tangent × chord` is its
+  normal and `chord × that` is the one wanted.
+- **Which side this arc is on is a sign and not a search.** The wire leaves its
+  first corner along `∇S × ∇T` or against it, by the material side (§36.6), and
+  the reading of the plane grows or shrinks along that direction. No point on the
+  arc has to be built.
+- **The offset can be proved rather than rounded.** `Model::validate` asks that
+  both ends read *on or in front*, so the offset comes **down** — and how far
+  down is not a number anybody needs, because the loop asks the predicate about
+  the ends as the boxes `walk` will ask about them as, doubles the step, and
+  stops when the predicate says so.
+
+**And `Model::validate` was never the blocker either.** Lane 3 already has the
+sweep skip a face trimmed by part of a curve, by name, so an answer with arcs in
+it passes.
+
+**What actually stops it**, measured: with the arcs named, a bar notched by a
+block builds an answer and refuses inside `rcad_geom::walk`, which is picking
+which of the two arcs to march. The refusal carries two `side of a half-space`
+records about boxes round the arc's own ends — and it refuses under
+`Policy::tolerant` as well as under a certified one, so it is not a budget
+question. The records are swept into the refusal by a later `ask` rather than
+being the decision that failed, so they name where the reading was uncertain and
+not what gave up, and **this lane did not localise it further**.
+
+So the classification is unchanged and the family of fixes is narrower by three
+of its four members: it is a **gap**, the naming is done, the sweep is done, and
+what is left is one function in `rcad-geom` deciding which arc a picker picks.
+The two obvious members of the remaining family are that `walk`'s midpoint test
+is asked about a point too near the chord for a short arc, and that
+`every_half_space_holds` records a reading that *rules nothing out* — which §5
+says is a route not taken rather than a decision anybody failed to prove, the
+same argument `select.rs` already makes about a ray it abandoned.
+
+**Nothing half-built was left behind.** The picker code is not in the tree: it
+had no test that could pass, and CLAUDE.md's rule about that is not a preference.
+
+### 36.20 The quartic, weighed and left
+
+`which_comes_first_round_a_crossing` refuses a quartic, so a **ball with a pipe
+through it** is still refused and §31.7 criterion 13 is met for two of its three
+shapes rather than all three.
+
+Left, and classified a **gap** exactly as §34.10 already classifies it: the two
+loops are there and are tellable apart, and what is missing is an *order along*
+one. That is not a sign anybody can add — a degree-four loop has no conic frame
+to sweep an area in, and ordering points along one is the marcher's job, which
+makes it a change to `rcad-geom`'s `walk` and `along_a_crossing` rather than to
+anything this lane owns. §31.2's own table puts it at the top of the degree
+column and §31.9 defers the algebra it rests on.
+
+**It is also not what blocked the shape this lane was asked for.** A ball cut by
+a plane never asks it: a plane and a ball cross in a circle, which §34.5 orders
+with one determinant. Taking the quartic here would have been a second
+milestone's worth of marcher work bolted to a lane whose job was a cap.
+
+### 36.21 The numbers
+
+Family by family and never blended (§17.7), the same four families at 384 fuses
+each so the rows are comparable with §36.14's.
+
+| Family | fuses | refused | recorded anything |
+|---|---|---|---|
+| lattice, a bar through a block | 384 | **0.00%** | 0 |
+| turned about an awkward axis | 384 | **0.00%** | 0 |
+| **a ball resting on a block** | 384 | **0.00%** | 0 |
+| written at `2^k` | 384 | **0.00%** | 0 |
+
+The ball row was **100% refused** at §36.14 and is now a control like the other
+three. That is the whole of what this lane is.
+
+| | at §36.14 | now |
+|---|---|---|
+| tests (`cargo nextest`, whole workspace) | 1067 | **1067** |
+| suite duration | 2.9 s | 2.9 s |
+| doc tests | 19 | 19 |
+| `FORMAT_VERSION` | 3 | 3 |
+| fuzz corpus | 793 | **805** |
+
+`just fuzz 180` ran 4 836 184 executions in 181 seconds, found **12 new seeds**
+and **no crash**. Coverage stayed at 2507 edges, which is what it should be:
+`rcad-geom` is untouched, so there is no new arithmetic for the corpus to reach.
+
+**The test count did not move and that is worth a line.** A test that asserted a
+refusal of the whole ball family came out and a test that meshes four caps and
+checks four volumes went in. A milestone that measures itself by test count would
+have scored this lane at nothing.
+
+`just default` is green, `cargo-deny` included. **`rcad-predicates` is still at 0
+files changed for the whole milestone**, and `rcad-geom` is at 0 for lanes 4, 5
+and 5b together — the closed-edge direction rule landed entirely in `rcad-topo`,
+because what needed settling was which of two surfaces names the direction and
+not how a crossing is walked.
+
+**No test had its number re-derived.** Nothing measured moved except the ball
+family's refusal share, which went from every fuse to none.
+
+**Did widening anything break what lane 3 proved?** Nothing in `holds.rs`
+changed in this lane, so nothing lane 3 proved was widened at all. What changed
+underneath it is which way round a closed edge's walked points are stored, and
+§35.8's four families of point classification, `point_in_a_curved_solid.rs` and
+`meshing_a_curved_solid.rs` all pass unchanged — which is the answer that
+matters, because a mesh whose two faces along an edge read the same points in the
+same order is exactly what §23.4's promise is made of.
+
+### 36.22 What lanes 6 and 7 have to be told, corrected
+
+§36.15 stands except where this lane moved it.
+
+- **A ball cut by a plane works**, so roadmap §7.4's entries about balls reach
+  what they are about rather than reaching a refusal on the way in. §36.15's
+  second bullet is withdrawn.
+- **The line between what is built and what is refused has moved by one word**:
+  an answer whose every curved edge is a **whole closed curve** is built, and
+  that now includes a face bounded by one such curve with a pole behind it. An
+  *arc* is still refused, so a bar notched by a block still is, and so is any
+  entry that cuts a curved face twice with crossing curves.
+- **A ball with a pipe through it is refused for a different reason from a
+  notched bar**, and a catalogue that runs them together will read one refusal
+  where there are two: the first is the quartic ordering (§36.20) and the second
+  is the arc (§36.19).
+- **The closed-edge direction rule is a rule and not yet a check.** A metamorphic
+  property that builds a curved solid, writes it out and reads it back is fine;
+  one that hand-builds a closed edge with the coedges the other way round will
+  not be caught by `validate` and may mesh a cap to the wrong pole. Say so rather
+  than assume it.
