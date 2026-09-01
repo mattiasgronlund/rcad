@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Deflection, DynamicRange, Isometry, Orientation, Plane, SIDE_OF_CYLINDER, SIDE_OF_PLANE,
-    SIDE_OF_SPHERE, Surface, Vector,
+    Deflection, DynamicRange, EdgeRun, Isometry, Orientation, Plane, SIDE_OF_CYLINDER,
+    SIDE_OF_PLANE, SIDE_OF_SPHERE, Surface, Vector,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -17,7 +17,6 @@ use slotmap::SecondaryMap;
 use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
-use crate::model::EdgeRun;
 use crate::view::{FaceView, SolidView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
 
@@ -136,7 +135,7 @@ impl Model {
                     }
                     if picked_by
                         .iter()
-                        .any(|half_space| half_space.side_of_point(at) == Decision::Neg)
+                        .any(|half_space| side_of_surface(half_space, at) == Decision::Neg)
                     {
                         return Err(Invalid::EdgeOutsideWhatPickedIt.into());
                     }
@@ -871,13 +870,12 @@ fn magnitude_of(tag: Option<Approximation>) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
+    use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
     use super::{Decision, winding_of, winding_round};
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
-    use crate::model::EdgeRun;
     use crate::{Error, FaceView, Invalid, Model, WireView};
 
     fn an_empty_model() -> Model {
@@ -1095,9 +1093,42 @@ mod tests {
         else {
             panic!("a ball's seam is named by a crossing")
         };
-        picked_by[0] = elsewhere;
+        picked_by[0] = Surface::Plane(elsewhere);
 
         assert_eq!(refusal(&model), Invalid::EdgeOutsideWhatPickedIt);
+    }
+
+    /// The same check, asked about a curved half-space, which is what §24.5
+    /// widened the field to hold.
+    ///
+    /// A ball's seam is picked out by *outside this smaller ball*, which its two
+    /// poles are; grow that ball past them and the name picks a piece the seam
+    /// is not on. Nothing but this check would notice, and while `picked_by`
+    /// held planes the question could not be asked at all.
+    #[test]
+    fn an_edge_outside_a_curved_half_space_that_picked_it_is_caught() {
+        for (radius, expected) in [(1.0, None), (5.0, Some(Invalid::EdgeOutsideWhatPickedIt))] {
+            let mut model = an_empty_model();
+            model
+                .add_ball(2.0, &Isometry::identity())
+                .expect("a ball of radius two");
+
+            let edge = model.data().edges.keys().next().expect("the seam");
+            let inner = Sphere::new(Point::origin(), radius).expect("a radius");
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } =
+                &mut model.data_mut().edges[edge].run
+            else {
+                panic!("a ball's seam is named by a crossing")
+            };
+            picked_by[0] = Surface::Sphere(inner);
+
+            match expected {
+                None => model
+                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    .expect("both poles are outside a ball of radius one"),
+                Some(invalid) => assert_eq!(refusal(&model), invalid),
+            }
+        }
     }
 
     #[test]

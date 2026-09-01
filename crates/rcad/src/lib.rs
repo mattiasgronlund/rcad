@@ -296,6 +296,15 @@ pub use rcad_topo::Error as TopologyError;
 /// (`docs/decisions.md` §3.6, §7.2).
 pub use rcad_mesh::CannotTriangulate;
 
+/// What crossing two surfaces comes back with.
+///
+/// Out here ahead of the intersector that produces it, because these are the
+/// shapes M3's two stages both write against and §13 rule 4 says a meaning two
+/// people settle separately gets settled twice, differently. Quadric
+/// intersection with certified results and an explicit refusal has users who are
+/// not kernel users, which is §24.15's argument for exporting it at all.
+pub use rcad_geom::{EdgeRun, NamedRun, SurfaceMeet};
+
 pub use rcad_geom::{
     Axis, BSplineCurve, BSplineSurface, Cylinder, Deflection, EVALUATION_ROUNDOFF, Isometry,
     KnotVector, MAX_DEGREE, Orientation, Plane, PlaneAgreement, Point, REFINEMENT_ROUNDOFF, Scale,

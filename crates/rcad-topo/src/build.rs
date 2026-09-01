@@ -1,11 +1,13 @@
-use rcad_geom::{Axis, Cylinder, Isometry, Orientation, Plane, Point, Sphere, Surface, Vector};
+use rcad_geom::{
+    Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Sphere, Surface, Vector,
+};
 use rcad_predicates::{
     Approximation, Decision, Policy, ProvenanceLog, Record, orient2d_tolerantly,
 };
 use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
-use crate::model::{EdgeRun, FaceUse, ShellUse, WireStep};
+use crate::model::{FaceUse, ShellUse, WireStep};
 use crate::{EdgeKey, Error, FaceKey, Model, Result, SolidKey, VertexKey};
 
 /// A flat outline with holes in it, checked and ready to extrude.
@@ -731,7 +733,7 @@ impl Model {
             south,
             EdgeRun::PartOfWhereItCrosses {
                 and: Surface::Plane(meridian),
-                picked_by: smallvec::smallvec![facing_x],
+                picked_by: smallvec::smallvec![Surface::Plane(facing_x)],
             },
         );
 

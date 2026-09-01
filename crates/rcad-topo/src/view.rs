@@ -1,10 +1,10 @@
-use rcad_geom::{Isometry, Orientation, Plane, Point, Segment, Surface, Vector};
+use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Segment, Surface, Vector};
 use rcad_predicates::Approximation;
 use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{
-    CoedgeData, EdgeData, EdgeRun, FaceData, ShellData, SolidData, VertexData, WireData, WireStep,
+    CoedgeData, EdgeData, FaceData, ShellData, SolidData, VertexData, WireData, WireStep,
 };
 use crate::{CoedgeKey, EdgeKey, FaceKey, Model, ShellKey, SolidKey, VertexKey, WireKey};
 

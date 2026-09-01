@@ -54,7 +54,14 @@ use crate::model::{Model, ModelData};
 /// Reading anything else fails with
 /// [`Error::WrongFormatVersion`](crate::Error::WrongFormatVersion). It goes up
 /// whenever the stored shape changes, which in M0 and M1 means often.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// Two since M3's gate, where an edge's `picked_by` widened from a plane to any
+/// surface (decisions.md §24.5). A plane writes as four numbers and a surface
+/// writes as a tag and then its own numbers, so a version 1 file read at this
+/// shape would take a plane's leading coefficient for the tag — bytes that parse
+/// into a *different* solid rather than bytes that fail, which is the one
+/// outcome §4.1 ranks below a crash.
+pub const FORMAT_VERSION: u32 = 2;
 
 impl Serialize for Model {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -91,4 +98,67 @@ struct Written<'m> {
 struct Payload {
     version: u32,
     data: ModelData,
+}
+
+#[cfg(test)]
+mod tests {
+    use rcad_geom::{Axis, Cylinder, EdgeRun, Isometry, Plane, Point, Scale, Surface, Vector};
+    use rcad_predicates::{Policy, ProvenanceLog};
+
+    use super::FORMAT_VERSION;
+    use crate::Model;
+
+    /// A ball whose seam is picked out by a *curved* half-space writes out and
+    /// reads back holding the same one.
+    ///
+    /// The widened field is the whole of what moved the version, so this is the
+    /// round trip §24.18's thirteenth criterion asks for. A pipe of radius one
+    /// about the `x` axis has both poles of a ball of radius two well outside
+    /// it, so the model that comes back is sound as well as identical.
+    #[test]
+    fn a_seam_picked_out_by_a_pipe_comes_back_picked_out_by_the_same_pipe() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+
+        let picker =
+            Surface::Cylinder(Cylinder::new(Axis::x(), 1.0).expect("a pipe of radius one"));
+        let edge = model.data().edges.keys().next().expect("the seam");
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &mut model.data_mut().edges[edge].run
+        else {
+            panic!("a ball's seam is named by a crossing")
+        };
+        picked_by[0] = picker;
+
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+        let after: Model = postcard::from_bytes(&bytes).expect("and reads back");
+        after
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a ball whose poles sit outside a thinner pipe is sound");
+
+        let edge = after.data().edges.keys().next().expect("the seam");
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &after.data().edges[edge].run else {
+            panic!("a ball's seam is named by a crossing")
+        };
+        assert_eq!(picked_by.as_slice(), [picker]);
+    }
+
+    /// Why the version had to move, in bytes.
+    ///
+    /// A plane and a surface holding that plane are not the same run of bytes,
+    /// so a version 1 file read at this shape would come apart — quietly, where
+    /// the leading coefficient happens to read as a valid tag. The number is
+    /// what stops that, and it is only worth having if the shapes really differ.
+    #[test]
+    fn a_plane_and_a_surface_holding_that_plane_are_different_bytes() {
+        let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+            .expect("the x axis is a unit normal");
+        let bare = postcard::to_allocvec(&plane).expect("a plane writes out");
+        let wrapped = postcard::to_allocvec(&Surface::Plane(plane)).expect("a surface writes out");
+
+        assert_eq!(FORMAT_VERSION, 2);
+        assert_ne!(bare, wrapped);
+        assert_eq!(wrapped.len(), bare.len() + 1, "one byte of tag in front");
+    }
 }

@@ -756,6 +756,7 @@ dependencies = [
  "proptest",
  "rcad-predicates",
  "serde",
+ "smallvec",
  "thiserror",
 ]
 
