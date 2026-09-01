@@ -26,3 +26,7 @@ workspace = true
 [[bench]]
 name = "how_wide_the_enclosure_gets"
 harness = false
+
+[[bench]]
+name = "what_a_marched_point_costs"
+harness = false
