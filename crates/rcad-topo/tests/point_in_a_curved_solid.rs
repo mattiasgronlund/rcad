@@ -8,7 +8,10 @@
 //! `docs/decisions.md` §31.7's criterion 10 names the first two tests below and
 //! criterion 9 names `whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face`.
 
-use rcad_geom::{Deflection, Isometry, Point, Scale, Surface};
+use rcad_geom::{
+    Axis, Cylinder, Deflection, Isometry, Plane, Point, Scale, Sphere, Surface, Vector,
+    meet_of_three_surfaces,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Model, OnAFace, SolidKey};
 
@@ -380,4 +383,125 @@ fn how_far_from_a_side(at: Point, from: Point, to: Point) -> f64 {
     }
     let part = ((at - from).dot(side) / squared).clamp(0.0, 1.0);
     (at - (from + side * part)).length()
+}
+
+/// §31.10's first route needs a meet of three surfaces, and the ones it needs
+/// are the ones the milestone refuses.
+///
+/// **This is the demonstration behind the route this lane chose**, and
+/// `docs/decisions.md` §35 is where it is read.
+///
+/// Route one is a ray *along the surface* from the point, crossing-counted
+/// against the wires. A ray along a ball's skin is the ball crossed with a plane
+/// through the point; a boundary of a ball with a pipe through it runs along
+/// where the ball crosses the pipe; so every crossing that ray has to count is a
+/// point of ball, plane and pipe together. Two of those three are quadrics, and
+/// [`meet_of_three_surfaces`] refuses that by name — the same refusal §31.2's
+/// row 4 files as a gap deferred to the milestone that builds an algebraic
+/// solver.
+///
+/// The control is the pair the same route *can* do: put two planes in and the
+/// answer comes back, so what is refused is the degree and not the call.
+#[test]
+fn a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses() {
+    let ball = Surface::Sphere(Sphere::new(Point::origin(), RADIUS).expect("a ball"));
+    let pipe = Surface::Cylinder(
+        Cylinder::new(Axis::x(), 1.0).expect("a pipe of radius one along the x axis"),
+    );
+    // The ray along the ball's skin through the point (0, 3, 0), which is the
+    // ball crossed with the plane through it and the ball's own axis.
+    let ray = Surface::Plane(
+        Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+            .expect("a unit normal"),
+    );
+
+    let refusal = meet_of_three_surfaces(
+        [&ball, &pipe, &ray],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect_err("a ball, a pipe and a plane is one plane short");
+    assert!(
+        matches!(
+            refusal,
+            rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
+        ),
+        "got {refusal:?}"
+    );
+
+    let another = Surface::Plane(
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+            .expect("a unit normal"),
+    );
+    meet_of_three_surfaces(
+        [&ball, &another, &ray],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("two planes and a ball is answered");
+}
+
+/// The same grid against a bar and a ball that have been turned and moved,
+/// reported family by family and never blended (`docs/decisions.md` §17.7).
+///
+/// **This is the row that would have gone wrong quietly.** Which side of a
+/// trimming surface a face lies on is read off its corners, and a corner that is
+/// exactly on a cap circle is carried into place by an isometry that rounds, so
+/// it lands a hair off the cap's plane on whichever side the rounding chose. Read
+/// with a predicate, a placed bar's wall would look as though it stood on both
+/// sides of its own cap. The corners of the edges running along a surface are
+/// skipped by topology instead, and this is what says so.
+///
+/// **Nothing is recorded, and the reason is structural rather than lucky.** The
+/// grid is drawn on the lattice and the solid is not, so every ray meets a
+/// turned surface in a box; but a certified policy never accepts anything, so a
+/// predicate handed a box either proves its sign and says nothing, or gives up.
+/// A record here would mean a decision had been taken on something nobody
+/// proved, which is what §17.2 keeps apart from being undecided.
+#[test]
+fn a_turned_bar_and_ball_are_placed_as_surely_as_a_lattice_one() {
+    let axis = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+    let turn = Isometry::rotation(&axis, 0.7)
+        .expect("a rotation")
+        .compose(&Isometry::translation(Vector::new(0.25, -0.5, 0.75)).expect("a move"));
+
+    for (make, what) in [
+        (a_round_bar as fn() -> (Model, SolidKey), "bar"),
+        (a_ball as fn() -> (Model, SolidKey), "ball"),
+    ] {
+        let (mut model, solid) = make();
+        model.place_solid(solid, &turn);
+        let placed = solid;
+        let mut log = ProvenanceLog::new();
+        let mut counted = 0;
+        for i in -6..=6 {
+            for j in -6..=6 {
+                for k in -6..=6 {
+                    let at = Point::new(
+                        f64::from(i) / 2.0 + 0.125,
+                        f64::from(j) / 2.0 + 0.125,
+                        f64::from(k) / 2.0 + 0.125,
+                    );
+                    let where_it_sits =
+                        model
+                            .solid(placed)
+                            .classify_point(at, &Policy::certified(), &mut log);
+                    assert!(
+                        matches!(
+                            where_it_sits,
+                            Containment::Inside | Containment::Outside | Containment::OnBoundary
+                        ),
+                        "the turned {what} could not place {at:?}: {where_it_sits:?}"
+                    );
+                    counted += 1;
+                }
+            }
+        }
+        assert_eq!(counted, 13 * 13 * 13);
+        assert!(
+            log.records().is_empty(),
+            "the turned {what} recorded {:?}",
+            log.records()
+        );
+    }
 }
