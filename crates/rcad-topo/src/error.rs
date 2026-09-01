@@ -144,18 +144,6 @@ pub enum Error {
         count: usize,
     },
 
-    /// The fuse was handed a solid with a curved face.
-    ///
-    /// The fuse cuts faces along the lines where their planes cross, and a
-    /// cylinder has no plane to cross. Extending it to curved crossings is M4
-    /// (decisions.md §1.7); until then this is a refusal and not a failure —
-    /// the input is a sound solid and the operation is the thing that is not
-    /// ready for it.
-    ///
-    /// Deliberately not [`Error::Undecidable`]. Nothing was in doubt here.
-    #[error("the fuse needs every face to be flat, and one of these solids has a curved one")]
-    FuseNeedsFlatFaces,
-
     /// One face of a solid could not be cut into triangles.
     ///
     /// Carries what the triangulator said. Most of those are about the

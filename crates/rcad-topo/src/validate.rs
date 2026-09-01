@@ -546,7 +546,7 @@ impl Model {
 /// longitude. The exception here would only ever have covered the one caller
 /// that thought of it — `SolidView::measure` did not, and panicked — so the
 /// floor went where it belongs and this went back to a constant.
-fn as_coarse_as_a_mesh_gets() -> Deflection {
+pub(crate) fn as_coarse_as_a_mesh_gets() -> Deflection {
     Deflection::of(f64::MAX).expect("the largest f64 is a positive finite length")
 }
 

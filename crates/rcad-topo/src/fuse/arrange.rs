@@ -156,14 +156,13 @@ impl Piece {
     ///
     /// # Panics
     ///
-    /// If the piece is curved. Selection and the commit are still gated on
-    /// [`Error::FuseNeedsFlatFaces`](crate::Error::FuseNeedsFlatFaces), which
-    /// lane 5 of §31.6 takes off; until then no curved piece reaches them.
+    /// If the piece is curved. Only [`Stretches`] asks, and only about a
+    /// straight crossing, which is a pair of planes.
     pub(crate) fn plane(&self) -> Plane {
         *self
             .surface
             .as_plane()
-            .expect("the fuse is still gated on every face being flat")
+            .expect("only a flat piece is asked which plane it is on")
     }
 }
 

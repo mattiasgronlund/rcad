@@ -55,8 +55,9 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
+use crate::measure::signed_volume_over;
 use crate::model::{FaceUse, ShellUse};
-use crate::validate::winding_round;
+use crate::validate::{as_coarse_as_a_mesh_gets, winding_round};
 use crate::{
     Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
 };
@@ -888,7 +889,8 @@ impl Assembly {
 
         let mut volumes = Vec::new();
         for &solid in &written.solids {
-            let volume = apart.solid(apart.key_for_solid(solid)).signed_volume();
+            let volume =
+                how_much_space_it_encloses(apart.solid(apart.key_for_solid(solid)), policy, log)?;
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
             }
@@ -1279,6 +1281,31 @@ struct JoinedFace {
     plane: Plane,
     /// The outline first, then one ring per hole.
     rings: Vec<Vec<Dart>>,
+}
+
+/// How much space one shell of the answer encloses, signed by which way its
+/// faces point.
+///
+/// A polyhedron's own fan *is* its volume and is summed exactly. A **curved**
+/// shell has no such fan — a bar's wall fans into two triangles on its seam and
+/// a round cap into none at all (§35.4) — so it is summed over a mesh instead,
+/// which is what `Model::validate` already does about the same question one
+/// layer up. Only the sign is read here, and the coarsest mesh there is says
+/// which way round a shell is.
+///
+/// # Errors
+///
+/// Whatever meshing the shell makes of it.
+fn how_much_space_it_encloses(
+    solid: SolidView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<f64> {
+    if solid.is_wholly_flat() {
+        return Ok(solid.signed_volume());
+    }
+    let mesh = solid.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
+    Ok(signed_volume_over(&mesh))
 }
 
 /// The other dart along the same edge.

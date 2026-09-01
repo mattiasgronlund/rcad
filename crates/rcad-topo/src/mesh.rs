@@ -521,22 +521,26 @@ impl BuildingAMesh {
         // walked along the one going up and back along the one going down. Which
         // of the two is stored first is an order the face happens to hold
         // (§31.3), so it is asked rather than assumed.
-        let (up, turned) = if runs_up(outer, whole_turn) {
-            (outer.clone(), hole.clone())
-        } else {
-            (outer.the_other_way(), hole.clone())
+        // **Both loops are walked the way the longitude grows**, and the patch
+        // goes along one and back along the other. Which way each was stored is
+        // an order the face happens to hold — on a closed surface neither wire
+        // is the outer one (§31.3) — so it is turned to face the same way here
+        // rather than assumed, and the two are brought into one longitude frame
+        // before anything is measured against a longitude.
+        let facing_up = |around: &WalkedLoop| {
+            if runs_up(around, whole_turn) {
+                around.the_other_way().the_other_way()
+            } else {
+                around.the_other_way()
+            }
         };
-        let down = if runs_up(&turned, whole_turn) {
-            turned.the_other_way()
-        } else {
-            turned
-        };
-        let (up, down) = (&up, &down);
+        let up = facing_up(outer);
+        let down = in_the_same_turn_as(&facing_up(hole), &up, whole_turn);
 
         let from = up.corners[0][0];
         let quarters: [f64; 4] = [0, 1, 2, 3].map(|step| from + f64::from(step) * whole_turn / 4.0);
-        let along_the_top = quarters.map(|at| nearest_longitude(up, at, whole_turn));
-        let along_the_bottom = quarters.map(|at| nearest_longitude(down, at, whole_turn));
+        let along_the_top = quarters.map(|at| nearest_longitude(&up, at));
+        let along_the_bottom = quarters.map(|at| nearest_longitude(&down, at));
 
         let mut cuts = Vec::with_capacity(4);
         for step in 0..4 {
@@ -546,10 +550,10 @@ impl BuildingAMesh {
         }
 
         // Every stretch is put on the end **unwrapped against what is already
-        // there**. Each of the two loops was walked in a longitude frame of its
-        // own, and a patch that took them as they came would step a whole turn
-        // crossing from one to the other — which in the surface's two
-        // coordinates is a boundary folded across itself rather than a rectangle.
+        // there**. A patch that took the two chains as they came would step a
+        // whole turn crossing from the end of one to the start of the other,
+        // which in the surface's two coordinates is a boundary folded across
+        // itself rather than a rectangle.
         let mut patches = Vec::with_capacity(4);
         for step in 0..4 {
             let next = (step + 1) % 4;
@@ -559,7 +563,9 @@ impl BuildingAMesh {
             );
             one.take_in_unwrapped(&cuts[next], whole_turn);
             one.take_in_unwrapped(
-                &down.between(along_the_bottom[next], along_the_bottom[step]),
+                &down
+                    .between(along_the_bottom[step], along_the_bottom[next])
+                    .the_other_way(),
                 whole_turn,
             );
             one.take_in_unwrapped(&cuts[step].the_other_way(), whole_turn);
@@ -905,16 +911,41 @@ fn runs_up(around: &WalkedLoop, whole: f64) -> bool {
     climbed > 0.0
 }
 
-/// Which corner of a loop sits nearest a longitude, counting whole turns as no
-/// distance at all.
-fn nearest_longitude(around: &WalkedLoop, at: f64, whole: f64) -> usize {
+/// Which corner of a loop sits nearest a longitude.
+///
+/// **Not counting whole turns as no distance at all**, which is the one thing a
+/// chain that goes right round makes wrong: its first corner and its last are a
+/// whole turn apart and would be equally near everything, so which of the two
+/// came back would decide whether the stretch after it goes a quarter of the way
+/// round or three quarters.
+fn nearest_longitude(around: &WalkedLoop, at: f64) -> usize {
     (0..around.corners.len())
         .min_by(|&one, &other| {
-            let away =
-                |which: usize| the_short_way_round(around.corners[which][0] - at, whole).abs();
+            let away = |which: usize| (around.corners[which][0] - at).abs();
             away(one).total_cmp(&away(other))
         })
         .expect("a walked loop has a corner")
+}
+
+/// One loop's longitudes moved by whole turns into the frame another was walked
+/// in.
+fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> WalkedLoop {
+    let least = |around: &WalkedLoop| {
+        around
+            .corners
+            .iter()
+            .map(|corner| corner[0])
+            .fold(f64::MAX, f64::min)
+    };
+    let by = ((least(frame) - least(chain)) / whole).round() * whole;
+    WalkedLoop {
+        corners: chain
+            .corners
+            .iter()
+            .map(|corner| [corner[0] + by, corner[1]])
+            .collect(),
+        points: chain.points.clone(),
+    }
 }
 
 /// The same corners with the whole turns put back, so that no step in the chain

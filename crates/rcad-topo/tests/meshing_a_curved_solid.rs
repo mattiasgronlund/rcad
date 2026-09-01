@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Cause, Policy, ProvenanceLog};
-use rcad_topo::{Error, Mesh, Model, ProfileBuilder, SolidKey};
+use rcad_topo::{Error, Mesh, Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 5.0;
@@ -922,4 +922,84 @@ fn every_size_of_bar_and_ball_at_every_coarseness_meshes_into_a_closed_surface()
         checked > 150,
         "only {checked} of the grid meshed at all, which is not a sweep"
     );
+}
+
+/// §31.7 criterion 13, for the shape criterion 11 is the headline of: a fused
+/// curved solid meshes and passes §23.4's oracle in full.
+///
+/// Its answer has the first face in this kernel that is a **ring** — a tube of
+/// the bar's wall between the block's two planes, bounded by two curves that
+/// each go right round the cylinder and by nothing else. It has no seam and
+/// cannot be given one: a seam wants two corners at a single longitude, and the
+/// two curves bounding a tube start wherever the pair that cut each of them
+/// starts. So the seam is put in by the mesher, four times, as a cut in the
+/// surface's own two coordinates rather than as topology anybody has to hold.
+#[test]
+fn a_block_with_a_round_hole_meshes_into_a_closed_surface() {
+    let hole = core::f64::consts::PI * 8.0;
+    for (rule, what, should_be) in [
+        (
+            Rule::Difference,
+            "a block with a hole through it",
+            512.0 - hole,
+        ),
+        (
+            Rule::Union,
+            "a block with a bar sticking out of both sides",
+            512.0 + core::f64::consts::PI * 4.0,
+        ),
+        (
+            Rule::Intersection,
+            "the bit of the bar inside the block",
+            hole,
+        ),
+    ] {
+        let mut model = a_model();
+        let block = model
+            .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a block eight across");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                12.0,
+                &Isometry::translation(Vector::new(4.0, 4.0, -2.0)).expect("a shift"),
+            )
+            .expect("a bar through the middle of it");
+
+        let mut log = ProvenanceLog::new();
+        let fused = model
+            .fuse(&[block], &[bar], rule, &Policy::certified(), &mut log)
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        assert!(
+            log.records().is_empty(),
+            "{what}: a lattice-aligned curved pair needs nothing approximated, got {:?}",
+            log.records()
+        );
+
+        let solids = fused.solids();
+        assert_eq!(solids.len(), 1, "{what} is one solid");
+        for &solid in solids {
+            let mesh = meshed(&model, solid, 0.05);
+            the_mesh_closes_up(&model, solid, &mesh, 0.05);
+
+            // The volume is the strongest thing there is to say about a
+            // curved answer, and it is what says the tube is not inside out:
+            // a wall wound the wrong way takes its own volume off twice.
+            let measured = model
+                .solid(solid)
+                .measure(
+                    Deflection::of(0.01).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} measures: {why}"));
+            let out_by = (measured.volume() - should_be).abs();
+            assert!(
+                out_by < 0.02 * should_be,
+                "{what}: {} against the {should_be} a block of eight and a bar of radius one \
+                 come to, which is {out_by} out",
+                measured.volume()
+            );
+        }
+    }
 }
