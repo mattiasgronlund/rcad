@@ -779,8 +779,12 @@ mod tests {
     /// range and the third leans across it by about `1e-16`, so the meet is at
     /// about `1e315` and no `f64` holds it.
     ///
-    /// A **gap** and not a limit: the same three planes written lower down the
-    /// range are placed, and the second half of this is what says so.
+    /// A **limit**, and §34.10 filed it as a gap. The second half below writes
+    /// the same three planes lower down and they are placed — but that is a
+    /// different triple with a different answer, and *this* triple's answer is a
+    /// point at about `1e315` that no `f64` names. §16.10's two words go by
+    /// whether the answer exists, and here it does not. The refusal is right and
+    /// there is nothing to fix. §39.
     #[test]
     fn three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere() {
         let leaning = [1.0, 1.0, 2f64.powi(-50)];

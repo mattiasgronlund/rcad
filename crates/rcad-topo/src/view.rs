@@ -467,11 +467,17 @@ impl<'m> FaceView<'m> {
     ///
     /// `validate` used to be what made that unreachable, and **it is not any
     /// more**: a curved face is a sound face now, and `add_round_bar` builds
-    /// one. What keeps this sound is [`SolidView::is_wholly_flat`], asked by
-    /// every operation that only handles flat faces before it walks anything.
-    /// So reaching this means an operation skipped that check, which is a bug
-    /// in this crate rather than bad input. Use [`FaceView::surface`] when the
-    /// face might be curved.
+    /// one. What keeps every *in-crate* caller sound is
+    /// [`SolidView::is_wholly_flat`], asked by every operation that only handles
+    /// flat faces before it walks anything, so reaching this from inside the
+    /// kernel is a bug in this crate.
+    ///
+    /// **From outside it is three lines and no bug at all.** This is `pub`,
+    /// [`Model::face`](crate::Model::face) hands out a [`FaceView`] for any key,
+    /// and a bar's wall is curved. That is a documented panic on a stated
+    /// precondition and not §16.11's kind — [`FaceView::surface`] is right here
+    /// and answers for every face — but "rather than bad input" was not true and
+    /// is gone (§39).
     #[must_use]
     pub fn plane(self) -> Plane {
         *self.surface().as_plane().expect(

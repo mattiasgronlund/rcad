@@ -254,11 +254,20 @@ const MOST_POINTS_A_MESH_WILL_HOLD: usize = 4 * 1024 * 1024;
 
 /// How many pieces one face may be cut into before this gives up on it.
 ///
-/// Every cut that happens at all makes both pieces narrower, and four pieces is
-/// the answer for every face this kernel builds — the fuse's rings included,
-/// which are cut across into exactly four. Reaching this means a piece is being
-/// cut without getting any smaller, and it is
-/// [`Error::ACurvedFaceCannotBeCutSmallEnoughToMesh`] rather than an assert
+/// Four pieces is the answer for every face this kernel builds — the fuse's
+/// rings included, which are cut across into exactly four — and a fuse over
+/// curved faces was measured, at deflections from `1e-4` to 3 and turned both
+/// ways, at one or two.
+///
+/// **Reaching this needs sixteen cuts that each *do* make both halves
+/// narrower.** The sentence that used to stand here said the opposite — that
+/// reaching it means a piece is being cut without getting any smaller — and
+/// [`cut_in_two`] is what says otherwise: a cut that does not narrow both halves
+/// hands back `None` and the piece goes straight onto the pile. Naming the one
+/// condition that provably cannot reach an error is worse than naming none,
+/// because it sends whoever hits it looking for the wrong thing.
+///
+/// It is [`Error::ACurvedFaceCannotBeCutSmallEnoughToMesh`] rather than an assert
 /// because `validate` walks this and a face can arrive from a file (§16.11).
 const MOST_PIECES_A_FACE_IS_CUT_INTO: usize = 16;
 

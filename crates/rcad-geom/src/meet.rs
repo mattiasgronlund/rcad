@@ -100,9 +100,13 @@ impl NamedRun {
     ///
     /// Both ends come back as the box that says *nothing at all is known about
     /// where this is*. That is **not** the same as an end that could not be
-    /// worked out, and the two can never be confused: a partly undecidable
-    /// answer refuses whole (`docs/decisions.md` §24.10), so an end a predicate
-    /// gave up on comes back as `Err` and never inside a run.
+    /// worked out, and no route through [`intersect`](crate::intersect) confuses
+    /// them: a partly undecidable answer refuses whole (`docs/decisions.md`
+    /// §24.10), so an end a predicate gave up on comes back as `Err` and never
+    /// inside a run. The type does not carry that — [`NamedRun::new`] is `pub`
+    /// and checks only the closed-run rule, and `Interval::ENTIRE` is `pub` too,
+    /// so a caller can build the confusion by hand. Nothing in this crate does
+    /// (§39).
     ///
     /// A crossing can still come in more than one piece with no ends anywhere —
     /// a plane running down the inside of a pipe cuts two endless lines — and

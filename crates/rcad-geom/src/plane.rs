@@ -417,6 +417,20 @@ impl Plane {
     /// line, or two of them are parallel, and there is no single meeting point —
     /// or when they are close enough to that for the determinant not to be
     /// bounded away from zero.
+    ///
+    /// # And one thing it does not refuse
+    ///
+    /// **`Ok` can hold a box with a side that runs the whole number line.**
+    /// Cramer's rule divides one interval determinant by another and checks
+    /// neither for overflow, so three planes that meet past the top of `f64`'s
+    /// range come back as a box that says nothing at all — which a caller would
+    /// read as a place. Ask `uncertainty().is_finite()` before believing one.
+    /// [`meet_of_three_surfaces`](crate::meet_of_three_surfaces) does, and treats
+    /// it as the refusal it is;
+    /// `three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere`
+    /// is the demonstration. The **limit** underneath it is real — no `f64`
+    /// triple names a point at `1e315` — and `docs/decisions.md` §39 corrects
+    /// §34.10, which filed it as a gap.
     pub fn meet_of_three(first: &Plane, second: &Plane, third: &Plane) -> Result<PredicatePoint> {
         Ok(meet_of_three_planes(
             first.coefficients(),

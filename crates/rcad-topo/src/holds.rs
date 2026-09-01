@@ -139,9 +139,18 @@ impl<'m> SolidView<'m> {
 /// straight back onto the plane, so the step grows until the plane's own
 /// predicate says [`Decision::Pos`] about where it landed.
 ///
-/// `None` when doubling sixty times never gets off the plane, which needs a
-/// normal that is not a real number: a plane built by a constructor here has a
-/// unit one, and sixty doublings of it clears any finite coordinate.
+/// `None` when doubling sixty times never gets off the plane. The sentence that
+/// used to stand here said that needs a normal that is not a real number, and
+/// named the wrong end of the range: the step *starts* at the corner's own
+/// magnitude, so a corner at `f64::MAX` on a plane whose normal is not along an
+/// axis overflows on the very first try and every doubling after it, and the
+/// answer is `None` with a perfectly good answer available at a *smaller* step.
+/// A **gap**, and it is the flat second cause of
+/// [`Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`] that §35.11 records
+/// only the curved one of. Nothing a builder here makes reaches it — every
+/// constructor refuses a model whose dynamic range is that wide — and
+/// [`Model`](crate::Model) is `Deserialize`, so it is a refusal rather than a
+/// wrong answer and §39 hands it on with the other three the audit found.
 fn a_point_off_the_plane(face: FaceView<'_>, plane: &Plane) -> Option<Point> {
     let from = face
         .wires()

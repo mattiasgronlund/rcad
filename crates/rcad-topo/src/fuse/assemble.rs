@@ -1400,18 +1400,28 @@ impl Edge {
     /// That field is there for a run whose two faces are the *same* surface — a
     /// ball's seam — and names the second one. An arc's two faces already name
     /// both, so either is a true answer, and what picks between them is a check:
-    /// `Model::validate` asks that both ends read **exactly** `Zero` against
-    /// `and`, and a corner this fuse solved for is exactly on a plane it was
-    /// solved from and only within its own box on a quadric. So the flat one goes
-    /// in wherever there is one, and `name_of_surface_bits` gives that for free
-    /// by sorting a plane ahead of a ball or a pipe.
+    /// `Model::validate` asks that both ends are not *provably* off `and`, and a
+    /// flat `and` is the cheapest of the three to be sure about. So the flat one
+    /// goes in wherever there is one, and `name_of_surface_bits` gives that for
+    /// free by sorting a plane ahead of a ball or a pipe.
+    ///
+    /// **The sentence that used to stand here said the check was an exact
+    /// `Zero`, and that a corner this fuse solved for is exactly on a plane it
+    /// was solved from.** Both halves were wrong, and the second is why nobody
+    /// checked the first: a corner is `through + t·direction` over a divisor, and
+    /// it lands on the plane exactly only when the line's direction is
+    /// axis-aligned. A block turned against a bar is enough to break it, and the
+    /// fix is the one the old sentence named as future work — the same slop
+    /// `check_curved_face` reads off a solved corner (§36.13), read in
+    /// `check_edges` too. §39.
     ///
     /// A crossing with **two** curved surfaces and two ends is a pair of balls
-    /// cut twice, and nothing builds one: `ACurvedFaceGoesRightRoundWithNoSeam`
-    /// refuses two balls united before an arc of them is ever named
-    /// (§36.23). When that stops being true, what has to give is the check — the
-    /// same slop `check_curved_face` already reads off a solved corner (§36.13),
-    /// read here too — and not this choice.
+    /// cut twice. Two balls united refuse `ACurvedFaceGoesRightRoundWithNoSeam`
+    /// before an arc of them is ever named (§36.23), and that is one shape of the
+    /// family rather than the family: `fuse([ballA], [ballB, cube])` is a pair of
+    /// balls cut twice and is reachable. What stops *it* is a crate down —
+    /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, because a corner of such an arc
+    /// has two quadrics round it (§31.2's limit under row 4).
     fn the_surface_that_names_it_twice(&self) -> Surface {
         let mut either = self.carried_by;
         either.sort_by_key(name_of_surface_bits);
