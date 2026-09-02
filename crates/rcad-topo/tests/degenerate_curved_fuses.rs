@@ -632,25 +632,43 @@ fn a_ball_cut_by_a_plane_that_crosses_its_seam_once_is_answered() {
     );
 }
 
-/// The same ball cut by `x = 2` instead, where the crossing circle meets the
-/// seam **twice**, is refused by name.
+/// The same ball cut by `x = 2` instead: the cap is answered and what is left
+/// round it is refused by name.
 ///
-/// The circle `x = 2` on that ball meets the plane `y = 0` at `(2, 0, ±√12)`,
-/// and both of those have `x ≥ 0`, so both are on the seam. One crossing works
-/// and two do not, and the two cuts differ in nothing else: same ball, same
-/// knife, same lattice, one axis.
+/// **How many times the cut meets the seam is not what decides it, and this row
+/// used to say it was.** The circle `x = 2` meets the seam at `(2, 0, ±√12)`,
+/// twice against `z = 2`'s once, and this refused where `z = 2` answered — but
+/// the seam is not the difference. `z = 2` cuts the ball into two pieces each
+/// holding one pole; `x = 2` cuts it into a cap holding **no** pole and a
+/// remainder holding **both**. The cap is answered here, at `40π/3`, exactly as
+/// `z = 2`'s is. Only the both-pole piece refuses, and it refuses because
+/// nothing writes a cut closed face with a seam and two poles of its own
+/// (§38.3). The seam-crossing count is a coincidence of these two knives.
 #[test]
-fn a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name() {
+fn a_ball_cut_off_its_polar_axis_keeps_the_cap_and_refuses_what_is_round_it() {
+    let cap = PI * 4.0 * 10.0 / 3.0;
+
     let mut model = a_model();
     let ball = model
         .add_ball(4.0, &Isometry::identity())
         .expect("a ball of radius four");
     let knife = block(&mut model, [12.0, 12.0, 12.0], Vector::new(2.0, -6.0, -6.0));
     let pair = Pair::of(ball, knife);
+    let above = fused(&mut model, &pair, Rule::Intersection);
+    assert_eq!(above.solids().len(), 1, "the cap beyond x = 2 is one solid");
+    measures(volume_of(&model, above.solids()), cap, Side::Under);
 
-    match refusal(&mut model, &pair, Rule::Union, &Policy::certified()) {
-        Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => (),
-        other => panic!("a cut meeting the seam twice refused with {other:?}"),
+    for rule in [Rule::Union, Rule::Difference] {
+        let mut model = a_model();
+        let ball = model
+            .add_ball(4.0, &Isometry::identity())
+            .expect("a ball of radius four");
+        let knife = block(&mut model, [12.0, 12.0, 12.0], Vector::new(2.0, -6.0, -6.0));
+        let pair = Pair::of(ball, knife);
+        match refusal(&mut model, &pair, rule, &Policy::certified()) {
+            Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => (),
+            other => panic!("{rule:?} of a ball and a knife off its axis gave {other:?}"),
+        }
     }
 }
 
@@ -1555,7 +1573,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             pair: "a ball cut by a plane meeting its seam twice",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name",
+                test: "a_ball_cut_off_its_polar_axis_keeps_the_cap_and_refuses_what_is_round_it",
             },
         },
         Entry {
