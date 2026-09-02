@@ -98,6 +98,7 @@ impl Model {
     }
 
     fn check_edges(&self) -> Result<()> {
+        let rounding = self.what_writing_a_plane_down_costs();
         for (slot, edge) in &self.data().edges {
             let (Some(start), Some(end)) = (
                 self.data().vertices.get(edge.start),
@@ -131,6 +132,12 @@ impl Model {
             // both surfaces of it, and inside every half-space that was used to
             // pick which piece it is. Otherwise the name describes a curve this
             // edge is not on, and nothing else in the kernel would notice.
+            //
+            // A plane is asked with `what_writing_a_plane_down_costs` of room,
+            // which is the same allowance `check_flat_face` gives a corner
+            // against the plane its face *sits* on. Asking a stored *name* more
+            // strictly than the surface a face is actually carried by had it
+            // backwards: it refused corners for the rounding in the name.
             if let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &edge.run {
                 for corner in [start, end] {
                     let at = PredicatePoint::from(corner.point.coordinates());
@@ -142,6 +149,11 @@ impl Model {
                         // lands *near* each of them and exactly on one only when
                         // the arithmetic happened to be exact.
                         _ if not_provably_off(and, corner.point, corner.approximation) => {}
+                        _ if off_a_plane_by_no_more_than_writing_it_down_cost(
+                            and,
+                            corner.point,
+                            rounding,
+                        ) => {}
                         Decision::Pos | Decision::Neg => {
                             return Err(Invalid::VertexOffItsFaceSurface.into());
                         }
@@ -630,18 +642,36 @@ impl Model {
     /// itself is allowed to be — a face built here is exactly planar in the
     /// model's own frame, so this is only taking up the slack in fitting a
     /// plane through corners that arrived from somewhere else. The second is
-    /// how far off our own *measurement* of it could be: what the plane says
-    /// its own arithmetic costs, times the largest coordinate in the model,
-    /// times [`MEASURING_SLACK`].
+    /// [`Model::what_writing_a_plane_down_costs`].
+    ///
+    /// **Only the second half is allowed against a plane an edge is merely
+    /// *named* by** — see that function.
     fn allowed_wobble(&self) -> f64 {
+        self.scale().default_linear_tolerance() + self.what_writing_a_plane_down_costs()
+    }
+
+    /// How far off a plane a point exactly on it can read, purely because the
+    /// plane was written down in `f64`.
+    ///
+    /// [`Plane`] scales its normal to length one and rounds its offset, so the
+    /// plane the numbers *are* is a few ulps from the plane the numbers *mean*,
+    /// and a point exactly on the second reads a nonzero distance to the first.
+    /// That is what the plane says its own arithmetic costs
+    /// ([`Plane::SIGNED_DISTANCE_ROUNDOFF`]) times the largest coordinate in the
+    /// model, times [`MEASURING_SLACK`].
+    ///
+    /// **It is not a modelling tolerance and nothing here may turn it into
+    /// one.** It is the width of the number: a corner inside it is one no `f64`
+    /// could have written any nearer, and a corner outside it is off a plane
+    /// somebody chose rather than off a plane that rounded.
+    fn what_writing_a_plane_down_costs(&self) -> f64 {
         let largest = self
             .data()
             .vertices
             .values()
             .map(|vertex| vertex.point.largest_coordinate_magnitude())
             .fold(0.0, f64::max);
-        self.scale().default_linear_tolerance()
-            + MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * largest
+        MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * largest
     }
 }
 
@@ -1203,6 +1233,37 @@ fn not_provably_off(surface: &Surface, point: Point, slop: Option<Approximation>
     )
 }
 
+/// Whether the surface an edge is *named* by is a plane, and the corner is off
+/// it by no more than writing that plane down in `f64` cost.
+///
+/// **The two standards this kernel had, made one.** `check_flat_face` allows a
+/// corner one [`Model::allowed_wobble`] against the plane its face is *carried
+/// by*; `check_edges` allowed a corner nothing at all against the plane an arc
+/// is merely *named* by, which is the weaker claim of the two asked the harder
+/// way round. An arc's plane is exactly where the mismatch bites: a circle's
+/// plane is built through a point with a normal that gets scaled to length one,
+/// so a corner exactly on the circle reads a nonzero distance to the stored
+/// plane unless the numbers happen to cancel — which they do only for an
+/// axis-aligned circle whose ends share the centre's coordinate along the axis.
+/// Every other arc was refused for the rounding in its own name.
+///
+/// `a_plane_through_a_point_does_not_put_that_point_exactly_on_itself` is that
+/// rounding, demonstrated on one plane and one point rather than argued.
+///
+/// **A plane and nothing else.** A sphere, a pipe, a cone and a ring have a
+/// value rather than a signed length, so there is no distance here to compare;
+/// a corner named by one of those is still asked exactly, and the width it
+/// carries on itself is [`not_provably_off`]'s question.
+fn off_a_plane_by_no_more_than_writing_it_down_cost(
+    surface: &Surface,
+    point: Point,
+    rounding: f64,
+) -> bool {
+    surface
+        .as_plane()
+        .is_some_and(|flat| flat.signed_distance_to(point).abs() <= rounding)
+}
+
 /// Which way `wire` winds round `normal`.
 ///
 /// [`Decision::Pos`] with it, [`Decision::Neg`] against it, [`Decision::Zero`]
@@ -1608,6 +1669,86 @@ mod tests {
         *and = Surface::Plane(moved);
 
         assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// The rounding the allowance above exists for, on one plane and one point.
+    ///
+    /// `(0, −10, −8)` dotted with `(−9, −4, 5)` is `40 − 40` and the point is
+    /// exactly on the plane through the origin with that normal. The stored
+    /// plane is not that plane: the normal is divided by its largest component
+    /// and then scaled to length one, and neither division is exact, so the
+    /// point reads a fifth of a coordinate spacing off a plane it is on.
+    ///
+    /// **Nothing anywhere can make this number zero**, which is why the
+    /// allowance is not a tolerance. Every arc a real file names is one of
+    /// these: its plane is written down as a centre and an axis, and its
+    /// corners are other points.
+    #[test]
+    fn a_plane_through_a_point_does_not_put_that_point_exactly_on_itself() {
+        let named_by_an_axis =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, -10.0, -8.0))
+                .expect("a direction with length");
+        let on_it = Point::new(-9.0, -4.0, 5.0);
+
+        let off_by = named_by_an_axis.signed_distance_to(on_it).abs();
+        let spacing = on_it.largest_coordinate_magnitude() * f64::EPSILON;
+        assert!(
+            off_by > 0.0,
+            "the whole point is that writing the plane down rounds"
+        );
+        assert!(
+            off_by < spacing,
+            "{off_by} should be under one coordinate spacing {spacing}"
+        );
+    }
+
+    /// A corner off the plane its arc is *named* by, by no more than writing
+    /// that plane down cost, is let through.
+    ///
+    /// The same allowance `check_flat_face` gives a corner against the plane its
+    /// face is carried by, and it is here because a name is the *weaker* claim
+    /// of the two and was being asked the harder way round.
+    ///
+    /// The ball's seam plane is nudged along its own normal, which is what a
+    /// file that wrote the plane a few ulps off does, and the poles stay exactly
+    /// on the sphere so nothing else in the sweep has an opinion.
+    #[test]
+    fn a_corner_off_the_plane_of_its_arc_by_the_rounding_in_that_plane_is_let_through() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+        let rounding = model.what_writing_a_plane_down_costs();
+
+        nudge_the_seam_plane(&mut model, rounding / 2.0);
+
+        a_clean_sweep(&model);
+    }
+
+    #[test]
+    fn a_corner_further_off_the_plane_of_its_arc_than_that_is_caught() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+        let rounding = model.what_writing_a_plane_down_costs();
+
+        nudge_the_seam_plane(&mut model, rounding * 2.0);
+
+        assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// Slide the plane a ball's seam is named by along its own normal.
+    fn nudge_the_seam_plane(model: &mut Model, by: f64) {
+        let edge = model.data().edges.keys().next().expect("the seam");
+        let moved =
+            Plane::from_point_and_normal(Point::new(0.0, by, 0.0), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal");
+        let EdgeRun::PartOfWhereItCrosses { and, .. } = &mut model.data_mut().edges[edge].run
+        else {
+            panic!("a ball's seam is named by a crossing")
+        };
+        *and = Surface::Plane(moved);
     }
 
     /// And it has to be inside the half-spaces that picked which part it is.
