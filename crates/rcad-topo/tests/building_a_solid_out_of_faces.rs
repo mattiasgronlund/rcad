@@ -29,8 +29,8 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, Error as GeomError, HalfSpace, Isometry, Orientation,
-    Picker, Plane, Point, Scale, Surface, Vector,
+    Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point,
+    Scale, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
@@ -146,10 +146,10 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// today** — not a plane-bounded block, not a second bend on the bend's own
 /// axis, not even a bit-for-bit copy of the bend itself
 /// (`a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule` in
-/// `how_often_a_fuse_with_a_torus_refuses.rs` is the demonstration: a fuse
-/// asks where three surfaces meet before it asks what two of them cross in,
-/// and a line meets a torus four times whatever the pair is, so the refusal
-/// fires before either surface's shape or the tool's placement is read).
+/// `how_often_a_fuse_with_a_torus_refuses.rs` is the demonstration: the corner
+/// search answers now — a straight line meets a torus in up to four places and
+/// each of them is worked out — and the arrangement gives up one step later,
+/// on putting the corners it found in order along the curve they sit on).
 ///
 /// So the fuse half of the oracle here compares the **refusal**: the same
 /// rule against the same third solid must refuse the same way for both.
@@ -205,11 +205,8 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let refusal_of_rebuilt =
         refused_fusing_a_third_solid(&model, rebuilt, &a_turned_bend_of_the_same_ring_and_tube);
     assert!(
-        matches!(
-            refusal_of_built,
-            Error::Geometry(GeomError::WhereALineMeetsATorusIsAQuartic)
-        ),
-        "expected the corner search to refuse on the torus's own quartic, got \
+        matches!(refusal_of_built, Error::ACrossingThisCannotBeOrderedAlong),
+        "expected the arrangement to refuse on ordering points along the crossing, got \
          {refusal_of_built:?}"
     );
     assert_eq!(

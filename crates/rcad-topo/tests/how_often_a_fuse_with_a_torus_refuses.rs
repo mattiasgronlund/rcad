@@ -29,18 +29,20 @@
 //! for every family below, how many of the tool's planes fall in each of the
 //! three rows.
 //!
-//! # One refusal answers for all five, and it is not the one this lane built
+//! # One refusal answers for all five, and it has moved crates
 //!
-//! Every bend family below comes back
-//! `WhereALineMeetsATorusIsAQuartic` and never
-//! `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`. That is the arrangement's
-//! order and not an accident: a fuse asks **where three surfaces meet** before
-//! it asks what two of them cross in, and a line meets a torus four times
-//! whatever the pair is. So the crossing refusals this lane named are correct
-//! and are reachable from `intersect`, and *no fuse reaches them* — which means
-//! naming the plane-and-torus quartic buys a fuse nothing until the
-//! three-surface quartic is solved too, and that is worth knowing before
-//! somebody spends a lane on the first alone.
+//! Every bend family below comes back `Error::ACrossingThisCannotBeOrderedAlong`,
+//! raised in `fuse/arrange.rs`. It used to be `WhereALineMeetsATorusIsAQuartic`
+//! from `rcad-geom`, refused on surface *type* before a root was worked out;
+//! that is no longer true of anything. Where a straight line meets a torus is
+//! answered now, in nought, one, two, three or four places, so the arrangement
+//! finds every corner a bend has and then gives up one step later — on putting
+//! those corners in order along the curve they sit on.
+//!
+//! So the refusal has walked one stage down the pipeline and the rate has not
+//! moved. That the rate did not move is the useful half: the corner search was
+//! never the only thing in the way, and a lane that fixes the ordering is what
+//! tells us whether it was the last.
 //!
 //! # The control is the whole reason these numbers mean anything
 //!
@@ -68,7 +70,7 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Error as GeomError, Isometry, Point, Scale, Vector};
+use rcad_geom::{Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -412,13 +414,13 @@ fn no_box_of_planes_can_close_round_a_torus_axis_without_a_quartic() {
 /// solids already agree on exactly.
 ///
 /// It refuses anyway, under all three rules, and always with the same
-/// complaint: `fuse/arrange.rs` asks where three surfaces meet **before** it
-/// asks what two of them cross in, and a straight line meets a torus in a
-/// quartic whatever the pair behind it is — the same reason
-/// `WhereALineMeetsATorusIsAQuartic` answers for every family in
-/// `how_often_a_certified_fuse_with_a_torus_in_it_refuses`. So this is not
-/// four more measurements of the same thing; it is the demonstration that
-/// there is no tool, drawn or undrawn, this kernel fuses a bend with today.
+/// complaint: the corners are all found, and then `fuse/arrange.rs` cannot put
+/// them in order along the curve they sit on — the same
+/// `ACrossingThisCannotBeOrderedAlong` every family in
+/// `how_often_a_certified_fuse_with_a_torus_in_it_refuses` comes back with. So
+/// this is not four more measurements of the same thing; it is the
+/// demonstration that there is no tool, drawn or undrawn, this kernel fuses a
+/// bend with today.
 #[test]
 fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
     let policy = Policy::certified();
@@ -430,12 +432,9 @@ fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
         let mut log = ProvenanceLog::new();
         let refused = model.fuse(&[first], &[second], rule, &policy, &mut log);
         assert!(
-            matches!(
-                refused,
-                Err(Error::Geometry(GeomError::WhereALineMeetsATorusIsAQuartic))
-            ),
-            "{rule:?} of a bend and a bit-for-bit copy of itself: expected the three-surface \
-             quartic to refuse it, got {refused:?}"
+            matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong)),
+            "{rule:?} of a bend and a bit-for-bit copy of itself: expected the ordering along \
+             the crossing to refuse it, got {refused:?}"
         );
     }
 }
