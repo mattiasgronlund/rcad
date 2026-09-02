@@ -100,12 +100,16 @@ pub enum Refusal {
 
     /// A face with several bounds and no `FACE_OUTER_BOUND` among them.
     ///
-    /// **Gap.** `SolidBuilder::add_face` takes the outer wire first and the
-    /// holes after, and with several `FACE_BOUND`s and no outer one the file
-    /// has not said which is which. Working it out is geometry — which loop
-    /// encloses the others on this surface — and this reader does no geometry
-    /// the file did not write down. A face with exactly one bound is not this:
-    /// the one bound is the outer one and it is taken.
+    /// **Limit.** With several `FACE_BOUND`s and no `FACE_OUTER_BOUND`, what
+    /// says which is outer is the way each winds — ISO winds an outline one way
+    /// round the face's normal and a hole the other — and this is what is left
+    /// when *none* of them winds forwards or *several* do. Either way the file
+    /// has said something that is not a face.
+    ///
+    /// Neither corpus reaches it: 0 of 44 and 0 of 323. What used to reach it,
+    /// 23 KiCad files, were faces bounded by two half-circles, whose corners
+    /// are two points and no polygon at all — and reading those needed an arc's
+    /// bulge past its own chord rather than a wider refusal.
     #[error("{face} has {bounds} bounds and none of them is a FACE_OUTER_BOUND")]
     AFaceThatDoesNotSayWhichBoundIsTheOuterOne {
         /// The face.

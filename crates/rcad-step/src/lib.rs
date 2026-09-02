@@ -1,10 +1,52 @@
-//! Reads an ISO 10303-21 file — a STEP "Part 21" file — into an entity graph.
+//! Reads an ISO 10303-21 file — a STEP "Part 21" file — into an entity graph,
+//! and that graph's solids into a [`Model`](rcad_topo::Model).
 //!
-//! This is the half of a STEP importer that turns bytes into entities. It does
-//! not know what an `ADVANCED_FACE` means, does not build geometry, and never
-//! mentions a `Model`. What it hands back is exactly what the file said: a
-//! header, a list of instances in file order, and an index from `#123` to the
-//! instance it names (decisions.md §42.10, lane 3's first half).
+//! **This reader maps solids bounded by planes, spheres, cylinders, cones and
+//! tori, whose edges run along straight lines, circles and ellipses. Every
+//! other surface and curve kind is refused by the name the file gives it. A
+//! model that imports is internally sound and is not checked for interference
+//! with anything else in the file.** That is §42.11's opening sentence, and it
+//! is the first thing to know.
+//!
+//! # Two halves
+//!
+//! [`StepFile::read`] turns bytes into entities. It does not know what an
+//! `ADVANCED_FACE` means, does not build geometry, and never mentions a
+//! `Model`: what it hands back is exactly what the file said, a header, a list
+//! of instances in file order, and an index from `#123` to the instance it
+//! names.
+//!
+//! [`Import::read`] walks that graph — `manifold_solid_brep`, `closed_shell`,
+//! `advanced_face`, `face_bound`, `edge_loop`, `oriented_edge`, `edge_curve`,
+//! `vertex_point` — into one `Model`, or refuses it by a [`Refusal`] that says
+//! which `#id` stopped it and why.
+//!
+//! # How often a real file imports
+//!
+//! Measured, per corpus, never blended, by
+//! `crates/rcad-step/tests/how_often_a_real_file_imports.rs`:
+//!
+//! | | files | imported |
+//! |---|---:|---:|
+//! | files this kernel wrote itself (the control) | 88 | **88** |
+//! | `kicad/`, KiCad's own footprint library | 323 | **46** |
+//! | `nist/`, ASME Y14.5 GD&T certification parts | 44 | **0** |
+//!
+//! The two real corpora are different populations and are never added together.
+//! What refuses the rest is grouped and counted in that test's own output, and
+//! the two biggest are not about this reader: a face bounded by two steps,
+//! which this kernel has no wire for, and a corner the file puts on a curved
+//! face that an exact predicate says is not on it.
+//!
+//! # Nothing is converted and nothing is healed
+//!
+//! A file written in inches comes back in inches, with the numbers the file
+//! wrote. [`Scale`](rcad_geom::Scale) carries a unit and never multiplies by
+//! one, so there is no conversion to round (decisions.md §3.5); a unit this
+//! kernel has no name for is refused rather than scaled into one it has.
+//! The declared uncertainty is read and published by
+//! [`Import::declared_uncertainty`] and **never acted on**: no predicate
+//! anywhere is asked a different question because of it.
 //!
 //! ```
 //! use rcad_step::{StepFile, Value};
