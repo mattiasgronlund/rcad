@@ -656,3 +656,88 @@ fn a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike() 
         "the bar has to answer some and refuse some, or it is not a control"
     );
 }
+
+/// `A ∪ B` is `B ∪ A` and `A ∩ B` is `B ∩ A`, over every cone pair that answers.
+///
+/// The metamorphic half of `fuses_that_must_agree.rs`, over a surface kind that
+/// did not exist when that file was written. Union and intersection are the two
+/// rules that commute; difference does not and is left out rather than fudged.
+///
+/// **Compared on the answer's own geometry and not on a measurement of it**, and
+/// the first attempt at this compared measurements and failed by `5e-14` on a
+/// volume of 220. That was not the fuse disagreeing: the two answers are the
+/// same solid, and what differed was where each mesh happened to start round the
+/// cone. A measurement is a mesh away from the thing being compared, so the
+/// comparison is on what the fuse actually wrote — every corner of every face,
+/// bit for bit.
+///
+/// **The count that answered is printed and floored**, because a family that
+/// refused every fuse would satisfy this vacuously — §14.7's rule, and the whole
+/// reason the two rates above are reported rather than assumed.
+#[test]
+fn uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_asked() {
+    let policy = Policy::certified();
+    let mut compared = 0;
+    let mut both_refused = 0;
+
+    for family in [
+        Family::AFrustumAgainstACornerUpCube,
+        Family::APointedConeAgainstACornerUpCube,
+    ] {
+        let mut draw = Draw(0x5EED);
+        for _ in 0..DRAWS {
+            let Some((model, cone, cube)) = a_pair(family, &mut draw) else {
+                continue;
+            };
+            for rule in [Rule::Union, Rule::Intersection] {
+                let written = |arguments: [SolidKey; 1], tools: [SolidKey; 1]| {
+                    let mut copy = model.clone();
+                    let answer =
+                        copy.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())?;
+                    let keys: Vec<SolidKey> = answer.solids().to_vec();
+                    copy.validate(&policy, &mut ProvenanceLog::new())?;
+                    let mut corners: Vec<[u64; 3]> = Vec::new();
+                    for piece in keys {
+                        for face in copy.solid(piece).faces() {
+                            for wire in face.wires() {
+                                for at in wire.points() {
+                                    corners.push(at.coordinates().map(f64::to_bits));
+                                }
+                            }
+                        }
+                    }
+                    corners.sort_unstable();
+                    Ok::<_, rcad_topo::Error>(corners)
+                };
+                match (written([cone], [cube]), written([cube], [cone])) {
+                    (Ok(one), Ok(other)) => {
+                        assert!(
+                            !one.is_empty(),
+                            "{rule:?} of a cone and a cube came back with no corners at all"
+                        );
+                        assert_eq!(
+                            one, other,
+                            "{rule:?} of a cone and a cube wrote different corners depending on \
+                             which was named first"
+                        );
+                        compared += 1;
+                    }
+                    (Err(_), Err(_)) => both_refused += 1,
+                    // One way round answered and the other refused, which is
+                    // allowed: a refusal is about the arithmetic and the two
+                    // orders ask different questions of it. Nothing to compare.
+                    _ => (),
+                }
+            }
+        }
+    }
+
+    println!(
+        "a cone and a corner-up cube, both ways round: {compared} pairs compared, \
+         {both_refused} refused both ways"
+    );
+    assert!(
+        compared >= 4,
+        "only {compared} pairs were ever compared, so this proved almost nothing"
+    );
+}
