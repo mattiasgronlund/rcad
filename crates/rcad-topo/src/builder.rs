@@ -41,15 +41,18 @@ use crate::{Error, Model, Result, SolidKey};
 /// entities.
 ///
 /// **There is no placement argument, and that is a gap rather than a limit**
-/// (§16.10). An [`EdgeRun::PartOfWhereItCrosses`] carries
-/// [`Picker`](rcad_geom::Picker)s; `HalfSpace` and `Picker` have `shifted` and
-/// nothing else, so a `build` taking an [`Isometry`] could not move an arc's own
-/// name with it and would have to refuse every turned arc. The answer plainly
-/// exists — a half-space stores four raw numbers and a movement takes
-/// `(n, d)` to `(Rn, d + Rn·t)`, exact wherever `R` is — and the family of fixes
-/// is one function, `HalfSpace::transformed`, in a crate this lane does not own
-/// (§15.9). What calls it due is a reader that wants to place an occurrence
-/// without redescribing its points.
+/// (§16.10). It used to be an arithmetic gap: an
+/// [`EdgeRun::PartOfWhereItCrosses`] carries [`Picker`](rcad_geom::Picker)s, and
+/// `HalfSpace` and `Picker` had `shifted` and nothing else, so a `build` taking
+/// an [`Isometry`] could not move an arc's own name with it. That half is
+/// built — [`HalfSpace::transformed`](rcad_geom::HalfSpace::transformed),
+/// [`Picker::transformed`](rcad_geom::Picker::transformed) and
+/// [`EdgeRun::transformed`](rcad_geom::EdgeRun::transformed) all take
+/// `(n, d)` to `(Rn, d + Rn·t)`, exact wherever `R` is — so what is left is
+/// entirely in this crate: moving each point and each run on the way in, and
+/// saying which of the movement's roundings the caller is buying. What calls it
+/// due is a reader that wants to place an occurrence without redescribing its
+/// points.
 ///
 /// # Errors
 ///

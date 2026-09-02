@@ -289,7 +289,7 @@ fn walk_one_outline(
         return Ok(Some(0));
     }
     for coedge in wire.coedges() {
-        if coedge.edge().run() != &EdgeRun::Straight {
+        if coedge.edge().stored_run() != &EdgeRun::Straight {
             return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() });
         }
     }
