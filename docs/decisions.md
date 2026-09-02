@@ -11222,3 +11222,733 @@ A count is a baseline with a baseline's failure mode: a legitimate new panicking
 wildcard fails the check until the number is committed with it. That is the same
 deal a golden file makes, and it is the reason the number lives next to the
 recipe rather than in a file nobody reads.
+
+---
+## 41. Five of §39.7's seventeen, and the first of them is still open two units deeper, recorded 2026-09-02
+
+*Written by the gate that closed M5's first fan. §38 did this for §37's four
+defects. Three lanes ran in sequence on one branch and closed §39.7's items 1, 2,
+3, 4 and 7 — the five §39.7 ranked first. This section is the record, and the
+audit that had to happen before the record could be written.*
+
+**Every load-bearing number below was re-derived at this gate, not copied from a
+lane's report.** §39.3 records that the claim audit has found a real defect on
+five consecutive milestones; §16.10 records why. What is new here is that the
+same discipline was pointed at the lanes' own reports, and it caught three
+things: a numeral that was wrong, an impossibility argument that ruled out the
+half of a family that does not work and read as ruling out the half that does,
+and **the headline item, which is closed at the one depth its two new tests pin
+and open at another**. §41.6 is that one. A gate that finds nothing has usually
+not looked.
+
+| §39.7 | what it was | now |
+|---|---|---|
+| 1. a ball cut anywhere but through a pole is refused, and a rigid motion of both operands changes the answer | one wire made of one closed edge was **assumed** to run right round the surface, and on a ball a closed edge is any circle at all | **answered** at the depth §39.3 measured — all three axes, all 21 angles of the sweep. **Not closed in general**: §41.6 |
+| 2. the fuse bakes a placement in and the mesh floor goes up 77-fold | the crossing term is charged against how far the face reaches in the frame it is *stored* in, and after a fuse "stored" is "world" | **answered** — the mesher shifts a far-off face into a frame where its numbers are small, exactly, and the 76.85 is 1.4444 |
+| 3. three panics on a caller's bytes, demonstrated | `validate` on a closed edge between two flat faces, `mesh`/`measure` on a closed edge with two different ends, `mesh` on a wire fanned onto the wrong surface | **all three refuse by name** |
+| 4. the rule that generalises them: a `# Panics` clause on a `pub` item needs a demonstration that the arenas cannot hold the shape | fifty-eight such clauses stood unswept | **swept, all fifty-eight.** Five more real ones found and fixed; two suspects the brief named were doc-only and are now cited to a demonstration |
+| 7. `meet_of_three_planes` refuses three perpendicular planes written at `1e-200` | the determinant's one surviving term underflows past the smallest subnormal | **answered** — a retry with each plane scaled by its own exact power of two |
+
+**Two of the five were closed by reconditioning the arithmetic rather than by
+widening a bound, and that is now a pattern with a name.** Item 7 divides each
+plane's four coefficients by a power of two before the determinants; item 2
+subtracts an exact offset off a face's coordinates before the mesh is worked out.
+Neither moved a published constant. §18 said scaling is a technique and not only
+an oracle; these are the third and fourth times it has been the whole of a fix,
+and §41.5 finds a fifth candidate sitting unfixed in `Isometry`. **When a bound
+looks too wide, the question to ask first is what the arithmetic was handed, not
+what the constant says.**
+
+### 41.1 A ball cut off its polar axis, and the confident wrong answer underneath it
+
+§39.7 item 1 was first on the list because it is a **§19 violation** — turning
+ball and slab together flipped a working answer into a refusal at
+`acos(1/4) = 1.3181` radians — and §19 is the property this kernel sells.
+
+**The root cause is one line, and it is not the one §39.3 was looking at.**
+`WalkedLoop::goes_right_round` was set from `wire.closes_on_one_edge()`, a
+*structural* fact, on the argument that *"one coedge whose two ends are one corner
+runs right round the curve its two faces cross in, which on a periodic surface is
+right round the surface."* The second half is false on a sphere: a closed edge on
+a ball is **any circle at all**, and most circles encircle no pole. So a cap that
+does not go round the ball was sent to `cut_a_cap_up_to_its_pole`, which found no
+pole to fan to along `y` and the **wrong** pole along `x`. Measured at this gate
+on `main`, with the two raise sites of the name instrumented apart:
+
+| axis | on `main` | where the refusal is raised |
+|---|---|---|
+| `z` | `Ok`, one solid | — |
+| `y` | `ACurvedFaceGoesRightRoundWithNoSeam` | `mesh.rs`, **not** `arrange.rs` |
+| `x` | `CannotMeshAFace { BoundaryCrossesItself { at: 4 } }` | the triangulator, handed four patches fanned to a pole the cap does not reach |
+
+`goes_right_round` is now **measured** rather than asserted — the walk has to gain
+at least half a turn of longitude all the way round — which can only turn `true`
+into `false`, so no wire that meshed before takes a new path.
+
+**And that uncovered the deeper defect.** With both caps down the generic path
+they came back with the right volume and were walked **opposite ways round** in
+the surface's own two coordinates: signed chart area `+3.4748599566989133` at
+`y = 1` and `−3.4748599566989133` at `x = 1`, same magnitude, opposite sign, for
+two caps that are one cap turned a quarter turn. The sign of that area *is* which
+side of the loop the material is on, and it disagreed with itself.
+
+The cause is §23.8's own failure mode one function over: `mesh.rs` re-derived
+"which way is this closed edge stored running" by **summing the longitude all the
+way round the edge** and leaving the evaluator's order alone when the sum came out
+zero, while the fuse chose the coedge orientation from the **analytic** rule
+(`a_closed_crossing_is_walked_the_way_it_is_stored`). The sum is exactly zero and
+not merely small: on a ball of radius `r` at the origin cut by `x = d`, the
+crossing tangent is `p × x̂` and the longitude direction is `ẑ × p`, and
+
+```
+(p × x̂)·(ẑ × p) = (p·ẑ)(x̂·p) − (p·p)(x̂·ẑ) = z·d
+```
+
+so the sign flips at `z = 0` and the two halves cancel. For a `z = d` cut the same
+expression is `−‖p × ẑ‖²`, negative everywhere — **which is why exactly one axis
+ever worked**. The summing rule is deleted; both sides now ask
+`the_way_a_closed_edge_is_stored_running`, which is the authority the fuse writes
+with and `Model::validate` reads back with.
+
+**Under that sat a confident wrong answer, and §4.1 ranks one below both crashing
+and refusing.** A loop on a ball bounds two pieces and the triangulator fills the
+chart-interior of whichever it is handed; when the material is on the *other*
+side — the piece holding both poles — it silently filled the complement.
+Reproduced at this gate, with the one guard that stops it disabled and nothing
+else changed:
+
+```
+two balls of radius 2, centres 2 apart, Rule::Union
+  Ok, 1 solid, volume 10.396094933134792
+  the union is 18π  = 56.548667764616276
+  the lens   is 10π/3 = 10.471975511965978
+```
+
+It built the **lens** and called it the union. That is the same species as
+§38.1's dropped ball and §39.3's `Ok`-with-an-invalid-solid — the third success
+return in two milestones that the audit caught and nothing else did. It is now
+refused `ACurvedFaceGoesRightRoundWithNoSeam` by name, gated on a
+one-closed-curve wire on a surface that pinches so that a legitimately inside-out
+whole-surface piece — §38.1's bubble — still passes.
+
+**Why not the frame-change fix**, which would re-chart the ball so its pole is the
+cut circle's axis and close the both-poles row as well: it cannot be expressed.
+`Sphere::transformed` moves only the centre — a ball has no frame of its own by
+design — so a rotated chart cannot be handed to `TrimmedDomain::new(*stored, …)`.
+Doing it means changing `rcad-geom`'s `Sphere` or `rcad-mesh`'s `TrimmedDomain`,
+and `rcad-mesh` is at **0 files changed through M4 and this fan**.
+
+### 41.2 The 77-fold mesh floor, closed by neither of the two fixes §39.7 offered
+
+§39.7 item 2 offered two families: keep the placement on the solid through a fuse,
+or widen `rcad-mesh`'s bound. **Neither landed.** What landed is item 7's move one
+layer up: recondition the arithmetic before doing it.
+
+Re-measured at this gate on a clone at `2f6ee28`, before the fix, and on the
+branch tip after it — the same four public calls both times:
+
+| | floor | asked `1e-5` |
+|---|---|---|
+| a bar of radius 1, five tall, at `z = 1e9` | `3.996804731620784e-6` | meshes |
+| after a `Difference` against a cube fifty units away that cuts nothing, before | `3.0716170532259685e-4` (**76.85181687573629×**) | refused |
+| the same, now | `5.773161581679176e-6` (**1.4444442421729329×**) | meshes |
+
+against the closed forms
+
+```
+(POINT_ALONG_A_CROSSING_ROUNDOFF / WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO + POINT_ROUNDOFF) / POINT_ROUNDOFF
+    = (256·ε/0.1875 + 18·ε) / (18·ε) = 76.85185185185185
+(POINT_ROUNDOFF + SURFACE_AFTER_SHIFTING_ROUNDOFF) / POINT_ROUNDOFF
+    = (18 + 8)/18 = 26/18 = 1.4444444444444444
+```
+
+Six figures either way; the residual is the crossing term charged against the
+bar's own five units, `1e-13`-sized against a `4e-6` floor. Every constant in
+those two lines was read off the tree at this gate: `POINT_ALONG_A_CROSSING_ROUNDOFF`
+`= 256·ε`, `Isometry::POINT_ROUNDOFF` `= 18·ε`, `WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO`
+`= 0.1875`, `SURFACE_AFTER_SHIFTING_ROUNDOFF` `= 8·ε`.
+
+**`rcad-mesh` produces none of it**, and that is checked rather than argued: the
+refusal is `rcad_topo::Error::DeflectionBelowWhatAMeshCanReach`, raised in
+`room_a_mesh_has_to_work_in` before a patch is handed over, and this gate read it
+straight out of the error. `rcad-mesh`'s own
+`CannotTriangulate::NoMeshCanGetThatCloseToTheSurface` is never reached.
+
+**What landed.** `the_frame_this_face_is_meshed_in(face)` is usually the frame the
+face is stored in, and for a face at **no placement at all** whose numbers are far
+from the origin it is that frame shifted until they are small.
+`a_shift_that_loses_nothing` moves a coordinate only when every number the face
+holds in it has one sign and the largest is no more than twice the smallest, and
+then by the smallest — **Sterbenz's condition**, `a − b` exact whenever
+`b/2 ≤ a ≤ 2b` — so the face worked out in the shifted frame is the very same
+face. A flat face is never shifted. Instrumented at this gate on the fused bar,
+the surface `rcad-topo` hands `rcad-mesh` for its wall:
+
+```
+world       Cylinder { axis origin (0, 0, 1000000000), direction (0,0,1), radius 1 }
+handed over Cylinder { axis origin (0, 0, 0),          direction (0,0,1), radius 1 }
+frame       translation (0, 0, -1000000000)
+```
+
+An `EdgeRun` had to learn to be shifted with it: a ball's seam is *the plane its
+meridian lies in* plus *the half-space picking one half of it*, and shifting the
+ball while leaving the seam behind picks a piece of a crossing that is not there.
+`HalfSpace::shifted`, `Picker::shifted` and `EdgeRun::shifted` take a `Vector` and
+not an `Isometry` on purpose — a half-space stores its normal unscaled so an
+exactly-square picking normal stays exactly square (§32.3), and a turn scales that
+away.
+
+**One published bound is new and it makes the floor higher, not lower.**
+`rcad_geom::SURFACE_AFTER_SHIFTING_ROUNDOFF = 8 · f64::EPSILON`. §15.6's search
+for it, re-run at this gate over 20 000 draws sixty octaves wide, worst slip as a
+multiple of `ε` times the size:
+
+| plane | half-space | ball | pipe | the bound |
+|---|---|---|---|---|
+| 1.5928602657890887 | 1.3661359484458944 | 0.4990673137264969 | 0.4990673137264969 | 8 |
+
+Nothing existing was widened: `POINT_ALONG_A_CROSSING_ROUNDOFF`,
+`Isometry::POINT_ROUNDOFF`, `CORNER_AFTER_MOVING_ROUNDOFF`,
+`Surface::ROUND_TRIP_ROUNDOFF`, `WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO` and
+`WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET` are bit for bit what they were.
+
+**Why the two families §39.7 named are not what closed it.** Family (A) — keep the
+placement on the solid — is blocked in the tree twice over, and both blocks are
+demonstrations rather than paragraphs. `fuse/bake.rs`'s `place_a_corner` asserts
+outright that the faces round one corner are at one placement, so a fuse over two
+solids at two placements must pick a frame that is in general neither input's; and
+picking the first argument's is closed by
+`swapping_the_two_sides_of_a_curved_pair_changes_not_one_bit`, which compares the
+two orders **bit for bit**. Storing an answer's vertices through `F⁻¹` and reading
+them back through `F` is a round trip that moves them, and `fuses_that_must_agree`
+compares face planes and wire rings bit for bit across commutativity,
+associativity and transform invariance. Family (A) buys mesh accuracy by spending
+answer accuracy, which is backwards for a kernel whose §19 property is bit-for-bit
+agreement. **A third blocker was offered and called decisive, and this gate does
+not accept it** — §41.4 item 8.
+
+Family (B) splits in two and only one half is closed. Take the bound as tight as
+its own derivation allows and hand the boundary the whole deflection:
+
+| what is assumed | ratio left |
+|---|---|
+| as shipped, `256·ε` and an 18.75% share | 76.85 |
+| `POINT_ALONG_A_CROSSING_ROUNDOFF` cut to `34·ε`, its own derived figure | 11.07 |
+| that, and the whole budget to the boundary (`0.375`) | 6.04 |
+| that, and the derived figure halved again | 3.52 |
+
+The floor of the input is `18·ε·L` and a conic worked out at `L` cannot go under a
+few `ε·L` however honest the constant, so **no member of the constant-widening
+half reaches 1** — arithmetic, not opinion. The other half of §39.7's own wording,
+*"charges the roundings the surface actually has rather than the largest number in
+it"*, is a different fix and it **does** reach 1: see §41.7's fourth row.
+
+### 41.3 Fifty-eight `# Panics` clauses, swept, and a frozen crate unfrozen
+
+§39.7 item 4's rule: *a `# Panics` clause on a `pub` item needs a demonstration
+that the arenas cannot hold the shape, not an argument that geometry forbids it.*
+`Model` is `Deserialize` and the arenas hold whatever the bytes say.
+
+**Counted at this gate rather than taken on trust.** On `main`, `# Panics`
+immediately above a strictly-`pub` item:
+
+| crate | sites | verdict |
+|---|---|---|
+| `rcad-geom` | 21 | three real, all fixed; two doc-only, cited to a demonstration |
+| `rcad-topo` | 27 | five real, all fixed |
+| `rcad-predicates` | 10 | clean; one boundary gap flagged, not a panic (§41.8) |
+| `rcad-mesh` | 0 | — |
+| `rcad` | 0 | — |
+| | **58** | |
+
+Fifty-three remain on the branch. **The count is 58 only if `pub(crate)` is
+excluded; counting those too gives 76, so eighteen `pub(crate)` clauses were not
+swept.** That is defensible — a `pub(crate)` panic is the internal invariant
+CLAUDE.md says to keep — but it is the sweep's boundary and is written down here
+rather than left implicit.
+
+The three §39.7 item 3 named, all now named `Err`s: `Invalid::ClosedEdgeBetweenTwoFlatFaces`
+out of `validate` (the old `.expect("two planes cross in a straight line, which
+never closes")`), `Error::AClosedRunDoesNotComeBackToWhereItStarted` out of
+`rcad-geom`'s `NamedRun::new`, and `Error::AWireDoesNotFanIntoALoopToMesh` plus a
+reused `Invalid::FaceHasNoWires` out of `mesh`'s `hand_over`. The five the sweep
+found on top: `NamedRun::the_whole_of`, `Segment::transformed`,
+`EdgeView::segment`, `Model::set_edge_approximation`, `Model::set_face_approximation`.
+
+**`EdgeView::segment` is the one worth reading twice.** Its clause said
+*"`Model::validate` rejects [same-point ends], so reaching it means the model was
+already broken"* — and that is **false**. `check_edges` refuses same-point ends
+only for `EdgeRun::Straight`; a closed edge is *supposed* to have `start == end`,
+every round bar's two cap circles are exactly that, and they are ordinary and
+`validate()`-sound. `segment()` never looked at the `EdgeRun` and panicked on the
+commonest closed edge in the kernel. It returns `Result<Option<Segment>>` now.
+This is not the `Deserialize` species at all — it is a `# Panics` clause that was
+simply wrong about a shape the builder makes in two lines — and it is the argument
+for sweeping the clauses rather than only the byte-reachable ones.
+
+Four public signatures changed with them: `NamedRun::new`, `NamedRun::the_whole_of`
+and `Segment::transformed` return `Result`, and `EdgeView::segment` returns
+`Result<Option<Segment>>`. Four new public variants landed —
+`rcad_geom::Error::{AClosedRunDoesNotComeBackToWhereItStarted,
+ACrossingPieceHasNoEndsAndNothingPickingIt}` and
+`rcad_topo::{Error::AWireDoesNotFanIntoALoopToMesh, Invalid::ClosedEdgeBetweenTwoFlatFaces}`
+— and `just check-wildcards` did **not** move off 76. That is §40 working as §40.6
+said it would, not §40 failing: no wildcard site enumerates every variant of the
+two enums that grew, because cross-crate matches on `rcad_geom::Error` name one
+variant and forward the rest.
+
+**`rcad-predicates` is no longer frozen.** §39.7 item 7's fix is one file,
+`planes.rs`: on refusal, retry with each plane scaled by the exact power of two
+that brings its own largest coefficient into range. A plane names the same points
+after any nonzero scaling of its four coefficients, and Cramer's numerator and
+denominator determinants are each **linear in every row**, so scaling row `i` by
+`sᵢ` multiplies both by `s₁s₂s₃` and the ratio cancels exactly — row by row, which
+is why three unrelated exponents work where `orient3d`'s degree-three homogeneity
+retry needs one shared factor. A plane with no exact scaled copy sinks the retry
+and the original refusal stands, correctly: that is a limit.
+
+**§39.7 item 7 said this was the opening gate's item and not a lane's**, on §31.5
+and §15.9 — *"a change reopens this gate and stops the fan"*. It was taken by a
+lane, and M5 has no opening-gate section. The change itself is audited and green;
+the process rule was not followed, and this sentence is the record of that rather
+than a quiet gap between §40 and §41.
+
+**The measured rate did not move by one fuse**, which is the number to read.
+`every_point_where_three_surfaces_meet_is_on_all_three_of_them`, re-run here:
+
+| family | triples | corners | certified `Zero` on all three | refused | widest box |
+|---|---|---|---|---|---|
+| control, lattice | 2050 | 571 | 315 | **0.00%** | 2.1568020616793115e-16 |
+| leaning | 2050 | 1281 | 0 | **0.00%** | 1.7763568394002505e-14 |
+| written at `2^k` | 2050 | 646 | 240 | **10.83%** (222) | 3.0246243428348286e-16 |
+| turned | 2050 | 682 | 0 | **0.00%** | 2.410769996328908e-15 |
+
+Every figure is §39.5's, to every digit §39.5 printed. The reason is structural
+and was checked rather than asserted: every production call site of
+`meet_of_three_planes` goes through `Plane::coefficients()`, and every `Plane`
+constructor normalizes the normal to length one, so a uniformly-tiny coefficient
+array cannot reach it from real geometry. The fix moves nothing a generator
+draws, exactly as §39.7 predicted, and that is now measured.
+
+### 41.4 Every claim the lanes made that this gate could not verify, or found false
+
+§16.10's rule applied to the reports rather than to the tree. The lanes' own
+briefs record that lane claims in earlier milestones were repeatedly slightly
+wrong in ways that misdirected the next lane, so nothing below was copied.
+
+**Verified by re-derivation** — the mesh floors and both ratios, on a clone at
+`2f6ee28` and on the tip; the three cap volumes and the 21-angle sweep; the
+`10.83%` and its three sibling rows to full precision; all seven
+`fuses_that_must_agree` families and their named breakdowns against §38.7; the
+58 `# Panics` sites; the two-ball wrong answer, reproduced with the guard
+disabled; the `SURFACE_AFTER_SHIFTING_ROUNDOFF` search; and the two refusal sites
+of §39.7 item 1 on `main`.
+
+**Found false or overstated:**
+
+1. **The shift in this milestone's headline case is `(0, 0, −1e9)`, not
+   `(0, 0, 1e9 − 2.5)`.** `add_round_bar(1.0, 5.0, …)` runs from the placement to
+   five above it rather than centring on it, so the bar's stored numbers are
+   `z ∈ [1e9, 1e9 + 5]` and the smallest is the billion exactly. Instrumented
+   above. The conclusion that rests on it — that the slip of the neighbouring cap
+   planes is *exactly* zero here, so 1.00 is reachable — survives unchanged and
+   is in fact easier: `1e9 ⊖ 1e9 = 0` and `1000000005 ⊖ 1e9 = 5`, both exact.
+2. **"Family (B) cannot close it" is true of half of family (B).** §39.7 item 2
+   words (B) as *"widen `rcad-mesh`'s bound so it charges the roundings the
+   surface actually has rather than the largest number in it"*, which is two
+   fixes in one sentence. Widening the *constants* is exhausted at 3.52 and the
+   table above is the demonstration. Charging *the roundings the surface actually
+   has* is measuring the slip instead of bounding it — and that is precisely the
+   fix that reaches 1.00 and is deferred as §41.7's fourth row. The
+   impossibility is real and it is narrower than it reads.
+3. **"A face spreading over more than a factor of two gets no shift" is a gap,
+   not "a limit for the shift and a gap for the floor".** A limit is a property of
+   an *answer*, not of a technique. The answer — a finer mesh of a fused solid
+   spanning `z ∈ [1e9, 3e9]` — exists. What is true is that *this* shift cannot
+   reach it exactly, which is a sentence about the fix. The vocabulary is worth
+   keeping clean because §39.4 has thirty-three rows sorted by it.
+4. **§39.7 item 2 does not name the wrong file; it names a real §16.10 gap that
+   is not this one.** `triangulate.rs:860` does call its own bound a gap and does
+   carry the escape sentence. What is wrong is the inference: closing that bound
+   would have moved the measured figure by exactly zero, because `rcad-topo`
+   refuses first under its own name. The correction is to the causal claim, not
+   to the citation.
+5. **The `# Panics` sweep counted 58 and the tree holds 76**, the difference
+   being `pub(crate)` items. Written down above rather than left as a number
+   nobody can reproduce.
+6. **The §16.11 miscitation is fixed in two places and stands in fifteen.**
+   §16.11 is about the dynamic-range check being a ratio; it says nothing about a
+   caller's bytes, nothing about panics, and nothing about `validate` being the
+   import boundary. The rule being cited is CLAUDE.md's own tier table and §4.1,
+   with §4.3 for where the sweep runs. Fifteen doc comments in `rcad-topo` still
+   cite §16.11 for it (`fuse/arrange.rs`, `mesh.rs` ×5, `classify.rs`,
+   `validate.rs` ×2, `error.rs` ×3, `holds.rs`, and two test files), and so do
+   §38's opening paragraph, §38.6's fourth row, §39.4's closing note and §39.7
+   item 3.
+7. **§38.3's table of what a handed-in direction buys is not current.** Lane 2
+   tried to reproduce it and could not get a consistent pair out of the fallback:
+   `unwrap_or(true)` makes both faces walk the edge the same way and trips the
+   arena's own rule that two coedges run opposite ways, and falling back on
+   `material_side` alone does the same because the two faces measure it against
+   different partners. **This gate did not re-measure it either.** The three rows
+   of §38.3's table should be treated as unverified until someone reproduces
+   them; what *is* re-measured is that the refusal itself still stands
+   (§41.7).
+8. **"STEP solids arrive with no placement at all" is a paragraph where CLAUDE.md
+   asks for a demonstration, and it was offered as the decisive blocker.** Family
+   (A)'s third block is that a solid read out of a STEP file arrives in world
+   coordinates with nothing left on it to say where it was put, so a fix that only
+   helps kernel-built-then-fused solids leaves the importer with the whole 77.
+   **That is a claim about a milestone that has not started, resting on an importer
+   nobody has written.** CLAUDE.md asks for the family of fixes considered and why
+   that family is the only one, and for "no caller hits this" to be checked against
+   the public API rather than today's callers. The family it does not name is *an
+   importer that factors a placement out of what it reads*: the format carries an
+   `AXIS2_PLACEMENT_3D` on every surface and an `ITEM_DEFINED_TRANSFORMATION` on
+   every assembly step, `Model::place_solid` is public, and nothing in this kernel
+   stops an importer using either. **The verdict: the conclusion stands and this
+   reason does not.** Blocks 1 and 2 are demonstrations in the tree — an assert in
+   `bake.rs` and a bit-for-bit test — and either alone closes family (A). The third
+   should be struck rather than called decisive, and it is worth noticing that it
+   argues *for* the fix that landed rather than against family (A): what the shift
+   is built for is precisely a face at no placement at all.
+
+**And one claim that is true for a reason its own argument does not name.**
+Lane 1 checked `Cylinder::basis` and `Plane::basis` — both said *"the constructors
+do not allow that"* with no demonstration, §39.7 item 4's discredited shape — and
+found the claim held: `Axis` and `Plane` both carry `#[serde(try_from = …)]`, so
+`Deserialize` routes through the validating constructor. The argument names two
+routes in and **the tree has three**. `Axis::transformed` and `Plane::transformed`
+deliberately do *not* re-normalize, and both are reached with an `Isometry` that
+came off the wire. The claim survives because `Isometry`'s own `try_from`
+normalizes its quaternion — a fact two types away from where the sentence sits,
+which is the exact shape §39.3's rule was written about. It is checked here rather
+than left implicit, and checking it turned up §41.5.
+
+### 41.5 A rotation off the wire that is not the rotation the bytes name
+
+**Found at this gate, not fixed, and it is a wrong answer rather than a refusal.**
+
+`Isometry`'s `TryFrom<([f64; 3], [f64; 4])>` — which `#[serde(try_from = …)]`
+makes the only route in on the wire, and `FaceUse.loc` makes reachable at every
+placed face of a deserialized `Model` — checks that the four quaternion
+coefficients are finite and that `norm()` is not zero, and then hands them to
+nalgebra's `UnitQuaternion::from_quaternion`. When the **sum of their squares
+overflows**, `norm()` is infinite, the zero test passes, and what comes back is
+the **identity rotation**. Measured here, a quarter turn about `x` written at
+growing scales:
+
+```
+[1e153, 1e153, 0, 0] → ẑ moves to (0, −1.0000000000000002, −2.2e-16)   correct
+[1e154, 1e154, 0, 0] → ẑ moves to (0, 0, 1)                            the identity
+[1e308, 1e308, 1e308, 1e308] → ẑ moves to (0, 0, 1)                    the identity
+```
+
+`2 · (1e154)² > f64::MAX` and `2 · (1e153)² < f64::MAX`, which is the whole of the
+boundary. A caller's bytes name one rotation and the kernel silently uses another
+— §4.1's lowest tier, below both refusing and crashing, and the second wrong
+answer this section records.
+
+**A gap, and its fix is item 7's fix one type over.** Dividing all four
+coefficients by the exact power of two that brings the largest into range costs
+not one bit and reaches the answer, exactly as `meet_of_three_planes` now does for
+a plane's four coefficients. Recorded and not built: this gate writes
+`docs/decisions.md` and nothing else, and the fix wants its own test and its own
+lane. **Consumer: any `Model` that has been through a file**, which is what M5 is.
+
+### 41.6 The §19 violation is closed at one depth and open at another
+
+**This is the finding that should be read before the rest of this section.**
+
+§39.7 item 1's two new tests pin the same ball of radius four and the same
+twenty-cube slab with its face **one unit** from the centre, on three axes and at
+21 angles. Both pass, and at that depth the property holds. **At a deeper cut it
+does not.** Measured at this gate — ball of radius four, a twenty-cube whose face
+sits at `d`, `Rule::Intersection`, every volume read at a deflection of `0.002`,
+against the cap's closed form `πh²(3r − h)/3` with `h = 4 − d`:
+
+| `d` | square to `z` | square to `x` | closed form |
+|---|---|---|---|
+| 1.00 | `Ok` 84.798930 | `Ok` 84.801572 | 84.823002 |
+| 2.00 | `Ok` 41.872603 | `Ok` 41.871236 | 41.887902 |
+| 2.80 | `Ok` 16.278100 | `Ok` 16.278045 | 16.286016 |
+| 2.82 | `Ok` 15.769081 | `Ok` 15.769041 | 15.776835 |
+| **2.83** | **`Ok` 15.517572** | **`Invalid::VolumeIsNotPositive { volume: 0.0 }`** | **15.524900** |
+| 3.00 | `Ok` 11.513343 | `VolumeIsNotPositive` | 11.519173 |
+| 3.90 | `Ok` 0.123970 | `VolumeIsNotPositive` | 0.124617 |
+| 3.99 | `Ok` 0.001166 | `VolumeIsNotPositive` | 0.001256 |
+
+**The two columns agree to five figures right up to the row where one of them stops
+answering.** Same two solids, same relative position, one quarter turn apart, and
+one answers and one refuses. That is §19, and it is the sentence §39.7 item 1 was
+put first for.
+
+**It is not a regression.** On `main` the same `d = 3` cut square to `x` refuses
+`VolumeIsNotPositive { volume: 0.0 }` too — it is the shallow cuts that used to
+refuse `CannotMeshAFace` and now answer. The lanes made the branch strictly
+better and the item is **not closed**.
+
+**The cause is the sign-reading mesh and not the mesher this fan fixed.**
+`nest_the_shells` reads a curved shell's sign by meshing it at
+`as_coarse_as_a_mesh_gets()`, which is `Deflection::of(f64::MAX)`, and refuses
+when that mesh encloses exactly nothing. A cap that holds a pole is cut into four
+patches up to that pole whatever the deflection, so the `z` row survives to
+`h = 0.01`; a cap that holds no pole goes down the generic path, and the coarsest
+mesh of a cap of height `1.17` on a ball of radius four is empty. The `2.83`
+boundary is `h/r ≈ 0.29` — not a sliver, not a degeneracy, and 5.8% of the ball.
+
+**A gap.** The answer exists, is `15.5249`, and the very same shape turned a
+quarter turn answers it at `15.517572`, within `0.05%`. The family of fixes is
+named in §41.7's first row.
+
+**And it means the catalogue row underneath it is understated by twenty times.**
+That refusal was filed this fan as *"the lens between two balls of radius 2 three
+apart… the lens is `π/4 = 0.785`"*. The same refusal takes a spherical cap of
+**15.52** off a ball of radius four in three public calls. A row that describes a
+gap by the smallest shape that reaches it is a row the next lane will size wrong.
+
+### 41.7 Every refusal these lanes leave standing, classified
+
+CLAUDE.md's rule, and each row was re-checked against it here rather than taken
+from a report — §41.4 item 3 is one that changed on the way.
+
+| Refusal | Shape | | Demonstration |
+|---|---|---|---|
+| `Invalid::VolumeIsNotPositive { volume: 0.0 }` | **the sign-reading mesh encloses nothing**: an off-axis spherical cap under `h/r ≈ 0.29`, and the lens between two balls of radius two three apart | **gap, and a §19 violation** | §41.6's table. `what_two_balls_that_really_cross_share_is_the_lens_between_them` pins the lens at `π/4`; the cap at `d = 2.83` is `15.52` and has **no test**. The fix is a finer sign-reading mesh, or reading a shell's sign without one |
+| `ACurvedFaceGoesRightRoundWithNoSeam` | a face on a ball bounded by one closed curve with the **material outside it** — the whole ball less a disc; either half of a two-ball union; `Union`/`Difference` of a ball and a knife off its polar axis | **gap** | `what_is_round_two_crossing_balls_is_refused_for_want_of_a_seam`, `a_ball_cut_off_its_polar_axis_keeps_the_cap_and_refuses_what_is_round_it`. The answer is `18π = 56.549` for the two balls, and the piece on the *other* side of the very same curve is answered. Wants §38.3's machinery: a cut closed face with a seam and two poles of its own |
+| `ACurvedFaceGoesRightRoundWithNoSeam` | nothing bounding a face on a plane or a pipe; one curve right round a pipe | **limit**, unchanged | §38.6's rows. No answer exists: such a face is unbounded |
+| `DeflectionBelowWhatAMeshCanReach` on a fused or imported curved solid, at **1.4444×** the floor of the same solid unfused | a boolean that removes no material still costs the mesh 44% of its floor: the neighbours' bill, `(18 + 8)/18` | **gap** | `a_boolean_that_cuts_nothing_off_a_bar_does_not_make_it_much_coarser_to_mesh`. The shift is chosen from one face's numbers and is exact on them; the plane on the other side of an edge is moved by the same shift without being asked, and a plane's offset moves by a dot product, which rounds. **No shift makes that exact in general** — a product of two 53-bit numbers is not a 53-bit number — so the *bounding* family is exhausted at `4.5·ε·L`. What reaches 1.00 is measuring the slip instead of bounding it, which is exactly computable for a pure translation and is **zero in this very case**; it needs the floor to see the surfaces along a face's edges, which stops it being a property of one face |
+| `DeflectionBelowWhatAMeshCanReach` on a curved solid **far from the origin at all**, at `18·ε·L` | a ball a billion units out cannot be meshed as finely as one at the origin | **limit**, unchanged | `a_ball_a_long_way_out_cannot_be_meshed_as_finely_as_one_at_the_origin`. No `f64` point sits closer to that surface; §18's scaling reaches it exactly |
+| `DeflectionBelowWhatAMeshCanReach` on a face whose numbers **straddle the origin or spread over more than a factor of two** in every axis | a fused solid spanning `z ∈ [1e9, 3e9]` gets no shift | **gap**, and **not** a limit (§41.4 item 3) | Not demonstrated by a test. Sterbenz does not apply, so *this* shift cannot be taken exactly; a coarser power-of-two-grid shift applies more widely and is not exact, and would need the measured-slip machinery above to be honest |
+| `AClosedEdgeOfTheAnswerWouldStartAtAPole` | a ball cut by a plane containing its polar axis | **gap**, unchanged | `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`, which asserts it for `x = 0` **and** `y = 0` and for all three rules and is green on this branch. **§39.7 item 12 is explicitly not closed** by anything in this fan |
+| a rotation off the wire whose quaternion norm overflows | silently the identity rather than the rotation or a refusal | **gap**, new at this gate, **not a refusal at all** | §41.5. Listed here because the catalogue is where the next lane looks |
+
+**One refusal was withdrawn.** `two_balls_that_really_cross_are_refused_by_name`
+pinned `ACurvedFaceGoesRightRoundWithNoSeam` at two apart and `VolumeIsNotPositive`
+at three apart, both under `Union`. Both now give the first name under `Union`,
+and the `VolumeIsNotPositive` row moved to `Intersection`.
+
+**§39.4's seventh undemonstrated refusal is now demonstrated.** It was the one
+that needed four public calls and had no test: `add_round_bar` → `mesh` → `fuse` →
+`mesh`, read out of `DeflectionBelowWhatAMeshCanReach`'s own `closest` field,
+which is the only way a caller can learn where the floor is. Six of §39.4's seven
+remain, all the hand-built-broken-model kind. **The count does not fall to six**,
+because §41.6's cap and §41.5's rotation are two new rows with no test between
+them.
+
+### 41.8 What the lanes flagged and did not build
+
+Five items, each with a demonstration and none of them a live crash.
+
+1. **The mesher round-trips a placed face's surface through its own placement and
+   charges nothing for it.** `mesh.rs` computes
+   `face.surface().transformed(&the_frame_this_face_is_meshed_in(face))` where
+   `face.surface()` is already `stored.transformed(&location)` and the frame is
+   `location.inverse()`. `Surface::ROUND_TRIP_ROUNDOFF` is **256·ε** and the only
+   term the floor charges for placement is `Isometry::POINT_ROUNDOFF · L`, which
+   is **18·ε·L** — fourteen times short for a placement that turns. It is exact
+   for an axis-aligned translation, which is why no test catches it.
+   **Pre-existing**, the same species as §39.7 item 2, and the fix is cheap: read
+   the stored surface instead of round-tripping it.
+2. **A shifted picker can decide confidently what an unshifted one refused.** A
+   half-space in an `EdgeRun` strays by up to `SURFACE_AFTER_SHIFTING_ROUNDOFF · L`
+   when shifted. That moves no mesh point — a strayed offset slides a flat surface
+   along its own normal without turning it (§29.8) — and it can only be wrong
+   about a pair of pieces closer together than the stray, which for a shift of a
+   billion is an arc under about `1e-3` radians. Before the shift the same
+   decision was made against a point box `POINT_ALONG_A_CROSSING_ROUNDOFF` wide in
+   the world's numbers, fifty-seven times the stray, so the pair was undecidable
+   then too — **but it was refused rather than answered, and that difference is
+   real.** Not demonstrated by a test.
+3. **`Approximation` has no boundary guard where `Scale` has one.** Checked here:
+   `Approximation` derives `Deserialize` plainly, with no `#[serde(try_from = …)]`,
+   and `check_approximation_ordering` compares magnitudes with `<`, which is
+   silently false on `NaN`. So a deserialized `Model` can carry
+   `Approximation { magnitude: NaN }` on a vertex, edge or face and the sweep will
+   not catch it. **Not a reachable panic** — no call site re-wraps a stored
+   magnitude, checked over all twenty `Approximation::new` sites — but the
+   invariant is not closed at the boundary the way its neighbours are.
+4. **`BSplineSurface` is missing the demonstration `BSplineCurve` has.**
+   `evaluate`, `partial_u`, `partial_v` and `evaluate_with_enclosure` share the
+   curve's "weight came out non-positive" invariant and the same constructor-side
+   proof it cannot happen. The curve side has
+   `weights_small_enough_to_blend_away_to_nothing_are_refused_up_front`; nothing
+   in `bspline_surface.rs` demonstrates it. **Safe, no live bug, missing
+   demonstration only** — which is exactly what §39.7 item 4's rule asks for.
+5. **Two doc comments on one mechanism say opposite things.**
+   `cut_a_cap_up_to_its_pole` says *"which of the two poles the face reaches is
+   read off the loop's own direction"*; `which_pole_this_cap_reaches` — the
+   function it is describing — opens *"**Not read off which way the loop runs**,
+   and that is the trap this walked into once"*. They are using "the loop's
+   direction" for two different things, the code is right either way now that the
+   loop direction is trustworthy, and the wording is a §23.8 trap waiting for the
+   next reader. Left alone deliberately: fixing it means touching the
+   pole-choosing rule.
+
+### 41.9 The numbers
+
+| | at §39 (M4's close) | now |
+|---|---|---|
+| tests (`cargo nextest`, whole workspace) | 1112, and 1113 after §40 | **1129** |
+| suite duration | 2.9 s | **2.87 s** |
+| doc tests | 19 | **19** |
+| `FORMAT_VERSION` | 3 | **3, unchanged** |
+| fuzz corpus | 815 | **815** |
+| wildcard arms over our own enums | 76 | **76, unchanged** |
+| `rcad-predicates` files changed | 0 for the whole of M4 | **1** (§41.3) |
+| `rcad-mesh` files changed | 0 | **0**, through M4 and this fan |
+
+**Files changed, whole tree:** `rcad-geom` 15 (11 in `src`), `rcad-topo` 10 (6),
+`rcad-predicates` 1, `rcad` 1 test file, `rcad-mesh` 0. The suite is sixteen
+tests larger than `main`.
+
+**No measured rate moved, family by family and never blended (§17.7).** All seven
+`fuses_that_must_agree` families re-measured at this gate, against §38.7:
+
+| family | fuses | refused | not a solid |
+|---|---|---|---|
+| §37 control, a bar through a block | 423 | 0 (0.0%) | 0 (0.0%) |
+| §17.7 control, lattice pairs | 423 | 0 (0.0%) | 20 (4.7%) |
+| §17.7 degenerate, sharing coordinates | 423 | 0 (0.0%) | 72 (17.0%) |
+| §17.7 control, somewhere else in `f64` | 423 | 0 (0.0%) | 17 (4.0%) |
+| §17.7 headline, turned pairs | 423 | 96 (22.7%) | 17 (4.0%) |
+| §22 headline, skew pairs | 423 | 51 (12.1%) | 8 (1.9%) |
+| §22 control, both leaning alike | 423 | 24 (5.7%) | 17 (4.0%) |
+
+The named breakdowns are unchanged too: turned 96 all *side of plane*; skew 9 /
+30 / 12 across *a point inside a piece of a face* / *order along a crossing* /
+*side of plane*; leaning alike 3 / 6 / 15. §39.6's own 22.70% against a threshold
+of 24% reads the same, so its 1.3 points and six fuses of headroom are where
+§39.6 left them.
+
+`how_often_a_curved_fuse_refuses.rs`, re-measured: turned curved pairs **0.0% of
+384**; a block turned against a bar **354 of 384 answered**, refusing
+`{"a point inside a piece of a face": 24, "an edge would have 1 faces along it": 6}`.
+
+**The three cap volumes and the sweep**, against `27π = 84.82300164692441`:
+
+| axis | volume | off the closed form |
+|---|---|---|
+| `z` | 84.59732446013571 | −0.266% |
+| `y` | 84.62054762306524 | −0.239% |
+| `x` | 84.62021161694274 | −0.239% |
+
+and turning ball and slab together about `x` in 0.1 rad steps answers at **all 21
+angles from 0.00 to 2.00**, one solid each, from 84.56433812106617 (−0.30495%) to
+84.62417907760833 (−0.23440%). No flip anywhere. §39.3 measured this same sweep
+on the M4 tree and found it answered 1.00–1.30 and refused 1.40–1.50.
+
+**Soaked, not fuzzed.** `RCAD_SOAK_FACTOR=20` over `fuses_that_must_agree.rs`
+(7 719 fuses a family) gives control 0.0%, lattice 4.9% not a solid, sharing
+coordinates 15.8%, elsewhere 4.5%, leaning alike 5.2% refused, skew 14.5%,
+turned 24.3% — every one inside §38.8's soak ranges. **Neither soak was re-run at
+this gate**; what stands in its place is two lanes measuring the same seven
+figures independently, which is weaker and is said rather than hidden.
+**`just fuzz` was not run by any lane or by this
+gate.** `rcad-geom` changed, so §30.7's rule does ask for it; what stands in its
+place is that the change is three new methods and one new constant, no existing
+expression moved, `where_two_surfaces_cross` — the fuzz target — reaches none of
+them, and the shipped equivalent
+`every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly` passes. That is a
+weaker argument than a run and is written down as one.
+
+### 41.10 Corrections to §39 and earlier
+
+- **§39.7 item 1's description of the `x` face is wrong in the half that matters.**
+  It says *"there the fuse gets past naming the faces and the triangulator is what
+  gives up"*, put as if the `y` row does not. Both get past naming the faces; the
+  fuse answers both; **both refusals come out of `mesh.rs`**, three lines apart in
+  the same `match`, and this gate instrumented `main` to confirm it. Anyone
+  scoping the work from §39.7 alone would have looked in the wrong crate for one
+  of the two.
+- **§39.7 item 1 is not closed by this fan.** §41.6. It is closed for a cut one
+  unit from the centre and open from `h/r ≈ 0.29` down.
+- **§39.7 item 2's causal claim is wrong and its citation is not.**
+  `triangulate.rs:860` really does call its own bound a §16.10 gap; fixing that
+  bound would have moved the measured 77 by exactly zero, because `rcad-topo`
+  refuses first under its own name. §41.2.
+- **§39.7 item 2's family (B) is two fixes in one sentence**, and only the
+  constant-widening one is impossible. §41.4 item 2.
+- **§39.7 item 3 cites §16.11 for a rule §16.11 does not contain**, and so do
+  §38's opening paragraph, §38.6's fourth row, §39.4's closing note, and fifteen
+  doc comments still in the tree. §16.11 is about the dynamic-range check being a
+  ratio. The rule is CLAUDE.md's tier table and §4.1, with §4.3 for where the
+  sweep runs. §41.4 item 6.
+- **§39.7 item 7 said the `rcad-predicates` change belonged to M5's opening gate
+  and a lane took it.** §41.3. There is no M5 opening-gate section; this is where
+  that is recorded.
+- **§39.3's *"only the first [of three kinds of piece] is handled"* is now two of
+  three.** Only the both-poles piece is unhandled.
+- **§38.6's `ACurvedFaceGoesRightRoundWithNoSeam` row is one row for three
+  shapes**, two limits and a gap, and §39.8 had already half-corrected it. §41.7
+  splits it.
+- **§38.3's table of what a handed-in direction buys was not reproducible** and
+  should not be quoted as current until someone reproduces it. §41.4 item 7. The
+  refusal it describes is unchanged and still asserted by name.
+- **`WalkingAWire::finish`'s comment** — *"one coedge whose two ends are one
+  corner runs right round the curve its two faces cross in, which on a periodic
+  surface is right round the surface"* — is false on a sphere. Fixed in the tree.
+- **`how_far_round_this_face_it_goes`'s doc** — *"Zero for a closed edge that does
+  not go round the face at all … and then the evaluator's own direction is left
+  alone. **That is the right answer for the wire this is read for**"* — is not:
+  it left the same cap walked one way at `y = 1` and the other at `x = 1`. The
+  function is deleted.
+- **`cut_a_cap_up_to_its_pole`'s doc** said *"a ball cut by a plane leaves one
+  [cap]"*. Only a plane square to the polar axis does. Fixed.
+- **`a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name`'s doc**
+  said *"one crossing works and two do not, and the two cuts differ in nothing
+  else"*. The seam-crossing count was never what decided it: `z = 2` leaves two
+  one-pole pieces, `x = 2` leaves a no-pole cap and a both-poles remainder, the
+  cap answers against `40π/3` and only the remainder refuses. Renamed and both
+  halves asserted.
+- **`how_far_a_mesh_point_of_this_face_rounds`'s doc** said the evaluator follows
+  a crossing in the frame the face is **stored** in. It follows it in the frame the
+  face is **meshed** in, which was the same thing only while nothing baked.
+  Rewritten.
+- **`rcad-mesh`'s `NoMeshCanGetThatCloseToTheSurface` escape is true again**, and
+  for a reason two crates from where the sentence sits: the mesher now puts a
+  bar's axis back at the origin itself. §39.8 filed it as falsified and §41.2's
+  instrumentation is the demonstration that it holds. **It is still worth
+  distrusting** — what makes it true is nothing the sentence names, which is the
+  species §39.3's rule was written about.
+- **`fuse/bake.rs`'s header** — *"[`Picker`] still needs no `transformed`"* — is
+  still true of the fuse and is now misleading as a statement about the kernel:
+  the mesher needs `Picker::shifted`. Not edited, because it is `bake.rs`'s
+  sentence about `bake.rs`.
+
+### 41.11 What is left of §39.7's seventeen, as a current list
+
+Renumbered so the next lane reads a list rather than a diff. **Items 5, 6, and 9
+through 17 were untouched by this fan and are unchanged except where a sentence
+below says otherwise.**
+
+| now | was | state |
+|---|---|---|
+| 1 | §39.7 item 1 | **partly closed.** Answered for a cut one unit from the centre, on three axes and 21 angles. Still a §19 violation from `h/r ≈ 0.29` down, for a different reason — the sign-reading mesh, §41.6. **Consumer unchanged: the first imported ball anybody cuts** |
+| 2 | §39.7 item 2 | **closed to 1.4444**, and the residual is §41.7's fourth row. **Consumer: every fused curved solid, and every imported one** |
+| 3 | §39.7 item 3 | **closed.** All three refuse by name |
+| 4 | §39.7 item 4 | **closed for `pub` items**, 58 of them. Eighteen `pub(crate)` clauses were out of scope, §41.3 |
+| 5 | §39.7 item 5 | unchanged. `Exact::dot_of` does not slide and `Exact::square_minus` does. A change to `Exact` and therefore a lane with its own re-measurement of every rate in §41.9. **`rcad-predicates` is no longer frozen, so the §31.5 obstacle to it is gone** |
+| 6 | §39.7 item 6 | unchanged. Two authorities on *is this plane along this pipe's axis*, `intersect` exact and `along_a_crossing.rs`/`walk.rs` with `== 0.0`, on `(1, 0, 3)` against `(−12, −12, 4)` |
+| 7 | §39.7 item 7 | **closed**, and it unfroze `rcad-predicates`. §41.3 |
+| 8 | §39.7 item 8 | **six of seven remain, and there are two new rows with no test**: §41.6's cap and §41.5's rotation. Net eight |
+| 9–13 | §39.7 items 9–13 | unchanged: a ball with a pipe through it; two coincident curved faces; a corner exactly on a curved face; **a ball cut by a plane through its polar axis, re-measured this fan and still refused for all three rules and both `x = 0` and `y = 0`**; a turned notched bar and a bar cut by one plane off its axis |
+| 14–17 | §39.7 items 14–17 | unchanged: three curved surfaces and a crossing through itself; cone and torus; the BVH, the bump arena and `rkyv`; `Undecidable` out of `mesh` recorded as a design consequence |
+| **18** | new | **`Isometry` off the wire silently identity when its quaternion norm overflows.** §41.5. A wrong answer on a caller's bytes, and the fix is item 7's fix one type over |
+| **19** | new | **The mesher's uncharged surface round trip**, 256·ε charged at 18·ε. §41.8 item 1 |
+| **20** | new | **`Approximation` has no boundary guard**, and `NaN` sails past the ordering check. §41.8 item 3 |
+| **21** | new | **`BSplineSurface` is missing the demonstration `BSplineCurve` has.** §41.8 item 4 |
+
+**What the closing gate has to be told.** Two things, and neither is a lane's
+regression.
+
+- **The headline item is not closed and the record must not say it is.** §41.6.
+  A gate that had trusted the reports would have written "the §19 violation is
+  closed", and the two tests that back that sentence pin one depth. The test this
+  is owed is the same three-axis comparison at two or three depths, which fails
+  today and should.
+- **A wrong answer went into the tree unnoticed and came out under a
+  demonstration.** §41.1's two-ball union, reproduced here at 10.396 where the
+  union is 56.549, was refused by name *because a lane looked for it* — nothing in
+  the suite would have caught it. §39.9's sentence stands unchanged: ten lanes of
+  green tests measured the things the lanes thought of.
