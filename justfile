@@ -74,6 +74,20 @@ fuzz duration="60":
         cargo +nightly fuzz run where_two_surfaces_cross -- \
         -max_total_time={{duration}} -max_len=71
 
+# The Part 21 reader, over arbitrary bytes (docs/decisions.md §42.12 criterion 5).
+#
+# Same nightly-compiler caveat as `fuzz` above, and the same repeated RUSTFLAGS.
+# What runs on every commit instead is
+# `crates/rcad-step/tests/what_the_reader_refuses_and_by_what_name.rs`, which
+# covers the shapes somebody thought of; this covers the ones nobody did.
+#
+# No `-max_len`, unlike `fuzz`: the reader's promise is about any length of
+# anything, and the truncation cases live at every length there is.
+fuzz-reader duration="60":
+    cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
+        cargo +nightly fuzz run no_step_file_makes_the_reader_panic -- \
+        -max_total_time={{duration}}
+
 bench:
     cargo bench --workspace
 
