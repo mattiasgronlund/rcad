@@ -26,7 +26,10 @@
 //! | The pair | Anticlockwise about |
 //! |---|---|
 //! | a plane and a ball, or a plane and a pipe | the plane's stored normal |
-//! | the same two the other way round | the same normal negated |
+//! | a plane and a torus, cut in the two meridian circles | the plane's stored normal |
+//! | a plane square to a torus's axis, the circle outside the ring | the plane's stored normal |
+//! | a plane square to a torus's axis, the circle inside the ring | the same normal negated |
+//! | any of those the other way round | the same answer negated |
 //! | two balls | the second centre minus the first |
 //!
 //! The pipe row takes a line of work to see and is worth having written down.
@@ -35,15 +38,32 @@
 //! is the sign of `u · ρ` for `u` the step from the ellipse's centre. Writing
 //! `a` for the foot of the point on the axis, `u · ρ` is `‖u × ŵ‖²`, which is
 //! above zero for every `u` in a plane the axis is not parallel to.
+//!
+//! # The torus rows, and why one of them is upside down
+//!
+//! The same `sign(u · ρ)` settles a torus, with `ρ` now the step out of the
+//! tube's own centre circle. On a meridian circle the tube's centre *is* the
+//! circle's centre, so `u` and `ρ` are the same vector and `u · ρ = ‖u‖²`, above
+//! zero on both of the two. On a circle round the axis the two part company: the
+//! circle's centre is on the axis, so `‖u‖` is the distance out to the axis and
+//! `u · ρ` comes to `‖u‖(‖u‖ − R)` for `R` the ring radius. The two circles sit
+//! at `R ± √(r² − t²)`, one either side of `R`, so **the outer one winds about
+//! the plane's normal and the inner one about its opposite**.
+//!
+//! Which of the two a run is on is not a fact about the pair, so it cannot be
+//! read off the two surfaces the way every other row here is. It is read off
+//! the point the ordering starts from, against the pipe of the ring's own radius
+//! — the very pipe [`intersect`](crate::intersect) hands back as the picker that
+//! tells the two circles apart.
 
 use rcad_predicates::{
     Decision, Filtered, Interval, NOTHING_IS_KNOWN, Point as PredicatePoint, Predicate,
-    are_real_numbers, decide, is_a_real_point,
+    SideOfSurface, are_real_numbers, decide, is_a_real_point,
 };
 
 use crate::enclosure::{cross_enclosing, dot_enclosing, exactly};
 use crate::exact::Exact;
-use crate::{Error, Result, Surface, Vector};
+use crate::{Cylinder, Error, Plane, Result, Surface, Torus, Vector};
 
 /// The name the ordering question goes by in provenance records.
 pub const ROUND_A_CROSSING: &str = "round a crossing";
@@ -67,12 +87,13 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose crossing is
 /// not one closed curve lying in a plane: two planes, a plane along a pipe's
-/// axis, two pipes, a ball against a pipe, and every pair with a cone or a torus
-/// on it but a plane against a cone.
+/// axis, two pipes, a ball against a pipe, a plane cutting a torus in a quartic,
+/// and every pair with a cone or a torus on it but a plane against either.
 ///
-/// **A plane against a torus is refused here and cut in circles by
-/// [`walk`](crate::walk)**, and that one is a gap rather than a limit — see
-/// [`the_way_this_crossing_winds`].
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
+/// resting on a torus's tube, which touches it all the way round one circle
+/// instead of crossing it, so `∇S × ∇T` is zero everywhere on that circle and
+/// there is no direction to run round it in.
 ///
 /// **"A plane along a pipe's axis" is decided here by a rounded `f64` and by
 /// [`intersect`](crate::intersect) exactly**, so the two disagree about a plane
@@ -88,7 +109,10 @@ pub fn which_comes_first_round_a_crossing(
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Result<Decision> {
-    let anticlockwise_about = the_way_this_crossing_winds(pair)?;
+    let anticlockwise_about = match the_way_this_crossing_winds(pair, from)? {
+        WhichWayItWinds::About(normal) => normal,
+        WhichWayItWinds::CannotTell => return Ok(NOTHING_IS_KNOWN),
+    };
     if !(is_a_real_point(from)
         && is_a_real_point(one)
         && is_a_real_point(other)
@@ -105,13 +129,31 @@ pub fn which_comes_first_round_a_crossing(
     .0)
 }
 
+/// The normal a crossing runs anticlockwise about, when that can be worked out.
+///
+/// **Exhaustive on purpose.** There is a normal or there is not, and a caller
+/// that cannot have one has nothing left to order by.
+enum WhichWayItWinds {
+    /// The crossing runs anticlockwise about this.
+    About(Vector),
+    /// Which of two circles the run is on could not be decided from the point
+    /// the ordering starts at — the honest answer is that nothing is known, and
+    /// not a refusal.
+    CannotTell,
+}
+
 /// The normal the crossing of these two surfaces runs anticlockwise about.
+///
+/// `from` is a point on the crossing, and only the torus rows read it: a plane
+/// square to a torus's axis cuts two circles that wind opposite ways, and which
+/// one this is is not a fact about the pair.
 ///
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair that does not cross
-/// in one closed curve lying in a plane, **and for a plane against a torus,
-/// which does**. That last one is a gap and the arm that refuses it says so.
+/// in one closed curve lying in a plane, and
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
+/// resting on a torus's tube.
 ///
 /// # Every pair is named, and there is no `_`
 ///
@@ -119,7 +161,10 @@ pub fn which_comes_first_round_a_crossing(
 /// goes to be ignored (§40). A cone and a torus landed and fell into it without
 /// a word — the same thing that happened to `walk`'s three hand-kept lists
 /// (§24.5), through a wildcard rather than through a missing arm.
-fn the_way_this_crossing_winds(pair: [&Surface; 2]) -> Result<Vector> {
+fn the_way_this_crossing_winds(
+    pair: [&Surface; 2],
+    from: PredicatePoint,
+) -> Result<WhichWayItWinds> {
     let winds = match pair {
         [Surface::Plane(flat), Surface::Sphere(_)] => flat.normal(),
         [Surface::Sphere(_), Surface::Plane(flat)] => -flat.normal(),
@@ -157,17 +202,18 @@ fn the_way_this_crossing_winds(pair: [&Surface; 2]) -> Result<Vector> {
             Surface::Cylinder(_),
             Surface::Sphere(_) | Surface::Cylinder(_),
         ] => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
-        // A plane cuts a torus in one or two circles, each of them flat and
-        // convex, so the normal this asks for **exists** and is the plane's
-        // own — the same one the two arms above it hand back for a ball and for
-        // a cone. `walk` builds those circles; this refuses to order points
-        // along them, so a **gap** and not a limit, and it is a gap a bend of
-        // pipe with a flat cap on it reaches. What closes it is the two arms
-        // written out, and what stopped them being written is that nobody
-        // noticed: this arm was a `_`, and a torus fell into it silently
-        // (§24.5, §40).
-        [Surface::Plane(_), Surface::Torus(_)] | [Surface::Torus(_), Surface::Plane(_)] => {
-            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        // The two flat families a plane cuts a torus in are circles, and only
+        // those two reach a normal — everything else a plane and a torus make is
+        // a quartic and is refused by name, here as in
+        // `intersect`(crate::intersect).
+        [Surface::Plane(flat), Surface::Torus(ring)] => {
+            return the_way_a_plane_cuts_a_torus(flat, ring, from);
+        }
+        [Surface::Torus(ring), Surface::Plane(flat)] => {
+            return Ok(match the_way_a_plane_cuts_a_torus(flat, ring, from)? {
+                WhichWayItWinds::About(normal) => WhichWayItWinds::About(-normal),
+                WhichWayItWinds::CannotTell => WhichWayItWinds::CannotTell,
+            });
         }
         // A cone or a torus against another curved surface: `intersect` refuses
         // to name that crossing at all, so there is no run along it to order.
@@ -187,7 +233,100 @@ fn the_way_this_crossing_winds(pair: [&Surface; 2]) -> Result<Vector> {
     if winds == Vector::zero() {
         return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
     }
-    Ok(winds)
+    Ok(WhichWayItWinds::About(winds))
+}
+
+/// The normal the circle a plane cuts out of a torus runs anticlockwise about.
+///
+/// # Which family this is, is asked exactly
+///
+/// `‖n × w‖²` says whether the plane is square to the axis, and `n·w` with
+/// `n·c − d` say whether it holds the axis — the same three signs
+/// [`intersect`](crate::intersect) asks, on the same stored numbers, so the two
+/// agree about which family a pair is in. They are asked here through
+/// [`Exact`] rather than through the cascade because this function has no policy
+/// and no log to run one with; every one of them is a polynomial in stored
+/// numbers, so the exact level always decides and no rounding ever moves a pair
+/// from one family to another.
+///
+/// **`walk` asks the first of the three in plain `f64`**, so a plane whose
+/// `n × w` cancels to zero in `f64` and not exactly is a circle round the axis
+/// there and a quartic here, and this refuses a run that one builds. A **gap**
+/// of the shape §39.7 item 6 already records, on the same question rather than a
+/// new one, and it goes the safe way: a refusal, never a wrong order.
+///
+/// # Errors
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for every plane that cuts this
+/// torus in a quartic, and
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
+/// resting on the tube, whose one circle the two surfaces touch along rather
+/// than cross.
+fn the_way_a_plane_cuts_a_torus(
+    flat: &Plane,
+    ring: &Torus,
+    from: PredicatePoint,
+) -> Result<WhichWayItWinds> {
+    let normal = flat.normal().components();
+    let along = ring.axis().direction().components();
+    let centre = ring.centre().coordinates();
+    if !(are_real_numbers(normal)
+        && are_real_numbers(along)
+        && are_real_numbers(centre)
+        && are_real_numbers([flat.offset()]))
+    {
+        return Ok(WhichWayItWinds::CannotTell);
+    }
+
+    let Some(across) = Exact::cross_of(&Exact::of_each(normal), along) else {
+        return Ok(WhichWayItWinds::CannotTell);
+    };
+    if across.iter().all(|part| part.sign() == Decision::Zero) {
+        return the_way_a_circle_round_the_axis_winds(flat, ring, from);
+    }
+
+    let (Some(runs_along), Some(reaches_the_centre)) = (
+        Exact::dot_of(normal, along),
+        Exact::dot_of(normal, centre).map(|reach| reach.minus(&Exact::of(flat.offset()))),
+    ) else {
+        return Ok(WhichWayItWinds::CannotTell);
+    };
+    if runs_along.sign() != Decision::Zero || reaches_the_centre.sign() != Decision::Zero {
+        return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+    }
+    // A plane holding the axis cuts the two meridian circles, and each of them
+    // is centred where the tube's own centre circle passes through the plane. So
+    // `u` and `ρ` are one vector and `u · ρ` is a length squared, above zero on
+    // both circles — which is why this row needs nothing read off `from`.
+    Ok(WhichWayItWinds::About(flat.normal()))
+}
+
+/// Which way one of the two circles a plane square to a torus's axis cuts runs,
+/// told apart by which side of the ring's own pipe `from` sits.
+///
+/// The pipe is the one [`intersect`](crate::intersect) hands back as the picker
+/// on these two runs, built here from the same two numbers, so a run that names
+/// the outer circle is ordered by the outer circle's normal. `Cylinder::new`
+/// cannot fail on it: a torus's ring radius is above zero and its axis is finite
+/// by construction, which is the claim `two_circles_round_the_axis` makes about
+/// the same call.
+fn the_way_a_circle_round_the_axis_winds(
+    flat: &Plane,
+    ring: &Torus,
+    from: PredicatePoint,
+) -> Result<WhichWayItWinds> {
+    let ring_pipe = Cylinder::new(ring.axis(), ring.ring_radius())?;
+    match ring_pipe.side_of(from) {
+        Decision::Pos => Ok(WhichWayItWinds::About(flat.normal())),
+        Decision::Neg => Ok(WhichWayItWinds::About(-flat.normal())),
+        // On the pipe itself, which is where the two circles have run together
+        // into the one the plane rests on the tube along. The surfaces touch
+        // there instead of crossing, so `∇S × ∇T` is zero all the way round and
+        // no ordering follows from it.
+        Decision::Zero => Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent),
+        Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
+        other => unreachable!("which side of a pipe a point is on is a sign: {other:?}"),
+    }
 }
 
 /// `((one − from) × (other − from)) · anticlockwise_about`, evaluated the two
@@ -363,13 +502,145 @@ mod tests {
         );
     }
 
+    /// A ring of four and one about `+z`, centred on the origin. Its outer
+    /// equator is at radius five, its inner at three, and it reaches one unit
+    /// either side of `z = 0`.
+    fn a_ring() -> Surface {
+        Surface::Torus(crate::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube inside its ring"))
+    }
+
+    /// The way out of the tube at a point on [`a_ring`], which is the torus's
+    /// own gradient there up to a factor above zero.
+    fn out_of_the_tube_at(point: [f64; 3]) -> Vector {
+        let [x, y, z] = point;
+        let out = (x * x + y * y).sqrt();
+        Vector::new(x - 4.0 * x / out, y - 4.0 * y / out, z)
+    }
+
+    /// That the step from `at` to `next` runs the way the crossing of a plane
+    /// facing `facing` and [`a_ring`] does, which is `n × ∇T` (§17.4).
+    ///
+    /// Every torus test below asserts this before it asserts an order, so what
+    /// they pin is the geometry and not a convention this file picked.
+    fn the_step_runs_the_way_the_two_surfaces_cross(facing: Vector, at: [f64; 3], next: [f64; 3]) {
+        let runs = facing.cross(out_of_the_tube_at(at));
+        let step = Vector::new(next[0] - at[0], next[1] - at[1], next[2] - at[2]);
+        assert!(
+            runs.dot(step) > 0.0,
+            "the crossing runs {runs:?} at {at:?} and the step to {next:?} is {step:?}"
+        );
+    }
+
+    /// The cap of a bend of pipe: one of the two circles a plane holding the
+    /// ring's axis cuts. Both of them wind about the plane's own normal, so the
+    /// same listing orders both.
+    #[test]
+    fn three_points_on_the_cap_of_a_bend_come_back_in_the_order_they_run_round_it() {
+        let ring = a_ring();
+        let facing = Vector::new(0.0, 1.0, 0.0);
+        let cap = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), facing).expect("a unit normal"),
+        );
+        // Anticlockwise about `+y` from the outside of the ring, for the circle
+        // centred `out` along `+x`.
+        let round = |out: f64, eighths: i32| {
+            let angle = core::f64::consts::TAU * f64::from(eighths) / 8.0;
+            [out + angle.cos(), 0.0, -angle.sin()]
+        };
+
+        for out in [4.0, -4.0] {
+            let at = |eighths| PredicatePoint::from(round(out, eighths));
+            the_step_runs_the_way_the_two_surfaces_cross(facing, round(out, 0), round(out, 1));
+            assert_eq!(
+                which_comes_first_round_a_crossing([&cap, &ring], at(0), at(1), at(3)),
+                Ok(Decision::Pos),
+                "the circle {out} along the x axis"
+            );
+            assert_eq!(
+                which_comes_first_round_a_crossing([&cap, &ring], at(0), at(3), at(1)),
+                Ok(Decision::Neg)
+            );
+            assert_eq!(
+                which_comes_first_round_a_crossing([&ring, &cap], at(0), at(1), at(3)),
+                Ok(Decision::Neg),
+                "and the pair the other way round runs the other way"
+            );
+        }
+    }
+
+    /// The two circles a plane square to the axis cuts are concentric and lie in
+    /// one plane, and they wind **opposite ways** — the outer about the plane's
+    /// normal and the inner about its opposite. So the same three points listed
+    /// anticlockwise about that normal are in order on one and out of order on
+    /// the other, which is the whole reason this row reads the point it starts
+    /// from.
+    #[test]
+    fn the_two_circles_round_a_rings_axis_run_opposite_ways() {
+        let ring = a_ring();
+        let facing = Vector::new(0.0, 0.0, 1.0);
+        let through = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), facing).expect("a unit normal"),
+        );
+        let round = |radius: f64, eighths: i32| {
+            let angle = core::f64::consts::TAU * f64::from(eighths) / 8.0;
+            [radius * angle.cos(), radius * angle.sin(), 0.0]
+        };
+
+        let outer = |eighths| PredicatePoint::from(round(5.0, eighths));
+        the_step_runs_the_way_the_two_surfaces_cross(facing, round(5.0, 0), round(5.0, 1));
+        assert_eq!(
+            which_comes_first_round_a_crossing([&through, &ring], outer(0), outer(1), outer(3)),
+            Ok(Decision::Pos)
+        );
+        assert_eq!(
+            which_comes_first_round_a_crossing([&through, &ring], outer(0), outer(3), outer(1)),
+            Ok(Decision::Neg)
+        );
+
+        // The same eighths on the inner circle, which the crossing runs round
+        // the other way.
+        let inner = |eighths| PredicatePoint::from(round(3.0, eighths));
+        the_step_runs_the_way_the_two_surfaces_cross(facing, round(3.0, 0), round(3.0, -1));
+        assert_eq!(
+            which_comes_first_round_a_crossing([&through, &ring], inner(0), inner(1), inner(3)),
+            Ok(Decision::Neg)
+        );
+        assert_eq!(
+            which_comes_first_round_a_crossing([&through, &ring], inner(0), inner(3), inner(1)),
+            Ok(Decision::Pos)
+        );
+    }
+
+    /// A plane resting on the tube touches the ring all the way round one circle
+    /// instead of crossing it. `intersect` names that circle, and `∇S × ∇T` is
+    /// zero at every point of it, so there is no direction to order along and
+    /// this refuses.
+    ///
+    /// A **limit** and not a gap: the answer does not exist. The family of fixes
+    /// is a convention picked out of thin air — the plane's own two basis
+    /// vectors, say — and a convention is not the crossing's direction, which is
+    /// what §17.4 says a coedge is oriented by.
+    #[test]
+    fn a_plane_resting_on_a_rings_tube_has_no_direction_to_be_ordered_along() {
+        let ring = a_ring();
+        let resting = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 1.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal"),
+        );
+        let on_it = PredicatePoint::from([4.0, 0.0, 1.0]);
+        assert_eq!(
+            which_comes_first_round_a_crossing([&resting, &ring], on_it, on_it, on_it),
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent)
+        );
+        assert_eq!(
+            out_of_the_tube_at([4.0, 0.0, 1.0]).cross(Vector::new(0.0, 0.0, 1.0)),
+            Vector::zero(),
+            "the two surfaces have one gradient between them there"
+        );
+    }
+
     /// The pairs whose crossing is not one closed curve in a plane are refused
     /// rather than ordered by a rule that does not hold for them.
-    ///
-    /// **A plane against a torus is in this list and does not belong in it.**
-    /// It cuts one or two circles, `walk` builds them, and this refuses to order
-    /// points along them; the row is here to pin today's answer, so closing that
-    /// gap fails this test loudly rather than passing unnoticed.
     #[test]
     fn a_crossing_that_is_not_a_conic_is_refused_rather_than_ordered() {
         let ground = the_equators_plane();
@@ -380,8 +651,16 @@ mod tests {
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
         let ball = a_ball(5.0);
         let cone = Surface::Cone(crate::Cone::new(Axis::z(), 1.0).expect("a slope"));
-        let bend = Surface::Torus(
-            crate::Torus::new(Axis::z(), 4.0, 1.0).expect("a ring wider than its tube"),
+        let bend = a_ring();
+        // Parallel to the ring's axis but off it, which cuts a quartic.
+        let beside = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(2.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .expect("the x axis is a unit normal"),
+        );
+        // Leaning across it, which cuts a quartic too.
+        let leaning = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 1.0))
+                .expect("a normal with a length"),
         );
         let somewhere = PredicatePoint::from([1.0, 0.0, 0.0]);
 
@@ -403,10 +682,13 @@ mod tests {
             [&bend, &pipe],
             [&bend, &cone],
             [&bend, &bend],
-            // And the gap: a plane cuts a torus in circles and this refuses
-            // them, both ways round.
-            [&ground, &bend],
-            [&bend, &ground],
+            // The planes that cut a torus in a quartic rather than in circles,
+            // both ways round. The two that cut circles are ordered, three
+            // tests up.
+            [&beside, &bend],
+            [&bend, &beside],
+            [&leaning, &bend],
+            [&bend, &leaning],
         ] {
             assert_eq!(
                 which_comes_first_round_a_crossing(pair, somewhere, somewhere, somewhere),

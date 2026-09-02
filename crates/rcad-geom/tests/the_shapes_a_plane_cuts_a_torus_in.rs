@@ -25,6 +25,7 @@
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Sphere,
     Surface, SurfaceMeet, Torus, Vector, intersect, walk, where_a_closed_crossing_starts,
+    which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
 
@@ -277,6 +278,106 @@ fn each_meridian_circle_starts_somewhere_on_both_surfaces() {
         assert!(flat.signed_distance_to(*at).abs() < 1e-13, "off the plane");
     }
     assert_ne!(starts[0], starts[1], "the two circles start in two places");
+}
+
+// ---------------------------------------------------------------------------
+// Ordering points round the circles, which is what a capped bend needs.
+// ---------------------------------------------------------------------------
+
+/// Every step `walk` takes round a run, as `which_comes_first_round_a_crossing`
+/// answers about it starting from the run's own vertex.
+///
+/// One sign for the whole run is what a caller needs: the points come off one
+/// conic at rising angles, so a run that is ordered at all is ordered the same
+/// way at every step of it.
+fn how_the_walked_points_are_ordered(
+    run: &NamedRun,
+    flat: &Plane,
+    ring: &Torus,
+    swapped: bool,
+) -> Decision {
+    let pair = [Surface::Plane(*flat), Surface::Torus(*ring)];
+    let along = if swapped {
+        [&pair[1], &pair[0]]
+    } else {
+        [&pair[0], &pair[1]]
+    };
+    let start = where_a_closed_crossing_starts(run, along, &mut ProvenanceLog::new())
+        .expect("a closed crossing has a place to start");
+    let points = walked(run, flat, ring);
+    assert!(points.len() >= 3, "a circle is walked into enough pieces");
+
+    let from = rcad_predicates::Point::from(start.coordinates());
+    let mut so_far: Option<Decision> = None;
+    for step in points.windows(2) {
+        let answered = which_comes_first_round_a_crossing(
+            along,
+            from,
+            rcad_predicates::Point::from(step[0].coordinates()),
+            rcad_predicates::Point::from(step[1].coordinates()),
+        )
+        .expect("a circle a plane cuts out of a ring is ordered");
+        assert!(
+            matches!(answered, Decision::Pos | Decision::Neg),
+            "{step:?} came back {answered:?}"
+        );
+        assert_eq!(*so_far.get_or_insert(answered), answered, "at {step:?}");
+    }
+    so_far.expect("at least one step")
+}
+
+/// **A capped bend of pipe.** Its two caps are planes through the ring's axis
+/// and each of them cuts one whole meridian circle, which is the edge the cap
+/// face is bounded by.
+///
+/// Naming that circle, putting a vertex on it and walking it all worked before;
+/// what did not is telling two points along it apart, which is what the
+/// arrangement needs to cut the cap face with it. Every step of the walk is
+/// ordered here, one way for the whole circle, and the other way when the pair
+/// is swapped — which is the crossing's own direction and not a convention
+/// (§17.4).
+#[test]
+fn every_step_round_the_cap_of_a_bend_is_ordered_the_same_way() {
+    let ring = a_ring();
+    let flat = a_plane(Point::origin(), Vector::new(0.0, 1.0, 0.0));
+    let SurfaceMeet::Curves(runs) = crossed(&flat, &ring).expect("a named crossing") else {
+        panic!("a plane through the axis cuts two circles");
+    };
+
+    for run in &runs {
+        let one_way = how_the_walked_points_are_ordered(run, &flat, &ring, false);
+        let other = how_the_walked_points_are_ordered(run, &flat, &ring, true);
+        assert_ne!(
+            one_way, other,
+            "swapping the pair runs the circle backwards"
+        );
+    }
+}
+
+/// The two circles a plane square to the axis cuts are walked round the same way
+/// in space — both are built on the ring's own basis — and the crossing runs
+/// round them **opposite** ways, because the tube's outward normal points out of
+/// the ring on one and into it on the other.
+///
+/// So the same walk, on the same plane, orders one circle forwards and the other
+/// backwards. That is the row that cannot be read off the pair of surfaces, and
+/// this is what pins it.
+#[test]
+fn the_two_circles_round_a_rings_axis_are_ordered_opposite_ways() {
+    let ring = a_ring();
+    let flat = a_plane(Point::origin(), Vector::new(0.0, 0.0, 1.0));
+    let SurfaceMeet::Curves(runs) = crossed(&flat, &ring).expect("a named crossing") else {
+        panic!("a plane through the ring cuts two circles");
+    };
+    assert_eq!(runs.len(), 2);
+    assert!(matches!(the_picker_on(&runs[0]), Picker::OutsideAPipe(_)));
+    assert!(matches!(the_picker_on(&runs[1]), Picker::InsideAPipe(_)));
+
+    assert_ne!(
+        how_the_walked_points_are_ordered(&runs[0], &flat, &ring, false),
+        how_the_walked_points_are_ordered(&runs[1], &flat, &ring, false),
+        "the outer circle and the inner one run opposite ways"
+    );
 }
 
 // ---------------------------------------------------------------------------
