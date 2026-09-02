@@ -23,8 +23,8 @@
 //! coordinate direction — which is what every row below does.
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Sphere,
-    Surface, SurfaceMeet, Torus, Vector, intersect, walk, where_a_closed_crossing_starts,
+    Axis, Cone, Cylinder, Deflection, EdgeRun, Error, MeetOfThree, NamedRun, Picker, Plane, Point,
+    Sphere, Surface, SurfaceMeet, Torus, Vector, intersect, walk, where_a_closed_crossing_starts,
     which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
@@ -467,10 +467,14 @@ fn a_ring_against_anything_curved_is_refused_and_against_itself_is_one_surface()
 }
 
 /// A straight line meets a torus four times and every other surface here twice,
-/// so where three surfaces meet is refused by name rather than answered with a
-/// quadratic's two roots.
+/// so where three surfaces meet answers with four places and not a quadratic's
+/// two.
+///
+/// The counts and the touching cases are
+/// `crates/rcad-geom/tests/where_a_line_meets_a_torus.rs`; what this row still
+/// holds is the sorting-order claim, which is about this file's subject.
 #[test]
-fn where_two_planes_and_a_ring_meet_is_refused_because_a_line_meets_it_four_times() {
+fn where_two_planes_and_a_ring_meet_is_answered_at_up_to_four_places() {
     let ring = a_ring();
     let one = a_plane(Point::origin(), Vector::new(0.0, 1.0, 0.0));
     let other = a_plane(Point::origin(), Vector::new(0.0, 0.0, 1.0));
@@ -485,13 +489,14 @@ fn where_two_planes_and_a_ring_meet_is_refused_because_a_line_meets_it_four_time
         );
     }
 
-    // **All three positions, because the refusal is one check and the argument
-    // for it is a sorting order.** `meet_of_three_surfaces` asks only whether
-    // the *last* of the three sorted surfaces is a torus, and `how_a_quadric_cuts_the_line`
-    // panics on one that gets past. What makes the one check enough is that a
-    // torus sorts after every other kind, so a lone torus is always last — and
-    // that is a claim about `Surface::how_it_sorts_against`, three files away,
-    // which nothing but this makes anyone re-check.
+    // **All three positions, because the quartic route is one check and the
+    // argument for it is a sorting order.** `meet_of_three_surfaces` asks only
+    // whether the *last* of the three sorted surfaces is a torus, and
+    // `how_a_quadric_cuts_the_line` panics on one that gets past. What makes the
+    // one check enough is that a torus sorts after every other kind, so a lone
+    // torus is always last — and that is a claim about
+    // `Surface::how_it_sorts_against`, three files away, which nothing but this
+    // makes anyone re-check.
     let flat = [Surface::Plane(one), Surface::Plane(other)];
     let ring = Surface::Torus(ring);
     for triple in [
@@ -499,15 +504,16 @@ fn where_two_planes_and_a_ring_meet_is_refused_because_a_line_meets_it_four_time
         [&flat[0], &ring, &flat[1]],
         [&ring, &flat[0], &flat[1]],
     ] {
-        assert_eq!(
-            rcad_geom::meet_of_three_surfaces(
-                triple,
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            ),
-            Err(Error::WhereALineMeetsATorusIsAQuartic),
-            "{triple:?}"
-        );
+        let answer = rcad_geom::meet_of_three_surfaces(
+            triple,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the x axis meets this ring");
+        let MeetOfThree::At(places) = &answer else {
+            panic!("expected four places, got {answer:?} for {triple:?}");
+        };
+        assert_eq!(places.len(), 4, "{triple:?}");
     }
 
     // Two tori or three never get as far as that check, and they must not fall
