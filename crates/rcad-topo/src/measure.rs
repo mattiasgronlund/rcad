@@ -4,7 +4,7 @@ use rcad_geom::{Cone, Deflection, Point, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::mesh::{Mesh, MeshTriangle};
-use crate::view::{FaceView, WireView};
+use crate::view::FaceView;
 use crate::{Error, FaceKey, Result, SolidView};
 
 /// How much space a solid takes up, how much skin it has, where it balances,
@@ -265,7 +265,7 @@ impl SolidView<'_> {
     /// One walk over the faces rather than three, because the two error terms
     /// are both a share of the very area being summed.
     fn skin_of(self, mesh: &Mesh) -> Skin {
-        let radii = radius_of_each_face(self);
+        let radii = radius_of_each_face(self, mesh);
         let deviation = mesh.deviation().magnitude();
         let mut skin = Skin {
             area: 0.0,
@@ -662,28 +662,20 @@ fn how_far_the_solid_reaches_from(mesh: &Mesh, centroid: Point) -> f64 {
 /// How far each face of this solid bends, or `None` where it does not bend at
 /// all.
 ///
-/// # Panics
+/// # How small a cone face's radius really gets, and why the corners cannot say
 ///
-/// On a surface this has not been taught. [`Surface`] grows a variant at every
-/// milestone, and a surface measured by not being measured is worse than a stop.
-fn radius_of_each_face(solid: SolidView<'_>) -> HashMap<FaceKey, Option<f64>> {
-    solid
-        .faces()
-        .map(|face| {
-            let radius = match face.surface() {
-                Surface::Plane(_) => None,
-                Surface::Sphere(ball) => Some(ball.radius()),
-                Surface::Cylinder(pipe) => Some(pipe.radius()),
-                Surface::Cone(cone) => Some(how_tightly_a_cone_bends_over(&cone, face)),
-                other => panic!("this crate cannot say how far {other:?} bends"),
-            };
-            (face.key(), radius)
-        })
-        .collect()
-}
-
-/// The smallest radius of normal curvature this cone face bends by anywhere on
-/// itself, which is what the two bounds above have to be charged against.
+/// **Read over the mesh's own points and not over the face's corners**, and the
+/// case that forces it is a cone that ends in a point. Its cone face is bounded
+/// by one circle and nothing else; the apex is where the surface's own second
+/// coordinate runs out, not a vertex of the model, so **no corner of that face
+/// is anywhere near it**. Charged against its corners the face would publish the
+/// radius at its rim — four units on a cone of radius four — for a face that
+/// reaches a radius of nothing at all. That is a bound claimed and not earned,
+/// which is worse than no bound.
+///
+/// The mesh's points are the right domain anyway: what the two bounds above are
+/// about is how far *these triangles* can be from the surface, and the triangles
+/// are what the mesh holds.
 ///
 /// **The offset-surface argument is what needs the smallest and not the
 /// largest.** [`how_much_more_surface_there_can_be`] projects the mesh onto the
@@ -706,13 +698,53 @@ fn radius_of_each_face(solid: SolidView<'_>) -> HashMap<FaceKey, Option<f64>> {
 /// `(8π/3)·deviation³(1 + slope²)^{3/2}/slope` of volume, both of which are
 /// bounded outright. That wants a bound taking two numbers rather than one, and
 /// its consumer is a pointed cone somebody wants a measured volume for.
-fn how_tightly_a_cone_bends_over(cone: &Cone, face: FaceView<'_>) -> f64 {
-    let along = cone.axis().direction();
-    face.wires()
-        .flat_map(WireView::points)
-        .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
-        .fold(f64::INFINITY, f64::min)
-        * cone.slope().hypot(1.0)
+///
+/// # Panics
+///
+/// On a surface this has not been taught. [`Surface`] grows a variant at every
+/// milestone, and a surface measured by not being measured is worse than a stop.
+fn radius_of_each_face(solid: SolidView<'_>, mesh: &Mesh) -> HashMap<FaceKey, Option<f64>> {
+    let mut cones: HashMap<FaceKey, Cone> = HashMap::new();
+    let mut radii: HashMap<FaceKey, Option<f64>> = solid
+        .faces()
+        .map(|face| {
+            let radius = match face.surface() {
+                Surface::Plane(_) => None,
+                Surface::Sphere(ball) => Some(ball.radius()),
+                Surface::Cylinder(pipe) => Some(pipe.radius()),
+                // Worked out below, over the mesh's own points rather than over
+                // the face's corners. A face with no triangles keeps the
+                // infinity, and contributes no area either, so it is charged
+                // nothing — which is right, because there is nothing there.
+                Surface::Cone(cone) => {
+                    cones.insert(face.key(), cone);
+                    Some(f64::INFINITY)
+                }
+                other => panic!("this crate cannot say how far {other:?} bends"),
+            };
+            (face.key(), radius)
+        })
+        .collect();
+
+    for triangle in mesh.triangles() {
+        let Some(cone) = cones.get(&triangle.face()) else {
+            continue;
+        };
+        let along = cone.axis().direction();
+        let steepness = cone.slope().hypot(1.0);
+        for corner in triangle.corners() {
+            let at = mesh.points()[corner as usize];
+            let here = cone.radius_at(along.dot(at - cone.apex())) * steepness;
+            let slot = radii
+                .get_mut(&triangle.face())
+                .expect("every face of the solid is in the table");
+            *slot = Some(
+                slot.expect("a cone face was put in with a radius")
+                    .min(here),
+            );
+        }
+    }
+    radii
 }
 
 /// Where one mesh triangle's three corners are.

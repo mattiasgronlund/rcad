@@ -526,6 +526,16 @@ fn how_far_a_flat_piece_strays(
         Surface::Cone(cone) => (cone.radius_at(reach) * cone.slope().hypot(1.0), 2.0),
         other => panic!("this crate cannot say how far a flat piece of {other:?} strays"),
     };
+    // **A piece whose every corner is on the apex, which a cone has and no other
+    // surface here does.** Cutting a cone's cap up to its apex leaves a side
+    // running from the apex to the apex — one 3D point at two longitudes — and
+    // the derivation above divides by the radius the chord was measured at,
+    // which there is nothing at all. The answer is not the infinity that falls
+    // out of the arithmetic: every corner of such a piece is within `slop` of
+    // the apex, so every point of it is, and the apex is on the cone.
+    if radius == 0.0 {
+        return slop;
+    }
     let chord = longest_chord + 2.0 * slop;
     chord * chord / (share * radius) + slop
 }

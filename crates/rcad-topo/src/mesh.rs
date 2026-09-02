@@ -1689,6 +1689,12 @@ fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room:
         ),
         other => panic!("this crate cannot walk along {other:?}"),
     };
+    // A step that stays on a cone's apex covers no distance and bends by
+    // nothing, so it is one piece — `how_far_a_flat_piece_strays` in `rcad-mesh`
+    // makes the same allowance for the same shape and says why.
+    if radius == 0.0 {
+        return 1;
+    }
     let longest_chord = (share * radius * room * WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET).sqrt();
     let by_bending = (radius * turns_over / longest_chord).ceil();
     let by_turning = (turns_over / (core::f64::consts::TAU / 4.0)).ceil();
