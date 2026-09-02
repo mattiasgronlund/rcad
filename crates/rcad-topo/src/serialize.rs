@@ -49,7 +49,7 @@
 //! level below by slot, and reading those slots wholesale is what let a
 //! stranger's bytes build a solid naming a shell that was not there — a model
 //! the STEP writer and the sweep both crashed on rather than refused
-//! ([`ModelData::check_keys_resolve`](crate::model::ModelData::check_keys_resolve)).
+//! (`ModelData::check_keys_resolve`).
 //! It is the one thing about a model that costs no arithmetic to decide, so
 //! nothing downstream has to carry a `Policy` to ask it.
 

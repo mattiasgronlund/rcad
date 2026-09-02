@@ -37,7 +37,7 @@ impl Model {
     /// - every stored key names something that is still there — asked first,
     ///   for all seven arenas at once, because every check after it walks the
     ///   model through views and a view over a missing slot panics rather than
-    ///   refusing ([`ModelData::check_keys_resolve`](crate::model::ModelData::check_keys_resolve)),
+    ///   refusing (`ModelData::check_keys_resolve`),
     /// - no coordinate is infinite and no edge has zero length,
     /// - every edge is used by exactly two coedges running opposite ways,
     /// - every wire has at least three coedges and closes back on itself,
