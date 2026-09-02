@@ -34,7 +34,10 @@ impl Model {
     ///
     /// What it checks:
     ///
-    /// - every stored key names something that is still there,
+    /// - every stored key names something that is still there — asked first,
+    ///   for all seven arenas at once, because every check after it walks the
+    ///   model through views and a view over a missing slot panics rather than
+    ///   refusing ([`ModelData::check_keys_resolve`](crate::model::ModelData::check_keys_resolve)),
     /// - no coordinate is infinite and no edge has zero length,
     /// - every edge is used by exactly two coedges running opposite ways,
     /// - every wire has at least three coedges and closes back on itself,
@@ -73,6 +76,7 @@ impl Model {
     /// why [`how_far_the_sweeps_mesh_may_stray`] asks for the coarsest mesh
     /// there is.
     pub fn validate(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+        self.data().check_keys_resolve()?;
         self.check_vertices()?;
         self.check_edges()?;
         self.check_coedges()?;
@@ -206,10 +210,7 @@ impl Model {
                 }
             }
         }
-        for (slot, coedge) in &self.data().coedges {
-            if !self.data().edges.contains_key(coedge.edge) {
-                return Err(Invalid::DanglingKey { entity: "edge" }.into());
-            }
+        for slot in self.data().coedges.keys() {
             match used.get(slot).copied().unwrap_or(0) {
                 0 => return Err(Invalid::Orphan { entity: "coedge" }.into()),
                 1 => {}
@@ -241,19 +242,6 @@ impl Model {
                 }
                 .into());
             }
-            for coedge in wire.coedges() {
-                if !self.data().coedges.contains_key(coedge) {
-                    return Err(Invalid::DanglingKey { entity: "coedge" }.into());
-                }
-            }
-            for &step in &wire.steps {
-                if let crate::model::WireStep::Pole(vertex) = step
-                    && !self.data().vertices.contains_key(vertex)
-                {
-                    return Err(Invalid::DanglingKey { entity: "vertex" }.into());
-                }
-            }
-
             // A pole is walked like any other step and simply goes nowhere, so
             // closure is one rule rather than two.
             let mut previous_end = None;
@@ -300,11 +288,6 @@ impl Model {
         for (slot, face) in &self.data().faces {
             if face.wires.is_empty() {
                 return Err(Invalid::FaceHasNoWires.into());
-            }
-            for &wire in &face.wires {
-                if !self.data().wires.contains_key(wire) {
-                    return Err(Invalid::DanglingKey { entity: "wire" }.into());
-                }
             }
 
             let view = FaceView::new(self, slot, Isometry::identity(), Orientation::Forward);
@@ -460,12 +443,7 @@ impl Model {
                 }
             }
         }
-        for (slot, shell) in &self.data().shells {
-            for face in &shell.faces {
-                if !self.data().faces.contains_key(face.face) {
-                    return Err(Invalid::DanglingKey { entity: "face" }.into());
-                }
-            }
+        for slot in self.data().shells.keys() {
             match used.get(slot).copied().unwrap_or(0) {
                 0 => return Err(Invalid::Orphan { entity: "shell" }.into()),
                 1 => {}
@@ -479,12 +457,7 @@ impl Model {
             }
         }
 
-        for (slot, solid) in &self.data().solids {
-            for shell in &solid.shells {
-                if !self.data().shells.contains_key(shell.shell) {
-                    return Err(Invalid::DanglingKey { entity: "shell" }.into());
-                }
-            }
+        for slot in self.data().solids.keys() {
             let view = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
             // A polyhedron's own fan *is* its volume, so nothing is meshed for
             // one. A curved solid has no fan — a round bar's caps fan into no
@@ -1475,6 +1448,7 @@ mod tests {
     use super::{Decision, as_coarse_as_a_mesh_gets, winding_of, winding_round};
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
+    use crate::model::{ShellData, ShellUse, SolidData, VertexData, WireStep};
     use crate::{Error, FaceView, Invalid, Model, SolidView, WireView};
 
     fn an_empty_model() -> Model {
@@ -1548,6 +1522,118 @@ mod tests {
             .next()
             .expect("a cube has corners");
         model.data_mut().vertices.remove(corner);
+
+        assert_eq!(refusal(&model), Invalid::DanglingKey { entity: "vertex" });
+    }
+
+    /// **The sweep itself crashed on a stranger's model, which is the one
+    /// thing it exists not to do.**
+    ///
+    /// A fuzz target over `postcard::from_bytes::<Model>` built this shape
+    /// after 17,827,556 executions: two solids, and nothing at all in the
+    /// other six arenas. The sweep reached it at
+    /// `check_which_side_of_its_trimming_each_curved_face_lies_on`, which walks
+    /// every solid through views, and `ShellView::faces` indexed the shell
+    /// arena with a slot that was not in it — `invalid SlotMap key used`,
+    /// `view.rs:388`. The solid-names-a-shell check was already written; it
+    /// just ran two checks too late.
+    ///
+    /// Built by hand rather than read from the fuzzer's bytes, because
+    /// [the format is one we intend to break](crate::serialize) and a stored
+    /// corpus in it stops reproducing the day the version moves.
+    #[test]
+    fn a_solid_naming_a_shell_that_is_not_there_is_refused_rather_than_crashing_the_sweep() {
+        let mut model = an_empty_model();
+        let nowhere = model
+            .data_mut()
+            .shells
+            .insert(ShellData { faces: Vec::new() });
+        model.data_mut().shells.remove(nowhere);
+        model.data_mut().solids.insert(SolidData {
+            shells: SmallVec::from_buf([ShellUse {
+                shell: nowhere,
+                loc: Isometry::identity(),
+                orient: Orientation::Forward,
+            }]),
+        });
+
+        assert_eq!(refusal(&model), Invalid::DanglingKey { entity: "shell" });
+    }
+
+    /// **Every level, not just the two the earlier sweep reached.**
+    ///
+    /// The check was written five times, once inside the check for whichever
+    /// entity happened to store the key, and only the vertex and edge levels
+    /// ran early enough to work. Measured on the code before this change,
+    /// taking one entity of each kind out of a cube gave: vertex and edge
+    /// refused by name; **coedge panicked** `invalid SlotMap key used` at
+    /// `check_edges`, which reads the index's coedge list and indexes the
+    /// coedge arena with it; wire, face and shell refused for
+    /// [`Invalid::Orphan`] one level down, which is the symptom and not the
+    /// fact — the model's own words for what is wrong with it are that a key
+    /// names nothing.
+    ///
+    /// One entity of each kind is the whole family in one test.
+    #[test]
+    fn every_level_of_the_model_is_refused_for_naming_something_that_is_gone() {
+        let gone = |entity| Invalid::DanglingKey { entity };
+
+        let mut model = a_cube();
+        let vertex = model.data().vertices.keys().next().expect("a corner");
+        model.data_mut().vertices.remove(vertex);
+        assert_eq!(refusal(&model), gone("vertex"), "an edge's end");
+
+        let mut model = a_cube();
+        let edge = model.data().edges.keys().next().expect("an edge");
+        model.data_mut().edges.remove(edge);
+        assert_eq!(refusal(&model), gone("edge"), "a coedge's edge");
+
+        let mut model = a_cube();
+        let coedge = model.data().coedges.keys().next().expect("a coedge");
+        model.data_mut().coedges.remove(coedge);
+        assert_eq!(refusal(&model), gone("coedge"), "a step round a wire");
+
+        let mut model = a_cube();
+        let wire = model.data().wires.keys().next().expect("a wire");
+        model.data_mut().wires.remove(wire);
+        assert_eq!(refusal(&model), gone("wire"), "a face's boundary");
+
+        let mut model = a_cube();
+        let face = model.data().faces.keys().next().expect("a face");
+        model.data_mut().faces.remove(face);
+        assert_eq!(refusal(&model), gone("face"), "a face a shell is made of");
+
+        let mut model = a_cube();
+        let shell = model.data().shells.keys().next().expect("a shell");
+        model.data_mut().shells.remove(shell);
+        assert_eq!(refusal(&model), gone("shell"), "a solid's skin");
+    }
+
+    /// The one step round a wire that names a corner instead of an edge.
+    ///
+    /// A pole cannot be reached by taking a corner away, because a ball's poles
+    /// are its seam's two ends and the edge check names them first. So the slot
+    /// is made dangling on purpose: put a corner in, take it out again, and
+    /// point the pole at it.
+    #[test]
+    fn a_pole_standing_on_a_corner_that_is_gone_is_caught() {
+        let mut model = a_ball();
+        let nowhere = model.data_mut().vertices.insert(VertexData {
+            point: Point::origin(),
+            approximation: None,
+        });
+        model.data_mut().vertices.remove(nowhere);
+
+        let mut poles = 0;
+        for wire in model.data_mut().wires.values_mut() {
+            for step in &mut wire.steps {
+                if let WireStep::Pole(vertex) = step {
+                    *vertex = nowhere;
+                    poles += 1;
+                }
+            }
+        }
+        assert!(poles > 0, "a ball's boundary stands on its poles");
 
         assert_eq!(refusal(&model), Invalid::DanglingKey { entity: "vertex" });
     }
