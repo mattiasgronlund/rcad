@@ -1,0 +1,6 @@
+ISO-10303-21;
+DATA;
+#1=CAIAN_POINT('',(0.,0.,0.));
+#2=(NAMED_UNIT(*)LEIT(0.));
+#2=(NAMED_()SI_UNIT(.MI0.,0.));
+AMED

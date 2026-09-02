@@ -1,9 +1,0 @@
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION((''),'0;1');
-FILE_NAME();
-FILE_SCHEMA(('X'));
-ION((''),('X'));
-ENDSEC;
-DATA;
-#0=A('\X2\0316\X0\;\P'));

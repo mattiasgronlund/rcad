@@ -1,8 +1,0 @@
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION();
-FILE_NAME('');ION((''),'1;1');
-ME('');
-FILE_SCHEMA(('X'));
-ENDSEC;
-D;

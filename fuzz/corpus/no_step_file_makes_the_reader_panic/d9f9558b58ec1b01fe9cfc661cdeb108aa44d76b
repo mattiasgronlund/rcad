@@ -1,6 +1,0 @@
-ISO-10303-21;
-HEADER;
-FDERS(ION('s'),'2E');
-FE('');
-FILE_T(IO(''),'2;1');
-CHEMA(P('X'))3-

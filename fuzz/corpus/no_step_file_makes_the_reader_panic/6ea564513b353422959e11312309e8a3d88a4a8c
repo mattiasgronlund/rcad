@@ -1,0 +1,10 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');
+FILE_NAME('',(''),'');
+FILE_SCHEMA(('IGN'));
+ENDSEC;
+DATA;
+#1=CAIPOINT('',(0.,0.,0.));
+#2=(NAT(.M0.));
+#2=(NAMUNINIT(.EI0.,0.));#2=(NAMED_U('')L

@@ -1,0 +1,11 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'');
+FILE_NAFE('');
+SE_DESION((''),'0');
+FILE_NAFE('');
+FHLON((''),'1;1');TION((''),'2;1');
+_SCHEMAMA((7),'2;1');
+FILE_NAME('','','');FILE_SCHEMA(('AI,GN'));
+ENDSEC;
+END-ISO-10303-21;

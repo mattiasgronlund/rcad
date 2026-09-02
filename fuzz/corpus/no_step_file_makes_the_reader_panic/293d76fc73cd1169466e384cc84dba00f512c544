@@ -1,0 +1,8 @@
+ISO-10303-21;HEADER;FILE_DESCRIPTION((''),'2;');
+FILE_NAME('',(''),(''),'');
+FILE_SCHEMA((''));
+ENDSEC;
+DATA;
+#1=CA('',(0.,0.,0.,0.),#9);
+ENDSEC;
+END-ISO-10303-21;

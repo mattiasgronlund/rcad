@@ -1,7 +1,0 @@
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION((''),'2;1');
-FILE_NAME('''','','');
-FILE_SCHEMA(('EEaSIGN','',(''),'HE'));
-ENDSEC;
-DAT606-21,

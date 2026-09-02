@@ -1,0 +1,13 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');
+FILE_NAME('','');
+FILE_SCHEMA(('AEXIGN'));
+ENDSEC;
+DATA;
+#1=CNI('',());
+#2=(ED_UN()S_UNIT(.MI0.,0.));#20=CAIINT('',(0.,0.,0.));
+#2=(_UNIT(.MI0.,0.));
+#21=CARTET('',(0,0.));
+#2=(NAI_UNIT(.MI0.,0.));
+#2=TOMGTIVE_DEO

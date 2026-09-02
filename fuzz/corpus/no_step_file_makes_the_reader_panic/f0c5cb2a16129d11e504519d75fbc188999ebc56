@@ -1,0 +1,7 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'3;1');
+NAME('');
+ON((''),'2;');
+FILE_NAME();CH('');FI('2*');_NAE('');_();
+ENDSEC;S

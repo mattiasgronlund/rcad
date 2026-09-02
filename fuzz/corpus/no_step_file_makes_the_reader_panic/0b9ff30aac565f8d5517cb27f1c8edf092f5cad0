@@ -1,6 +1,0 @@
-ISO-10303-21;
-HEADER;
-FDERSCRT(ION('s'),'2E');
-FE('');
-FILE_T(IOIPN(''),'2;1');
-CHEMA(P('X'))3-

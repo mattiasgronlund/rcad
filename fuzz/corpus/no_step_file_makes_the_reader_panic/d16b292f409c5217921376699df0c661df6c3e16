@@ -1,8 +1,0 @@
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION((''),'41');
-FILE_NAME('=','','');
-FILE_SCHEMA(('AU'));
-E('',0);
-ENDSEC;
-END-ISO-10303-21;

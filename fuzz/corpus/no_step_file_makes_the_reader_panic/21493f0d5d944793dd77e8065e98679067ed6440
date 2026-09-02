@@ -1,0 +1,12 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'0;');
+FILE_NAME('');
+FILE_SCHEMA(());
+ENDSEC;
+HEADER;
+FILE_DESCRIPTION((''),'1;');
+FILE_NAME('','',(''),(''),'','');
+FILE_SCHEMA(());
+ENDSEC;
+-ISÕ10;

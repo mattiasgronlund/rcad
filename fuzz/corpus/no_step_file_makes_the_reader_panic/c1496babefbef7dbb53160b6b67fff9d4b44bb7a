@@ -1,8 +1,0 @@
-ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION((''),'2;1');
-FILE_NAME('','',((),''''),'');
-FILE_SCHEMA(('ATON'));
-ENDSEC;
-DATA;
-#2=(NAIT()SIT(.LMETRE.)),#

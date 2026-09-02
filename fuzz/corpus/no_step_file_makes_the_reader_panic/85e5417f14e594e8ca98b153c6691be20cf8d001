@@ -1,8 +1,0 @@
-ISO-10303-21;
-HEADER;E('');
-FI(('X'));RIP(('X'));NDSECDSCRN((''),'4;1');
-FIE_NAM('');
-FA(('X'));TION((''),'2~2');
-FIL('');_A((''));
-ENDSEC;
-DAÿ;

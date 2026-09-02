@@ -1,0 +1,11 @@
+ISO-10303-21;
+HEADER;
+FILIPTION((''),'2;1');
+FILE_NAME('',(''),(''),'',',''');A(('AN'));
+ENDSON((''),'3;1');
+FILNAME('',(''),(''),'''','');
+FIA(('AOMOTIVE_DESIGN'));
+RION((''),'2;1','',(''),(''),'''');A(('AUTOI?GN'));
+ENDSON((''),'2');
+FILE_ME('',(''),(''),'','');
+FILE_SCHEMA(('AUTOMTIVMN'));D_FACE('',(

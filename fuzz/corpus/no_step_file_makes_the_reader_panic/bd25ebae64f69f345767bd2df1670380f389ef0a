@@ -1,5 +1,0 @@
-ISO-10303-21;
-HEADER;
-SCHEMA(('A	L'));
-A(('A'));
-_IN(('1')_N

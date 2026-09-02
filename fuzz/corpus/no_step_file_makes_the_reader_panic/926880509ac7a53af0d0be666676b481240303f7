@@ -1,0 +1,13 @@
+ISO-10303-21;
+
+DATA;
+
+ENDSEC;
+DATA;
+
+ENDSEC;DATA;
+#1=CA(POSITIG(8),$,*,#0);
+
+ENDSEC;
+DATA;
+;

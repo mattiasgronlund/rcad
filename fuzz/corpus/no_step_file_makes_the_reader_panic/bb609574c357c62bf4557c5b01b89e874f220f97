@@ -1,0 +1,15 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');E_NA('');O((''));
+FILE_NAFE('');
+FILE_LE_SE_D((''),'2;1');_NAFE('');
+EMA(('X'));NAFE('');
+FILE_LESION((''),';5');
+E_NAFE('');E_SE((''),'2;1');
+FILE_NAFE('');
+FEIL_SCMA(('X'));
+ENDSCILE_NAFE('');
+FILE_ON('2;1');
+ILEE('');
+FILA(('X'));
+ENDSEC;\
