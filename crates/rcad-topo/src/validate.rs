@@ -918,7 +918,7 @@ pub(crate) fn the_curved_one_of(carried_by: &[Surface; 2]) -> Option<Surface> {
 ///
 /// On a flat surface, which has no longitude, and on a kind this has not been
 /// taught.
-fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
+pub(crate) fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
     match surface {
         Surface::Sphere(_) => Vector::new(0.0, 0.0, 1.0),
         Surface::Cylinder(pipe) => pipe.axis().direction(),

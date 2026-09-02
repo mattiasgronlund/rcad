@@ -30,7 +30,7 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::fuse::name_of_surface_bits;
-use crate::validate::side_of_surface;
+use crate::validate::{side_of_surface, the_way_it_is_parametrised_about};
 use crate::view::{EdgeView, FaceView, VertexView, WireStepView, WireView};
 use crate::{EdgeKey, Error, FaceKey, Invalid, Result, SolidView, VertexKey};
 
@@ -390,13 +390,21 @@ impl BuildingAMesh {
         // plane leaves *two* caps in two different fuses, and each was stored
         // the way whichever face walked it first ran. A pole read off that is
         // right for half the caps there are.
+        //
+        // The rule is read **at the corner**, which is where the fuse writes it
+        // and where `Model::validate` reads it back. Summing the longitude all
+        // the way round instead comes to nothing on a circle that encircles no
+        // pole, and leaving the direction to the evaluator there is what
+        // [`the_way_a_closed_edge_is_stored_running`] measures the cost of.
         if edge.is_closed()
             && let Some(reference) = the_curved_surface_that_names_a_closed_edge(&along)
-            && how_far_round_this_face_it_goes(
+            && let Some(first) = points.first()
+            && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(
                 &reference,
+                &along,
                 back.apply_to_point(from.point()),
-                &points,
-            ) < 0.0
+            )
+            && (*first - back.apply_to_point(from.point())).dot(stored_way) < 0.0
         {
             points.reverse();
         }
@@ -465,6 +473,32 @@ impl BuildingAMesh {
         let Some(whole_turn) = how_far_the_longitude_wraps(stored) else {
             return Ok(vec![walked]);
         };
+        // **A loop drawn on a ball bounds two pieces and only one of them is a
+        // patch this can fill.** The triangulator fills the inside of what it
+        // is handed, and the inside of a loop in the surface's own two
+        // coordinates is the piece holding no pole. When the material is on the
+        // *other* side — the piece holding both poles, which a ball with a cap
+        // taken off it is — the answer is the whole ball less a disc, and
+        // writing it needs a seam and two poles the way §38.1 wrote an uncut
+        // one. Nothing here builds that yet, so it is refused by name rather
+        // than filled inside out: without this the union of two balls of radius
+        // two whose centres are two apart came back `Ok` measuring 10.40, where
+        // `18π = 56.55` is the union and `10π/3 = 10.47` is the *lens* between
+        // them — the complement of the piece that was asked for.
+        //
+        // **Only asked of a surface that pinches**, which here is only a ball.
+        // A loop on a pipe that does not go right round bounds a patch one way
+        // and an endless tube the other, and the endless one is not a face at
+        // all — §38.6's limit, refused further down for want of anything to cut
+        // across to rather than misread here.
+        if walked.len() == 1
+            && walked[0].closes_on_one_curve
+            && !walked[0].goes_right_round
+            && where_this_surface_pinches(stored).is_some()
+            && how_much_of_the_chart_this_loop_encloses(&walked[0]) <= 0.0
+        {
+            return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
+        }
         let widest = whole_turn / 4.0;
         if how_far_round(&walked[0]) <= widest {
             return Ok(vec![walked]);
@@ -771,6 +805,7 @@ impl BuildingAMesh {
         let mut along = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
+            closes_on_one_curve: false,
             goes_right_round: false,
         };
         for step in 1..steps {
@@ -838,6 +873,7 @@ impl BuildingAMesh {
         let mut along_the_cut = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
+            closes_on_one_curve: false,
             goes_right_round: false,
         };
         for step in 1..steps {
@@ -1026,8 +1062,11 @@ impl BuildingAMesh {
 struct WalkedLoop {
     corners: Vec<[f64; 2]>,
     points: Vec<u32>,
-    /// Whether this wire is one whole closed curve, so that it comes back to
-    /// where it started a whole turn on rather than at the longitude it left.
+    /// Whether this wire is one whole closed curve — one coedge whose two ends
+    /// are its one corner — with no seam and no pole side anywhere in it.
+    closes_on_one_curve: bool,
+    /// Whether it went right round the surface, gaining a whole turn of
+    /// longitude rather than climbing and coming back.
     goes_right_round: bool,
 }
 
@@ -1037,6 +1076,7 @@ impl WalkedLoop {
         let mut taken = WalkedLoop {
             corners: Vec::new(),
             points: Vec::new(),
+            closes_on_one_curve: false,
             goes_right_round: false,
         };
         let mut at = from;
@@ -1072,6 +1112,7 @@ impl WalkedLoop {
         WalkedLoop {
             corners: self.corners.iter().rev().copied().collect(),
             points: self.points.iter().rev().copied().collect(),
+            closes_on_one_curve: self.closes_on_one_curve,
             goes_right_round: self.goes_right_round,
         }
     }
@@ -1104,7 +1145,19 @@ fn where_this_surface_pinches(surface: &Surface) -> Option<f64> {
 
 /// Whether a loop is walked in the direction the longitude grows.
 fn runs_up(around: &WalkedLoop, whole: f64) -> bool {
-    let corners = &around.corners;
+    how_far_the_longitude_climbed(&around.corners, whole) > 0.0
+}
+
+/// How much longitude a closed walk gains all the way round, whole turns and
+/// all: zero for a loop that comes back the way it went, `±whole` for one that
+/// encircles the surface's axis once.
+///
+/// The closing step from the last corner to the first is part of it, because a
+/// loop that goes right round is stored as one turn's worth of corners with the
+/// last step left implicit. No single step can be more than a quarter turn —
+/// [`how_many_steps`] will not walk further than that — so taking each step the
+/// short way round is taking it the way it actually went.
+fn how_far_the_longitude_climbed(corners: &[[f64; 2]], whole: f64) -> f64 {
     let mut climbed = 0.0;
     for step in 0..corners.len() {
         climbed += the_short_way_round(
@@ -1112,7 +1165,7 @@ fn runs_up(around: &WalkedLoop, whole: f64) -> bool {
             whole,
         );
     }
-    climbed > 0.0
+    climbed
 }
 
 /// Which corner of a loop sits nearest a longitude.
@@ -1149,6 +1202,7 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
             .map(|corner| [corner[0] + by, corner[1]])
             .collect(),
         points: chain.points.clone(),
+        closes_on_one_curve: chain.closes_on_one_curve,
         goes_right_round: chain.goes_right_round,
     }
 }
@@ -1171,6 +1225,7 @@ fn unwrapped(chain: &WalkedLoop, whole: f64) -> WalkedLoop {
     WalkedLoop {
         corners,
         points: chain.points.clone(),
+        closes_on_one_curve: chain.closes_on_one_curve,
         goes_right_round: chain.goes_right_round,
     }
 }
@@ -1188,6 +1243,26 @@ fn longitudes_of(around: &WalkedLoop) -> (f64, f64) {
 fn how_far_round(around: &WalkedLoop) -> f64 {
     let (least, most) = longitudes_of(around);
     most - least
+}
+
+/// How much area one loop encloses in the surface's own two coordinates, signed:
+/// **positive when the face's material is inside the loop** and negative when it
+/// is outside.
+///
+/// A surface's two coordinates are right-handed about its outward normal —
+/// `∂u × ∂v` is `R² cos v` times it on a ball — and a wire keeps its face's
+/// material on its left, so a loop with the material inside it runs
+/// anticlockwise in `(u, v)` and the shoelace sum comes out positive. The number
+/// itself is not used, only its sign, and it is an area in radians squared
+/// rather than a size in space.
+fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
+    let corners = &around.corners;
+    let mut twice_the_area = 0.0;
+    for step in 0..corners.len() {
+        let (here, next) = (corners[step], corners[(step + 1) % corners.len()]);
+        twice_the_area += here[0] * next[1] - next[0] * here[1];
+    }
+    twice_the_area / 2.0
 }
 
 /// Where to cut a patch that goes too far round: the loop with the cut's two
@@ -1213,6 +1288,7 @@ fn where_to_cut(around: &WalkedLoop, middle: f64) -> Option<(WalkedLoop, [usize;
     let mut opened = WalkedLoop {
         corners: Vec::with_capacity(count + 2),
         points: Vec::with_capacity(count + 2),
+        closes_on_one_curve: false,
         goes_right_round: false,
     };
     let mut moved_to = Vec::with_capacity(count);
@@ -1278,9 +1354,11 @@ fn the_nearer_of(middle: f64, here: f64, next: f64) -> bool {
 /// The running state of a walk round one wire.
 struct WalkingAWire {
     wraps: Option<f64>,
-    /// Whether this wire is one whole closed curve, so that it comes back to
-    /// where it started a whole turn on rather than at the longitude it left.
-    goes_right_round: bool,
+    /// Whether this wire is one whole closed curve, so that it is allowed to
+    /// come back to where it started a whole turn on rather than at the
+    /// longitude it left. Whether it *did* is measured in
+    /// [`WalkingAWire::finish`] and is a different question.
+    closes_on_one_curve: bool,
     longitude: f64,
     started: bool,
     will_not_lie_flat: bool,
@@ -1290,10 +1368,10 @@ struct WalkingAWire {
 }
 
 impl WalkingAWire {
-    fn new(wraps: Option<f64>, goes_right_round: bool) -> Self {
+    fn new(wraps: Option<f64>, closes_on_one_curve: bool) -> Self {
         Self {
             wraps,
-            goes_right_round,
+            closes_on_one_curve,
             longitude: 0.0,
             started: false,
             will_not_lie_flat: false,
@@ -1385,22 +1463,34 @@ impl WalkingAWire {
         if self.will_not_lie_flat {
             return None;
         }
-        // A wire made of one whole closed curve is *meant* to come back a whole
-        // turn on — a cap circle of a tube the fuse cut out of a bar's wall is
-        // one — so the check below is not about it. It is a fact about the wire
-        // and not a measurement: one coedge whose two ends are one corner runs
-        // right round the curve its two faces cross in, which on a periodic
-        // surface is right round the surface.
+        // A wire made of one whole closed curve is *allowed* to come back a
+        // whole turn on — a cap circle of a tube the fuse cut out of a bar's
+        // wall is one — so the check below is not about it.
         if let (Some(whole), Some(first)) = (self.wraps, self.corners.first())
-            && !self.goes_right_round
+            && !self.closes_on_one_curve
             && (self.longitude - first[0]).abs() >= whole / 2.0
         {
             return None;
         }
+        // **Whether it went right round the surface is measured and not read
+        // off the wire**, and that is §39.7 item 1. One coedge whose two ends
+        // are one corner runs right round the curve its two faces cross in —
+        // and on a sphere that curve is any circle at all, most of which
+        // encircle no pole. A ball cut at `y = 1` leaves a cap bounded by one
+        // closed edge spanning 2.64 radians of longitude and coming straight
+        // back; calling that a cap right round the ball sent it looking for a
+        // pole to fan up to, and it either found none (refused
+        // `ACurvedFaceGoesRightRoundWithNoSeam`) or found the wrong one and
+        // handed the triangulator a boundary that crosses itself.
+        let goes_right_round = self.closes_on_one_curve
+            && self.wraps.is_some_and(|whole| {
+                how_far_the_longitude_climbed(&self.corners, whole).abs() >= whole / 2.0
+            });
         Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
-            goes_right_round: self.goes_right_round && self.wraps.is_some(),
+            closes_on_one_curve: self.closes_on_one_curve,
+            goes_right_round,
         })
     }
 }
@@ -1463,40 +1553,45 @@ fn the_two_surfaces_either_side(
     Ok([first.transformed(back), second.transformed(back)])
 }
 
-/// How far round this face's own longitude a closed edge's points go, following
-/// them from the corner it starts at.
+/// Which way in space a closed edge is stored running, read at the corner it
+/// starts at.
 ///
-/// A whole turn one way or the other for a cap circle, and the **sign** is the
-/// whole of what this is read for. Summed the short way round from step to step,
-/// which is why no step of a walk is allowed past a quarter turn: past a half
-/// one there is no telling a step from one the other way.
+/// **The same rule the fuse wrote the edge with and `Model::validate` reads it
+/// back with**, spelled once (§23.8):
+/// [`a_closed_crossing_is_walked_the_way_it_is_stored`] asks whether the
+/// crossing's forward direction `∇S × ∇T` runs with the longitude
+/// `axis × ∇S` **at the corner**, and this hands back the direction that does.
 ///
-/// Zero for a closed edge that does not go round the face at all — a small
-/// circle cut out of a ball by a plane that misses its axis — and then the
-/// evaluator's own direction is left alone.
+/// **Summing the longitude all the way round instead is what this replaces, and
+/// it was one authority short.** A cap circle of a bar gains a whole turn either
+/// way and the sum reads it; a circle cut out of a ball by a plane that misses
+/// its polar axis gains **nothing** — it climbs and comes straight back — so the
+/// sum was exactly zero and the walk was left running whichever way the
+/// evaluator happened to produce it. The same ball cut at `x = 1` and at `y = 1`
+/// then came back with its cap walked opposite ways round: chart areas of
+/// `−3.4749` and `+3.4749` for two caps that are one cap turned a quarter turn.
+/// Nothing read the direction, so nothing failed — until something needs it, and
+/// [`how_much_of_the_chart_this_loop_encloses`] does.
 ///
-/// **That is the right answer for the wire this is read for and not for every
-/// wire**, and the difference is worth naming rather than glossing. What the
-/// sign settles is whether a face's *outer* wire comes back to the longitude it
-/// set off from, and an edge that goes nowhere round the face cannot make it
-/// fail that whichever way it runs. A closed edge that is a **hole** in a curved
-/// face is a different question — there the direction is what makes it read as a
-/// hole rather than as a second outline — and nothing here answers it. No
-/// builder makes such a face; one arriving from a file would need a curved face
-/// with a closed-edge hole in it, which is M4's ball with a pipe through it.
-fn how_far_round_this_face_it_goes(stored: &Surface, from: Point, points: &[Point]) -> f64 {
-    let Some(whole_turn) = how_far_the_longitude_wraps(stored) else {
-        return 0.0;
-    };
-    let mut at = stored.coordinates_of(from).0;
-    let mut round = 0.0;
-    for &point in points.iter().chain(core::iter::once(&from)) {
-        let next = stored.coordinates_of(point).0;
-        let step = the_short_way_round(next - at, whole_turn);
-        round += step;
-        at = next;
+/// `None` when neither sign is a fact: the two surfaces are tangent here, so
+/// there is no crossing direction, or the corner is at a pole, where every
+/// longitude runs through the one point and `axis × ∇S` is exactly zero (§38.3).
+fn the_way_a_closed_edge_is_stored_running(
+    reference: &Surface,
+    along: &[Surface; 2],
+    at: Point,
+) -> Option<Vector> {
+    let forward = gradient_of(&along[0], at).cross(gradient_of(&along[1], at));
+    let longitude = the_way_it_is_parametrised_about(reference).cross(gradient_of(reference, at));
+    let with_the_longitude = forward.dot(longitude);
+    if with_the_longitude == 0.0 {
+        return None;
     }
-    round
+    Some(if with_the_longitude > 0.0 {
+        forward
+    } else {
+        -forward
+    })
 }
 
 /// Which of the two surfaces either side of a closed edge says which way it
