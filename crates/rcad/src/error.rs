@@ -30,9 +30,20 @@ use rcad_predicates::ProvenanceLog;
 /// layers rather than one flattened enum: which layer refused says what kind of
 /// thing went wrong, and that is worth keeping visible.
 ///
+/// Reading and writing a STEP file are two more layers, each with its own
+/// reason to refuse that has nothing to do with the kernel's own three:
+/// [`Error::StepSyntax`] is bytes that are not a Part 21 file at all,
+/// [`Error::StepImport`] is a Part 21 file whose solids could not become a
+/// `Model`, and [`Error::StepWrite`] is a `Model` this writer could not put in
+/// one. [`StepSyntaxError`], [`Refusal`] and [`CannotWrite`] are the wrapped
+/// types, re-exported the same way as the kernel's own three.
+///
 /// [`PredicateError`]: crate::PredicateError
 /// [`GeometryError`]: crate::GeometryError
 /// [`TopologyError`]: crate::TopologyError
+/// [`StepSyntaxError`]: crate::StepSyntaxError
+/// [`Refusal`]: crate::Refusal
+/// [`CannotWrite`]: crate::CannotWrite
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -57,6 +68,21 @@ pub enum Error {
         /// The decisions that could not be settled.
         records: ProvenanceLog,
     },
+
+    /// Bytes handed to [`StepFile::read`](crate::StepFile::read) were not a
+    /// Part 21 file this reader could parse.
+    #[error(transparent)]
+    StepSyntax(#[from] crate::StepSyntaxError),
+
+    /// A Part 21 file parsed, but [`Import::read`](crate::Import::read) could
+    /// not turn its solids into a `Model`.
+    #[error(transparent)]
+    StepImport(#[from] crate::Refusal),
+
+    /// A `Model` could not be written back out as a Part 21 file by
+    /// [`write`](crate::write).
+    #[error(transparent)]
+    StepWrite(#[from] crate::CannotWrite),
 }
 
 /// An undecided *operation* keeps its own variant here rather than being buried

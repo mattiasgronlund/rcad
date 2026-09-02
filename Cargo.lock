@@ -774,6 +774,7 @@ dependencies = [
  "rcad-geom",
  "rcad-mesh",
  "rcad-predicates",
+ "rcad-step",
  "rcad-topo",
  "thiserror",
 ]
