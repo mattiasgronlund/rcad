@@ -161,6 +161,13 @@ impl PointsAlongACrossing {
 ///
 /// [`Error::AnEndOfARunNamesNoPlace`] when an end is neither the box that says
 /// nothing at all is known nor a box with a middle.
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
+/// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a run between a
+/// cone or a torus and another curved surface — the same two refusals
+/// [`intersect`](crate::intersect) gives those pairs. Nothing in this crate
+/// builds such a run, and a file read in states one whenever it holds a pipe
+/// running into a bend.
 pub fn walk(
     run: &NamedRun,
     along: [&Surface; 2],
@@ -251,6 +258,10 @@ pub fn walk(
 /// degree-four run pick both loops or neither, and
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the crossing's size or a seed
 /// on it falls out of `f64`'s range.
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
+/// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a cone or a
+/// torus against another curved surface, exactly as [`walk`] does.
 pub fn where_a_closed_crossing_starts(
     run: &NamedRun,
     along: [&Surface; 2],
@@ -297,10 +308,14 @@ fn middle_of(side: Interval) -> f64 {
     (side.lo() + side.hi()) / 2.0
 }
 
-/// Whether this pair crosses in a curve no conic stands in for.
+/// Whether this pair crosses in a degree-four curve the marcher can follow.
 ///
-/// A ball against a pipe, or two pipes. Every other pair crosses in something
-/// that lies in a plane (§24.5).
+/// A ball against a pipe, or two pipes, and those three only. It is **not** the
+/// list of pairs whose crossing misses a plane: a cone or a torus against
+/// another curved surface misses one too, and the marcher has no seed for
+/// either, so `the_conic_between` refuses those by the name the naming half
+/// gives them. Reading this as the wider list is what put a panic on the end of
+/// that `match` (§24.5).
 fn a_crossing_that_runs_to_a_quartic(pair: &[Surface; 2]) -> bool {
     matches!(
         pair,
@@ -597,16 +612,29 @@ fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Su
 /// in the naming half, because it is only ever needed to work points out
 /// (§27.1).
 ///
-/// # Panics
+/// # Errors
 ///
-/// On a pair that crosses in a degree-four curve.
-/// [`a_crossing_that_runs_to_a_quartic`] matches exactly those three pairs and
-/// [`walk`] hands every one of them to the marcher before reaching here, so this
-/// is a broken invariant of this file and not something a caller can ask for.
-/// **It used to be a refusal**, `CrossingRunsToAQuartic`, and the claim audit
-/// found that the second stage had filled the arm and left the variant behind:
-/// a public refusal nothing could produce, whose own doc said the evaluator
-/// still raised it.
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
+/// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for the pairs the
+/// naming half refuses under those same two names. **The evaluator refuses
+/// exactly what the namer refuses**, which is the whole of what this arm is for.
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for the three pairs that cross
+/// in a degree-four curve. [`walk`] and [`where_a_closed_crossing_starts`] hand
+/// every one of those to the marcher before reaching here, so nothing in this
+/// crate sees it — but it is the true answer to the question this function asks
+/// rather than a guard, and a `match` arm that crashes is one forgotten check
+/// away from being a caller's crash.
+///
+/// # This used to panic, and a real file reached it
+///
+/// The panic said the marcher had already taken every degree-four pair, and
+/// [`a_crossing_that_runs_to_a_quartic`] named three: a ball against a pipe, and
+/// two pipes. A cone and a torus landed after it was written and neither was
+/// added, so a pipe running into a bend — two faces a STEP file states outright
+/// — fell past every conic arm into the panic, reached from `Import::read` on a
+/// KiCad file. [`NamedRun`] is public and `Model` is `Deserialize`, so "no
+/// caller builds such a run" was never a claim about callers.
 fn the_conic_between(
     pair: [Surface; 2],
     run: &NamedRun,
@@ -665,10 +693,29 @@ fn the_conic_between(
             };
             where_two_balls_cut(&first, &second).map(Some)
         }
-        [first, second] => panic!(
-            "{first:?} and {second:?} cross in a quartic, so the marcher \
-             should already have this run"
-        ),
+        // The same two names `intersect` gives these pairs, and in the same
+        // order — a cone against a torus is the torus's refusal in both places,
+        // so the two halves never disagree about what a pair is called.
+        [
+            Surface::Cone(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+        ]
+        | [Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)] => {
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        }
+        [
+            Surface::Torus(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        ]
+        | [
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+            Surface::Torus(_),
+        ] => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+        [Surface::Sphere(_), Surface::Cylinder(_)]
+        | [
+            Surface::Cylinder(_),
+            Surface::Sphere(_) | Surface::Cylinder(_),
+        ] => Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
     }
 }
 
