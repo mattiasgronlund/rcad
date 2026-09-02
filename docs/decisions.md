@@ -12195,8 +12195,8 @@ read "closed" is the thing §4.1 ranks below refusing.
 
 | | at §41.9 | now |
 |---|---|---|
-| tests (`cargo nextest`, whole workspace) | 1129 | **1135** |
-| suite duration | 2.87 s | **2.75 s** |
+| tests (`cargo nextest`, whole workspace) | 1129 | **1136** |
+| suite duration | 2.87 s | **2.76 s** |
 | doc tests | 19 | **19** |
 | `FORMAT_VERSION` | 3 | **3, unchanged** |
 | fuzz corpus | 815 | **824** |
