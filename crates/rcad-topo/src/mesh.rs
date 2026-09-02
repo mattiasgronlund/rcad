@@ -1869,12 +1869,30 @@ fn how_far_one_coordinate_can_be_shifted_for_nothing(low: f64, high: f64) -> f64
 /// on them; the surface on the *other* side of an edge — the plane a bar's cap
 /// sits on, the second pipe of a crossing — is moved by the same shift without
 /// having been asked, and [`SURFACE_AFTER_SHIFTING_ROUNDOFF`] is what that
-/// costs. So does the [`EdgeRun`](rcad_geom::EdgeRun) that picks the piece.
+/// costs.
 ///
 /// **This is the whole of what a fuse's baking still costs a mesh**, and it is a
 /// factor of `(POINT_ROUNDOFF + SURFACE_AFTER_SHIFTING_ROUNDOFF) /
 /// POINT_ROUNDOFF`, which is 1.44 rather than §39.7 item 2's 77. Measured by
 /// `a_boolean_that_cuts_nothing_off_a_bar_does_not_make_it_much_coarser_to_mesh`.
+/// It is a **gap** and not a limit — the answer at 1.00 exists, and reaching it
+/// means measuring what the shift really cost each neighbour rather than
+/// bounding it, which needs the surfaces along a face's edges at the time the
+/// floor is worked out.
+///
+/// **A picker is not a distance and is not charged here.** The half-spaces in an
+/// [`EdgeRun`](rcad_geom::EdgeRun) stray by the same amount when they are
+/// shifted, and that does not move a mesh point anywhere — it decides which
+/// piece of a crossing this edge is. [`HalfSpace`](rcad_geom::HalfSpace)'s own
+/// doc says a strayed offset is allowed, because it moves the flat surface along
+/// its own normal without turning it and so can only be wrong about *where
+/// between* two pieces it sits (§29.8) — and to be wrong at all it would have to
+/// stray further than the two pieces are apart, which here means an arc under
+/// about `1e-3` radians. Worth knowing rather than hidden: before the shift the
+/// same decision was made against a point box `POINT_ALONG_A_CROSSING_ROUNDOFF`
+/// wide in the *world's* numbers, fifty-seven times this, so nothing this can
+/// get wrong was decided then either — but it was refused rather than answered,
+/// and that difference is real.
 fn how_far_shifting_this_face_rounds(face: FaceView<'_>, meshed_in: &Isometry) -> f64 {
     if *meshed_in == face.location().inverse() {
         return 0.0;
