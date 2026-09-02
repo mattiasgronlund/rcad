@@ -137,10 +137,13 @@ mod import;
 
 mod refusal;
 
+mod write;
+
 pub use error::{Error, Problem};
 pub use graph::{BrokenReference, EntityId, Header, Instance, Record, StepFile, Value};
 pub use import::Import;
 pub use refusal::Refusal;
+pub use write::{CannotWrite, write};
 
 /// How deep lists, and values wearing type names, may nest.
 ///
