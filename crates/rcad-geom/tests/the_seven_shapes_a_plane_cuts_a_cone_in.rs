@@ -24,7 +24,7 @@
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, NamedRun, Plane, Point, Sphere, Surface, SurfaceMeet,
-    Vector, intersect, walk,
+    Vector, intersect, walk, where_a_closed_crossing_starts,
 };
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
 
@@ -214,6 +214,82 @@ fn a_plane_through_the_apex_and_down_it_cuts_two_lines_and_is_refused_by_name() 
         assert_eq!(
             cone.side_of(rcad_predicates::Point::from([0.0, sideways, 1.0])),
             Decision::Zero
+        );
+    }
+}
+
+/// Rows 3, 4, 6 and 7 again, reached this time through [`walk`] and
+/// [`where_a_closed_crossing_starts`] — which used to panic on all four.
+///
+/// `intersect` refuses these four shapes before a run exists, and
+/// `where_a_plane_cuts_a_cone` asserted that that was enough. **It is not.**
+/// [`NamedRun`] and [`EdgeRun`] are public, [`EdgeRun`] is `Deserialize`, and
+/// both walk entry points are public and take whatever pair of surfaces the
+/// caller hands them — so a caller, or a file read back in, states a closed run
+/// between a cone and a plane that cuts it in a parabola and the assert fires.
+/// Nothing here forges an internal state: every value goes in through a
+/// published constructor.
+///
+/// The four are told apart the same way `intersect` tells them apart, so the
+/// namer and the walker never disagree about what a pair is called.
+#[test]
+fn a_run_a_caller_names_between_a_plane_and_a_cone_that_has_no_closed_crossing_is_refused_by_name()
+{
+    let cone = Surface::Cone(a_right_angled_cone());
+    let apex = Point::origin();
+    for (through, facing, refusal) in [
+        (
+            Point::new(0.0, 0.0, 4.0),
+            Vector::new(0.0, 1.0, 1.0),
+            Error::ACrossingThatIsAParabola,
+        ),
+        (
+            Point::new(1.0, 0.0, 0.0),
+            Vector::new(1.0, 0.0, 0.0),
+            Error::ACrossingThatIsAHyperbola,
+        ),
+        (
+            apex,
+            Vector::new(0.0, 1.0, 1.0),
+            Error::APlaneTouchingAConeAlongOneOfItsRulings,
+        ),
+        (
+            apex,
+            Vector::new(1.0, 0.0, 0.0),
+            Error::TwoLinesThroughAConesApexAreOneCurveThroughItself,
+        ),
+    ] {
+        let flat = Surface::Plane(a_plane(through, facing));
+        assert_eq!(
+            intersect(
+                &flat,
+                &cone,
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+            Err(refusal.clone()),
+            "the claim the assert rested on: the namer refuses this pair"
+        );
+
+        let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it");
+        assert_eq!(
+            walk(
+                &stated,
+                [&flat, &cone],
+                Deflection::of(1.0).expect("a positive length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .err(),
+            Some(refusal.clone()),
+            "and here is a run between them anyway, walked: {flat:?}"
+        );
+        assert_eq!(
+            where_a_closed_crossing_starts(&stated, [&flat, &cone], &mut ProvenanceLog::new())
+                .err(),
+            Some(refusal),
+            "the other public way in reaches the same place: {flat:?}"
         );
     }
 }

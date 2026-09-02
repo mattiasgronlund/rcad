@@ -384,9 +384,19 @@ impl Quadratic {
 /// # Panics
 ///
 /// On a plane, which is not a quadric and is answered by
-/// [`where_three_planes_meet`] before this is reached, and on a torus, which is
-/// not a quadric either and is refused by [`meet_of_three_surfaces`] one
-/// function up — see the note there for why that one check catches every torus.
+/// [`where_three_planes_meet`] sixteen lines above the only call, and on a
+/// torus, which is not a quadric either and is refused by
+/// [`meet_of_three_surfaces`] two lines after that.
+///
+/// The plane arm is unreachable by adjacency — same function, same value, no
+/// branch between. **The torus arm is not**: one check covers three positions
+/// only because a torus sorts after every other kind, which is a fact about
+/// [`Surface::how_it_sorts_against`] in another file and nothing here makes
+/// anyone re-read it.
+/// `where_two_planes_and_a_ring_meet_is_refused_because_a_line_meets_it_four_times`
+/// (`crates/rcad-geom/tests/the_shapes_a_plane_cuts_a_torus_in.rs`) walks a
+/// torus through all three positions, and two of them and three, so the claim is
+/// demonstrated rather than argued.
 fn how_a_quadric_cuts_the_line(line: &WhereTwoPlanesCross, quadric: &Surface) -> Option<Quadratic> {
     match quadric {
         Surface::Sphere(ball) => how_a_ball_cuts_the_line(line, ball),
