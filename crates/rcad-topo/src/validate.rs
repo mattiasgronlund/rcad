@@ -643,11 +643,17 @@ impl Model {
 /// So a zero is asked again with less room. Halving from the mesh's own width
 /// rather than down from [`as_coarse_as_a_mesh_gets`] is what keeps it to a
 /// handful of meshes: the bulge a flat patch is hiding is at most that width, and
-/// every halving that does not find it rules out half of what is left. It stops
-/// when the mesher will go no finer, which every solid reaches — the floor under
-/// a deflection is a real length — and then the zero stands and the caller
-/// refuses it. **The finer meshes are read for a sign and thrown away**; nothing
-/// a caller measures is worked out here.
+/// every halving that does not find it rules out half of what is left. **The
+/// finer meshes are read for a sign and thrown away**; nothing a caller measures
+/// is worked out here.
+///
+/// **What stops it needs no argument about geometry.** Halving a finite length
+/// reaches zero, and `Deflection::of` refuses a length that is not greater than
+/// zero, so the loop ends whatever any mesh does. Long before that two named
+/// refusals end it on a real solid — `DeflectionBelowWhatAMeshCanReach` at the
+/// floor of the input's own numbers, and `MoreMeshPointsThanASolidWillHold` if a
+/// surface reaches the point cap first — and either way the zero stands and the
+/// caller refuses it.
 ///
 /// # Errors
 ///

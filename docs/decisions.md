@@ -12027,10 +12027,23 @@ right, and the third is the one worth reading:
 1. **It names the same rotation.** A quaternion names a rotation by the
    *direction* of its four coefficients, so one shared nonzero factor is
    invisible.
-2. **It costs nothing where the old code worked.** `norm_squared` scales by
-   exactly `2^2e`, `sqrt` of an exactly-scaled value is exactly scaled, and the
-   division cancels the factor — so the answer is unchanged bit for bit, which
-   the 2098-scale sweep is the demonstration of rather than the argument.
+2. **It costs nothing where the old code worked — and the first way of saying
+   that was wrong.** The sentence written first was *"where the squares were
+   already in range this hands back the identical unit quaternion, bit for bit"*,
+   and running `claim-audit` on it broke it in four hundred thousand draws: 2033
+   of them had the *sum* of the squares an ordinary number with **one of the four
+   squares in the subnormals**, and there the two answers differ by an ulp. A
+   square that has fallen into the subnormals has lost bits, so the norm built
+   from it is not the norm, and it is the **unscaled** answer that was wrong.
+   The claim that survives is *all four squares normal*: then each scales by
+   exactly `2^2e`, so the sum does, so its square root scales by exactly `2^e`,
+   and the division cancels the factor.
+   `scaling_first_moves_no_answer_whose_four_squares_were_normal_to_begin_with`
+   is the demonstration, and it counts all three outcomes with a floor under each
+   — 31 323 bit for bit, 4 212 at the subnormal boundary and within one ulp,
+   4 433 with the sum out of range altogether — because a run where the second
+   bucket was empty would be testing the first on nothing. **Nothing that used to
+   answer now refuses**, measured the same way: 0 of 400 000.
 3. **Nothing new is refused, and that was a decision.** The largest coefficient
    always lands in `[1, 2)`, so there is no unscalable quaternion and no new
    `Err`. A coefficient more than 1022 binades under the largest goes subnormal
@@ -12233,6 +12246,11 @@ can be struck rather than carried forward.
 - **Item 1 is closed for the cap and open for what is round it**, and the open
   half is a milestone. Item 18 is closed outright. Items 19, 20 and 21 of §41.11
   are untouched.
+- **A claim audit broke this lane's own sentence too**, and it is the same
+  species as the two above: *"where the squares were already in range"* was true
+  of the sum and silent about the four. §16.10's rule caught its own author, one
+  section after §41.4 pointed it at three lanes' reports. **Run it on what you
+  wrote, not only on what you inherited.**
 - **Both of §41's own open items were the same fix twice**, and both were found
   by a claim audit rather than by a failing test. §41.5's rotation came out of
   checking a `# Panics` clause two types away from it; item 1's real boundary came

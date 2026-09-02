@@ -274,11 +274,22 @@ impl TryFrom<([f64; 3], [f64; 4])> for Isometry {
 ///
 /// A quaternion names a rotation by the direction of its four coefficients, so
 /// multiplying all four by one nonzero factor names the very same rotation, and
-/// a power of two costs no bits while the results stay normal. Where the
-/// squares were already in range this hands back the identical unit quaternion,
-/// bit for bit.
+/// a power of two costs no bits while the results stay normal.
 ///
-/// **Where they were not, this is what reaches the answer at all.** The sum of
+/// **Where all four squares were already normal numbers this hands back the
+/// identical unit quaternion, bit for bit.** Every square scales by exactly
+/// `2^2e`, so the sum does, so its square root scales by exactly `2^e`, and the
+/// division cancels the factor again. *All four*, and not merely their sum: one
+/// square can fall into the subnormals — or underflow to zero outright — while
+/// the sum is an ordinary number, and a norm built from a square that has lost
+/// bits is not the norm. There this differs, by a single ulp, and it is the
+/// unscaled answer that was wrong. **The first draft of this sentence said "the
+/// squares were already in range" and the demonstration is what narrowed it**;
+/// `scaling_first_moves_no_answer_whose_four_squares_were_normal_to_begin_with`
+/// counts all three outcomes and asserts a floor under each.
+///
+/// **Where the sum itself was out of range, this is what reaches the answer at
+/// all.** The sum of
 /// the four squares spans twice the range the coefficients do. Written above
 /// about `1.3e154` it overflows, `norm()` is infinity, dividing by it gives four
 /// zeros, and four zeros normalize to the *identity* — a rotation the caller's
@@ -652,6 +663,112 @@ mod tests {
 
     fn largest_of(components: [f64; 3]) -> f64 {
         components.into_iter().map(f64::abs).fold(0.0, f64::max)
+    }
+
+    /// §16.10 for [`brought_into_the_range_its_squares_fit_in`]'s claim that
+    /// where the squares were already in range it hands back the identical unit
+    /// quaternion, bit for bit.
+    ///
+    /// **The precondition is narrower than it first reads, and the first way of
+    /// writing this test found that out.** "The squares were in range" is not
+    /// "the sum of them was a normal number": a *single* square can fall into
+    /// the subnormals while the sum is fine, and a square down there has lost
+    /// bits, so the norm built from it is not the norm. There the rescaled
+    /// answer differs — by one ulp, on quaternions whose coefficients are more
+    /// than about 150 binades apart — and it is the unscaled one that was wrong.
+    ///
+    /// So the run counts three outcomes and asserts a floor under each. Without
+    /// the floors a change that made every draw overflow would leave the
+    /// bit-for-bit half tested on nothing, which is §14.7's rule.
+    #[test]
+    fn scaling_first_moves_no_answer_whose_four_squares_were_normal_to_begin_with() {
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut bit_for_bit, mut one_square_subnormal, mut out_of_range) = (0u32, 0u32, 0u32);
+        for _ in 0..40_000 {
+            // A middle to write the rotation at and a spread to write its four
+            // coefficients over. Both are drawn, because the bit-for-bit half
+            // needs quaternions the old arithmetic could handle, the boundary
+            // half needs one square in the subnormals, and the third needs the
+            // sum out of range altogether — and no single width reaches all
+            // three.
+            let middle = (next() % 800) as i32 - 400;
+            let spread = [20, 200, 1200][(next() % 3) as usize];
+            let coefficients = [0, 1, 2, 3].map(|_| {
+                let mantissa = f64::from_bits((next() & ((1 << 52) - 1)) | (1023 << 52));
+                let exponent = middle + (next() % spread) as i32 - spread as i32 / 2;
+                let half = exponent / 2;
+                let sign = if next() & 1 == 0 { 1.0 } else { -1.0 };
+                sign * mantissa * 2f64.powi(half) * 2f64.powi(exponent - half)
+            });
+            if !coefficients.iter().all(|c| c.is_finite()) {
+                continue;
+            }
+            let stored = na::Quaternion::new(
+                coefficients[0],
+                coefficients[1],
+                coefficients[2],
+                coefficients[3],
+            );
+            if stored.norm() == 0.0 {
+                continue;
+            }
+            let without_the_rescale = na::UnitQuaternion::from_quaternion(stored);
+            let without_the_rescale = {
+                let turn = without_the_rescale.quaternion();
+                [turn.w, turn.i, turn.j, turn.k]
+            };
+            let with_it = Isometry::try_from(([0.0; 3], coefficients))
+                .expect("a finite quaternion that is not four zeros names a rotation")
+                .rotation_quaternion();
+
+            let squares = coefficients.map(|c| c * c);
+            let every_square_is_normal =
+                (0..4).all(|which| coefficients[which] == 0.0 || squares[which].is_normal());
+            if !squares.iter().sum::<f64>().is_normal() {
+                out_of_range += 1;
+            } else if every_square_is_normal {
+                assert_eq!(
+                    without_the_rescale, with_it,
+                    "the rescale moved {coefficients:?}, whose four squares are all normal"
+                );
+                bit_for_bit += 1;
+            } else {
+                one_square_subnormal += 1;
+                for which in 0..4 {
+                    let apart = i64::from(without_the_rescale[which].to_bits() as i32)
+                        - i64::from(with_it[which].to_bits() as i32);
+                    assert!(
+                        without_the_rescale[which]
+                            .to_bits()
+                            .abs_diff(with_it[which].to_bits())
+                            <= 1,
+                        "{coefficients:?} component {which} moved {apart} bits"
+                    );
+                }
+            }
+        }
+        println!(
+            "bit for bit {bit_for_bit}, one square subnormal {one_square_subnormal}, \
+             out of range {out_of_range}"
+        );
+        assert!(
+            bit_for_bit > 10_000,
+            "only {bit_for_bit} went down the path this is about"
+        );
+        assert!(
+            one_square_subnormal > 500,
+            "only {one_square_subnormal} reached the boundary, so it is not being pinned"
+        );
+        assert!(
+            out_of_range > 1_000,
+            "only {out_of_range} had a sum out of range, so the third outcome is barely drawn"
+        );
     }
 
     /// The same movements and points every run, so the worst case this prints
