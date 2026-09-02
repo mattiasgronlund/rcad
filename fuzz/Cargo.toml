@@ -14,6 +14,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
 rcad-geom = { path = "../crates/rcad-geom" }
 rcad-predicates = { path = "../crates/rcad-predicates" }
 rcad-step = { path = "../crates/rcad-step" }
@@ -29,6 +30,13 @@ bench = false
 [[bin]]
 name = "no_step_file_makes_the_reader_panic"
 path = "fuzz_targets/no_step_file_makes_the_reader_panic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "no_model_makes_the_writer_panic"
+path = "fuzz_targets/no_model_makes_the_writer_panic.rs"
 test = false
 doc = false
 bench = false
