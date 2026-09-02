@@ -918,7 +918,7 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
     // about them either, and the six are a fixed set so which one answers does
     // not depend on anything but the piece.
     let middle = middle_of_the_corners(wires);
-    let reach = how_big_the_surface_is(&piece.surface);
+    let reach = how_big_the_surface_is(&piece.surface, middle);
     for axis in 0..3 {
         for way in [1.0, -1.0] {
             let mut step = [0.0; 3];
@@ -952,11 +952,22 @@ fn middle_of_the_corners(corners: &[Vec<PredicatePoint>]) -> Point {
     Point::from(summed.map(|total| total / how_many))
 }
 
-/// How far across a curved surface is: the radius of the ball or the pipe.
-fn how_big_the_surface_is(surface: &Surface) -> f64 {
+/// How far across a curved surface is near `there`: the radius of the ball or
+/// the pipe, and for a cone the radius it has where the piece sits.
+///
+/// **A cone is the reason this takes a point.** A ball and a pipe are the same
+/// size everywhere, so a step of "one radius" means the same wherever it is
+/// taken; a cone widens as it goes, so a step sized on the surface as a whole
+/// would be meaningless — there is no such number, and
+/// [`Surface::furthest_a_unit_step_goes`] says so by handing back infinity. What
+/// a step wants is how big the cone is *here*, which is one multiplication.
+fn how_big_the_surface_is(surface: &Surface, there: Point) -> f64 {
     match surface {
         Surface::Sphere(ball) => ball.radius(),
         Surface::Cylinder(pipe) => pipe.radius(),
+        Surface::Cone(cone) => cone
+            .radius_at(cone.axis().direction().dot(there - cone.apex()))
+            .max(f64::MIN_POSITIVE),
         Surface::Plane(_) | _ => 1.0,
     }
 }
@@ -979,6 +990,25 @@ fn the_middle_of_a_round_wire(flat: &Plane, partner: &Surface) -> Option<Predica
         Surface::Sphere(ball) => ball.centre(),
         Surface::Cylinder(pipe) => {
             let axis = pipe.axis();
+            let along = normal.dot(axis.direction());
+            if along == 0.0 {
+                return None;
+            }
+            axis.origin()
+                + axis.direction()
+                    * ((offset - normal.dot(axis.origin() - Point::origin())) / along)
+        }
+        // **The same point, and it takes a proof rather than a picture.** Where
+        // the cone's axis meets the plane is inside the ellipse they cut, and
+        // not obviously: the ellipse's centre is *not* the axis point, it is
+        // `s_c = −(1 + t²)hAk/E` along the plane's slope from it. The gap
+        // between the two works out to `|h|kt²/(|A|E)` against a semi-axis of
+        // `|h|t/E`, so the axis point sits `tk/|A|` of the way out — and `|A| >
+        // tk` is exactly the condition that made this an ellipse in the first
+        // place. So it is strictly inside, always, for the same one sign the
+        // intersector already decided.
+        Surface::Cone(cone) => {
+            let axis = cone.axis();
             let along = normal.dot(axis.direction());
             if along == 0.0 {
                 return None;
