@@ -2050,6 +2050,8 @@ enum WhatItSitsOn {
     /// A cone's skin: its apex, the way its axis points, and how fast it
     /// widens.
     Cone([f64; 3], [f64; 3], f64),
+    /// A ring's skin: its centre, the way its axis points, and its two radii.
+    Ring([f64; 3], [f64; 3], f64, f64),
 }
 
 impl WhatItSitsOn {
@@ -2066,6 +2068,12 @@ impl WhatItSitsOn {
                 cone.apex().coordinates(),
                 cone.axis().direction().components(),
                 cone.slope(),
+            ),
+            Surface::Torus(ring) => WhatItSitsOn::Ring(
+                ring.centre().coordinates(),
+                ring.axis().direction().components(),
+                ring.ring_radius(),
+                ring.tube_radius(),
             ),
             other => panic!("this file does not know how to write {other:?} down"),
         }
@@ -2091,6 +2099,11 @@ impl WhatItSitsOn {
                 .chain(apex.map(bits))
                 .chain(direction.map(bits))
                 .chain([bits(*slope)])
+                .collect(),
+            WhatItSitsOn::Ring(centre, direction, big, small) => core::iter::once(4)
+                .chain(centre.map(bits))
+                .chain(direction.map(bits))
+                .chain([bits(*big), bits(*small)])
                 .collect(),
         }
     }

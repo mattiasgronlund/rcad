@@ -254,8 +254,8 @@ fn canonical_cut_surfaces(face: &BakedFace) -> Vec<Surface> {
 /// triple sorted the other is two corners named as one. That is why the bits are
 /// flipped rather than taken raw — raw bits sort every negative number after
 /// every positive one, and `f64::total_cmp` does not.
-pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
-    let mut bits = [0u64; 8];
+pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 9] {
+    let mut bits = [0u64; 9];
     let mut fill = |kind: u64, numbers: &[f64]| {
         bits[0] = kind;
         for (slot, number) in numbers.iter().enumerate() {
@@ -300,6 +300,27 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
                 ],
             );
         }
+        // Eight numbers, one more than any other kind, and the row is nine long
+        // for it: two tori about one axis with the same ring radius and
+        // different tubes are two surfaces, and a key that left the tube out
+        // would call them one.
+        Surface::Torus(ring) => {
+            let centre = ring.centre().coordinates();
+            let along = ring.axis().direction().components();
+            fill(
+                4,
+                &[
+                    centre[0],
+                    centre[1],
+                    centre[2],
+                    along[0],
+                    along[1],
+                    along[2],
+                    ring.ring_radius(),
+                    ring.tube_radius(),
+                ],
+            );
+        }
         other => panic!("a surface nothing here can name: {other:?}"),
     }
     bits
@@ -323,7 +344,7 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
 /// leave the two spellings of one plane still telling apart. Every zero is
 /// turned back the right way up, and adding zero is what does it. A ball and a
 /// pipe have no reversed form at all and are their own key.
-pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 8] {
+pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 9] {
     let Surface::Plane(flat) = surface else {
         return name_of_surface_bits(surface);
     };
@@ -336,7 +357,7 @@ pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 8
         let turned = if backwards { -coefficient } else { coefficient };
         turned + 0.0
     });
-    let mut bits = [0u64; 8];
+    let mut bits = [0u64; 9];
     for (slot, number) in facing.iter().enumerate() {
         bits[slot + 1] = in_the_order_a_float_compares(*number);
     }
@@ -2604,6 +2625,31 @@ fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
                 squared * step[axis] - steepness * shadow * Interval::exactly(along[axis])
             }))
         }
+        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre`,
+        // which is the quartic's own gradient divided by four. Unlike every arm
+        // above it depends on `x·x`, because a torus is not a quadric.
+        Surface::Torus(ring) => {
+            let centre = ring.centre().coordinates();
+            let along = ring.axis().direction().components();
+            let box_of_it = at.enclosure();
+            let step = [0, 1, 2].map(|axis| box_of_it[axis] - Interval::exactly(centre[axis]));
+            let squared = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * Interval::exactly(along[axis]))
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let shadow = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * step[axis])
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let out = (0..3)
+                .map(|axis| step[axis] * step[axis])
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let big = Interval::exactly(ring.ring_radius());
+            let small = Interval::exactly(ring.tube_radius());
+            let bulge = out - big * big - small * small;
+            PredicatePoint::Constructed([0, 1, 2].map(|axis| {
+                squared * bulge * step[axis]
+                    + Interval::exactly(2.0) * big * big * shadow * Interval::exactly(along[axis])
+            }))
+        }
         other => panic!("a surface whose gradient nothing here knows: {other:?}"),
     }
 }
@@ -3441,6 +3487,7 @@ mod curved {
             Surface::Sphere(_) => "ball",
             Surface::Cylinder(_) => "pipe",
             Surface::Cone(_) => "cone",
+            Surface::Torus(_) => "ring",
             other => panic!("no {other:?} here"),
         }
     }
@@ -3662,6 +3709,7 @@ mod what_the_curved_arrangement_reaches {
                     Surface::Sphere(_) => "ball",
                     Surface::Cylinder(_) => "pipe",
                     Surface::Cone(_) => "cone",
+                    Surface::Torus(_) => "ring",
                     other => panic!("no {other:?} here"),
                 };
                 said.push(match split_a_face(face, &policy, &mut log) {

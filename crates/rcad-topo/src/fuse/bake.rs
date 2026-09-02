@@ -617,6 +617,7 @@ fn middle_of_the_places(around: &[Surface]) -> PredicatePoint {
         Surface::Sphere(ball) => ball.centre().coordinates(),
         Surface::Cylinder(pipe) => pipe.axis().origin().coordinates(),
         Surface::Cone(cone) => cone.apex().coordinates(),
+        Surface::Torus(ring) => ring.centre().coordinates(),
         other => panic!("a surface nothing here can name: {other:?}"),
     })
 }

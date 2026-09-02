@@ -40,7 +40,7 @@ use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
     Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
-    Surface, Vector,
+    Surface, Torus, Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -190,7 +190,7 @@ pub fn walk(
         return follow_the_quartic(run, pair, deflection, policy, log);
     }
 
-    let Some(conic) = the_conic_between(pair)? else {
+    let Some(conic) = the_conic_between(pair, run, log)? else {
         return Ok(nothing_between_the_ends());
     };
     let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * conic.the_size_it_was_worked_out_from();
@@ -265,7 +265,7 @@ pub fn where_a_closed_crossing_starts(
         }
         return the_seed_this_run_is_picked_up_at(run, &pair, log);
     }
-    let Some(conic) = the_conic_between(pair)? else {
+    let Some(conic) = the_conic_between(pair, run, log)? else {
         return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
     };
     Ok(conic.at(0.0))
@@ -607,7 +607,11 @@ fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Su
 /// found that the second stage had filled the arm and left the variant behind:
 /// a public refusal nothing could produce, whose own doc said the evaluator
 /// still raised it.
-fn the_conic_between(pair: [Surface; 2]) -> Result<Option<Conic>> {
+fn the_conic_between(
+    pair: [Surface; 2],
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Conic>> {
     match pair {
         [Surface::Plane(_), Surface::Plane(_)] => Ok(None),
         [Surface::Plane(flat), Surface::Sphere(ball)]
@@ -632,6 +636,13 @@ fn the_conic_between(pair: [Surface; 2]) -> Result<Option<Conic>> {
         [Surface::Plane(flat), Surface::Cone(cone)]
         | [Surface::Cone(cone), Surface::Plane(flat)] => {
             where_a_plane_cuts_a_cone(&flat, &cone).map(Some)
+        }
+        // A plane cuts a torus in **two** circles as often as in one, and which
+        // of them this run is is the picker's to say — which is why this is the
+        // one arm here that reads the run rather than only the pair.
+        [Surface::Plane(flat), Surface::Torus(ring)]
+        | [Surface::Torus(ring), Surface::Plane(flat)] => {
+            where_a_plane_cuts_a_torus(&flat, &ring, run, log).map(Some)
         }
         // **In a fixed order, and it is not tidiness.** `where_two_balls_cut`
         // builds the radical plane through the gap between the two centres, so
@@ -835,7 +846,9 @@ fn which_side_of(picker: &Picker, at: PredicatePoint, log: &mut ProvenanceLog) -
     let named = picker.predicate_name();
     let measures = match picker {
         Picker::InFrontOf(_) => Measures::Length,
-        Picker::OutsideABall(_) | Picker::OutsideAPipe(_) => Measures::Area,
+        Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) => {
+            Measures::Area
+        }
     };
     match decision {
         Decision::Pos | Decision::Zero | Decision::Neg => (),
@@ -1112,6 +1125,135 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
             &[mine, theirs, radius_here],
         ),
     })
+}
+
+/// The circle where a plane cuts a torus, picked out of the two the crossing can
+/// come in.
+///
+/// **Two families reach here and no others.** A plane square to the axis cuts
+/// circles round the axis; a plane holding the axis cuts the two meridian
+/// circles. Every other plane is refused by name in
+/// [`intersect`](crate::intersect) before a run exists, so this never has to
+/// stand in for a quartic.
+///
+/// **Which of the two circles is asked of the run's own pickers**, at the point
+/// each candidate starts from, taken as the box it is really known to be inside
+/// — the same question `the_seed_this_run_is_picked_up_at` puts to the marcher's
+/// seeds, asked the same way. A run with no picker on it is the whole of a
+/// crossing that comes in one piece, which is the tangent circle and nothing
+/// else.
+///
+/// # Which family this is, is asked in `f64`
+///
+/// `n × w == 0` is one exact comparison of stored triples and not a cascade
+/// question, exactly as the pipe arm above asks `n·w == 0.0`. §39.7 item 6
+/// records that as a standing gap — two authorities on the same question, one
+/// exact in [`intersect`](crate::intersect) and one an `f64` comparison here —
+/// and this arm is a third instance of it rather than a new one. What saves it
+/// is that a cross product of two stored triples is zero in `f64` exactly when
+/// it is zero in exact arithmetic: every component is `a·d − b·c` with no sum to
+/// cancel, so nothing here rounds a non-zero to zero or the other way. The pipe
+/// arm's `n·w` has a three-term sum in it and does not have that property.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when the circle's own numbers do
+/// not come out finite, and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the pickers hold both
+/// candidates or neither.
+fn where_a_plane_cuts_a_torus(
+    flat: &Plane,
+    ring: &Torus,
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    let candidates = if flat.normal().cross(ring.axis().direction()) == Vector::zero() {
+        circles_round_the_axis(flat, ring)
+    } else {
+        the_two_meridian_circles(flat, ring)
+    };
+    if candidates.iter().any(|circle| {
+        !(circle.centre.is_finite() && circle.across.is_finite() && circle.and.is_finite())
+    }) {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
+
+    let picked_by: &[Picker] = match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
+    };
+    let mut held: Vec<Conic> = Vec::new();
+    for circle in candidates {
+        let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * circle.the_size_it_was_worked_out_from();
+        if picked_by.is_empty() || every_half_space_holds(picked_by, circle.at(0.0), deviation, log)
+        {
+            held.push(circle);
+        }
+    }
+    match (picked_by.is_empty(), held.as_slice()) {
+        (_, [only]) => Ok(*only),
+        _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
+}
+
+/// The circles a plane square to a torus's axis cuts, outer first.
+///
+/// The centre of both is where the axis meets the plane, and the two radii are
+/// `R ± √(r² − t²)` for `t` the axial distance from the torus's centre to the
+/// plane. Where the plane rests exactly on the tube the root is zero, both
+/// radii are `R`, and the two candidates are the same circle twice — which is
+/// right: the crossing really is one circle then, and a run with no picker on it
+/// takes it.
+fn circles_round_the_axis(flat: &Plane, ring: &Torus) -> Vec<Conic> {
+    let along = ring.axis().direction();
+    let up = along * along.length_squared().recip();
+    let reach = (flat.offset() - flat.normal().dot(ring.centre() - Point::origin()))
+        / flat.normal().dot(up);
+    let middle = ring.centre() + up * reach;
+    let axial = reach * along.length();
+    let tube = ring.tube_radius();
+    let half_width = (tube * tube - axial * axial).max(0.0).sqrt();
+    let (across, and) = ring.basis();
+
+    [
+        ring.ring_radius() + half_width,
+        ring.ring_radius() - half_width,
+    ]
+    .into_iter()
+    .map(|radius| Conic {
+        centre: middle,
+        across: across * radius,
+        and: and * radius,
+        size: how_big_this_is(&[middle, ring.centre()], &[radius, tube]),
+    })
+    .collect()
+}
+
+/// The two circles a plane through a torus's axis cuts, each of the tube's own
+/// radius, centred where the plane meets the centre circle.
+fn the_two_meridian_circles(flat: &Plane, ring: &Torus) -> Vec<Conic> {
+    let along = ring.axis().direction();
+    let up = along * along.length_squared().recip();
+    let sideways = match ring.axis().direction().cross(flat.normal()).normalized() {
+        Ok(across) => across,
+        // Unreachable: this arm is only taken with `n × w` non-zero, which is
+        // the very thing a normalize needs.
+        Err(_) => return Vec::new(),
+    };
+    let tube = ring.tube_radius();
+
+    [ring.ring_radius(), -ring.ring_radius()]
+        .into_iter()
+        .map(|out| {
+            let middle = ring.centre() + sideways * out;
+            Conic {
+                centre: middle,
+                across: sideways * (tube * out.signum()),
+                and: up * tube,
+                size: how_big_this_is(&[middle, ring.centre()], &[out, tube]),
+            }
+        })
+        .collect()
 }
 
 /// The largest magnitude anything about a conic was worked out from.
@@ -1476,6 +1618,13 @@ mod tests {
                 let out = point - cone.apex();
                 (out.cross(along).length() - cone.slope() * out.dot(along).abs()).abs()
                     / (along.length() * cone.slope().hypot(1.0))
+            }
+            Surface::Torus(ring) => {
+                let along = ring.axis().direction();
+                let out = point - ring.centre();
+                let across = out.cross(along).length() / along.length() - ring.ring_radius();
+                let axial = out.dot(along) / along.length();
+                (across.hypot(axial) - ring.tube_radius()).abs()
             }
         }
     }

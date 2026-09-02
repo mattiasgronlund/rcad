@@ -23,7 +23,7 @@ check:
 # raises it. So does a new *variant*, because a site that names every variant
 # there is today starts matching a known one tomorrow — which is the whole point
 # of naming them.
-wildcard_arms := "77"
+wildcard_arms := "79"
 
 check-wildcards:
     @find crates -name lib.rs -path '*/src/*' -exec touch {} +

@@ -281,6 +281,17 @@ fn box_the_surface_bounds(face: FaceView<'_>) -> Option<(Point, Point)> {
                 open_out((apex + along * up).coordinates(), cone.radius_at(up));
             }
         }
+        // **The whole torus and not the corners' own reach**, unlike a pipe's
+        // arm above. A pipe's face cannot leave the tube of its own radius round
+        // the stretch of axis its corners span, so the shadows bound it. A torus
+        // has *two* ways round and a face that goes right round either of them
+        // reaches places no corner of it shadows — so what is bounded here is
+        // the surface, which is inside `ring + tube` of its centre whichever way
+        // the face wraps.
+        Surface::Torus(ring) => open_out(
+            ring.centre().coordinates(),
+            ring.ring_radius() + ring.tube_radius(),
+        ),
         other => panic!("this crate cannot say how far {other:?} reaches"),
     }
     seen.then(|| (Point::from(low), Point::from(high)))

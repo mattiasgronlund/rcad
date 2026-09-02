@@ -1131,6 +1131,17 @@ fn gradient_of(surface: &Surface, at: Point) -> Vector {
             let out = at - apex;
             out * along.dot(along) - along * (along.dot(out) * (1.0 + cone.slope() * cone.slope()))
         }
+        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre`, the
+        // quartic's gradient divided by four. It is the only one here that
+        // depends on how far the point is from the surface's own placing point,
+        // because a torus is not a quadric.
+        Surface::Torus(ring) => {
+            let (centre, along) = (ring.centre(), ring.axis().direction());
+            let out = at - centre;
+            let (big, small) = (ring.ring_radius(), ring.tube_radius());
+            let bulge = out.dot(out) - big * big - small * small;
+            out * (along.dot(along) * bulge) + along * (2.0 * big * big * along.dot(out))
+        }
         other => panic!("this crate cannot say which way {other:?} faces"),
     }
 }
@@ -1146,7 +1157,13 @@ fn where_this_surface_pinches(surface: &Surface) -> Option<f64> {
         // the angle — so the second try costs one predicate call and answers the
         // same, which is right rather than merely harmless: there is one apex.
         Surface::Cone(_) => Some(0.0),
-        Surface::Plane(_) | Surface::Cylinder(_) => None,
+        // **A torus pinches nowhere, and that is the whole of what makes its
+        // chart different from a ball's.** A step of one radian round the ring
+        // carries `R + r·cos v`, which is never less than `R − r` and so is
+        // never nothing; a step round the tube carries `r` everywhere. Both
+        // coordinates run right round instead, which costs a torus **two**
+        // seams where a ball has one seam and two poles.
+        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) => None,
         other => panic!("this crate cannot say whether {other:?} pinches"),
     }
 }
@@ -1627,7 +1644,7 @@ fn the_curved_surface_that_names_a_closed_edge(along: &[Surface; 2]) -> Option<S
 fn how_far_the_longitude_wraps(surface: &Surface) -> Option<f64> {
     match surface {
         Surface::Plane(_) => None,
-        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) => {
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) => {
             Some(core::f64::consts::TAU)
         }
         other => panic!("this crate cannot say whether {other:?} wraps round"),
@@ -1687,6 +1704,24 @@ fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room:
             2.0,
             round.abs(),
         ),
+        // **A torus bends both ways and by two different amounts**, which no
+        // other surface here does: `r` round the tube and up to `R + r` round
+        // the ring. `rcad-mesh`'s `how_far_a_flat_piece_strays` derives
+        // `C²·(1/(3r) + 1/(2S))` for `S = R + r`, which is `C²/ρ` for the one
+        // radius written below, so the share is one and the whole of the
+        // stretching is in `ρ`. `turns_over` is then the arc length divided by
+        // that radius, so that `radius · turns_over` is the arc length the way
+        // it is for every arm above.
+        Surface::Torus(ring) => {
+            let widest = ring.ring_radius() + ring.tube_radius();
+            let tube = ring.tube_radius();
+            let effective = 6.0 * tube * widest / (2.0 * widest + 3.0 * tube);
+            (
+                effective,
+                1.0,
+                (widest * round).hypot(tube * up) / effective,
+            )
+        }
         other => panic!("this crate cannot walk along {other:?}"),
     };
     // A step that stays on a cone's apex covers no distance and bends by
@@ -1840,6 +1875,7 @@ fn a_shift_that_loses_nothing(face: FaceView<'_>) -> Option<Isometry> {
         Surface::Sphere(ball) => ball.centre(),
         Surface::Cylinder(pipe) => pipe.axis().origin(),
         Surface::Cone(cone) => cone.apex(),
+        Surface::Torus(ring) => ring.centre(),
         // A surface kind this has not been taught is worked out where it is,
         // which is what every face did before there was a shift at all.
         _ => return None,
@@ -1967,6 +2003,10 @@ fn how_far_the_points_of_reach(face: FaceView<'_>, through: &Isometry) -> f64 {
                 .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
                 .fold(0.0, f64::max)
         }
+        // A torus reaches `R + r` from its centre whichever way a face on it
+        // wraps, and a face on it can wrap **both** ways — so unlike a pipe's,
+        // its corners settle nothing and the whole surface is what is charged.
+        Surface::Torus(ring) => ring.ring_radius() + ring.tube_radius(),
         other => panic!("this crate cannot say how far {other:?} reaches"),
     };
     let corners = face

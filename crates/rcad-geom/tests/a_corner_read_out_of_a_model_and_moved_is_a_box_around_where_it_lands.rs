@@ -23,7 +23,7 @@
 #![forbid(unsafe_code)]
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Isometry, Plane, Point, Sphere, Surface, Vector,
+    Axis, Cone, Cylinder, Isometry, Plane, Point, Sphere, Surface, Torus, Vector,
     where_a_corner_lands_after_moving,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, SideOfSurface};
@@ -256,6 +256,21 @@ fn moved_clear(surface: &Surface, reach: f64) -> Surface {
             )
             .expect("the same slope"),
         ),
+        // A torus cannot grow its tube without running through its own ring, so
+        // this slides its centre up its own axis instead, exactly as a cone's
+        // apex is slid.
+        Surface::Torus(ring) => Surface::Torus(
+            Torus::new(
+                Axis::new(
+                    ring.centre() + ring.axis().direction() * gap,
+                    ring.axis().direction(),
+                )
+                .expect("a direction with length"),
+                ring.ring_radius(),
+                ring.tube_radius(),
+            )
+            .expect("the same two radii"),
+        ),
         other => panic!("nothing here can move {other:?} clear"),
     }
 }
@@ -267,6 +282,7 @@ fn which_side_of(surface: &Surface, point: PredicatePoint) -> Decision {
         Surface::Sphere(ball) => ball.side_of(point),
         Surface::Cylinder(pipe) => pipe.side_of(point),
         Surface::Cone(cone) => cone.side_of(point),
+        Surface::Torus(ring) => ring.side_of(point),
         other => panic!("nothing here can place a point against {other:?}"),
     }
 }
@@ -290,6 +306,13 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
             let out = point - cone.apex();
             (out.cross(along).length() - cone.slope() * out.dot(along).abs()).abs()
                 / (along.length() * cone.slope().hypot(1.0))
+        }
+        Surface::Torus(ring) => {
+            let along = ring.axis().direction();
+            let out = point - ring.centre();
+            let across = out.cross(along).length() / along.length() - ring.ring_radius();
+            let axial = out.dot(along) / along.length();
+            (across.hypot(axial) - ring.tube_radius()).abs()
         }
         other => panic!("nothing here can measure against {other:?}"),
     }

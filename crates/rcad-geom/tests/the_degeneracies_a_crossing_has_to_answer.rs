@@ -74,6 +74,7 @@ fn side_of(surface: &Surface, at: rcad_predicates::Point) -> Decision {
         Surface::Sphere(ball) => ball.side_of(at),
         Surface::Cylinder(pipe) => pipe.side_of(at),
         Surface::Cone(cone) => cone.side_of(at),
+        Surface::Torus(ring) => ring.side_of(at),
         other => panic!("nothing here can ask about {other:?}"),
     }
 }

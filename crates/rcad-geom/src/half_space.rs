@@ -331,6 +331,23 @@ pub enum Picker {
     OutsideABall(Sphere),
     /// Everything on or outside a pipe.
     OutsideAPipe(Cylinder),
+    /// Everything on or inside a pipe.
+    ///
+    /// **The only picker that says *inside*, and a torus is what needed one.** A
+    /// plane square to a torus's axis cuts it in two circles that are
+    /// concentric and lie in one plane, and no flat half-space tells those
+    /// apart: a half-space holding the whole inner circle holds a disc round the
+    /// centre and so holds half the outer one too. Nor does any *outside*: the
+    /// pipe of a radius between the two holds every point of the outer circle
+    /// and none of the inner, which names one of the pair and leaves the other
+    /// with nothing to be named by.
+    ///
+    /// So the second name is the same pipe read the other way round, which is
+    /// what the two arms of [`EdgeRun::PartOfWhereItCrosses`] need and what
+    /// `HalfSpace::reversed` already gives the flat arm.
+    ///
+    /// [`EdgeRun::PartOfWhereItCrosses`]: crate::EdgeRun::PartOfWhereItCrosses
+    InsideAPipe(Cylinder),
 }
 
 impl Picker {
@@ -346,6 +363,11 @@ impl Picker {
             Picker::InFrontOf(half_space) => half_space.side_of_point(point),
             Picker::OutsideABall(ball) => ball.side_of(point),
             Picker::OutsideAPipe(pipe) => pipe.side_of(point),
+            Picker::InsideAPipe(pipe) => match pipe.side_of(point) {
+                Decision::Pos => Decision::Neg,
+                Decision::Neg => Decision::Pos,
+                same => same,
+            },
         }
     }
 
@@ -362,6 +384,7 @@ impl Picker {
             Picker::InFrontOf(half_space) => Picker::InFrontOf(half_space.shifted(by)),
             Picker::OutsideABall(ball) => Picker::OutsideABall(ball.transformed(&shift)),
             Picker::OutsideAPipe(pipe) => Picker::OutsideAPipe(pipe.transformed(&shift)),
+            Picker::InsideAPipe(pipe) => Picker::InsideAPipe(pipe.transformed(&shift)),
         })
     }
 
@@ -371,7 +394,7 @@ impl Picker {
         match self {
             Picker::InFrontOf(_) => SIDE_OF_A_HALF_SPACE,
             Picker::OutsideABall(_) => crate::SIDE_OF_SPHERE,
-            Picker::OutsideAPipe(_) => crate::SIDE_OF_CYLINDER,
+            Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) => crate::SIDE_OF_CYLINDER,
         }
     }
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rcad_geom::{
     Deflection, DynamicRange, EdgeRun, Isometry, Orientation, Plane, Point, SIDE_OF_CONE,
-    SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, Surface, Vector,
+    SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS, Surface, Vector,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -587,6 +587,18 @@ impl Model {
                         .fold(f64::INFINITY, f64::min)
                         .into()
                 }
+                // **A torus has two radii and the smaller is not always the
+                // tube.** The closed curves a torus face carries are the circles
+                // round the tube, of radius `r`, and the circles round the axis,
+                // whose smallest is the inner equator at `R − r`. Either can be
+                // the smallest feature of the solid, so both go in.
+                Surface::Torus(ring) => {
+                    Some((ring.ring_radius() - ring.tube_radius()).min(ring.tube_radius()))
+                }
+                // Every variant there is has an arm above; this is only the
+                // one that does not exist yet, and a surface whose smallest
+                // feature nobody has worked out is safest counted as having
+                // none.
                 _ => None,
             })
             .filter(|radius| radius.is_finite())
@@ -888,6 +900,7 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
         Surface::Sphere(ball) => ball.side_of(point),
         Surface::Cylinder(pipe) => pipe.side_of(point),
         Surface::Cone(cone) => cone.side_of(point),
+        Surface::Torus(ring) => ring.side_of(point),
         other => panic!("a surface nothing here can ask about: {other:?}"),
     }
 }
@@ -1038,6 +1051,11 @@ pub(crate) fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
         Surface::Sphere(_) => Vector::new(0.0, 0.0, 1.0),
         Surface::Cylinder(pipe) => pipe.axis().direction(),
         Surface::Cone(cone) => cone.axis().direction(),
+        // A torus's *first* coordinate winds about its axis, which is the one
+        // this is read for; its second winds about the centre circle, which is
+        // not one direction and is not what anybody asks here.
+        Surface::Torus(ring) => ring.axis().direction(),
+        Surface::Plane(_) => panic!("a plane has no longitude to be wound about"),
         other => panic!("this crate cannot say what {other:?} is wound about"),
     }
 }
@@ -1066,6 +1084,20 @@ pub(crate) fn gradient_of(surface: &Surface, at: Point) -> Vector {
             let out = at - apex;
             out * along.dot(along) - along * (along.dot(out) * (1.0 + cone.slope() * cone.slope()))
         }
+        // The gradient of `(w·w)(x·x + R² − r²)² − 4R²‖x × w‖²` at
+        // `x = at − centre`, divided by four:
+        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w`. On the outer equator that
+        // comes to `(w·w)·2Rr·x`, pointing away from the axis; on the inner
+        // equator to `−(w·w)·2Rr·x`, pointing towards it — which is out of the
+        // tube both times, and is the whole of what a torus's normal has that no
+        // quadric's here does.
+        Surface::Torus(ring) => {
+            let (centre, along) = (ring.centre(), ring.axis().direction());
+            let out = at - centre;
+            let (big, small) = (ring.ring_radius(), ring.tube_radius());
+            let bulge = out.dot(out) + big * big - small * small - 2.0 * big * big;
+            out * (along.dot(along) * bulge) + along * (2.0 * big * big * along.dot(out))
+        }
         other => panic!("this crate cannot say which way {other:?} faces"),
     }
 }
@@ -1077,6 +1109,7 @@ pub(crate) fn name_of_surface(surface: &Surface) -> &'static str {
         Surface::Sphere(_) => SIDE_OF_SPHERE,
         Surface::Cylinder(_) => SIDE_OF_CYLINDER,
         Surface::Cone(_) => SIDE_OF_CONE,
+        Surface::Torus(_) => SIDE_OF_TORUS,
         other => panic!("a surface nothing here can ask about: {other:?}"),
     }
 }

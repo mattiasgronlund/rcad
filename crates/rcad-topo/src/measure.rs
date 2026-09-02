@@ -720,6 +720,19 @@ fn radius_of_each_face(solid: SolidView<'_>, mesh: &Mesh) -> HashMap<FaceKey, Op
                     cones.insert(face.key(), cone);
                     Some(f64::INFINITY)
                 }
+                // **The tube radius, and it needs no mesh to find.** The inner
+                // offset surface of a torus is the same torus with a thinner
+                // tube, which exists for every `d` below `r` — so unlike a
+                // cone, a torus never runs out of an inner surface to project
+                // onto, and unlike a ball its ratio is not one number. The area
+                // element is `(R + r·cos v)·r`, so the offset's is
+                // `(R + (r − d)cos v)(r − d)` and the ratio is
+                // `[r/(r − d)]·[(R + r·cos v)/(R + (r − d)cos v)]`. The second
+                // factor is largest at the outer equator, where it is
+                // `(R + r)/(R + r − d)` — smaller than `r/(r − d)` because
+                // `R + r` is bigger than `r` — so the whole ratio is under
+                // `(r/(r − d))²`, which is the sphere's factor with `r` in it.
+                Surface::Torus(ring) => Some(ring.tube_radius()),
                 other => panic!("this crate cannot say how far {other:?} bends"),
             };
             (face.key(), radius)

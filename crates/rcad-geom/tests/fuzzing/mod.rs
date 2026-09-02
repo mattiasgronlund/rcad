@@ -231,6 +231,7 @@ fn side_of(surface: &Surface, point: PredicatePoint) -> Decision {
         Surface::Sphere(ball) => ball.side_of(point),
         Surface::Cylinder(pipe) => pipe.side_of(point),
         Surface::Cone(cone) => cone.side_of(point),
+        Surface::Torus(ring) => ring.side_of(point),
         other => panic!("nothing here can ask about {other:?}"),
     }
 }

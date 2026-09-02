@@ -1110,7 +1110,8 @@ impl Assembly {
                     // `docs/decisions.md` §35 records why that stops holding.
                     Containment::OnBoundary
                     | Containment::Undecidable { .. }
-                    | Containment::CannotFollowAFacesTrimming { .. } => (),
+                    | Containment::CannotFollowAFacesTrimming { .. }
+                    | Containment::CannotFireARayAtAFacesSurface { .. } => (),
                 }
             }
         }
@@ -1650,13 +1651,13 @@ enum CornerName {
     /// Three surfaces can meet at more than one point, so the three names do not
     /// pick a corner on their own; §31.3 is where that field comes from and it
     /// is what stops two different corners being joined into one.
-    Meet([[u64; 8]; 3], u8),
+    Meet([[u64; 9]; 3], u8),
     /// The one point on a closed crossing that nothing else cuts, named by the
     /// two surfaces it runs between.
-    RoundACurve([[u64; 8]; 2]),
+    RoundACurve([[u64; 9]; 2]),
     /// A pole of a closed surface, named by that surface and which of its two
     /// poles this is (§38.1).
-    Pole([u64; 8], bool),
+    Pole([u64; 9], bool),
 }
 
 impl Corners {
@@ -1739,7 +1740,7 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// What names one edge of the answer: the two corners it runs between, and —
 /// for an edge that closes, where those are one corner — the two surfaces
 /// either side of it. See [`which_curve_it_is`].
-type EdgeName = ([usize; 2], Option<[[u64; 8]; 2]>);
+type EdgeName = ([usize; 2], Option<[[u64; 9]; 2]>);
 
 /// The edges built so far, and how to find one again.
 #[derive(Default)]
@@ -1971,7 +1972,7 @@ fn the_half_space_both_ends_are_on(facing: Vector, ends: [Point; 2]) -> Option<P
 /// split it in two and leave each half with one face along it. Measured: the
 /// skew family's not-a-solid share went from under three in a hundred to three
 /// and a half.
-fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option<[[u64; 8]; 2]> {
+fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option<[[u64; 9]; 2]> {
     if from != to {
         return None;
     }

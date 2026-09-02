@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 
 use spade::{ConstrainedDelaunayTriangulation, InsertionError, Point2, Triangulation};
 
-use rcad_geom::{Cone, Surface};
+use rcad_geom::{Cone, Surface, Torus};
 use rcad_predicates::{Approximation, Cause, Decision, orient2d};
 
 use crate::domain::TrimmedDomain;
@@ -359,6 +359,15 @@ fn how_far_a_point_lands_off_its_surface(surface: &Surface, corners: &[[f64; 2]]
             HOW_FAR_THE_EVALUATOR_ROUNDS
                 * (cone.apex().largest_coordinate_magnitude() + cone.radius_at(reach) + reach)
         }
+        // A torus is bounded, so this needs no corners at all: every point of it
+        // is within `ring + tube` of its centre, whichever way a patch on it
+        // wraps.
+        Surface::Torus(ring) => {
+            HOW_FAR_THE_EVALUATOR_ROUNDS
+                * (ring.centre().largest_coordinate_magnitude()
+                    + ring.ring_radius()
+                    + ring.tube_radius())
+        }
         other => panic!("this crate cannot say how far a point of {other:?} lands off it"),
     }
 }
@@ -463,6 +472,18 @@ fn chord_across_the_curve(
         Surface::Cone(cone) => {
             2.0 * how_wide_a_cone_is_over(cone, across) * ((from[0] - to[0]) / 2.0).sin().abs()
         }
+        // **A torus curves two ways by two different amounts, so it has two
+        // chords and this is the longer.** Round the ring the chord is measured
+        // on the outer equator, which is the widest circle the surface has —
+        // `how_far_a_flat_piece_strays` divides by that same `R + r`, and a
+        // chord read on a smaller circle than the one it is charged against is a
+        // bound on nothing. Round the tube it is the tube's own chord.
+        Surface::Torus(ring) => {
+            let widest = ring.ring_radius() + ring.tube_radius();
+            let around = 2.0 * widest * ((from[0] - to[0]) / 2.0).sin().abs();
+            let over = 2.0 * ring.tube_radius() * ((from[1] - to[1]) / 2.0).sin().abs();
+            around.max(over)
+        }
         other => panic!("this crate cannot say which way {other:?} curves"),
     }
 }
@@ -530,6 +551,58 @@ fn chord_across_the_curve(
 /// `how_far_a_flat_piece_of_a_cone_really_strays_stays_under_the_published_bound`
 /// is the search §15.6 asks for.
 ///
+/// # A torus gets `C²·(1/(3r) + 1/(2S))`, in two halves that are the two ways it
+/// bends
+///
+/// Neither of the two derivations above transfers whole: a torus is not a sphere
+/// and its two radii of curvature are different numbers, `r` round the tube and
+/// `R + r·cos v` over `cos v` round the ring. What does transfer is both of
+/// them, one to each half of the surface's own two coordinates.
+///
+/// Write a point of the torus as `(s, a)` — how far it is from the axis and how
+/// far along it — so that the surface is the set with `(s − R)² + a² = r²`, and
+/// how far a point `p` sits off it is `‖(s_p − R, a_p)‖ − r`.
+///
+/// Take a flat piece `p = Σλᵢvᵢ` with its corners `vᵢ` on the torus, and let
+/// `Yᵢ = (sᵢ, aᵢ)`, which sit on the circle of radius `r` about `(R, 0)`.
+///
+/// - **`a` is linear**, so `a_p = Σλᵢaᵢ` exactly.
+/// - **`s` is not**, and how far it falls short is the cone's own step, one
+///   dimension down: with `S = Σλᵢsᵢ`, `S − s_p ≤ Σλᵢsᵢ(1 − cos(uᵢ − u_k))` for
+///   any fixed `k`, which taking `k` at the widest corner and measuring the
+///   chords on that corner's circle comes to `C_u²/(2·S_max)`.
+/// - So `P = (s_p, a_p)` sits within `C_u²/(2·S_max)` of `P' = (S, a_p)`, and
+///   `P'` is a convex combination of the `Yᵢ`, which the **sphere's** sum
+///   bounds: `r − ‖P' − (R,0)‖ ≤ C_v²/(3r)`, with `C_v` the chord in the
+///   `(s, a)` plane — which is exactly the chord round the tube.
+///
+/// Adding the two:
+///
+/// ```text
+/// how far the piece strays  ≤  C_v²/(3r)  +  C_u²/(2·S_max)
+/// ```
+///
+/// **Measured with one chord and not two.** [`chord_across_the_curve`] hands
+/// back the larger of the two, both taken on the widest circle the surface has,
+/// `S = R + r`; measuring `C_u` on a circle wider than the corners' own and
+/// dividing by that same wider number is conservative, because
+/// `C_u²/(2S) = 2S·sin²(Δu/2)` **rises** with `S`. With one chord `C` for both,
+///
+/// ```text
+/// ≤ C²·(1/(3r) + 1/(2S))  =  C² / ρ,      ρ = 6rS / (2S + 3r)
+/// ```
+///
+/// which is the `share = 1` arm below and is what
+/// [`how_far_a_torus_bends_over_a_patch`] returns.
+///
+/// **Nothing about it can degenerate.** `ρ` lies between `2r` and `3r` for every
+/// torus there is, because `R + r` is always more than `r`. So a torus reaches
+/// neither of the two shapes a cone does — no patch of one is bounded by
+/// nothing, and none has a radius of zero — and both guards below are dead code
+/// for a torus rather than arms it takes.
+/// `how_far_a_flat_piece_of_a_torus_really_strays_stays_under_the_published_bound`
+/// is the search §15.6 asks for.
+///
 /// A boundary side is a piece with two corners rather than three, and the same
 /// sum gives it `L²/(4r)`. It is measured with `L²/(3r)` anyway, because what
 /// gets published is the bound on the *triangle* that side ends up in, and a
@@ -553,6 +626,7 @@ fn how_far_a_flat_piece_strays(
         Surface::Plane(_) => return 0.0,
         Surface::Sphere(ball) => (ball.radius(), 3.0),
         Surface::Cylinder(pipe) => (pipe.radius(), 3.0),
+        Surface::Torus(ring) => (how_far_a_torus_bends_over_a_patch(ring), 1.0),
         Surface::Cone(cone) => (
             how_wide_a_cone_is_over(cone, across) * cone.slope().hypot(1.0),
             2.0,
@@ -580,6 +654,26 @@ fn how_far_a_flat_piece_strays(
     chord * chord / (share * radius) + slop
 }
 
+/// The one radius a torus's chord bound divides by, `6rS / (2S + 3r)` for
+/// `S = ring + tube`.
+///
+/// See [`how_far_a_flat_piece_strays`] for where it comes from. It is written as
+/// one number with a share of one, rather than as two terms, so that a torus
+/// reads through the same `chord² / (share · radius)` every other surface does —
+/// and so that [`a_step_that_stays_within`] can turn it round without a second
+/// derivation.
+///
+/// **Always finite and always above zero**, which a cone's is not: it lies
+/// between `2r` and `3r`, because `6rS/(2S + 3r)` rises from `2r` at `S = r`
+/// towards `3r` as `S` grows. So a torus never reaches the two shapes a cone
+/// does — a patch that is bounded by nothing, and a patch whose radius is
+/// nothing at all — and neither guard below can fire for one.
+fn how_far_a_torus_bends_over_a_patch(ring: &Torus) -> f64 {
+    let widest = ring.ring_radius() + ring.tube_radius();
+    let tube = ring.tube_radius();
+    6.0 * tube * widest / (2.0 * widest + 3.0 * tube)
+}
+
 /// The longest chord a triangle may have and still stay within `deflection`.
 ///
 /// [`how_far_a_flat_piece_strays`] turned round. Zero or less when even a chord
@@ -601,6 +695,7 @@ fn a_step_that_stays_within(
         Surface::Plane(_) => return f64::INFINITY,
         Surface::Sphere(ball) => (ball.radius(), 3.0),
         Surface::Cylinder(pipe) => (pipe.radius(), 3.0),
+        Surface::Torus(ring) => (how_far_a_torus_bends_over_a_patch(ring), 1.0),
         Surface::Cone(cone) => (
             how_wide_a_cone_is_over(cone, across) * cone.slope().hypot(1.0),
             2.0,

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::isometry::Isometry;
 use crate::point::Point;
-use crate::{Cone, Cylinder, Plane, Sphere};
+use crate::{Cone, Cylinder, Plane, Sphere, Torus};
 
 /// The surface a face sits on.
 ///
@@ -17,10 +17,14 @@ use crate::{Cone, Cylinder, Plane, Sphere};
 ///
 /// M0 built solids out of [`Plane`] only, and [`Sphere`] and [`Cylinder`] were
 /// here as types so the enum was shaped right and the sign predicates had
-/// somewhere to land. **Topology accepts all four now**: a round bar has a face
-/// on a cylinder, a ball has one on a sphere, and a taper has one on a cone. A
-/// torus is still out — its sign predicate is a quartic, one degree past
-/// everything the quadric machinery here is written for.
+/// somewhere to land. **Topology accepts all five now**: a round bar has a face
+/// on a cylinder, a ball has one on a sphere, a taper has one on a cone and a
+/// ring has one on a torus.
+///
+/// **Four of the five are quadrics and the fifth is not**, and almost every
+/// place a torus is refused traces to that. A straight line meets a quadric
+/// twice and a torus four times; a plane cuts a quadric in a conic and a torus
+/// in a quartic. [`Torus`] says what follows.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Surface {
@@ -32,6 +36,8 @@ pub enum Surface {
     Cylinder(Cylinder),
     /// A double cone's skin, pinched to nothing at its apex.
     Cone(Cone),
+    /// A ring's skin.
+    Torus(Torus),
 }
 
 impl Surface {
@@ -43,7 +49,9 @@ impl Surface {
     pub fn as_plane(&self) -> Option<&Plane> {
         match self {
             Surface::Plane(plane) => Some(plane),
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) => None,
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) => {
+                None
+            }
         }
     }
 
@@ -67,6 +75,7 @@ impl Surface {
             Surface::Sphere(sphere) => sphere.point_at(u, v),
             Surface::Cylinder(cylinder) => cylinder.point_at(u, v),
             Surface::Cone(cone) => cone.point_at(u, v),
+            Surface::Torus(torus) => torus.point_at(u, v),
         }
     }
 
@@ -146,6 +155,7 @@ impl Surface {
             Surface::Sphere(sphere) => sphere.coordinates_of(point),
             Surface::Cylinder(cylinder) => cylinder.coordinates_of(point),
             Surface::Cone(cone) => cone.coordinates_of(point),
+            Surface::Torus(torus) => torus.coordinates_of(point),
         }
     }
 
@@ -187,6 +197,7 @@ impl Surface {
             Surface::Sphere(sphere) => (sphere.radius(), sphere.radius()),
             Surface::Cylinder(cylinder) => (cylinder.radius(), 1.0),
             Surface::Cone(cone) => (f64::INFINITY, cone.slope().hypot(1.0)),
+            Surface::Torus(ring) => (ring.ring_radius() + ring.tube_radius(), ring.tube_radius()),
         }
     }
 
@@ -221,25 +232,38 @@ impl Surface {
     }
 
     /// Which kind this is, and the numbers it places and sizes itself with.
-    fn the_numbers_it_is_written_with(&self) -> (u8, [f64; 7]) {
+    ///
+    /// **Every number a surface holds goes in**, and a torus is why the row is
+    /// eight long rather than seven: two tori about one axis with the same ring
+    /// radius and different tubes are two surfaces, and a row that left the tube
+    /// out would sort them equal and name one corner for both.
+    fn the_numbers_it_is_written_with(&self) -> (u8, [f64; 8]) {
         match self {
             Surface::Plane(flat) => {
                 let [a, b, c, d] = flat.coefficients();
-                (0, [a, b, c, d, 0.0, 0.0, 0.0])
+                (0, [a, b, c, d, 0.0, 0.0, 0.0, 0.0])
             }
             Surface::Sphere(ball) => {
                 let [x, y, z] = ball.centre().coordinates();
-                (1, [x, y, z, ball.radius(), 0.0, 0.0, 0.0])
+                (1, [x, y, z, ball.radius(), 0.0, 0.0, 0.0, 0.0])
             }
             Surface::Cylinder(pipe) => {
                 let [x, y, z] = pipe.axis().origin().coordinates();
                 let [u, v, w] = pipe.axis().direction().components();
-                (2, [x, y, z, u, v, w, pipe.radius()])
+                (2, [x, y, z, u, v, w, pipe.radius(), 0.0])
             }
             Surface::Cone(cone) => {
                 let [x, y, z] = cone.apex().coordinates();
                 let [u, v, w] = cone.axis().direction().components();
-                (3, [x, y, z, u, v, w, cone.slope()])
+                (3, [x, y, z, u, v, w, cone.slope(), 0.0])
+            }
+            Surface::Torus(ring) => {
+                let [x, y, z] = ring.centre().coordinates();
+                let [u, v, w] = ring.axis().direction().components();
+                (
+                    4,
+                    [x, y, z, u, v, w, ring.ring_radius(), ring.tube_radius()],
+                )
             }
         }
     }
@@ -252,6 +276,7 @@ impl Surface {
             Surface::Sphere(sphere) => Surface::Sphere(sphere.transformed(movement)),
             Surface::Cylinder(cylinder) => Surface::Cylinder(cylinder.transformed(movement)),
             Surface::Cone(cone) => Surface::Cone(cone.transformed(movement)),
+            Surface::Torus(ring) => Surface::Torus(ring.transformed(movement)),
         }
     }
 }
@@ -277,6 +302,12 @@ impl From<Cylinder> for Surface {
 impl From<Cone> for Surface {
     fn from(cone: Cone) -> Self {
         Surface::Cone(cone)
+    }
+}
+
+impl From<Torus> for Surface {
+    fn from(torus: Torus) -> Self {
+        Surface::Torus(torus)
     }
 }
 

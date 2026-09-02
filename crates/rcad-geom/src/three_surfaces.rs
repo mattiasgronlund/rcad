@@ -98,6 +98,14 @@ pub fn meet_of_three_surfaces(
     if let Surface::Plane(last) = &third {
         return where_three_planes_meet(one, other, last, policy, log);
     }
+    // **A torus is the only surface here that a line does not meet twice**, and
+    // the refusal has to be taken before a quadratic is asked for rather than
+    // inside the asking. A torus sorts after every other kind, and two of the
+    // three must be planes to get this far, so a torus anywhere in the triple is
+    // `third` — which is what makes this one check cover every route in.
+    if let Surface::Torus(_) = &third {
+        return Err(Error::WhereALineMeetsATorusIsAQuartic);
+    }
 
     let at = the_places_these_three_sit(&first, &second, &third);
     let Some(line) = the_line_two_planes_cross_in(one, other, &at, policy, log)? else {
@@ -133,6 +141,7 @@ fn the_places_these_three_sit(
             Surface::Sphere(ball) => ball.centre().coordinates(),
             Surface::Cylinder(pipe) => pipe.axis().origin().coordinates(),
             Surface::Cone(cone) => cone.apex().coordinates(),
+            Surface::Torus(ring) => ring.centre().coordinates(),
         })
     })
 }
@@ -375,13 +384,16 @@ impl Quadratic {
 /// # Panics
 ///
 /// On a plane, which is not a quadric and is answered by
-/// [`where_three_planes_meet`] before this is reached.
+/// [`where_three_planes_meet`] before this is reached, and on a torus, which is
+/// not a quadric either and is refused by [`meet_of_three_surfaces`] one
+/// function up — see the note there for why that one check catches every torus.
 fn how_a_quadric_cuts_the_line(line: &WhereTwoPlanesCross, quadric: &Surface) -> Option<Quadratic> {
     match quadric {
         Surface::Sphere(ball) => how_a_ball_cuts_the_line(line, ball),
         Surface::Cylinder(pipe) => how_a_pipe_cuts_the_line(line, pipe),
         Surface::Cone(cone) => how_a_cone_cuts_the_line(line, cone),
         Surface::Plane(flat) => panic!("{flat:?} is flat, so three planes is the question"),
+        Surface::Torus(ring) => panic!("{ring:?} is a quartic and is refused before this"),
     }
 }
 

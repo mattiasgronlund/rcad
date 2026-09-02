@@ -529,7 +529,8 @@ fn settle_against_each(
             // curved solids at entry; `docs/decisions.md` §35 records why that
             // argument stops holding and why what replaces it is a refusal
             // about a caller's solid rather than a panic.
-            Containment::CannotFollowAFacesTrimming { .. } => return Ok(None),
+            Containment::CannotFollowAFacesTrimming { .. }
+            | Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(None),
             Containment::OnBoundary | Containment::Undecidable { .. } => {
                 let Some(face) = coincident_face(model, solids[index], piece, point, policy, log)?
                 else {

@@ -59,6 +59,30 @@ pub enum Error {
         half_angle: f64,
     },
 
+    /// A torus was asked for with a tube as wide as its ring, or wider.
+    ///
+    /// Such a surface runs through itself, and — the reason this is refused at
+    /// the door rather than noted in a doc comment — the quartic
+    /// [`Torus`](crate::Torus)'s sign predicate reads **stops meaning inside and
+    /// outside**. `a_tube_wider_than_its_ring_would_certify_the_wrong_side`
+    /// writes out the quartic by hand for a point plainly inside such a tube and
+    /// shows it come back positive, which every level of the cascade would
+    /// certify as outside. A confident wrong answer is what §4.1 ranks below a
+    /// crash.
+    ///
+    /// It is caller input rather than a broken invariant: two radii arrive from
+    /// a stranger's bytes through `Deserialize` as readily as from a call.
+    #[error(
+        "a torus's tube radius {tube_radius} must be less than its ring radius {ring_radius}, or \
+         the surface runs through itself"
+    )]
+    ATorusThatRunsThroughItself {
+        /// How far the middle of the tube runs from the axis.
+        ring_radius: f64,
+        /// How thick the tube is.
+        tube_radius: f64,
+    },
+
     /// A mesh was asked to stray a distance that is not a distance.
     #[error("a deflection must be greater than zero, but it was {length}")]
     DeflectionNotPositive {
@@ -389,6 +413,72 @@ pub enum Error {
     /// whole second stage over again.
     #[error("a cone crossing another curved surface is a degree-four space curve")]
     ACrossingBetweenAConeAndAnotherCurvedSurface,
+
+    /// A plane cuts a torus in a quartic that is not a pair of circles.
+    ///
+    /// A **gap**, and the largest one a torus leaves. Only two families of plane
+    /// cut a torus in circles: one **square to the axis**, which cuts two
+    /// circles round the axis, and one **through the axis**, which cuts the two
+    /// meridian circles. Both are built. Every other plane cuts a genuine
+    /// quartic — a Cassini oval, a figure of eight, a pair of Villarceau
+    /// circles on the two bitangent planes — and the vocabulary here has no name
+    /// for one: [`EdgeRun`](crate::EdgeRun) says straight, closed, or which
+    /// piece, and [`crate::PointsAlongACrossing`] draws a closed curve either
+    /// from a [`Conic`](crate::Surface) or from the marcher.
+    ///
+    /// The family of fixes, so that this is a demonstration and not a paragraph:
+    /// (a) **the marcher already draws degree-four space curves** and is the
+    /// short route — it wants a torus arm in `march.rs` (written: a torus
+    /// carries its own enclosing gradient there already) and a seed per loop,
+    /// which is the part that is missing, because where a plane's quartic falls
+    /// into one loop, two, or a figure of eight is an eighth-degree
+    /// discriminant in the plane's four numbers and nobody has derived it.
+    /// (b) a closed form for the quartic's branches, which is Ferrari's method
+    /// on interval coefficients and gives roots as boxes that a nearly-tangent
+    /// plane widens to nothing. (c) refusing the naming and letting the
+    /// arrangement cut the face some other way, which is not
+    /// [`intersect`](crate::intersect)'s to decide (§24.3).
+    /// **(a) is the shortest**, and its consumer is a torus fused with a block
+    /// that is not square to the ring.
+    #[error("a plane cuts this torus in a quartic that is not a pair of circles")]
+    ACrossingBetweenAPlaneAndATorusThatIsAQuartic,
+
+    /// A torus against a ball, a pipe, a cone, or another torus.
+    ///
+    /// A **gap** and the same one two leaning pipes have (§29), one degree
+    /// worse: the crossing is a space curve of degree up to eight, naming which
+    /// of its shapes it takes has no discriminant anybody has written down, and
+    /// the marcher has no seed to start from.
+    ///
+    /// The family of fixes, shortest first. (a) The **coaxial** cases are two
+    /// circles each and are one sign question apiece — a pipe sharing the
+    /// torus's axis crosses it in two circles square to that axis, and so does a
+    /// ball centred on it and a second torus about it. That covers a rod through
+    /// the middle of a ring, which is what a real file holds. (b) The general
+    /// case wants §29's whole second stage over again with a torus in it.
+    #[error("a torus crossing another curved surface is a space curve of degree up to eight")]
+    ACrossingBetweenATorusAndAnotherCurvedSurface,
+
+    /// A straight line meets a torus in a quartic, and nothing here solves one.
+    ///
+    /// A **gap**. Where three surfaces meet is worked out by crossing two of
+    /// them into a line and asking the third where that line cuts it, and every
+    /// surface but a torus answers with a **quadratic** — one equation in one
+    /// unknown of degree at most two, which is §31.2's row 11 and is what
+    /// [`MeetOfThree`](crate::MeetOfThree) is written around. A torus answers
+    /// with a quartic and there are up to four meets rather than two.
+    ///
+    /// The family of fixes: (a) solve the quartic, which is Ferrari's method on
+    /// interval coefficients — the roots come back as boxes and a line nearly
+    /// tangent to the tube widens them past use, but so does a nearly-tangent
+    /// line on a quadric already, so this is the same trade one degree up; (b)
+    /// widen `MeetOfThree` from two meets to four, which every reader of it
+    /// grows an arm for; (c) isolate the roots by bisection under the policy,
+    /// which turns an exact question into a search. **(a) plus (b) together are
+    /// the shortest**, and neither can land without the other. Its consumer is a
+    /// corner where two planes meet a torus.
+    #[error("a straight line meets this torus in a quartic, and nothing here solves one")]
+    WhereALineMeetsATorusIsAQuartic,
 
     /// A point cannot be worked out as close to a crossing as was asked for.
     ///

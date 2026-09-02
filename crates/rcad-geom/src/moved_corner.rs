@@ -206,6 +206,12 @@ fn how_big_a_surface_is(surface: &Surface) -> f64 {
         // the surface. What it places itself with is its apex, and the slope is
         // a ratio of order one, so the apex is the whole of the size here.
         Surface::Cone(cone) => cone.apex().largest_coordinate_magnitude().max(cone.slope()),
+        // A torus is bounded and so has a size of its own, unlike a cone: it
+        // reaches `ring + tube` from its centre and never further.
+        Surface::Torus(ring) => ring
+            .centre()
+            .largest_coordinate_magnitude()
+            .max(ring.ring_radius() + ring.tube_radius()),
     }
 }
 

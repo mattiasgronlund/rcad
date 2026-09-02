@@ -37,7 +37,7 @@ use crate::enclosure::{
     cross_enclosing, dot_enclosing, exactly, gap_enclosing, quotient_or_everything, root_enclosing,
     squared_length_enclosing,
 };
-use crate::{Cone, Cylinder, Error, Plane, Point, Result, Sphere, Surface, Vector};
+use crate::{Cone, Cylinder, Error, Plane, Point, Result, Sphere, Surface, Torus, Vector};
 
 /// How much of the deflection budget the sagitta of one straight piece may take
 /// before the step is halved.
@@ -346,6 +346,28 @@ fn how_far_off_and_which_way(surface: &Surface, at: Point) -> (f64, Vector) {
                     * steepness.recip(),
             )
         }
+        // Nothing in this crate marches a crossing with a torus on it either;
+        // `Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic` and
+        // `Error::ACrossingBetweenATorusAndAnotherCurvedSurface` refuse those
+        // before a run exists to follow. The arm does the arithmetic for the
+        // same reason the cone's does, and here it is worth more: a torus's
+        // distance function is **exact and everywhere finite**, `‖(s − R, a)‖ −
+        // r` with `s` the distance from the axis and `a` the distance along it,
+        // so the day a seed exists the marcher can already settle onto one.
+        Surface::Torus(ring) => {
+            let along = ring.axis().direction();
+            let out = at - ring.centre();
+            let up = out.dot(along) / along.length_squared();
+            let sideways = out - along * up;
+            let across = sideways.length() - ring.ring_radius();
+            let axial = up * along.length();
+            let off_the_circle = across.hypot(axial);
+            (
+                off_the_circle - ring.tube_radius(),
+                (sideways * (across / sideways.length()) + along * (axial / along.length()))
+                    * off_the_circle.recip(),
+            )
+        }
     }
 }
 
@@ -357,6 +379,7 @@ fn how_far_off_enclosing(surface: &Surface, at: Point) -> (Interval, [Interval; 
         Surface::Sphere(ball) => how_far_off_a_ball_enclosing(ball, at),
         Surface::Cylinder(pipe) => how_far_off_a_pipe_enclosing(pipe, at),
         Surface::Cone(cone) => how_far_off_a_cone_enclosing(cone, at),
+        Surface::Torus(ring) => how_far_off_a_torus_enclosing(ring, at),
     }
 }
 
@@ -434,6 +457,32 @@ fn how_far_off_a_cone_enclosing(cone: &Cone, at: Point) -> (Interval, [Interval;
         quotient_or_everything(across - down, steepness)
     });
     (furthest_from_zero(off), outwards)
+}
+
+/// `| ‖(‖(p − c)_perp‖ − R, (p − c)·ŵ)‖ − r |`, and the unit normal there.
+///
+/// Unreachable from anything this crate marches, for the reason
+/// [`how_far_off_and_which_way`]'s torus arm gives; written out rather than
+/// stubbed for the same reason.
+fn how_far_off_a_torus_enclosing(ring: &Torus, at: Point) -> (Interval, [Interval; 3]) {
+    let along = exactly(ring.axis().direction().components());
+    let direction_length = root_enclosing(squared_length_enclosing(along));
+    let out = gap_enclosing(ring.centre().coordinates(), at.coordinates());
+    let up = quotient_or_everything(dot_enclosing(out, along), squared_length_enclosing(along));
+    let sideways: [Interval; 3] = core::array::from_fn(|axis| out[axis] - along[axis] * up);
+    let reach = root_enclosing(squared_length_enclosing(sideways));
+    let across = reach - Interval::exactly(ring.ring_radius());
+    let axial = up * direction_length;
+    let off_the_circle = root_enclosing(across * across + axial * axial);
+    let outwards: [Interval; 3] = core::array::from_fn(|axis| {
+        let out_of_the_tube = quotient_or_everything(sideways[axis] * across, reach)
+            + quotient_or_everything(along[axis] * axial, direction_length);
+        quotient_or_everything(out_of_the_tube, off_the_circle)
+    });
+    (
+        furthest_from_zero(off_the_circle - Interval::exactly(ring.tube_radius())),
+        outwards,
+    )
 }
 
 /// The magnitude of an enclosure, as an enclosure of no width: how far the
