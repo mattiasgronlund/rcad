@@ -85,15 +85,23 @@ impl Walk {
     }
 
     /// One `ADVANCED_FACE`: the surface it sits on, the wires that trim it, and
-    /// whether its own normal is the surface's or the other way about.
+    /// which way its own normal points.
     ///
-    /// **`same_sense` is false means two things at once, and both have to be
-    /// said.** The face's outward normal is the surface's reversed, which is
-    /// [`Orientation::Reversed`] on the shell; and the file's loops wind the
-    /// right way round *that* normal, which is the wrong way round the one the
-    /// kernel stores. `Model::validate` reads a wire's winding against the
-    /// stored surface and never against the shell's use of it, so the loop is
-    /// walked backwards to match. Two reversals and not one.
+    /// **`same_sense` is false does not turn the loops round, and working out
+    /// why is most of what makes a real file import.** A closed shell's loops
+    /// are wound about the *face's* normal, so two faces sharing an edge always
+    /// walk it opposite ways whatever either one's `same_sense` says. Reversing
+    /// a loop for `same_sense` would make the two walk it the same way, which
+    /// `SolidBuilder` refuses by name — and did, on 13 of the 323 KiCad files,
+    /// before this was got right.
+    ///
+    /// What `same_sense = .F.` changes is where the *surface* points, and this
+    /// is the same two-line table the fuse already keeps
+    /// (`fuse/assemble.rs`, §31.3's ON split): a plane is stored already turned
+    /// round and is then used forwards, because a plane welds "which surface"
+    /// to "which way"; a curved surface has no turned-round form — a sphere is
+    /// a sphere — so it is stored as it is and the shell says
+    /// [`Orientation::Reversed`].
     fn describe_the_face(
         &mut self,
         reading: &Reading<'_>,
@@ -101,43 +109,199 @@ impl Walk {
     ) -> Result<(DraftFace, Orientation), Refusal> {
         let keyword = reading.keyword_of(self.brep, face, &["ADVANCED_FACE", "FACE_SURFACE"])?;
         let sits_on = reading.reference_at(face, keyword, 2)?;
-        let surface = reading.surface_at(face, sits_on)?;
+        let written = reading.surface_at(face, sits_on)?;
         let same_sense = reading.flag_at(face, keyword, 3)?;
-        let bounds = reading.references_at(face, keyword, 1)?;
-        let outer_first = outer_bound_first(reading, face, &bounds)?;
+        let (surface, used) = match (written.as_plane(), same_sense) {
+            (_, true) => (written, Orientation::Forward),
+            (Some(flat), false) => (Surface::Plane(flat.reversed()), Orientation::Forward),
+            (None, false) => (written, Orientation::Reversed),
+        };
 
+        let bounds = reading.references_at(face, keyword, 1)?;
+        let outer_first = self.outer_bound_first(reading, face, &bounds, &surface)?;
         let mut wires = Vec::with_capacity(outer_first.len());
         for bound in outer_first {
-            wires.push(self.describe_the_bound(reading, face, bound, same_sense)?);
+            wires.push(self.describe_the_bound(reading, face, bound)?);
         }
         let drafted = self
             .builder
             .add_face(surface, &wires)
             .map_err(|why| self.refused(face, why))?;
         self.face_names.push(face);
-        Ok((
-            drafted,
-            if same_sense {
-                Orientation::Forward
-            } else {
-                Orientation::Reversed
-            },
-        ))
+        Ok((drafted, used))
     }
 
-    /// One `FACE_BOUND` or `FACE_OUTER_BOUND`, as a wire.
-    fn describe_the_bound(
-        &mut self,
+    /// The bounds of a face with the outer one first, which is the order
+    /// [`SolidBuilder::add_face`] takes them in.
+    ///
+    /// A face with one bound has that one as its outer, whatever the file called
+    /// it. A face with several says which is which in one of two ways, and this
+    /// reads both rather than guessing:
+    ///
+    /// - a `FACE_OUTER_BOUND` among them says so by its own type name;
+    /// - **and where every bound is a plain `FACE_BOUND`, the winding says so.**
+    ///   ISO 10303-42 winds an outer bound the way a right hand turns about the
+    ///   face's normal and a hole the other way, and `Model::validate` asks for
+    ///   exactly that. So the outer bound is the one whose corners sweep a
+    ///   positive area, and this is reading what the file wrote rather than
+    ///   working out which loop encloses which. **312 of the 323 KiCad files
+    ///   have such a face** and every one of them was refused before this.
+    ///
+    /// The sweep of the area here is plain `f64` and its sign is a **hint and
+    /// not a decision** — which is what makes it allowed to be plain `f64`.
+    /// `Model::validate` asks the same question of the same corners moments
+    /// later with a certified predicate, so a hint that came out wrong is a
+    /// refusal by name and never a model with its holes and its outline swapped.
+    ///
+    /// A curved face has no winding rule to read — the sweep asks none of one —
+    /// so its bounds are taken in file order.
+    fn outer_bound_first(
+        &self,
+        reading: &Reading<'_>,
+        face: EntityId,
+        bounds: &[EntityId],
+        surface: &Surface,
+    ) -> Result<Vec<EntityId>, Refusal> {
+        if bounds.len() <= 1 {
+            return Ok(bounds.to_vec());
+        }
+        let named = bounds.iter().position(|bound| {
+            reading
+                .file()
+                .instance(*bound)
+                .is_some_and(|held| held.part("FACE_OUTER_BOUND").is_some())
+        });
+        let outer = match (named, surface.as_plane()) {
+            (Some(outer), _) => outer,
+            (None, None) => return Ok(bounds.to_vec()),
+            (None, Some(flat)) => {
+                let mut sweeping_forwards = Vec::new();
+                for (position, bound) in bounds.iter().enumerate() {
+                    if self.area_swept_by(reading, face, *bound, flat)? > 0.0 {
+                        sweeping_forwards.push(position);
+                    }
+                }
+                match sweeping_forwards[..] {
+                    [only] => only,
+                    _ => {
+                        return Err(Refusal::AFaceThatDoesNotSayWhichBoundIsTheOuterOne {
+                            face,
+                            bounds: bounds.len(),
+                        });
+                    }
+                }
+            }
+        };
+        let mut ordered = Vec::with_capacity(bounds.len());
+        ordered.push(bounds[outer]);
+        ordered.extend(
+            bounds
+                .iter()
+                .enumerate()
+                .filter_map(|(position, bound)| (position != outer).then_some(*bound)),
+        );
+        Ok(ordered)
+    }
+
+    /// Twice the area a bound sweeps round the plane's normal, in the plane's
+    /// own two coordinates.
+    ///
+    /// Positive means it turns the way a right hand turns about the normal. The
+    /// corners give a polygon, and a **closed** edge — a whole circle or
+    /// ellipse, which has one corner and so no polygon at all — gives its own
+    /// area, signed by which way round it is walked. Without that second term a
+    /// washer's two circular bounds both sweep exactly nothing and neither can
+    /// be told from the other.
+    ///
+    /// An *arc* contributes only its chord, which is a hint sometimes short by a
+    /// segment. See [`Walk::outer_bound_first`] for why a hint is all this has
+    /// to be.
+    fn area_swept_by(
+        &self,
         reading: &Reading<'_>,
         face: EntityId,
         bound: EntityId,
-        face_agrees_with_its_surface: bool,
-    ) -> Result<rcad_topo::DraftWire, Refusal> {
+        flat: &Plane,
+    ) -> Result<f64, Refusal> {
+        let (loop_id, walk_it_backwards) = self.loop_of_bound(reading, face, bound)?;
+        let mut oriented = reading.references_at(loop_id, "EDGE_LOOP", 1)?;
+        if walk_it_backwards {
+            oriented.reverse();
+        }
+        let mut corners = Vec::with_capacity(oriented.len());
+        let mut round = 0.0;
+        for use_of_an_edge in oriented {
+            let edge_curve = reading.reference_at(use_of_an_edge, "ORIENTED_EDGE", 3)?;
+            let forwards =
+                reading.flag_at(use_of_an_edge, "ORIENTED_EDGE", 4)? != walk_it_backwards;
+            let ends = [
+                reading.reference_at(edge_curve, "EDGE_CURVE", 1)?,
+                reading.reference_at(edge_curve, "EDGE_CURVE", 2)?,
+            ];
+            corners.push(self.point_of_vertex(reading, ends[usize::from(!forwards)])?);
+            if ends[0] == ends[1] {
+                let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)? == forwards;
+                round +=
+                    self.area_a_closed_curve_sweeps(reading, edge_curve, along_the_curve, flat)?;
+            }
+        }
+        let mut twice_the_area = 2.0 * round;
+        for step in 0..corners.len() {
+            let (from, to) = (
+                flat.plane_coordinates_of(corners[step]),
+                flat.plane_coordinates_of(corners[(step + 1) % corners.len()]),
+            );
+            twice_the_area += from.0 * to.1 - to.0 * from.1;
+        }
+        Ok(twice_the_area)
+    }
+
+    /// The area a whole circle or ellipse encloses, signed by which way round
+    /// the plane's normal it is walked.
+    ///
+    /// Zero for anything else, which leaves the bound's own polygon as the whole
+    /// of the hint.
+    fn area_a_closed_curve_sweeps(
+        &self,
+        reading: &Reading<'_>,
+        edge_curve: EntityId,
+        along_the_curve: bool,
+        flat: &Plane,
+    ) -> Result<f64, Refusal> {
+        let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3)?;
+        let Some(held) = reading.file().instance(curve) else {
+            return Ok(0.0);
+        };
+        let (keyword, area) = match held.parts()[0].keyword() {
+            "CIRCLE" => {
+                let radius = reading.real_at(curve, "CIRCLE", 2)?;
+                ("CIRCLE", core::f64::consts::PI * radius * radius)
+            }
+            "ELLIPSE" => {
+                let across = reading.real_at(curve, "ELLIPSE", 2)?;
+                let along = reading.real_at(curve, "ELLIPSE", 3)?;
+                ("ELLIPSE", core::f64::consts::PI * across * along)
+            }
+            _ => return Ok(0.0),
+        };
+        let position = reading.reference_at(curve, keyword, 1)?;
+        let place = reading.placement_at(curve, position)?;
+        let facing = place.axis.dot(flat.normal());
+        if facing == 0.0 {
+            return Ok(0.0);
+        }
+        Ok(area * facing.signum() * if along_the_curve { 1.0 } else { -1.0 })
+    }
+
+    /// The `EDGE_LOOP` a bound holds, and whether the bound walks it backwards.
+    fn loop_of_bound(
+        &self,
+        reading: &Reading<'_>,
+        face: EntityId,
+        bound: EntityId,
+    ) -> Result<(EntityId, bool), Refusal> {
         let keyword = reading.keyword_of(face, bound, &["FACE_OUTER_BOUND", "FACE_BOUND"])?;
         let loop_id = reading.reference_at(bound, keyword, 1)?;
-        let bound_agrees = reading.flag_at(bound, keyword, 2)?;
-        let walk_it_backwards = bound_agrees != face_agrees_with_its_surface;
-
         let held = reading
             .file()
             .instance(loop_id)
@@ -152,7 +316,17 @@ impl Walk {
                 keyword: held.parts()[0].keyword().to_owned(),
             });
         }
+        Ok((loop_id, !reading.flag_at(bound, keyword, 2)?))
+    }
 
+    /// One `FACE_BOUND` or `FACE_OUTER_BOUND`, as a wire.
+    fn describe_the_bound(
+        &mut self,
+        reading: &Reading<'_>,
+        face: EntityId,
+        bound: EntityId,
+    ) -> Result<rcad_topo::DraftWire, Refusal> {
+        let (loop_id, walk_it_backwards) = self.loop_of_bound(reading, face, bound)?;
         let mut oriented = reading.references_at(loop_id, "EDGE_LOOP", 1)?;
         if walk_it_backwards {
             oriented.reverse();
@@ -439,44 +613,6 @@ impl Walk {
             why: Box::new(why),
         }
     }
-}
-
-/// The bounds of a face with the outer one first, which is the order
-/// [`SolidBuilder::add_face`] takes them in.
-///
-/// A face with one bound has that one as its outer, whatever the file called it
-/// — the schema's `FACE_BOUND` is the supertype and a lone bound is the
-/// boundary. A face with several and no `FACE_OUTER_BOUND` has not said which
-/// is which, and working it out is geometry this reader does not do.
-fn outer_bound_first(
-    reading: &Reading<'_>,
-    face: EntityId,
-    bounds: &[EntityId],
-) -> Result<Vec<EntityId>, Refusal> {
-    if bounds.len() <= 1 {
-        return Ok(bounds.to_vec());
-    }
-    let outer = bounds.iter().position(|bound| {
-        reading
-            .file()
-            .instance(*bound)
-            .is_some_and(|held| held.part("FACE_OUTER_BOUND").is_some())
-    });
-    let Some(outer) = outer else {
-        return Err(Refusal::AFaceThatDoesNotSayWhichBoundIsTheOuterOne {
-            face,
-            bounds: bounds.len(),
-        });
-    };
-    let mut ordered = Vec::with_capacity(bounds.len());
-    ordered.push(bounds[outer]);
-    ordered.extend(
-        bounds
-            .iter()
-            .enumerate()
-            .filter_map(|(position, bound)| (position != outer).then_some(*bound)),
-    );
-    Ok(ordered)
 }
 
 /// The half-space facing `facing` whose flat surface stands on the chord, low

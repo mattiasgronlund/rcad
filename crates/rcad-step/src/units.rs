@@ -18,6 +18,17 @@ use crate::refusal::Refusal;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Declared {
     pub(crate) unit: Unit,
+    /// How many radians one of the file's own plane-angle units is, or `None`
+    /// where the file declares one this reader cannot read.
+    ///
+    /// **The file's own number, not this reader's.** A `CONVERSION_BASED_UNIT`
+    /// called `'DEGREE'` writes the factor out —
+    /// `PLANE_ANGLE_MEASURE(0.0174532925199433)` — and using that rather than a
+    /// `PI / 180.0` computed here keeps the reader from disagreeing with the
+    /// file about what a degree is. One `CONICAL_SURFACE` attribute in the whole
+    /// of this reader needs it, and `None` is only a refusal if a file holds
+    /// one.
+    pub(crate) radians_per_angle_unit: Option<f64>,
     pub(crate) uncertainty: Option<f64>,
     pub(crate) how_many_uncertainties: usize,
 }
@@ -26,6 +37,7 @@ pub(crate) struct Declared {
 /// geometric contexts.
 pub(crate) fn what_the_file_declared(reading: &Reading<'_>) -> Result<Declared, Refusal> {
     let mut unit: Option<Unit> = None;
+    let mut radians_per_angle_unit: Option<f64> = None;
     let mut uncertainty: Option<f64> = None;
     let mut how_many_uncertainties = 0;
 
@@ -34,6 +46,7 @@ pub(crate) fn what_the_file_declared(reading: &Reading<'_>) -> Result<Declared, 
             let named = reading.references_at(context.id(), "GLOBAL_UNIT_ASSIGNED_CONTEXT", 0)?;
             for one in named {
                 let Some(found) = length_unit_at(reading, one)? else {
+                    radians_per_angle_unit = radians_per_angle_unit.or(how_big_an_angle_unit_is(reading, one));
                     continue;
                 };
                 match unit {
@@ -66,6 +79,7 @@ pub(crate) fn what_the_file_declared(reading: &Reading<'_>) -> Result<Declared, 
 
     Ok(Declared {
         unit: unit.ok_or(Refusal::TheFileDeclaresNoLengthUnit)?,
+        radians_per_angle_unit,
         uncertainty,
         how_many_uncertainties,
     })
@@ -162,6 +176,32 @@ fn converted_length_unit_at(reading: &Reading<'_>, id: EntityId) -> Result<Unit,
             id,
             described: format!("{factor} {}", base.symbol()),
         })
+}
+
+/// How many radians one of this unit is, when it is a plane angle at all.
+///
+/// Radians are one, and a `CONVERSION_BASED_UNIT` from radians is whatever
+/// number the file wrote. Anything else — an angle unit converted from
+/// something that is not a radian, or a measure this reader cannot read —
+/// is `None`, and `None` only refuses a file that has a cone in it.
+fn how_big_an_angle_unit_is(reading: &Reading<'_>, id: EntityId) -> Option<f64> {
+    let held = reading.file().instance(id)?;
+    held.part("PLANE_ANGLE_UNIT")?;
+    if held.part("SI_UNIT").is_some() {
+        let name = reading
+            .record(id, "SI_UNIT")
+            .ok()?
+            .attribute(1)
+            .and_then(crate::Value::as_enumeration)?;
+        return (name == "RADIAN").then_some(1.0);
+    }
+    let measure = reading.reference_at(id, "CONVERSION_BASED_UNIT", 1).ok()?;
+    let says = reading
+        .keyword_of(id, measure, &["PLANE_ANGLE_MEASURE_WITH_UNIT", "MEASURE_WITH_UNIT"])
+        .ok()?;
+    let factor = reading.real_at(measure, says, 0).ok()?;
+    let of = reading.reference_at(measure, says, 1).ok()?;
+    (how_big_an_angle_unit_is(reading, of)? == 1.0).then_some(factor)
 }
 
 /// The value of an `UNCERTAINTY_MEASURE_WITH_UNIT`, when it is a length.

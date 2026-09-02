@@ -65,6 +65,7 @@ impl Import {
     ) -> Result<Self, Refusal> {
         let reading = Reading::of(file);
         let declared = what_the_file_declared(&reading)?;
+        reading.angles_are_measured_in(declared.radians_per_angle_unit);
         nothing_is_placed_somewhere_this_reader_cannot_move_it(&reading)?;
 
         let biggest_coordinate = biggest_coordinate_in(file);
@@ -275,7 +276,21 @@ fn nothing_is_placed_somewhere_this_reader_cannot_move_it(
         let source = reading.reference_at(mapped.id(), "MAPPED_ITEM", 1)?;
         let target = reading.reference_at(mapped.id(), "MAPPED_ITEM", 2)?;
         let origin = reading.reference_at(source, "REPRESENTATION_MAP", 0)?;
-        if !(is_the_identity(reading, origin)? && is_the_identity(reading, target)?) {
+        // A mapped item both of whose ends are placements is placing a shape.
+        // One whose ends are not is placing a **view**: NIST's files map a
+        // shape representation from a `CAMERA_MODEL_D3`, which is where a
+        // picture is looked at from, and the solids that picture shows are the
+        // same ones already read at their own coordinates. Nothing physical is
+        // lost by not following it, and following it would put the part in a
+        // second place it is not.
+        let places_a_shape = [origin, target].into_iter().all(|end| {
+            reading
+                .file()
+                .instance(end)
+                .is_some_and(|held| held.part("AXIS2_PLACEMENT_3D").is_some())
+        });
+        if places_a_shape && !(is_the_identity(reading, origin)? && is_the_identity(reading, target)?)
+        {
             return Err(Refusal::APlacementThisReaderCannotApply {
                 id: mapped.id(),
                 keyword: "MAPPED_ITEM",

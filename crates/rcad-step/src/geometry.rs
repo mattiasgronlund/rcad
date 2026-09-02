@@ -22,6 +22,7 @@ use crate::refusal::Refusal;
 #[derive(Debug)]
 pub(crate) struct Reading<'a> {
     file: &'a StepFile,
+    radians_per_angle_unit: Cell<Option<f64>>,
     integers_read_as_reals: Cell<usize>,
 }
 
@@ -29,8 +30,16 @@ impl<'a> Reading<'a> {
     pub(crate) fn of(file: &'a StepFile) -> Self {
         Self {
             file,
+            radians_per_angle_unit: Cell::new(None),
             integers_read_as_reals: Cell::new(0),
         }
+    }
+
+    /// How many radians one of the file's plane-angle units is, once
+    /// [`what_the_file_declared`](crate::units::what_the_file_declared) has
+    /// read it. A `CONICAL_SURFACE` is the only thing that asks.
+    pub(crate) fn angles_are_measured_in(&self, radians: Option<f64>) {
+        self.radians_per_angle_unit.set(radians);
     }
 
     pub(crate) fn file(&self) -> &'a StepFile {
@@ -78,8 +87,15 @@ impl<'a> Reading<'a> {
                 let position = self.reference_at(id, "CONICAL_SURFACE", 1)?;
                 let place = self.placement_at(id, position)?;
                 let radius = self.real_at(id, "CONICAL_SURFACE", 2)?;
-                let half_angle = self.real_at(id, "CONICAL_SURFACE", 3)?;
-                Ok(Surface::Cone(cone_from(id, &place, radius, half_angle)?))
+                let written = self.real_at(id, "CONICAL_SURFACE", 3)?;
+                let radians = self.radians_per_angle_unit.get().ok_or_else(|| {
+                    Refusal::ALengthUnitThisKernelDoesNotHave {
+                        id,
+                        described: "a cone whose semi-angle is in a unit this reader cannot read"
+                            .to_owned(),
+                    }
+                })?;
+                Ok(Surface::Cone(cone_from(id, &place, radius, written * radians)?))
             }
             "TOROIDAL_SURFACE" => {
                 let position = self.reference_at(id, "TOROIDAL_SURFACE", 1)?;
@@ -402,6 +418,10 @@ pub(crate) struct Placement {
 }
 
 /// A `CONICAL_SURFACE`'s cone, whose apex the file does not write down.
+///
+/// The half-angle arrives in radians, which for a file that writes degrees is
+/// the file's own conversion factor times the number it wrote — one
+/// multiplication, and it lands in the same `tan` below that rounds anyway.
 ///
 /// STEP gives the radius at the placement's own origin and the half-angle;
 /// [`Cone`] is the apex and the tangent of that angle. So the apex is
