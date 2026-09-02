@@ -424,6 +424,34 @@ impl Writing {
                 }
                 Ok(self.line(start, end - start))
             }
+            (Surface::Plane(_), Surface::Plane(_))
+            | (Surface::Plane(_), Surface::Cylinder(_))
+            | (Surface::Cylinder(_), Surface::Plane(_))
+            | (Surface::Cylinder(_), Surface::Cylinder(_))
+            | (Surface::Plane(_), Surface::Sphere(_))
+            | (Surface::Sphere(_), Surface::Plane(_))
+            | (Surface::Plane(_), Surface::Cone(_))
+            | (Surface::Cone(_), Surface::Plane(_))
+            | (Surface::Plane(_), Surface::Torus(_))
+            | (Surface::Torus(_), Surface::Plane(_))
+            | (Surface::Cylinder(_), Surface::Sphere(_))
+            | (Surface::Sphere(_), Surface::Cylinder(_))
+            | (Surface::Cylinder(_), Surface::Cone(_))
+            | (Surface::Cone(_), Surface::Cylinder(_))
+            | (Surface::Cylinder(_), Surface::Torus(_))
+            | (Surface::Torus(_), Surface::Cylinder(_))
+            | (Surface::Sphere(_), Surface::Sphere(_))
+            | (Surface::Sphere(_), Surface::Cone(_))
+            | (Surface::Cone(_), Surface::Sphere(_))
+            | (Surface::Sphere(_), Surface::Torus(_))
+            | (Surface::Torus(_), Surface::Sphere(_))
+            | (Surface::Cone(_), Surface::Cone(_))
+            | (Surface::Cone(_), Surface::Torus(_))
+            | (Surface::Torus(_), Surface::Cone(_))
+            | (Surface::Torus(_), Surface::Torus(_)) => Err(refuse()),
+            // `Surface` grows every milestone (docs/decisions.md §40); this
+            // arm is only ever reached by the variant that has not landed
+            // yet, since every one that exists today has its own line above.
             _ => Err(refuse()),
         }
     }
@@ -765,6 +793,63 @@ mod plane_round_trip_tests {
             single_coordinate_rounds > trials / 10,
             "picking a different point should not make the rounding disappear: \
              {single_coordinate_rounds}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod cone_round_trip_tests {
+    use rcad_geom::{Axis, Cone, Point, Vector};
+
+    /// The demonstration behind `Writing::surface`'s doc comment: a cone's
+    /// slope is not written down — STEP has no field for a tangent, only a
+    /// half-angle — so every cone this writer emits goes out through `atan`
+    /// (here, and in `Writing::surface`) and comes back through `tan` (in
+    /// `cone_from`, and here through the public
+    /// [`Cone::from_half_angle`](rcad_geom::Cone::from_half_angle) that does
+    /// the same conversion), and that round trip is not exact.
+    #[test]
+    fn a_cone_is_the_one_surface_whose_round_trip_goes_through_a_library_function() {
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next_u64 = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut next_f64 = |lo: f64, hi: f64| {
+            let unit = (next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
+            lo + unit * (hi - lo)
+        };
+
+        let axis = Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).unwrap();
+        let trials = 5000;
+        let mut rounds = 0;
+        let mut worst_ulps: f64 = 0.0;
+        for _ in 0..trials {
+            let slope = next_f64(1e-3, 1e3);
+            let cone = Cone::new(axis, slope).unwrap();
+            let half_angle = cone.slope().atan();
+            let round_tripped = Cone::from_half_angle(axis, half_angle).unwrap();
+            if round_tripped.slope() != slope {
+                rounds += 1;
+                let slip = (round_tripped.slope() - slope).abs();
+                worst_ulps = worst_ulps.max(slip / slope.abs());
+            }
+        }
+        println!(
+            "{trials} random slopes: atan-then-tan rounds {rounds} times, \
+             worst relative slip {worst_ulps}"
+        );
+        assert!(
+            rounds > trials / 10,
+            "a cone's slope should round often enough that the cost in the doc \
+             comment is real and not a curiosity: {rounds}"
+        );
+        assert!(
+            worst_ulps < 1e-9,
+            "the round trip should still be small, not something a caller of a \
+             written-and-reread file would notice: {worst_ulps}"
         );
     }
 }
