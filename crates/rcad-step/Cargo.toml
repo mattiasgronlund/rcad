@@ -1,0 +1,18 @@
+[package]
+name = "rcad-step"
+description = "Reads ISO 10303-21 (STEP Part 21) text into a resolved entity graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+step-io = "0.2.4"
+
+[lints]
+workspace = true
