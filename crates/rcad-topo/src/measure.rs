@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use rcad_geom::{Deflection, Point, Surface, Vector};
+use rcad_geom::{Cone, Deflection, Point, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::mesh::{Mesh, MeshTriangle};
-use crate::view::FaceView;
+use crate::view::{FaceView, WireView};
 use crate::{Error, FaceKey, Result, SolidView};
 
 /// How much space a solid takes up, how much skin it has, where it balances,
@@ -674,11 +674,45 @@ fn radius_of_each_face(solid: SolidView<'_>) -> HashMap<FaceKey, Option<f64>> {
                 Surface::Plane(_) => None,
                 Surface::Sphere(ball) => Some(ball.radius()),
                 Surface::Cylinder(pipe) => Some(pipe.radius()),
+                Surface::Cone(cone) => Some(how_tightly_a_cone_bends_over(&cone, face)),
                 other => panic!("this crate cannot say how far {other:?} bends"),
             };
             (face.key(), radius)
         })
         .collect()
+}
+
+/// The smallest radius of normal curvature this cone face bends by anywhere on
+/// itself, which is what the two bounds above have to be charged against.
+///
+/// **The offset-surface argument is what needs the smallest and not the
+/// largest.** [`how_much_more_surface_there_can_be`] projects the mesh onto the
+/// surface `deviation` inside the material and reads the area back out; for a
+/// cone that inner surface is *the same cone shifted along its own axis*, so the
+/// factor is the pipe's `R/(R − d)` with `R = slope·|v|·√(1 + slope²)` the radius
+/// of normal curvature — and the sphere's `(R/(R − d))²` bounds that, exactly as
+/// it bounds a pipe's. `R` varies over the face, so the smallest of it is the
+/// one that bounds the lot.
+///
+/// **A face that reaches its apex gets zero, and the bounds then come back
+/// infinite.** That is honest and it is a **gap**: within `deviation` of the
+/// apex there is no inner offset cone at all — its own apex has moved
+/// `deviation·√(1 + slope²)/slope` up the axis — so no argument of this shape
+/// covers the tip, and the number this hands back must not pretend otherwise.
+/// What closes it is splitting the face at `v = 2·deviation·√(1 + slope²)/slope`
+/// and charging the tip its **whole** size rather than a share of it: the cone
+/// above that split has `R ≥ 2·deviation`, and the tip below it holds at most
+/// `4π·deviation²(1 + slope²)^{3/2}/slope` of area and
+/// `(8π/3)·deviation³(1 + slope²)^{3/2}/slope` of volume, both of which are
+/// bounded outright. That wants a bound taking two numbers rather than one, and
+/// its consumer is a pointed cone somebody wants a measured volume for.
+fn how_tightly_a_cone_bends_over(cone: &Cone, face: FaceView<'_>) -> f64 {
+    let along = cone.axis().direction();
+    face.wires()
+        .flat_map(WireView::points)
+        .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
+        .fold(f64::INFINITY, f64::min)
+        * cone.slope().hypot(1.0)
 }
 
 /// Where one mesh triangle's three corners are.

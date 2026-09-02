@@ -42,6 +42,23 @@ pub enum Error {
         radius: f64,
     },
 
+    /// A cone was asked for with a spread that is not a spread.
+    #[error("a cone's slope must be greater than zero, but it was {slope}")]
+    SlopeNotPositive {
+        /// What the caller asked for.
+        slope: f64,
+    },
+
+    /// A cone was named by a half-angle that is not one.
+    ///
+    /// At zero a cone is a line and at a right angle it is a plane, so the open
+    /// range between them is the whole of what names a cone.
+    #[error("a cone's half-angle must be between zero and a right angle, but it was {half_angle}")]
+    HalfAngleIsNotACone {
+        /// What the caller asked for.
+        half_angle: f64,
+    },
+
     /// A mesh was asked to stray a distance that is not a distance.
     #[error("a deflection must be greater than zero, but it was {length}")]
     DeflectionNotPositive {
@@ -279,6 +296,99 @@ pub enum Error {
          written down in f64 to tell them apart"
     )]
     CannotNameWhichPieceOfACrossingThisIs,
+
+    /// A plane cuts a cone in a parabola.
+    ///
+    /// A **gap**, and the gap is in the vocabulary rather than in the
+    /// arithmetic. Which of the seven shapes a plane cuts a cone in is settled
+    /// exactly, here, by one sign — so nothing was undecided. What
+    /// [`EdgeRun`](crate::EdgeRun) has no arm for is **one curve that runs on
+    /// for ever and bends**: `Straight` says the two ends are the whole of it,
+    /// `RightRoundWhereItsFacesCross` says the curve closes, and
+    /// `PartOfWhereItCrosses` says which of several pieces this is. A parabola
+    /// is one piece, unbounded, and not straight.
+    ///
+    /// The family of fixes, so that this is a demonstration and not a paragraph:
+    /// (a) a fourth `EdgeRun` variant for an endless curve, which every match on
+    /// that enum then grows an arm for; (b) naming it as
+    /// `PartOfWhereItCrosses` picked by a half-space that holds the whole of it,
+    /// which is expressible today — a parabola lies wholly in one nappe, so the
+    /// half-space through the apex square to the axis holds it — but which
+    /// `walk` cannot then draw, because [`Conic`] is a centre and two semi-axes
+    /// and a parabola has neither; (c) a bounded stand-in cut at the two places
+    /// the face's own wire reaches, which is not this function's to know because
+    /// [`intersect`](crate::intersect) is handed two surfaces and no topology.
+    /// (b) plus a parabolic arm in the walker is the shortest, and its consumer
+    /// is a cone fused with a plane parallel to one of its rulings.
+    ///
+    /// [`Conic`]: crate::Surface
+    #[error("a plane cuts this cone in a parabola, which is one endless curve that bends")]
+    ACrossingThatIsAParabola,
+
+    /// A plane cuts a cone in a hyperbola.
+    ///
+    /// A **gap**, for the reason [`Error::ACrossingThatIsAParabola`] gives, and
+    /// twice over: a hyperbola is two endless curves that bend. The one extra
+    /// thing this case has is that the two branches *are* tellable apart with
+    /// what is already here — each lies wholly in one nappe of the cone, so the
+    /// half-space through the apex square to the axis holds one and rules out
+    /// the other. What is missing is the same missing thing: nothing can draw
+    /// an endless bending curve once it has been named.
+    #[error("a plane cuts this cone in a hyperbola, which is two endless curves that bend")]
+    ACrossingThatIsAHyperbola,
+
+    /// A plane through a cone's apex cuts it in two lines that meet there.
+    ///
+    /// A **limit**, and the same one
+    /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] names. Two
+    /// straight lines crossing at a point are one curve that runs through
+    /// itself: no half-space picks one of them, because both pass through the
+    /// apex and a half-space that holds one holds half of the other. Splitting
+    /// them at the apex would be four half-lines and would need a *point* to
+    /// split at, which is topology's and not a surface pair's (§24.3).
+    #[error(
+        "a plane through this cone's apex cuts two lines that meet there, which is one curve \
+         that runs through itself"
+    )]
+    TwoLinesThroughAConesApexAreOneCurveThroughItself,
+
+    /// A plane touches a cone along one whole ruling.
+    ///
+    /// A **gap**. The crossing is one endless straight line and
+    /// [`EdgeRun::Straight`](crate::EdgeRun::Straight) says exactly that — a
+    /// plane along a pipe's axis and tangent to it is named that way already.
+    /// What is missing is one step further on: `rcad-topo`'s arrangement has to
+    /// tell this pair from the pair that crosses in an ellipse *before* it asks
+    /// for a crossing, and the only thing that tells them apart is the sign of
+    /// `(n·w)² − slope²·|n × w|²`, which is a sign question with a policy and a
+    /// log and the arrangement's dispatch has neither. A pipe gets away with the
+    /// same dispatch because its version, `n·w == 0`, is one exact `f64`
+    /// comparison.
+    ///
+    /// The fix is to hand the arrangement the crossing it already asked for
+    /// instead of re-deriving the pair's shape from the surfaces, which is one
+    /// signature change in `how_a_crossing_runs`. Its consumer is a cone with a
+    /// plane resting against one of its sides.
+    #[error("this plane touches the cone along one whole ruling")]
+    APlaneTouchingAConeAlongOneOfItsRulings,
+
+    /// A cone against a ball, a pipe, or another cone.
+    ///
+    /// A **gap** and the same one two leaning pipes have (§29): the crossing is
+    /// a degree-four space curve, naming which of its shapes it takes is an
+    /// eighth-degree discriminant, and drawing it needs the marcher. None of
+    /// that is built for a cone.
+    ///
+    /// The family of fixes, shortest first. (a) The **coaxial** cases are
+    /// planar and are one sign question each: a ball centred on a cone's axis, a
+    /// pipe sharing it, and a second cone sharing it all cross in circles square
+    /// to that axis, exactly as `a_ball_centred_on_a_pipes_axis` already does
+    /// for its own row. That covers a countersink in a round bar, which is the
+    /// case a real file actually holds. (b) The general case wants the marcher
+    /// taught a cone and an eighth-degree discriminant derived, which is §29's
+    /// whole second stage over again.
+    #[error("a cone crossing another curved surface is a degree-four space curve")]
+    ACrossingBetweenAConeAndAnotherCurvedSurface,
 
     /// A point cannot be worked out as close to a crossing as was asked for.
     ///

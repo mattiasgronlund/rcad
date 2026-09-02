@@ -41,7 +41,7 @@
 //! straddled. Under a tolerant policy the same query resolves instead, and the
 //! log picks up a record of what was accepted to get there.
 
-use rcad_geom::{Cylinder, EdgeRun, Point, Sphere, Surface};
+use rcad_geom::{Cone, Cylinder, EdgeRun, Point, Sphere, Surface};
 use rcad_predicates::expansion::{product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
@@ -622,6 +622,7 @@ fn where_the_ray_meets(
     let (a, b, k) = match surface {
         Surface::Sphere(ball) => how_a_ray_meets_a_ball(ball, from, along),
         Surface::Cylinder(pipe) => how_a_ray_meets_a_pipe(pipe, from, along),
+        Surface::Cone(cone) => how_a_ray_meets_a_cone(cone, from, along),
         other => panic!("this crate cannot fire a ray at {other:?}"),
     };
 
@@ -693,6 +694,38 @@ fn how_a_ray_meets_a_pipe(
     )
 }
 
+/// `a`, `b` and `k` of the quadratic a ray puts a cone to.
+///
+/// The pipe's three with the axial term put back: `‖x × w‖² − slope²(x·w)²`
+/// against the pipe's `‖x × w‖² − r²`, which is the same cross product read the
+/// same way, so the surface a root is worked out from is the one
+/// [`side_of_surface`] is later asked about.
+///
+/// **`a` can be below zero here and cannot for a ball or a pipe**, because
+/// `slope²(D·w)²` can beat `‖D × w‖²` — every ray pointing further into the cone
+/// than its own rulings do. The quadratic is solved the same way either way; the
+/// caller's comment says what changes.
+fn how_a_ray_meets_a_cone(
+    cone: &Cone,
+    from: [Interval; 3],
+    along: [Interval; 3],
+) -> (Interval, Interval, Interval) {
+    let direction = exactly(cone.axis().direction().components());
+    let out = negated(gap_enclosing(from, cone.apex()));
+    let across = cross_enclosing(along, direction);
+    let sideways = cross_enclosing(out, direction);
+    let slope = Interval::exactly(cone.slope());
+    let spread = slope * slope;
+    let up_the_ray = dot_enclosing(along, direction);
+    let up_the_gap = dot_enclosing(out, direction);
+    (
+        dot_enclosing(across, across) - spread * up_the_ray * up_the_ray,
+        Interval::exactly(2.0)
+            * (dot_enclosing(across, sideways) - spread * up_the_ray * up_the_gap),
+        dot_enclosing(sideways, sideways) - spread * up_the_gap * up_the_gap,
+    )
+}
+
 /// What a root at `t` along the ray comes to.
 ///
 /// A root at exactly zero is where the ray *starts*, which is the point sitting
@@ -735,6 +768,17 @@ fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
         // ray that crosses one curved face and one flat one, which is a ray
         // through a bar's wall and out of its cap (§36.13).
         Surface::Sphere(ball) => negated(gap_enclosing(at, ball.centre())),
+        // The gradient of `|x × w|² − slope²(x·w)²`, halved, read out of the
+        // middle rather than towards it for the reason the pipe's arm gives.
+        Surface::Cone(cone) => {
+            let direction = exactly(cone.axis().direction().components());
+            let out = negated(gap_enclosing(at, cone.apex()));
+            let up = dot_enclosing(out, direction);
+            let squared = dot_enclosing(direction, direction);
+            let slope = Interval::exactly(cone.slope());
+            let steepness = Interval::exactly(1.0) + slope * slope;
+            core::array::from_fn(|axis| squared * out[axis] - steepness * up * direction[axis])
+        }
         Surface::Cylinder(pipe) => {
             let direction = exactly(pipe.axis().direction().components());
             let out = negated(gap_enclosing(at, pipe.axis().origin()));

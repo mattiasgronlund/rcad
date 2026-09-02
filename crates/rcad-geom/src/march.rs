@@ -37,7 +37,7 @@ use crate::enclosure::{
     cross_enclosing, dot_enclosing, exactly, gap_enclosing, quotient_or_everything, root_enclosing,
     squared_length_enclosing,
 };
-use crate::{Cylinder, Error, Plane, Point, Result, Sphere, Surface, Vector};
+use crate::{Cone, Cylinder, Error, Plane, Point, Result, Sphere, Surface, Vector};
 
 /// How much of the deflection budget the sagitta of one straight piece may take
 /// before the step is halved.
@@ -323,6 +323,29 @@ fn how_far_off_and_which_way(surface: &Surface, at: Point) -> (f64, Vector) {
                 sideways * reach.recip(),
             )
         }
+        // Nothing in this crate marches a crossing with a cone on it — every
+        // pair that reaches the marcher is a quartic, and
+        // `Error::ACrossingBetweenAConeAndAnotherCurvedSurface` refuses those
+        // before a run exists to follow. The arm is here because a `match` on a
+        // growing enum with a wildcard in it is where the next variant goes to
+        // be ignored (§40), and it does the arithmetic rather than panicking so
+        // that the day a cone reaches the marcher the answer is right rather
+        // than absent. The distance is `(‖x_perp‖ - slope*x_along) / hypot(1, slope)`,
+        // which is the honest distance to the nappe the point stands over.
+        Surface::Cone(cone) => {
+            let along = cone.axis().direction();
+            let out = at - cone.apex();
+            let up = out.dot(along) / along.length_squared();
+            let sideways = out - along * up;
+            let reach = sideways.length();
+            let steepness = cone.slope().hypot(1.0);
+            let outwards = sideways * reach.recip();
+            (
+                (reach - cone.slope() * up.abs()) / steepness,
+                (outwards - along * (cone.slope() * up.signum() / along.length()))
+                    * steepness.recip(),
+            )
+        }
     }
 }
 
@@ -333,6 +356,7 @@ fn how_far_off_enclosing(surface: &Surface, at: Point) -> (Interval, [Interval; 
         Surface::Plane(flat) => how_far_off_a_plane_enclosing(flat, at),
         Surface::Sphere(ball) => how_far_off_a_ball_enclosing(ball, at),
         Surface::Cylinder(pipe) => how_far_off_a_pipe_enclosing(pipe, at),
+        Surface::Cone(cone) => how_far_off_a_cone_enclosing(cone, at),
     }
 }
 
@@ -378,6 +402,38 @@ fn how_far_off_a_pipe_enclosing(pipe: &Cylinder, at: Point) -> (Interval, [Inter
         furthest_from_zero(off),
         sideways.map(|part| quotient_or_everything(part, reach)),
     )
+}
+
+/// `| ‖(p − apex)_perp‖ − slope·|(p − apex)_along| | / √(1 + slope²)`, and the
+/// unit normal there.
+///
+/// Unreachable from anything this crate marches, for the reason
+/// [`how_far_off_and_which_way`]'s cone arm gives; written out rather than
+/// stubbed for the same reason.
+fn how_far_off_a_cone_enclosing(cone: &Cone, at: Point) -> (Interval, [Interval; 3]) {
+    let along = exactly(cone.axis().direction().components());
+    let squared_direction = squared_length_enclosing(along);
+    let out = gap_enclosing(cone.apex().coordinates(), at.coordinates());
+    let up = quotient_or_everything(dot_enclosing(out, along), squared_direction);
+    let sideways: [Interval; 3] = core::array::from_fn(|axis| out[axis] - along[axis] * up);
+    let reach = root_enclosing(squared_length_enclosing(sideways));
+    let slope = Interval::exactly(cone.slope());
+    let steepness = root_enclosing(Interval::exactly(1.0) + slope * slope);
+    let leaning = if up.hi() < 0.0 {
+        -Interval::exactly(1.0)
+    } else {
+        Interval::exactly(1.0)
+    };
+    let off = quotient_or_everything(reach - slope * up * leaning, steepness);
+    let outwards: [Interval; 3] = core::array::from_fn(|axis| {
+        let across = quotient_or_everything(sideways[axis], reach);
+        let down = quotient_or_everything(
+            slope * leaning * along[axis],
+            root_enclosing(squared_direction),
+        );
+        quotient_or_everything(across - down, steepness)
+    });
+    (furthest_from_zero(off), outwards)
 }
 
 /// The magnitude of an enclosure, as an enclosure of no width: how far the

@@ -41,7 +41,7 @@ use smallvec::{SmallVec, smallvec};
 use crate::enclosure::{quotient_or_everything, root_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{Question, ask, intersect, squared_length_of_a_cross_product};
-use crate::{Cylinder, Error, Plane, PlaneAgreement, Result, Sphere, Surface, SurfaceMeet};
+use crate::{Cone, Cylinder, Error, Plane, PlaneAgreement, Result, Sphere, Surface, SurfaceMeet};
 
 /// The name the three-surface meet goes by in provenance records.
 pub const WHERE_THREE_SURFACES_MEET: &str = "where three surfaces meet";
@@ -132,6 +132,7 @@ fn the_places_these_three_sit(
             Surface::Plane(flat) => flat.origin().coordinates(),
             Surface::Sphere(ball) => ball.centre().coordinates(),
             Surface::Cylinder(pipe) => pipe.axis().origin().coordinates(),
+            Surface::Cone(cone) => cone.apex().coordinates(),
         })
     })
 }
@@ -379,6 +380,7 @@ fn how_a_quadric_cuts_the_line(line: &WhereTwoPlanesCross, quadric: &Surface) ->
     match quadric {
         Surface::Sphere(ball) => how_a_ball_cuts_the_line(line, ball),
         Surface::Cylinder(pipe) => how_a_pipe_cuts_the_line(line, pipe),
+        Surface::Cone(cone) => how_a_cone_cuts_the_line(line, cone),
         Surface::Plane(flat) => panic!("{flat:?} is flat, so three planes is the question"),
     }
 }
@@ -419,6 +421,34 @@ fn how_a_pipe_cuts_the_line(line: &WhereTwoPlanesCross, pipe: &Cylinder) -> Opti
     })
 }
 
+/// `‖(V + s·D) × w‖² − slope²·((V + s·D)·w)²` for the cone's stored axis
+/// direction `w`.
+///
+/// **No `m²` correction, and that is the cone being easier than the pipe rather
+/// than the correction being forgotten.** A pipe's constant term compares an
+/// area against `r²`, so writing the line with its divisor left in makes the
+/// radius carry `m²` — see [`squared_radius_of`]. Both halves here are degree
+/// two in `V + s·D` and the slope is a pure ratio, so the divisor factors out of
+/// the whole expression and every sign read off it is untouched.
+fn how_a_cone_cuts_the_line(line: &WhereTwoPlanesCross, cone: &Cone) -> Option<Quadratic> {
+    let along = cone.axis().direction().components();
+    let up = Exact::of_each(along);
+    let reach = the_line_offset_to(line, cone.apex().coordinates())?;
+    let sideways = Exact::cross_of(&line.direction, along)?;
+    let across = Exact::cross_of(&reach, along)?;
+    let slope_squared = Exact::product_of(cone.slope(), cone.slope())?;
+    let direction_up = Exact::dot_of_two_exact(&line.direction, &up)?;
+    let reach_up = Exact::dot_of_two_exact(&reach, &up)?;
+    Some(Quadratic {
+        squared: Exact::squared_length_of(&sideways)?
+            .minus(&slope_squared.times(&direction_up.times(&direction_up)?)?),
+        half_linear: Exact::dot_of_two_exact(&sideways, &across)?
+            .minus(&slope_squared.times(&direction_up.times(&reach_up)?)?),
+        constant: Exact::squared_length_of(&across)?
+            .minus(&slope_squared.times(&reach_up.times(&reach_up)?)?),
+    })
+}
+
 /// The line's own point, moved so `place` is the origin, and still scaled by the
 /// line's divisor.
 fn the_line_offset_to(line: &WhereTwoPlanesCross, place: [f64; 3]) -> Option<[Exact; 3]> {
@@ -447,6 +477,15 @@ fn where_a_line_meets_a_quadric(
     log: &mut ProvenanceLog,
 ) -> Result<MeetOfThree> {
     // `A` is dimensionless — see the note in `where_three_planes_meet`.
+    //
+    // **`A` below zero is a real answer and a cone is what brings it.** A ball's
+    // is `D·D` and a pipe's is `‖D × w‖²`, and a sum of squares is never
+    // negative — which is what the arm here used to say. A cone's is
+    // `‖D × w‖² − slope²(D·w)²`, negative for every line pointing further into
+    // the cone than its own rulings do, which is most of the lines through it.
+    // The roots are read off the same three numbers either way, and
+    // [`the_two_places_along_it`] never divides by `A` except through Forsythe's
+    // pairing, so nothing below cares about the sign.
     match ask(
         &the_sign_of(&quadratic.squared),
         Measures::Length,
@@ -454,23 +493,13 @@ fn where_a_line_meets_a_quadric(
         policy,
         log,
     )? {
-        Decision::Pos => (),
-        // The line runs along the pipe's axis, so it lies on the wall or misses
-        // it and there is no corner either way.
+        Decision::Pos | Decision::Neg => (),
         Decision::Zero => {
-            return match ask(
-                &the_sign_of(&quadratic.constant),
-                Measures::Area,
-                at,
-                policy,
-                log,
-            )? {
-                Decision::Zero => Ok(MeetOfThree::MoreThanAPoint),
-                Decision::Pos | Decision::Neg => Ok(MeetOfThree::Nowhere),
-                other => unreachable!("a sign question answers with a sign: {other:?}"),
-            };
+            return where_a_line_meets_a_quadric_it_runs_alongside(
+                line, quadratic, at, policy, log,
+            );
         }
-        other => unreachable!("a sum of squares is never below zero: {other:?}"),
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
 
     let squared = quadratic.squared.enclosure();
@@ -494,6 +523,58 @@ fn where_a_line_meets_a_quadric(
                 the_point_at(line, upper),
             ]))
         }
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+}
+
+/// Where the line meets the quadric when the squared term is exactly zero, so
+/// the equation is `2B·s + C = 0` and not a quadratic at all.
+///
+/// **A pipe and a cone reach this differently, and the difference is one root.**
+/// A pipe's `A` is `‖D × w‖²`, so `A = 0` means the line runs along the axis and
+/// then `B = (D × w)·(V × w)` is exactly zero too: the line lies on the wall or
+/// misses it, and there is no single point either way. That was the whole of
+/// this before there were cones. A cone's `A = 0` means the line runs parallel
+/// to one of its rulings, and such a line crosses the cone at exactly **one**
+/// point, with `B` nowhere near zero.
+///
+/// So the linear term is asked about first. For a ball and a pipe the answer is
+/// always [`Decision::Zero`] and always certified — `B` is a dot product with an
+/// exactly-zero vector — so this asks one more question than it used to and
+/// gives every old answer back unchanged.
+fn where_a_line_meets_a_quadric_it_runs_alongside(
+    line: &WhereTwoPlanesCross,
+    quadratic: &Quadratic,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    match ask(
+        &the_sign_of(&quadratic.half_linear),
+        Measures::Length,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Pos | Decision::Neg => {
+            let twice_the_linear = Interval::exactly(2.0) * quadratic.half_linear.enclosure();
+            return Ok(MeetOfThree::At(smallvec![the_point_at(
+                line,
+                quotient_or_everything(-quadratic.constant.enclosure(), twice_the_linear),
+            )]));
+        }
+        Decision::Zero => (),
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+    match ask(
+        &the_sign_of(&quadratic.constant),
+        Measures::Area,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Zero => Ok(MeetOfThree::MoreThanAPoint),
+        Decision::Pos | Decision::Neg => Ok(MeetOfThree::Nowhere),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
 }

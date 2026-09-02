@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Deflection, DynamicRange, EdgeRun, Isometry, Orientation, Plane, Point, SIDE_OF_CYLINDER,
-    SIDE_OF_PLANE, SIDE_OF_SPHERE, Surface, Vector,
+    Deflection, DynamicRange, EdgeRun, Isometry, Orientation, Plane, Point, SIDE_OF_CONE,
+    SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, Surface, Vector,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -296,9 +296,10 @@ impl Model {
             }
 
             let view = FaceView::new(self, slot, Isometry::identity(), Orientation::Forward);
-            match &face.surface {
-                Surface::Plane(plane) => check_flat_face(view, plane, allowed_wobble)?,
-                curved => check_curved_face(view, curved)?,
+            if let Surface::Plane(plane) = &face.surface {
+                check_flat_face(view, plane, allowed_wobble)?;
+            } else {
+                check_curved_face(view, &face.surface)?;
             }
 
             match used.get(slot).copied().unwrap_or(0) {
@@ -562,15 +563,33 @@ impl Model {
             .map(EdgeView::distance_between_its_ends)
             .fold(f64::INFINITY, f64::min);
         let smallest_radius = self
-            .data()
-            .faces
-            .values()
-            .filter_map(|face| match face.surface {
+            .solids()
+            .flat_map(|solid| solid.faces())
+            .filter_map(|face| match face.surface() {
                 Surface::Plane(_) => None,
                 Surface::Sphere(ball) => Some(ball.radius()),
                 Surface::Cylinder(pipe) => Some(pipe.radius()),
+                // **A cone's apex is a vertex and a vertex has no size**, the
+                // same way a cube's corner has none, so the radius *there* is
+                // not a feature this is asking about. What the radius stands in
+                // for is the closed edge a curved face carries, whose chord is
+                // zero and whose real size is the circle it runs round — and a
+                // closed edge on a cone never sits at the apex, because a circle
+                // of no radius is a point. So the corners at the apex are passed
+                // over and the smallest circle the face actually carries is what
+                // comes back.
+                Surface::Cone(cone) => {
+                    let along = cone.axis().direction();
+                    face.wires()
+                        .flat_map(WireView::points)
+                        .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
+                        .filter(|radius| *radius > 0.0)
+                        .fold(f64::INFINITY, f64::min)
+                        .into()
+                }
                 _ => None,
             })
+            .filter(|radius| radius.is_finite())
             .fold(f64::INFINITY, f64::min);
         let smallest_feature = smallest_chord.min(smallest_radius);
         if !smallest_feature.is_finite() || largest == 0.0 {
@@ -868,6 +887,7 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
         Surface::Plane(flat) => flat.side_of_point(point),
         Surface::Sphere(ball) => ball.side_of(point),
         Surface::Cylinder(pipe) => pipe.side_of(point),
+        Surface::Cone(cone) => cone.side_of(point),
         other => panic!("a surface nothing here can ask about: {other:?}"),
     }
 }
@@ -1017,6 +1037,7 @@ pub(crate) fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
     match surface {
         Surface::Sphere(_) => Vector::new(0.0, 0.0, 1.0),
         Surface::Cylinder(pipe) => pipe.axis().direction(),
+        Surface::Cone(cone) => cone.axis().direction(),
         other => panic!("this crate cannot say what {other:?} is wound about"),
     }
 }
@@ -1036,6 +1057,15 @@ pub(crate) fn gradient_of(surface: &Surface, at: Point) -> Vector {
             let out = at - origin;
             out * along.dot(along) - along * along.dot(out)
         }
+        // The gradient of `|x × w|² − slope²(x·w)²` at `x = at − apex`, halved:
+        // `|w|²x − (1 + slope²)(x·w)w`. It points out of whichever nappe the
+        // point is on, which is what the sign predicate's own evenness in `x·w`
+        // asks for.
+        Surface::Cone(cone) => {
+            let (apex, along) = (cone.apex(), cone.axis().direction());
+            let out = at - apex;
+            out * along.dot(along) - along * (along.dot(out) * (1.0 + cone.slope() * cone.slope()))
+        }
         other => panic!("this crate cannot say which way {other:?} faces"),
     }
 }
@@ -1046,6 +1076,7 @@ pub(crate) fn name_of_surface(surface: &Surface) -> &'static str {
         Surface::Plane(_) => SIDE_OF_PLANE,
         Surface::Sphere(_) => SIDE_OF_SPHERE,
         Surface::Cylinder(_) => SIDE_OF_CYLINDER,
+        Surface::Cone(_) => SIDE_OF_CONE,
         other => panic!("a surface nothing here can ask about: {other:?}"),
     }
 }

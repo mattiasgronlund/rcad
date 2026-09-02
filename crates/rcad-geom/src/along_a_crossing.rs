@@ -121,6 +121,13 @@ fn the_way_this_crossing_winds(pair: [&Surface; 2]) -> Result<Vector> {
         }
         [Surface::Plane(flat), Surface::Cylinder(_)] => flat.normal(),
         [Surface::Cylinder(_), Surface::Plane(flat)] => -flat.normal(),
+        // A plane cuts a cone in a conic lying in that plane, exactly as it cuts
+        // a pipe. The four shapes that are not one closed curve — a parabola, a
+        // hyperbola, one ruling and two — never reach here, because
+        // `where_a_plane_and_a_cone_cross` refuses each of them by name and no
+        // run carrying one exists.
+        [Surface::Plane(flat), Surface::Cone(_)] => flat.normal(),
+        [Surface::Cone(_), Surface::Plane(flat)] => -flat.normal(),
         // Two balls cross in a circle in their radical plane, whose normal is
         // the line between the centres. Two balls with the same centre cross in
         // nothing at all, and there is no such line.

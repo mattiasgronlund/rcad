@@ -1884,6 +1884,19 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
             one.axis().direction().cross(other.axis().direction()) == Vector::zero()
         }
+        // **A cone never reaches here running straight.** The only crossing with
+        // a cone on it that `intersect` names at all is the ellipse a plane cuts
+        // across it; the two shapes that *are* straight — a tangent plane's one
+        // ruling, and two rulings meeting at the apex — are refused by name in
+        // `where_a_plane_and_a_cone_cross`, so no run carrying either exists.
+        [
+            Surface::Cone(_),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+        ]
+        | [
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_),
+            Surface::Cone(_),
+        ] => false,
         _ => false,
     }
 }

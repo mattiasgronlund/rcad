@@ -490,6 +490,7 @@ fn a_box_round_one_curved_face_holds_the_face_and_the_box_round_its_triangles_do
                     "a round cap fans into no triangles at all"
                 );
             }
+            Surface::Cone(cone) => panic!("a bar has no {cone:?}"),
             other => panic!("a bar has no {other:?}"),
         }
     }

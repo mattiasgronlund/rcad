@@ -274,6 +274,13 @@ fn box_the_surface_bounds(face: FaceView<'_>) -> Option<(Point, Point)> {
                 open_out(shadow.coordinates(), pipe.radius());
             }
         }
+        Surface::Cone(cone) => {
+            let (apex, along) = (cone.apex(), cone.axis().direction());
+            for corner in face.wires().flat_map(WireView::points) {
+                let up = along.dot(corner - apex);
+                open_out((apex + along * up).coordinates(), cone.radius_at(up));
+            }
+        }
         other => panic!("this crate cannot say how far {other:?} reaches"),
     }
     seen.then(|| (Point::from(low), Point::from(high)))

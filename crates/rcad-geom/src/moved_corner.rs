@@ -201,6 +201,11 @@ fn how_big_a_surface_is(surface: &Surface) -> f64 {
             .origin()
             .largest_coordinate_magnitude()
             .max(pipe.radius()),
+        // A cone has no radius of its own — how far out it reaches is about how
+        // far along it you look, which is a question about a face and not about
+        // the surface. What it places itself with is its apex, and the slope is
+        // a ratio of order one, so the apex is the whole of the size here.
+        Surface::Cone(cone) => cone.apex().largest_coordinate_magnitude().max(cone.slope()),
     }
 }
 

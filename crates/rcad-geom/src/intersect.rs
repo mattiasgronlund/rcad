@@ -41,8 +41,8 @@ use crate::enclosure::{
 };
 use crate::exact::Exact;
 use crate::{
-    Cylinder, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result, Sphere, Surface,
-    SurfaceMeet, Vector,
+    Cone, Cylinder, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result, Sphere,
+    Surface, SurfaceMeet, Vector,
 };
 
 /// The name the two-plane crossing goes by in provenance records.
@@ -63,6 +63,9 @@ pub const WHERE_A_BALL_AND_A_PIPE_CROSS: &str = "where a ball and a pipe cross";
 /// The name the two-pipe crossing goes by in provenance records.
 pub const WHERE_TWO_PIPES_CROSS: &str = "where two pipes cross";
 
+/// The name the plane-and-cone crossing goes by in provenance records.
+pub const WHERE_A_PLANE_AND_A_CONE_CROSS: &str = "where a plane and a cone cross";
+
 /// Where two surfaces cross, as an [`EdgeRun`] and nothing that had to be built.
 ///
 /// Both surfaces arrive with their locations **already composed**, and that is
@@ -79,7 +82,7 @@ pub const WHERE_TWO_PIPES_CROSS: &str = "where two pipes cross";
 ///
 /// # Which pairs are named here
 ///
-/// All six. The four whose crossing **lies in a plane** — plane–plane,
+/// Six of the ten. The four whose crossing **lies in a plane** — plane–plane,
 /// plane–ball, plane–pipe and ball–ball — are named by one sign question or two
 /// (§24.5). A ball crossing a pipe is a degree-four space curve and is named
 /// too: which of the five shapes it takes is settled exactly by an eighth-degree
@@ -92,6 +95,14 @@ pub const WHERE_TWO_PIPES_CROSS: &str = "where two pipes cross";
 /// that crossing takes compares a distance against a sum of two radii measured
 /// in two different metrics, and clearing the square roots out of that
 /// comparison costs eight degrees and runs past what `f64` can square.
+///
+/// **A cone against a plane is classified whole and named in two of its seven
+/// shapes** — see [`where_a_plane_and_a_cone_cross`] for the table and for what
+/// each of the five refusals is and what would close it. **A cone against a
+/// ball, a pipe or another cone is not named at all**: the crossing is a
+/// degree-four space curve and none of the machinery §29 built for two pipes
+/// exists for a cone. Two cones that hold the same numbers are the same surface
+/// and come back as one.
 ///
 /// # Errors
 ///
@@ -108,6 +119,13 @@ pub const WHERE_TWO_PIPES_CROSS: &str = "where two pipes cross";
 /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] when the two
 /// surfaces are tangent along the curve rather than at a point, so what they
 /// cross in is one curve that runs through itself.
+///
+/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
+/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
+/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for the four
+/// shapes of a plane against a cone that this vocabulary cannot say, and
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against
+/// anything curved.
 ///
 /// **A partly undecidable answer refuses whole.** A caller handed one of two
 /// curves has no way to know a second existed, and a fuse classifying against
@@ -140,6 +158,15 @@ pub fn intersect(
         }
         (Surface::Cylinder(one), Surface::Cylinder(other)) => {
             where_two_pipes_cross(one, other, policy, log)
+        }
+        (Surface::Plane(flat), Surface::Cone(cone))
+        | (Surface::Cone(cone), Surface::Plane(flat)) => {
+            where_a_plane_and_a_cone_cross(flat, cone, policy, log)
+        }
+        (Surface::Cone(one), Surface::Cone(other)) if one == other => Ok(SurfaceMeet::SameSurface),
+        (Surface::Cone(_), Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_))
+        | (Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)) => {
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
         }
     }
 }
@@ -1551,6 +1578,112 @@ fn two_lines_told_apart(
             })
             .collect(),
     ))
+}
+
+/// A plane and a cone: seven shapes, two of them named here and five refused by
+/// name.
+///
+/// # The two signs that settle all seven
+///
+/// **Where the apex stands**, `n·a − d`, and **how the plane leans against the
+/// cone's own half-angle**:
+///
+/// ```text
+/// E  =  (n·w)²  −  slope² · ‖n × w‖²
+/// ```
+///
+/// `E` is the textbook comparison "is the plane steeper than the cone" written
+/// so that nothing is normalized: `‖n × w‖² = (n·n)(w·w) − (n·w)²`, so this is
+/// `(1 + slope²)(n·w)² − slope²(n·n)(w·w)` with the two lengths carried, which
+/// is the rule the module note opens with. Above zero the plane cuts across the
+/// cone, at zero it is parallel to one ruling, below zero it is steeper than the
+/// cone and reaches both nappes.
+///
+/// | apex | `E` | the crossing | here |
+/// |---|---|---|---|
+/// | off the plane | `> 0` | an ellipse, a circle when the plane is square to the axis | **named** — one closed curve |
+/// | off the plane | `= 0` | a parabola | [`Error::ACrossingThatIsAParabola`] |
+/// | off the plane | `< 0` | a hyperbola | [`Error::ACrossingThatIsAHyperbola`] |
+/// | on the plane | `> 0` | the apex and nothing else | **named** — one touching point, exactly |
+/// | on the plane | `= 0` | one ruling, touched along its whole length | [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] |
+/// | on the plane | `< 0` | two rulings crossing at the apex | [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] |
+///
+/// The seventh shape a plane and a quadric can make is *the same surface*, and a
+/// plane is never a cone.
+///
+/// **Every one of the five refusals is a refusal of the vocabulary and not of
+/// the arithmetic**, and each variant says which of a limit and a gap it is and
+/// what closing it would take. Both signs above are polynomials in stored `f64`
+/// and level 3 settles them; nothing here is ever undecided except when a
+/// product leaves `f64`'s range.
+///
+/// **The touching point is exact.** Where the plane passes through the apex and
+/// nothing else, the one point they share is the apex, which is a stored `f64`
+/// triple — not a box, unlike a plane resting on a ball, where the touching
+/// point is a division away.
+fn where_a_plane_and_a_cone_cross(
+    flat: &Plane,
+    cone: &Cone,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<SurfaceMeet> {
+    let normal = flat.normal().components();
+    let d = flat.offset();
+    let apex = cone.apex().coordinates();
+    let along = cone.axis().direction().components();
+    let slope = cone.slope();
+    let at = [
+        PredicatePoint::from(flat.origin().coordinates()),
+        PredicatePoint::from(apex),
+    ];
+
+    let stands_off = Question {
+        named: WHERE_A_PLANE_AND_A_CONE_CROSS,
+        enclosing: || dot_enclosing(exactly(normal), exactly(apex)) - Interval::exactly(d),
+        exactly: || Some(Exact::dot_of(normal, apex)?.minus(&Exact::of(d))),
+    };
+    let apex_is_on_the_plane = match ask(&stands_off, Measures::Length, &at, policy, log)? {
+        Decision::Zero => true,
+        Decision::Pos | Decision::Neg => false,
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    };
+
+    let leans = Question {
+        named: WHERE_A_PLANE_AND_A_CONE_CROSS,
+        enclosing: || {
+            let up = dot_enclosing(exactly(normal), exactly(along));
+            let across = squared_length_enclosing(cross_enclosing(exactly(normal), exactly(along)));
+            up * up - squared_enclosing(slope) * across
+        },
+        exactly: || {
+            let up = Exact::dot_of(normal, along)?;
+            let across =
+                Exact::squared_length_of(&Exact::cross_of(&Exact::of_each(normal), along)?)?;
+            Some(
+                up.times(&up)?
+                    .minus(&Exact::product_of(slope, slope)?.times(&across)?),
+            )
+        },
+    };
+    // Dimensionless: every number in it is a direction component or a slope.
+    // `Measures::Length` is the arm whose conversion is the identity, which is
+    // the right conversion for a value with no units, and §28 records that the
+    // *name* is wrong for the same reason the plane-and-pipe row does.
+    let leaning = ask(&leans, Measures::Length, &at, policy, log)?;
+
+    match (apex_is_on_the_plane, leaning) {
+        (false, Decision::Pos) => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )?])),
+        (false, Decision::Zero) => Err(Error::ACrossingThatIsAParabola),
+        (false, Decision::Neg) => Err(Error::ACrossingThatIsAHyperbola),
+        (true, Decision::Pos) => Ok(SurfaceMeet::TouchAtOnePoint {
+            at: PredicatePoint::from(apex),
+        }),
+        (true, Decision::Zero) => Err(Error::APlaneTouchingAConeAlongOneOfItsRulings),
+        (true, Decision::Neg) => Err(Error::TwoLinesThroughAConesApexAreOneCurveThroughItself),
+        (_, other) => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
 }
 
 /// The point on `flat` nearest `centre`, as the box it is really known to be

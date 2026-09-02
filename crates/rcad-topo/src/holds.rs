@@ -119,15 +119,12 @@ impl<'m> SolidView<'m> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<OnAFace> {
-        match face.surface() {
-            Surface::Plane(plane) => {
-                let aim = a_point_off_the_plane(face, &plane).ok_or(
-                    Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() },
-                )?;
-                what_a_flat_face_holds(self, face, point, aim, policy, log)
-            }
-            curved => what_a_curved_face_holds(self, face, &curved, point, policy, log),
-        }
+        let Surface::Plane(plane) = face.surface() else {
+            return what_a_curved_face_holds(self, face, &face.surface(), point, policy, log);
+        };
+        let aim = a_point_off_the_plane(face, &plane)
+            .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
+        what_a_flat_face_holds(self, face, point, aim, policy, log)
     }
 }
 

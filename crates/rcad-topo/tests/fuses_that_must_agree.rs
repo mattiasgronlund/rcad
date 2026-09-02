@@ -2047,6 +2047,9 @@ enum WhatItSitsOn {
     /// A pipe's skin: a point on its axis, the way that axis points, and how
     /// big it is.
     Pipe([f64; 3], [f64; 3], f64),
+    /// A cone's skin: its apex, the way its axis points, and how fast it
+    /// widens.
+    Cone([f64; 3], [f64; 3], f64),
 }
 
 impl WhatItSitsOn {
@@ -2058,6 +2061,11 @@ impl WhatItSitsOn {
                 pipe.axis().origin().coordinates(),
                 pipe.axis().direction().components(),
                 pipe.radius(),
+            ),
+            Surface::Cone(cone) => WhatItSitsOn::Cone(
+                cone.apex().coordinates(),
+                cone.axis().direction().components(),
+                cone.slope(),
             ),
             other => panic!("this file does not know how to write {other:?} down"),
         }
@@ -2078,6 +2086,11 @@ impl WhatItSitsOn {
                 .chain(origin.map(bits))
                 .chain(direction.map(bits))
                 .chain([bits(*radius)])
+                .collect(),
+            WhatItSitsOn::Cone(apex, direction, slope) => core::iter::once(3)
+                .chain(apex.map(bits))
+                .chain(direction.map(bits))
+                .chain([bits(*slope)])
                 .collect(),
         }
     }

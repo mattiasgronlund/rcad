@@ -36,7 +36,7 @@ mod crossings;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
 use rcad_geom::{
-    Axis, Cylinder, Error, MeetOfThree, Plane, Point, Sphere, Surface, Vector,
+    Axis, Cone, Cylinder, Error, MeetOfThree, Plane, Point, Sphere, Surface, Vector,
     meet_of_three_surfaces,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
@@ -329,6 +329,19 @@ fn moved_clear(surface: &Surface, size: f64) -> Surface {
         Surface::Cylinder(pipe) => Surface::Cylinder(
             Cylinder::new(pipe.axis(), pipe.radius() + gap).expect("a larger radius"),
         ),
+        // A cone has no radius to grow; sliding its apex up its own axis moves
+        // every one of its points off the cone it came from.
+        Surface::Cone(cone) => Surface::Cone(
+            Cone::new(
+                Axis::new(
+                    cone.apex() + cone.axis().direction() * gap,
+                    cone.axis().direction(),
+                )
+                .expect("a direction with length"),
+                cone.slope(),
+            )
+            .expect("the same slope"),
+        ),
         other => panic!("nothing here can move {other:?} clear"),
     }
 }
@@ -350,6 +363,7 @@ fn which_side_of(surface: &Surface, point: PredicatePoint) -> Decision {
         Surface::Plane(flat) => flat.side_of_point(point),
         Surface::Sphere(ball) => ball.side_of(point),
         Surface::Cylinder(pipe) => pipe.side_of(point),
+        Surface::Cone(cone) => cone.side_of(point),
         other => panic!("nothing here can place a point against {other:?}"),
     }
 }

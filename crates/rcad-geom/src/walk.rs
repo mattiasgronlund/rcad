@@ -39,8 +39,8 @@ use crate::exact::Exact;
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
-    Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere, Surface,
-    Vector,
+    Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
+    Surface, Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -624,6 +624,15 @@ fn the_conic_between(pair: [Surface; 2]) -> Result<Option<Conic>> {
             }
             where_a_plane_cuts_a_pipe(&flat, &pipe).map(Some)
         }
+        // The only shape a plane and a cone cross in that reaches here is the
+        // ellipse; the four that are not one closed curve are refused by name
+        // before a run exists (`where_a_plane_and_a_cone_cross`), and the fifth,
+        // a plane through the apex and nothing else, is a touching point and not
+        // a curve.
+        [Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)] => {
+            where_a_plane_cuts_a_cone(&flat, &cone).map(Some)
+        }
         // **In a fixed order, and it is not tidiness.** `where_two_balls_cut`
         // builds the radical plane through the gap between the two centres, so
         // the pair the other way round gets that plane reversed, a different
@@ -913,6 +922,90 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
             &[middle, pipe.axis().origin()],
             &[pipe.radius(), radius_across, radius_down_the_slope],
         ),
+    })
+}
+
+/// The ellipse where a plane cuts across a cone.
+///
+/// # The two semi-axes, derived
+///
+/// Write `n̂` and `ŵ` for the plane's normal and the cone's axis scaled to length
+/// one, `h = n̂·apex − d/‖n‖` for how far the apex stands off the plane, `A =
+/// n̂·ŵ`, `k = ‖n̂ × ŵ‖`, and `t` for the slope. Set two directions in the plane:
+/// `û₂ = (n̂ × ŵ)/k` and `û₁ = û₂ × n̂`, so `û₁ × û₂ = n̂`. A point of the plane is
+/// `apex − h·n̂ + s·û₁ + r·û₂`, and putting that into the cone's own equation
+/// `‖x‖² = (1 + t²)(x·ŵ)²` gives, after one completion of the square,
+///
+/// ```text
+/// E·(s − s_c)² + r² = h²t²/E,   E = (1 + t²)A² − t²,   s_c = −(1 + t²)hAk/E
+/// ```
+///
+/// — the `t²` on the right is what is left after `(1 + t²)²A²k² + E² + E(t² − 1)`
+/// collapses, and it collapsing is why the answer is this short. So the
+/// semi-axis along `û₁` is `|h|t/E` and the one along `û₂` is `|h|t/√E`, and the
+/// centre is `apex − h·n̂ + s_c·û₁`.
+///
+/// `E` is the very number [`intersect`](crate::intersect) decided the sign of to
+/// call this an ellipse, so a positive `E` is the caller's precondition and not
+/// something asked again here — and it is summed through [`Exact`] for the same
+/// reason a nearly-tangent circle's radius is: a plane leaning at nearly the
+/// cone's own half-angle makes it a small difference of two large numbers.
+///
+/// **The two directions come from [`two_directions_in`]**, which hands back
+/// `(−û₂, −û₁)` — the same pair a pipe uses, in the same roles: its first is
+/// square to the axis, which for a cone is the *minor* axis, and its second runs
+/// down the plane's slope, which is the major one. Negating both leaves
+/// `across × and` where it was, so the ellipse is traced the way a pipe's is.
+fn where_a_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Result<Conic> {
+    let normal = flat.normal().components();
+    let along = cone.axis().direction().components();
+    let apex = cone.apex();
+    let slope = cone.slope();
+
+    let worked_out = || {
+        let squared_normal = Exact::dot_of(normal, normal)?;
+        let squared_along = Exact::dot_of(along, along)?;
+        let up = Exact::dot_of(normal, along)?;
+        let sideways = Exact::squared_length_of(&Exact::cross_of(&Exact::of_each(normal), along)?)?;
+        let leaning = up
+            .times(&up)?
+            .minus(&Exact::product_of(slope, slope)?.times(&sideways)?);
+        let reach = Exact::dot_of(normal, apex.coordinates())?.minus(&Exact::of(flat.offset()));
+        Some((
+            leaning.nearest_f64(),
+            squared_normal.nearest_f64(),
+            squared_along.nearest_f64(),
+            up.nearest_f64(),
+            sideways.nearest_f64(),
+            reach.nearest_f64(),
+        ))
+    };
+    let Some((leaning, squared_normal, squared_along, up, sideways, reach)) = worked_out() else {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    };
+    assert!(
+        leaning > 0.0,
+        "a plane that does not cut across a cone crosses it in no closed curve, and          `where_a_plane_and_a_cone_cross` refuses every one of those by name"
+    );
+
+    // `E = leaning / (‖n‖²‖w‖²)`, `h = reach / ‖n‖`, `A = up / (‖n‖‖w‖)` and
+    // `k = √sideways / (‖n‖‖w‖)`, all substituted into the three lines above and
+    // the lengths cancelled by hand so that nothing takes a root it need not.
+    let normal_length = squared_normal.sqrt();
+    let along_length = squared_along.sqrt();
+    let major = reach.abs() * slope * normal_length * squared_along / leaning;
+    let minor = reach.abs() * slope * along_length / leaning.sqrt();
+    let off_centre =
+        -(1.0 + slope * slope) * reach * up * sideways.sqrt() / (normal_length * leaning);
+
+    let (across, and) = two_directions_in(flat, cone.axis().direction());
+    let centre = apex - flat.normal() * (reach / squared_normal) - and * off_centre;
+
+    Ok(Conic {
+        centre,
+        across: across * minor,
+        and: and * major,
+        size: how_big_this_is(&[centre, apex], &[major, minor, off_centre]),
     })
 }
 
@@ -1377,6 +1470,12 @@ mod tests {
                 let along = pipe.axis().direction();
                 ((point - pipe.axis().origin()).cross(along).length() - pipe.radius()).abs()
                     / along.length()
+            }
+            Surface::Cone(cone) => {
+                let along = cone.axis().direction();
+                let out = point - cone.apex();
+                (out.cross(along).length() - cone.slope() * out.dot(along).abs()).abs()
+                    / (along.length() * cone.slope().hypot(1.0))
             }
         }
     }

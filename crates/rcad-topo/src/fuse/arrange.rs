@@ -284,6 +284,22 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
                 ],
             );
         }
+        Surface::Cone(cone) => {
+            let apex = cone.apex().coordinates();
+            let along = cone.axis().direction().components();
+            fill(
+                3,
+                &[
+                    apex[0],
+                    apex[1],
+                    apex[2],
+                    along[0],
+                    along[1],
+                    along[2],
+                    cone.slope(),
+                ],
+            );
+        }
         other => panic!("a surface nothing here can name: {other:?}"),
     }
     bits
@@ -2569,6 +2585,25 @@ fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
                     .map(|axis| squared * step[axis] - shadow * Interval::exactly(along[axis])),
             )
         }
+        // `|w|²x − (1 + slope²)(x·w)w` for `x = at − apex`: the pipe's with the
+        // shadow term scaled by how far the cone leans.
+        Surface::Cone(cone) => {
+            let apex = cone.apex().coordinates();
+            let along = cone.axis().direction().components();
+            let box_of_it = at.enclosure();
+            let step = [0, 1, 2].map(|axis| box_of_it[axis] - Interval::exactly(apex[axis]));
+            let squared = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * Interval::exactly(along[axis]))
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let shadow = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * step[axis])
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let slope = Interval::exactly(cone.slope());
+            let steepness = Interval::exactly(1.0) + slope * slope;
+            PredicatePoint::Constructed([0, 1, 2].map(|axis| {
+                squared * step[axis] - steepness * shadow * Interval::exactly(along[axis])
+            }))
+        }
         other => panic!("a surface whose gradient nothing here knows: {other:?}"),
     }
 }
@@ -2637,6 +2672,8 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
             | (Surface::Plane(_), Surface::Cylinder(_))
             | (Surface::Cylinder(_), Surface::Plane(_))
             | (Surface::Sphere(_), Surface::Sphere(_))
+            | (Surface::Plane(_), Surface::Cone(_))
+            | (Surface::Cone(_), Surface::Plane(_))
     )
 }
 
@@ -3403,6 +3440,7 @@ mod curved {
             Surface::Plane(_) => "plane",
             Surface::Sphere(_) => "ball",
             Surface::Cylinder(_) => "pipe",
+            Surface::Cone(_) => "cone",
             other => panic!("no {other:?} here"),
         }
     }
@@ -3623,6 +3661,7 @@ mod what_the_curved_arrangement_reaches {
                     Surface::Plane(_) => "plane",
                     Surface::Sphere(_) => "ball",
                     Surface::Cylinder(_) => "pipe",
+                    Surface::Cone(_) => "cone",
                     other => panic!("no {other:?} here"),
                 };
                 said.push(match split_a_face(face, &policy, &mut log) {

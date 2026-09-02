@@ -61,6 +61,7 @@
 mod along_a_crossing;
 mod bspline_curve;
 mod bspline_surface;
+mod cone;
 mod conic;
 mod cylinder;
 mod de_boor;
@@ -88,6 +89,7 @@ mod walk;
 pub use crate::along_a_crossing::{ROUND_A_CROSSING, which_comes_first_round_a_crossing};
 pub use crate::bspline_curve::{BSplineCurve, REFINEMENT_ROUNDOFF};
 pub use crate::bspline_surface::BSplineSurface;
+pub use crate::cone::{Cone, SIDE_OF_CONE};
 pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
 pub use crate::de_boor::EVALUATION_ROUNDOFF;
 pub use crate::deflection::Deflection;

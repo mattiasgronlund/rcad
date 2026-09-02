@@ -135,7 +135,7 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
     let mut corners = every_corner(domain);
     refuse_loops_that_touch(&corners, domain)?;
     let surface = domain.surface();
-    let (across, along) = surface.furthest_a_unit_step_goes();
+    let (across, along) = how_this_domain_is_scaled(surface, &corners);
 
     let mut mesh = ConstrainedDelaunayTriangulation::<Point2<f64>>::new();
     let mut corner_of: Vec<u32> = Vec::new();
@@ -162,11 +162,12 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 
     let deflection = domain.deflection().length();
     let slop = how_far_a_point_lands_off_its_surface(surface, &corners);
-    let step = a_step_that_stays_within(surface, deflection, slop);
+    let whole_patch = how_far_up_its_axis_this_reaches(&corners);
+    let step = a_step_that_stays_within(surface, whole_patch, deflection, slop);
     if step <= 0.0 {
         return Err(CannotTriangulate::NoMeshCanGetThatCloseToTheSurface {
             deflection,
-            closest: how_far_a_flat_piece_strays(surface, 0.0, slop),
+            closest: how_far_a_flat_piece_strays(surface, whole_patch, 0.0, slop),
         });
     }
     // Size first and the loops after, because how many triangles the deflection
@@ -174,8 +175,9 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
     // are fine enough is a question about both.
     refuse_a_patch_too_big_to_hold(domain, (across, along), step)?;
     for (from, to) in every_side(domain) {
-        let chord = chord_across_the_curve(surface, corners[from], corners[to]);
-        let strays = how_far_a_flat_piece_strays(surface, chord, slop);
+        let reach = how_far_up_its_axis_this_reaches(&[corners[from], corners[to]]);
+        let chord = chord_across_the_curve(surface, reach, corners[from], corners[to]);
+        let strays = how_far_a_flat_piece_strays(surface, reach, chord, slop);
         if strays > deflection {
             return Err(
                 CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection {
@@ -349,7 +351,47 @@ fn how_far_a_point_lands_off_its_surface(surface: &Surface, corners: &[[f64; 2]]
             HOW_FAR_THE_EVALUATOR_ROUNDS
                 * (pipe.axis().origin().largest_coordinate_magnitude() + pipe.radius() + reach)
         }
+        // A cone is endless the same way, and how far out its points are is
+        // about how far along it the patch reaches, times the slope.
+        Surface::Cone(cone) => {
+            let reach = how_far_up_its_axis_this_reaches(corners);
+            HOW_FAR_THE_EVALUATOR_ROUNDS
+                * (cone.apex().largest_coordinate_magnitude() + cone.radius_at(reach) + reach)
+        }
         other => panic!("this crate cannot say how far a point of {other:?} lands off it"),
+    }
+}
+
+/// The furthest along its own axis a set of corners in a surface's own two
+/// coordinates reaches.
+///
+/// Meaningless for a plane, a ball or a pipe, and read only by the cone arms
+/// below, which is why it is a plain number rather than a method on
+/// [`Surface`]: what a second coordinate *means* is the surface's own business,
+/// and only a cone's decides how big the surface is where the patch sits.
+fn how_far_up_its_axis_this_reaches(corners: &[[f64; 2]]) -> f64 {
+    corners
+        .iter()
+        .map(|corner| corner[1].abs())
+        .fold(0.0, f64::max)
+}
+
+/// How the domain is stretched before the triangulation runs.
+///
+/// [`Surface::furthest_a_unit_step_goes`] for every surface that has a ceiling
+/// over the whole of itself. A cone does not — a radian round it carries
+/// `slope · v`, which grows for ever — so the patch's own furthest reach stands
+/// in, which is exactly the ceiling over *this* patch and is what a scaling is
+/// for.
+fn how_this_domain_is_scaled(surface: &Surface, corners: &[[f64; 2]]) -> (f64, f64) {
+    match surface {
+        Surface::Cone(cone) => (
+            cone.radius_at(how_far_up_its_axis_this_reaches(corners)),
+            cone.slope().hypot(1.0),
+        ),
+        Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | _ => {
+            surface.furthest_a_unit_step_goes()
+        }
     }
 }
 
@@ -375,7 +417,7 @@ const HOW_FAR_THE_EVALUATOR_ROUNDS: f64 = 8.0 * f64::EPSILON;
 ///
 /// On a surface this crate has not been taught — see
 /// [`how_far_a_point_lands_off_its_surface`].
-fn chord_across_the_curve(surface: &Surface, from: [f64; 2], to: [f64; 2]) -> f64 {
+fn chord_across_the_curve(surface: &Surface, reach: f64, from: [f64; 2], to: [f64; 2]) -> f64 {
     match surface {
         Surface::Plane(_) => 0.0,
         Surface::Sphere(ball) => ball
@@ -384,6 +426,13 @@ fn chord_across_the_curve(surface: &Surface, from: [f64; 2], to: [f64; 2]) -> f6
         // Twice the radius times the sine of half the turn, which is the chord
         // for any turn and not only for a short one.
         Surface::Cylinder(pipe) => 2.0 * pipe.radius() * ((from[0] - to[0]) / 2.0).sin().abs(),
+        // A cone is flat along its rulings too, so this is the pipe's chord
+        // measured on the widest circle the piece touches. **Measured there and
+        // not at either end**, because that is the radius
+        // [`how_far_a_flat_piece_strays`] divides by, and a chord read at a
+        // smaller radius than the one it is charged against is a bound on
+        // nothing.
+        Surface::Cone(cone) => 2.0 * cone.radius_at(reach) * ((from[0] - to[0]) / 2.0).sin().abs(),
         other => panic!("this crate cannot say which way {other:?} curves"),
     }
 }
@@ -413,6 +462,44 @@ fn chord_across_the_curve(surface: &Surface, from: [f64; 2], to: [f64; 2]) -> f6
 /// distance, which is why `L` there is a chord of the cross-section and a
 /// triangle stretched along the pipe is bounded by nothing at all.
 ///
+/// # A cone gets `L²/(2R)` and its own derivation, because a sphere's does not
+/// transfer
+///
+/// A cone's radius of curvature is not one number: it shrinks to nothing at the
+/// apex, so there is no `r` to put in the sphere's sum. What is true instead is
+/// this. Write the cone about its apex, `x = v·(ŵ + t·ê(u))`, so a point of it
+/// at `v` sits `r = t·v` off the axis and the distance from any point `p` inside
+/// the nappe to the cone is `(t·p_∥ − ‖p_⊥‖)/√(1 + t²)`.
+///
+/// A flat piece `p = Σλᵢvᵢ` with its corners on the cone has
+/// `t·p_∥ = Σλᵢrᵢ` and `p_⊥ = Σλᵢ rᵢê(uᵢ)`, so
+///
+/// ```text
+/// (t·p_∥ − ‖p_⊥‖)  ≤  Σλᵢ rᵢ(1 − cos(uᵢ − u_k))  ≤  maxᵢ rᵢ(1 − cos(uᵢ − u_k))
+/// ```
+///
+/// for any fixed `k` — the first step because `‖Σ‖ ≥ Σ·ê(u_k)`, the second
+/// because a convex combination is at most its largest term. Take `k` to be the
+/// corner with the **largest** radius, `R_c = maxᵢ rᵢ`. Measuring every chord on
+/// the circle of that radius — which is what
+/// [`chord_across_the_curve`] does for a cone — gives
+/// `C² = 2R_c²(1 − cos Δ)`, so `rᵢ(1 − cos Δ) = rᵢC²/(2R_c²) ≤ C²/(2R_c)`, and
+///
+/// ```text
+/// how far the piece strays  ≤  C² / (2 · R_c · √(1 + t²))  =  C² / (2R)
+/// ```
+///
+/// with `R = R_c√(1 + t²)` the cone's radius of normal curvature at the widest
+/// corner. That is the `share = 2` arm below, and unlike the sphere's it stays
+/// finite **at the apex**: a triangle with a corner on the apex is charged
+/// against its two other corners' radius, which is exactly where its chords were
+/// measured.
+///
+/// It is loose by about a factor of four against a drawn case, the same way the
+/// sphere's `L²/(3r)` is loose against a two-corner side, and
+/// `how_far_a_flat_piece_of_a_cone_really_strays_stays_under_the_published_bound`
+/// is the search §15.6 asks for.
+///
 /// A boundary side is a piece with two corners rather than three, and the same
 /// sum gives it `L²/(4r)`. It is measured with `L²/(3r)` anyway, because what
 /// gets published is the bound on the *triangle* that side ends up in, and a
@@ -426,15 +513,21 @@ fn chord_across_the_curve(surface: &Surface, from: [f64; 2], to: [f64; 2]) -> f6
 ///
 /// On a surface this crate has not been taught — see
 /// [`how_far_a_point_lands_off_its_surface`].
-fn how_far_a_flat_piece_strays(surface: &Surface, longest_chord: f64, slop: f64) -> f64 {
-    let radius = match surface {
+fn how_far_a_flat_piece_strays(
+    surface: &Surface,
+    reach: f64,
+    longest_chord: f64,
+    slop: f64,
+) -> f64 {
+    let (radius, share) = match surface {
         Surface::Plane(_) => return 0.0,
-        Surface::Sphere(ball) => ball.radius(),
-        Surface::Cylinder(pipe) => pipe.radius(),
+        Surface::Sphere(ball) => (ball.radius(), 3.0),
+        Surface::Cylinder(pipe) => (pipe.radius(), 3.0),
+        Surface::Cone(cone) => (cone.radius_at(reach) * cone.slope().hypot(1.0), 2.0),
         other => panic!("this crate cannot say how far a flat piece of {other:?} strays"),
     };
     let chord = longest_chord + 2.0 * slop;
-    chord * chord / (3.0 * radius) + slop
+    chord * chord / (share * radius) + slop
 }
 
 /// The longest chord a triangle may have and still stay within `deflection`.
@@ -448,14 +541,15 @@ fn how_far_a_flat_piece_strays(surface: &Surface, longest_chord: f64, slop: f64)
 ///
 /// On a surface this crate has not been taught — see
 /// [`how_far_a_point_lands_off_its_surface`].
-fn a_step_that_stays_within(surface: &Surface, deflection: f64, slop: f64) -> f64 {
-    let radius = match surface {
+fn a_step_that_stays_within(surface: &Surface, reach: f64, deflection: f64, slop: f64) -> f64 {
+    let (radius, share) = match surface {
         Surface::Plane(_) => return f64::INFINITY,
-        Surface::Sphere(ball) => ball.radius(),
-        Surface::Cylinder(pipe) => pipe.radius(),
+        Surface::Sphere(ball) => (ball.radius(), 3.0),
+        Surface::Cylinder(pipe) => (pipe.radius(), 3.0),
+        Surface::Cone(cone) => (cone.radius_at(reach) * cone.slope().hypot(1.0), 2.0),
         other => panic!("this crate cannot size a step across {other:?}"),
     };
-    (3.0 * radius * (deflection - slop)).max(0.0).sqrt() - 2.0 * slop
+    (share * radius * (deflection - slop)).max(0.0).sqrt() - 2.0 * slop
 }
 
 /// Refuse a deflection needing more points than one patch will hold.
@@ -558,12 +652,21 @@ fn refine_the_inside(
             if !inside[face.index()] {
                 continue;
             }
+            // **The reach comes first and over the whole triangle**, because it
+            // is the radius every one of the three chords below is charged
+            // against — see [`chord_across_the_curve`].
+            let reach = how_far_up_its_axis_this_reaches(
+                &face
+                    .vertices()
+                    .map(|vertex| corners[corner_of[vertex.index()] as usize]),
+            );
             let mut longest_chord = f64::NEG_INFINITY;
             let mut to_split: Option<(f64, [f64; 2], [f64; 2])> = None;
             for edge in face.adjacent_edges() {
                 let from = corners[corner_of[edge.from().index()] as usize];
                 let to = corners[corner_of[edge.to().index()] as usize];
-                longest_chord = longest_chord.max(chord_across_the_curve(aim.surface, from, to));
+                longest_chord =
+                    longest_chord.max(chord_across_the_curve(aim.surface, reach, from, to));
                 if edge.is_constraint_edge() {
                     continue;
                 }
@@ -575,7 +678,7 @@ fn refine_the_inside(
                 }
             }
 
-            let strays = how_far_a_flat_piece_strays(aim.surface, longest_chord, aim.slop);
+            let strays = how_far_a_flat_piece_strays(aim.surface, reach, longest_chord, aim.slop);
             furthest = furthest.max(strays);
             if strays <= aim.deflection {
                 continue;

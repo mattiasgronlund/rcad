@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::isometry::Isometry;
 use crate::point::Point;
-use crate::{Cylinder, Plane, Sphere};
+use crate::{Cone, Cylinder, Plane, Sphere};
 
 /// The surface a face sits on.
 ///
@@ -17,9 +17,10 @@ use crate::{Cylinder, Plane, Sphere};
 ///
 /// M0 built solids out of [`Plane`] only, and [`Sphere`] and [`Cylinder`] were
 /// here as types so the enum was shaped right and the sign predicates had
-/// somewhere to land. **Topology accepts all three now**: a round bar has a
-/// face on a cylinder and a ball has one on a sphere. Cone and torus are still
-/// out, because nothing builds one and nothing has a sign predicate for one.
+/// somewhere to land. **Topology accepts all four now**: a round bar has a face
+/// on a cylinder, a ball has one on a sphere, and a taper has one on a cone. A
+/// torus is still out — its sign predicate is a quartic, one degree past
+/// everything the quadric machinery here is written for.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Surface {
@@ -29,6 +30,8 @@ pub enum Surface {
     Sphere(Sphere),
     /// An endless round pipe's skin.
     Cylinder(Cylinder),
+    /// A double cone's skin, pinched to nothing at its apex.
+    Cone(Cone),
 }
 
 impl Surface {
@@ -40,7 +43,7 @@ impl Surface {
     pub fn as_plane(&self) -> Option<&Plane> {
         match self {
             Surface::Plane(plane) => Some(plane),
-            Surface::Sphere(_) | Surface::Cylinder(_) => None,
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) => None,
         }
     }
 
@@ -63,6 +66,7 @@ impl Surface {
             Surface::Plane(plane) => plane.point_at(u, v),
             Surface::Sphere(sphere) => sphere.point_at(u, v),
             Surface::Cylinder(cylinder) => cylinder.point_at(u, v),
+            Surface::Cone(cone) => cone.point_at(u, v),
         }
     }
 
@@ -141,6 +145,7 @@ impl Surface {
             Surface::Plane(plane) => plane.plane_coordinates_of(point),
             Surface::Sphere(sphere) => sphere.coordinates_of(point),
             Surface::Cylinder(cylinder) => cylinder.coordinates_of(point),
+            Surface::Cone(cone) => cone.coordinates_of(point),
         }
     }
 
@@ -159,12 +164,29 @@ impl Surface {
     /// scaling makes its domain faithful and the crowding near its poles is
     /// real. It costs triangles rather than correctness, because what governs
     /// correctness is the proven deviation and not the shape of the triangles.
+    ///
+    /// # A cone's first coordinate has no ceiling, and infinity is the honest
+    /// answer
+    ///
+    /// A step of one radian round a cone carries `slope · v`, which grows
+    /// without limit as the cone widens, so **no finite number bounds it over
+    /// the whole surface** and this hands back [`f64::INFINITY`]. That is not a
+    /// gap to be closed by a cleverer bound: the quantity being bounded is
+    /// unbounded.
+    ///
+    /// What a mesher wants is a scaling for one *patch*, and a patch is
+    /// bounded — [`Cone::radius_at`] at the patch's own furthest reach is the
+    /// number, and `rcad-mesh` works it out from the corners it was handed.
+    /// Along a ruling a unit of `v` carries exactly `√(1 + slope²)`, which is
+    /// finite and is the same everywhere, so the second half of the pair is a
+    /// bound like the others.
     #[must_use]
     pub fn furthest_a_unit_step_goes(&self) -> (f64, f64) {
         match self {
             Surface::Plane(_) => (1.0, 1.0),
             Surface::Sphere(sphere) => (sphere.radius(), sphere.radius()),
             Surface::Cylinder(cylinder) => (cylinder.radius(), 1.0),
+            Surface::Cone(cone) => (f64::INFINITY, cone.slope().hypot(1.0)),
         }
     }
 
@@ -214,6 +236,11 @@ impl Surface {
                 let [u, v, w] = pipe.axis().direction().components();
                 (2, [x, y, z, u, v, w, pipe.radius()])
             }
+            Surface::Cone(cone) => {
+                let [x, y, z] = cone.apex().coordinates();
+                let [u, v, w] = cone.axis().direction().components();
+                (3, [x, y, z, u, v, w, cone.slope()])
+            }
         }
     }
 
@@ -224,6 +251,7 @@ impl Surface {
             Surface::Plane(plane) => Surface::Plane(plane.transformed(movement)),
             Surface::Sphere(sphere) => Surface::Sphere(sphere.transformed(movement)),
             Surface::Cylinder(cylinder) => Surface::Cylinder(cylinder.transformed(movement)),
+            Surface::Cone(cone) => Surface::Cone(cone.transformed(movement)),
         }
     }
 }
@@ -243,6 +271,12 @@ impl From<Sphere> for Surface {
 impl From<Cylinder> for Surface {
     fn from(cylinder: Cylinder) -> Self {
         Surface::Cylinder(cylinder)
+    }
+}
+
+impl From<Cone> for Surface {
+    fn from(cone: Cone) -> Self {
+        Surface::Cone(cone)
     }
 }
 
