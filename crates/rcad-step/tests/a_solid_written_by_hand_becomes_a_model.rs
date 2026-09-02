@@ -11,7 +11,7 @@ mod written_by_hand;
 use rcad_geom::{Deflection, Unit};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
-use written_by_hand::a_block;
+use written_by_hand::{a_block, a_quarter_disc_plate};
 
 /// The measurements of one block, read out of a file this test wrote.
 fn measure(text: &str) -> (f64, f64, [f64; 3]) {
@@ -131,5 +131,56 @@ fn a_file_declaring_more_precision_than_its_numbers_carry_says_so() {
     assert!(
         import.asks_for_more_precision_than_its_numbers_carry(),
         "an uncertainty below the coordinate spacing is a promise the numbers do not keep"
+    );
+}
+
+/// The curved half of the hand-written control: a plate whose top and bottom
+/// are quarter-discs.
+///
+/// A quarter-disc of radius `r` and height `h` encloses `πr²h/4` and its skin is
+/// `πr²/2 + 2rh + πrh/2`. Those are the numbers this checks against, and the
+/// measurement of a curved solid is over a mesh, so this is the one place in
+/// this file where a comparison is a bound rather than an equality — and the
+/// bound is the one the measurement publishes for itself.
+#[test]
+fn a_quarter_disc_plate_written_by_hand_measures_what_its_numbers_say() {
+    let (radius, height) = (2.0, 4.0);
+    let file = StepFile::read(a_quarter_disc_plate(radius, height, ".MILLI.").as_bytes())
+        .expect("a file this test wrote reads");
+    let mut log = ProvenanceLog::new();
+    let import = Import::read(&file, &Policy::certified(), &mut log).expect("a plate imports");
+    import
+        .model()
+        .validate(&Policy::certified(), &mut log)
+        .expect("and the model it made is sound");
+
+    let [(_, key)] = import.solids() else {
+        panic!("one solid");
+    };
+    let measured = import
+        .model()
+        .solid(*key)
+        .measure(
+            Deflection::of(0.001).expect("a fine mesh"),
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("a plate measures");
+
+    let space = core::f64::consts::PI * radius * radius * height / 4.0;
+    let skin = core::f64::consts::PI * radius * radius / 2.0
+        + 2.0 * radius * height
+        + core::f64::consts::PI * radius * height / 2.0;
+    assert!(
+        (measured.volume() - space).abs() <= measured.volume_error(),
+        "a quarter-disc plate encloses {space} and this one says {} give or take {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+    assert!(
+        (measured.surface_area() - skin).abs() <= measured.area_error(),
+        "a quarter-disc plate has {skin} of skin and this one says {} give or take {}",
+        measured.surface_area(),
+        measured.area_error()
     );
 }

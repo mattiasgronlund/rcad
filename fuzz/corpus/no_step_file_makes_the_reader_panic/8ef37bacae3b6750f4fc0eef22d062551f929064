@@ -1,0 +1,13 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');
+FILE_NAME('','',((),''''),'','','');
+_N('','',((),''''),'','','');
+FILE_SCHEMA(('ESIGN'));
+EHEMA(('E_DESIGN'));
+ENDSEC;
+DATA;
+#0=CARTN_PNNAD_UITT('',(.MILLI.,.MEE.));
+#3=ADVACDAFC_NEE('',ITH_MERE(25.4),$,*,#9);
+ENDSEC;
+END-ISO-10303-21;

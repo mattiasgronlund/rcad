@@ -7,6 +7,10 @@
 //! exporting them from anywhere is that the closed form is known — a block of
 //! sides `a`, `b`, `c` encloses `abc` and no measurement of it is being compared
 //! against another measurement.
+//!
+//! Every test file here takes what it needs from this module and leaves the
+//! rest, so what is unused in one is used in another.
+#![allow(dead_code)]
 
 /// A block with one corner at the origin and the opposite corner at
 /// `(sides[0], sides[1], sides[2])`, written in `unit`.
@@ -203,4 +207,251 @@ pub fn real(number: f64) -> String {
             format!("{mantissa}E{exponent}")
         }
     }
+}
+
+/// A plate whose top and bottom are quarter-discs of `radius`, standing
+/// `height` tall on the origin, written in `unit`.
+///
+/// **Written because a block cannot fail at the things a real file fails at.**
+/// It has a cylindrical face, two arcs between two corners each — which is what
+/// makes an edge need a picking half-space at all — two flat faces the cylinder
+/// crosses, and a seam up each side. Every number in it is exact for any radius
+/// and height an `f64` holds: the corners sit at `(r, 0, z)` and `(0, r, z)`, so
+/// `x² + y² − r²` cancels to nothing, and the arcs' plane is `z = const` with
+/// its corners exactly on it.
+///
+/// A quarter and not a half, and the reason is a finding rather than a taste: a
+/// half-disc's three corners are **collinear**, and `check_flat_face` reads a
+/// wire's winding off its corners alone, so the area a half-disc's arc encloses
+/// is invisible to it and the face is refused as winding against its own normal.
+/// A quarter's three corners make a triangle.
+pub fn a_quarter_disc_plate(radius: f64, height: f64, unit: &str) -> String {
+    a_pie(radius, height, unit, true)
+}
+
+/// The same plate cut down to the segment between the arc and its chord, so
+/// each flat face is bounded by two steps: an arc and a straight.
+///
+/// **This is the smallest file that reaches the gap that refuses 36 of the 323
+/// KiCad files and 16 of the 44 NIST ones.** Two steps is not enough for
+/// `SolidBuilder::add_wire` or for `Invalid::WireTooShort`, and a face bounded
+/// by two curves is a real face — a lune on a sphere is the other one. The gap
+/// is the kernel's and was named before this reader existed (§42.5's lane, its
+/// §2, `ADraftWireIsTooShort`); what this adds is a file that reaches it.
+pub fn a_plate_bounded_by_an_arc_and_its_chord(radius: f64, height: f64, unit: &str) -> String {
+    a_pie(radius, height, unit, false)
+}
+
+fn a_pie(radius: f64, height: f64, unit: &str, through_the_middle: bool) -> String {
+    let mut corners = vec![[radius, 0.0, 0.0]];
+    if through_the_middle {
+        corners.push([0.0, 0.0, 0.0]);
+    }
+    corners.push([0.0, radius, 0.0]);
+    let below = corners.len();
+    for step in 0..below {
+        corners.push([corners[step][0], corners[step][1], height]);
+    }
+
+    let (edges, faces): (Vec<Edge>, Vec<(Loop, Face)>) = if through_the_middle {
+        (
+            vec![
+                (0, 2, Some(630)),
+                (2, 1, None),
+                (1, 0, None),
+                (3, 5, Some(631)),
+                (5, 4, None),
+                (4, 3, None),
+                (0, 3, None),
+                (2, 5, None),
+                (1, 4, None),
+            ],
+            vec![
+                (
+                    vec![(2, false), (1, false), (0, false)],
+                    Face::Flat([0.0, 0.0, -1.0], [0.0, 0.0, 0.0]),
+                ),
+                (
+                    vec![(3, true), (4, true), (5, true)],
+                    Face::Flat([0.0, 0.0, 1.0], [0.0, 0.0, height]),
+                ),
+                (
+                    vec![(6, true), (5, false), (8, false), (2, true)],
+                    Face::Flat([0.0, -1.0, 0.0], [0.0, 0.0, 0.0]),
+                ),
+                (
+                    vec![(1, true), (8, true), (4, false), (7, false)],
+                    Face::Flat([-1.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+                ),
+                (
+                    vec![(0, true), (7, true), (3, false), (6, false)],
+                    Face::Round(radius),
+                ),
+            ],
+        )
+    } else {
+        (
+            vec![
+                (0, 1, Some(630)),
+                (1, 0, None),
+                (2, 3, Some(631)),
+                (3, 2, None),
+                (0, 2, None),
+                (1, 3, None),
+            ],
+            vec![
+                (
+                    vec![(1, false), (0, false)],
+                    Face::Flat([0.0, 0.0, -1.0], [0.0, 0.0, 0.0]),
+                ),
+                (
+                    vec![(2, true), (3, true)],
+                    Face::Flat([0.0, 0.0, 1.0], [0.0, 0.0, height]),
+                ),
+                (
+                    vec![(4, true), (3, false), (5, false), (1, true)],
+                    Face::Flat([1.0, 1.0, 0.0], [radius, 0.0, 0.0]),
+                ),
+                (
+                    vec![(0, true), (5, true), (2, false), (4, false)],
+                    Face::Round(radius),
+                ),
+            ],
+        )
+    };
+
+    let mut text = a_header(unit);
+    for (which, corner) in corners.iter().enumerate() {
+        text += &format!(
+            "#{}=CARTESIAN_POINT('',{});\n",
+            600 + which,
+            triple(*corner)
+        );
+        text += &format!("#{}=VERTEX_POINT('',#{});\n", 610 + which, 600 + which);
+    }
+    for (which, z) in [(0_usize, 0.0), (1_usize, height)] {
+        text += &format!(
+            "#{}=CARTESIAN_POINT('',{});\n",
+            620 + which,
+            triple([0.0, 0.0, z])
+        );
+        text += &format!(
+            "#{}=DIRECTION('',{});\n",
+            624 + which,
+            triple([0.0, 0.0, 1.0])
+        );
+        text += &format!(
+            "#{}=DIRECTION('',{});\n",
+            626 + which,
+            triple([1.0, 0.0, 0.0])
+        );
+        text += &format!(
+            "#{}=AXIS2_PLACEMENT_3D('',#{},#{},#{});\n",
+            628 + which,
+            620 + which,
+            624 + which,
+            626 + which
+        );
+        text += &format!(
+            "#{}=CIRCLE('',#{},{});\n",
+            630 + which,
+            628 + which,
+            real(radius)
+        );
+    }
+    for (which, (from, to, arc)) in edges.iter().enumerate() {
+        let curve = match arc {
+            Some(circle) => *circle,
+            None => {
+                let way = direction_from(corners[*from], corners[*to]);
+                text += &format!("#{}=DIRECTION('',{});\n", 660 + which, triple(way));
+                text += &format!(
+                    "#{}=VECTOR('',#{},{});\n",
+                    670 + which,
+                    660 + which,
+                    real(1.0)
+                );
+                text += &format!(
+                    "#{}=LINE('',#{},#{});\n",
+                    680 + which,
+                    600 + from,
+                    670 + which
+                );
+                680 + which
+            }
+        };
+        text += &format!(
+            "#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n",
+            690 + which,
+            610 + from,
+            610 + to,
+            curve
+        );
+    }
+    for (which, (round, sits_on)) in faces.iter().enumerate() {
+        let mut steps = Vec::new();
+        for (step, (edge, forwards)) in round.iter().enumerate() {
+            let id = 700 + which * 8 + step;
+            text += &format!(
+                "#{id}=ORIENTED_EDGE('',*,*,#{},{});\n",
+                690 + edge,
+                if *forwards { ".T." } else { ".F." }
+            );
+            steps.push(format!("#{id}"));
+        }
+        text += &format!("#{}=EDGE_LOOP('',({}));\n", 740 + which, steps.join(","));
+        text += &format!(
+            "#{}=FACE_OUTER_BOUND('',#{},.T.);\n",
+            746 + which,
+            740 + which
+        );
+        let (origin, axis) = match sits_on {
+            Face::Flat(normal, at) => (*at, *normal),
+            Face::Round(_) => ([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        };
+        text += &format!("#{}=CARTESIAN_POINT('',{});\n", 752 + which, triple(origin));
+        text += &format!("#{}=DIRECTION('',{});\n", 758 + which, triple(axis));
+        text += &format!(
+            "#{}=AXIS2_PLACEMENT_3D('',#{},#{},$);\n",
+            764 + which,
+            752 + which,
+            758 + which
+        );
+        text += &match sits_on {
+            Face::Flat(_, _) => format!("#{}=PLANE('',#{});\n", 770 + which, 764 + which),
+            Face::Round(radius) => format!(
+                "#{}=CYLINDRICAL_SURFACE('',#{},{});\n",
+                770 + which,
+                764 + which,
+                real(*radius)
+            ),
+        };
+        text += &format!(
+            "#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n",
+            776 + which,
+            746 + which,
+            770 + which
+        );
+    }
+    let skin: Vec<String> = (0..faces.len())
+        .map(|which| format!("#{}", 776 + which))
+        .collect();
+    text += &format!("#800=CLOSED_SHELL('',({}));\n", skin.join(","));
+    text += "#801=MANIFOLD_SOLID_BREP('',#800);\n";
+    text + "ENDSEC;\nEND-ISO-10303-21;\n"
+}
+
+/// One edge: the corners it runs between, and the circle it runs along where it
+/// is an arc rather than a straight.
+type Edge = (usize, usize, Option<usize>);
+
+/// One loop: the edges it walks, each with whether it walks it forwards.
+type Loop = Vec<(usize, bool)>;
+
+/// What one face of a pie-slice plate sits on.
+enum Face {
+    /// A plane, given its outward normal and a point on it.
+    Flat([f64; 3], [f64; 3]),
+    /// The cylinder about the `z` axis, given its radius.
+    Round(f64),
 }

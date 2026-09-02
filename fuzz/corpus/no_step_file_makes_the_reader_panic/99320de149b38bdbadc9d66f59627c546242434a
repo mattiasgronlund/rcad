@@ -1,0 +1,9 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'1;LE1');
+FILE_NAME('','',(''),(''),'','');
+FILE_SCHEMA(('AUTON'));
+ENDSEC;
+DATA;
+#0=T('',(0.,0.,0.));
+#4=(_IT()SIIGTH_()SIT()-Ü21;

@@ -1,0 +1,7 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');FIL0_NAME('','',(''),(''),'','','');
+FILE_NAME('',')_U(AME');
+FILE_SCHEMA(('AN'));
+ENDSEC;
+END-ISO-10303-21;

@@ -1,0 +1,12 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'');
+FE_NAESHR(IOIPN(''),'2;1');
+FILE_NAFE('');
+RON((''),'1;1');
+FILE_NAFE();
+FIL((''),'2;1');
+FILE_NAME('','','');
+FILE_SCHEMA(('AU'));
+ENDSEC;
+END-ISO-10303-21;

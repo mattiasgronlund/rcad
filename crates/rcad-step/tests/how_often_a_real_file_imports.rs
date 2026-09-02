@@ -27,36 +27,45 @@ use std::path::{Path, PathBuf};
 
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, Refusal, StepFile};
-use written_by_hand::a_block;
+use written_by_hand::{a_block, a_quarter_disc_plate};
 
 /// Every file this kernel wrote itself imports, and the model it makes is
 /// sound.
 ///
-/// A block at eleven sizes over eleven orders of magnitude and in every unit
-/// this kernel has. One refusal here is one bug.
+/// A block and a quarter-disc plate, each at eleven sizes over eleven orders of
+/// magnitude and in each of the four units this kernel names by an `SI_UNIT`
+/// prefix. The plate is the half that matters: it has a cylindrical face, two
+/// arcs and the half-spaces that say which arc, which is the whole of what a
+/// block cannot exercise.
+///
+/// **One refusal here is one bug**, and it is what makes the two rates below
+/// mean anything: a rate with no control cannot tell a reader that refuses real
+/// files from a reader that refuses everything (§42.12 criterion 10).
 #[test]
 fn every_file_this_kernel_wrote_itself_imports() {
     let mut written = 0;
     for power in -5..6 {
-        let side = f64::from(2.0_f32).powi(power);
+        let size = f64::from(2.0_f32).powi(power);
         for unit in ["$", ".MILLI.", ".CENTI.", ".MICRO."] {
-            let text = a_block([side, side * 2.0, side * 4.0], unit);
-            let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
-            let mut log = ProvenanceLog::new();
-            let import =
-                Import::read(&file, &Policy::certified(), &mut log).unwrap_or_else(|why| {
-                    panic!("a block of side {side} in {unit} did not import: {why}")
-                });
-            import
-                .model()
-                .validate(&Policy::certified(), &mut log)
-                .expect("and every imported model validates under a certified policy");
-            written += 1;
+            for (what, text) in [
+                ("a block", a_block([size, size * 2.0, size * 4.0], unit)),
+                ("a plate", a_quarter_disc_plate(size, size * 2.0, unit)),
+            ] {
+                let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
+                let mut log = ProvenanceLog::new();
+                let import = Import::read(&file, &Policy::certified(), &mut log)
+                    .unwrap_or_else(|why| panic!("{what} of size {size} in {unit}: {why}"));
+                import
+                    .model()
+                    .validate(&Policy::certified(), &mut log)
+                    .expect("and every imported model validates under a certified policy");
+                written += 1;
+            }
         }
     }
     println!("control: {written} / {written} imported");
     assert_eq!(
-        written, 44,
+        written, 88,
         "the control must not shrink without somebody saying so"
     );
 }

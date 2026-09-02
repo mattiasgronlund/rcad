@@ -17,6 +17,7 @@ libfuzzer-sys = "0.4"
 rcad-geom = { path = "../crates/rcad-geom" }
 rcad-predicates = { path = "../crates/rcad-predicates" }
 rcad-step = { path = "../crates/rcad-step" }
+rcad-topo = { path = "../crates/rcad-topo" }
 
 [[bin]]
 name = "where_two_surfaces_cross"

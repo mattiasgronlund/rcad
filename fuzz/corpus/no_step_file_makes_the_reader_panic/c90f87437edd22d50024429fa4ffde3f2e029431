@@ -1,0 +1,16 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');ME('','',(''),(''),'','','');
+FILE_NAME('','));
+#2=(NAMED_;
+#2=(NME');
+FILE_SCHEMA(('AUTOMOTI'));
+ENDSEC;
+DATA;
+#0=DVANCIHEMA(('IGN'));
+ENDSEC;
+DATA;
+#1=CARTOINT('',(#3),#1,.T.);
+#4=MEASUE('','',(''),(''),'','',*,#2);
+ENDSEC;
+END-ISO-10303-21;

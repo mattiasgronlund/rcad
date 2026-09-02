@@ -1,0 +1,13 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');
+FILE_NAME('',(''),(''),'','','');
+FILE_SCHEMA(('AGN'));
+ENDSEC;
+DATA;
+#1=CANT('',(0.,0.,0.));
+#2=(NAME()SI_UNIT(.MILL.));
+#3=AD('',(#3),#1,.T.);
+#2=MEASURE(POSITIE_LENG(25.4),$,*,#9);
+ENDSEC;
+END-ISO-10303-21;

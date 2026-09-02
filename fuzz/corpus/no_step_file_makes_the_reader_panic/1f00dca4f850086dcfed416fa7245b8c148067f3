@@ -1,0 +1,4 @@
+ISO-10303-21;
+HEADER;DERS(ION('s'),'2E');
+FEILE_T(IO(''),'2;1');
+CHEMA(P('X'))3-
