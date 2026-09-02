@@ -185,20 +185,12 @@ pub fn walk(
     }
 
     let pair = the_two_surfaces_it_runs_between(run, along);
-    if a_crossing_that_runs_to_a_quartic(&pair) {
-        // Two pipes down one direction cross in straight lines, and a run that
-        // is one of those is picked out by a half-space rather than being
-        // `Straight`, so it reaches here — with nothing to put between its ends.
-        if let [Surface::Cylinder(one), Surface::Cylinder(other)] = pair
-            && one.axis().direction().cross(other.axis().direction()) == Vector::zero()
-        {
-            return Ok(nothing_between_the_ends());
+    let conic = match what_a_run_between_these_two_lies_on(pair, run, log)? {
+        WhatARunLiesOn::StraightLine => return Ok(nothing_between_the_ends()),
+        WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
+            return follow_the_quartic(run, pair, seeds, deflection, policy, log);
         }
-        return follow_the_quartic(run, pair, deflection, policy, log);
-    }
-
-    let Some(conic) = the_conic_between(pair, run, log)? else {
-        return Ok(nothing_between_the_ends());
+        WhatARunLiesOn::Conic(conic) => conic,
     };
     let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * conic.the_size_it_was_worked_out_from();
     // A conic drawn near the top of `f64`'s range has a bound that overflows,
@@ -268,18 +260,13 @@ pub fn where_a_closed_crossing_starts(
     log: &mut ProvenanceLog,
 ) -> Result<Point> {
     let pair = the_two_surfaces_it_runs_between(run, along);
-    if a_crossing_that_runs_to_a_quartic(&pair) {
-        if let [Surface::Cylinder(one), Surface::Cylinder(other)] = pair
-            && one.axis().direction().cross(other.axis().direction()) == Vector::zero()
-        {
-            return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
+    match what_a_run_between_these_two_lies_on(pair, run, log)? {
+        WhatARunLiesOn::StraightLine => Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+        WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
+            the_seed_this_run_is_picked_up_at(run, &pair, seeds, log)
         }
-        return the_seed_this_run_is_picked_up_at(run, &pair, log);
+        WhatARunLiesOn::Conic(conic) => Ok(conic.at(0.0)),
     }
-    let Some(conic) = the_conic_between(pair, run, log)? else {
-        return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
-    };
-    Ok(conic.at(0.0))
 }
 
 /// Whether this end says where it is.
@@ -308,21 +295,170 @@ fn middle_of(side: Interval) -> f64 {
     (side.lo() + side.hi()) / 2.0
 }
 
-/// Whether this pair crosses in a degree-four curve the marcher can follow.
+/// What a run between two surfaces lies on: one of three things, and which one
+/// is worked out in a single place.
 ///
-/// A ball against a pipe, or two pipes, and those three only. It is **not** the
-/// list of pairs whose crossing misses a plane: a cone or a torus against
-/// another curved surface misses one too, and the marcher has no seed for
-/// either, so `the_conic_between` refuses those by the name the naming half
-/// gives them. Reading this as the wider list is what put a panic on the end of
-/// that `match` (§24.5).
-fn a_crossing_that_runs_to_a_quartic(pair: &[Surface; 2]) -> bool {
-    matches!(
-        pair,
-        [Surface::Sphere(_), Surface::Cylinder(_)]
-            | [Surface::Cylinder(_), Surface::Sphere(_)]
-            | [Surface::Cylinder(_), Surface::Cylinder(_)]
-    )
+/// **Exhaustive on purpose.** A fourth shape of crossing would mean a fourth
+/// way of walking one, and the point of this enum is that both callers handle
+/// every shape there is.
+enum WhatARunLiesOn {
+    /// A straight line, so the run's two ends are the whole of it and there is
+    /// no closed curve to start anywhere.
+    StraightLine,
+    /// A conic in a plane, walked round in an angle.
+    Conic(Conic),
+    /// A degree-four loop, with one point near each piece it can come in for
+    /// the marcher to start from.
+    QuarticPickedUpAt([Point; 2]),
+}
+
+/// Which of those three the crossing of these two surfaces is, and the thing
+/// needed to walk it.
+///
+/// **This is the one list of what a pair of surfaces does**, and it is one list
+/// because three of them were kept in step by hand and were not. A guard said
+/// which pairs the marcher had a seed for, a `match` said which had a conic, and
+/// a third `match` said where a seed came from; a cone and a torus landed and
+/// were added to none of the three, so twelve pairs fell off the end of the
+/// second one into a `panic!` that a real KiCad file reached (§24.5). Every pair
+/// is now named once, here, and a sixth kind of [`Surface`] is a compile error
+/// in this `match` — which is the only place that has to know.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
+/// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for the pairs
+/// [`intersect`](crate::intersect) refuses under those same two names, in the
+/// same order — a cone against a torus is the torus's refusal in both halves,
+/// so the namer and the evaluator never disagree about what a pair is called.
+/// **The evaluator refuses exactly what the namer refuses**, and both are gaps:
+/// the crossing is there and none of the machinery for a degree-four or
+/// degree-eight curve with a cone or a torus in it exists.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed for a degree-four
+/// crossing comes out as something that is not a point.
+///
+/// Whatever the conic builders refuse, for the pairs that have one.
+fn what_a_run_between_these_two_lies_on(
+    pair: [Surface; 2],
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<WhatARunLiesOn> {
+    match pair {
+        [Surface::Plane(_), Surface::Plane(_)] => Ok(WhatARunLiesOn::StraightLine),
+        [Surface::Plane(flat), Surface::Sphere(ball)]
+        | [Surface::Sphere(ball), Surface::Plane(flat)] => {
+            where_a_plane_cuts_a_ball(&flat, &ball).map(WhatARunLiesOn::Conic)
+        }
+        // A plane along a pipe's axis cuts it in straight lines, and a run that
+        // is one of those is picked out by a half-space rather than being
+        // `Straight`, so it reaches here and there is no ellipse to build.
+        [Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)] => {
+            if flat.normal().dot(pipe.axis().direction()) == 0.0 {
+                return Ok(WhatARunLiesOn::StraightLine);
+            }
+            where_a_plane_cuts_a_pipe(&flat, &pipe).map(WhatARunLiesOn::Conic)
+        }
+        // The only shape a plane and a cone cross in that reaches here is the
+        // ellipse; the four that are not one closed curve are refused by name
+        // before a run exists (`where_a_plane_and_a_cone_cross`), and the fifth,
+        // a plane through the apex and nothing else, is a touching point and not
+        // a curve.
+        [Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)] => {
+            where_a_plane_cuts_a_cone(&flat, &cone).map(WhatARunLiesOn::Conic)
+        }
+        // A plane cuts a torus in **two** circles as often as in one, and which
+        // of them this run is is the picker's to say — which is why this is the
+        // one arm here that reads the run rather than only the pair.
+        [Surface::Plane(flat), Surface::Torus(ring)]
+        | [Surface::Torus(ring), Surface::Plane(flat)] => {
+            where_a_plane_cuts_a_torus(&flat, &ring, run, log).map(WhatARunLiesOn::Conic)
+        }
+        // **In a fixed order, and it is not tidiness.** `where_two_balls_cut`
+        // builds the radical plane through the gap between the two centres, so
+        // the pair the other way round gets that plane reversed, a different
+        // `basis` out of it, and a whole different starting angle — measured,
+        // forty of forty swapped pairs walked into different points, and not by
+        // a rounding. The other three conic pairs are already order-free
+        // because both arms of their `match` call the same function with the
+        // same arguments. This makes the fourth one so, which is what
+        // `where_a_closed_crossing_starts` needs and what §31.3 assumed
+        // (§34).
+        [Surface::Sphere(one), Surface::Sphere(other)] => {
+            let (first, second) = if Surface::Sphere(one)
+                .how_it_sorts_against(&Surface::Sphere(other))
+                == Ordering::Greater
+            {
+                (other, one)
+            } else {
+                (one, other)
+            };
+            where_two_balls_cut(&first, &second).map(WhatARunLiesOn::Conic)
+        }
+        [Surface::Sphere(ball), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
+            a_quartic_picked_up_at(where_a_ball_reaches_across_a_pipe(&ball, &pipe))
+        }
+        [Surface::Cylinder(one), Surface::Cylinder(other)] => {
+            // Two pipes down one direction cross in straight lines, and a run
+            // that is one of those is picked out by a half-space rather than
+            // being `Straight`, so it reaches here.
+            if one.axis().direction().cross(other.axis().direction()) == Vector::zero() {
+                return Ok(WhatARunLiesOn::StraightLine);
+            }
+            let certified = |pipe: &Cylinder| pipe.radius() / pipe.axis().direction().length();
+            // Two pipes of the same certified radius are neither thinner, and
+            // then which one is walked round has to be settled by the numbers
+            // they store rather than by which of them the caller wrote first —
+            // otherwise the seed, and the vertex `where_a_closed_crossing_starts`
+            // puts on the loop, move when the pair is swapped.
+            let mine_is_thinner = match certified(&one).total_cmp(&certified(&other)) {
+                Ordering::Equal => {
+                    Surface::Cylinder(one).how_it_sorts_against(&Surface::Cylinder(other))
+                        != Ordering::Greater
+                }
+                Ordering::Less => true,
+                Ordering::Greater => false,
+            };
+            let (thin, fat) = if mine_is_thinner {
+                (one, other)
+            } else {
+                (other, one)
+            };
+            a_quartic_picked_up_at(where_one_pipe_reaches_across_another(&thin, &fat))
+        }
+        [
+            Surface::Cone(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+        ]
+        | [Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)] => {
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        }
+        [
+            Surface::Torus(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        ]
+        | [
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+            Surface::Torus(_),
+        ] => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+    }
+}
+
+/// The two seeds of a degree-four crossing, once they have been checked for
+/// being points at all.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when either comes out as something
+/// that is not a point.
+fn a_quartic_picked_up_at(seeds: [Point; 2]) -> Result<WhatARunLiesOn> {
+    if seeds.iter().any(|seed| !seed.is_finite()) {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
+    Ok(WhatARunLiesOn::QuarticPickedUpAt(seeds))
 }
 
 /// A run of a degree-four crossing, followed by the marcher.
@@ -345,19 +481,18 @@ fn a_crossing_that_runs_to_a_quartic(pair: &[Surface; 2]) -> bool {
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] when the marcher's own bound
 /// takes more than its half of the deflection and the policy will not accept it.
 ///
-/// The marcher's two refusals, and
-/// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed cannot be worked out at
-/// all.
+/// The marcher's two refusals.
 fn follow_the_quartic(
     run: &NamedRun,
     pair: [Surface; 2],
+    seeds: [Point; 2],
     deflection: Deflection,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<PointsAlongACrossing> {
     let half_the_budget = deflection.length() / 2.0;
     let surfaces = [&pair[0], &pair[1]];
-    let seed = the_seed_this_run_is_picked_up_at(run, &pair, log)?;
+    let seed = the_seed_this_run_is_picked_up_at(run, &pair, seeds, log)?;
 
     let walked = march(
         surfaces,
@@ -389,11 +524,11 @@ fn follow_the_quartic(
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces pick
-/// both loops or neither, and [`Error::CannotWorkOutHowBigACrossingIs`] when a
-/// seed cannot be worked out at all.
+/// both loops or neither.
 fn the_seed_this_run_is_picked_up_at(
     run: &NamedRun,
     pair: &[Surface; 2],
+    seeds: [Point; 2],
     log: &mut ProvenanceLog,
 ) -> Result<Point> {
     let surfaces = [&pair[0], &pair[1]];
@@ -402,72 +537,26 @@ fn the_seed_this_run_is_picked_up_at(
         EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
     };
 
-    let mut seeds = Vec::new();
-    for seed in where_a_quartic_can_be_picked_up(pair)? {
+    let mut settled_seeds = Vec::new();
+    for seed in seeds {
         let (settled, off) = settled_with_a_bound(surfaces, seed)?;
         if picked_by.is_empty() || every_half_space_holds(picked_by, settled, off, log) {
-            seeds.push(settled);
+            settled_seeds.push(settled);
         }
     }
-    match (picked_by.is_empty(), seeds.as_slice()) {
+    match (picked_by.is_empty(), settled_seeds.as_slice()) {
         (true, [first, ..]) => Ok(*first),
         (false, [only]) => Ok(*only),
         _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
     }
 }
 
-/// One point near each piece a degree-four crossing can come in, for the marcher
-/// to start from.
+/// The two places a ball reaches furthest along a pipe's axis, one on each of
+/// the two loops it can leave.
 ///
 /// **Where the two pieces are pulled apart matters.** A ball and a pipe leave
 /// two loops either side of the plane through the centre square to the axis, so
-/// the two seeds are the far ends of the same reach along that axis. Two pipes
-/// leave two loops either side of the plane the naming half picked them apart
-/// with, and reaching both of them means walking round the **thinner** of the
-/// two: on the fatter one the same two loops show up as two arcs of the same
-/// sweep, and a pair of seeds taken there would both land on one of them.
-///
-/// # Errors
-///
-/// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed comes out as something
-/// that is not a point.
-fn where_a_quartic_can_be_picked_up(pair: &[Surface; 2]) -> Result<Vec<Point>> {
-    let seeds = match pair {
-        [Surface::Sphere(ball), Surface::Cylinder(pipe)]
-        | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
-            where_a_ball_reaches_across_a_pipe(ball, pipe)
-        }
-        [Surface::Cylinder(one), Surface::Cylinder(other)] => {
-            let certified = |pipe: &Cylinder| pipe.radius() / pipe.axis().direction().length();
-            // Two pipes of the same certified radius are neither thinner, and
-            // then which one is walked round has to be settled by the numbers
-            // they store rather than by which of them the caller wrote first —
-            // otherwise the seed, and the vertex `where_a_closed_crossing_starts`
-            // puts on the loop, move when the pair is swapped.
-            let mine_is_thinner = match certified(one).total_cmp(&certified(other)) {
-                Ordering::Equal => {
-                    Surface::Cylinder(*one).how_it_sorts_against(&Surface::Cylinder(*other))
-                        != Ordering::Greater
-                }
-                Ordering::Less => true,
-                Ordering::Greater => false,
-            };
-            if mine_is_thinner {
-                where_one_pipe_reaches_across_another(one, other)
-            } else {
-                where_one_pipe_reaches_across_another(other, one)
-            }
-        }
-        [first, second] => panic!("{first:?} and {second:?} do not cross in a quartic"),
-    };
-    if seeds.iter().any(|seed| !seed.is_finite()) {
-        return Err(Error::CannotWorkOutHowBigACrossingIs);
-    }
-    Ok(seeds.to_vec())
-}
-
-/// The two places a ball reaches furthest along a pipe's axis, one on each of
-/// the two loops it can leave.
+/// the two seeds are the far ends of the same reach along that axis.
 ///
 /// Both are on the ray from the axis out towards the ball's centre, where the
 /// crossing runs furthest from the plane through the centre square to the axis.
@@ -497,6 +586,12 @@ fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point;
 /// `thin` is walked round to the angle where the other pipe reaches furthest,
 /// and the two roots of the quadratic in how far along its axis the point sits
 /// are the two seeds. Where the pair leaves only one loop both roots are on it.
+///
+/// **Which of the two is walked round matters**, which is why the caller sorts
+/// them. Two pipes leave two loops either side of the plane the naming half
+/// picked them apart with, and reaching both of them means walking round the
+/// thinner: on the fatter one the same two loops show up as two arcs of the
+/// same sweep, and a pair of seeds taken there would both land on one of them.
 fn where_one_pipe_reaches_across_another(thin: &Cylinder, fat: &Cylinder) -> [Point; 2] {
     let [thin_way, fat_way] = [thin, fat].map(|pipe| {
         let along = pipe.axis().direction();
@@ -601,121 +696,6 @@ fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Su
         EdgeRun::Straight
         | EdgeRun::RightRoundWhereItsFacesCross
         | EdgeRun::PartOfWhereItCrosses { .. } => [*along[0], *along[1]],
-    }
-}
-
-/// The conic the crossing of these two surfaces lies on, or `None` when the
-/// crossing is straight and its two ends are the whole of it.
-///
-/// All four planar pairs come down to a plane and a quadric, and two balls come
-/// down to that too — through the radical plane, which is built **here** and not
-/// in the naming half, because it is only ever needed to work points out
-/// (§27.1).
-///
-/// # Errors
-///
-/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
-/// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for the pairs the
-/// naming half refuses under those same two names. **The evaluator refuses
-/// exactly what the namer refuses**, which is the whole of what this arm is for.
-///
-/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for the three pairs that cross
-/// in a degree-four curve. [`walk`] and [`where_a_closed_crossing_starts`] hand
-/// every one of those to the marcher before reaching here, so nothing in this
-/// crate sees it — but it is the true answer to the question this function asks
-/// rather than a guard, and a `match` arm that crashes is one forgotten check
-/// away from being a caller's crash.
-///
-/// # This used to panic, and a real file reached it
-///
-/// The panic said the marcher had already taken every degree-four pair, and
-/// [`a_crossing_that_runs_to_a_quartic`] named three: a ball against a pipe, and
-/// two pipes. A cone and a torus landed after it was written and neither was
-/// added, so a pipe running into a bend — two faces a STEP file states outright
-/// — fell past every conic arm into the panic, reached from `Import::read` on a
-/// KiCad file. [`NamedRun`] is public and `Model` is `Deserialize`, so "no
-/// caller builds such a run" was never a claim about callers.
-fn the_conic_between(
-    pair: [Surface; 2],
-    run: &NamedRun,
-    log: &mut ProvenanceLog,
-) -> Result<Option<Conic>> {
-    match pair {
-        [Surface::Plane(_), Surface::Plane(_)] => Ok(None),
-        [Surface::Plane(flat), Surface::Sphere(ball)]
-        | [Surface::Sphere(ball), Surface::Plane(flat)] => {
-            where_a_plane_cuts_a_ball(&flat, &ball).map(Some)
-        }
-        // A plane along a pipe's axis cuts it in straight lines, and a run that
-        // is one of those is picked out by a half-space rather than being
-        // `Straight`, so it reaches here and there is no ellipse to build.
-        [Surface::Plane(flat), Surface::Cylinder(pipe)]
-        | [Surface::Cylinder(pipe), Surface::Plane(flat)] => {
-            if flat.normal().dot(pipe.axis().direction()) == 0.0 {
-                return Ok(None);
-            }
-            where_a_plane_cuts_a_pipe(&flat, &pipe).map(Some)
-        }
-        // The only shape a plane and a cone cross in that reaches here is the
-        // ellipse; the four that are not one closed curve are refused by name
-        // before a run exists (`where_a_plane_and_a_cone_cross`), and the fifth,
-        // a plane through the apex and nothing else, is a touching point and not
-        // a curve.
-        [Surface::Plane(flat), Surface::Cone(cone)]
-        | [Surface::Cone(cone), Surface::Plane(flat)] => {
-            where_a_plane_cuts_a_cone(&flat, &cone).map(Some)
-        }
-        // A plane cuts a torus in **two** circles as often as in one, and which
-        // of them this run is is the picker's to say — which is why this is the
-        // one arm here that reads the run rather than only the pair.
-        [Surface::Plane(flat), Surface::Torus(ring)]
-        | [Surface::Torus(ring), Surface::Plane(flat)] => {
-            where_a_plane_cuts_a_torus(&flat, &ring, run, log).map(Some)
-        }
-        // **In a fixed order, and it is not tidiness.** `where_two_balls_cut`
-        // builds the radical plane through the gap between the two centres, so
-        // the pair the other way round gets that plane reversed, a different
-        // `basis` out of it, and a whole different starting angle — measured,
-        // forty of forty swapped pairs walked into different points, and not by
-        // a rounding. The other three conic pairs are already order-free
-        // because both arms of their `match` call the same function with the
-        // same arguments. This makes the fourth one so, which is what
-        // `where_a_closed_crossing_starts` needs and what §31.3 assumed
-        // (§34).
-        [Surface::Sphere(one), Surface::Sphere(other)] => {
-            let (first, second) = if Surface::Sphere(one)
-                .how_it_sorts_against(&Surface::Sphere(other))
-                == Ordering::Greater
-            {
-                (other, one)
-            } else {
-                (one, other)
-            };
-            where_two_balls_cut(&first, &second).map(Some)
-        }
-        // The same two names `intersect` gives these pairs, and in the same
-        // order — a cone against a torus is the torus's refusal in both places,
-        // so the two halves never disagree about what a pair is called.
-        [
-            Surface::Cone(_),
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
-        ]
-        | [Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)] => {
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
-        }
-        [
-            Surface::Torus(_),
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
-        ]
-        | [
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
-            Surface::Torus(_),
-        ] => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-        [Surface::Sphere(_), Surface::Cylinder(_)]
-        | [
-            Surface::Cylinder(_),
-            Surface::Sphere(_) | Surface::Cylinder(_),
-        ] => Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
     }
 }
 
@@ -1587,7 +1567,15 @@ mod tests {
 
         for [one, other] in every_pair_that_crosses_in_a_closed_curve() {
             let (forwards, backwards) = (walked([&one, &other]), walked([&other, &one]));
-            if a_crossing_that_runs_to_a_quartic(&[one, other]) {
+            let marched = matches!(
+                what_a_run_between_these_two_lies_on(
+                    [one, other],
+                    &whole,
+                    &mut ProvenanceLog::new()
+                ),
+                Ok(WhatARunLiesOn::QuarticPickedUpAt(_))
+            );
+            if marched {
                 let seed = where_a_closed_crossing_starts(
                     &whole,
                     [&one, &other],
