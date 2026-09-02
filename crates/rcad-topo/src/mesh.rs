@@ -877,9 +877,7 @@ impl BuildingAMesh {
                 }
             })?);
         }
-        let (outer, holes) = loops
-            .split_first()
-            .ok_or(Invalid::FaceHasNoWires)?;
+        let (outer, holes) = loops.split_first().ok_or(Invalid::FaceHasNoWires)?;
 
         let domain = TrimmedDomain::new(
             *stored,

@@ -1308,7 +1308,7 @@ mod tests {
             .expect("a radius"),
         );
         let straight = NamedRun::the_whole_of(EdgeRun::Straight)
-                .expect("a straight run is never a piece with nothing picking it");
+            .expect("a straight run is never a piece with nothing picking it");
 
         for [one, other] in [[&ground, &wall], [&wall, &pipe], [&pipe, &beside_it]] {
             assert_eq!(
