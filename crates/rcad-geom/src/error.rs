@@ -461,22 +461,22 @@ pub enum Error {
 
     /// A straight line meets a torus in a quartic, and nothing here solves one.
     ///
-    /// A **gap**. Where three surfaces meet is worked out by crossing two of
-    /// them into a line and asking the third where that line cuts it, and every
-    /// surface but a torus answers with a **quadratic** — one equation in one
-    /// unknown of degree at most two, which is §31.2's row 11 and is what
-    /// [`MeetOfThree`](crate::MeetOfThree) is written around. A torus answers
-    /// with a quartic and there are up to four meets rather than two.
+    /// **Nothing raises this any more, and it is kept because it is public.** A
+    /// straight line meeting a torus is solved: `real_roots` isolates the
+    /// quartic's real roots off its derivative and settles every sign exactly,
+    /// [`MeetOfThree::At`](crate::MeetOfThree::At) carries up to four places, and
+    /// `where_a_line_meets_a_torus.rs` walks nought, one, two, three and four of
+    /// them. Of the three fixes this doc used to weigh, none was taken: (a)
+    /// Ferrari on interval coefficients was not needed, (b) widening
+    /// `MeetOfThree` was, and (c) — isolating the roots — is what happened, and
+    /// it did not turn an exact question into a search: the search picks the
+    /// brackets and exact arithmetic decides every sign inside them.
     ///
-    /// The family of fixes: (a) solve the quartic, which is Ferrari's method on
-    /// interval coefficients — the roots come back as boxes and a line nearly
-    /// tangent to the tube widens them past use, but so does a nearly-tangent
-    /// line on a quadric already, so this is the same trade one degree up; (b)
-    /// widen `MeetOfThree` from two meets to four, which every reader of it
-    /// grows an arm for; (c) isolate the roots by bisection under the policy,
-    /// which turns an exact question into a search. **(a) plus (b) together are
-    /// the shortest**, and neither can land without the other. Its consumer is a
-    /// corner where two planes meet a torus.
+    /// What is left of the gap is narrower and is
+    /// [`Error::Undecidable`](Error::Undecidable) rather than this: a line that
+    /// touches the tube at a place no `f64` names cannot be told from one that
+    /// all but touches it, because neither has a sign to change. `real_roots`'s
+    /// module doc names that family of fixes.
     #[error("a straight line meets this torus in a quartic, and nothing here solves one")]
     WhereALineMeetsATorusIsAQuartic,
 

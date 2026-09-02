@@ -41,7 +41,10 @@ use smallvec::{SmallVec, smallvec};
 use crate::enclosure::{quotient_or_everything, root_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{Question, ask, intersect, squared_length_of_a_cross_product};
-use crate::{Cone, Cylinder, Error, Plane, PlaneAgreement, Result, Sphere, Surface, SurfaceMeet};
+use crate::real_roots::{Maybe, where_a_polynomial_is_zero};
+use crate::{
+    Cone, Cylinder, Error, Plane, PlaneAgreement, Result, Sphere, Surface, SurfaceMeet, Torus,
+};
 
 /// The name the three-surface meet goes by in provenance records.
 pub const WHERE_THREE_SURFACES_MEET: &str = "where three surfaces meet";
@@ -57,8 +60,11 @@ pub const WHERE_THREE_SURFACES_MEET: &str = "where three surfaces meet";
 pub enum MeetOfThree {
     /// They have no point in common at all.
     Nowhere,
-    /// They meet at these points — one, or two — running along the line the two
-    /// planes cross in.
+    /// They meet at these points — one, two, three or four — running along the
+    /// line the two planes cross in.
+    ///
+    /// Three and four take a torus: a straight line meets a quadric twice and a
+    /// ring four times, which is the whole of what makes a torus not a quadric.
     ///
     /// Each is a box the true meeting point is somewhere inside, because
     /// solving a quadratic divides and a quotient of two ranges almost never
@@ -98,19 +104,18 @@ pub fn meet_of_three_surfaces(
     if let Surface::Plane(last) = &third {
         return where_three_planes_meet(one, other, last, policy, log);
     }
-    // **A torus is the only surface here that a line does not meet twice**, and
-    // the refusal has to be taken before a quadratic is asked for rather than
-    // inside the asking. A torus sorts after every other kind, and two of the
-    // three must be planes to get this far, so a torus anywhere in the triple is
-    // `third` — which is what makes this one check cover every route in.
-    if let Surface::Torus(_) = &third {
-        return Err(Error::WhereALineMeetsATorusIsAQuartic);
-    }
-
     let at = the_places_these_three_sit(&first, &second, &third);
     let Some(line) = the_line_two_planes_cross_in(one, other, &at, policy, log)? else {
         return what_a_third_surface_leaves_of_one_plane(one, other, &third, &at, policy, log);
     };
+    // **A torus is the only surface here that a line does not meet twice**, and
+    // it takes its own route rather than a quadratic's. A torus sorts after
+    // every other kind, and two of the three must be planes to get this far, so
+    // a torus anywhere in the triple is `third` — which is what makes this one
+    // check cover every route in.
+    if let Surface::Torus(ring) = &third {
+        return where_a_line_meets_a_ring(&line, ring, &at, policy, log);
+    }
     let quadratic = how_a_quadric_cuts_the_line(&line, &third)
         .ok_or_else(|| an_exact_step_could_not_be_taken(&at))?;
     where_a_line_meets_a_quadric(&line, &quadratic, &at, policy, log)
@@ -347,6 +352,152 @@ fn the_line_two_planes_cross_in(
     }
 }
 
+/// Where the line meets a ring: nowhere, or at up to four points.
+///
+/// **A line never lies along a torus**, which is what makes this shorter than
+/// the quadric route below it: the leading coefficient is `(w·w)(D·D)²` for a
+/// direction `D` two crossing planes handed over and an axis direction a stored
+/// [`Axis`](crate::Axis) normalised, and neither of those is zero. So the
+/// quartic is a quartic, never the zero polynomial, and there is no
+/// [`MeetOfThree::MoreThanAPoint`] to answer with.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when a product the exact arithmetic needs falls out of
+/// `f64`'s range, and when the line all but touches the ring — a **gap** and not
+/// a limit, and [`real_roots`](crate::real_roots) names the family of fixes. A
+/// touch that lands on an `f64` is answered rather than refused, and a bend of
+/// pipe's own seam is that case.
+fn where_a_line_meets_a_ring(
+    line: &WhereTwoPlanesCross,
+    ring: &Torus,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    let quartic =
+        how_a_ring_cuts_the_line(line, ring).ok_or_else(|| an_exact_step_could_not_be_taken(at))?;
+    assert!(
+        matches!(quartic[0].sign(), Decision::Pos),
+        "a line's direction and a ring's axis both have length, so this is above zero"
+    );
+    let found =
+        where_a_polynomial_is_zero(&quartic).ok_or_else(|| an_exact_step_could_not_be_taken(at))?;
+
+    let mut places: SmallVec<[PredicatePoint; 2]> = found
+        .at
+        .iter()
+        .map(|step| the_point_at(line, *step))
+        .collect();
+    for unsure in &found.or_maybe_at {
+        // The quartic is a length to the fourth and `Measures` stops at a
+        // volume; `where_three_planes_meet`'s note says why the nearest arm is
+        // taken rather than a new one invented here, and §28 says what should
+        // replace the lot.
+        let touching = ask(
+            &how_far_it_reaches(unsure),
+            Measures::Volume,
+            at,
+            policy,
+            log,
+        )?;
+        assert!(
+            matches!(touching, Decision::Pos | Decision::Neg | Decision::Zero),
+            "a sign question answers with a sign: {touching:?}"
+        );
+        if matches!(touching, Decision::Zero) {
+            places.push(the_point_at(line, unsure.inside));
+        }
+    }
+    if places.is_empty() {
+        return Ok(MeetOfThree::Nowhere);
+    }
+    Ok(MeetOfThree::At(places))
+}
+
+/// The quartic a ring cuts out of the line, highest power first, or `None` when
+/// a product it needs falls out of `f64`'s range.
+///
+/// A ring's own sign expression is `(w·w)(x·x + R² − r²)² − 4R²‖x × w‖²` for
+/// `x = p − centre`. Writing the line as `(V + s·D)/m` and multiplying the whole
+/// of it by `m⁴` — positive, so no sign moves — turns that into
+///
+/// ```text
+/// (w·w)·A(s)²  −  4R²m²·B(s)
+/// A(s) = (V + sD)·(V + sD) + m²(R² − r²)
+/// B(s) = ‖(V + sD) × w‖²
+/// ```
+///
+/// with `A` and `B` quadratics in `s`, so the whole is a quartic whose every
+/// coefficient is a polynomial in the numbers as stored. **Both radii are
+/// squared against `m²` and neither against `w·w`**, which is the same rule
+/// [`Torus`] is certified under and the opposite of a pipe's: a torus's stored
+/// radii are the numbers the caller wrote, and a discriminant that scaled them
+/// by the axis's length would be certified about a different ring from the one
+/// the sign predicate is (§27.1).
+fn how_a_ring_cuts_the_line(line: &WhereTwoPlanesCross, ring: &Torus) -> Option<[Exact; 5]> {
+    let along = ring.axis().direction().components();
+    let reach = the_line_offset_to(line, ring.centre().coordinates())?;
+    let axis_squared = Exact::dot_of(along, along)?;
+    let divisor_squared = line.divided_by.times(&line.divided_by)?;
+    let ring_squared = Exact::product_of(ring.ring_radius(), ring.ring_radius())?;
+    let hollow = ring_squared.minus(&Exact::product_of(ring.tube_radius(), ring.tube_radius())?);
+
+    let bulge = [
+        Exact::squared_length_of(&line.direction)?,
+        twice(&Exact::dot_of_two_exact(&reach, &line.direction)?)?,
+        Exact::squared_length_of(&reach)?.plus(&divisor_squared.times(&hollow)?),
+    ];
+    let sideways = Exact::cross_of(&line.direction, along)?;
+    let across = Exact::cross_of(&reach, along)?;
+    let round = [
+        Exact::squared_length_of(&sideways)?,
+        twice(&Exact::dot_of_two_exact(&across, &sideways)?)?,
+        Exact::squared_length_of(&across)?,
+    ];
+    let four_ring_squared = twice(&twice(&ring_squared)?)?.times(&divisor_squared)?;
+
+    Some([
+        axis_squared.times(&bulge[0].times(&bulge[0])?)?,
+        axis_squared.times(&twice(&bulge[0].times(&bulge[1])?)?)?,
+        axis_squared
+            .times(
+                &bulge[1]
+                    .times(&bulge[1])?
+                    .plus(&twice(&bulge[0].times(&bulge[2])?)?),
+            )?
+            .minus(&four_ring_squared.times(&round[0])?),
+        axis_squared
+            .times(&twice(&bulge[1].times(&bulge[2])?)?)?
+            .minus(&four_ring_squared.times(&round[1])?),
+        axis_squared
+            .times(&bulge[2].times(&bulge[2])?)?
+            .minus(&four_ring_squared.times(&round[2])?),
+    ])
+}
+
+/// Twice a number, exactly, or `None` when that runs off the top of the range.
+fn twice(value: &Exact) -> Option<Exact> {
+    value.times(&Exact::of(2.0))
+}
+
+/// How far the quartic reaches over a box it turns in, as a question the cascade
+/// can ask.
+///
+/// There is no exact level here and that is the refusal, not an omission: the
+/// turning point is not an `f64`, so no exact evaluation reaches it. What level
+/// 2 hands over is a box round the height of the turn, and a policy that will
+/// not read a zero out of a box that straddles one is refused.
+fn how_far_it_reaches(
+    unsure: &Maybe,
+) -> Question<impl Fn() -> Interval + '_, impl Fn() -> Option<Exact> + '_> {
+    Question {
+        named: WHERE_THREE_SURFACES_MEET,
+        enclosing: move || unsure.how_far_it_reaches,
+        exactly: move || None,
+    }
+}
+
 /// `A·s² + 2B·s + C`, where `s` runs along the line.
 ///
 /// Kept as three exact expansions and never as one polynomial, because the sign
@@ -385,15 +536,15 @@ impl Quadratic {
 ///
 /// On a plane, which is not a quadric and is answered by
 /// [`where_three_planes_meet`] sixteen lines above the only call, and on a
-/// torus, which is not a quadric either and is refused by
-/// [`meet_of_three_surfaces`] two lines after that.
+/// torus, which is not a quadric either and is taken by
+/// [`where_a_line_meets_a_ring`] two lines after that.
 ///
 /// The plane arm is unreachable by adjacency — same function, same value, no
 /// branch between. **The torus arm is not**: one check covers three positions
 /// only because a torus sorts after every other kind, which is a fact about
 /// [`Surface::how_it_sorts_against`] in another file and nothing here makes
 /// anyone re-read it.
-/// `where_two_planes_and_a_ring_meet_is_refused_because_a_line_meets_it_four_times`
+/// `where_two_planes_and_a_ring_meet_is_answered_at_up_to_four_places`
 /// (`crates/rcad-geom/tests/the_shapes_a_plane_cuts_a_torus_in.rs`) walks a
 /// torus through all three positions, and two of them and three, so the claim is
 /// demonstrated rather than argued.
