@@ -178,6 +178,19 @@ impl Isometry {
     }
 
     /// Where `point` ends up.
+    ///
+    /// Within [`Isometry::POINT_ROUNDOFF`] times the largest number involved of
+    /// where the true movement would put it.
+    ///
+    /// **A movement with no turn does better than that, and something rests on
+    /// it.** It comes to one addition per coordinate and nothing else, so a
+    /// shift a caller has arranged to be exact — where Sterbenz's condition
+    /// holds, say — really does come out exact. `rcad-topo`'s mesher rests the
+    /// whole of the frame it works a far-off face out in on that (§39.7 item 2),
+    /// and it is a fact about what this delegates to rather than one this crate
+    /// arranges, so
+    /// `a_movement_with_no_turn_moves_a_point_by_one_addition_and_nothing_else`
+    /// is the demonstration rather than this sentence.
     #[must_use]
     pub fn apply_to_point(&self, point: Point) -> Point {
         self.0.transform_point(&point.into()).into()
@@ -188,6 +201,11 @@ impl Isometry {
     /// A vector is the difference between two points, so the shift cancels out
     /// and only the turn acts on it. Applying the translation here is the
     /// classic way to move a normal to the wrong place.
+    ///
+    /// A movement with no turn hands the vector straight back, bit for bit —
+    /// same demonstration as [`Isometry::apply_to_point`], and it is what keeps
+    /// a shifted pipe's axis direction and a shifted plane's normal exactly what
+    /// they were.
     #[must_use]
     pub fn apply_to_vector(&self, vector: Vector) -> Vector {
         self.0.transform_vector(&vector.into()).into()
@@ -275,6 +293,80 @@ mod tests {
 
     fn quarter_turn_about_z() -> Isometry {
         Isometry::rotation(&Axis::z(), FRAC_PI_2).unwrap()
+    }
+
+    /// §16.10 for [`Isometry::apply_to_point`]'s "one addition per coordinate
+    /// and nothing else".
+    ///
+    /// **This is a claim about a dependency and not about arithmetic written
+    /// here**, which is exactly the kind that stops being true without anybody
+    /// touching this file. `rcad-topo`'s mesher shifts a face stored far from
+    /// the origin into a frame where its numbers are small, and the whole reason
+    /// that is allowed is that the shift is *exact*; a turn of the identity that
+    /// cost a rounding would make it inexact and the mesh floor would be
+    /// understating what a point costs.
+    ///
+    /// So: over two hundred thousand draws sixty octaves wide, a shift moves a
+    /// point by exactly what adding its three components does, bit for bit, and
+    /// hands a vector straight back.
+    #[test]
+    fn a_movement_with_no_turn_moves_a_point_by_one_addition_and_nothing_else() {
+        let mut seed = 0x1234_5678_9abc_def0_u64;
+        let mut next_bits = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let a_number = |bits: u64| {
+            let mantissa = (bits >> 11) as f64 / (1u64 << 53) as f64;
+            let octave = ((bits >> 3) % 60) as i32 - 30;
+            let sign = if bits & 1 == 0 { 1.0 } else { -1.0 };
+            sign * (1.0 + mantissa) * 2.0f64.powi(octave)
+        };
+
+        for _ in 0..200_000 {
+            let by = Vector::new(
+                a_number(next_bits()),
+                a_number(next_bits()),
+                a_number(next_bits()),
+            );
+            let shift = Isometry::translation(by).expect("a finite shift");
+
+            let place = Point::new(
+                a_number(next_bits()),
+                a_number(next_bits()),
+                a_number(next_bits()),
+            );
+            let moved = shift.apply_to_point(place).coordinates();
+            for (axis, (was, along)) in place
+                .coordinates()
+                .into_iter()
+                .zip(by.components())
+                .enumerate()
+            {
+                assert_eq!(
+                    moved[axis].to_bits(),
+                    (was + along).to_bits(),
+                    "shifting {place:?} by {by:?} did something other than add \
+                     along coordinate {axis}"
+                );
+            }
+
+            let way = Vector::new(
+                a_number(next_bits()),
+                a_number(next_bits()),
+                a_number(next_bits()),
+            );
+            let turned = shift.apply_to_vector(way);
+            for (moved, was) in turned.components().into_iter().zip(way.components()) {
+                assert_eq!(
+                    moved.to_bits(),
+                    was.to_bits(),
+                    "a shift with no turn changed the direction {way:?}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -1886,8 +1886,9 @@ fn how_far_one_coordinate_can_be_shifted_for_nothing(low: f64, high: f64) -> f64
 /// piece of a crossing this edge is. [`HalfSpace`](rcad_geom::HalfSpace)'s own
 /// doc says a strayed offset is allowed, because it moves the flat surface along
 /// its own normal without turning it and so can only be wrong about *where
-/// between* two pieces it sits (§29.8) — and to be wrong at all it would have to
-/// stray further than the two pieces are apart, which here means an arc under
+/// between* two pieces it sits (§29.8). To be wrong at all, the middle of the
+/// piece being asked about would have to sit within the stray of the picking
+/// surface — on a circle of radius one shifted a billion units, an arc under
 /// about `1e-3` radians. Worth knowing rather than hidden: before the shift the
 /// same decision was made against a point box `POINT_ALONG_A_CROSSING_ROUNDOFF`
 /// wide in the *world's* numbers, fifty-seven times this, so nothing this can
