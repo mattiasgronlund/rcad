@@ -1249,3 +1249,131 @@ fn a_bar_notched_by_a_block_meshes_into_a_closed_surface() {
         );
     }
 }
+
+/// §39.7 item 2, and the seventh of §39.4's undemonstrated refusals — the only
+/// one of the seven that is four public calls away rather than a hand-built
+/// broken model.
+///
+/// **A boolean that removes no material must not make the answer coarser than
+/// the input.** A bar built a billion units up its own axis has a mesh floor,
+/// because a point put on its skin is carried into place by a movement that
+/// rounds against the billion (`a_ball_a_long_way_out_cannot_be_meshed_as_finely
+/// _as_one_at_the_origin` is that on its own). Cutting it with a block fifty
+/// units away removes nothing at all — and used to raise that floor **77-fold**,
+/// from `4.00e-6` to `3.07e-4`, because the fuse bakes placement into the
+/// surface it writes (§17.3) and the crossing evaluator then charges its
+/// rounding against the billion instead of against the five the bar is long.
+/// Measured, the ratio was `76.85181687573629`, which is
+/// `(POINT_ALONG_A_CROSSING_ROUNDOFF / 0.1875 + POINT_ROUNDOFF) / POINT_ROUNDOFF`
+/// to six figures.
+///
+/// The mesher now works a face stored far from the origin out in a frame it
+/// shifts it into, and the shift is exact, so what is left is the neighbouring
+/// surfaces the shift moves without asking:
+/// `(POINT_ROUNDOFF + SURFACE_AFTER_SHIFTING_ROUNDOFF) / POINT_ROUNDOFF`, which
+/// is `26/18` and is what this holds it to.
+///
+/// Both halves are asserted from the front door and neither is a tolerance: the
+/// floor is read out of the refusal's own `closest`, and the deflection §39.3
+/// says used to be refused is asked for and answered.
+#[test]
+fn a_boolean_that_cuts_nothing_off_a_bar_does_not_make_it_much_coarser_to_mesh() {
+    let a_billion = 1e9;
+    let mut model = a_model();
+    let bar = model
+        .add_round_bar(
+            1.0,
+            5.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, a_billion)).expect("a long way"),
+        )
+        .expect("a bar a billion units up its own axis");
+    let before = the_finest_mesh_this_solid_can_be_asked_for(&model, bar);
+    let whole = volume_of(&model, bar);
+
+    let block = model
+        .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a block eight across");
+    model.place_solid(
+        block,
+        &Isometry::translation(Vector::new(50.0, 0.0, a_billion)).expect("a long way"),
+    );
+    let fused = model
+        .fuse(
+            &[bar],
+            &[block],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a block fifty units away cuts nothing off the bar");
+    let solids = fused.solids();
+    assert_eq!(solids.len(), 1, "nothing was cut, so one solid comes back");
+    let cut = solids[0];
+
+    let after = the_finest_mesh_this_solid_can_be_asked_for(&model, cut);
+    let coarser = after / before;
+    println!("mesh floor {before:e} before the fuse, {after:e} after, {coarser} times coarser");
+    assert!(
+        (1.0..=26.0 / 18.0).contains(&coarser),
+        "a boolean that cut nothing made the bar {coarser} times coarser to \
+         mesh, against the 26/18 the shift into the meshing frame costs"
+    );
+
+    // Not bit for bit: the same triangles are summed in two frames, so the two
+    // answers differ in the last place or two and in nothing else.
+    let kept = volume_of(&model, cut);
+    assert!(
+        (kept - whole).abs() <= 8.0 * f64::EPSILON * whole,
+        "the point of this test is a boolean that removed no material, and it \
+         went from {whole} to {kept}"
+    );
+
+    // §39.3's own two numbers, from the other side: this used to refuse
+    // everything under 3.07e-4, and 1e-5 is what the bar meshed at before the
+    // fuse and must mesh at after it.
+    let asked = 1e-5;
+    assert!(before < asked, "the bar itself meshes at {asked}");
+    let mesh = model
+        .solid(cut)
+        .mesh(
+            Deflection::of(asked).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar a boolean cut nothing off meshes as finely as the bar did");
+    the_mesh_closes_up(&model, cut, &mesh, asked);
+}
+
+/// The floor under a deflection, read out of the refusal that publishes it.
+///
+/// Asking for a length no arithmetic reaches and reading `closest` off the
+/// refusal is the only way a caller can find out, which is why
+/// [`Error::DeflectionBelowWhatAMeshCanReach`] carries it.
+fn the_finest_mesh_this_solid_can_be_asked_for(model: &Model, solid: SolidKey) -> f64 {
+    let refusal = model.solid(solid).mesh(
+        Deflection::of(1e-30).expect("a positive length"),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let Err(Error::DeflectionBelowWhatAMeshCanReach { closest, .. }) = refusal else {
+        panic!("a curved solid a billion units out has a floor, and got {refusal:?}")
+    };
+    assert!(
+        closest > 0.0 && closest.is_finite(),
+        "a floor of {closest} is not a floor"
+    );
+    closest
+}
+
+/// How much a solid holds, worked out over a mesh fine enough to be steady.
+fn volume_of(model: &Model, solid: SolidKey) -> f64 {
+    model
+        .solid(solid)
+        .measure(
+            Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar a billion units out measures")
+        .volume()
+}

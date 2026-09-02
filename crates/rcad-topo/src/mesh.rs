@@ -20,7 +20,8 @@
 use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{
-    Deflection, Isometry, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, Surface, Vector,
+    Deflection, Isometry, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Point,
+    SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector,
 };
 use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate};
 use rcad_predicates::{
@@ -309,11 +310,13 @@ impl BuildingAMesh {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
-        let stored = face.surface().transformed(&face.location().inverse());
+        let stored = face
+            .surface()
+            .transformed(&the_frame_this_face_is_meshed_in(face));
         if stored.as_plane().is_some() {
             return Ok(());
         }
-        let room = self.deflection.length() - how_far_placing_this_face_rounds(face);
+        let room = self.deflection.length() - how_far_moving_this_face_rounds(face);
         for wire in face.wires() {
             for coedge in wire.coedges() {
                 let edge = coedge.edge();
@@ -356,10 +359,11 @@ impl BuildingAMesh {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Vec<u32>> {
-        let back = face.location().inverse();
+        let back = the_frame_this_face_is_meshed_in(face);
         let (from, to) = ends_in_the_stored_order(edge);
         let run = NamedRun::new(
-            edge.run().clone(),
+            edge.run()
+                .shifted(the_shift_this_face_is_meshed_with(face))?,
             [from, to]
                 .map(|end| PredicatePoint::from(back.apply_to_point(end.point()).coordinates())),
         )?;
@@ -408,8 +412,8 @@ impl BuildingAMesh {
 
         self.worst = self
             .worst
-            .max(along_it.deviation().magnitude() + how_far_placing_this_face_rounds(face));
-        let there = face.location();
+            .max(along_it.deviation().magnitude() + how_far_moving_this_face_rounds(face));
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         Ok(points
             .into_iter()
             .map(|along| {
@@ -421,8 +425,10 @@ impl BuildingAMesh {
 
     /// Cut one face into triangles and put them in the solid's own table.
     fn cut_up(&mut self, face: FaceView<'_>, log: &mut ProvenanceLog) -> Result<()> {
-        let stored = face.surface().transformed(&face.location().inverse());
-        let room = self.deflection.length() - how_far_placing_this_face_rounds(face);
+        let stored = face
+            .surface()
+            .transformed(&the_frame_this_face_is_meshed_in(face));
+        let room = self.deflection.length() - how_far_moving_this_face_rounds(face);
 
         let mut walked = Vec::with_capacity(face.wire_count());
         for wire in face.wires() {
@@ -600,7 +606,7 @@ impl BuildingAMesh {
             [0, 1, 2, 3].map(|step| from + way * f64::from(step) * whole_turn / 4.0);
         let along = quarters.map(|at| nearest_longitude(cap, at));
 
-        let there = face.location();
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         let at_the_pole = stored.point_at(from, towards);
         if !at_the_pole.is_finite() {
             return Ok(None);
@@ -661,7 +667,7 @@ impl BuildingAMesh {
         cap: &WalkedLoop,
     ) -> Option<f64> {
         let pole = where_this_surface_pinches(stored)?;
-        let back = face.location().inverse();
+        let back = the_frame_this_face_is_meshed_in(face);
         let mine = face.surface();
         let coedge = face.wires().flat_map(WireView::coedges).next()?;
         let partner = self
@@ -802,7 +808,7 @@ impl BuildingAMesh {
                 most: MOST_POINTS_A_MESH_WILL_HOLD,
             });
         }
-        let there = face.location();
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         let mut along = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
@@ -870,7 +876,7 @@ impl BuildingAMesh {
             });
         }
 
-        let there = face.location();
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         let mut along_the_cut = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
@@ -930,7 +936,7 @@ impl BuildingAMesh {
         // Everything past the corners this patch handed over is a point the
         // refinement put strictly inside it, so it belongs to this patch alone
         // and nothing else will ever name it (§25.1).
-        let there = face.location();
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         for corner in &cut.corners()[corner_is.len()..] {
             let inside = stored.point_at(corner[0], corner[1]);
             corner_is.push(self.remember(there.apply_to_point(inside)));
@@ -959,7 +965,7 @@ impl BuildingAMesh {
         }
         self.worst = self
             .worst
-            .max(cut.deviation().magnitude() + how_far_placing_this_face_rounds(face));
+            .max(cut.deviation().magnitude() + how_far_moving_this_face_rounds(face));
         Ok(())
     }
 
@@ -979,7 +985,7 @@ impl BuildingAMesh {
         face: FaceView<'_>,
         stored: &Surface,
     ) -> Option<WalkedLoop> {
-        let back = face.location().inverse();
+        let back = the_frame_this_face_is_meshed_in(face);
         let poles = poles_of(wire);
         let mut walk = WalkingAWire::new(
             how_far_the_longitude_wraps(stored),
@@ -1714,8 +1720,8 @@ const WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO: f64 = WHAT_THE_BOUNDARY_TAKES_OF_THE_B
 /// How far out of place a point of this face's boundary can be before any
 /// triangle has strayed anywhere, which is the floor under a deflection.
 ///
-/// **Two chains in two frames, and keeping them apart is §19 again.** The
-/// evaluator follows a crossing in the frame the face is **stored** in and
+/// **Three chains in two frames, and keeping them apart is §19 again.** The
+/// evaluator follows a crossing in the frame the face is **meshed** in and
 /// publishes [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of how far out the surfaces
 /// reach *there*; the movement that carries the point to where the solid sits
 /// rounds against how far out the face reaches *there*. A ball stored at the
@@ -1723,13 +1729,157 @@ const WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO: f64 = WHAT_THE_BOUNDARY_TAKES_OF_THE_B
 /// charging it both against the billion would put the floor under a mesh fifty
 /// times higher than the arithmetic asks for.
 ///
+/// The third is [`WHAT_SHIFTING_A_FACE_INTO_ITS_MESHING_FRAME_ROUNDS`], and a
+/// face that is already worked out where it is stored does not pay it.
+///
 /// The evaluator's share is divided by [`WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO`],
 /// because that is the fraction of the deflection it is handed and it refuses a
 /// deflection it cannot place a point inside.
 fn how_far_a_mesh_point_of_this_face_rounds(face: FaceView<'_>) -> f64 {
     POINT_ALONG_A_CROSSING_ROUNDOFF / WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO
-        * how_far_the_points_of_reach(face, &face.location().inverse())
-        + how_far_placing_this_face_rounds(face)
+        * how_far_the_points_of_reach(face, &the_frame_this_face_is_meshed_in(face))
+        + how_far_moving_this_face_rounds(face)
+}
+
+/// How far out of place a point of this face can be for reasons that have
+/// nothing to do with how finely it was asked for: the movement into the frame
+/// the face is meshed in, and the movement back out of it.
+///
+/// This is what a deflection loses before any curve is refined, so it comes off
+/// the budget a boundary is refined against as well as standing in the floor.
+fn how_far_moving_this_face_rounds(face: FaceView<'_>) -> f64 {
+    how_far_placing_this_face_rounds(face)
+        + how_far_shifting_this_face_rounds(face, &the_frame_this_face_is_meshed_in(face))
+}
+
+/// The frame this face's own geometry is worked out in.
+///
+/// Usually the frame it is **stored** in, which is where §17.1 puts a face and
+/// which is what every solid this kernel builds itself keeps its curves in.
+///
+/// **But "stored" is not always near the origin.** A fuse bakes placement into
+/// the surface it writes (§17.3), and a solid read out of a file arrives in world
+/// coordinates with nothing left on it to say where it was put. The crossing
+/// evaluator charges its rounding against the biggest number it was handed, so a
+/// bar built a billion units up its own axis and then put through a boolean that
+/// cuts nothing off it went from meshing at `1e-5` to refusing everything under
+/// `3.07e-4` — a boolean that removed no material making its own answer 77 times
+/// coarser (§39.7 item 2).
+///
+/// So a face whose stored numbers are far from the origin is shifted until they
+/// are small, worked out there, and shifted back.
+/// [`a_shift_that_loses_nothing`] says how far, and its name is the point.
+///
+/// **Only a face at no placement at all is shifted**, which is exactly the fused
+/// and the imported one. A face that carries a placement is already worked out
+/// in a frame somebody chose for it, and composing a shift onto a movement that
+/// turns as well as shifts is no longer a subtraction one coordinate at a time —
+/// which is the whole of what makes the shift exact.
+fn the_frame_this_face_is_meshed_in(face: FaceView<'_>) -> Isometry {
+    if face.location() != Isometry::identity() {
+        return face.location().inverse();
+    }
+    a_shift_that_loses_nothing(face).unwrap_or_else(Isometry::identity)
+}
+
+/// How far the frame this face is meshed in was shifted off the frame it is
+/// stored in, which is nothing at all for most faces.
+///
+/// **An [`EdgeRun`](rcad_geom::EdgeRun) is written in the frame its face is
+/// stored in and has to be shifted with it.** A ball's seam is the plane its
+/// meridian lies in together with the half-space picking one half of it, and a
+/// ball worked out somewhere else with its seam left where it was picks a piece
+/// of a crossing that is not there.
+fn the_shift_this_face_is_meshed_with(face: FaceView<'_>) -> Vector {
+    if face.location() != Isometry::identity() {
+        return Vector::zero();
+    }
+    the_frame_this_face_is_meshed_in(face).translation_part()
+}
+
+/// A shift down the coordinate axes that brings this face's own numbers near the
+/// origin, or `None` when there is nothing there to gain.
+///
+/// The numbers are the face's corners and the point its surface is placed by — a
+/// ball's centre, a pipe's axis origin — taken one coordinate at a time, and
+/// [`how_far_one_coordinate_can_be_shifted_for_nothing`] decides each.
+///
+/// **A flat face is never shifted**: its mesh is drawn through corners the model
+/// already holds and rounds nothing, so [`how_far_the_points_of_reach`] gives it
+/// a floor of zero wherever it sits.
+fn a_shift_that_loses_nothing(face: FaceView<'_>) -> Option<Isometry> {
+    let placed_by = match face.surface() {
+        Surface::Plane(_) => return None,
+        Surface::Sphere(ball) => ball.centre(),
+        Surface::Cylinder(pipe) => pipe.axis().origin(),
+        // A surface kind this has not been taught is worked out where it is,
+        // which is what every face did before there was a shift at all.
+        _ => return None,
+    };
+    let mut low = placed_by.coordinates();
+    let mut high = low;
+    for corner in face.wires().flat_map(WireView::points) {
+        for (axis, coordinate) in corner.coordinates().into_iter().enumerate() {
+            low[axis] = low[axis].min(coordinate);
+            high[axis] = high[axis].max(coordinate);
+        }
+    }
+
+    let shift = [0, 1, 2]
+        .map(|axis| how_far_one_coordinate_can_be_shifted_for_nothing(low[axis], high[axis]));
+    if shift == [0.0; 3] {
+        return None;
+    }
+    Isometry::translation(Vector::new(-shift[0], -shift[1], -shift[2])).ok()
+}
+
+/// How much can be taken off every number between `low` and `high` without
+/// losing a bit of any of them.
+///
+/// **It loses nothing, and that is a condition rather than a hope.** A coordinate
+/// is moved only when every number in it has one sign and the largest is no more
+/// than twice the smallest, and it is then moved by the smallest of them. That is
+/// Sterbenz's condition — `a − b` is exact whenever `b/2 ≤ a ≤ 2b` — so each of
+/// these subtractions loses nothing and the face worked out in the shifted frame
+/// is the very same face.
+///
+/// A coordinate whose numbers straddle the origin, or spread over more than a
+/// factor of two, comes back zero: there is nothing to take off it that would
+/// make it smaller and still be exact.
+///
+/// `taking_the_smallest_of_a_run_of_numbers_off_all_of_them_loses_no_bits` is
+/// the demonstration.
+fn how_far_one_coordinate_can_be_shifted_for_nothing(low: f64, high: f64) -> f64 {
+    if low > 0.0 && high <= 2.0 * low {
+        low
+    } else if high < 0.0 && low >= 2.0 * high {
+        high
+    } else {
+        0.0
+    }
+}
+
+/// How far moving the surfaces round this face into the frame it is meshed in
+/// can put one of them from where it truly goes.
+///
+/// Zero for a face worked out where it is stored, because nothing moves.
+///
+/// **This is the neighbours' bill and not the face's own.**
+/// [`a_shift_that_loses_nothing`] is chosen from one face's numbers and is exact
+/// on them; the surface on the *other* side of an edge — the plane a bar's cap
+/// sits on, the second pipe of a crossing — is moved by the same shift without
+/// having been asked, and [`SURFACE_AFTER_SHIFTING_ROUNDOFF`] is what that
+/// costs. So does the [`EdgeRun`](rcad_geom::EdgeRun) that picks the piece.
+///
+/// **This is the whole of what a fuse's baking still costs a mesh**, and it is a
+/// factor of `(POINT_ROUNDOFF + SURFACE_AFTER_SHIFTING_ROUNDOFF) /
+/// POINT_ROUNDOFF`, which is 1.44 rather than §39.7 item 2's 77. Measured by
+/// `a_boolean_that_cuts_nothing_off_a_bar_does_not_make_it_much_coarser_to_mesh`.
+fn how_far_shifting_this_face_rounds(face: FaceView<'_>, meshed_in: &Isometry) -> f64 {
+    if *meshed_in == face.location().inverse() {
+        return 0.0;
+    }
+    SURFACE_AFTER_SHIFTING_ROUNDOFF * how_far_the_points_of_reach(face, &Isometry::identity())
 }
 
 /// How far moving this face's points from the frame it is stored in to where the
@@ -2353,5 +2503,81 @@ mod tests {
             refusal,
             Error::AWireWillNotLieFlatOnItsFace { .. }
         ));
+    }
+
+    /// §16.10 for [`how_far_one_coordinate_can_be_shifted_for_nothing`]: the
+    /// shift the mesher works a far-off face out in really does lose nothing.
+    ///
+    /// **The whole of the frame change rests on this.** A shift that lost a bit
+    /// would move the surface the points are put on, and the floor under a
+    /// deflection would be understating what a mesh point costs — which is the
+    /// defect this frame change exists to fix, arriving by a different road.
+    ///
+    /// The check is exact and not a tolerance: Knuth's two-sum hands back what an
+    /// addition threw away, to the last bit, and the claim is that it is zero.
+    /// Searched over numbers sixty octaves apart, both signs, with the runs that
+    /// are *refused* a shift counted too — a rule that shifted nothing at all
+    /// would pass this whatever it said.
+    #[test]
+    fn taking_the_smallest_of_a_run_of_numbers_off_all_of_them_loses_no_bits() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next_bits = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        // A whole fifty-three bits of mantissa, because a number with only
+        // twenty-four significant bits subtracts exactly from its neighbours
+        // whatever the rule says, and a search over those proves nothing.
+        let a_fraction = |bits: u64| (bits >> 11) as f64 / (1u64 << 53) as f64;
+        let a_number = |bits: u64| {
+            let octave = ((bits >> 20) % 60) as i32 - 30;
+            let sign = if bits & 1 == 0 { 1.0 } else { -1.0 };
+            sign * (1.0 + a_fraction(bits)) * 2.0f64.powi(octave)
+        };
+
+        let (mut shifted, mut left_alone) = (0, 0);
+        for _ in 0..20_000 {
+            // A place to draw the run around, and how far it spreads. Some
+            // spreads are inside a factor of two of the base and some are not,
+            // and the rule has to be right about both.
+            let base = a_number(next_bits());
+            let spread = 5.0 * a_fraction(next_bits());
+            let run: [f64; 8] =
+                [0, 1, 2, 3, 4, 5, 6, 7].map(|step| base * (1.0 + spread * f64::from(step) / 7.0));
+            let low = run.into_iter().fold(f64::INFINITY, f64::min);
+            let high = run.into_iter().fold(f64::NEG_INFINITY, f64::max);
+
+            let by = how_far_one_coordinate_can_be_shifted_for_nothing(low, high);
+            if by == 0.0 {
+                left_alone += 1;
+                continue;
+            }
+            shifted += 1;
+            for value in run {
+                let lost = what_an_addition_lost(value, -by);
+                assert_eq!(
+                    lost, 0.0,
+                    "taking {by} off {value} out of a run over {low}..={high} \
+                     lost {lost}"
+                );
+            }
+        }
+
+        println!("runs shifted {shifted}, runs left alone {left_alone}");
+        assert!(
+            shifted > 0 && left_alone > 0,
+            "a search where nothing was shifted, or where everything was, is \
+             not testing the rule: {shifted} shifted and {left_alone} left alone"
+        );
+    }
+
+    /// What an addition threw away, exactly — Knuth's two-sum, which holds for
+    /// any two `f64` whatever their sizes.
+    fn what_an_addition_lost(x: f64, y: f64) -> f64 {
+        let sum = x + y;
+        let x_part = sum - y;
+        (x - x_part) + (y - (sum - x_part))
     }
 }
