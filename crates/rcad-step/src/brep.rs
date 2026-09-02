@@ -210,15 +210,12 @@ impl Walk {
     /// own two coordinates.
     ///
     /// Positive means it turns the way a right hand turns about the normal. The
-    /// corners give a polygon, and a **closed** edge — a whole circle or
-    /// ellipse, which has one corner and so no polygon at all — gives its own
-    /// area, signed by which way round it is walked. Without that second term a
-    /// washer's two circular bounds both sweep exactly nothing and neither can
-    /// be told from the other.
+    /// corners give a polygon and each arc gives what it bulges past its own
+    /// chord — without which a bound made of two half-circles, whose corners are
+    /// two points and so no polygon at all, sweeps exactly nothing.
     ///
-    /// An *arc* contributes only its chord, which is a hint sometimes short by a
-    /// segment. See [`Walk::outer_bound_first`] for why a hint is all this has
-    /// to be.
+    /// See [`Walk::outer_bound_first`] for why plain `f64` is enough here and is
+    /// not enough anywhere else.
     fn area_swept_by(
         &self,
         reading: &Reading<'_>,
@@ -232,7 +229,7 @@ impl Walk {
             oriented.reverse();
         }
         let mut corners = Vec::with_capacity(oriented.len());
-        let mut round = 0.0;
+        let mut bulge = 0.0;
         for use_of_an_edge in oriented {
             let edge_curve = reading.reference_at(use_of_an_edge, "ORIENTED_EDGE", 3)?;
             let forwards =
@@ -242,13 +239,9 @@ impl Walk {
                 reading.reference_at(edge_curve, "EDGE_CURVE", 2)?,
             ];
             corners.push(self.point_of_vertex(reading, ends[usize::from(!forwards)])?);
-            if ends[0] == ends[1] {
-                let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)? == forwards;
-                round +=
-                    self.area_a_closed_curve_sweeps(reading, edge_curve, along_the_curve, flat)?;
-            }
+            bulge += self.area_an_arc_bulges_past_its_chord(reading, edge_curve, forwards, flat)?;
         }
-        let mut twice_the_area = 2.0 * round;
+        let mut twice_the_area = 2.0 * bulge;
         for step in 0..corners.len() {
             let (from, to) = (
                 flat.plane_coordinates_of(corners[step]),
@@ -259,31 +252,44 @@ impl Walk {
         Ok(twice_the_area)
     }
 
-    /// The area a whole circle or ellipse encloses, signed by which way round
-    /// the plane's normal it is walked.
+    /// How much area an arc puts between itself and its own chord, signed by
+    /// which way round the plane's normal the wire walks it.
     ///
-    /// Zero for anything else, which leaves the bound's own polygon as the whole
-    /// of the hint.
-    fn area_a_closed_curve_sweeps(
+    /// A circular arc of radius `r` spanning `φ` bulges past its chord by
+    /// `r²(φ − sin φ)/2`, which is positive for every `φ` in `(0, 2π]` — a whole
+    /// circle is `πr²` and is not a special case. What has to be got right is
+    /// *which* `φ`: two ends on a closed curve leave two arcs, and
+    /// `EDGE_CURVE.same_sense` says which of them this edge is, so the other is
+    /// `2π` minus it.
+    ///
+    /// An ellipse's `φ` here is the angle its two ends subtend rather than its
+    /// own parameter, which is the wrong angle by however far the ellipse is
+    /// from round. It stays because this is a hint: the number is never
+    /// compared against anything but zero, and an ellipse's bulge does not
+    /// change sign for being measured at the wrong angle.
+    ///
+    /// Zero for a straight and for a curve kind this reader does not name, which
+    /// leaves the corners' own polygon as the whole of the hint.
+    fn area_an_arc_bulges_past_its_chord(
         &self,
         reading: &Reading<'_>,
         edge_curve: EntityId,
-        along_the_curve: bool,
+        forwards: bool,
         flat: &Plane,
     ) -> Result<f64, Refusal> {
         let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3)?;
         let Some(held) = reading.file().instance(curve) else {
             return Ok(0.0);
         };
-        let (keyword, area) = match held.parts()[0].keyword() {
+        let (keyword, half_the_whole) = match held.parts()[0].keyword() {
             "CIRCLE" => {
                 let radius = reading.real_at(curve, "CIRCLE", 2)?;
-                ("CIRCLE", core::f64::consts::PI * radius * radius)
+                ("CIRCLE", radius * radius / 2.0)
             }
             "ELLIPSE" => {
                 let across = reading.real_at(curve, "ELLIPSE", 2)?;
                 let along = reading.real_at(curve, "ELLIPSE", 3)?;
-                ("ELLIPSE", core::f64::consts::PI * across * along)
+                ("ELLIPSE", across * along / 2.0)
             }
             _ => return Ok(0.0),
         };
@@ -293,7 +299,47 @@ impl Walk {
         if facing == 0.0 {
             return Ok(0.0);
         }
-        Ok(area * facing.signum() * if along_the_curve { 1.0 } else { -1.0 })
+        let ends = [
+            reading.reference_at(edge_curve, "EDGE_CURVE", 1)?,
+            reading.reference_at(edge_curve, "EDGE_CURVE", 2)?,
+        ];
+        let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)?;
+        let span = self.how_far_round_the_arc_goes(reading, &ends, &place, along_the_curve)?;
+        let bulge = half_the_whole * (span - span.sin());
+        Ok(if (along_the_curve == forwards) == (facing > 0.0) {
+            bulge
+        } else {
+            -bulge
+        })
+    }
+
+    /// The angle an edge's own arc turns through, in `(0, 2π]`.
+    fn how_far_round_the_arc_goes(
+        &self,
+        reading: &Reading<'_>,
+        ends: &[EntityId; 2],
+        place: &crate::geometry::Placement,
+        along_the_curve: bool,
+    ) -> Result<f64, Refusal> {
+        if ends[0] == ends[1] {
+            return Ok(core::f64::consts::TAU);
+        }
+        let from = self.point_of_vertex(reading, ends[0])? - place.origin;
+        let to = self.point_of_vertex(reading, ends[1])? - place.origin;
+        let turned = from
+            .cross(to)
+            .dot(place.axis)
+            .atan2(from.dot(to) * place.axis.dot(place.axis).sqrt());
+        let turned = if turned <= 0.0 {
+            turned + core::f64::consts::TAU
+        } else {
+            turned
+        };
+        Ok(if along_the_curve {
+            turned
+        } else {
+            core::f64::consts::TAU - turned
+        })
     }
 
     /// The `EDGE_LOOP` a bound holds, and whether the bound walks it backwards.
