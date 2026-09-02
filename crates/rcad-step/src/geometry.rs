@@ -95,7 +95,12 @@ impl<'a> Reading<'a> {
                             .to_owned(),
                     }
                 })?;
-                Ok(Surface::Cone(cone_from(id, &place, radius, written * radians)?))
+                Ok(Surface::Cone(cone_from(
+                    id,
+                    &place,
+                    radius,
+                    written * radians,
+                )?))
             }
             "TOROIDAL_SURFACE" => {
                 let position = self.reference_at(id, "TOROIDAL_SURFACE", 1)?;

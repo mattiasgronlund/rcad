@@ -43,8 +43,10 @@ fn every_file_this_kernel_wrote_itself_imports() {
             let text = a_block([side, side * 2.0, side * 4.0], unit);
             let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
             let mut log = ProvenanceLog::new();
-            let import = Import::read(&file, &Policy::certified(), &mut log)
-                .unwrap_or_else(|why| panic!("a block of side {side} in {unit} did not import: {why}"));
+            let import =
+                Import::read(&file, &Policy::certified(), &mut log).unwrap_or_else(|why| {
+                    panic!("a block of side {side} in {unit} did not import: {why}")
+                });
             import
                 .model()
                 .validate(&Policy::certified(), &mut log)
@@ -53,7 +55,10 @@ fn every_file_this_kernel_wrote_itself_imports() {
         }
     }
     println!("control: {written} / {written} imported");
-    assert_eq!(written, 44, "the control must not shrink without somebody saying so");
+    assert_eq!(
+        written, 44,
+        "the control must not shrink without somebody saying so"
+    );
 }
 
 /// What one corpus came to.
@@ -69,6 +74,7 @@ struct Tally {
     walked_past: BTreeMap<&'static str, usize>,
     units: BTreeMap<String, usize>,
     over_precise: usize,
+    corner_misses_in_spacings: Vec<f64>,
 }
 
 #[test]
@@ -120,6 +126,18 @@ fn how_often_a_real_file_imports() {
                 Err(why) => {
                     *tally.refused.entry(grouped(&why)).or_default() += 1;
                     match &why {
+                        Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn {
+                            off_by,
+                            coordinate_spacing,
+                            ..
+                        }
+                        | Refusal::ACornerIsNotOnThePlaneOfTheArcItEndsOn {
+                            off_by,
+                            coordinate_spacing,
+                            ..
+                        } => tally
+                            .corner_misses_in_spacings
+                            .push(off_by / coordinate_spacing),
                         Refusal::ASurfaceThisKernelDoesNotHold { keyword, .. } => {
                             *tally.surfaces_wanted.entry(keyword.clone()).or_default() += 1;
                         }
@@ -137,9 +155,15 @@ fn how_often_a_real_file_imports() {
 
 fn report(source: &str, files: &[PathBuf], tally: &Tally) {
     let denominator = files.len();
-    #[expect(clippy::cast_precision_loss, reason = "a percentage of a few hundred files")]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a percentage of a few hundred files"
+    )]
     let rate = 100.0 * tally.imported as f64 / denominator as f64;
-    println!("=== {source}: {} / {denominator} imported = {rate:.1}%", tally.imported);
+    println!(
+        "=== {source}: {} / {denominator} imported = {rate:.1}%",
+        tally.imported
+    );
     println!("    {} solids", tally.solids);
     println!("    units declared: {:?}", tally.units);
     println!(
@@ -150,7 +174,10 @@ fn report(source: &str, files: &[PathBuf], tally: &Tally) {
         "    {} files ask for more precision than their own numbers carry",
         tally.over_precise
     );
-    println!("    shapes this reader did not take: {:?}", tally.walked_past);
+    println!(
+        "    shapes this reader did not take: {:?}",
+        tally.walked_past
+    );
     let mut reasons: Vec<_> = tally.refused.iter().collect();
     reasons.sort_by_key(|&(name, count)| (std::cmp::Reverse(*count), name.clone()));
     for (reason, count) in reasons {
@@ -162,6 +189,64 @@ fn report(source: &str, files: &[PathBuf], tally: &Tally) {
     if !tally.curves_wanted.is_empty() {
         println!("    curves asked for: {:?}", tally.curves_wanted);
     }
+    report_the_corner_misses(&tally.corner_misses_in_spacings);
+}
+
+/// How far the worst corner of each refused file is off the curved surface the
+/// file says it is on, in that corner's own coordinate spacings.
+///
+/// **The split is the finding and it is a split.** Under one spacing the file's
+/// numbers are as close to the surface as an `f64` can be written and the
+/// refusal is about what a `Decision` can certify, not about the file. Over one
+/// spacing — and the tail runs into the tens of thousands — the file carries a
+/// modelling tolerance somebody chose, and no arithmetic anywhere would make
+/// those corners land on their surfaces.
+///
+/// Two different problems with two different answers, and a single median would
+/// hide that they are different. Both halves have to be there or this is not
+/// the corpus it was measured on.
+fn report_the_corner_misses(misses: &[f64]) {
+    if misses.is_empty() {
+        return;
+    }
+    let mut sorted = misses.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let at = |part: f64| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "an index into a few hundred"
+        )]
+        #[expect(clippy::cast_sign_loss, reason = "part is between zero and one")]
+        #[expect(clippy::cast_precision_loss, reason = "a few hundred files")]
+        let position = (part * (sorted.len() - 1) as f64) as usize;
+        sorted[position]
+    };
+    let within_a_spacing = sorted.iter().filter(|miss| **miss < 1.0).count();
+    println!(
+        "    the worst corner of each of the {} refused files, in its own coordinate spacings: \
+         least {:.3}, quartile {:.3}, median {:.3}, upper quartile {:.3}, most {:.1}",
+        sorted.len(),
+        at(0.0),
+        at(0.25),
+        at(0.5),
+        at(0.75),
+        at(1.0)
+    );
+    println!(
+        "      {within_a_spacing} of them are inside one spacing — as close as an f64 can be \
+         written — and {} are a modelling tolerance",
+        sorted.len() - within_a_spacing
+    );
+    assert!(
+        within_a_spacing > 0 && within_a_spacing < sorted.len(),
+        "this refusal is two different problems and the corpus has to hold both, or the \
+         report is describing a corpus this is not being run on"
+    );
+    assert!(
+        at(1.0) > 1000.0,
+        "a corpus whose worst corner is within a thousand spacings holds no file with a \
+         modelling tolerance in it, and both corpora do"
+    );
 }
 
 /// The name a refusal is counted under, which is the variant and never the
@@ -213,7 +298,16 @@ fn grouped(why: &Refusal) -> String {
         }
         Refusal::ThisEntityOfTheSolidWasRefused { why, .. }
         | Refusal::TheSolidTheFileDescribesIsNotOne { why, .. } => {
-            format!("the builder or the sweep: {}", first_line(&format!("{why}")))
+            format!(
+                "the builder or the sweep: {}",
+                first_line(&format!("{why}"))
+            )
+        }
+        Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn { .. } => {
+            "a corner is not on the curved face the file says it is on".to_owned()
+        }
+        Refusal::ACornerIsNotOnThePlaneOfTheArcItEndsOn { .. } => {
+            "a corner is not on the plane of the arc it ends on".to_owned()
         }
         Refusal::TheFileHasNoSize => "the file has no size".to_owned(),
         // `Refusal` is `#[non_exhaustive]` and grows; a new variant that is not

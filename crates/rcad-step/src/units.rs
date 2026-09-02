@@ -46,7 +46,8 @@ pub(crate) fn what_the_file_declared(reading: &Reading<'_>) -> Result<Declared, 
             let named = reading.references_at(context.id(), "GLOBAL_UNIT_ASSIGNED_CONTEXT", 0)?;
             for one in named {
                 let Some(found) = length_unit_at(reading, one)? else {
-                    radians_per_angle_unit = radians_per_angle_unit.or(how_big_an_angle_unit_is(reading, one));
+                    radians_per_angle_unit =
+                        radians_per_angle_unit.or(how_big_an_angle_unit_is(reading, one));
                     continue;
                 };
                 match unit {
@@ -197,7 +198,11 @@ fn how_big_an_angle_unit_is(reading: &Reading<'_>, id: EntityId) -> Option<f64> 
     }
     let measure = reading.reference_at(id, "CONVERSION_BASED_UNIT", 1).ok()?;
     let says = reading
-        .keyword_of(id, measure, &["PLANE_ANGLE_MEASURE_WITH_UNIT", "MEASURE_WITH_UNIT"])
+        .keyword_of(
+            id,
+            measure,
+            &["PLANE_ANGLE_MEASURE_WITH_UNIT", "MEASURE_WITH_UNIT"],
+        )
         .ok()?;
     let factor = reading.real_at(measure, says, 0).ok()?;
     let of = reading.reference_at(measure, says, 1).ok()?;

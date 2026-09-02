@@ -311,6 +311,81 @@ pub enum Refusal {
         edge: EntityId,
     },
 
+    /// A corner the file puts on a curved face is provably not on it, and this
+    /// is how far off.
+    ///
+    /// **This is the commonest thing a real file's own numbers do wrong, and
+    /// the measurement is the point of the variant.** `Model::validate` asks a
+    /// corner of a curved face for `Decision::Zero` exactly — a corner on a
+    /// pipe of radius `r` about the `z` axis has `x² + y² − r²` cancelling to
+    /// nothing — and a corner written as decimal text almost never does. It is
+    /// **And it is two different problems wearing one name**, which is what
+    /// `off_by` and `coordinate_spacing` are for. In 88 of the 161 refused
+    /// KiCad files the worst corner is inside **one** coordinate spacing: the
+    /// file wrote the closest `f64` there is and the exact predicate still says
+    /// the corner is off, because `x² + y² − r²` worked out exactly is not zero
+    /// at any `f64` near the circle. In the rest — and the tail reaches 20 777
+    /// spacings, and 13 169 in the NIST corpus — the file carries a modelling
+    /// tolerance somebody chose, and no arithmetic would put those corners on
+    /// their surfaces.
+    ///
+    /// **A gap, and the deferral is a decision rather than an absence.** The
+    /// kernel already has the mechanism — §17.2's `Approximation` on a vertex,
+    /// which `check_curved_face` consults before refusing — and it was built
+    /// for a corner a *fuse solved for*, whose slop is the width of the box it
+    /// was solved as. An imported corner has no such width: the only honest
+    /// number to tag it with is the miss itself, and a tag equal to the miss
+    /// makes the check pass by construction, which is a check that has stopped
+    /// asking anything. So what closes this is not a tag but a decision about
+    /// what an imported corner's slop *is* — §42.9's option C, with a `Cause`
+    /// of its own — and M5 refuses instead (§42.9 option A).
+    #[error("{corner}, on the curved face {face}, is {off_by} off the surface it sits on")]
+    ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn {
+        /// The `MANIFOLD_SOLID_BREP` being built.
+        solid: EntityId,
+        /// The face.
+        face: EntityId,
+        /// The `VERTEX_POINT`.
+        corner: EntityId,
+        /// How far off, in the file's own length unit.
+        off_by: f64,
+        /// How far apart two neighbouring `f64` are at this corner, which is
+        /// the smallest miss its own coordinates could possibly have.
+        coordinate_spacing: f64,
+    },
+
+    /// A corner at the end of an arc is provably not on the plane the arc lies
+    /// in, and this is how far off.
+    ///
+    /// **This refusal is about the kernel's vocabulary and not about the
+    /// file.** Two ends on a closed curve name two arcs, so an edge that is one
+    /// carries a second surface saying which — the plane the circle lies in —
+    /// and `Model::validate` asks its corners to be exactly on that plane.
+    /// A [`Plane`](rcad_geom::Plane) scales its normal to length one and rounds
+    /// its offset, so a corner is exactly on it only where the numbers cancel,
+    /// which is an axis-aligned circle whose ends share the centre's coordinate
+    /// along the axis. The corner is on the *curve*; what it is off is the
+    /// stored name of the curve.
+    ///
+    /// **A gap.** `check_flat_face` already allows a corner one
+    /// `Model::allowed_wobble` against the plane its face *sits on*, and
+    /// `check_edges` allows none at all against the plane an edge is merely
+    /// *named* by, which is the weaker claim of the two. What closes it is in
+    /// `rcad-topo`, which is not this crate.
+    #[error("{corner}, at the end of the arc {edge}, is {off_by} off the plane that arc lies in")]
+    ACornerIsNotOnThePlaneOfTheArcItEndsOn {
+        /// The `MANIFOLD_SOLID_BREP` being built.
+        solid: EntityId,
+        /// The `EDGE_CURVE`.
+        edge: EntityId,
+        /// The `VERTEX_POINT`.
+        corner: EntityId,
+        /// How far off, in the file's own length unit.
+        off_by: f64,
+        /// How far apart two neighbouring `f64` are at this corner.
+        coordinate_spacing: f64,
+    },
+
     /// The file's coordinates leave no working [`Scale`](rcad_geom::Scale) — a
     /// model of no size at all.
     ///

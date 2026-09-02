@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use rcad_geom::{EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, Vector};
-use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{
     DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex, Model, SolidBuilder, SolidKey,
 };
@@ -31,7 +31,7 @@ pub(crate) fn solid_from(
     let shell = reading.reference_at(brep, "MANIFOLD_SOLID_BREP", 1)?;
     let mut walk = Walk::new(brep);
     walk.describe_the_shell(reading, shell)?;
-    walk.build(model, policy, log)
+    walk.build(reading, model, policy, log)
 }
 
 /// One solid being described, and what every draft entity in it was called in
@@ -50,6 +50,7 @@ struct Walk {
     coedge_names: Vec<EntityId>,
     wire_names: Vec<EntityId>,
     face_names: Vec<EntityId>,
+    face_surfaces: Vec<Surface>,
 }
 
 impl Walk {
@@ -64,6 +65,7 @@ impl Walk {
             coedge_names: Vec::new(),
             wire_names: Vec::new(),
             face_names: Vec::new(),
+            face_surfaces: Vec::new(),
         }
     }
 
@@ -128,6 +130,7 @@ impl Walk {
             .add_face(surface, &wires)
             .map_err(|why| self.refused(face, why))?;
         self.face_names.push(face);
+        self.face_surfaces.push(surface);
         Ok((drafted, used))
     }
 
@@ -550,6 +553,7 @@ impl Walk {
     /// Check the whole description and write it into `model`.
     fn build(
         self,
+        reading: &Reading<'_>,
         model: &mut Model,
         policy: &Policy,
         log: &mut ProvenanceLog,
@@ -558,18 +562,175 @@ impl Walk {
         let builder = self.builder.clone();
         match builder.build(model, policy, log) {
             Ok(solid) => Ok(solid),
-            Err(why) => Err(match self.which_entity_the_builder_meant(&why) {
-                Some(entity) => Refusal::ThisEntityOfTheSolidWasRefused {
-                    solid: brep,
-                    entity,
-                    why: Box::new(why),
-                },
-                None => Refusal::TheSolidTheFileDescribesIsNotOne {
-                    solid: brep,
-                    why: Box::new(why),
+            Err(why) => Err(match self.a_corner_provably_off_a_curved_face(reading) {
+                Some(off) => off,
+                None => match self.which_entity_the_builder_meant(&why) {
+                    Some(entity) => Refusal::ThisEntityOfTheSolidWasRefused {
+                        solid: brep,
+                        entity,
+                        why: Box::new(why),
+                    },
+                    None => Refusal::TheSolidTheFileDescribesIsNotOne {
+                        solid: brep,
+                        why: Box::new(why),
+                    },
                 },
             }),
         }
+    }
+
+    /// The worst corner this description puts on a curved face it is provably
+    /// not on, with how far off it is.
+    ///
+    /// **Asked only after a build has already been refused**, so nothing is
+    /// loosened and no import that succeeded went through here. What it adds is
+    /// the number: `Model::validate` says a corner of a curved face is off its
+    /// surface and says nothing about *which* corner or by *how much*, and both
+    /// are what somebody deciding what the next milestone builds needs.
+    ///
+    /// The sign comes from the same certified predicate the sweep asked —
+    /// `Decision::Pos` or `Decision::Neg` and nothing else counts, so a corner
+    /// the arithmetic merely could not place is not reported as one that is off.
+    /// The distance is the corner's own distance to the point the surface's own
+    /// two coordinates put it at, which for a corner near a place the surface
+    /// pinches is an over-estimate and never an under-estimate.
+    fn a_corner_provably_off_a_curved_face(&self, reading: &Reading<'_>) -> Option<Refusal> {
+        let mut worst: Option<Refusal> = None;
+        let mut worst_by = 0.0;
+        for (face, surface) in self.face_names.iter().zip(&self.face_surfaces) {
+            if surface.as_plane().is_some() {
+                continue;
+            }
+            let Ok(corners) = self.corners_of_face(reading, *face) else {
+                continue;
+            };
+            for (corner, point) in corners {
+                let at = PredicatePoint::from(point.coordinates());
+                if !matches!(side_of(surface, at), Decision::Pos | Decision::Neg) {
+                    continue;
+                }
+                let off_by = how_far_off(surface, point);
+                if worst.is_none() || off_by > worst_by {
+                    worst_by = off_by;
+                    worst = Some(Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn {
+                        solid: self.brep,
+                        face: *face,
+                        corner,
+                        off_by,
+                        coordinate_spacing: point.largest_coordinate_magnitude() * f64::EPSILON,
+                    });
+                }
+            }
+        }
+        if let Some(off) = worst {
+            return Some(off);
+        }
+        self.a_corner_provably_off_the_plane_of_its_own_arc(reading)
+    }
+
+    /// The worst corner this description puts at the end of an arc whose own
+    /// plane it is provably not on.
+    ///
+    /// **This one is the vocabulary's and not the file's.** An arc is named by
+    /// the surfaces either side of it *and a second surface*, because two ends
+    /// on a closed curve name two arcs — and `Model::validate` asks the corners
+    /// of a named arc to be exactly on that second surface. The second surface
+    /// is the plane the circle lies in, and a [`Plane`] scales its normal to
+    /// length one and rounds its offset, so a corner is exactly on it only where
+    /// the numbers cancel: an axis-aligned circle whose ends share the centre's
+    /// coordinate along the axis. Every other arc in the world is refused for a
+    /// rounding in a name rather than for anything about the shape.
+    ///
+    /// **A gap, and what closes it is one crate away.** The corner really is on
+    /// the curve; what it is off is the *stored* plane, by the rounding of one
+    /// division and one dot product. `check_flat_face` already allows a corner
+    /// that much slack against the plane its face sits on
+    /// (`Model::allowed_wobble`) and `check_edges` allows none against the plane
+    /// an edge is *named* by, which is the weaker claim of the two. Reported
+    /// here rather than worked around, because `rcad-topo` is not this lane's
+    /// crate (§15.9).
+    fn a_corner_provably_off_the_plane_of_its_own_arc(
+        &self,
+        reading: &Reading<'_>,
+    ) -> Option<Refusal> {
+        let mut worst: Option<Refusal> = None;
+        let mut worst_by = 0.0;
+        for edge_curve in self.edges.keys() {
+            let Some((flat, corners)) = self.plane_of_the_arc(reading, *edge_curve) else {
+                continue;
+            };
+            for (corner, point) in corners {
+                let at = PredicatePoint::from(point.coordinates());
+                if !matches!(flat.side_of_point(at), Decision::Pos | Decision::Neg) {
+                    continue;
+                }
+                let off_by = flat.signed_distance_to(point).abs();
+                if worst.is_none() || off_by > worst_by {
+                    worst_by = off_by;
+                    worst = Some(Refusal::ACornerIsNotOnThePlaneOfTheArcItEndsOn {
+                        solid: self.brep,
+                        edge: *edge_curve,
+                        corner,
+                        off_by,
+                        coordinate_spacing: point.largest_coordinate_magnitude() * f64::EPSILON,
+                    });
+                }
+            }
+        }
+        worst
+    }
+
+    /// The plane an arc lies in and the two corners it ends at, for an edge
+    /// that is one, and nothing for an edge that is not.
+    fn plane_of_the_arc(
+        &self,
+        reading: &Reading<'_>,
+        edge_curve: EntityId,
+    ) -> Option<(Plane, [(EntityId, Point); 2])> {
+        let ends = [
+            reading.reference_at(edge_curve, "EDGE_CURVE", 1).ok()?,
+            reading.reference_at(edge_curve, "EDGE_CURVE", 2).ok()?,
+        ];
+        if ends[0] == ends[1] {
+            return None;
+        }
+        let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3).ok()?;
+        let keyword = match reading.file().instance(curve)?.parts()[0].keyword() {
+            "CIRCLE" => "CIRCLE",
+            "ELLIPSE" => "ELLIPSE",
+            _ => return None,
+        };
+        let position = reading.reference_at(curve, keyword, 1).ok()?;
+        let place = reading.placement_at(curve, position).ok()?;
+        let flat = Plane::from_point_and_normal(place.origin, place.axis).ok()?;
+        Some((
+            flat,
+            [
+                (ends[0], self.point_of_vertex(reading, ends[0]).ok()?),
+                (ends[1], self.point_of_vertex(reading, ends[1]).ok()?),
+            ],
+        ))
+    }
+
+    /// Every corner of one face, with the `VERTEX_POINT` it was written under.
+    fn corners_of_face(
+        &self,
+        reading: &Reading<'_>,
+        face: EntityId,
+    ) -> Result<Vec<(EntityId, Point)>, Refusal> {
+        let keyword = reading.keyword_of(self.brep, face, &["ADVANCED_FACE", "FACE_SURFACE"])?;
+        let mut corners = Vec::new();
+        for bound in reading.references_at(face, keyword, 1)? {
+            let (loop_id, _) = self.loop_of_bound(reading, face, bound)?;
+            for use_of_an_edge in reading.references_at(loop_id, "EDGE_LOOP", 1)? {
+                let edge_curve = reading.reference_at(use_of_an_edge, "ORIENTED_EDGE", 3)?;
+                for position in 1..=2 {
+                    let at = reading.reference_at(edge_curve, "EDGE_CURVE", position)?;
+                    corners.push((at, self.point_of_vertex(reading, at)?));
+                }
+            }
+        }
+        Ok(corners)
     }
 
     /// The `#id` behind an index a builder refusal carries.
@@ -653,4 +814,62 @@ fn a_half_space_holding_both(corners: [Point; 2], facing: Vector) -> Option<Half
             picking.side_of_point(PredicatePoint::from(corner.coordinates())) != Decision::Neg
         })
         .then_some(picking)
+}
+
+/// Which side of a surface a point is on, through the same certified predicates
+/// the sweep uses.
+fn side_of(surface: &Surface, point: PredicatePoint) -> Decision {
+    match surface {
+        Surface::Plane(flat) => flat.side_of_point(point),
+        Surface::Sphere(ball) => ball.side_of(point),
+        Surface::Cylinder(pipe) => pipe.side_of(point),
+        Surface::Cone(cone) => cone.side_of(point),
+        Surface::Torus(ring) => ring.side_of(point),
+        // `Surface` grows a variant every milestone this kernel learns a shape.
+        // A new one has no sign predicate here until somebody writes it, and
+        // reporting "not off it" about a surface nothing can ask about would be
+        // a claim rather than a measurement.
+        _ => Decision::Undecidable {
+            enclosure: f64::INFINITY,
+        },
+    }
+}
+
+/// How far a point is from a surface, measured against the point the surface's
+/// own two coordinates put it at.
+///
+/// Exact for a plane. For a curved surface it is the distance to the point the
+/// surface's own chart maps the corner's parameters back to, which is a real
+/// point of the surface — so it is an upper bound on the true distance and
+/// never an under-estimate, which is the direction a refusal wants.
+///
+/// **Zero means the miss is smaller than the numbers can show, not that there
+/// is none.** A corner an ulp off a pipe projects onto the pipe and rounds
+/// straight back onto itself, while `x² + y² − r²` worked out exactly is still
+/// not zero — which is the whole of why the certified predicate refuses a corner
+/// this measurement cannot see. Half of the KiCad corpus's refused corners are
+/// this case and the other half are a modelling tolerance somebody chose; the
+/// two are told apart by exactly this number.
+fn how_far_off(surface: &Surface, point: Point) -> f64 {
+    match surface {
+        Surface::Plane(flat) => flat.signed_distance_to(point).abs(),
+        Surface::Sphere(ball) => {
+            let (round, up) = ball.coordinates_of(point);
+            ball.point_at(round, up).distance_to(point)
+        }
+        Surface::Cylinder(pipe) => {
+            let (round, along) = pipe.coordinates_of(point);
+            pipe.point_at(round, along).distance_to(point)
+        }
+        Surface::Cone(cone) => {
+            let (round, along) = cone.coordinates_of(point);
+            cone.point_at(round, along).distance_to(point)
+        }
+        Surface::Torus(ring) => {
+            let (over, round) = ring.coordinates_of(point);
+            ring.point_at(over, round).distance_to(point)
+        }
+        // See `side_of`: a surface with no chart here has no distance either.
+        _ => f64::NAN,
+    }
 }

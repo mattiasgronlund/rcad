@@ -289,7 +289,8 @@ fn nothing_is_placed_somewhere_this_reader_cannot_move_it(
                 .instance(end)
                 .is_some_and(|held| held.part("AXIS2_PLACEMENT_3D").is_some())
         });
-        if places_a_shape && !(is_the_identity(reading, origin)? && is_the_identity(reading, target)?)
+        if places_a_shape
+            && !(is_the_identity(reading, origin)? && is_the_identity(reading, target)?)
         {
             return Err(Refusal::APlacementThisReaderCannotApply {
                 id: mapped.id(),
