@@ -67,7 +67,12 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose crossing is
 /// not one closed curve lying in a plane: two planes, a plane along a pipe's
-/// axis, two pipes, and a ball against a pipe.
+/// axis, two pipes, a ball against a pipe, and every pair with a cone or a torus
+/// on it but a plane against a cone.
+///
+/// **A plane against a torus is refused here and cut in circles by
+/// [`walk`](crate::walk)**, and that one is a gap rather than a limit — see
+/// [`the_way_this_crossing_winds`].
 ///
 /// **"A plane along a pipe's axis" is decided here by a rounded `f64` and by
 /// [`intersect`](crate::intersect) exactly**, so the two disagree about a plane
@@ -105,7 +110,15 @@ pub fn which_comes_first_round_a_crossing(
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair that does not cross
-/// in one closed curve lying in a plane.
+/// in one closed curve lying in a plane, **and for a plane against a torus,
+/// which does**. That last one is a gap and the arm that refuses it says so.
+///
+/// # Every pair is named, and there is no `_`
+///
+/// This used to end in a wildcard, and a wildcard is where the next surface kind
+/// goes to be ignored (§40). A cone and a torus landed and fell into it without
+/// a word — the same thing that happened to `walk`'s three hand-kept lists
+/// (§24.5), through a wildcard rather than through a missing arm.
 fn the_way_this_crossing_winds(pair: [&Surface; 2]) -> Result<Vector> {
     let winds = match pair {
         [Surface::Plane(flat), Surface::Sphere(_)] => flat.normal(),
@@ -132,10 +145,44 @@ fn the_way_this_crossing_winds(pair: [&Surface; 2]) -> Result<Vector> {
         // the line between the centres. Two balls with the same centre cross in
         // nothing at all, and there is no such line.
         [Surface::Sphere(one), Surface::Sphere(other)] => other.centre() - one.centre(),
-        // Two planes cross in a straight line; a ball against a pipe and two
-        // pipes cross in a degree-four space curve that is neither flat nor
-        // convex, so neither the determinant nor the argument behind it applies.
-        _ => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        // Two planes cross in a straight line, which has nothing to wind about.
+        [Surface::Plane(_), Surface::Plane(_)] => {
+            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        }
+        // A ball against a pipe and two pipes cross in a degree-four space curve
+        // that is neither flat nor convex, so neither the determinant nor the
+        // argument behind it applies.
+        [Surface::Sphere(_), Surface::Cylinder(_)]
+        | [
+            Surface::Cylinder(_),
+            Surface::Sphere(_) | Surface::Cylinder(_),
+        ] => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        // A plane cuts a torus in one or two circles, each of them flat and
+        // convex, so the normal this asks for **exists** and is the plane's
+        // own — the same one the two arms above it hand back for a ball and for
+        // a cone. `walk` builds those circles; this refuses to order points
+        // along them, so a **gap** and not a limit, and it is a gap a bend of
+        // pipe with a flat cap on it reaches. What closes it is the two arms
+        // written out, and what stopped them being written is that nobody
+        // noticed: this arm was a `_`, and a torus fell into it silently
+        // (§24.5, §40).
+        [Surface::Plane(_), Surface::Torus(_)] | [Surface::Torus(_), Surface::Plane(_)] => {
+            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        }
+        // A cone or a torus against another curved surface: `intersect` refuses
+        // to name that crossing at all, so there is no run along it to order.
+        [
+            Surface::Cone(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        ]
+        | [
+            Surface::Torus(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        ]
+        | [
+            Surface::Sphere(_) | Surface::Cylinder(_),
+            Surface::Cone(_) | Surface::Torus(_),
+        ] => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
     };
     if winds == Vector::zero() {
         return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
@@ -318,6 +365,11 @@ mod tests {
 
     /// The pairs whose crossing is not one closed curve in a plane are refused
     /// rather than ordered by a rule that does not hold for them.
+    ///
+    /// **A plane against a torus is in this list and does not belong in it.**
+    /// It cuts one or two circles, `walk` builds them, and this refuses to order
+    /// points along them; the row is here to pin today's answer, so closing that
+    /// gap fails this test loudly rather than passing unnoticed.
     #[test]
     fn a_crossing_that_is_not_a_conic_is_refused_rather_than_ordered() {
         let ground = the_equators_plane();
@@ -327,6 +379,10 @@ mod tests {
         );
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
         let ball = a_ball(5.0);
+        let cone = Surface::Cone(crate::Cone::new(Axis::z(), 1.0).expect("a slope"));
+        let bend = Surface::Torus(
+            crate::Torus::new(Axis::z(), 4.0, 1.0).expect("a ring wider than its tube"),
+        );
         let somewhere = PredicatePoint::from([1.0, 0.0, 0.0]);
 
         for pair in [
@@ -337,6 +393,20 @@ mod tests {
             [&pipe, &pipe],
             // Two balls with the same centre have no line between them.
             [&ball, &ball],
+            // A cone or a torus against another curved surface, which
+            // `intersect` refuses to name a crossing for at all.
+            [&cone, &ball],
+            [&ball, &cone],
+            [&cone, &pipe],
+            [&cone, &cone],
+            [&bend, &ball],
+            [&bend, &pipe],
+            [&bend, &cone],
+            [&bend, &bend],
+            // And the gap: a plane cuts a torus in circles and this refuses
+            // them, both ways round.
+            [&ground, &bend],
+            [&bend, &ground],
         ] {
             assert_eq!(
                 which_comes_first_round_a_crossing(pair, somewhere, somewhere, somewhere),
