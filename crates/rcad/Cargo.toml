@@ -12,6 +12,10 @@ repository.workspace = true
 rcad-geom.workspace = true
 rcad-mesh.workspace = true
 rcad-predicates.workspace = true
+# Not `.workspace = true`: rcad-step is not in the root Cargo.toml's
+# [workspace.dependencies], and that file is outside this lane's ownership.
+# Whoever owns it can fold this into the workspace table for consistency.
+rcad-step = { path = "../rcad-step", version = "0.0.0" }
 rcad-topo.workspace = true
 thiserror.workspace = true
 
