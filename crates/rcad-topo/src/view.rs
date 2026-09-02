@@ -214,7 +214,7 @@ impl<'m> SolidView<'m> {
         }
         for coedge in face.wires().flat_map(WireView::coedges) {
             let edge = coedge.edge();
-            if *edge.run() == EdgeRun::Straight {
+            if *edge.stored_run() == EdgeRun::Straight {
                 continue;
             }
             let Some(across) = edge
@@ -961,28 +961,45 @@ impl<'m> EdgeView<'m> {
         self.start().point().distance_to(self.end().point())
     }
 
-    /// What this edge runs along between its two ends.
+    /// What this edge runs along between its two ends, already moved into
+    /// place.
     ///
-    /// **Not public, and the reason changed with
-    /// [`SolidBuilder`](crate::SolidBuilder).** It used to be that no caller
-    /// outside this crate wanted one. Now one does: anything taking a solid
-    /// apart to describe it again has to hand an [`EdgeRun`] back, and for an
-    /// arc it cannot work one out from `is_closed` alone.
+    /// By value, because a located run is built here rather than stored
+    /// anywhere — the same shape as [`FaceView::surface`] and for the same
+    /// reason. A stored run carries a [`Surface`] and
+    /// [`Picker`](rcad_geom::Picker)s written in the frame the face is stored
+    /// in, and this view has a location composed onto it, so handing the stored
+    /// one out is what CLAUDE.md's rule about views forbids.
     ///
-    /// What stops it is that a run is **un-located geometry**. It carries a
-    /// [`Surface`] and [`Picker`](rcad_geom::Picker)s written in the frame the
-    /// face is stored in, and this view has a location composed onto it —
-    /// handing the stored run out is exactly what CLAUDE.md's rule about views
-    /// forbids. Returning a located one wants an `EdgeRun::transformed`, and
-    /// `rcad-geom` has only `shifted`, for [`HalfSpace`](rcad_geom::HalfSpace)
-    /// as well as for the run.
+    /// This is what anything taking a solid apart to describe it again reads:
+    /// an importer or a writer has to hand an [`EdgeRun`] back, and for an arc
+    /// it cannot work one out from [`EdgeView::is_closed`] alone. Working in
+    /// the frame the face is stored in instead wants
+    /// [`EdgeView::stored_run`].
     ///
-    /// So this is a **gap and not a limit** (§16.10), and it is the same gap as
-    /// the missing placement argument on
-    /// [`SolidBuilder`](crate::SolidBuilder): one function in
-    /// `rcad-geom` closes both. Until then a caller does what an importer does
-    /// and names the run from the geometry it holds.
-    pub(crate) fn run(self) -> &'m EdgeRun {
+    /// **What this cannot promise is the exact squareness of a picker on a
+    /// piece that runs on for ever.** A movement with no turn keeps every
+    /// picking normal bit for bit, so a placed-but-unturned solid's runs are
+    /// the stored ones shifted; a turn takes that squareness away, and
+    /// [`EdgeRun::transformed`](rcad_geom::EdgeRun::transformed) names the
+    /// three families of fix that were weighed and which one is left open.
+    #[must_use]
+    pub fn run(self) -> EdgeRun {
+        self.data().run.transformed(&self.loc)
+    }
+
+    /// This edge's run in the frame its face is stored in, with this view's
+    /// location left off.
+    ///
+    /// Not public: it is the raw arena payload, and handing that out is exactly
+    /// what [`EdgeView::run`] exists to stop. Two kinds of caller in here want
+    /// it anyway. The mesher shifts a face's run into the frame it meshes that
+    /// face in, and §41.2's shift is worked out for a face at no placement at
+    /// all, so a located run would land somewhere else. And every comparison
+    /// against [`EdgeRun::Straight`] or
+    /// [`EdgeRun::RightRoundWhereItsFacesCross`] takes either, since neither
+    /// carries geometry — reading this one saves building a run to throw away.
+    pub(crate) fn stored_run(self) -> &'m EdgeRun {
         &self.data().run
     }
 

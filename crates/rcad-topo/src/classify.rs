@@ -579,7 +579,7 @@ fn look_at_triangle(
 fn every_side_of_it_is_straight(face: FaceView<'_>) -> bool {
     face.wires().all(|wire| {
         wire.coedges()
-            .all(|coedge| coedge.edge().run() == &EdgeRun::Straight)
+            .all(|coedge| coedge.edge().stored_run() == &EdgeRun::Straight)
     })
 }
 

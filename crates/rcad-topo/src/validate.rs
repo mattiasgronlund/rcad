@@ -417,7 +417,7 @@ impl Model {
             for face in solid.faces() {
                 for coedge in face.wires().flat_map(WireView::coedges) {
                     let edge = coedge.edge();
-                    if *edge.run() != EdgeRun::RightRoundWhereItsFacesCross {
+                    if *edge.stored_run() != EdgeRun::RightRoundWhereItsFacesCross {
                         continue;
                     }
                     let Some(across) = the_face_across(solid, face, edge)? else {

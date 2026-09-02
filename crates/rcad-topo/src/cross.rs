@@ -164,7 +164,7 @@ mod tests {
         let already = model.edge(crossed.along()[0]);
         assert_eq!(
             already.run(),
-            &EdgeRun::RightRoundWhereItsFacesCross,
+            EdgeRun::RightRoundWhereItsFacesCross,
             "the edge the model declared and the crossing just named are the same run"
         );
     }
@@ -218,7 +218,8 @@ mod tests {
         // could ever name.
         let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
             .expect("the y axis is a unit normal");
-        let EdgeRun::PartOfWhereItCrosses { and, .. } = model.edge(crossed.along()[0]).run() else {
+        let EdgeRun::PartOfWhereItCrosses { and, .. } = model.edge(crossed.along()[0]).stored_run()
+        else {
             panic!("a ball's seam is part of where its face crosses a meridian");
         };
         assert_eq!(and, &Surface::Plane(meridian));

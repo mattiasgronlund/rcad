@@ -362,7 +362,7 @@ impl BuildingAMesh {
         let back = the_frame_this_face_is_meshed_in(face);
         let (from, to) = ends_in_the_stored_order(edge);
         let run = NamedRun::new(
-            edge.run()
+            edge.stored_run()
                 .shifted(the_shift_this_face_is_meshed_with(face))?,
             [from, to]
                 .map(|end| PredicatePoint::from(back.apply_to_point(end.point()).coordinates())),
@@ -2386,7 +2386,7 @@ mod tests {
             let edge = EdgeView::new(&model, slot, Isometry::identity(), Orientation::Forward);
             let (from, to) = ends_in_the_stored_order(edge);
             let run = NamedRun::new(
-                edge.run().clone(),
+                edge.stored_run().clone(),
                 [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
             )
             .expect("every edge the kernel builds itself comes back to where it started");
@@ -2429,7 +2429,7 @@ mod tests {
             let edge = EdgeView::new(&model, slot, Isometry::identity(), Orientation::Forward);
             let (from, to) = ends_in_the_stored_order(edge);
             let run = NamedRun::new(
-                edge.run().clone(),
+                edge.stored_run().clone(),
                 [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
             )
             .expect("every edge the kernel builds itself comes back to where it started");
