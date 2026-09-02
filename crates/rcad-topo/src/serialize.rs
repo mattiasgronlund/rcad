@@ -43,6 +43,15 @@
 //! The keys a caller is holding do **not** survive the trip. The model that
 //! comes back is a different model with its own identity, and in debug builds
 //! using an old key against it panics.
+//!
+//! **A file that names an entity the arenas do not hold is refused here**, not
+//! left for [`Model::validate`] to find. Every level of the model points at the
+//! level below by slot, and reading those slots wholesale is what let a
+//! stranger's bytes build a solid naming a shell that was not there — a model
+//! the STEP writer and the sweep both crashed on rather than refused
+//! (`ModelData::check_keys_resolve`).
+//! It is the one thing about a model that costs no arithmetic to decide, so
+//! nothing downstream has to carry a `Policy` to ask it.
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -92,6 +101,10 @@ impl<'de> Deserialize<'de> for Model {
                 expected: FORMAT_VERSION,
             }));
         }
+        payload
+            .data
+            .check_keys_resolve()
+            .map_err(D::Error::custom)?;
         Ok(Model::from_parts(payload.data))
     }
 }
@@ -157,6 +170,39 @@ mod tests {
             panic!("a ball's seam is named by a crossing")
         };
         assert_eq!(picked_by.as_slice(), [picker]);
+    }
+
+    /// **A file naming an entity the arenas do not hold does not become a
+    /// `Model` at all.**
+    ///
+    /// This is what closes the family rather than patching one site of it.
+    /// Deserializing is the only route to a model whose stored slots resolve to
+    /// nothing — no builder can make one and nothing in the crate removes an
+    /// entity — so a refusal here is what lets every accessor downstream keep
+    /// its `assert!` and every walk of the model keep indexing its arena.
+    ///
+    /// A cube with one corner taken out, written out and read back: the bytes
+    /// are well formed and the version is right, and it is still refused.
+    #[test]
+    fn a_file_naming_a_corner_that_is_not_there_never_becomes_a_model() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube of side two");
+        let corner = model
+            .data()
+            .vertices
+            .keys()
+            .next()
+            .expect("a cube has corners");
+        model.data_mut().vertices.remove(corner);
+
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+
+        assert!(
+            postcard::from_bytes::<Model>(&bytes).is_err(),
+            "a file whose edges name a corner that is not there must not read back"
+        );
     }
 
     /// Every run a computed crossing actually hands back, written out and read

@@ -121,8 +121,18 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model. Debug builds say so by name; a
+    /// release build cannot, because the model id is a zero-sized type there
+    /// (decisions.md §1.3), so all the panic can report is that no solid of
+    /// that name is here.
+    ///
+    /// **A key this model handed out always names something**, which is what
+    /// makes that an internal invariant and not a bad-input case. Nothing in
+    /// the crate removes an entity from an arena outside a test, and a file
+    /// whose stored slots resolve to nothing never becomes a `Model` at all —
+    /// `Deserialize` refuses it before the index is built, demonstrated by
+    /// `a_file_naming_a_corner_that_is_not_there_never_becomes_a_model` in
+    /// [`serialize`](crate::serialize).
     #[must_use]
     pub fn solid(&self, key: SolidKey) -> SolidView<'_> {
         let slot = key.slot_in(self.id);
@@ -134,8 +144,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn shell(&self, key: ShellKey) -> ShellView<'_> {
         let slot = key.slot_in(self.id);
@@ -151,8 +161,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn face(&self, key: FaceKey) -> FaceView<'_> {
         let slot = key.slot_in(self.id);
@@ -164,8 +174,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn wire(&self, key: WireKey) -> WireView<'_> {
         let slot = key.slot_in(self.id);
@@ -177,8 +187,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn coedge(&self, key: CoedgeKey) -> CoedgeView<'_> {
         let slot = key.slot_in(self.id);
@@ -190,8 +200,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn edge(&self, key: EdgeKey) -> EdgeView<'_> {
         let slot = key.slot_in(self.id);
@@ -203,8 +213,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn vertex(&self, key: VertexKey) -> VertexView<'_> {
         let slot = key.slot_in(self.id);
@@ -752,6 +762,76 @@ impl ModelData {
             shells: SlotMap::with_key(),
             solids: SlotMap::with_key(),
         }
+    }
+
+    /// Every slot stored in one entity names an entity the arenas hold.
+    ///
+    /// The seven arenas point at each other by slot and [`Model`] derives
+    /// `Deserialize`, so a file names whatever slots it likes: a solid can name
+    /// a shell that is not there, and so can every other level. Nothing
+    /// downstream survives one. A view built over a missing slot indexes its
+    /// arena, and that is a panic — which is how a stranger's bytes crashed the
+    /// STEP writer *and* [`Model::validate`], the check whose job was to say
+    /// the bytes were unsound.
+    ///
+    /// So this runs before anything walks the model: first in `validate`, and
+    /// on the way in from `Deserialize` before [`Model::from_parts`] builds the
+    /// index, because a slot index a file made up is unbounded and
+    /// `SecondaryMap::insert` grows to fit it.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::DanglingKey`] naming the kind of entity the first slot that
+    /// resolves to nothing was reaching for.
+    pub(crate) fn check_keys_resolve(&self) -> Result<()> {
+        for edge in self.edges.values() {
+            for end in [edge.start, edge.end] {
+                if !self.vertices.contains_key(end) {
+                    return Err(Invalid::DanglingKey { entity: "vertex" }.into());
+                }
+            }
+        }
+        for coedge in self.coedges.values() {
+            if !self.edges.contains_key(coedge.edge) {
+                return Err(Invalid::DanglingKey { entity: "edge" }.into());
+            }
+        }
+        for wire in self.wires.values() {
+            for coedge in wire.coedges() {
+                if !self.coedges.contains_key(coedge) {
+                    return Err(Invalid::DanglingKey { entity: "coedge" }.into());
+                }
+            }
+            for &step in &wire.steps {
+                if let WireStep::Pole(vertex) = step
+                    && !self.vertices.contains_key(vertex)
+                {
+                    return Err(Invalid::DanglingKey { entity: "vertex" }.into());
+                }
+            }
+        }
+        for face in self.faces.values() {
+            for &wire in &face.wires {
+                if !self.wires.contains_key(wire) {
+                    return Err(Invalid::DanglingKey { entity: "wire" }.into());
+                }
+            }
+        }
+        for shell in self.shells.values() {
+            for used in &shell.faces {
+                if !self.faces.contains_key(used.face) {
+                    return Err(Invalid::DanglingKey { entity: "face" }.into());
+                }
+            }
+        }
+        for solid in self.solids.values() {
+            for used in &solid.shells {
+                if !self.shells.contains_key(used.shell) {
+                    return Err(Invalid::DanglingKey { entity: "shell" }.into());
+                }
+            }
+        }
+        Ok(())
     }
 
     fn worst_approximation(&self) -> f64 {
