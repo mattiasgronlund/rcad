@@ -232,7 +232,7 @@ pub fn a_quarter_disc_plate(radius: f64, height: f64, unit: &str) -> String {
 /// The same plate cut down to the segment between the arc and its chord, so
 /// each flat face is bounded by two steps: an arc and a straight.
 ///
-/// **This is the smallest file that reaches the gap that refuses 36 of the 323
+/// **This is the smallest file that reaches the gap that refuses 59 of the 323
 /// KiCad files and 16 of the 44 NIST ones.** Two steps is not enough for
 /// `SolidBuilder::add_wire` or for `Invalid::WireTooShort`, and a face bounded
 /// by two curves is a real face — a lune on a sphere is the other one. The gap

@@ -148,7 +148,7 @@ impl Walk {
     ///   exactly that. So the outer bound is the one whose corners sweep a
     ///   positive area, and this is reading what the file wrote rather than
     ///   working out which loop encloses which. **312 of the 323 KiCad files
-    ///   have such a face** and every one of them was refused before this.
+    ///   have such a face**, and 266 of them were refused for it before this.
     ///
     /// The sweep of the area here is plain `f64` and its sign is a **hint and
     /// not a decision** — which is what makes it allowed to be plain `f64`.

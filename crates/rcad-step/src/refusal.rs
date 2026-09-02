@@ -301,7 +301,10 @@ pub enum Refusal {
 
     /// An arc whose picking half-space could not be written down.
     ///
-    /// **Gap, and one nothing has been seen to reach.** The half-space that says
+    /// **Gap, and neither corpus reaches it — 0 of 44 and 0 of 323.** What does
+    /// reach it is coordinates the dot product overflows on, which
+    /// `an_arc_whose_own_numbers_overflow_a_picking_half_space_is_refused_by_name`
+    /// writes at `1e200`. The half-space that says
     /// which of two arcs an edge is stands on the chord, and its offset is
     /// dropped by the width the dot product that computes it carries — eight
     /// epsilons of the sum of the term magnitudes, which is five more than the
