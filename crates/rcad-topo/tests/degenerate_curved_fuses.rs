@@ -1766,11 +1766,7 @@ fn what_happened(build: fn(&mut Model) -> Pair, rule: Rule) -> Outcome {
 /// square to is nothing but a rigid motion of the pair.
 #[test]
 fn the_same_ball_cut_the_same_way_along_three_axes_gives_the_same_cap() {
-    for (axis, shift) in [
-        ("z", Vector::new(-10.0, -10.0, 1.0)),
-        ("y", Vector::new(-10.0, 1.0, -10.0)),
-        ("x", Vector::new(1.0, -10.0, -10.0)),
-    ] {
+    for (axis, shift) in the_three_axes(1.0) {
         let mut model = a_model();
         let cut = a_ball_cut_one_unit_from_its_centre(&mut model, &Isometry::identity(), shift);
         match cut {
@@ -1790,6 +1786,27 @@ fn the_same_ball_cut_the_same_way_along_three_axes_gives_the_same_cap() {
 /// The volume of the cap this file cuts off a ball of radius four one unit from
 /// its centre: `πh²(3r − h)/3` with `h = 3`, which is `27π`.
 const A_CAP_ONE_IN: f64 = PI * 27.0;
+
+/// The one cut, square to each of the three axes in turn, as the shift that
+/// puts the twenty-cube's near face `depth` from the ball's centre.
+///
+/// A rigid motion of both operands and nothing else: the ball is the same ball
+/// whichever axis is named, and the slab is the same slab turned a quarter turn
+/// about the origin.
+fn the_three_axes(depth: f64) -> [(&'static str, Vector); 3] {
+    [
+        ("z", Vector::new(-10.0, -10.0, depth)),
+        ("y", Vector::new(-10.0, depth, -10.0)),
+        ("x", Vector::new(depth, -10.0, -10.0)),
+    ]
+}
+
+/// The cap a plane `depth` from the centre leaves on a ball of radius four:
+/// `πh²(3r − h)/3` with `h = 4 − depth`.
+fn a_cap_cut_at(depth: f64) -> f64 {
+    let height = 4.0 - depth;
+    PI * height * height * (12.0 - height) / 3.0
+}
 
 /// A ball of radius four turned by `placement`, cut by a twenty-cube shifted so
 /// that one of its faces sits one unit from the ball's centre.
@@ -1846,3 +1863,66 @@ fn turning_a_ball_and_the_slab_that_cuts_it_together_does_not_change_the_cap() {
         }
     }
 }
+
+/// The same ball and the same slab, three axes and **three depths**, and the
+/// nine answers are three volumes.
+///
+/// [`the_same_ball_cut_the_same_way_along_three_axes_gives_the_same_cap`] pins
+/// one depth, and §41.6 is what a gate found under it: square to `z` the cut
+/// answers down to a cap a hundredth of a unit high, and square to `x` or `y` it
+/// stops answering at `h/r = 1 − cos(π/4) = 0.2929`, which on a ball of radius
+/// four is a cap of **15.52** and 5.8% of the ball. Same two solids, same
+/// relative position, a quarter turn apart, one answering and one refusing.
+/// That is §19, and §19 is the property this kernel sells.
+///
+/// **The three columns are compared with each other and not only against the
+/// closed form**, because agreeing with each other *is* the claim. A depth where
+/// all three answered the same wrong volume would sail through a test that only
+/// asked each of them to answer, and a cap is a shape whose closed form nobody
+/// has to trust this file for.
+///
+/// Read at a tenth of [`A_DEFLECTION`], for the reason [`volume_of_at`] already
+/// gives: a deflection is an absolute length and the deepest cut here leaves a
+/// cap one unit high, where 0.02 is 0.6% short of the closed form on its own.
+#[test]
+fn the_same_ball_cut_at_three_depths_along_three_axes_gives_the_same_cap_each_time() {
+    for depth in [1.0, 2.0, 3.0] {
+        let closed_form = a_cap_cut_at(depth);
+        let mut volumes = Vec::new();
+        for (axis, shift) in the_three_axes(depth) {
+            let mut model = a_model();
+            match a_ball_cut_one_unit_from_its_centre(&mut model, &Isometry::identity(), shift) {
+                Ok(fused) => {
+                    assert_eq!(
+                        fused.solids().len(),
+                        1,
+                        "a ball cut {depth} from its centre square to {axis} is one solid"
+                    );
+                    let found = volume_of_at(&model, fused.solids(), A_DEFLECTION / 10.0);
+                    measures(found, closed_form, Side::Under);
+                    volumes.push((axis, found));
+                }
+                Err(why) => panic!("cut {depth} from the centre square to {axis} says {why:?}"),
+            }
+        }
+        let (widest, narrowest) = (
+            volumes.iter().map(|(_, v)| *v).fold(f64::MIN, f64::max),
+            volumes.iter().map(|(_, v)| *v).fold(f64::MAX, f64::min),
+        );
+        let apart = (widest - narrowest) / closed_form;
+        assert!(
+            apart < HOW_FAR_THREE_AXES_MAY_BE_APART,
+            "cut {depth} from the centre the three axes give {volumes:?}, {:.4}% apart",
+            100.0 * apart
+        );
+    }
+}
+
+/// How far the three axes' volumes may be from each other.
+///
+/// A twentieth of [`HOW_FAR_A_MESH_MAY_BE`], because the three are the same
+/// shape meshed three ways and not three shapes: what separates them is the
+/// order a sum of triangles is added up in and which way the tessellation
+/// happened to fall, not anything about the cap. Measured, the worst of the nine
+/// is 0.0033% and this is 0.025%.
+const HOW_FAR_THREE_AXES_MAY_BE_APART: f64 = HOW_FAR_A_MESH_MAY_BE / 20.0;
