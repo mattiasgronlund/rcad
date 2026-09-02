@@ -158,6 +158,19 @@ fn a_pipe_stored_with_a_negative_radius_is_refused_on_the_way_in() {
     assert!(postcard::from_bytes::<Cylinder>(&bytes).is_err());
 }
 
+/// `Cylinder::basis` panics if the stored axis has no direction to give, and
+/// says the constructors do not allow that. `Axis` is the type that carries
+/// that check, and it carries it on the way in too: a `Cylinder` can only be
+/// built around an already-checked `Axis` — `#[serde(try_from = "(Axis, f64)")]`
+/// makes it the only route, on the wire or in code — so bytes that describe a
+/// direction with no length are refused here, before a `Cylinder`, let alone
+/// its `basis`, ever exists to be asked.
+#[test]
+fn a_pipe_stored_with_a_zero_length_axis_direction_is_refused_on_the_way_in() {
+    let bytes = postcard::to_allocvec(&((Point::origin(), Vector::zero()), 3.0f64)).unwrap();
+    assert!(postcard::from_bytes::<Cylinder>(&bytes).is_err());
+}
+
 #[test]
 fn an_edge_stored_with_both_ends_in_the_same_place_is_refused_on_the_way_in() {
     let bytes = postcard::to_allocvec(&(Point::origin(), Point::origin())).unwrap();

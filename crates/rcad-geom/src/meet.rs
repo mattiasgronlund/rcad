@@ -15,7 +15,9 @@ use rcad_predicates::{Interval, Point as PredicatePoint};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::{Picker, Surface};
+use crate::error::{Error, Result};
+use crate::point::Vector;
+use crate::{Isometry, Picker, Surface};
 
 /// Where two surfaces cross.
 ///
@@ -72,22 +74,20 @@ pub struct NamedRun {
 impl NamedRun {
     /// The piece of curve `run` names, running from `ends[0]` to `ends[1]`.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If `run` goes right round a closed curve and the two ends are not the
-    /// same point. A closed run comes back to where it started by definition, so
-    /// a pair of different ends on one names a curve that does not exist, and
-    /// §4.1 ranks the crash above handing that on.
-    #[must_use]
-    pub fn new(run: EdgeRun, ends: [PredicatePoint; 2]) -> Self {
-        assert!(
-            run != EdgeRun::RightRoundWhereItsFacesCross || ends[0] == ends[1],
-            "a run that goes right round comes back to where it started, but {:?} and {:?} are \
-             different points",
-            ends[0],
-            ends[1]
-        );
-        Self { run, ends }
+    /// [`Error::AClosedRunDoesNotComeBackToWhereItStarted`] if `run` goes
+    /// right round a closed curve and the two ends are not the same point. A
+    /// closed run comes back to where it started by definition, so a pair of
+    /// different ends on one names a curve that does not exist.
+    pub fn new(run: EdgeRun, ends: [PredicatePoint; 2]) -> Result<Self> {
+        if run == EdgeRun::RightRoundWhereItsFacesCross && ends[0] != ends[1] {
+            return Err(Error::AClosedRunDoesNotComeBackToWhereItStarted {
+                start: Box::new(ends[0]),
+                end: Box::new(ends[1]),
+            });
+        }
+        Ok(Self { run, ends })
     }
 
     /// The whole of what `run` names, with no ends to cut it at.
@@ -112,24 +112,25 @@ impl NamedRun {
     /// a plane running down the inside of a pipe cuts two endless lines — and
     /// then the half-spaces are the whole of what tells them apart.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If `run` is a [`EdgeRun::PartOfWhereItCrosses`] with nothing picking it.
-    /// That variant exists to say *which* piece of a crossing this is, and with
-    /// no ends and no half-space it says nothing at all.
-    #[must_use]
-    pub fn the_whole_of(run: EdgeRun) -> Self {
-        if let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &run {
-            assert!(
-                !picked_by.is_empty(),
-                "a piece of a crossing with no ends and nothing picking it is not a piece of \
-                 anything"
-            );
+    /// [`Error::ACrossingPieceHasNoEndsAndNothingPickingIt`] if `run` is a
+    /// [`EdgeRun::PartOfWhereItCrosses`] with nothing picking it. That variant
+    /// exists to say *which* piece of a crossing this is, and with no ends
+    /// and no half-space it says nothing at all. Bad caller input rather
+    /// than a broken invariant: `picked_by` is a public field of a public
+    /// enum variant, so a caller can build the confusion by hand without
+    /// going through this crate's own naming logic at all.
+    pub fn the_whole_of(run: EdgeRun) -> Result<Self> {
+        if let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &run
+            && picked_by.is_empty()
+        {
+            return Err(Error::ACrossingPieceHasNoEndsAndNothingPickingIt);
         }
-        Self {
+        Ok(Self {
             run,
             ends: [nowhere_in_particular(); 2],
-        }
+        })
     }
 
     /// Which piece of which crossing this is.
@@ -232,12 +233,44 @@ pub enum EdgeRun {
     },
 }
 
+impl EdgeRun {
+    /// This run, shifted by `by`.
+    ///
+    /// **A run is written in the frame its face is stored in**, so anything that
+    /// works a face out somewhere else has to bring the run along or it picks a
+    /// piece of a crossing that is not there. `rcad-topo`'s mesher shifts a face
+    /// stored far from the origin until its numbers are small, and this is how
+    /// the run goes with it.
+    ///
+    /// A shift and not a movement, for the reason [`HalfSpace::shifted`] gives.
+    /// [`EdgeRun::Straight`] and [`EdgeRun::RightRoundWhereItsFacesCross`] hold
+    /// no geometry of their own and come back unchanged.
+    ///
+    /// [`HalfSpace::shifted`]: crate::HalfSpace::shifted
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if `by` has a component that is not a finite number.
+    pub fn shifted(&self, by: Vector) -> Result<Self> {
+        let EdgeRun::PartOfWhereItCrosses { and, picked_by } = self else {
+            return Ok(self.clone());
+        };
+        Ok(EdgeRun::PartOfWhereItCrosses {
+            and: and.transformed(&Isometry::translation(by)?),
+            picked_by: picked_by
+                .iter()
+                .map(|picker| picker.shifted(by))
+                .collect::<Result<_>>()?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rcad_predicates::Interval;
     use smallvec::smallvec;
 
-    use super::{EdgeRun, NamedRun, PredicatePoint, SurfaceMeet};
+    use super::{EdgeRun, Error, NamedRun, PredicatePoint, SurfaceMeet};
     use crate::{Axis, Cylinder, HalfSpace, Picker, Plane, Point, Sphere, Surface, Vector};
 
     fn a_pole(up: f64) -> PredicatePoint {
@@ -263,7 +296,8 @@ mod tests {
                 picked_by: smallvec![Picker::from(facing_x)],
             },
             [a_pole(3.0), a_pole(-3.0)],
-        );
+        )
+        .expect("a picked run does not have to come back to where it started");
 
         let SurfaceMeet::Curves(runs) = SurfaceMeet::Curves(vec![seam.clone()]) else {
             panic!("just built one");
@@ -296,14 +330,24 @@ mod tests {
         }
     }
 
-    /// A run that goes right round comes back to where it started, and a pair of
-    /// different ends on one names a curve that is not there.
+    /// A run that goes right round comes back to where it started, and a pair
+    /// of different ends on one names a curve that is not there.
+    ///
+    /// `Model` derives `Deserialize`, so nothing between a caller's bytes and
+    /// this constructor guarantees the two ends agree — this has to be an
+    /// `Err`, not a crash, or a hand-built model can bring the kernel down
+    /// (CLAUDE.md's rule on panics vs. bad caller input).
     #[test]
-    #[should_panic(expected = "comes back to where it started")]
-    fn a_closed_run_with_two_different_ends_is_a_bug() {
-        let _ = NamedRun::new(
-            EdgeRun::RightRoundWhereItsFacesCross,
-            [a_pole(1.0), a_pole(-1.0)],
+    fn a_closed_run_with_two_different_ends_is_bad_caller_input() {
+        assert_eq!(
+            NamedRun::new(
+                EdgeRun::RightRoundWhereItsFacesCross,
+                [a_pole(1.0), a_pole(-1.0)],
+            ),
+            Err(Error::AClosedRunDoesNotComeBackToWhereItStarted {
+                start: Box::new(a_pole(1.0)),
+                end: Box::new(a_pole(-1.0)),
+            })
         );
     }
 
@@ -315,28 +359,36 @@ mod tests {
     /// never reaches a caller, because §24.10 refuses such an answer whole.
     #[test]
     fn a_run_a_pair_of_surfaces_names_has_no_ends_and_says_so() {
-        let circle = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross);
+        let circle = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it");
         assert!(circle.is_the_whole_curve());
         assert_eq!(circle.ends()[0], circle.ends()[1]);
         assert_eq!(circle.ends()[0].uncertainty(), f64::INFINITY);
         assert_eq!(circle.ends()[0].exact_coordinates(), None);
 
         let between_two_poles =
-            NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [a_pole(3.0); 2]);
+            NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [a_pole(3.0); 2])
+                .expect("the same point twice does come back to where it started");
         assert!(!between_two_poles.is_the_whole_curve());
     }
 
     /// A piece of a crossing with no ends and nothing picking it says nothing
     /// about which piece it is, and two of those are the same run twice.
+    ///
+    /// `picked_by` is a public field of a public enum variant, so a caller
+    /// can build this by hand with no help from this crate at all — bad
+    /// caller input, and `Err` rather than a crash.
     #[test]
-    #[should_panic(expected = "is not a piece of anything")]
-    fn a_piece_of_a_crossing_with_neither_ends_nor_a_half_space_is_a_bug() {
+    fn a_piece_of_a_crossing_with_neither_ends_nor_a_half_space_is_bad_caller_input() {
         let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
             .expect("the y axis is a unit normal");
-        let _ = NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
-            and: Surface::Plane(meridian),
-            picked_by: smallvec![],
-        });
+        assert_eq!(
+            NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(meridian),
+                picked_by: smallvec![],
+            }),
+            Err(Error::ACrossingPieceHasNoEndsAndNothingPickingIt)
+        );
     }
 
     /// An end of a computed crossing is usually a box rather than a point, and
@@ -349,7 +401,8 @@ mod tests {
             Interval::exactly(0.0),
             Interval::exactly(0.0),
         ]);
-        let run = NamedRun::new(EdgeRun::Straight, [somewhere, somewhere]);
+        let run = NamedRun::new(EdgeRun::Straight, [somewhere, somewhere])
+            .expect("a straight run never has to come back to where it started");
         assert!(run.ends()[0].uncertainty() > 0.0);
         assert_eq!(run.ends()[0].exact_coordinates(), None);
     }

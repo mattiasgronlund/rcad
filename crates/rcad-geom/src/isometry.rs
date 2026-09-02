@@ -3,6 +3,7 @@
 use nalgebra as na;
 use serde::{Deserialize, Serialize};
 
+use crate::exact::{binary_exponent, multiplied_by_a_power_of_two};
 use crate::point::{Axis, Point, Vector};
 use crate::{Error, Result};
 
@@ -20,6 +21,12 @@ use crate::{Error, Result};
 /// the last bit or two of a rotation that was already very nearly unit length,
 /// so a movement that has been written and read back puts points in the same
 /// places to within rounding, not bit for bit.
+///
+/// The scale the four coefficients are written at makes no difference to the
+/// rotation they name, and none to the one that comes back: they are brought
+/// onto a power of two of their own first, so the squares the scaling back needs
+/// can neither overflow nor underflow
+/// (`brought_into_the_range_its_squares_fit_in`).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "([f64; 3], [f64; 4])", into = "([f64; 3], [f64; 4])")]
 pub struct Isometry(na::Isometry3<f64>);
@@ -178,6 +185,19 @@ impl Isometry {
     }
 
     /// Where `point` ends up.
+    ///
+    /// Within [`Isometry::POINT_ROUNDOFF`] times the largest number involved of
+    /// where the true movement would put it.
+    ///
+    /// **A movement with no turn does better than that, and something rests on
+    /// it.** It comes to one addition per coordinate and nothing else, so a
+    /// shift a caller has arranged to be exact — where Sterbenz's condition
+    /// holds, say — really does come out exact. `rcad-topo`'s mesher rests the
+    /// whole of the frame it works a far-off face out in on that (§39.7 item 2),
+    /// and it is a fact about what this delegates to rather than one this crate
+    /// arranges, so
+    /// `a_movement_with_no_turn_moves_a_point_by_one_addition_and_nothing_else`
+    /// is the demonstration rather than this sentence.
     #[must_use]
     pub fn apply_to_point(&self, point: Point) -> Point {
         self.0.transform_point(&point.into()).into()
@@ -188,6 +208,11 @@ impl Isometry {
     /// A vector is the difference between two points, so the shift cancels out
     /// and only the turn acts on it. Applying the translation here is the
     /// classic way to move a normal to the wrong place.
+    ///
+    /// A movement with no turn hands the vector straight back, bit for bit —
+    /// same demonstration as [`Isometry::apply_to_point`], and it is what keeps
+    /// a shifted pipe's axis direction and a shifted plane's normal exactly what
+    /// they were.
     #[must_use]
     pub fn apply_to_vector(&self, vector: Vector) -> Vector {
         self.0.transform_vector(&vector.into()).into()
@@ -223,25 +248,80 @@ impl Default for Isometry {
 impl TryFrom<([f64; 3], [f64; 4])> for Isometry {
     type Error = Error;
 
-    fn try_from((offset, [w, i, j, k]): ([f64; 3], [f64; 4])) -> Result<Self> {
+    fn try_from((offset, stored): ([f64; 3], [f64; 4])) -> Result<Self> {
         let offset = Vector::from(offset);
         if !offset.is_finite() {
             return Err(Error::NotFinite {
                 what: "translation",
             });
         }
-        let stored = na::Quaternion::new(w, i, j, k);
-        if !stored.coords.iter().all(|c| c.is_finite()) {
+        if !stored.iter().all(|coefficient| coefficient.is_finite()) {
             return Err(Error::NotFinite { what: "rotation" });
         }
-        if stored.norm() == 0.0 {
+        if stored.iter().all(|coefficient| *coefficient == 0.0) {
             return Err(Error::ZeroLength { what: "rotation" });
         }
+        let [w, i, j, k] = brought_into_the_range_its_squares_fit_in(stored);
         Ok(Self(na::Isometry3::from_parts(
             na::Translation3::new(offset.x(), offset.y(), offset.z()),
-            na::UnitQuaternion::from_quaternion(stored),
+            na::UnitQuaternion::from_quaternion(na::Quaternion::new(w, i, j, k)),
         )))
     }
+}
+
+/// `coefficients`, every one multiplied by the same power of two, chosen so the
+/// largest of them lands in `[1, 2)`.
+///
+/// A quaternion names a rotation by the direction of its four coefficients, so
+/// multiplying all four by one nonzero factor names the very same rotation, and
+/// a power of two costs no bits while the results stay normal.
+///
+/// **Where all four squares were already normal numbers this hands back the
+/// identical unit quaternion, bit for bit.** Every square scales by exactly
+/// `2^2e`, so the sum does, so its square root scales by exactly `2^e`, and the
+/// division cancels the factor again. *All four*, and not merely their sum: one
+/// square can fall into the subnormals — or underflow to zero outright — while
+/// the sum is an ordinary number, and a norm built from a square that has lost
+/// bits is not the norm. There this differs, by a single ulp, and it is the
+/// unscaled answer that was wrong. **The first draft of this sentence said "the
+/// squares were already in range" and the demonstration is what narrowed it**;
+/// `scaling_first_moves_no_answer_whose_four_squares_were_normal_to_begin_with`
+/// counts all three outcomes and asserts a floor under each.
+///
+/// **Where the sum itself was out of range, this is what reaches the answer at
+/// all.** The sum of
+/// the four squares spans twice the range the coefficients do. Written above
+/// about `1.3e154` it overflows, `norm()` is infinity, dividing by it gives four
+/// zeros, and four zeros normalize to the *identity* — a rotation the caller's
+/// bytes did not name, which `docs/decisions.md` §4.1 ranks below both crashing
+/// and refusing. Written below about `1.5e-162` the same sum underflows to zero
+/// and the rotation is refused for having no length. Brought into `[1, 2)` the
+/// largest square is between 1 and 4 and neither end is anywhere near.
+///
+/// **What the scaling can lose, and why it is nothing.** A coefficient more than
+/// 1022 binades under the largest is pushed into the subnormals and rounds
+/// there, by at most half of `2^-1074`. It is that far under the norm as well,
+/// so the number it stands for in the unit quaternion is itself under
+/// `2^-1022` — dividing by a norm that is now between 1 and 2 keeps the slip
+/// where it was, and half of the smallest number an `f64` holds is the closest
+/// any answer gets. So no quaternion is refused for being unscalable: the
+/// refusals left above are four zeros and a coefficient that is not a number,
+/// and both are bytes that name no rotation for any arithmetic to find.
+///
+/// `a_rotation_written_at_any_scale_is_the_same_rotation` is the demonstration,
+/// over every one of the 2098 scales an `f64` exponent field holds.
+fn brought_into_the_range_its_squares_fit_in(coefficients: [f64; 4]) -> [f64; 4] {
+    let largest = coefficients
+        .iter()
+        .copied()
+        .map(f64::abs)
+        .fold(0.0, f64::max);
+    assert!(
+        largest > 0.0,
+        "a quaternion of four zeros is refused before it gets here"
+    );
+    let exponent = -binary_exponent(largest);
+    coefficients.map(|coefficient| multiplied_by_a_power_of_two(coefficient, exponent))
 }
 
 impl From<Isometry> for ([f64; 3], [f64; 4]) {
@@ -275,6 +355,80 @@ mod tests {
 
     fn quarter_turn_about_z() -> Isometry {
         Isometry::rotation(&Axis::z(), FRAC_PI_2).unwrap()
+    }
+
+    /// §16.10 for [`Isometry::apply_to_point`]'s "one addition per coordinate
+    /// and nothing else".
+    ///
+    /// **This is a claim about a dependency and not about arithmetic written
+    /// here**, which is exactly the kind that stops being true without anybody
+    /// touching this file. `rcad-topo`'s mesher shifts a face stored far from
+    /// the origin into a frame where its numbers are small, and the whole reason
+    /// that is allowed is that the shift is *exact*; a turn of the identity that
+    /// cost a rounding would make it inexact and the mesh floor would be
+    /// understating what a point costs.
+    ///
+    /// So: over two hundred thousand draws sixty octaves wide, a shift moves a
+    /// point by exactly what adding its three components does, bit for bit, and
+    /// hands a vector straight back.
+    #[test]
+    fn a_movement_with_no_turn_moves_a_point_by_one_addition_and_nothing_else() {
+        let mut seed = 0x1234_5678_9abc_def0_u64;
+        let mut next_bits = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let a_number = |bits: u64| {
+            let mantissa = (bits >> 11) as f64 / (1u64 << 53) as f64;
+            let octave = ((bits >> 3) % 60) as i32 - 30;
+            let sign = if bits & 1 == 0 { 1.0 } else { -1.0 };
+            sign * (1.0 + mantissa) * 2.0f64.powi(octave)
+        };
+
+        for _ in 0..200_000 {
+            let by = Vector::new(
+                a_number(next_bits()),
+                a_number(next_bits()),
+                a_number(next_bits()),
+            );
+            let shift = Isometry::translation(by).expect("a finite shift");
+
+            let place = Point::new(
+                a_number(next_bits()),
+                a_number(next_bits()),
+                a_number(next_bits()),
+            );
+            let moved = shift.apply_to_point(place).coordinates();
+            for (axis, (was, along)) in place
+                .coordinates()
+                .into_iter()
+                .zip(by.components())
+                .enumerate()
+            {
+                assert_eq!(
+                    moved[axis].to_bits(),
+                    (was + along).to_bits(),
+                    "shifting {place:?} by {by:?} did something other than add \
+                     along coordinate {axis}"
+                );
+            }
+
+            let way = Vector::new(
+                a_number(next_bits()),
+                a_number(next_bits()),
+                a_number(next_bits()),
+            );
+            let turned = shift.apply_to_vector(way);
+            for (moved, was) in turned.components().into_iter().zip(way.components()) {
+                assert_eq!(
+                    moved.to_bits(),
+                    was.to_bits(),
+                    "a shift with no turn changed the direction {way:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -509,6 +663,112 @@ mod tests {
 
     fn largest_of(components: [f64; 3]) -> f64 {
         components.into_iter().map(f64::abs).fold(0.0, f64::max)
+    }
+
+    /// §16.10 for [`brought_into_the_range_its_squares_fit_in`]'s claim that
+    /// where the squares were already in range it hands back the identical unit
+    /// quaternion, bit for bit.
+    ///
+    /// **The precondition is narrower than it first reads, and the first way of
+    /// writing this test found that out.** "The squares were in range" is not
+    /// "the sum of them was a normal number": a *single* square can fall into
+    /// the subnormals while the sum is fine, and a square down there has lost
+    /// bits, so the norm built from it is not the norm. There the rescaled
+    /// answer differs — by one ulp, on quaternions whose coefficients are more
+    /// than about 150 binades apart — and it is the unscaled one that was wrong.
+    ///
+    /// So the run counts three outcomes and asserts a floor under each. Without
+    /// the floors a change that made every draw overflow would leave the
+    /// bit-for-bit half tested on nothing, which is §14.7's rule.
+    #[test]
+    fn scaling_first_moves_no_answer_whose_four_squares_were_normal_to_begin_with() {
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut bit_for_bit, mut one_square_subnormal, mut out_of_range) = (0u32, 0u32, 0u32);
+        for _ in 0..40_000 {
+            // A middle to write the rotation at and a spread to write its four
+            // coefficients over. Both are drawn, because the bit-for-bit half
+            // needs quaternions the old arithmetic could handle, the boundary
+            // half needs one square in the subnormals, and the third needs the
+            // sum out of range altogether — and no single width reaches all
+            // three.
+            let middle = (next() % 800) as i32 - 400;
+            let spread = [20, 200, 1200][(next() % 3) as usize];
+            let coefficients = [0, 1, 2, 3].map(|_| {
+                let mantissa = f64::from_bits((next() & ((1 << 52) - 1)) | (1023 << 52));
+                let exponent = middle + (next() % spread) as i32 - spread as i32 / 2;
+                let half = exponent / 2;
+                let sign = if next() & 1 == 0 { 1.0 } else { -1.0 };
+                sign * mantissa * 2f64.powi(half) * 2f64.powi(exponent - half)
+            });
+            if !coefficients.iter().all(|c| c.is_finite()) {
+                continue;
+            }
+            let stored = na::Quaternion::new(
+                coefficients[0],
+                coefficients[1],
+                coefficients[2],
+                coefficients[3],
+            );
+            if stored.norm() == 0.0 {
+                continue;
+            }
+            let without_the_rescale = na::UnitQuaternion::from_quaternion(stored);
+            let without_the_rescale = {
+                let turn = without_the_rescale.quaternion();
+                [turn.w, turn.i, turn.j, turn.k]
+            };
+            let with_it = Isometry::try_from(([0.0; 3], coefficients))
+                .expect("a finite quaternion that is not four zeros names a rotation")
+                .rotation_quaternion();
+
+            let squares = coefficients.map(|c| c * c);
+            let every_square_is_normal =
+                (0..4).all(|which| coefficients[which] == 0.0 || squares[which].is_normal());
+            if !squares.iter().sum::<f64>().is_normal() {
+                out_of_range += 1;
+            } else if every_square_is_normal {
+                assert_eq!(
+                    without_the_rescale, with_it,
+                    "the rescale moved {coefficients:?}, whose four squares are all normal"
+                );
+                bit_for_bit += 1;
+            } else {
+                one_square_subnormal += 1;
+                for which in 0..4 {
+                    let apart = i64::from(without_the_rescale[which].to_bits() as i32)
+                        - i64::from(with_it[which].to_bits() as i32);
+                    assert!(
+                        without_the_rescale[which]
+                            .to_bits()
+                            .abs_diff(with_it[which].to_bits())
+                            <= 1,
+                        "{coefficients:?} component {which} moved {apart} bits"
+                    );
+                }
+            }
+        }
+        println!(
+            "bit for bit {bit_for_bit}, one square subnormal {one_square_subnormal}, \
+             out of range {out_of_range}"
+        );
+        assert!(
+            bit_for_bit > 10_000,
+            "only {bit_for_bit} went down the path this is about"
+        );
+        assert!(
+            one_square_subnormal > 500,
+            "only {one_square_subnormal} reached the boundary, so it is not being pinned"
+        );
+        assert!(
+            out_of_range > 1_000,
+            "only {out_of_range} had a sum out of range, so the third outcome is barely drawn"
+        );
     }
 
     /// The same movements and points every run, so the worst case this prints

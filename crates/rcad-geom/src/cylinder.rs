@@ -89,8 +89,27 @@ impl Cylinder {
     ///
     /// # Panics
     ///
-    /// If the stored axis direction has no length. The constructors do not
-    /// allow that.
+    /// If the stored axis direction has no length. That never happens:
+    /// [`Axis::new`] checks it, and [`Axis::x`]/[`Axis::y`]/[`Axis::z`] each
+    /// build one straight from a literal unit vector, so neither public
+    /// constructor can hand back a zero direction. `Deserialize` goes
+    /// through the first check —
+    /// `#[serde(try_from = "(Point, Vector)")]` on `Axis` makes `Axis::new`
+    /// the route in on the wire.
+    /// `a_pipe_stored_with_a_zero_length_axis_direction_is_refused_on_the_way_in`
+    /// (`crates/rcad-geom/tests/serialization.rs`) shows the bytes refused
+    /// before a `Cylinder` exists to ask.
+    ///
+    /// **There is a third route in and it is not a constructor.**
+    /// [`Cylinder::transformed`] goes through `Axis::transformed`, which does
+    /// not re-normalize — deliberately, so a direction that was exactly square
+    /// to something stays exactly square to it (`docs/decisions.md` §32.3). What
+    /// keeps that safe is two types away: an [`Isometry`] turns by a quaternion
+    /// scaled to length one, whatever scale its four coefficients arrived at, so
+    /// it never shrinks a direction to nothing.
+    /// `a_rotation_written_at_any_scale_is_the_same_rotation` is that
+    /// demonstration, and §41.4 is why an unreachability claim has to name every
+    /// route rather than the constructors it thought of.
     #[must_use]
     pub fn basis(&self) -> (Vector, Vector) {
         let along = self.axis.direction();

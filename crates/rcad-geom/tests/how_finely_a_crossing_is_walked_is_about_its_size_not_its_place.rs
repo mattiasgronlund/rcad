@@ -31,7 +31,8 @@ fn a_cap_circle_of_a_bar(height: f64) -> Vec<Point> {
             .expect("the z axis is a unit normal"),
     );
     let corner = PredicatePoint::from([3.0, 0.0, height]);
-    let run = NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [corner, corner]);
+    let run = NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [corner, corner])
+        .expect("the same corner twice does come back to where it started");
 
     walk(
         &run,
@@ -86,7 +87,8 @@ fn a_circle_cut_out_of_a_ball_is_walked_the_same_wherever_the_ball_sits() {
                 .expect("the z axis is a unit normal"),
         );
         let corner = PredicatePoint::from([along + 5.0, 0.0, 0.0]);
-        let run = NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [corner, corner]);
+        let run = NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [corner, corner])
+            .expect("the same corner twice does come back to where it started");
         walk(
             &run,
             [&ball, &flat],

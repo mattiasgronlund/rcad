@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::exact::Exact;
 use crate::plane::which_side_of_a_flat_surface;
 use crate::point::{Point, Vector};
-use crate::{Cylinder, Error, Result, Sphere};
+use crate::{Cylinder, Error, Isometry, Result, Sphere};
 
 /// The name a half-space's sign predicate goes by in provenance records.
 pub const SIDE_OF_A_HALF_SPACE: &str = "side of a half-space";
@@ -200,6 +200,27 @@ impl HalfSpace {
         self.offset
     }
 
+    /// This half-space, shifted by `by`.
+    ///
+    /// **A shift and not a movement, and the type is saying something by it.**
+    /// A half-space stores the normal it was handed without scaling it, because
+    /// a picking normal exactly square to the direction a crossing runs along
+    /// stops being exactly square the moment anything scales it (§32.3). A shift
+    /// carries the normal over untouched and moves only the offset, so
+    /// squareness survives; a turn would not, and there is no `transformed` here
+    /// for that reason.
+    ///
+    /// The offset gains `normal · by`, which is a dot product and rounds. What
+    /// that costs a mesh is
+    /// `WHAT_SHIFTING_A_FACE_INTO_ITS_MESHING_FRAME_ROUNDS` over in `rcad-topo`.
+    #[must_use]
+    pub fn shifted(&self, by: Vector) -> Self {
+        Self {
+            normal: self.normal,
+            offset: self.offset + self.normal.dot(by),
+        }
+    }
+
     /// `[a, b, c, d]` for `a·x + b·y + c·z ≥ d`.
     #[must_use]
     pub fn coefficients(&self) -> [f64; 4] {
@@ -326,6 +347,22 @@ impl Picker {
             Picker::OutsideABall(ball) => ball.side_of(point),
             Picker::OutsideAPipe(pipe) => pipe.side_of(point),
         }
+    }
+
+    /// This picker, shifted by `by`.
+    ///
+    /// A shift and not a movement, for the reason [`HalfSpace::shifted`] gives.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if `by` has a component that is not a finite number.
+    pub fn shifted(&self, by: Vector) -> Result<Self> {
+        let shift = Isometry::translation(by)?;
+        Ok(match self {
+            Picker::InFrontOf(half_space) => Picker::InFrontOf(half_space.shifted(by)),
+            Picker::OutsideABall(ball) => Picker::OutsideABall(ball.transformed(&shift)),
+            Picker::OutsideAPipe(pipe) => Picker::OutsideAPipe(pipe.transformed(&shift)),
+        })
     }
 
     /// The name this picker's sign predicate goes by in provenance records.

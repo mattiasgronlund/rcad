@@ -154,7 +154,9 @@ fn corners_of(model: &Model, solid: SolidKey) -> Vec<Point> {
     corners
 }
 
-/// Every edge of a solid, once each.
+/// Every straight edge of a solid, once each. A closed edge has no segment
+/// to give and is skipped rather than asserted against, because nothing
+/// about this helper's own name promises the solid it is handed has none.
 fn edges_of(model: &Model, solid: SolidKey) -> Vec<Segment> {
     let mut seen = Vec::new();
     let mut edges = Vec::new();
@@ -164,7 +166,12 @@ fn edges_of(model: &Model, solid: SolidKey) -> Vec<Segment> {
                 let edge = coedge.edge();
                 if !seen.contains(&edge.key()) {
                     seen.push(edge.key());
-                    edges.push(edge.segment());
+                    if let Some(segment) = edge
+                        .segment()
+                        .expect("this file only builds solids with finite, distinct edges")
+                    {
+                        edges.push(segment);
+                    }
                 }
             }
         }

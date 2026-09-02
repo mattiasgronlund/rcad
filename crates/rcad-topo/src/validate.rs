@@ -423,7 +423,8 @@ impl Model {
                         [outward(face), outward(across)],
                         at,
                         turned_by(material, across.orientation()),
-                    ) else {
+                    )?
+                    else {
                         continue;
                     };
                     if walks_it_forward
@@ -479,9 +480,7 @@ impl Model {
             let volume = if self.solid_is_wholly_flat(slot) {
                 view.signed_volume()
             } else {
-                let mesh = view.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
-                every_side_of_the_skin_is_used_both_ways(&mesh)?;
-                signed_volume_over(&mesh)
+                how_much_space_a_curved_solid_encloses(view, policy, log)?
             };
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
@@ -615,6 +614,97 @@ impl Model {
     }
 }
 
+/// How much space a curved solid encloses, signed by which way its faces point,
+/// and whether the two faces along each of its sides agree.
+///
+/// A polyhedron's own fan *is* its volume; a curved solid has no such fan — a
+/// round bar's caps fan into no triangles at all and its wall into two with no
+/// area (§35.4) — so it is summed over a mesh instead. Only the **sign** is read
+/// off this, never the size.
+///
+/// # A coarse mesh that encloses exactly nothing has not answered
+///
+/// [`as_coarse_as_a_mesh_gets`] leans on the mesher never stepping more than a
+/// quarter turn, which is what keeps a *whole* curved surface from collapsing.
+/// **It says nothing about a patch that spans less than a quarter turn**, and
+/// there the mesher has no reason to put a point anywhere: the patch is handed
+/// to the triangulator with a budget it already meets, so it comes back as its
+/// own boundary and nothing else — flat. Closed off by the flat face on the
+/// other side of that boundary it encloses zero, to the last bit.
+///
+/// A ball cut by a plane is exactly that, and it is `docs/decisions.md` §41.6: a
+/// cap under `h/r = 1 − cos(π/4) = 0.2929` spans under a quarter turn, and on a
+/// ball of radius four that is a cap of 15.52 and 5.8% of the ball. **Cut square
+/// to the ball's own polar axis the same cap answers**, because then it holds a
+/// pole and is fanned up to it whatever the deflection — so the same two solids
+/// a quarter turn apart answered one way round and refused the other, which is
+/// the §19 violation §39.7 item 1 leads with.
+///
+/// So a zero is asked again with less room. Halving from the mesh's own width
+/// rather than down from [`as_coarse_as_a_mesh_gets`] is what keeps it to a
+/// handful of meshes: the bulge a flat patch is hiding is at most that width, and
+/// every halving that does not find it rules out half of what is left. **The
+/// finer meshes are read for a sign and thrown away**; nothing a caller measures
+/// is worked out here.
+///
+/// **What stops it needs no argument about geometry.** Halving a finite length
+/// reaches zero, and `Deflection::of` refuses a length that is not greater than
+/// zero, so the loop ends whatever any mesh does. Long before that two named
+/// refusals end it on a real solid — `DeflectionBelowWhatAMeshCanReach` at the
+/// floor of the input's own numbers, and `MoreMeshPointsThanASolidWillHold` if a
+/// surface reaches the point cap first — and either way the zero stands and the
+/// caller refuses it.
+///
+/// # Errors
+///
+/// Whatever meshing the solid at its coarsest makes of it, and
+/// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one side do
+/// not.
+pub(crate) fn how_much_space_a_curved_solid_encloses(
+    view: SolidView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<f64> {
+    let coarsest = view.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
+    every_side_of_the_skin_is_used_both_ways(&coarsest)?;
+    let enclosed = signed_volume_over(&coarsest);
+    if enclosed != 0.0 {
+        return Ok(enclosed);
+    }
+    let mut room = how_far_across(&coarsest) / 2.0;
+    while let Ok(less) = Deflection::of(room) {
+        // A finer mesh that refuses is the stopping condition and not a
+        // failure: the coarsest one was built and checked, and what this is
+        // looking for is a point off the flat that no mesh of this solid holds.
+        // Handing the refusal on would replace a named answer about the shape
+        // with one about a deflection nobody asked for.
+        let Ok(finer) = view.mesh(less, policy, log) else {
+            break;
+        };
+        let enclosed = signed_volume_over(&finer);
+        if enclosed != 0.0 {
+            return Ok(enclosed);
+        }
+        room /= 2.0;
+    }
+    Ok(0.0)
+}
+
+/// The longest side of the box a mesh's points sit in.
+fn how_far_across(mesh: &Mesh) -> f64 {
+    let mut lowest = [f64::MAX; 3];
+    let mut highest = [f64::MIN; 3];
+    for point in mesh.points() {
+        for (axis, coordinate) in point.coordinates().into_iter().enumerate() {
+            lowest[axis] = lowest[axis].min(coordinate);
+            highest[axis] = highest[axis].max(coordinate);
+        }
+    }
+    (0..3).fold(0.0, |widest: f64, axis| {
+        widest.max(highest[axis] - lowest[axis])
+    })
+}
+
 /// How far the mesh the sweep checks a curved solid over may stray.
 ///
 /// **As coarse as it goes, and that is not a corner cut.** What is asked of this
@@ -626,6 +716,12 @@ impl Model {
 /// turn goes, so a bar still comes out four ways round and a ball still comes
 /// out an octahedron. The sweep runs at every test boundary, and a mesh at the
 /// model's own deflection would cost it a hundredfold for the same two answers.
+///
+/// **That is an argument about a whole surface and it does not carry to a
+/// patch.** A face spanning less than a quarter turn is one step whatever the
+/// deflection, and one step is flat.
+/// [`how_much_space_a_curved_solid_encloses`] is where that is paid for; nothing
+/// else reads a mesh this coarse.
 ///
 /// **A number and not a fraction of the solid, because a fraction has a worst
 /// case and this does not.** Half a radius sounds like the coarsest sensible
@@ -806,20 +902,36 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 /// answer back with it, and two spellings of one question is how those two come
 /// to disagree (§23.8).
 ///
+/// # Errors
+///
+/// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] if neither surface is curved. Two
+/// planes cross in a straight line, which does not close, so no closed edge is
+/// named by a flat pair — this is bad caller input rather than a broken
+/// invariant, because `Model` derives `Deserialize` and nothing upstream of
+/// this check has confirmed the edge's own claim is possible
+/// (`docs/decisions.md` §39.7 item 4, not §16.11 — that section is about the
+/// dynamic-range check being a ratio and says nothing about panics on a
+/// caller's bytes; the rule is CLAUDE.md's).
+///
 /// # Panics
 ///
-/// If neither surface is curved. Two planes cross in a straight line, which does
-/// not close, so no closed edge is named by a flat pair. And if `material_side`
-/// is neither [`Decision::Pos`] nor [`Decision::Neg`], which a side that was read
-/// at all never is.
+/// If `material_side` is neither [`Decision::Pos`] nor [`Decision::Neg`].
+/// This one *is* a broken internal invariant and not caller input: the only
+/// caller, [`Model::validate`](crate::Model::validate)'s own
+/// `check_closed_edges_are_walked_the_way_their_surfaces_wind`, only ever
+/// passes a value [`which_side_of_it_this_face_lies_on`] read off a real
+/// corner, and that function's own `Ok(Some(_))` is never anything but
+/// [`Decision::Pos`] or [`Decision::Neg`] — it filters `Zero` out and turns
+/// `Undecidable` into an `Err` before it can reach here.
 pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     pair: [&Surface; 2],
     outward: [Vector; 2],
     at: Point,
     material_side: Decision,
-) -> Option<bool> {
-    let curved = the_curved_one_of(&[*pair[0], *pair[1]])
-        .expect("two planes cross in a straight line, which never closes");
+) -> Result<Option<bool>> {
+    let Some(curved) = the_curved_one_of(&[*pair[0], *pair[1]]) else {
+        return Err(Invalid::ClosedEdgeBetweenTwoFlatFaces.into());
+    };
     let longitude = the_way_it_is_parametrised_about(&curved).cross(gradient_of(&curved, at));
     // **At a pole there is no longitude to compare against** (§38.3). Every
     // longitude runs through the one point there, so `ẑ × ∇C` is exactly the
@@ -828,14 +940,14 @@ pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     // that reads one back skips, the same way it skips a face with no corner off
     // its partner.
     if longitude == Vector::zero() {
-        return None;
+        return Ok(None);
     }
     let runs_along_stored = outward[0].cross(outward[1]).dot(longitude) > 0.0;
-    Some(match material_side {
+    Ok(Some(match material_side {
         Decision::Neg => runs_along_stored,
         Decision::Pos => !runs_along_stored,
         other => panic!("a face with no side to its material: {other:?}"),
-    })
+    }))
 }
 
 /// A side read against a surface, turned round when the face on it is used
@@ -901,7 +1013,7 @@ pub(crate) fn the_curved_one_of(carried_by: &[Surface; 2]) -> Option<Surface> {
 ///
 /// On a flat surface, which has no longitude, and on a kind this has not been
 /// taught.
-fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
+pub(crate) fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
     match surface {
         Surface::Sphere(_) => Vector::new(0.0, 0.0, 1.0),
         Surface::Cylinder(pipe) => pipe.axis().direction(),
@@ -1694,6 +1806,74 @@ mod tests {
 
             assert_eq!(refusal(&model), expected);
         }
+    }
+
+    /// Whether the coedge, walked the way its wire uses it, starts at `vertex`.
+    fn coedge_starts_at(model: &Model, coedge: CoedgeSlot, vertex: VertexSlot) -> bool {
+        let data = model.data();
+        let edge = &data.edges[data.coedges[coedge].edge];
+        let start = match data.coedges[coedge].orientation {
+            Orientation::Forward => edge.start,
+            Orientation::Reversed => edge.end,
+        };
+        start == vertex
+    }
+
+    /// `docs/decisions.md` §39.7 item 3's first demonstrated panic: a cube
+    /// with one extra closed edge spliced into two of its wires, so a
+    /// `RightRoundWhereItsFacesCross` edge sits between two flat faces —
+    /// which no builder in this crate makes, and nothing stops `Model`'s
+    /// `Deserialize` from holding it anyway.
+    ///
+    /// Two planes cross in a straight line, which never closes, so
+    /// `a_closed_crossing_is_walked_the_way_it_is_stored` used to reach for
+    /// the curved surface of the pair with `.expect(...)` and find neither —
+    /// a panic on exactly the kind of bytes `Model::validate` exists to
+    /// refuse instead.
+    #[test]
+    fn a_closed_edge_between_two_flat_faces_is_caught() {
+        let mut model = a_cube();
+        let corner = model
+            .data()
+            .vertices
+            .keys()
+            .next()
+            .expect("a cube has corners");
+
+        let closed_edge = model.add_closed_edge(corner);
+        let forward = model.add_coedge(closed_edge, Orientation::Forward);
+        let backward = model.add_coedge(closed_edge, Orientation::Reversed);
+
+        let wires_through_corner: Vec<WireSlot> = model
+            .data()
+            .wires
+            .keys()
+            .filter(|&wire| {
+                model.data().wires[wire]
+                    .coedges()
+                    .any(|coedge| coedge_starts_at(&model, coedge, corner))
+            })
+            .collect();
+        assert!(
+            wires_through_corner.len() >= 2,
+            "a cube corner sits on at least two faces' wires, and this has {}",
+            wires_through_corner.len()
+        );
+
+        for (&wire, new_coedge) in wires_through_corner.iter().zip([forward, backward]) {
+            let position = model.data().wires[wire]
+                .coedges()
+                .position(|coedge| coedge_starts_at(&model, coedge, corner))
+                .expect("just filtered the wires for this");
+            model.data_mut().wires[wire]
+                .steps
+                .insert(position, crate::model::WireStep::Along(new_coedge));
+        }
+        // `data_mut` only touches the downward links; the reverse index that
+        // `faces_along_edge` reads is derived and stays stale until rebuilt.
+        let model = Model::from_parts(model.data().clone());
+
+        assert_eq!(refusal(&model), Invalid::ClosedEdgeBetweenTwoFlatFaces);
     }
 
     /// §23.9's first gap, closed. A round cap's wire has one corner and no

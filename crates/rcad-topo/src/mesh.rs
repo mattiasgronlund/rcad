@@ -20,9 +20,10 @@
 use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{
-    Deflection, Isometry, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, Surface, Vector,
+    Deflection, Isometry, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Point,
+    SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector,
 };
-use rcad_mesh::{CannotTriangulate, Loop, TrimmedDomain, triangulate};
+use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate};
 use rcad_predicates::{
     Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
     ProvenanceLog, Record,
@@ -30,9 +31,9 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::fuse::name_of_surface_bits;
-use crate::validate::side_of_surface;
+use crate::validate::{side_of_surface, the_way_it_is_parametrised_about};
 use crate::view::{EdgeView, FaceView, VertexView, WireStepView, WireView};
-use crate::{EdgeKey, Error, FaceKey, Result, SolidView, VertexKey};
+use crate::{EdgeKey, Error, FaceKey, Invalid, Result, SolidView, VertexKey};
 
 /// A solid cut into triangles.
 ///
@@ -147,23 +148,19 @@ impl SolidView<'_> {
     /// refuses a face, carrying what it said. [`Error::Undecidable`] when a
     /// predicate inside a triangulation could not settle a sign.
     /// [`Error::AWireWillNotLieFlatOnItsFace`],
-    /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`] and
-    /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] for a solid that
-    /// arrived from a file with a shape no builder here makes. All three are
-    /// refusals rather than asserts precisely because
-    /// [`Model::validate`](crate::Model::validate) meshes what it is given, and
-    /// a sweep over untrusted bytes has to hand back a refusal (§16.11, §4.1).
-    /// Whatever [`rcad_geom::walk`] makes of an edge it cannot follow, which
-    /// includes a seam whose half-spaces pick both halves of its meridian or
-    /// neither.
-    ///
-    /// # Panics
-    ///
-    /// If a wire fans into fewer than three corners in the surface's own two
-    /// coordinates. Nothing does: a wire has three steps or it closes on one
-    /// edge, and a closed edge on a curved face is walked four ways round
-    /// whatever the deflection, because the evaluator will not step past a
-    /// quarter turn either.
+    /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`],
+    /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] and
+    /// [`Error::AWireDoesNotFanIntoALoopToMesh`] for a solid that arrived from
+    /// a file with a shape no builder here makes — a wall face storing a
+    /// [`Plane`](rcad_geom::Plane) where its own
+    /// [`Cylinder`](rcad_geom::Cylinder) belongs fans a four-step wire into
+    /// one corner in the plane's own two coordinates. All four are refusals
+    /// rather than asserts precisely because
+    /// [`Model::validate`](crate::Model::validate) is a separate call this
+    /// does not require first, `Model` derives `Deserialize`, and a caller's
+    /// bytes may not panic (CLAUDE.md, §4.1). Whatever [`rcad_geom::walk`]
+    /// makes of an edge it cannot follow, which includes a seam whose
+    /// half-spaces pick both halves of its meridian or neither.
     pub fn mesh(
         self,
         deflection: Deflection,
@@ -313,11 +310,13 @@ impl BuildingAMesh {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
-        let stored = face.surface().transformed(&face.location().inverse());
+        let stored = face
+            .surface()
+            .transformed(&the_frame_this_face_is_meshed_in(face));
         if stored.as_plane().is_some() {
             return Ok(());
         }
-        let room = self.deflection.length() - how_far_placing_this_face_rounds(face);
+        let room = self.deflection.length() - how_far_moving_this_face_rounds(face);
         for wire in face.wires() {
             for coedge in wire.coedges() {
                 let edge = coedge.edge();
@@ -360,13 +359,14 @@ impl BuildingAMesh {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Vec<u32>> {
-        let back = face.location().inverse();
+        let back = the_frame_this_face_is_meshed_in(face);
         let (from, to) = ends_in_the_stored_order(edge);
         let run = NamedRun::new(
-            edge.run().clone(),
+            edge.run()
+                .shifted(the_shift_this_face_is_meshed_with(face))?,
             [from, to]
                 .map(|end| PredicatePoint::from(back.apply_to_point(end.point()).coordinates())),
-        );
+        )?;
         let along = the_two_surfaces_either_side(edge, &self.along_each_edge, &back)?;
 
         let along_it = rcad_geom::walk(
@@ -394,21 +394,26 @@ impl BuildingAMesh {
         // plane leaves *two* caps in two different fuses, and each was stored
         // the way whichever face walked it first ran. A pole read off that is
         // right for half the caps there are.
-        if edge.is_closed()
-            && let Some(reference) = the_curved_surface_that_names_a_closed_edge(&along)
-            && how_far_round_this_face_it_goes(
-                &reference,
-                back.apply_to_point(from.point()),
-                &points,
-            ) < 0.0
-        {
-            points.reverse();
+        //
+        // The rule is read **at the corner**, which is where the fuse writes it
+        // and where `Model::validate` reads it back. Summing the longitude all
+        // the way round instead comes to nothing on a circle that encircles no
+        // pole, and leaving the direction to the evaluator there is what
+        // [`the_way_a_closed_edge_is_stored_running`] measures the cost of.
+        if edge.is_closed() {
+            let corner = back.apply_to_point(from.point());
+            if let Some(first) = points.first()
+                && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(&along, corner)
+                && (*first - corner).dot(stored_way) < 0.0
+            {
+                points.reverse();
+            }
         }
 
         self.worst = self
             .worst
-            .max(along_it.deviation().magnitude() + how_far_placing_this_face_rounds(face));
-        let there = face.location();
+            .max(along_it.deviation().magnitude() + how_far_moving_this_face_rounds(face));
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         Ok(points
             .into_iter()
             .map(|along| {
@@ -420,8 +425,10 @@ impl BuildingAMesh {
 
     /// Cut one face into triangles and put them in the solid's own table.
     fn cut_up(&mut self, face: FaceView<'_>, log: &mut ProvenanceLog) -> Result<()> {
-        let stored = face.surface().transformed(&face.location().inverse());
-        let room = self.deflection.length() - how_far_placing_this_face_rounds(face);
+        let stored = face
+            .surface()
+            .transformed(&the_frame_this_face_is_meshed_in(face));
+        let room = self.deflection.length() - how_far_moving_this_face_rounds(face);
 
         let mut walked = Vec::with_capacity(face.wire_count());
         for wire in face.wires() {
@@ -469,6 +476,33 @@ impl BuildingAMesh {
         let Some(whole_turn) = how_far_the_longitude_wraps(stored) else {
             return Ok(vec![walked]);
         };
+        // **A loop drawn on a ball bounds two pieces and only one of them is a
+        // patch this can fill.** The triangulator fills the inside of what it
+        // is handed, and the inside of a loop in the surface's own two
+        // coordinates is the piece holding no pole. When the material is on the
+        // *other* side — the piece holding both poles, which a ball with a cap
+        // taken off it is — the answer is the whole ball less a disc, and
+        // writing it needs a seam and two poles the way §38.1 wrote an uncut
+        // one. Nothing here builds that yet, so it is refused by name rather
+        // than filled inside out: without this the union of two balls of radius
+        // two whose centres are two apart came back `Ok` measuring 10.40, where
+        // `18π = 56.55` is the union and `10π/3 = 10.47` is the *lens* between
+        // them — the complement of the piece that was asked for.
+        //
+        // **Only asked of a surface that pinches**, which here is only a ball,
+        // and on a pipe there is nothing to ask. A pipe's two coordinates are
+        // longitude and height and it runs on for ever, so a loop that does not
+        // go right round it bounds a patch one way and an **unbounded** region
+        // the other. A solid is bounded, so its faces are, so the material is
+        // the patch — there is no second case for a sign to tell apart.
+        if walked.len() == 1
+            && walked[0].closes_on_one_curve
+            && !walked[0].goes_right_round
+            && where_this_surface_pinches(stored).is_some()
+            && how_much_of_the_chart_this_loop_encloses(&walked[0]) <= 0.0
+        {
+            return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
+        }
         let widest = whole_turn / 4.0;
         if how_far_round(&walked[0]) <= widest {
             return Ok(vec![walked]);
@@ -526,8 +560,11 @@ impl BuildingAMesh {
     /// Cut a **cap** — one loop right round a surface that pinches to a point,
     /// with nothing else bounding it — into four patches with one loop each.
     ///
-    /// A ball cut by a plane leaves one, and it is about the simplest curved
-    /// boolean there is. Its patch in the sphere's own two coordinates is a
+    /// A ball cut by a plane square to its polar axis leaves one, and it is
+    /// about the simplest curved boolean there is. A plane at any other angle
+    /// leaves a loop that climbs in longitude and comes straight back, which
+    /// goes to [`BuildingAMesh::cut_in_two`] instead and needs no pole at all.
+    /// Its patch in the sphere's own two coordinates is a
     /// rectangle whose top edge is the pole and whose two sides are one meridian
     /// used twice, and **the model says neither**: a
     /// [`WireStep::Pole`](crate::model::WireStep) and a seam are what say them,
@@ -569,7 +606,7 @@ impl BuildingAMesh {
             [0, 1, 2, 3].map(|step| from + way * f64::from(step) * whole_turn / 4.0);
         let along = quarters.map(|at| nearest_longitude(cap, at));
 
-        let there = face.location();
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         let at_the_pole = stored.point_at(from, towards);
         if !at_the_pole.is_finite() {
             return Ok(None);
@@ -630,7 +667,7 @@ impl BuildingAMesh {
         cap: &WalkedLoop,
     ) -> Option<f64> {
         let pole = where_this_surface_pinches(stored)?;
-        let back = face.location().inverse();
+        let back = the_frame_this_face_is_meshed_in(face);
         let mine = face.surface();
         let coedge = face.wires().flat_map(WireView::coedges).next()?;
         let partner = self
@@ -771,10 +808,11 @@ impl BuildingAMesh {
                 most: MOST_POINTS_A_MESH_WILL_HOLD,
             });
         }
-        let there = face.location();
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         let mut along = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
+            closes_on_one_curve: false,
             goes_right_round: false,
         };
         for step in 1..steps {
@@ -838,10 +876,11 @@ impl BuildingAMesh {
             });
         }
 
-        let there = face.location();
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         let mut along_the_cut = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
+            closes_on_one_curve: false,
             goes_right_round: false,
         };
         for step in 1..steps {
@@ -874,14 +913,14 @@ impl BuildingAMesh {
         let mut loops = Vec::with_capacity(patch.len());
         for one in patch {
             corner_is.extend(one.points);
-            loops.push(Loop::through(one.corners).expect(
-                "a wire of a valid solid fans into at least three corners made \
-                 of finite numbers",
-            ));
+            loops.push(Loop::through(one.corners).map_err(|why: NotALoop| {
+                Error::AWireDoesNotFanIntoALoopToMesh {
+                    face: face.key(),
+                    why,
+                }
+            })?);
         }
-        let (outer, holes) = loops
-            .split_first()
-            .expect("a face of a valid solid has at least one wire");
+        let (outer, holes) = loops.split_first().ok_or(Invalid::FaceHasNoWires)?;
 
         let domain = TrimmedDomain::new(
             *stored,
@@ -897,7 +936,7 @@ impl BuildingAMesh {
         // Everything past the corners this patch handed over is a point the
         // refinement put strictly inside it, so it belongs to this patch alone
         // and nothing else will ever name it (§25.1).
-        let there = face.location();
+        let there = the_frame_this_face_is_meshed_in(face).inverse();
         for corner in &cut.corners()[corner_is.len()..] {
             let inside = stored.point_at(corner[0], corner[1]);
             corner_is.push(self.remember(there.apply_to_point(inside)));
@@ -926,7 +965,7 @@ impl BuildingAMesh {
         }
         self.worst = self
             .worst
-            .max(cut.deviation().magnitude() + how_far_placing_this_face_rounds(face));
+            .max(cut.deviation().magnitude() + how_far_moving_this_face_rounds(face));
         Ok(())
     }
 
@@ -946,7 +985,7 @@ impl BuildingAMesh {
         face: FaceView<'_>,
         stored: &Surface,
     ) -> Option<WalkedLoop> {
-        let back = face.location().inverse();
+        let back = the_frame_this_face_is_meshed_in(face);
         let poles = poles_of(wire);
         let mut walk = WalkingAWire::new(
             how_far_the_longitude_wraps(stored),
@@ -1030,8 +1069,11 @@ impl BuildingAMesh {
 struct WalkedLoop {
     corners: Vec<[f64; 2]>,
     points: Vec<u32>,
-    /// Whether this wire is one whole closed curve, so that it comes back to
-    /// where it started a whole turn on rather than at the longitude it left.
+    /// Whether this wire is one whole closed curve — one coedge whose two ends
+    /// are its one corner — with no seam and no pole side anywhere in it.
+    closes_on_one_curve: bool,
+    /// Whether it went right round the surface, gaining a whole turn of
+    /// longitude rather than climbing and coming back.
     goes_right_round: bool,
 }
 
@@ -1041,6 +1083,7 @@ impl WalkedLoop {
         let mut taken = WalkedLoop {
             corners: Vec::new(),
             points: Vec::new(),
+            closes_on_one_curve: false,
             goes_right_round: false,
         };
         let mut at = from;
@@ -1076,6 +1119,7 @@ impl WalkedLoop {
         WalkedLoop {
             corners: self.corners.iter().rev().copied().collect(),
             points: self.points.iter().rev().copied().collect(),
+            closes_on_one_curve: self.closes_on_one_curve,
             goes_right_round: self.goes_right_round,
         }
     }
@@ -1108,7 +1152,19 @@ fn where_this_surface_pinches(surface: &Surface) -> Option<f64> {
 
 /// Whether a loop is walked in the direction the longitude grows.
 fn runs_up(around: &WalkedLoop, whole: f64) -> bool {
-    let corners = &around.corners;
+    how_far_the_longitude_climbed(&around.corners, whole) > 0.0
+}
+
+/// How much longitude a closed walk gains all the way round, whole turns and
+/// all: zero for a loop that comes back the way it went, `±whole` for one that
+/// encircles the surface's axis once.
+///
+/// The closing step from the last corner to the first is part of it, because a
+/// loop that goes right round is stored as one turn's worth of corners with the
+/// last step left implicit. No single step can be more than a quarter turn —
+/// [`how_many_steps`] will not walk further than that — so taking each step the
+/// short way round is taking it the way it actually went.
+fn how_far_the_longitude_climbed(corners: &[[f64; 2]], whole: f64) -> f64 {
     let mut climbed = 0.0;
     for step in 0..corners.len() {
         climbed += the_short_way_round(
@@ -1116,7 +1172,7 @@ fn runs_up(around: &WalkedLoop, whole: f64) -> bool {
             whole,
         );
     }
-    climbed > 0.0
+    climbed
 }
 
 /// Which corner of a loop sits nearest a longitude.
@@ -1153,6 +1209,7 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
             .map(|corner| [corner[0] + by, corner[1]])
             .collect(),
         points: chain.points.clone(),
+        closes_on_one_curve: chain.closes_on_one_curve,
         goes_right_round: chain.goes_right_round,
     }
 }
@@ -1175,6 +1232,7 @@ fn unwrapped(chain: &WalkedLoop, whole: f64) -> WalkedLoop {
     WalkedLoop {
         corners,
         points: chain.points.clone(),
+        closes_on_one_curve: chain.closes_on_one_curve,
         goes_right_round: chain.goes_right_round,
     }
 }
@@ -1192,6 +1250,26 @@ fn longitudes_of(around: &WalkedLoop) -> (f64, f64) {
 fn how_far_round(around: &WalkedLoop) -> f64 {
     let (least, most) = longitudes_of(around);
     most - least
+}
+
+/// How much area one loop encloses in the surface's own two coordinates, signed:
+/// **positive when the face's material is inside the loop** and negative when it
+/// is outside.
+///
+/// A surface's two coordinates are right-handed about its outward normal —
+/// `∂u × ∂v` is `R² cos v` times it on a ball — and a wire keeps its face's
+/// material on its left, so a loop with the material inside it runs
+/// anticlockwise in `(u, v)` and the shoelace sum comes out positive. The number
+/// itself is not used, only its sign, and it is an area in radians squared
+/// rather than a size in space.
+fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
+    let corners = &around.corners;
+    let mut twice_the_area = 0.0;
+    for step in 0..corners.len() {
+        let (here, next) = (corners[step], corners[(step + 1) % corners.len()]);
+        twice_the_area += here[0] * next[1] - next[0] * here[1];
+    }
+    twice_the_area / 2.0
 }
 
 /// Where to cut a patch that goes too far round: the loop with the cut's two
@@ -1217,6 +1295,7 @@ fn where_to_cut(around: &WalkedLoop, middle: f64) -> Option<(WalkedLoop, [usize;
     let mut opened = WalkedLoop {
         corners: Vec::with_capacity(count + 2),
         points: Vec::with_capacity(count + 2),
+        closes_on_one_curve: false,
         goes_right_round: false,
     };
     let mut moved_to = Vec::with_capacity(count);
@@ -1282,9 +1361,11 @@ fn the_nearer_of(middle: f64, here: f64, next: f64) -> bool {
 /// The running state of a walk round one wire.
 struct WalkingAWire {
     wraps: Option<f64>,
-    /// Whether this wire is one whole closed curve, so that it comes back to
-    /// where it started a whole turn on rather than at the longitude it left.
-    goes_right_round: bool,
+    /// Whether this wire is one whole closed curve, so that it is allowed to
+    /// come back to where it started a whole turn on rather than at the
+    /// longitude it left. Whether it *did* is measured in
+    /// [`WalkingAWire::finish`] and is a different question.
+    closes_on_one_curve: bool,
     longitude: f64,
     started: bool,
     will_not_lie_flat: bool,
@@ -1294,10 +1375,10 @@ struct WalkingAWire {
 }
 
 impl WalkingAWire {
-    fn new(wraps: Option<f64>, goes_right_round: bool) -> Self {
+    fn new(wraps: Option<f64>, closes_on_one_curve: bool) -> Self {
         Self {
             wraps,
-            goes_right_round,
+            closes_on_one_curve,
             longitude: 0.0,
             started: false,
             will_not_lie_flat: false,
@@ -1389,22 +1470,34 @@ impl WalkingAWire {
         if self.will_not_lie_flat {
             return None;
         }
-        // A wire made of one whole closed curve is *meant* to come back a whole
-        // turn on — a cap circle of a tube the fuse cut out of a bar's wall is
-        // one — so the check below is not about it. It is a fact about the wire
-        // and not a measurement: one coedge whose two ends are one corner runs
-        // right round the curve its two faces cross in, which on a periodic
-        // surface is right round the surface.
+        // A wire made of one whole closed curve is *allowed* to come back a
+        // whole turn on — a cap circle of a tube the fuse cut out of a bar's
+        // wall is one — so the check below is not about it.
         if let (Some(whole), Some(first)) = (self.wraps, self.corners.first())
-            && !self.goes_right_round
+            && !self.closes_on_one_curve
             && (self.longitude - first[0]).abs() >= whole / 2.0
         {
             return None;
         }
+        // **Whether it went right round the surface is measured and not read
+        // off the wire**, and that is §39.7 item 1. One coedge whose two ends
+        // are one corner runs right round the curve its two faces cross in —
+        // and on a sphere that curve is any circle at all, most of which
+        // encircle no pole. A ball cut at `y = 1` leaves a cap bounded by one
+        // closed edge spanning 2.64 radians of longitude and coming straight
+        // back; calling that a cap right round the ball sent it looking for a
+        // pole to fan up to, and it either found none (refused
+        // `ACurvedFaceGoesRightRoundWithNoSeam`) or found the wrong one and
+        // handed the triangulator a boundary that crosses itself.
+        let goes_right_round = self.closes_on_one_curve
+            && self.wraps.is_some_and(|whole| {
+                how_far_the_longitude_climbed(&self.corners, whole).abs() >= whole / 2.0
+            });
         Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
-            goes_right_round: self.goes_right_round && self.wraps.is_some(),
+            closes_on_one_curve: self.closes_on_one_curve,
+            goes_right_round,
         })
     }
 }
@@ -1467,40 +1560,43 @@ fn the_two_surfaces_either_side(
     Ok([first.transformed(back), second.transformed(back)])
 }
 
-/// How far round this face's own longitude a closed edge's points go, following
-/// them from the corner it starts at.
+/// Which way in space a closed edge is stored running, read at the corner it
+/// starts at.
 ///
-/// A whole turn one way or the other for a cap circle, and the **sign** is the
-/// whole of what this is read for. Summed the short way round from step to step,
-/// which is why no step of a walk is allowed past a quarter turn: past a half
-/// one there is no telling a step from one the other way.
+/// **The same rule the fuse wrote the edge with and `Model::validate` reads it
+/// back with**, spelled once (§23.8):
+/// [`a_closed_crossing_is_walked_the_way_it_is_stored`] asks whether the
+/// crossing's forward direction `∇S × ∇T` runs with the longitude
+/// `axis × ∇S` **at the corner**, and this hands back the direction that does.
 ///
-/// Zero for a closed edge that does not go round the face at all — a small
-/// circle cut out of a ball by a plane that misses its axis — and then the
-/// evaluator's own direction is left alone.
+/// **Summing the longitude all the way round instead is what this replaces, and
+/// it was one authority short.** A cap circle of a bar gains a whole turn either
+/// way and the sum reads it; a circle cut out of a ball by a plane that misses
+/// its polar axis gains **nothing** — it climbs and comes straight back — so the
+/// sum was exactly zero and the walk was left running whichever way the
+/// evaluator happened to produce it. The same ball cut at `x = 1` and at `y = 1`
+/// then came back with its cap walked opposite ways round: chart areas of
+/// `−3.4749` and `+3.4749` for two caps that are one cap turned a quarter turn.
+/// Nothing read the direction, so nothing failed — until something needs it, and
+/// [`how_much_of_the_chart_this_loop_encloses`] does.
 ///
-/// **That is the right answer for the wire this is read for and not for every
-/// wire**, and the difference is worth naming rather than glossing. What the
-/// sign settles is whether a face's *outer* wire comes back to the longitude it
-/// set off from, and an edge that goes nowhere round the face cannot make it
-/// fail that whichever way it runs. A closed edge that is a **hole** in a curved
-/// face is a different question — there the direction is what makes it read as a
-/// hole rather than as a second outline — and nothing here answers it. No
-/// builder makes such a face; one arriving from a file would need a curved face
-/// with a closed-edge hole in it, which is M4's ball with a pipe through it.
-fn how_far_round_this_face_it_goes(stored: &Surface, from: Point, points: &[Point]) -> f64 {
-    let Some(whole_turn) = how_far_the_longitude_wraps(stored) else {
-        return 0.0;
-    };
-    let mut at = stored.coordinates_of(from).0;
-    let mut round = 0.0;
-    for &point in points.iter().chain(core::iter::once(&from)) {
-        let next = stored.coordinates_of(point).0;
-        let step = the_short_way_round(next - at, whole_turn);
-        round += step;
-        at = next;
+/// `None` when neither sign is a fact: neither surface is curved, so there is no
+/// longitude at all; the two are tangent here, so there is no crossing
+/// direction; or the corner is at a pole, where every longitude runs through the
+/// one point and `axis × ∇S` is exactly zero (§38.3).
+fn the_way_a_closed_edge_is_stored_running(along: &[Surface; 2], at: Point) -> Option<Vector> {
+    let reference = the_curved_surface_that_names_a_closed_edge(along)?;
+    let forward = gradient_of(&along[0], at).cross(gradient_of(&along[1], at));
+    let longitude = the_way_it_is_parametrised_about(&reference).cross(gradient_of(&reference, at));
+    let with_the_longitude = forward.dot(longitude);
+    if with_the_longitude == 0.0 {
+        return None;
     }
-    round
+    Some(if with_the_longitude > 0.0 {
+        forward
+    } else {
+        -forward
+    })
 }
 
 /// Which of the two surfaces either side of a closed edge says which way it
@@ -1624,8 +1720,8 @@ const WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO: f64 = WHAT_THE_BOUNDARY_TAKES_OF_THE_B
 /// How far out of place a point of this face's boundary can be before any
 /// triangle has strayed anywhere, which is the floor under a deflection.
 ///
-/// **Two chains in two frames, and keeping them apart is §19 again.** The
-/// evaluator follows a crossing in the frame the face is **stored** in and
+/// **Three chains in two frames, and keeping them apart is §19 again.** The
+/// evaluator follows a crossing in the frame the face is **meshed** in and
 /// publishes [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of how far out the surfaces
 /// reach *there*; the movement that carries the point to where the solid sits
 /// rounds against how far out the face reaches *there*. A ball stored at the
@@ -1633,13 +1729,176 @@ const WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO: f64 = WHAT_THE_BOUNDARY_TAKES_OF_THE_B
 /// charging it both against the billion would put the floor under a mesh fifty
 /// times higher than the arithmetic asks for.
 ///
+/// The third is [`WHAT_SHIFTING_A_FACE_INTO_ITS_MESHING_FRAME_ROUNDS`], and a
+/// face that is already worked out where it is stored does not pay it.
+///
 /// The evaluator's share is divided by [`WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO`],
 /// because that is the fraction of the deflection it is handed and it refuses a
 /// deflection it cannot place a point inside.
 fn how_far_a_mesh_point_of_this_face_rounds(face: FaceView<'_>) -> f64 {
     POINT_ALONG_A_CROSSING_ROUNDOFF / WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO
-        * how_far_the_points_of_reach(face, &face.location().inverse())
-        + how_far_placing_this_face_rounds(face)
+        * how_far_the_points_of_reach(face, &the_frame_this_face_is_meshed_in(face))
+        + how_far_moving_this_face_rounds(face)
+}
+
+/// How far out of place a point of this face can be for reasons that have
+/// nothing to do with how finely it was asked for: the movement into the frame
+/// the face is meshed in, and the movement back out of it.
+///
+/// This is what a deflection loses before any curve is refined, so it comes off
+/// the budget a boundary is refined against as well as standing in the floor.
+fn how_far_moving_this_face_rounds(face: FaceView<'_>) -> f64 {
+    how_far_placing_this_face_rounds(face)
+        + how_far_shifting_this_face_rounds(face, &the_frame_this_face_is_meshed_in(face))
+}
+
+/// The frame this face's own geometry is worked out in.
+///
+/// Usually the frame it is **stored** in, which is where §17.1 puts a face and
+/// which is what every solid this kernel builds itself keeps its curves in.
+///
+/// **But "stored" is not always near the origin.** A fuse bakes placement into
+/// the surface it writes (§17.3), and a solid read out of a file arrives in world
+/// coordinates with nothing left on it to say where it was put. The crossing
+/// evaluator charges its rounding against the biggest number it was handed, so a
+/// bar built a billion units up its own axis and then put through a boolean that
+/// cuts nothing off it went from meshing at `1e-5` to refusing everything under
+/// `3.07e-4` — a boolean that removed no material making its own answer 77 times
+/// coarser (§39.7 item 2).
+///
+/// So a face whose stored numbers are far from the origin is shifted until they
+/// are small, worked out there, and shifted back.
+/// [`a_shift_that_loses_nothing`] says how far, and its name is the point.
+///
+/// **Only a face at no placement at all is shifted**, which is exactly the fused
+/// and the imported one. A face that carries a placement is already worked out
+/// in a frame somebody chose for it, and composing a shift onto a movement that
+/// turns as well as shifts is no longer a subtraction one coordinate at a time —
+/// which is the whole of what makes the shift exact.
+fn the_frame_this_face_is_meshed_in(face: FaceView<'_>) -> Isometry {
+    if face.location() != Isometry::identity() {
+        return face.location().inverse();
+    }
+    a_shift_that_loses_nothing(face).unwrap_or_else(Isometry::identity)
+}
+
+/// How far the frame this face is meshed in was shifted off the frame it is
+/// stored in, which is nothing at all for most faces.
+///
+/// **An [`EdgeRun`](rcad_geom::EdgeRun) is written in the frame its face is
+/// stored in and has to be shifted with it.** A ball's seam is the plane its
+/// meridian lies in together with the half-space picking one half of it, and a
+/// ball worked out somewhere else with its seam left where it was picks a piece
+/// of a crossing that is not there.
+fn the_shift_this_face_is_meshed_with(face: FaceView<'_>) -> Vector {
+    if face.location() != Isometry::identity() {
+        return Vector::zero();
+    }
+    the_frame_this_face_is_meshed_in(face).translation_part()
+}
+
+/// A shift down the coordinate axes that brings this face's own numbers near the
+/// origin, or `None` when there is nothing there to gain.
+///
+/// The numbers are the face's corners and the point its surface is placed by — a
+/// ball's centre, a pipe's axis origin — taken one coordinate at a time, and
+/// [`how_far_one_coordinate_can_be_shifted_for_nothing`] decides each.
+///
+/// **A flat face is never shifted**: its mesh is drawn through corners the model
+/// already holds and rounds nothing, so [`how_far_the_points_of_reach`] gives it
+/// a floor of zero wherever it sits.
+fn a_shift_that_loses_nothing(face: FaceView<'_>) -> Option<Isometry> {
+    let placed_by = match face.surface() {
+        Surface::Plane(_) => return None,
+        Surface::Sphere(ball) => ball.centre(),
+        Surface::Cylinder(pipe) => pipe.axis().origin(),
+        // A surface kind this has not been taught is worked out where it is,
+        // which is what every face did before there was a shift at all.
+        _ => return None,
+    };
+    let mut low = placed_by.coordinates();
+    let mut high = low;
+    for corner in face.wires().flat_map(WireView::points) {
+        for (axis, coordinate) in corner.coordinates().into_iter().enumerate() {
+            low[axis] = low[axis].min(coordinate);
+            high[axis] = high[axis].max(coordinate);
+        }
+    }
+
+    let shift = [0, 1, 2]
+        .map(|axis| how_far_one_coordinate_can_be_shifted_for_nothing(low[axis], high[axis]));
+    if shift == [0.0; 3] {
+        return None;
+    }
+    Isometry::translation(Vector::new(-shift[0], -shift[1], -shift[2])).ok()
+}
+
+/// How much can be taken off every number between `low` and `high` without
+/// losing a bit of any of them.
+///
+/// **It loses nothing, and that is a condition rather than a hope.** A coordinate
+/// is moved only when every number in it has one sign and the largest is no more
+/// than twice the smallest, and it is then moved by the smallest of them. That is
+/// Sterbenz's condition — `a − b` is exact whenever `b/2 ≤ a ≤ 2b` — so each of
+/// these subtractions loses nothing and the face worked out in the shifted frame
+/// is the very same face.
+///
+/// A coordinate whose numbers straddle the origin, or spread over more than a
+/// factor of two, comes back zero: there is nothing to take off it that would
+/// make it smaller and still be exact.
+///
+/// `taking_the_smallest_of_a_run_of_numbers_off_all_of_them_loses_no_bits` is
+/// the demonstration.
+fn how_far_one_coordinate_can_be_shifted_for_nothing(low: f64, high: f64) -> f64 {
+    if low > 0.0 && high <= 2.0 * low {
+        low
+    } else if high < 0.0 && low >= 2.0 * high {
+        high
+    } else {
+        0.0
+    }
+}
+
+/// How far moving the surfaces round this face into the frame it is meshed in
+/// can put one of them from where it truly goes.
+///
+/// Zero for a face worked out where it is stored, because nothing moves.
+///
+/// **This is the neighbours' bill and not the face's own.**
+/// [`a_shift_that_loses_nothing`] is chosen from one face's numbers and is exact
+/// on them; the surface on the *other* side of an edge — the plane a bar's cap
+/// sits on, the second pipe of a crossing — is moved by the same shift without
+/// having been asked, and [`SURFACE_AFTER_SHIFTING_ROUNDOFF`] is what that
+/// costs.
+///
+/// **This is the whole of what a fuse's baking still costs a mesh**, and it is a
+/// factor of `(POINT_ROUNDOFF + SURFACE_AFTER_SHIFTING_ROUNDOFF) /
+/// POINT_ROUNDOFF`, which is 1.44 rather than §39.7 item 2's 77. Measured by
+/// `a_boolean_that_cuts_nothing_off_a_bar_does_not_make_it_much_coarser_to_mesh`.
+/// It is a **gap** and not a limit — the answer at 1.00 exists, and reaching it
+/// means measuring what the shift really cost each neighbour rather than
+/// bounding it, which needs the surfaces along a face's edges at the time the
+/// floor is worked out.
+///
+/// **A picker is not a distance and is not charged here.** The half-spaces in an
+/// [`EdgeRun`](rcad_geom::EdgeRun) stray by the same amount when they are
+/// shifted, and that does not move a mesh point anywhere — it decides which
+/// piece of a crossing this edge is. [`HalfSpace`](rcad_geom::HalfSpace)'s own
+/// doc says a strayed offset is allowed, because it moves the flat surface along
+/// its own normal without turning it and so can only be wrong about *where
+/// between* two pieces it sits (§29.8). To be wrong at all, the middle of the
+/// piece being asked about would have to sit within the stray of the picking
+/// surface — on a circle of radius one shifted a billion units, an arc under
+/// about `1e-3` radians. Worth knowing rather than hidden: before the shift the
+/// same decision was made against a point box `POINT_ALONG_A_CROSSING_ROUNDOFF`
+/// wide in the *world's* numbers, fifty-seven times this, so nothing this can
+/// get wrong was decided then either — but it was refused rather than answered,
+/// and that difference is real.
+fn how_far_shifting_this_face_rounds(face: FaceView<'_>, meshed_in: &Isometry) -> f64 {
+    if *meshed_in == face.location().inverse() {
+        return 0.0;
+    }
+    SURFACE_AFTER_SHIFTING_ROUNDOFF * how_far_the_points_of_reach(face, &Isometry::identity())
 }
 
 /// How far moving this face's points from the frame it is stored in to where the
@@ -1780,6 +2039,53 @@ mod tests {
             .expect_err("a curved face with a hole cannot be cut up");
         assert!(
             matches!(refusal, Error::CurvedFaceWithAHoleGoesTooFarRound { .. }),
+            "got {refusal:?}"
+        );
+    }
+
+    /// A wire fanned onto the wrong surface is refused and does not panic.
+    ///
+    /// `docs/decisions.md` §39.7 item 3's third demonstrated panic: a round
+    /// bar's wall face, its own [`rcad_geom::Cylinder`] swapped out for a
+    /// [`Plane`] with nothing else changed. The wire round it is unchanged —
+    /// walked from the same 3D edges, the same four steps — but a wire that
+    /// fans out round a circle in the cylinder's own `(u, v)` collapses into
+    /// one corner in the plane's, because every point on the circle sits
+    /// directly below the plane's own normal at the corner where the seam
+    /// meets it. **The route is `Deserialize` and not a builder**: no builder
+    /// here stores a flat surface under a curved wire, but nothing stops
+    /// `Model`'s `Deserialize` from holding it, and [`SolidView::mesh`] is
+    /// public in its own right.
+    #[test]
+    fn a_wall_stored_with_the_wrong_surface_is_refused_rather_than_asserted_against() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = model
+            .add_round_bar(5.0, 10.0, &Isometry::identity())
+            .expect("a bar five across and ten tall");
+
+        let wall = model
+            .data()
+            .faces
+            .iter()
+            .find(|(_, face)| face.surface.as_plane().is_none())
+            .map(|(slot, _)| slot)
+            .expect("a bar has one curved face");
+
+        let flat =
+            Plane::from_point_and_normal(Point::new(5.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .expect("the x axis is a unit normal");
+        model.data_mut().faces[wall].surface = Surface::Plane(flat);
+
+        let refusal = model
+            .solid(bar)
+            .mesh(
+                Deflection::of(1.0).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a wire fanned onto the wrong surface cannot be cut up");
+        assert!(
+            matches!(refusal, Error::AWireDoesNotFanIntoALoopToMesh { .. }),
             "got {refusal:?}"
         );
     }
@@ -2003,7 +2309,8 @@ mod tests {
             let run = NamedRun::new(
                 edge.run().clone(),
                 [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
-            );
+            )
+            .expect("every edge the kernel builds itself comes back to where it started");
             if run.run() == &EdgeRun::RightRoundWhereItsFacesCross {
                 closed += 1;
                 assert_eq!(
@@ -2045,7 +2352,8 @@ mod tests {
             let run = NamedRun::new(
                 edge.run().clone(),
                 [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
-            );
+            )
+            .expect("every edge the kernel builds itself comes back to where it started");
             let faces: Vec<Surface> = model
                 .faces_along_edge(slot)
                 .map(|face| model.data().faces[face].surface)
@@ -2214,5 +2522,81 @@ mod tests {
             refusal,
             Error::AWireWillNotLieFlatOnItsFace { .. }
         ));
+    }
+
+    /// §16.10 for [`how_far_one_coordinate_can_be_shifted_for_nothing`]: the
+    /// shift the mesher works a far-off face out in really does lose nothing.
+    ///
+    /// **The whole of the frame change rests on this.** A shift that lost a bit
+    /// would move the surface the points are put on, and the floor under a
+    /// deflection would be understating what a mesh point costs — which is the
+    /// defect this frame change exists to fix, arriving by a different road.
+    ///
+    /// The check is exact and not a tolerance: Knuth's two-sum hands back what an
+    /// addition threw away, to the last bit, and the claim is that it is zero.
+    /// Searched over numbers sixty octaves apart, both signs, with the runs that
+    /// are *refused* a shift counted too — a rule that shifted nothing at all
+    /// would pass this whatever it said.
+    #[test]
+    fn taking_the_smallest_of_a_run_of_numbers_off_all_of_them_loses_no_bits() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next_bits = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        // A whole fifty-three bits of mantissa, because a number with only
+        // twenty-four significant bits subtracts exactly from its neighbours
+        // whatever the rule says, and a search over those proves nothing.
+        let a_fraction = |bits: u64| (bits >> 11) as f64 / (1u64 << 53) as f64;
+        let a_number = |bits: u64| {
+            let octave = ((bits >> 20) % 60) as i32 - 30;
+            let sign = if bits & 1 == 0 { 1.0 } else { -1.0 };
+            sign * (1.0 + a_fraction(bits)) * 2.0f64.powi(octave)
+        };
+
+        let (mut shifted, mut left_alone) = (0, 0);
+        for _ in 0..20_000 {
+            // A place to draw the run around, and how far it spreads. Some
+            // spreads are inside a factor of two of the base and some are not,
+            // and the rule has to be right about both.
+            let base = a_number(next_bits());
+            let spread = 5.0 * a_fraction(next_bits());
+            let run: [f64; 8] =
+                [0, 1, 2, 3, 4, 5, 6, 7].map(|step| base * (1.0 + spread * f64::from(step) / 7.0));
+            let low = run.into_iter().fold(f64::INFINITY, f64::min);
+            let high = run.into_iter().fold(f64::NEG_INFINITY, f64::max);
+
+            let by = how_far_one_coordinate_can_be_shifted_for_nothing(low, high);
+            if by == 0.0 {
+                left_alone += 1;
+                continue;
+            }
+            shifted += 1;
+            for value in run {
+                let lost = what_an_addition_lost(value, -by);
+                assert_eq!(
+                    lost, 0.0,
+                    "taking {by} off {value} out of a run over {low}..={high} \
+                     lost {lost}"
+                );
+            }
+        }
+
+        println!("runs shifted {shifted}, runs left alone {left_alone}");
+        assert!(
+            shifted > 0 && left_alone > 0,
+            "a search where nothing was shifted, or where everything was, is \
+             not testing the rule: {shifted} shifted and {left_alone} left alone"
+        );
+    }
+
+    /// What an addition threw away, exactly — Knuth's two-sum, which holds for
+    /// any two `f64` whatever their sizes.
+    fn what_an_addition_lost(x: f64, y: f64) -> f64 {
+        let sum = x + y;
+        let x_part = sum - y;
+        (x - x_part) + (y - (sum - x_part))
     }
 }

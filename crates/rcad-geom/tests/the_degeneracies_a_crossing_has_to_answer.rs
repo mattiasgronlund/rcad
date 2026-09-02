@@ -166,7 +166,8 @@ fn a_crossing_that_runs_across_a_faces_seam_is_walked_without_noticing_it() {
     let cap = a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]);
 
     let walked = walk(
-        &NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross),
+        &NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it"),
         [&pipe, &cap],
         Deflection::of(0.01).expect("a length"),
         &Policy::certified(),
@@ -221,7 +222,8 @@ fn every_point_of_a_picked_run_is_inside_every_half_space_that_picked_it() {
             rcad_predicates::Point::from([0.0, 0.0, radius]),
             rcad_predicates::Point::from([0.0, 0.0, -radius]),
         ],
-    );
+    )
+    .expect("a picked run does not have to come back to where it started");
 
     let walked = walk(
         &seam,

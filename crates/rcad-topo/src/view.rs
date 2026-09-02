@@ -6,7 +6,7 @@ use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlo
 use crate::model::{
     CoedgeData, EdgeData, FaceData, ShellData, SolidData, VertexData, WireData, WireStep,
 };
-use crate::{CoedgeKey, EdgeKey, FaceKey, Model, ShellKey, SolidKey, VertexKey, WireKey};
+use crate::{CoedgeKey, EdgeKey, FaceKey, Model, Result, ShellKey, SolidKey, VertexKey, WireKey};
 
 /// A solid, with the location and orientation it is being looked at through.
 ///
@@ -885,19 +885,6 @@ impl<'m> EdgeView<'m> {
         VertexView::new(self.model, vertex, self.loc)
     }
 
-    /// The straight line this edge follows, already located and running the way
-    /// the edge is being used.
-    ///
-    /// # Panics
-    ///
-    /// If the two ends are at the same point. [`Model::validate`] rejects that,
-    /// so reaching it means the model was already broken.
-    #[must_use]
-    pub fn segment(self) -> Segment {
-        Segment::new(self.start().point(), self.end().point())
-            .expect("an edge of a valid model has two different ends")
-    }
-
     /// Whether this edge comes back to the corner it left, because it runs
     /// right round a closed curve.
     ///
@@ -906,6 +893,34 @@ impl<'m> EdgeView<'m> {
     #[must_use]
     pub fn is_closed(self) -> bool {
         self.data().run == EdgeRun::RightRoundWhereItsFacesCross
+    }
+
+    /// The straight line this edge follows, already located and running the way
+    /// the edge is being used.
+    ///
+    /// `None` for a closed edge: its two ends are one corner by definition, so
+    /// there is no two-different-point segment to hand back. [`EdgeView::is_closed`]
+    /// says so up front, or read this `None`.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Segment::new`] refuses — a coordinate that is not a finite
+    /// number, or two ends at the same point on an edge that is not closed.
+    /// The doc this replaced said `Model::validate` rules the second one out,
+    /// which is true only of `EdgeRun::Straight`: `check_edges` explicitly
+    /// only refuses same-point ends when the run is straight, precisely
+    /// because a closed edge is supposed to have them. `Model` derives
+    /// `Deserialize`, and this is called on models `validate` never saw, so a
+    /// `Straight` edge with two equal ends is a real caller-input case and
+    /// not a broken invariant.
+    pub fn segment(self) -> Result<Option<Segment>> {
+        if self.is_closed() {
+            return Ok(None);
+        }
+        Ok(Some(Segment::new(
+            self.start().point(),
+            self.end().point(),
+        )?))
     }
 
     /// The straight-line distance between the edge's two ends.

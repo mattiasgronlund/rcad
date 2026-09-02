@@ -48,7 +48,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
 /// How fine the meshes every volume here is read off are.
 const A_DEFLECTION: f64 = 0.02;
@@ -168,15 +168,27 @@ fn what_it_gave_up_on(why: &Error) -> &str {
     }
 }
 
-/// How much space the answer takes up, all of its solids together.
+/// How much space the answer takes up, all of its solids together, at
+/// [`A_DEFLECTION`].
 fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
+    volume_of_at(model, solids, A_DEFLECTION)
+}
+
+/// The same at a deflection of this row's own choosing.
+///
+/// **Only for a row whose answer is thin**, and the reason is the one
+/// [`HOW_FAR_A_MESH_MAY_BE`] already gives: a deflection is an absolute length,
+/// so the same 0.02 buys a smaller share of a small shape. The lens between two
+/// balls of radius two is 1.6 units at its widest and 10.47 in volume, and
+/// [`A_DEFLECTION`] leaves it 0.725% short where a fifth of it leaves 0.062%.
+fn volume_of_at(model: &Model, solids: &[SolidKey], deflection: f64) -> f64 {
     solids
         .iter()
         .map(|&solid| {
             model
                 .solid(solid)
                 .measure(
-                    Deflection::of(A_DEFLECTION).expect("a fiftieth of a millimetre is a length"),
+                    Deflection::of(deflection).expect("a fiftieth of a millimetre is a length"),
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
                 )
@@ -386,39 +398,74 @@ fn a_turned_ball_and_a_far_one_come_back_with_the_volume_of_a_ball() {
     }
 }
 
-/// The control that says the family is not empty everywhere: two balls that
-/// really do cross each other are **refused by name** rather than dropped.
-///
-/// Which name depends on how far in they are, and §36.28 records only the first
-/// of the two. Both are refusals and neither is a wrong answer, so this is the
-/// row that shows the arithmetic can tell a crossing pair from a touching one —
-/// what it cannot do is keep the touching one.
-#[test]
-fn two_balls_that_really_cross_are_refused_by_name() {
-    for (apart, expected) in [
-        (2.0, "goes right round with no seam"),
-        (3.0, "encloses nothing"),
-    ] {
-        let mut model = a_model();
-        let one = model
-            .add_ball(2.0, &Isometry::identity())
-            .expect("a ball of radius two");
-        let other = model
-            .add_ball(
-                2.0,
-                &Isometry::translation(Vector::new(apart, 0.0, 0.0)).expect("a shift"),
-            )
-            .expect("a ball of radius two");
-        let pair = Pair::of(one, other);
+/// Two balls of radius two, `apart` between their centres.
+fn two_balls_that_cross(model: &mut Model, apart: f64) -> Pair {
+    let one = model
+        .add_ball(2.0, &Isometry::identity())
+        .expect("a ball of radius two");
+    let other = model
+        .add_ball(
+            2.0,
+            &Isometry::translation(Vector::new(apart, 0.0, 0.0)).expect("a shift"),
+        )
+        .expect("a ball of radius two");
+    Pair::of(one, other)
+}
 
+/// The control that says the family is not empty everywhere: two balls that
+/// really do cross each other are **kept apart from two that only touch**.
+///
+/// The lens between them is answered against its closed form, which is the row
+/// that shows the arithmetic can tell a crossing pair from a touching one — what
+/// it cannot do is keep the touching one.
+///
+/// `π(4r + d)(2r − d)²/12` is the lens of two balls of one radius `d` apart, so
+/// `10π/3` at two apart and `11π/12` at three. Measured at a fifth of
+/// [`A_DEFLECTION`] because a lens is thin — see [`volume_of_at`].
+///
+/// **Three apart used to refuse and now answers**, and it is the second half of
+/// what §41.6 found. The lens there spans under a quarter turn of either ball,
+/// so the coarsest mesh — the one the fuse reads a shell's *sign* off, not the
+/// one this file asks for — put no point inside it and it came back flat,
+/// enclosing exactly nothing, and the fuse refused `VolumeIsNotPositive`. The
+/// sign is read off a finer mesh now when a coarse one encloses nothing, and
+/// this is the smallest shape in the suite that reaches it.
+#[test]
+fn what_two_balls_that_really_cross_share_is_the_lens_between_them() {
+    for (apart, lens) in [(2.0, 10.0 * PI / 3.0), (3.0, 11.0 * PI / 12.0)] {
+        let mut model = a_model();
+        let pair = two_balls_that_cross(&mut model, apart);
+        let shared = fused(&mut model, &pair, Rule::Intersection);
+        assert_eq!(
+            shared.solids().len(),
+            1,
+            "two balls {apart} apart share one lens"
+        );
+        measures(
+            volume_of_at(&model, shared.solids(), A_DEFLECTION / 5.0),
+            lens,
+            Side::Under,
+        );
+    }
+}
+
+/// What is *round* two crossing balls is refused by name, and the name says
+/// which shape is missing.
+///
+/// Each ball keeps the part of its skin **outside** the other, and that piece
+/// holds both of its poles: it is the whole ball less a disc, and writing it
+/// down wants a seam and two poles of its own the way §38.1 wrote an uncut ball.
+/// Nothing builds that yet. A **gap** and not a limit — the answer is `18π` at
+/// two apart — and it is refused rather than filled inside out, which is what it
+/// used to do: before the mesher was taught to tell the two pieces apart this
+/// came back `Ok` measuring 10.40, the lens, where the union is 56.55.
+#[test]
+fn what_is_round_two_crossing_balls_is_refused_for_want_of_a_seam() {
+    for apart in [2.0, 3.0] {
+        let mut model = a_model();
+        let pair = two_balls_that_cross(&mut model, apart);
         match refusal(&mut model, &pair, Rule::Union, &Policy::certified()) {
-            Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => {
-                assert_eq!(expected, "goes right round with no seam");
-            }
-            Error::Invalid(Invalid::VolumeIsNotPositive { volume }) => {
-                assert_eq!(expected, "encloses nothing");
-                assert_eq!(volume, 0.0);
-            }
+            Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => (),
             other => panic!("two balls {apart} apart refused with {other:?}"),
         }
     }
@@ -580,25 +627,43 @@ fn a_ball_cut_by_a_plane_that_crosses_its_seam_once_is_answered() {
     );
 }
 
-/// The same ball cut by `x = 2` instead, where the crossing circle meets the
-/// seam **twice**, is refused by name.
+/// The same ball cut by `x = 2` instead: the cap is answered and what is left
+/// round it is refused by name.
 ///
-/// The circle `x = 2` on that ball meets the plane `y = 0` at `(2, 0, ±√12)`,
-/// and both of those have `x ≥ 0`, so both are on the seam. One crossing works
-/// and two do not, and the two cuts differ in nothing else: same ball, same
-/// knife, same lattice, one axis.
+/// **How many times the cut meets the seam is not what decides it, and this row
+/// used to say it was.** The circle `x = 2` meets the seam at `(2, 0, ±√12)`,
+/// twice against `z = 2`'s once, and this refused where `z = 2` answered — but
+/// the seam is not the difference. `z = 2` cuts the ball into two pieces each
+/// holding one pole; `x = 2` cuts it into a cap holding **no** pole and a
+/// remainder holding **both**. The cap is answered here, at `40π/3`, exactly as
+/// `z = 2`'s is. Only the both-pole piece refuses, and it refuses because
+/// nothing writes a cut closed face with a seam and two poles of its own
+/// (§38.3). The seam-crossing count is a coincidence of these two knives.
 #[test]
-fn a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name() {
+fn a_ball_cut_off_its_polar_axis_keeps_the_cap_and_refuses_what_is_round_it() {
+    let cap = PI * 4.0 * 10.0 / 3.0;
+
     let mut model = a_model();
     let ball = model
         .add_ball(4.0, &Isometry::identity())
         .expect("a ball of radius four");
     let knife = block(&mut model, [12.0, 12.0, 12.0], Vector::new(2.0, -6.0, -6.0));
     let pair = Pair::of(ball, knife);
+    let above = fused(&mut model, &pair, Rule::Intersection);
+    assert_eq!(above.solids().len(), 1, "the cap beyond x = 2 is one solid");
+    measures(volume_of(&model, above.solids()), cap, Side::Under);
 
-    match refusal(&mut model, &pair, Rule::Union, &Policy::certified()) {
-        Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => (),
-        other => panic!("a cut meeting the seam twice refused with {other:?}"),
+    for rule in [Rule::Union, Rule::Difference] {
+        let mut model = a_model();
+        let ball = model
+            .add_ball(4.0, &Isometry::identity())
+            .expect("a ball of radius four");
+        let knife = block(&mut model, [12.0, 12.0, 12.0], Vector::new(2.0, -6.0, -6.0));
+        let pair = Pair::of(ball, knife);
+        match refusal(&mut model, &pair, rule, &Policy::certified()) {
+            Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => (),
+            other => panic!("{rule:?} of a ball and a knife off its axis gave {other:?}"),
+        }
     }
 }
 
@@ -1468,7 +1533,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             pair: "the same two balls, three apart, really crossing",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "two_balls_that_really_cross_are_refused_by_name",
+                test: "what_is_round_two_crossing_balls_is_refused_for_want_of_a_seam",
             },
         },
         Entry {
@@ -1503,7 +1568,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             pair: "a ball cut by a plane meeting its seam twice",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name",
+                test: "a_ball_cut_off_its_polar_axis_keeps_the_cap_and_refuses_what_is_round_it",
             },
         },
         Entry {
@@ -1678,64 +1743,181 @@ fn what_happened(build: fn(&mut Model) -> Pair, rule: Rule) -> Outcome {
     }
 }
 
-/// The same ball, the same slab, three axes, three different outcomes.
+/// The same ball, the same slab, three axes, **one answer**.
 ///
-/// §39.7 item 1 says a ball cut anywhere but through a pole is refused and that
-/// a rigid motion of both operands changes the answer. It found that along `y`.
-/// Along `x` the answer is neither of the two it knew about: the fuse gets past
-/// naming the faces and the *triangulator* is what gives up, on a boundary that
-/// crosses itself. So the one defect wears three faces, and a fix that only
-/// stops the `y` refusal will leave the `x` one standing.
+/// §39.7 item 1 wanted this: a ball cut anywhere but through a pole used to be
+/// refused, and it refused two different ways. Along `y` no pole was found to
+/// fan the cap up to and it came back `ACurvedFaceGoesRightRoundWithNoSeam`;
+/// along `x` the *wrong* pole was found and the triangulator was handed a
+/// boundary that crosses itself. One cause under both: a wire made of one closed
+/// edge was **assumed** to run right round the surface, and on a ball a closed
+/// edge is any circle at all — `atan2(1, ±√15)` and `atan2(±√15, 1)` are 2.636
+/// radians of longitude apart either way and neither circle encircles a pole.
 ///
-/// **This pins what happens today, §19's way round**, so whoever closes §39.7
-/// item 1 is failed loudly by it rather than quietly agreeing with it. What it
-/// should say when that lands is `Answered` on all three rows, one solid each,
-/// every volume the same spherical cap.
+/// **The three rows must agree, and that is §19 and not tidiness**: same ball,
+/// same slab, same one unit from the centre, so the same spherical cap
+/// `πh²(3r − h)/3` with `r = 4` and `h = 3`, which is `27π`. A rigid motion of
+/// both operands is not allowed to change the answer, and the axis a cut is
+/// square to is nothing but a rigid motion of the pair.
 #[test]
-fn the_same_ball_cut_the_same_way_along_three_axes_gives_three_different_answers() {
-    let cut_one_unit_from_the_centre_along = |shift: Vector| {
+fn the_same_ball_cut_the_same_way_along_three_axes_gives_the_same_cap() {
+    for (axis, shift) in the_three_axes(1.0) {
         let mut model = a_model();
-        let ball = model
-            .add_ball(4.0, &Isometry::identity())
-            .expect("a ball of radius four");
-        let block = model
-            .add_cube(20.0, &Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a block round it");
-        model.place_solid(block, &Isometry::translation(shift).expect("a shift"));
-        model.fuse(
-            &[ball],
-            &[block],
-            Rule::Intersection,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-    };
-
-    let along_z = cut_one_unit_from_the_centre_along(Vector::new(-10.0, -10.0, 1.0));
-    match along_z {
-        Ok(ref fused) => assert_eq!(
-            fused.solids().len(),
-            1,
-            "a cut square to the polar axis is the one that works"
-        ),
-        Err(ref why) => panic!("the polar axis used to answer, and now says {why:?}"),
+        let cut = a_ball_cut_one_unit_from_its_centre(&mut model, &Isometry::identity(), shift);
+        match cut {
+            Ok(fused) => {
+                assert_eq!(
+                    fused.solids().len(),
+                    1,
+                    "a ball cut once square to {axis} is one solid"
+                );
+                measures(volume_of(&model, fused.solids()), A_CAP_ONE_IN, Side::Under);
+            }
+            Err(why) => panic!("the cut square to {axis} says {why:?}"),
+        }
     }
-
-    let along_y = cut_one_unit_from_the_centre_along(Vector::new(-10.0, 1.0, -10.0));
-    assert!(
-        matches!(
-            along_y,
-            Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
-        ),
-        "pinning what happens today: the same cut along y is refused for want of \
-         a seam, got {along_y:?}"
-    );
-
-    let along_x = cut_one_unit_from_the_centre_along(Vector::new(1.0, -10.0, -10.0));
-    assert!(
-        matches!(along_x, Err(Error::CannotMeshAFace { .. })),
-        "pinning what happens today, and it is not the refusal along y: the cut \
-         along x reaches the triangulator and hands it a boundary that crosses \
-         itself, got {along_x:?}"
-    );
 }
+
+/// The volume of the cap this file cuts off a ball of radius four one unit from
+/// its centre: `πh²(3r − h)/3` with `h = 3`, which is `27π`.
+const A_CAP_ONE_IN: f64 = PI * 27.0;
+
+/// The one cut, square to each of the three axes in turn, as the shift that
+/// puts the twenty-cube's near face `depth` from the ball's centre.
+///
+/// A rigid motion of both operands and nothing else: the ball is the same ball
+/// whichever axis is named, and the slab is the same slab turned a quarter turn
+/// about the origin.
+fn the_three_axes(depth: f64) -> [(&'static str, Vector); 3] {
+    [
+        ("z", Vector::new(-10.0, -10.0, depth)),
+        ("y", Vector::new(-10.0, depth, -10.0)),
+        ("x", Vector::new(depth, -10.0, -10.0)),
+    ]
+}
+
+/// The cap a plane `depth` from the centre leaves on a ball of radius four:
+/// `πh²(3r − h)/3` with `h = 4 − depth`.
+fn a_cap_cut_at(depth: f64) -> f64 {
+    let height = 4.0 - depth;
+    PI * height * height * (12.0 - height) / 3.0
+}
+
+/// A ball of radius four turned by `placement`, cut by a twenty-cube shifted so
+/// that one of its faces sits one unit from the ball's centre.
+fn a_ball_cut_one_unit_from_its_centre(
+    model: &mut Model,
+    placement: &Isometry,
+    shift: Vector,
+) -> Result<Fused, Error> {
+    let ball = model
+        .add_ball(4.0, placement)
+        .expect("a ball of radius four");
+    let block = model
+        .add_cube(20.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a block round it");
+    let put_it = placement.compose(&Isometry::translation(shift).expect("a shift"));
+    model.place_solid(block, &put_it);
+    model.fuse(
+        &[ball],
+        &[block],
+        Rule::Intersection,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+}
+
+/// Turning the ball and the slab **together** does not change the cap they
+/// leave, at any angle.
+///
+/// This is §19 itself, and it is the half of §39.7 item 1 that made it first in
+/// the list. §39.3 measured this very sweep about `x` on the M4 tree and found
+/// it answered from 1.00 to 1.30 radians and refused from 1.40 to 1.50, either
+/// side of `acos(1/4) = 1.3181` — the angle at which the cap stops holding a
+/// pole. A rigid motion of both operands is not allowed to decide anything, and
+/// a boundary at `acos(1/4)` is a fact about the ball's stored parametrisation
+/// and not about the pair.
+///
+/// Twenty-one angles rather than the four §39.3 quotes, so that the flip cannot
+/// hide between two of them: `acos(1/4)` is 1.3181 and the steps are 0.1 apart.
+#[test]
+fn turning_a_ball_and_the_slab_that_cuts_it_together_does_not_change_the_cap() {
+    let axis = Axis::new(Point::origin(), Vector::new(1.0, 0.0, 0.0)).expect("the x axis");
+    for tenth in 0..=20 {
+        let angle = f64::from(tenth) / 10.0;
+        let mut model = a_model();
+        let turn = Isometry::rotation(&axis, angle).expect("a share of a turn");
+        let cut =
+            a_ball_cut_one_unit_from_its_centre(&mut model, &turn, Vector::new(-10.0, 1.0, -10.0));
+        match cut {
+            Ok(fused) => {
+                assert_eq!(fused.solids().len(), 1, "turned {angle} it is one solid");
+                measures(volume_of(&model, fused.solids()), A_CAP_ONE_IN, Side::Under);
+            }
+            Err(why) => panic!("turned {angle} radians about x the pair says {why:?}"),
+        }
+    }
+}
+
+/// The same ball and the same slab, three axes and **three depths**, and the
+/// nine answers are three volumes.
+///
+/// [`the_same_ball_cut_the_same_way_along_three_axes_gives_the_same_cap`] pins
+/// one depth, and §41.6 is what a gate found under it: square to `z` the cut
+/// answers down to a cap a hundredth of a unit high, and square to `x` or `y` it
+/// stops answering at `h/r = 1 − cos(π/4) = 0.2929`, which on a ball of radius
+/// four is a cap of **15.52** and 5.8% of the ball. Same two solids, same
+/// relative position, a quarter turn apart, one answering and one refusing.
+/// That is §19, and §19 is the property this kernel sells.
+///
+/// **The three columns are compared with each other and not only against the
+/// closed form**, because agreeing with each other *is* the claim. A depth where
+/// all three answered the same wrong volume would sail through a test that only
+/// asked each of them to answer, and a cap is a shape whose closed form nobody
+/// has to trust this file for.
+///
+/// Read at a tenth of [`A_DEFLECTION`], for the reason [`volume_of_at`] already
+/// gives: a deflection is an absolute length and the deepest cut here leaves a
+/// cap one unit high, where 0.02 is 0.6% short of the closed form on its own.
+#[test]
+fn the_same_ball_cut_at_three_depths_along_three_axes_gives_the_same_cap_each_time() {
+    for depth in [1.0, 2.0, 3.0] {
+        let closed_form = a_cap_cut_at(depth);
+        let mut volumes = Vec::new();
+        for (axis, shift) in the_three_axes(depth) {
+            let mut model = a_model();
+            match a_ball_cut_one_unit_from_its_centre(&mut model, &Isometry::identity(), shift) {
+                Ok(fused) => {
+                    assert_eq!(
+                        fused.solids().len(),
+                        1,
+                        "a ball cut {depth} from its centre square to {axis} is one solid"
+                    );
+                    let found = volume_of_at(&model, fused.solids(), A_DEFLECTION / 10.0);
+                    measures(found, closed_form, Side::Under);
+                    volumes.push((axis, found));
+                }
+                Err(why) => panic!("cut {depth} from the centre square to {axis} says {why:?}"),
+            }
+        }
+        let (widest, narrowest) = (
+            volumes.iter().map(|(_, v)| *v).fold(f64::MIN, f64::max),
+            volumes.iter().map(|(_, v)| *v).fold(f64::MAX, f64::min),
+        );
+        let apart = (widest - narrowest) / closed_form;
+        assert!(
+            apart < HOW_FAR_THREE_AXES_MAY_BE_APART,
+            "cut {depth} from the centre the three axes give {volumes:?}, {:.4}% apart",
+            100.0 * apart
+        );
+    }
+}
+
+/// How far the three axes' volumes may be from each other.
+///
+/// A twentieth of [`HOW_FAR_A_MESH_MAY_BE`], because the three are the same
+/// shape meshed three ways and not three shapes: what separates them is the
+/// order a sum of triangles is added up in and which way the tessellation
+/// happened to fall, not anything about the cap. Measured, the worst of the nine
+/// is 0.0033% and this is 0.025%.
+const HOW_FAR_THREE_AXES_MAY_BE_APART: f64 = HOW_FAR_A_MESH_MAY_BE / 20.0;

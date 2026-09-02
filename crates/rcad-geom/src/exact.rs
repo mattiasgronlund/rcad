@@ -379,7 +379,7 @@ pub(crate) const WIDEST_SQUARABLE_SPREAD: i32 =
 /// used to stand here said an expansion's entries are non-zero, and
 /// [`Exact::product_of`] stored a zero low half for every product that came out
 /// exact, which is what kept a slide that would have worked from being tried.
-fn binary_exponent(value: f64) -> i32 {
+pub(crate) fn binary_exponent(value: f64) -> i32 {
     assert!(value != 0.0, "zero has no binary exponent");
     let bits = value.abs().to_bits();
     let stored = (bits >> 52) as i32;
@@ -397,7 +397,7 @@ fn binary_exponent(value: f64) -> i32 {
 /// products that would have been ordinary numbers. Halving the exponent keeps
 /// both factors well inside what `f64` holds, and each step moves the magnitude
 /// the same way, so neither intermediate is further out than the answer.
-fn multiplied_by_a_power_of_two(value: f64, exponent: i32) -> f64 {
+pub(crate) fn multiplied_by_a_power_of_two(value: f64, exponent: i32) -> f64 {
     let half = exponent / 2;
     value * 2f64.powi(half) * 2f64.powi(exponent - half)
 }

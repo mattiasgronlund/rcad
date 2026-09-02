@@ -6,6 +6,8 @@
 //! application do not agree with each other, the composed locations topology
 //! hands out are quietly wrong everywhere at once.
 
+use core::f64::consts::TAU;
+
 use proptest::prelude::*;
 use rcad_geom::{Axis, Isometry, Plane, Point, Vector};
 
@@ -41,6 +43,13 @@ fn movement() -> impl Strategy<Value = Isometry> {
                 Some(shift.compose(&turn))
             },
         )
+}
+
+fn a_plane() -> impl Strategy<Value = Plane> {
+    (point(), coordinate(), coordinate(), coordinate())
+        .prop_filter_map("the normal needs some length", |(through, x, y, z)| {
+            Plane::from_point_and_normal(through, Vector::new(x, y, z)).ok()
+        })
 }
 
 proptest! {
@@ -126,6 +135,32 @@ proptest! {
             twice_undone.apply_to_point(point).distance_to(movement.apply_to_point(point))
                 < CLOSE_ENOUGH
         );
+    }
+
+    /// Two faces that touch stay touching, exactly, when **one** movement moves
+    /// both of them.
+    ///
+    /// The other half of
+    /// `a_contact_between_two_solids_at_two_placements_does_not_survive_every_turn`,
+    /// and what makes that one a gap rather than a limit: the answer exists and
+    /// one arrangement reaches it every time. Two faces of a contact are one
+    /// plane and its [`Plane::reversed`] — `(n, d)` and `(−n, −d)` — and
+    /// [`Plane::transformed`] carries that through whatever the movement is,
+    /// because it is a pure function of the two and because negating a vector
+    /// negates each product and each sum of an `f64` dot product exactly.
+    ///
+    /// So a pair moved **as a unit** obeys `docs/decisions.md` §19 bit for bit.
+    /// What breaks it is the two solids carrying different placements, which is
+    /// what `add_extrusion` leaves behind for every solid built anywhere but the
+    /// origin. §41.13.
+    #[test]
+    fn two_faces_that_touch_stay_touching_when_one_movement_moves_both(
+        movement in movement(),
+        plane in a_plane(),
+    ) {
+        let facing_it = plane.transformed(&movement);
+        let facing_back = plane.reversed().transformed(&movement);
+        prop_assert_eq!(facing_it.coefficients(), facing_back.reversed().coefficients());
     }
 
     #[test]
@@ -245,4 +280,111 @@ fn a_plane_whose_normal_is_not_quite_unit_length() -> Plane {
 fn a_plane_whose_normal_is_not_a_fixed_point_of_scaling() -> Plane {
     Plane::from_point_and_normal(Point::new(1.0, 2.0, 3.0), Vector::new(6.0, 3.0, 7.0))
         .expect("a point and a direction with length")
+}
+
+/// Two solids at two placements, turned by one turn, stop touching.
+///
+/// This is the arithmetic under `rcad-topo`'s
+/// `a_pair_that_touches_face_to_face_can_stop_touching_when_the_pair_is_turned`,
+/// measured over every turn that suite can draw, and `docs/decisions.md` §41.13
+/// is what it is recorded for.
+///
+/// The two planes are a solid's downward face on `z = 0` and another solid's
+/// upward face on the very same `z = 0`, each written the way `add_extrusion`
+/// writes it: the geometry in the solid's own frame and the lift kept as a
+/// placement. Turning both by one turn is `place_solid`, which **composes**, so
+/// the second one's placement becomes `(R, fl(R·(0,0,−3)))` — and
+/// `fl(R·(0,0,−3))` is not `−3·fl(R·(0,0,1))`, because the quaternion sandwich
+/// is not exactly homogeneous in the vector it turns.
+/// [`Plane::transformed`] then works the moved offset out as `d + n·t`, whose
+/// two terms are both about 3 and nearly cancel, and what is left over is the
+/// gap between two faces that were touching.
+///
+/// **The gap is real and not a summation artefact**: summed exactly rather than
+/// in `f64` it is `−5.195804564346705e-16` for the turn this pins, so the
+/// composed placement genuinely puts the second solid that far off. It is
+/// `0.78·f64::EPSILON·L` with `L = 3`, well inside
+/// [`Isometry::POINT_ROUNDOFF`], which is why nothing downstream is entitled to
+/// call it a mistake — and why a fuse, which reads the four numbers as exact,
+/// answers that the two solids do not touch.
+///
+/// **Both halves are asserted, and the second is what stops this going quiet.**
+/// A turn that keeps every contact would make the count meaningless, so the
+/// test insists that a real share of the turns keep it too.
+#[test]
+fn a_contact_between_two_solids_at_two_placements_does_not_survive_every_turn() {
+    let mut kept = 0;
+    let mut lost = 0;
+    for direction in every_whole_number_direction() {
+        for steps in 1..64 {
+            let axis = Axis::new(Point::origin(), direction).expect("a direction with length");
+            let turn = Isometry::rotation(&axis, TAU * f64::from(steps) / 64.0)
+                .expect("a finite rotation");
+            if a_touching_pair_still_touches(&turn) {
+                kept += 1;
+            } else {
+                lost += 1;
+            }
+        }
+    }
+
+    println!(
+        "of {} turns, {kept} keep the contact and {lost} lose it",
+        kept + lost
+    );
+    assert_eq!(
+        (kept, lost),
+        (10446, 11100),
+        "the two moved planes agree for this many of the turns the fuse suites draw"
+    );
+}
+
+/// The turn this suite's `rcad-topo` sibling pins, and the one the shrinker
+/// found.
+#[test]
+fn the_turn_that_lost_a_contact_lost_it_by_less_than_one_rounding_of_the_placement() {
+    let axis = Axis::new(Point::origin(), Vector::new(2.0, 3.0, -2.0)).expect("a direction");
+    let turn = Isometry::rotation(&axis, TAU * 44.0 / 64.0).expect("a finite rotation");
+
+    let (below, above) = a_touching_pair_after(&turn);
+    assert_eq!(
+        below.normal().components().map(|component| -component),
+        above.normal().components(),
+        "the two normals are still exactly opposite; only the offsets moved"
+    );
+
+    let gap = (below.offset() + above.offset()).abs();
+    assert_ne!(gap, 0.0, "this is the turn that loses the contact");
+    assert!(
+        gap < Isometry::POINT_ROUNDOFF * 3.0,
+        "a gap of {gap} is further than placing the solid is allowed to move it"
+    );
+}
+
+/// The two faces of the contact, each read the way a fuse reads it.
+fn a_touching_pair_after(turn: &Isometry) -> (Plane, Plane) {
+    let below = Plane::from_coefficients([0.0, 0.0, -1.0, -0.0]).expect("a plane");
+    let above = Plane::from_coefficients([0.0, 0.0, 1.0, -3.0]).expect("a plane");
+    let lift = Isometry::translation(Vector::new(0.0, 0.0, -3.0)).expect("a finite shift");
+    (
+        below.transformed(turn),
+        above.transformed(&turn.compose(&lift)),
+    )
+}
+
+fn a_touching_pair_still_touches(turn: &Isometry) -> bool {
+    let (below, above) = a_touching_pair_after(turn);
+    let (mine, theirs) = (below.coefficients(), above.coefficients());
+    (0..3).all(|axis| mine[axis] == -theirs[axis]) && mine[3] + theirs[3] == 0.0
+}
+
+/// Every direction `pairs::a_turn` can draw.
+fn every_whole_number_direction() -> impl Iterator<Item = Vector> {
+    (-3..=3).flat_map(|x| {
+        (-3..=3).flat_map(move |y| {
+            (-3..=3)
+                .filter(move |&z: &i32| [x, y, z] != [0, 0, 0])
+                .map(move |z| Vector::new(f64::from(x), f64::from(y), f64::from(z)))
+        })
+    })
 }

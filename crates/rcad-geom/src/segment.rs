@@ -139,18 +139,23 @@ impl Segment {
 
     /// The same run after `movement` is applied.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If the moved ends land on top of each other. A rigid movement keeps
-    /// distances, so reaching this means the segment or the movement was
-    /// already broken.
-    #[must_use]
-    pub fn transformed(&self, movement: &Isometry) -> Self {
+    /// [`Error::SegmentHasNoLength`] if the moved ends land on top of each
+    /// other. **In exact arithmetic this cannot happen** — a rigid movement
+    /// keeps distances — but `f64` is not exact arithmetic: a translation far
+    /// enough from the origin can swallow a short segment's whole length
+    /// below its own rounding, the same way `T + eps == T` once `eps` is
+    /// under `T`'s own ulp. `Isometry`'s constructors bound the rotation to a
+    /// unit quaternion and nothing else, so nothing stops a caller — or a
+    /// `Model`'s `Deserialize`, which reaches this through a placed edge —
+    /// from handing over a translation large enough to do it to an entirely
+    /// ordinary short segment.
+    pub fn transformed(&self, movement: &Isometry) -> Result<Self> {
         Self::new(
             movement.apply_to_point(self.start),
             movement.apply_to_point(self.end),
         )
-        .expect("a rigid movement cannot collapse a segment that had a length")
     }
 }
 
@@ -278,9 +283,26 @@ mod tests {
     fn moving_a_segment_moves_both_of_its_ends_and_keeps_its_length() {
         let segment = segment_along_x();
         let turn = Isometry::rotation(&Axis::z(), FRAC_PI_2).unwrap();
-        let moved = segment.transformed(&turn);
+        let moved = segment
+            .transformed(&turn)
+            .expect("an ordinary rotation does not collapse an ordinary segment");
         assert!(moved.end().distance_to(Point::new(0.0, 10.0, 0.0)) < 1e-14);
         assert!((moved.length() - segment.length()).abs() < 1e-14);
+    }
+
+    /// A translation far enough from the origin swallows a short segment's
+    /// whole length below its own rounding: `f64` addition is not exact, and
+    /// nothing in `Isometry`'s own constructors bounds the translation
+    /// against the length of what it moves. Both inputs are entirely
+    /// ordinary — a segment `1e-10` long, a translation of `1e20` — built
+    /// through this crate's own public, validating constructors with no
+    /// hand-corruption anywhere.
+    #[test]
+    fn a_translation_far_enough_from_the_origin_can_collapse_a_short_segment() {
+        let segment = Segment::new(Point::origin(), Point::new(1e-10, 0.0, 0.0))
+            .expect("a segment a tenth of a nanometre long");
+        let shove = Isometry::translation(Vector::new(1e20, 0.0, 0.0)).expect("a move");
+        assert_eq!(segment.transformed(&shove), Err(Error::SegmentHasNoLength));
     }
 
     #[test]
