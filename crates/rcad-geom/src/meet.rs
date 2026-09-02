@@ -82,8 +82,8 @@ impl NamedRun {
     pub fn new(run: EdgeRun, ends: [PredicatePoint; 2]) -> Result<Self> {
         if run == EdgeRun::RightRoundWhereItsFacesCross && ends[0] != ends[1] {
             return Err(Error::AClosedRunDoesNotComeBackToWhereItStarted {
-                start: ends[0],
-                end: ends[1],
+                start: Box::new(ends[0]),
+                end: Box::new(ends[1]),
             });
         }
         Ok(Self { run, ends })
@@ -312,8 +312,8 @@ mod tests {
                 [a_pole(1.0), a_pole(-1.0)],
             ),
             Err(Error::AClosedRunDoesNotComeBackToWhereItStarted {
-                start: a_pole(1.0),
-                end: a_pole(-1.0),
+                start: Box::new(a_pole(1.0)),
+                end: Box::new(a_pole(-1.0)),
             })
         );
     }

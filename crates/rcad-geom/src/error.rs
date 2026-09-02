@@ -332,15 +332,19 @@ pub enum Error {
     /// dynamic-range check being a ratio and says nothing about this).
     ///
     /// [`NamedRun::new`]: crate::NamedRun::new
+    ///
+    /// Boxed: a bare pair of [`Point`](rcad_predicates::Point)s pushed this
+    /// enum's largest variant past what `clippy::result_large_err` allows,
+    /// and every other variant here is small.
     #[error(
         "a run that goes right round comes back to where it started, but {start:?} and {end:?} \
          are different points"
     )]
     AClosedRunDoesNotComeBackToWhereItStarted {
         /// Where the run says it starts.
-        start: rcad_predicates::Point,
+        start: Box<rcad_predicates::Point>,
         /// Where the run says it ends.
-        end: rcad_predicates::Point,
+        end: Box<rcad_predicates::Point>,
     },
 
     /// A piece of a crossing was named with no ends and nothing picking it
