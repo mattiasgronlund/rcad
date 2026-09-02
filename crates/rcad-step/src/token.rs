@@ -73,10 +73,10 @@ pub(crate) struct Tokens<'a> {
 }
 
 impl<'a> Tokens<'a> {
-    pub(crate) fn over(bytes: &'a [u8], at: usize) -> Self {
+    pub(crate) fn over(bytes: &'a [u8]) -> Self {
         Tokens {
             bytes,
-            at,
+            at: 0,
             ahead: None,
         }
     }

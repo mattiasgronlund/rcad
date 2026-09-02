@@ -23,7 +23,7 @@ enum Section {
 }
 
 pub(crate) fn read(bytes: &[u8]) -> Result<StepFile, Error> {
-    let mut tokens = Tokens::over(bytes, 0);
+    let mut tokens = Tokens::over(bytes);
     opening_line(&mut tokens)?;
 
     let mut header = None;
@@ -205,8 +205,9 @@ fn one_instance(tokens: &mut Tokens<'_>) -> Result<Instance, Error> {
 
 /// The first type name a complex instance gives twice, if it gives one twice.
 ///
-/// It is quadratic in the number of parts, which is what a complex instance has
-/// four of in a real file and eleven of at the corpus's worst.
+/// Quadratic in the number of parts, which is the number of types one entity
+/// inherits from — a handful, and bounded by the schema rather than by the
+/// file's size.
 fn a_type_written_twice(parts: &[Record]) -> Option<&str> {
     parts.iter().enumerate().find_map(|(position, part)| {
         parts[..position]

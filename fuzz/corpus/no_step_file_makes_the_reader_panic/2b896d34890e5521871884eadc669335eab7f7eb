@@ -1,0 +1,11 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');
+FILE((''),'DATCARTES;0');
+FILE_NAME('','',(''),(''),'','');
+FILE_SCHEMA(());
+ENDSEC;
+DATA;
+#3=A('\X2\0316\X0\0A  ');
+ENDSEC;
+END-ISO-10303-21;

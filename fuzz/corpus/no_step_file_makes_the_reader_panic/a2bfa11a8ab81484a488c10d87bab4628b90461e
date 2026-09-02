@@ -1,0 +1,10 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');
+FILE_NAME('','',(''),(''),'','');
+FILE_SCHEMA(('AUTOM'));
+ENDSEC;
+DATA;
+#2=TESIAN_POINT('',(0.,0.,0.));
+#2=(NAMEH_UNIT()SI_UNIT(.TESIAN_103.,0.));
+#2=0(

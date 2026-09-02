@@ -1,0 +1,12 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;,');
+FILE_NAME('','',((),''''),'','','');
+FILE_SCHEMA(('EN'));
+ENDSEC;
+DATA;
+#1=CAN_POINT('',(0.,0.,0.));
+#2=(NAD_UIT()SI_UNIT(.M.));
+#3=ADCED_FACE('',ITH_MEASURE(25.4),$,*,#9);
+ENDSEC;
+END-ISO-10303-21;

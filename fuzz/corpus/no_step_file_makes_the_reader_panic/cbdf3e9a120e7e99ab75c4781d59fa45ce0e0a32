@@ -1,0 +1,8 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'41');
+FILE_NAME('=','','');
+FILE_SCHEMA(('AUSGN'));
+E('',5);
+ENDSEC;
+END-ISO-10303-21;

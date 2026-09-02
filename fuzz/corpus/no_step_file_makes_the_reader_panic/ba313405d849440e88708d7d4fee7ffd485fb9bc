@@ -1,0 +1,6 @@
+ISO-10303-21;
+HEADER;
+E_DESCTION(('FGN'));
+E('5',8);EMA(('OGN'));
+E('0',8);
+E('5',8);EMA((5',0);SEC;'ND;

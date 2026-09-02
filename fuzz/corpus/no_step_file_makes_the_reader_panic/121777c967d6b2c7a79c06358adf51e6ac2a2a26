@@ -1,0 +1,8 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'3;1');FILE_NAME('','');
+FILE_SCHEMA(('AU_DEGN'));
+ENDSEC;
+DATA;
+#1=C('',(0,0.,0.));
+#2=(NAT(*)LNI2-21;

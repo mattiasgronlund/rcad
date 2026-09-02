@@ -1,0 +1,5 @@
+ISO-10303-21;
+HEADER;
+FILE_IPTION((''),'2;1');
+FILE_NAME('','',(''),(''),'','','');
+FILE_SMHEIT(.MILLI.,.METRE.

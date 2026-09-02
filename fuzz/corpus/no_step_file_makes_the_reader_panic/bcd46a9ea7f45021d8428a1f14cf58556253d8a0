@@ -1,0 +1,5 @@
+ISO-10303-21;
+HEADER;ITON(';1');
+FME();
+F(('X'));
+ENDSEC;C

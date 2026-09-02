@@ -1,0 +1,9 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');
+FILE_NAME('','',(''),(''),'','','');
+FILE_SCHEMA(('ATKVE_DESIGN'));
+ENDSEC;
+DATA;
+#2=(N(RE(25.4),$,*,$9);
+E21;
