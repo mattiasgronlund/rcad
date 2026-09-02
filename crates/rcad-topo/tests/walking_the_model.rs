@@ -89,10 +89,43 @@ fn every_edge_of_a_cube_of_side_two_is_two_long() {
 
     for edge in model.edges() {
         assert_eq!(edge.distance_between_its_ends(), 2.0);
-        assert_eq!(edge.segment().length(), 2.0);
-        assert_eq!(edge.segment().start(), edge.start().point());
-        assert_eq!(edge.segment().end(), edge.end().point());
+        let segment = edge
+            .segment()
+            .expect("a cube's edges are all finite and distinct")
+            .expect("a cube has no closed edges");
+        assert_eq!(segment.length(), 2.0);
+        assert_eq!(segment.start(), edge.start().point());
+        assert_eq!(segment.end(), edge.end().point());
     }
+}
+
+/// `EdgeView::segment` used to panic on exactly this: a round bar's two cap
+/// circles are closed edges with `start == end` by definition, and
+/// `Model::validate` accepts that — a closed edge is *supposed* to come
+/// back to where it started, so this is the commonest closed edge the
+/// kernel builds, not a broken model.
+#[test]
+fn a_round_bars_closed_cap_edges_have_no_segment_and_do_not_panic() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    model
+        .add_round_bar(3.0, 5.0, &Isometry::identity())
+        .expect("a bar three across and five tall");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a round bar this kernel built is sound");
+
+    let mut closed = 0;
+    for edge in model.edges() {
+        let segment = edge.segment().expect("a round bar's edges are all finite");
+        assert_eq!(segment.is_none(), edge.is_closed());
+        if edge.is_closed() {
+            closed += 1;
+        }
+    }
+    assert_eq!(
+        closed, 2,
+        "a round bar has exactly two closed edges: its two cap circles"
+    );
 }
 
 #[test]
