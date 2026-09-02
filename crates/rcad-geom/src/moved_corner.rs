@@ -113,11 +113,17 @@ pub const CORNER_AFTER_MOVING_ROUNDOFF: f64 = 128.0 * f64::EPSILON;
 /// second-order terms — a rounding is a relative slip of the *computed* value
 /// rather than of the true one.
 ///
-/// **Nothing here holds for a movement that turns**, and the types say so:
-/// [`HalfSpace::shifted`](crate::HalfSpace::shifted) and
-/// [`EdgeRun::shifted`](crate::EdgeRun::shifted) take a shift rather than an
-/// [`Isometry`], because a turned picking normal stops being exactly square to
-/// whatever it was written square to (§32.3).
+/// **Nothing here holds for a movement that turns.** Both rows rest on the
+/// normal, the direction and the radius being carried over untouched, which is
+/// what a shift does and a turn does not.
+/// [`HalfSpace::transformed`](crate::HalfSpace::transformed) is the general
+/// movement, and it mints no third constant: its normal and offset are the flat
+/// plane [`CORNER_AFTER_MOVING_ROUNDOFF`] already reckons with, under four
+/// [`Isometry::POINT_ROUNDOFF`](crate::Isometry::POINT_ROUNDOFF) for a unit
+/// normal. What a turn takes away that no bound describes is the exact
+/// squareness of a picking normal (§32.3), and
+/// [`HalfSpace::transformed`](crate::HalfSpace::transformed) is where that is
+/// set out and demonstrated.
 ///
 /// `a_surface_moved_by_a_shift_stays_inside_its_published_bound` measures the
 /// worst a search can find and prints the figure (§15.6). `rcad-topo`'s mesher

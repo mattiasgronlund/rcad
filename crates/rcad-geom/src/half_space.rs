@@ -202,13 +202,10 @@ impl HalfSpace {
 
     /// This half-space, shifted by `by`.
     ///
-    /// **A shift and not a movement, and the type is saying something by it.**
-    /// A half-space stores the normal it was handed without scaling it, because
-    /// a picking normal exactly square to the direction a crossing runs along
-    /// stops being exactly square the moment anything scales it (§32.3). A shift
-    /// carries the normal over untouched and moves only the offset, so
-    /// squareness survives; a turn would not, and there is no `transformed` here
-    /// for that reason.
+    /// The normal is carried over bit for bit and only the offset moves, so a
+    /// normal written exactly square to the direction a crossing runs along is
+    /// still exactly square to it afterwards. [`HalfSpace::transformed`] is the
+    /// general movement and that is the one thing it cannot promise.
     ///
     /// The offset gains `normal · by`, which is a dot product and rounds. What
     /// that costs a mesh is
@@ -218,6 +215,78 @@ impl HalfSpace {
         Self {
             normal: self.normal,
             offset: self.offset + self.normal.dot(by),
+        }
+    }
+
+    /// This half-space, moved by `movement`: `(n, d)` becomes
+    /// `(Rn, d + Rn·t)`.
+    ///
+    /// A point `q` is in the moved half-space exactly when the point it came
+    /// from is in this one, and `n·Rᵀ(q − t) ≥ d` is `(Rn)·q ≥ d + (Rn)·t`. So
+    /// this is a pure function of the four numbers held here and the movement,
+    /// and **nothing about the half-space is worked out a second time from
+    /// points that have themselves been moved** — which is the whole reason the
+    /// function exists rather than callers rebuilding a picker in the new frame.
+    ///
+    /// # What is exact, bit for bit
+    ///
+    /// - **A movement with no turn is [`HalfSpace::shifted`]**, identically.
+    ///   `Isometry::apply_to_vector` hands a vector straight back when there is
+    ///   no turn, and the offset is then the same expression.
+    ///   `moving_a_half_space_by_a_shift_is_the_shift_itself` is the
+    ///   demonstration.
+    /// - **Reversing commutes with moving.** Negating a vector negates every
+    ///   product and every partial sum of these expressions exactly, so the two
+    ///   pickers naming the two pieces of a cut crossing stay exact opposites
+    ///   however far the pair is moved — `docs/decisions.md` §19 for pickers,
+    ///   the statement `two_faces_that_touch_stay_touching_when_one_movement_moves_both`
+    ///   makes for planes.
+    /// - **The scale the caller wrote the picker at travels, when it is a power
+    ///   of two.** `(2ᵏn, 2ᵏd)` moves to exactly `2ᵏ` times where `(n, d)`
+    ///   moves to, because every product and sum on the way scales by exactly
+    ///   `2ᵏ` while nothing leaves the normal range. **At any other scale it
+    ///   does not** — the quaternion sandwich is not exactly homogeneous in the
+    ///   vector it turns, which is the same defect §41.13 measured on a
+    ///   composed placement.
+    ///   `the_scale_a_picker_is_written_at_travels_through_a_turn_only_when_it_is_a_power_of_two`
+    ///   counts both halves.
+    ///
+    /// # What a turn takes away, and why that is a limit
+    ///
+    /// A normal written exactly square to a direction is only square to the
+    /// moved direction to within a rounding afterwards: `fl(Rn)·fl(Rv)` is not
+    /// zero even where `n·v` is. So a picker on a piece of a crossing that runs
+    /// on for ever loses the `t`-independence the note on [`HalfSpace`]
+    /// describes, and a point far enough along the moved run can read the wrong
+    /// side of it.
+    ///
+    /// **A limit at this function and a gap one level up** (§16.10). Three
+    /// families of fix were weighed:
+    ///
+    /// - *Turn the normal more carefully.* The exact `Rn` is a sum of products
+    ///   of the stored quaternion's coefficients and is not an `f64` triple, so
+    ///   there is no exactly-turned normal to reach. Exact arithmetic finds the
+    ///   number and cannot store it.
+    /// - *Bring the normal onto a power of two first.* That buys homogeneity,
+    ///   which the bullet above already has, and nothing at all for squareness:
+    ///   scaling `n` exactly leaves `fl(Rn)·fl(Rv)` scaled by the same factor
+    ///   and just as non-zero.
+    /// - *Write a fresh normal exactly square to the moved direction*, which
+    ///   [`normals_exactly_square_to`] can always do. That answer exists in
+    ///   `f64` — but it needs the direction, and four numbers are all that is
+    ///   here. [`EdgeRun::transformed`](crate::EdgeRun::transformed) is where
+    ///   the direction is in hand, so that is where the gap is, and closing it
+    ///   is a design decision about which of the three normals a moved run
+    ///   should be picked by rather than an arithmetic one.
+    ///
+    /// `a_picker_written_square_to_a_run_is_no_longer_square_to_the_turned_run`
+    /// is the demonstration rather than this paragraph.
+    #[must_use]
+    pub fn transformed(&self, movement: &Isometry) -> Self {
+        let normal = movement.apply_to_vector(self.normal);
+        Self {
+            normal,
+            offset: self.offset + normal.dot(movement.translation_part()),
         }
     }
 
@@ -373,19 +442,31 @@ impl Picker {
 
     /// This picker, shifted by `by`.
     ///
-    /// A shift and not a movement, for the reason [`HalfSpace::shifted`] gives.
+    /// The flat arm keeps its normal bit for bit, which is what
+    /// [`HalfSpace::shifted`] is for and what a turn cannot do.
     ///
     /// # Errors
     ///
     /// [`Error::NotFinite`] if `by` has a component that is not a finite number.
     pub fn shifted(&self, by: Vector) -> Result<Self> {
-        let shift = Isometry::translation(by)?;
-        Ok(match self {
-            Picker::InFrontOf(half_space) => Picker::InFrontOf(half_space.shifted(by)),
-            Picker::OutsideABall(ball) => Picker::OutsideABall(ball.transformed(&shift)),
-            Picker::OutsideAPipe(pipe) => Picker::OutsideAPipe(pipe.transformed(&shift)),
-            Picker::InsideAPipe(pipe) => Picker::InsideAPipe(pipe.transformed(&shift)),
-        })
+        Ok(self.transformed(&Isometry::translation(by)?))
+    }
+
+    /// This picker, moved by `movement`.
+    ///
+    /// What each arm promises is what its own type promises:
+    /// [`HalfSpace::transformed`] for the flat one, and
+    /// [`Sphere::transformed`](crate::Sphere::transformed) and
+    /// [`Cylinder::transformed`](crate::Cylinder::transformed) for the curved
+    /// ones, which hold a place and a radius and were never square to anything.
+    #[must_use]
+    pub fn transformed(&self, movement: &Isometry) -> Self {
+        match self {
+            Picker::InFrontOf(half_space) => Picker::InFrontOf(half_space.transformed(movement)),
+            Picker::OutsideABall(ball) => Picker::OutsideABall(ball.transformed(movement)),
+            Picker::OutsideAPipe(pipe) => Picker::OutsideAPipe(pipe.transformed(movement)),
+            Picker::InsideAPipe(pipe) => Picker::InsideAPipe(pipe.transformed(movement)),
+        }
     }
 
     /// The name this picker's sign predicate goes by in provenance records.
@@ -422,7 +503,7 @@ mod tests {
     use rcad_predicates::Decision;
 
     use super::*;
-    use crate::Plane;
+    use crate::{Axis, Plane};
 
     /// **The property §31.7's first criterion asks for, and §32.3 showed a
     /// `Plane` cannot have.**
@@ -614,6 +695,209 @@ mod tests {
             Decision::Zero,
             "so the point asked about is on the run rather than beside it, and reads Zero"
         );
+    }
+
+    /// §16.10 for [`HalfSpace::transformed`]'s first exactness bullet: a
+    /// movement with no turn is [`HalfSpace::shifted`], identically.
+    ///
+    /// **This is what licenses [`Picker::shifted`] and
+    /// [`EdgeRun::shifted`](crate::EdgeRun::shifted) going through
+    /// `transformed`.** The mesher rests a whole meshing frame on a shift being
+    /// exact, so a shift that quietly started paying for a turn of the identity
+    /// would be a mesh floor that understates what a point costs — and nothing
+    /// in the mesher would say so.
+    ///
+    /// Numbers spread over forty octaves, so the dot product has cancellation
+    /// to work with as well as none.
+    #[test]
+    fn moving_a_half_space_by_a_shift_is_the_shift_itself() {
+        let mut numbers = SpreadOverFortyOctaves::seeded();
+        for _ in 0..20_000 {
+            let by = numbers.a_vector();
+            let half_space = HalfSpace::new(numbers.a_vector(), numbers.a_number())
+                .expect("a normal with length");
+            let shift = Isometry::translation(by).expect("a finite shift");
+            assert_eq!(
+                half_space.transformed(&shift).coefficients(),
+                half_space.shifted(by).coefficients(),
+                "moving {half_space:?} by a shift of {by:?} was not the shift"
+            );
+        }
+    }
+
+    /// §16.10 for [`HalfSpace::transformed`]'s second exactness bullet.
+    ///
+    /// Two pieces of one crossing are picked by a half-space and its
+    /// [`HalfSpace::reversed`]. If moving them apart gave anything but exact
+    /// opposites, a piece would gain a sliver the other lost, which is the
+    /// picker's version of the §19 violation §41.13 measured on two face planes.
+    #[test]
+    fn reversing_a_picker_and_moving_it_give_the_same_four_numbers_either_way() {
+        let half_space = HalfSpace::new(Vector::new(0.0, 5.0, -3.0), 2.5).expect("a normal");
+        for movement in turns_with_a_shift() {
+            assert_eq!(
+                half_space.reversed().transformed(&movement).coefficients(),
+                half_space.transformed(&movement).reversed().coefficients(),
+                "reversing before and after {movement:?} disagreed"
+            );
+        }
+    }
+
+    /// §16.10 for [`HalfSpace::transformed`]'s third exactness bullet, **and for
+    /// the sentence next to it saying no other scale travels**.
+    ///
+    /// A half-space stores whatever length of normal the caller wrote, so
+    /// `(n, d)` and `(λn, λd)` are the same flat surface said twice. Where `λ`
+    /// is a power of two every product and every sum on the way through a
+    /// movement scales by exactly `λ`, so the two moved answers are the same
+    /// surface still. Where it is not, they are not: the quaternion sandwich is
+    /// not exactly homogeneous in the vector it turns, and that is the defect
+    /// §41.13 measured arriving through a composed placement.
+    ///
+    /// **Both halves are counted.** A run where the scale by three happened to
+    /// travel every time would leave the second sentence tested on nothing, and
+    /// a run where the power of two never did would be asserting a floor over an
+    /// empty set.
+    #[test]
+    fn the_scale_a_picker_is_written_at_travels_through_a_turn_only_when_it_is_a_power_of_two() {
+        let half_space = HalfSpace::new(Vector::new(0.0, 5.0, -3.0), 2.5).expect("a normal");
+        let (mut three_travelled, mut three_did_not) = (0, 0);
+        for movement in turns_with_a_shift() {
+            let moved = half_space.transformed(&movement).coefficients();
+
+            let by_four = scaled_by(half_space, 4.0)
+                .transformed(&movement)
+                .coefficients();
+            assert_eq!(
+                by_four,
+                moved.map(|coefficient| coefficient * 4.0),
+                "writing the same picker four times as big moved it under {movement:?}"
+            );
+
+            let by_three = scaled_by(half_space, 3.0)
+                .transformed(&movement)
+                .coefficients();
+            if by_three == moved.map(|coefficient| coefficient * 3.0) {
+                three_travelled += 1;
+            } else {
+                three_did_not += 1;
+            }
+        }
+        println!(
+            "a scale of three travelled through {three_travelled} turns and not through \
+             {three_did_not}"
+        );
+        assert!(
+            three_did_not > three_travelled,
+            "only {three_did_not} of the turns are non-homogeneous, so the sentence saying \
+             no other scale travels is barely being tested"
+        );
+        assert!(
+            three_travelled > 0,
+            "not one turn carried a scale of three, so this is measuring a broken \
+             `transformed` rather than the sandwich"
+        );
+    }
+
+    /// §16.10 for the limit [`HalfSpace::transformed`] names: a turn takes the
+    /// exact squareness away.
+    ///
+    /// `a_point_a_long_way_down_an_endless_run_is_on_the_same_side_as_one_at_its_start`
+    /// above is the property this loses. A picker written exactly square to a
+    /// run keeps a point at any distance along that run on the side it started
+    /// on; after a turn the same pair reads `fl(Rn)·fl(Rv)`, which is not zero,
+    /// and far enough along the moved run the reading changes sign.
+    ///
+    /// So this counts how many turns keep it and insists most do not. A turn
+    /// that kept squareness every time would mean the limit was not a limit and
+    /// the doc comment should be deleted rather than the test loosened.
+    #[test]
+    fn a_picker_written_square_to_a_run_is_no_longer_square_to_the_turned_run() {
+        let (mut still_square, mut no_longer) = (0, 0);
+        for along in [
+            Vector::new(1.0, 3.0, 5.0),
+            Vector::new(2.0, -1.0, 7.0),
+            Vector::new(0.3, 1.7, -2.9),
+        ] {
+            let picker =
+                HalfSpace::through_a_point_square_to(Point::origin(), along, Vector::zero())
+                    .expect("a direction with length");
+            assert_eq!(
+                exact_dot_sign(picker.normal().components(), along.components()),
+                Some(Decision::Zero),
+                "the picker has to be square before the turn or this proves nothing"
+            );
+
+            for movement in turns_with_a_shift() {
+                let moved_normal = picker.transformed(&movement).normal();
+                let moved_along = movement.apply_to_vector(along);
+                if exact_dot_sign(moved_normal.components(), moved_along.components())
+                    == Some(Decision::Zero)
+                {
+                    still_square += 1;
+                } else {
+                    no_longer += 1;
+                }
+            }
+        }
+        println!("a turn kept the squareness {still_square} times and lost it {no_longer}");
+        assert!(
+            no_longer > still_square,
+            "only {no_longer} turns lost the squareness, so the limit is barely drawn"
+        );
+    }
+
+    /// The same surface written at a different length of normal.
+    fn scaled_by(half_space: HalfSpace, factor: f64) -> HalfSpace {
+        HalfSpace::new(half_space.normal() * factor, half_space.offset() * factor)
+            .expect("scaling a normal with length leaves it with length")
+    }
+
+    /// A turn about every whole-number direction in a seven-cube, at eight
+    /// angles, each followed by a shift.
+    ///
+    /// The shift is there because a turn about the origin leaves the offset with
+    /// nothing to do: `Rn · 0` is exactly zero and the offset carries over
+    /// whatever the arithmetic does. It is the offset that §41.13 is about.
+    fn turns_with_a_shift() -> Vec<Isometry> {
+        let shift = Isometry::translation(Vector::new(2.5, -7.25, 11.0)).expect("a finite shift");
+        let mut movements = Vec::new();
+        for direction in directions_across_the_sphere() {
+            let axis = Axis::new(Point::origin(), direction).expect("a direction with length");
+            for eighths in 1..=8 {
+                let turn =
+                    Isometry::rotation(&axis, core::f64::consts::TAU * f64::from(eighths) / 8.0)
+                        .expect("a finite angle about a finite axis");
+                movements.push(shift.compose(&turn));
+            }
+        }
+        movements
+    }
+
+    /// Numbers filling the whole mantissa, over forty octaves, of either sign.
+    ///
+    /// A number with only a few significant bits rounds far less than one that
+    /// fills the word, so a search over those would understate every slip.
+    struct SpreadOverFortyOctaves(u64);
+
+    impl SpreadOverFortyOctaves {
+        fn seeded() -> Self {
+            Self(0x1234_5678_9abc_def0)
+        }
+
+        fn a_vector(&mut self) -> Vector {
+            Vector::new(self.a_number(), self.a_number(), self.a_number())
+        }
+
+        fn a_number(&mut self) -> f64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            let mantissa = (self.0 >> 11) as f64 / (1u64 << 53) as f64;
+            let octave = ((self.0 >> 3) % 40) as i32 - 20;
+            let sign = if self.0 & 1 == 0 { 1.0 } else { -1.0 };
+            sign * (1.0 + mantissa) * 2.0f64.powi(octave)
+        }
     }
 
     /// The four numbers survive being written out and read back, which a plane's
