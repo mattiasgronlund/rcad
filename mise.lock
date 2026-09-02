@@ -16,6 +16,10 @@ backend = "cargo:cargo-nextest"
 version = "1.42.4"
 backend = "cargo:just"
 
+[[tools."cargo:kache"]]
+version = "0.16.0"
+backend = "cargo:kache"
+
 [[tools."cargo:taplo-cli"]]
 version = "0.10.0"
 backend = "cargo:taplo-cli"

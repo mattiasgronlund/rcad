@@ -6,4 +6,19 @@ lockfile = true
 "cargo:cargo-deny" = "0.18"
 "cargo:cargo-fuzz" = "0.13"
 "cargo:just" = "1.42"
+"cargo:kache" = "0.16"
 "cargo:taplo-cli" = "0.10"
+
+# kache is a content-addressed build cache. Cargo picks it up as a compiler
+# wrapper, so a crate whose inputs have been compiled before is fetched instead
+# of built.
+#
+# It is set here and not in `.cargo/config.toml` so that the file which sets the
+# variable is the file which installs the tool. `build.rustc-wrapper` applies to
+# every cargo invocation in the repo, including one made without mise, and cargo
+# fails outright on a wrapper it cannot find; this way the variable exists
+# exactly where `kache` does. CI runs `mise exec -- just ...`, so it gets it too.
+#
+# To build without the cache for a run: `RUSTC_WRAPPER= just default`.
+[env]
+RUSTC_WRAPPER = "kache"
