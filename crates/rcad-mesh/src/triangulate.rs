@@ -600,8 +600,14 @@ fn chord_across_the_curve(
 /// neither of the two shapes a cone does — no patch of one is bounded by
 /// nothing, and none has a radius of zero — and both guards below are dead code
 /// for a torus rather than arms it takes.
+///
 /// `how_far_a_flat_piece_of_a_torus_really_strays_stays_under_the_published_bound`
-/// is the search §15.6 asks for.
+/// is the search §15.6 asks for: 450 triangles over six shapes of ring, five
+/// spans in each of the two coordinates, and three places round the tube
+/// including the **inner** equator, where a torus bends the other way and where
+/// a bound derived on the outer one is likeliest to be wrong. The worst uses
+/// **56.7%** of the bound — tighter than the cone's 39.4%, because the two
+/// halves of this one are added rather than one covering both.
 ///
 /// A boundary side is a piece with two corners rather than three, and the same
 /// sum gives it `L²/(4r)`. It is measured with `L²/(3r)` anyway, because what
@@ -1185,7 +1191,99 @@ pub enum CannotTriangulate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rcad_geom::{Axis, Cylinder, Point, Sphere, Vector};
+    use rcad_geom::{Axis, Cylinder, Point, Sphere, Torus, Vector};
+
+    /// [`how_far_a_flat_piece_strays`]'s torus arm is a published bound, so here
+    /// is the search that could find something over it (`docs/decisions.md`
+    /// §15.6).
+    ///
+    /// The claim is `C²/ρ` with `ρ = 6rS/(2S + 3r)` and `S = R + r`, and what is
+    /// measured against it is how far a point of the flat triangle really sits
+    /// off the torus — which is `‖(s − R, a)‖ − r` **exactly**, because a torus
+    /// is one of the few surfaces whose distance function is a closed form. No
+    /// sampling of the surface and no root-finding.
+    ///
+    /// The search runs over six shapes of ring, from one barely fatter than its
+    /// hole to one whose tube is nine tenths of its ring, and over triangles
+    /// spanning up to most of a half turn in **both** coordinates at once —
+    /// including ones sitting on the inner equator, which is where a torus bends
+    /// hardest the other way and where a bound derived on the outer equator
+    /// would be most likely to be wrong.
+    #[test]
+    fn how_far_a_flat_piece_of_a_torus_really_strays_stays_under_the_published_bound() {
+        let mut worst_share = 0.0_f64;
+        let mut checked = 0usize;
+
+        for (big, small) in [
+            (4.0, 1.0),
+            (10.0, 0.5),
+            (1.0, 0.9),
+            (2.0, 1.0),
+            (100.0, 3.0),
+            (0.5, 0.25),
+        ] {
+            let ring = Torus::new(Axis::z(), big, small).expect("a tube inside its ring");
+            let surface = Surface::from(ring);
+            for round in [0.02, 0.2, 0.8, 1.5, 2.6] {
+                for over in [0.02, 0.2, 0.8, 1.5, 2.6] {
+                    // Sitting on the outer equator, on the inner one, and half
+                    // way up the side.
+                    for start in [0.0, core::f64::consts::PI, core::f64::consts::FRAC_PI_2] {
+                        let at = [[0.0, start], [round, start], [round / 2.0, start + over]];
+                        let corners = at.map(|[u, v]| ring.point_at(u, v));
+
+                        let across = how_far_up_its_axis_this_reaches(&at);
+                        let mut longest = 0.0_f64;
+                        for one in 0..3 {
+                            for other in (one + 1)..3 {
+                                longest = longest.max(chord_across_the_curve(
+                                    &surface, across, at[one], at[other],
+                                ));
+                            }
+                        }
+                        let bound = how_far_a_flat_piece_strays(&surface, across, longest, 0.0);
+                        assert!(
+                            bound.is_finite() && bound > 0.0,
+                            "a torus is always bounded"
+                        );
+
+                        let mut furthest = 0.0_f64;
+                        const STEPS: usize = 20;
+                        for first in 0..=STEPS {
+                            for second in 0..=(STEPS - first) {
+                                let third = STEPS - first - second;
+                                let weights =
+                                    [first, second, third].map(|share| share as f64 / STEPS as f64);
+                                let inside = Point::new(
+                                    (0..3).map(|c| weights[c] * corners[c].x()).sum(),
+                                    (0..3).map(|c| weights[c] * corners[c].y()).sum(),
+                                    (0..3).map(|c| weights[c] * corners[c].z()).sum(),
+                                );
+                                let from_the_axis = inside.x().hypot(inside.y()) - big;
+                                furthest =
+                                    furthest.max((from_the_axis.hypot(inside.z()) - small).abs());
+                            }
+                        }
+                        checked += 1;
+                        worst_share = worst_share.max(furthest / bound);
+                        assert!(
+                            furthest <= bound,
+                            "a triangle on a ring of {big} and {small} spanning {round} by \
+                             {over} from {start} strays {furthest}, and the bound says {bound}"
+                        );
+                    }
+                }
+            }
+        }
+
+        println!("the worst of {checked} triangles used {worst_share} of its published bound");
+        assert!(checked > 400, "the search covered {checked} triangles");
+        assert!(
+            worst_share > 0.05,
+            "a bound nothing comes near proves nothing, and this one was only \
+             {worst_share} used"
+        );
+    }
 
     /// [`how_far_a_flat_piece_strays`]'s cone arm is a published bound, so here
     /// is the search that could find something over it (`docs/decisions.md`
