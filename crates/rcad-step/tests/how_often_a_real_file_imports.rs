@@ -70,6 +70,121 @@ fn every_file_this_kernel_wrote_itself_imports() {
     );
 }
 
+/// A real file measures what its own name says it should.
+///
+/// **The independent figure this lane needs, and it is not this kernel's.**
+/// Every other check here compares one measurement with another; this one
+/// compares a measurement against a number KiCad's own library wrote into the
+/// file name before anybody ran anything. A `PinHeader_2x15_P2.54mm` is fifteen
+/// pitches of 2.54 mm long and two across, and a
+/// `LED_Rectangular_W5.0mm_H2.0mm` is five by two — so a mapping that read a
+/// coordinate as a radius, or a millimetre as an inch, or dropped a face, would
+/// come out with a part the wrong size and say so here.
+///
+/// A nanometre of slack, which is a hundredth of what these files declare their
+/// own uncertainty to be and a ten-millionth of the smallest thing they hold.
+#[test]
+fn a_real_file_measures_what_its_own_name_says() {
+    let Some(root) = corpus() else {
+        return;
+    };
+    let mut checked = 0;
+    let mut dip_switches: Vec<(u32, f64)> = Vec::new();
+    for path in files_under(&root.join("kicad")) {
+        let claims = what_the_name_says(&name_of(&path));
+        let switches = how_many_dip_switches(&name_of(&path));
+        if claims.is_empty() && switches.is_none() {
+            continue;
+        }
+        let bytes = fs::read(&path).expect("a file the walk just listed");
+        let file = StepFile::read(&bytes).expect("every file in the corpus parses");
+        let mut log = ProvenanceLog::new();
+        let Ok(import) = Import::read(&file, &Policy::certified(), &mut log) else {
+            continue;
+        };
+        let across = how_big_it_is(&import);
+        if let Some(switches) = switches {
+            dip_switches.push((switches, across[0]));
+        }
+        for (axis, expected) in claims {
+            assert!(
+                (across[axis] - expected).abs() < 1e-9,
+                "{} says it is {expected} mm across axis {axis} and it measures {}",
+                name_of(&path),
+                across[axis]
+            );
+            checked += 1;
+        }
+    }
+    // A DIP switch's name says how many switches it has and what pitch they sit
+    // at, and says nothing about how much housing there is either side. So what
+    // its family checks is the **difference**: one more switch is one more
+    // 2.54 mm, whatever the ends are worth.
+    dip_switches.sort_by_key(|&(switches, _)| switches);
+    for pair in dip_switches.windows(2) {
+        let [(fewer, shorter), (more, longer)] = pair else {
+            unreachable!("windows(2) hands back two");
+        };
+        let expected = f64::from(more - fewer) * 2.54;
+        assert!(
+            (longer - shorter - expected).abs() < 1e-9,
+            "{more} switches against {fewer} should be {expected} mm longer and is {}",
+            longer - shorter
+        );
+        checked += 1;
+    }
+
+    println!("{checked} dimensions checked against the names the library wrote");
+    assert!(
+        checked >= 24,
+        "only {checked} dimensions were checked, which is too few for this to be \
+         saying anything"
+    );
+}
+
+/// How many switches a DIP switch's own name says it has.
+fn how_many_dip_switches(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix("SW_DIP_SPSTx")?;
+    name.contains("_P2.54mm").then_some(())?;
+    rest.split_once('_')?.0.parse().ok()
+}
+
+/// How far a whole import reaches along each axis.
+fn how_big_it_is(import: &Import) -> [f64; 3] {
+    let mut least = [f64::INFINITY; 3];
+    let mut most = [f64::NEG_INFINITY; 3];
+    for (_, key) in import.solids() {
+        let Some((low, high)) = import.model().solid(*key).box_around_it() else {
+            continue;
+        };
+        for axis in 0..3 {
+            least[axis] = least[axis].min(low.coordinates()[axis]);
+            most[axis] = most[axis].max(high.coordinates()[axis]);
+        }
+    }
+    [0, 1, 2].map(|axis| most[axis] - least[axis])
+}
+
+/// What a KiCad file's own name claims about how big the part is, as `(axis,
+/// millimetres)` pairs.
+///
+/// One family, and the ones that were tried and dropped are worth naming: a
+/// `LED_Rectangular_W3.0mm_H2.0mm` measures **four** millimetres across,
+/// because the name is about the body and the leads reach wider than it. A name
+/// that describes a part of the part is not a claim about the whole one, and a
+/// check built on it would have failed for a reason that is nobody's mistake.
+fn what_the_name_says(name: &str) -> Vec<(usize, f64)> {
+    if let Some(rest) = name.strip_prefix("PinHeader_")
+        && name.contains("_P2.54mm_Vertical")
+        && let Some((rows, rest)) = rest.split_once('x')
+        && let Some((columns, _)) = rest.split_once('_')
+        && let (Ok(rows), Ok(columns)) = (rows.parse::<u32>(), columns.parse::<u32>())
+    {
+        return vec![(0, f64::from(rows) * 2.54), (1, f64::from(columns) * 2.54)];
+    }
+    Vec::new()
+}
+
 /// What one corpus came to.
 #[derive(Default)]
 struct Tally {
