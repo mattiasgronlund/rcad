@@ -683,11 +683,17 @@ impl<'m> WireView<'m> {
     /// and all.
     ///
     /// [`WireView::coedges`] is the same walk with the poles left out, and that
-    /// is what almost everything wants. This is for the one caller that has to
+    /// is what almost everything wants. This is for the callers that have to
     /// see where the boundary stands still: a mesher, which needs the pole to
     /// know that the side of the patch it is standing on is a whole turn wide
-    /// (`docs/decisions.md` §25.6).
-    pub(crate) fn steps(self) -> impl Iterator<Item = WireStepView<'m>> {
+    /// (`docs/decisions.md` §25.6), and anything taking a solid apart to
+    /// describe it again through a [`SolidBuilder`](crate::SolidBuilder) — a
+    /// ball's one wire is four steps and two coedges, and reading it as two
+    /// describes a shape that is not there.
+    ///
+    /// Nothing un-located comes out: both arms carry a view, and a view's
+    /// geometry has already been moved into place.
+    pub fn steps(self) -> impl Iterator<Item = WireStepView<'m>> {
         let (model, loc, orient) = (self.model, self.loc, self.orient);
         let steps: SmallVec<[WireStep; 4]> = self.data().steps.clone();
         let count = steps.len();
@@ -740,8 +746,9 @@ impl<'m> WireView<'m> {
 /// arrived. What a ball adds is the pole: the surface pinches to a point, the
 /// boundary has to go somewhere between arriving there and leaving, and where
 /// it goes is nowhere at all.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum WireStepView<'m> {
+pub enum WireStepView<'m> {
     /// Along one use of an edge.
     Along(CoedgeView<'m>),
     /// Standing still at a pole.

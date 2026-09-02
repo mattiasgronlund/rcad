@@ -1,0 +1,508 @@
+//! A solid taken apart through the public API and described again through
+//! [`SolidBuilder`], measuring the same and fusing the same.
+//!
+//! `docs/decisions.md` §42.12 criterion 1. Until this lane there was no public
+//! way to build a solid out of faces at all — §42.5's `E0624` — so an importer
+//! could not turn `advanced_face` and `closed_shell` into a `Model`.
+//!
+//! **Why this is not a tautology.** The rebuild does not copy an arena: it
+//! walks the solid the way a reader walks a file — shell, faces, wires, steps,
+//! coedges, edges, corners — through views only, and hands the pieces back one
+//! call at a time. Nothing in `SolidBuilder` sees the original. If the builder
+//! wrote a coedge the wrong way round, dropped a pole, reversed a hole or mixed
+//! up which wire is the outer one, the sweep, the measurement or the fuse would
+//! say so.
+//!
+//! **The oracles, strongest first** (testing skill's table). Volume, area and
+//! centroid are compared **bit for bit**, not within a tolerance: the same
+//! corners summed in the same order give the same `f64`, and anything else is a
+//! real difference. The fuse comparison is the strong one — two solids that
+//! measure the same can still fuse differently, because a fuse reads topology
+//! the sums never touch.
+//!
+//! **The ball's seam is supplied rather than read**, and that is deliberate.
+//! `EdgeView::run` is `pub(crate)`: a run carries a `Surface` and `Picker`s in
+//! the frame the face is stored in, and handing one out un-located is the thing
+//! CLAUDE.md forbids. So a caller rebuilding a ball does what a reader does —
+//! it names the meridian from the geometry it holds, not from the model.
+
+use std::collections::HashMap;
+
+use rcad_geom::{
+    Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale, Surface,
+    Vector,
+};
+use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_topo::{
+    DraftEdge, DraftStep, DraftVertex, EdgeKey, EdgeView, Error, Invalid, Measurement, Model,
+    ProfileBuilder, Result, Rule, SolidBuilder, SolidKey, VertexKey, VertexView, WireStepView,
+};
+
+fn a_working_size() -> Scale {
+    Scale::millimetres(100.0).expect("100 mm is a working size")
+}
+
+/// What a straight-sided or whole-circle edge runs along, read off the model.
+///
+/// [`EdgeView::is_closed`] is public and is the whole of what these two shapes
+/// need: a cube has only straight edges and a round bar adds two cap circles.
+fn a_run_the_model_says(edge: EdgeView<'_>) -> EdgeRun {
+    if edge.is_closed() {
+        EdgeRun::RightRoundWhereItsFacesCross
+    } else {
+        EdgeRun::Straight
+    }
+}
+
+#[test]
+fn a_cube_built_face_by_face_is_the_cube_add_cube_builds() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(a_working_size());
+    let built = model
+        .add_cube(2.0, &policy, &mut log)
+        .expect("a cube of side two");
+
+    let rebuilt = Walk::of(&model, built)
+        .describe_again(&a_run_the_model_says)
+        .expect("a cube can be described again")
+        .build(&mut model, &policy, &mut log)
+        .expect("and the sweep is happy with the description");
+
+    assert!(log.is_empty(), "nothing here had to be approximated");
+    model
+        .validate(&policy, &mut log)
+        .expect("the model holding both is sound");
+    assert_eq!(model.solid_count(), 2);
+    // The cutter takes the corner octant off, on a whole-number lattice.
+    the_same_numbers(&model, built, rebuilt, &|model| {
+        a_block(model, [2.0, 2.0, 2.0], Vector::new(1.0, 1.0, 1.0))
+    });
+}
+
+#[test]
+fn a_round_bar_built_face_by_face_is_the_round_bar_add_round_bar_builds() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(a_working_size());
+    let built = model
+        .add_round_bar(2.0, 8.0, &Isometry::identity())
+        .expect("a bar of radius two");
+
+    let rebuilt = Walk::of(&model, built)
+        .describe_again(&a_run_the_model_says)
+        .expect("a bar can be described again")
+        .build(&mut model, &policy, &mut log)
+        .expect("and the sweep is happy with the description");
+
+    model
+        .validate(&policy, &mut log)
+        .expect("the model holding both is sound");
+    // `a_notch_across_the_seam` in `degenerate_curved_fuses.rs` is this cut:
+    // the notch runs across the bar's seam at `(2, 0, z)`, so the comparison
+    // reaches the one piece of topology a rebuild is most likely to get wrong.
+    the_same_numbers(&model, built, rebuilt, &|model| {
+        a_block(model, [2.0, 2.0, 2.0], Vector::new(1.0, -1.0, 3.0))
+    });
+}
+
+/// The one that needs a pole, a seam walked twice by one face, and a run the
+/// model will not hand back.
+#[test]
+fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(a_working_size());
+    let built = model
+        .add_ball(4.0, &Isometry::identity())
+        .expect("a ball of radius four");
+
+    let rebuilt = Walk::of(&model, built)
+        .describe_again(&a_seam_named_the_way_a_file_names_one)
+        .expect("a ball can be described again")
+        .build(&mut model, &policy, &mut log)
+        .expect("and the sweep is happy with the description");
+
+    model
+        .validate(&policy, &mut log)
+        .expect("the model holding both is sound");
+    // `a_ball_cut_across_its_seam`: the plane `z = 2` meets the seam once.
+    the_same_numbers(&model, built, rebuilt, &|model| {
+        a_block(model, [12.0, 12.0, 12.0], Vector::new(-6.0, -6.0, 2.0))
+    });
+}
+
+/// A box of the given lengths, with its low corner at `at`.
+fn a_block(model: &mut Model, [along_x, along_y, along_z]: [f64; 3], at: Vector) -> SolidKey {
+    let rectangle = ProfileBuilder::new(vec![
+        [0.0, 0.0],
+        [along_x, 0.0],
+        [along_x, along_y],
+        [0.0, along_y],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a rectangle");
+    model
+        .add_extrusion(
+            &rectangle,
+            along_z,
+            &Isometry::translation(at).expect("a finite placement"),
+        )
+        .expect("building a box needs no decision")
+}
+
+/// The seam of a ball, named from geometry a file carries rather than from the
+/// model.
+///
+/// A meridian is where the sphere crosses the plane `y = 0`, which is one whole
+/// circle; the seam is the half of it with `x >= 0`. Both facts come from the
+/// shape, which is what an importer reads out of a `surface_curve`.
+fn a_seam_named_the_way_a_file_names_one(edge: EdgeView<'_>) -> EdgeRun {
+    assert!(!edge.is_closed(), "a ball's one edge is its seam");
+    let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+        .expect("the y axis is a unit normal");
+    let facing_x = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+        .expect("the x axis has length");
+    EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(meridian),
+        picked_by: smallvec::smallvec![Picker::from(facing_x)],
+    }
+}
+
+/// What N occurrences of one shape cost, when each is described again.
+///
+/// §42.7 settles that M5 imports N occurrences as N solids and publishes what
+/// that costs. A builder holds no sharing at all: every occurrence is described
+/// from scratch and written from scratch, so the arena grows by exactly one
+/// copy per occurrence and nothing records that the copies came from one shape.
+/// This is that number, asserted rather than described.
+#[test]
+fn five_copies_of_one_shape_cost_five_times_the_entities() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(a_working_size());
+    let first = model
+        .add_cube(2.0, &policy, &mut log)
+        .expect("a cube of side two");
+    let (vertices, edges, faces) = (model.vertex_count(), model.edge_count(), model.face_count());
+
+    for copy in 1..5 {
+        let away = Isometry::translation(Vector::new(10.0 * f64::from(copy), 0.0, 0.0))
+            .expect("a finite shift");
+        Walk::of(&model, first)
+            .moved_by(away)
+            .describe_again(&a_run_the_model_says)
+            .expect("a cube can be described again somewhere else")
+            .build(&mut model, &policy, &mut log)
+            .expect("a shifted cube is a cube");
+    }
+
+    assert_eq!(model.solid_count(), 5);
+    assert_eq!(model.vertex_count(), 5 * vertices);
+    assert_eq!(model.edge_count(), 5 * edges);
+    assert_eq!(model.face_count(), 5 * faces);
+    model
+        .validate(&policy, &mut log)
+        .expect("five cubes side by side are a sound model");
+}
+
+/// `Model::validate` sees nothing that takes two solids to see, and this lane
+/// does not change that.
+///
+/// §42.6 demonstrated it on solids the kernel built itself. Here it is through
+/// the new door: two descriptions of the very same cube, both accepted, both
+/// written, and the sweep calls the pair sound. **A refusal you cannot detect
+/// is not a refusal**, so this is recorded as a test rather than as a sentence
+/// — §42.12 criterion 8 is the work that closes it, and it is a pass of its
+/// own, not a check inside the sweep.
+#[test]
+fn two_solids_described_at_the_same_place_are_still_called_a_valid_model() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(a_working_size());
+    let built = model
+        .add_cube(2.0, &policy, &mut log)
+        .expect("a cube of side two");
+    Walk::of(&model, built)
+        .describe_again(&a_run_the_model_says)
+        .expect("a cube can be described again")
+        .build(&mut model, &policy, &mut log)
+        .expect("and the same cube in the same place is accepted");
+
+    assert_eq!(model.solid_count(), 2);
+    model
+        .validate(&policy, &mut log)
+        .expect("nothing in the sweep compares one solid against another");
+}
+
+/// A face turned round in the shell is a solid whose skin points inwards, and
+/// the sweep says so rather than the builder.
+///
+/// This is the division the builder is built on: what one call can decide is
+/// decided there, and what takes the whole solid comes back from
+/// [`Model::validate`] under the name the sweep already had.
+#[test]
+fn a_solid_described_with_every_face_turned_round_is_refused_by_the_sweep() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(a_working_size());
+    let built = model
+        .add_cube(2.0, &policy, &mut log)
+        .expect("a cube of side two");
+
+    let refused = Walk::of(&model, built)
+        .with_every_face_turned_round()
+        .describe_again(&a_run_the_model_says)
+        .expect("a cube described inside out is still a description")
+        .build(&mut model, &policy, &mut log);
+
+    assert!(
+        matches!(
+            refused,
+            Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
+        ),
+        "expected the sweep to say the faces point inwards, got {refused:?}"
+    );
+    assert_eq!(model.solid_count(), 1, "a refused build writes nothing");
+}
+
+/// Both solids measure the same, and both fuse the same against a third.
+///
+/// The measurement is compared bit for bit. The fuse is the check measurement
+/// cannot make: it reads which coedge runs which way and which wire is the
+/// outer one, and two solids that agree on volume can disagree there.
+///
+/// **Both fuses have to answer**, and the cut has to take something away. Two
+/// refusals that agree would compare nothing at all, which is the vacuity the
+/// testing skill's first rule is about.
+fn the_same_numbers(
+    model: &Model,
+    built: SolidKey,
+    rebuilt: SolidKey,
+    cutter: &dyn Fn(&mut Model) -> SolidKey,
+) {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let deflection = Deflection::for_scale(model.scale());
+
+    let one = model
+        .solid(built)
+        .measure(deflection, &policy, &mut log)
+        .expect("the solid the kernel built measures");
+    let other = model
+        .solid(rebuilt)
+        .measure(deflection, &policy, &mut log)
+        .expect("and so does the one described again");
+    assert_eq!(one.volume(), other.volume(), "volume");
+    assert_eq!(one.surface_area(), other.surface_area(), "area");
+    assert_eq!(one.centroid(), other.centroid(), "centroid");
+
+    let whole = one.volume();
+    let cut_one = cut_by_a_third_solid(model, built, cutter, deflection)
+        .expect("the solid the kernel built is cut by the third one");
+    let cut_other = cut_by_a_third_solid(model, rebuilt, cutter, deflection)
+        .expect("and so is the one described again");
+
+    assert_eq!(
+        cut_one.len(),
+        cut_other.len(),
+        "the two fuses came back with different numbers of pieces"
+    );
+    assert!(!cut_one.is_empty(), "the cut left nothing to compare");
+    let left = cut_one.iter().map(|piece| piece.volume()).sum::<f64>();
+    assert!(
+        left < whole,
+        "the cut took nothing away, so this compared two solids nothing happened to: \
+         {left} of {whole}"
+    );
+    for (one, other) in cut_one.iter().zip(&cut_other) {
+        assert_eq!(one.volume(), other.volume(), "a fused piece's volume");
+        assert_eq!(
+            one.surface_area(),
+            other.surface_area(),
+            "a fused piece's area"
+        );
+        assert_eq!(one.centroid(), other.centroid(), "a fused piece's centroid");
+    }
+}
+
+/// One solid of the model, cut by a third one it overlaps, measured piece by
+/// piece.
+///
+/// Done on a clone so the two runs cannot see each other's answer.
+fn cut_by_a_third_solid(
+    model: &Model,
+    which: SolidKey,
+    cutter: &dyn Fn(&mut Model) -> SolidKey,
+    deflection: Deflection,
+) -> Result<Vec<Measurement>> {
+    let policy = Policy::certified();
+    let position = model
+        .solids()
+        .position(|solid| solid.key() == which)
+        .expect("the solid is in the model it came from");
+    let mut scratch = model.clone();
+    let keep = scratch
+        .solids()
+        .nth(position)
+        .expect("a clone holds the same solids in the same order")
+        .key();
+    let knife = cutter(&mut scratch);
+
+    let fused = scratch.fuse(
+        &[keep],
+        &[knife],
+        Rule::Difference,
+        &policy,
+        &mut ProvenanceLog::new(),
+    )?;
+    let pieces: Vec<SolidKey> = fused.solids().to_vec();
+    pieces
+        .into_iter()
+        .map(|piece| {
+            scratch
+                .solid(piece)
+                .measure(deflection, &policy, &mut ProvenanceLog::new())
+        })
+        .collect()
+}
+
+/// A walk over one solid that describes what it finds to a [`SolidBuilder`].
+///
+/// Everything is read through views, so nothing here reaches past the public
+/// API. What it may vary is what a reader varies: where the shape sits, and
+/// which way round its faces are used.
+struct Walk<'m> {
+    model: &'m Model,
+    solid: SolidKey,
+    moved_by: Isometry,
+    turn: Orientation,
+}
+
+impl<'m> Walk<'m> {
+    fn of(model: &'m Model, solid: SolidKey) -> Self {
+        Self {
+            model,
+            solid,
+            moved_by: Isometry::identity(),
+            turn: Orientation::Forward,
+        }
+    }
+
+    /// Describe the shape somewhere else, with the movement baked into the
+    /// numbers rather than carried as a placement (§42.8).
+    fn moved_by(mut self, movement: Isometry) -> Self {
+        self.moved_by = movement;
+        self
+    }
+
+    fn with_every_face_turned_round(mut self) -> Self {
+        self.turn = Orientation::Reversed;
+        self
+    }
+
+    fn describe_again(self, run_of: &dyn Fn(EdgeView<'_>) -> EdgeRun) -> Result<SolidBuilder> {
+        let view = self.model.solid(self.solid);
+        let mut shells = view.shells();
+        let shell = shells.next().expect("a solid has a shell");
+        assert!(shells.next().is_none(), "these solids have one shell each");
+        assert_eq!(
+            shell.location(),
+            Isometry::identity(),
+            "this walk reads stored geometry, so the shell has to sit at the identity"
+        );
+
+        let mut builder = SolidBuilder::new();
+        let mut corners: HashMap<VertexKey, DraftVertex> = HashMap::new();
+        let mut edges: HashMap<EdgeKey, DraftEdge> = HashMap::new();
+        let mut faces = Vec::new();
+
+        for reference in shell.face_refs() {
+            assert_eq!(
+                reference.location(),
+                Isometry::identity(),
+                "this walk reads stored geometry, so each face sits at the identity"
+            );
+            let face = self.model.face(reference.face());
+            let mut wires = Vec::new();
+            for wire in face.wires() {
+                let mut steps = Vec::new();
+                for step in wire.steps() {
+                    steps.push(self.describe_a_step(
+                        step,
+                        run_of,
+                        &mut builder,
+                        &mut corners,
+                        &mut edges,
+                    )?);
+                }
+                wires.push(builder.add_wire(&steps)?);
+            }
+            let orient = if self.turn.is_reversed() {
+                reference.orientation().reversed()
+            } else {
+                reference.orientation()
+            };
+            faces.push((
+                builder.add_face(face.surface().transformed(&self.moved_by), &wires)?,
+                orient,
+            ));
+        }
+        builder.add_shell(&faces)?;
+        Ok(builder)
+    }
+
+    fn describe_a_step(
+        &self,
+        step: WireStepView<'m>,
+        run_of: &dyn Fn(EdgeView<'_>) -> EdgeRun,
+        builder: &mut SolidBuilder,
+        corners: &mut HashMap<VertexKey, DraftVertex>,
+        edges: &mut HashMap<EdgeKey, DraftEdge>,
+    ) -> Result<DraftStep> {
+        match step {
+            WireStepView::Along(coedge) => {
+                // `CoedgeView::edge` turns the edge the way the coedge uses it,
+                // so its ends are the coedge's ends and not the edge's own.
+                // Reading the stored pair back means asking the model for the
+                // edge on its own account.
+                let stored = self.model.edge(coedge.edge().key());
+                let described = match edges.get(&stored.key()) {
+                    Some(&described) => described,
+                    None => {
+                        let start = self.same_corner(builder, corners, stored.start())?;
+                        let end = self.same_corner(builder, corners, stored.end())?;
+                        let described = builder.add_edge(start, end, run_of(stored))?;
+                        edges.insert(stored.key(), described);
+                        described
+                    }
+                };
+                Ok(DraftStep::Along(
+                    builder.add_coedge(described, coedge.orientation_on_its_edge())?,
+                ))
+            }
+            WireStepView::Pole(vertex) => {
+                Ok(DraftStep::Pole(self.same_corner(builder, corners, vertex)?))
+            }
+            // `WireStepView` grows a variant at every milestone, and a step
+            // described as whichever of the two it happens to resemble is a
+            // solid that is not the one being copied.
+            other => panic!("a wire step nothing here knows: {other:?}"),
+        }
+    }
+
+    /// The handle for a corner, describing it the first time it is met.
+    fn same_corner(
+        &self,
+        builder: &mut SolidBuilder,
+        corners: &mut HashMap<VertexKey, DraftVertex>,
+        vertex: VertexView<'_>,
+    ) -> Result<DraftVertex> {
+        if let Some(&described) = corners.get(&vertex.key()) {
+            return Ok(described);
+        }
+        let described = builder.add_vertex(self.moved_by.apply_to_point(vertex.point()))?;
+        corners.insert(vertex.key(), described);
+        Ok(described)
+    }
+}

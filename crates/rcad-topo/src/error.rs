@@ -577,6 +577,128 @@ pub enum Error {
     #[error("an edge of the answer runs along part of a curved crossing and cannot be named")]
     ACurvedEdgeThatIsPartOfACrossingCannotBeNamed,
 
+    /// A handle made by one [`SolidBuilder`](crate::SolidBuilder) was used on
+    /// another.
+    ///
+    /// A handle is an index into the builder that made it, so the same index in
+    /// a second builder names a different entity and resolves silently to the
+    /// wrong one. Refused rather than asserted against, because a builder takes
+    /// caller input from the first call to the last (`docs/decisions.md` §42.5).
+    #[error("this {entity} handle was made by a different builder")]
+    ADraftHandleCameFromAnotherBuilder {
+        /// Which kind of handle came from elsewhere.
+        entity: &'static str,
+    },
+
+    /// A point handed to a builder is infinite or is not a number.
+    #[error("the point described at position {vertex} is not a finite point")]
+    ADraftPointIsNotFinite {
+        /// Which vertex of the description, counting from zero.
+        vertex: usize,
+    },
+
+    /// A straight edge was described between one vertex and itself, or between
+    /// two vertices at the same point.
+    ///
+    /// A closed edge is not this: it comes back to where it started because it
+    /// runs right round a whole curve, which is what its
+    /// [`EdgeRun`](rcad_geom::EdgeRun) says.
+    #[error("the edge described at position {edge} is straight and has no length")]
+    ADraftEdgeHasNoLength {
+        /// Which edge of the description, counting from zero.
+        edge: usize,
+    },
+
+    /// A wire was described with too few steps to close round anything.
+    ///
+    /// Three is the floor, and the one exception is a wire that is a single
+    /// coedge on an edge running right round a closed curve — a round cap's
+    /// boundary, which is one whole circle.
+    #[error(
+        "a wire needs at least three steps unless its one edge closes already, this one has {steps}"
+    )]
+    ADraftWireIsTooShort {
+        /// How many steps the wire was given.
+        steps: usize,
+    },
+
+    /// A wire was described whose steps do not join up end to end.
+    #[error("a wire does not close: step {position} does not start where the one before it ended")]
+    ADraftWireDoesNotClose {
+        /// Which step breaks the chain. The count itself means the last step
+        /// does not come back to where the first one set off.
+        position: usize,
+    },
+
+    /// A face was described with no wires, so nothing says what trims it.
+    #[error("a face was described with no wires to trim it")]
+    ADraftFaceHasNoWires,
+
+    /// A shell was described with no faces, so it is not a skin at all.
+    #[error("a shell was described with no faces")]
+    ADraftShellHasNoFaces,
+
+    /// Something in the description is used where the data model allows it only
+    /// once: a coedge by two wires, a wire by two faces, or a face by two
+    /// shells.
+    #[error("the {entity} described at position {index} is used more than once")]
+    ADraftEntityIsUsedTwice {
+        /// Which kind of entity is over-used.
+        entity: &'static str,
+        /// Which one, counting from zero.
+        index: usize,
+    },
+
+    /// Something in the description is not used by anything above it.
+    ///
+    /// A vertex no edge and no pole names, a coedge no wire walks, a wire no
+    /// face is trimmed by, or a face the shell does not hold. A solid is
+    /// exactly what its shell reaches, so anything else is a description of
+    /// something that is not there.
+    #[error("the {entity} described at position {index} is not used by anything")]
+    ADraftEntityIsUsedByNothing {
+        /// Which kind of entity is unused.
+        entity: &'static str,
+        /// Which one, counting from zero.
+        index: usize,
+    },
+
+    /// An edge of the description is not walked by exactly two coedges, so the
+    /// skin does not close along it.
+    ///
+    /// This is what an unclosed shell looks like from inside a builder, and it
+    /// names the edge the skin is open along rather than the shell as a whole.
+    #[error(
+        "the edge described at position {edge} is walked by {count} coedges; a closed skin walks every edge exactly twice"
+    )]
+    ADraftEdgeIsNotWalkedByTwoCoedges {
+        /// Which edge of the description, counting from zero.
+        edge: usize,
+        /// How many coedges name it.
+        count: usize,
+    },
+
+    /// Both coedges of an edge run the same way, so the two faces meeting there
+    /// do not agree which side the material is on.
+    #[error("both coedges of the edge described at position {edge} run the same way round")]
+    ADraftEdgeIsWalkedTheSameWayTwice {
+        /// Which edge of the description, counting from zero.
+        edge: usize,
+    },
+
+    /// A second shell was described, and a solid built face by face has one.
+    ///
+    /// A void inside a solid, and a solid in two separate lumps, are both
+    /// `shells` of length two in the data model and neither is built, meshed or
+    /// measured anywhere in this kernel. Refused by name rather than written
+    /// and hoped for; `docs/decisions.md` §13 rule 3.
+    #[error("a solid built face by face has exactly one shell")]
+    ASolidBuiltFaceByFaceHasOneShell,
+
+    /// A solid was asked for before any shell was described.
+    #[error("no shell was described, so there is no solid to build")]
+    ADraftSolidHasNoShell,
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the
