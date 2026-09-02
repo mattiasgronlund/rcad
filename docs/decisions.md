@@ -12261,3 +12261,202 @@ can be struck rather than carried forward.
 - **A gate that audits three reports has audited three reports.** §41 caught a
   numeral in a lane's report and printed one of its own; the correction is above
   and the pattern is worth naming, because the next gate will write a section too.
+
+### 41.13 A §19 violation four lanes ran past, and the gate that could not see it
+
+*The branch tip was red: `turning_a_fuse` failed on a pair of blocks. It is not a
+regression from any of the twenty commits, the fuse is not at fault, and the
+number this closes is not the one it was reported as. Every figure below was
+measured on the branch.*
+
+**The case.** A `2 x 1 x 1` block on a `3 x 3 x 3` one, meeting exactly on
+`z = 0` over a rectangle of area 2. Turned by `TAU·44/64` about `(2, 3, -2)`:
+
+| | solids | faces | volume | area |
+|---|---|---|---|---|
+| fuse then turn | 1 | 10 | 29 | 60 |
+| turn then fuse | 2 | 12 | 28.99999999999999 | 63.999999999999964 |
+
+`60 = 64 − 2·2`. The lattice side glues the pair and drops both faces of the
+contact; the turned side never glues it. The property allowed `2.1e-10`.
+
+#### What actually happened, and it is upstream of every suspect
+
+Dumped in `bake::surface_of_every_face` and `cuts::cuts_between`:
+
+```
+face 1 (block 1, bottom): stored [0,0,-1,-0.0]  placed at t = [0,0,0]
+                       -> [ 0.9975583778312507, ..., -0.0]
+face 8 (block 2, top):    stored [0,0, 1,-3.0]  placed at t = [2.9926751334937522, ...]
+                       -> [-0.9975583778312507, ...,  8.881784197001252e-16]
+```
+
+The two normals are **exactly** opposite. Only the offsets moved, by `8.88e-16`,
+so `where_two_planes_cross` answers `Nothing`, `cuts::gather` makes no cut line,
+no face is split, and `assemble` never sees an interface at all.
+
+`place_solid` composes, so block 2's placement becomes `(R, fl(R·(0,0,-3)))` —
+and `fl(R·(0,0,-3))` is not `-3·fl(R·(0,0,1))`, because the quaternion sandwich
+is not exactly homogeneous in the vector it turns. `Plane::transformed` then
+works the offset out as `d + n·t`, whose terms are both about 3 and nearly
+cancel. **Summed exactly through `Exact` the residue is
+`-5.195804564346705e-16`, so it is not an artefact of the `f64` summation
+order**: the composed placement genuinely puts block 2 that far off block 1. That
+is `0.78·EPSILON·L` at `L = 3`, inside `Isometry::POINT_ROUNDOFF`. The pair
+handed to the turned fuse is not in contact, and the fuse answered it correctly.
+
+**`d8b903e` is cleared with a demonstration and not an argument.** It changes
+shell nesting; the failure is two stages upstream of nesting, in `cuts`, where no
+cut line is ever made. The ball-cut-off-pole item it closed stays closed and
+nothing here goes near it. `git diff main..m5` over every file on this path —
+`isometry.rs`, `plane.rs`, `view.rs`, `intersect.rs`, `model.rs` — is doc
+comments, `?` propagation and `ad43ccf`'s `TryFrom`, which is the wire route
+only. `Isometry::rotation`, `apply_to_vector`, `compose`, `Plane::transformed`,
+`place_solid` and `where_two_planes_cross`'s arithmetic are byte-identical to
+`main`.
+
+#### How broad it is
+
+Every turn `pairs::a_turn` can draw, 21546 of them, asking only whether the two
+contact planes come out coincident (`isometry_algebra.rs`):
+
+```
+same 10446, offsets differ 11100, normals differ 0, worst gap 4.88e-15
+```
+
+**51.5% of general rotations break an exact face contact.** Cross-tabulated
+against what `Rule::Union` of this pair then does:
+
+| | glued | undecidable | other error | apart |
+|---|---|---|---|---|
+| the planes still agree | 5631 | 2566 | 2249 | 0 |
+| the planes disagree | 1 | 10896 | 98 | **105** |
+
+So of the turns that break the contact, 98.2% refuse and **0.95% answer
+confidently with the pair unglued**. Those 105 are what an area comparison
+catches; the other 10896 are the number §17.7 has been publishing for two
+milestones.
+
+#### The turned family's refusal rate is this, and not much else
+
+Over 4000 fresh draws of `a_turned_pair`, three rules each, under
+`Policy::certified()`:
+
+| | turned fuses | refused |
+|---|---|---|
+| the pair kept every contact | 5817 | 96 (**1.65%**) |
+| the pair lost a contact | 6183 | 2832 (**45.80%**) |
+| all together | 12000 | 2967 (24.73%), of which **2865 sit on a lost contact** |
+
+24.73% is `fuses_that_must_agree`'s §17.7 turned headline — 22.70% shipped,
+24.3% soaked — arriving from a second direction. **96.6% of that family's
+refusals are pairs whose contact the placement rounding broke**, and a turned
+pair that keeps its contacts refuses at 1.65%.
+
+That number has been a headline of this tree since M3: §17.7 published it at
+**105 of 414 = 25.4%, every one of them *side of plane***, every gate since has
+re-measured it, and none has said what it was. §39.6 attributed two points of it
+to one commit and put the rest down to the corpus growing. **The rest is this.**
+A turned pair refuses because two of its faces were meant to be touching and are
+a rounding apart, and *side of plane* is the name the arrangement gives to being
+unable to say which side of one of them a corner of the other is on.
+
+#### The seed, and what four green lanes were really worth
+
+`turning_a_fuse` ran `TestRunner::new`, and `Config::default().rng_seed` is
+`RngSeed::Random`, which proptest 1.11 turns into `ChaChaRng::from_os_rng` — OS
+entropy on every run. **But the interesting number is not how lucky the greens
+were.**
+
+- Measured: **0 draws in 43000** break the area bound, and six soaked seeds at a
+  hundred times the corpus — between 5099 and 5314 pairings each — find none
+  either. A run is 81 pairings, so the property failed well under one run in
+  five hundred.
+- Measured: **17643 of 20000 drawn pairs share a plane, and 10129 of those lose
+  a contact when the pair is turned.** Half of every corpus this suite has ever
+  drawn carried the defect.
+
+So the four lanes' greens were almost certainly not luck, and that is the worse
+finding rather than the better one: **the gate had no power against the defect it
+eventually reported.** It saw it once, in a hundredth of a percent of the
+configurations that had it, and only because a rare shape let a broken contact
+through to an answer instead of to a refusal. A property that reports the defect
+once in 40000 draws is not a gate against it; the *refusal rate beside it* was
+the measurement that had been describing it all along, and nobody had attributed
+it.
+
+The seed is fixed now, with `RCAD_SOAK_FACTOR` and `RCAD_SOAK_SEED` doing the
+sweeping — the same two names `fuses_that_must_agree.rs` uses. That is worth less
+than it looks for finding defects and worth a great deal for the numbers the file
+prints, which changed every run and which §39.6's method — attribute a moved
+number to a commit, never widen it — cannot be applied to otherwise.
+
+#### What the property claims now
+
+Surface area is **discontinuous** where two faces meet: lose a contact of area
+`a` and both of its faces stay, so the total goes up by `2a` however small the
+slip. Volume and the centroid do not move — 29 against 28.99999999999999 here.
+A bound derived from `Isometry::POINT_ROUNDOFF` covers the two continuous
+quantities and cannot cover the third, because what it is looking at is not a
+rounding in the answer but a different answer.
+
+`how_much_a_lost_contact_can_add` is **derived from the two inputs and is not a
+slack**: for every pair of faces on one surface in the lattice frame and not in
+the turned one, twice the smaller face. Where two faces coincide the two answers
+can differ over that region and nowhere else, and each face is either kept or
+dropped there, so twice the region bounds it and the region is inside both
+faces. It is zero for every pairing whose contacts survived. The window widens
+**upwards only** — a contact can be lost and never gained, because a lattice
+pair's faces are a whole unit apart when they are not exactly together — so a
+turned answer with *less* area has dropped a face and nothing excuses it. On the
+pinned case the room is exactly 4 and the areas differ by 3.999999999999964.
+
+#### Three fixes to the arithmetic, measured and refused
+
+Over the same 21546 turns, how often the two contact planes come out coincident:
+
+| how the moved offset is worked out | agree |
+|---|---|
+| `d + n_moved·t`, what the code does | 10446 |
+| the same, summed exactly through `Exact` and rounded once | **378** |
+| `d + n·(R⁻¹t)` | 12086 |
+
+**Exactness makes it worse**, and that is the finding under the family: what
+keeps a contact alive is not accuracy but two routes agreeing, and the `f64`
+sum's own rounding lands on zero more often than the true value does. The fourth
+member of the family, `n_moved · movement(origin())`, is what §19.1 took out and
+is not a candidate.
+
+#### A gap, its consumer, and what would close it
+
+**A gap.** The answer exists — a plane with offset `0` is an `f64` — and one
+arrangement reaches it every time: **two solids that already share one placement
+keep any contact exactly**, because `Plane::transformed` is a pure function of
+the plane and the movement, and two exactly-opposite normals come out exactly
+opposite whatever the translation is. §19 holds bit-for-bit for a pair moved *as
+a unit* and fails by a rounding for a pair whose members carry different
+placements — which is what `add_extrusion` leaves behind for every solid built
+anywhere but the origin, and is reachable from the public API in four ordinary
+calls.
+
+Two families, neither built here, both with a named cost:
+
+- **Keep a pair at one placement.** `add_extrusion` could bake its lift into the
+  stored geometry rather than keep it as a location. That closes this case and
+  nothing wider: two solids a user placed at two different translations and then
+  turned together hit the same rounding.
+- **Store a movement as `p → R(p + t)` rather than `Rp + t`.** Composing a
+  rotation about the origin onto a translation is then exact — `t` is carried
+  over untouched — and `Plane::transformed`'s offset becomes `d + n·t` on the
+  *stored* normal and translation, which is exactly `0` for the case above. It
+  is not exact when the outer movement has a translation of its own, and it is a
+  representation change across four crates. Untested; the sentence above is a
+  derivation and not a measurement.
+
+Until one of them, the honest description of the kernel is the one this section
+measures: **a general rotation applied to a pair of solids at different
+placements moves them relative to each other by up to a rounding of the
+placement, a contact does not survive that half the time, and the kernel refuses
+45.8% of the pairs where it happens rather than answering them wrong.** That is
+§4.1's ladder working — refusing beats a confident wrong answer — and it is the
+whole of the turned family's refusal rate.
