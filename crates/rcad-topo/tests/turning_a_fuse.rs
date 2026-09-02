@@ -510,17 +510,29 @@ fn how_far_the_centroid_may_move(triangles: usize, slip: f64, largest: f64, volu
 /// is that arithmetic on its own — 11100 of the 21546 turns this file can draw
 /// lose a contact that way. `docs/decisions.md` §41.13.
 ///
-/// **Why twice the smaller face.** Where two faces of the inputs coincide, the
-/// two answers can differ over that region and nowhere else, and each of the two
-/// faces is either kept or dropped there. So the totals differ by at most twice
-/// the region, the region is inside both faces, and the smaller face is a bound
-/// on it. Anything the answer gained beyond that came from somewhere this cannot
-/// name, and is a defect.
+/// **Why twice the smaller face.** Away from the contact the turned pair is the
+/// lattice pair to within the rounding [`how_far_the_area_may_move`] already
+/// covers. Over the contact it is not: each of the two coincident faces is
+/// either kept there or dropped there, so the two totals differ by at most twice
+/// that region on top of the bound. The region is inside both faces, so the
+/// smaller face bounds it.
+///
+/// **Loosely, and only where it costs nothing.** Two big faces coincident over a
+/// small patch make this many times the jump they can actually cause. It is
+/// added only to a pairing that has already broken the plain bound — none of the
+/// shipped corpus and one of about five thousand under a soak — and it is a
+/// bound on the *inputs*, so no answer this test looks at can widen its own
+/// window. What closes the looseness is clipping the two outlines against each
+/// other in their shared plane, which is a polygon intersection and belongs
+/// where one is already written.
 ///
 /// The window is only widened **upwards**. A contact can be lost and never
-/// gained — the lattice pair's faces are a whole unit apart when they are not
-/// exactly together, far outside any rounding — so a turned answer with *less*
-/// area than the lattice one has dropped a face, and no lost contact excuses it.
+/// gained: two faces of a lattice pair are parallel only when their normals are
+/// the same signed axis, and then their offsets are whole numbers, so they are
+/// one plane exactly or a whole unit apart — and placing a solid moves an offset
+/// by less than `Isometry::POINT_ROUNDOFF` times its size. So a turned answer
+/// with *less* area than the lattice one has dropped a face, and no lost contact
+/// excuses it.
 fn how_much_a_lost_contact_can_add(still: &Configuration, turned: &Configuration) -> f64 {
     let (here, mine) = still.build();
     let (there, theirs) = turned.build();

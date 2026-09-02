@@ -12427,17 +12427,32 @@ sum's own rounding lands on zero more often than the true value does. The fourth
 member of the family, `n_moved · movement(origin())`, is what §19.1 took out and
 is not a candidate.
 
+**The residue is not the summation order**, which is the claim the whole
+paragraph rests on and the one §16.10 says to demonstrate rather than assert.
+Summed through the crate's own `Exact` the leftover on the pinned turn is
+`-5.195804564346705e-16` against the `f64` sum's `-8.881784197001252e-16` — two
+thirds as big, and not zero.
+`a_placement_that_moves_a_plane_off_its_neighbour_does_it_in_the_arithmetic` is
+where that is asserted. The composed placement really does put the second solid
+that far off; no way of adding four numbers up recovers a contact that is not
+there.
+
 #### A gap, its consumer, and what would close it
 
 **A gap.** The answer exists — a plane with offset `0` is an `f64` — and one
-arrangement reaches it every time: **two solids that already share one placement
-keep any contact exactly**, because `Plane::transformed` is a pure function of
-the plane and the movement, and two exactly-opposite normals come out exactly
-opposite whatever the translation is. §19 holds bit-for-bit for a pair moved *as
-a unit* and fails by a rounding for a pair whose members carry different
-placements — which is what `add_extrusion` leaves behind for every solid built
-anywhere but the origin, and is reachable from the public API in four ordinary
-calls.
+arrangement reaches it every time: **two faces that touch stay touching, exactly,
+when one movement moves both.** The two faces of a contact are one plane and its
+`reversed()`, `(n, d)` and `(−n, −d)`; `Plane::transformed` is a pure function of
+the plane and the movement, and negating a vector negates each product and each
+sum of an `f64` dot product exactly, so `(Rn, d + Rn·t)` and its partner come out
+exact negatives whatever `t` is.
+`two_faces_that_touch_stay_touching_when_one_movement_moves_both` is the
+demonstration rather than that sentence.
+
+So §19 holds bit-for-bit for a pair moved **as a unit** and fails by a rounding
+for a pair whose members carry different placements — which is what
+`add_extrusion` leaves behind for every solid built anywhere but the origin, and
+is reachable from the public API in four ordinary calls.
 
 Two families, neither built here, both with a named cost:
 

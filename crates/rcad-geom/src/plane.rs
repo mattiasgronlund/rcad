@@ -1509,4 +1509,50 @@ mod tests {
         assert_eq!(shoved.agreement_with(&sound), PlaneAgreement::CannotTell);
         assert_eq!(sound.agreement_with(&shoved), PlaneAgreement::CannotTell);
     }
+
+    /// A face that composing a placement moved off the face it was touching is
+    /// moved by the arithmetic and not by the summation order.
+    ///
+    /// The claim `isometry_algebra.rs` and `docs/decisions.md` §41.13 both rest
+    /// on. `Plane::transformed` works the moved offset out as `d + n·t`, and for
+    /// a face whose placement carries it back through its own offset the two
+    /// terms are both about 3 and nearly cancel — so the obvious suspicion is
+    /// that the leftover is the `f64` sum's own rounding and that summing more
+    /// carefully would make it zero.
+    ///
+    /// **It would not.** Summed through [`Exact`], which is the arithmetic the
+    /// predicates decide on, the leftover is still there and is about two thirds
+    /// of the `f64` sum's. The composed placement really does put this plane off
+    /// the one it was touching, by less than a rounding of the placement — which
+    /// is why nothing downstream is entitled to call it a mistake, and why the
+    /// fix is not in this function.
+    #[test]
+    fn a_placement_that_moves_a_plane_off_its_neighbour_does_it_in_the_arithmetic() {
+        let axis = Axis::new(Point::origin(), Vector::new(2.0, 3.0, -2.0)).unwrap();
+        let turn = Isometry::rotation(&axis, TAU * 44.0 / 64.0).unwrap();
+        let lift = Isometry::translation(Vector::new(0.0, 0.0, -3.0)).unwrap();
+        let placed = turn.compose(&lift);
+        let stored = Plane::from_coefficients([0.0, 0.0, 1.0, -3.0]).unwrap();
+
+        let moved = stored.transformed(&placed);
+        let summed_exactly = Exact::of(stored.offset()).plus(
+            &Exact::dot_of(
+                moved.normal().components(),
+                placed.translation_part().components(),
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(moved.offset(), -8.881784197001252e-16);
+        assert_eq!(summed_exactly.nearest_f64(), -5.195804564346705e-16);
+        assert_ne!(
+            summed_exactly.sign(),
+            rcad_predicates::Decision::Zero,
+            "no summation reaches the plane this face was touching"
+        );
+        assert!(
+            summed_exactly.nearest_f64().abs() < Isometry::POINT_ROUNDOFF * 3.0,
+            "and it is inside what placing a solid of this size is allowed to move it"
+        );
+    }
 }

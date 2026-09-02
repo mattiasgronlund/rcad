@@ -45,6 +45,13 @@ fn movement() -> impl Strategy<Value = Isometry> {
         )
 }
 
+fn a_plane() -> impl Strategy<Value = Plane> {
+    (point(), coordinate(), coordinate(), coordinate())
+        .prop_filter_map("the normal needs some length", |(through, x, y, z)| {
+            Plane::from_point_and_normal(through, Vector::new(x, y, z)).ok()
+        })
+}
+
 proptest! {
     #[test]
     fn moving_a_point_and_then_moving_it_back_leaves_it_where_it_started(
@@ -128,6 +135,32 @@ proptest! {
             twice_undone.apply_to_point(point).distance_to(movement.apply_to_point(point))
                 < CLOSE_ENOUGH
         );
+    }
+
+    /// Two faces that touch stay touching, exactly, when **one** movement moves
+    /// both of them.
+    ///
+    /// The other half of
+    /// `a_contact_between_two_solids_at_two_placements_does_not_survive_every_turn`,
+    /// and what makes that one a gap rather than a limit: the answer exists and
+    /// one arrangement reaches it every time. Two faces of a contact are one
+    /// plane and its [`Plane::reversed`] — `(n, d)` and `(−n, −d)` — and
+    /// [`Plane::transformed`] carries that through whatever the movement is,
+    /// because it is a pure function of the two and because negating a vector
+    /// negates each product and each sum of an `f64` dot product exactly.
+    ///
+    /// So a pair moved **as a unit** obeys `docs/decisions.md` §19 bit for bit.
+    /// What breaks it is the two solids carrying different placements, which is
+    /// what `add_extrusion` leaves behind for every solid built anywhere but the
+    /// origin. §41.13.
+    #[test]
+    fn two_faces_that_touch_stay_touching_when_one_movement_moves_both(
+        movement in movement(),
+        plane in a_plane(),
+    ) {
+        let facing_it = plane.transformed(&movement);
+        let facing_back = plane.reversed().transformed(&movement);
+        prop_assert_eq!(facing_it.coefficients(), facing_back.reversed().coefficients());
     }
 
     #[test]
