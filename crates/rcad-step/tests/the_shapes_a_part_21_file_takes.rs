@@ -263,3 +263,28 @@ END-ISO-10303-21;
     file.every_reference_resolves()
         .expect("#2 is defined, in the other section");
 }
+
+#[test]
+fn an_escape_whose_character_is_an_apostrophe_takes_both_bytes_of_the_pair() {
+    // Found by `just fuzz-reader`: `\S\` read only the first byte of the `''`
+    // that stands for one apostrophe, and the decoder then met the second on
+    // its own, where a string's own grammar says one cannot stand, and
+    // asserted. A caller's bytes may not panic (CLAUDE.md, and decisions.md
+    // §42.12 criterion 5), so the lone apostrophe was this reader's bug and not
+    // the file's.
+    assert_eq!(
+        only_attribute(r"#1=A('\S\''');").as_text(),
+        Some("\u{a7}"),
+        r"\S\ applied to an apostrophe is the section sign"
+    );
+    assert_eq!(
+        only_attribute(r"#1=A('a\S\''b');").as_text(),
+        Some("a\u{a7}b"),
+        "and the decoder carries on from after the pair, not from inside it"
+    );
+    assert_eq!(
+        only_attribute(r"#1=A('\S\A''');").as_text(),
+        Some("\u{c1}'"),
+        "an ordinary character after the directive still takes one byte"
+    );
+}

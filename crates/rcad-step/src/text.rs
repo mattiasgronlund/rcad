@@ -16,11 +16,16 @@ pub(crate) fn decode(body: &[u8], body_at: usize, whole: &[u8]) -> Result<String
     while at < body.len() {
         let byte = body[at];
         match byte {
+            // The scanner ended the string at the first apostrophe not
+            // doubled, so every one it left inside is the first of a pair —
+            // provided nothing before it stepped over only half of one. Of the
+            // directives, `\S\` is the only one that swallows a character it
+            // does not otherwise constrain, and it counts the pair.
             b'\'' => {
                 assert_eq!(
                     body.get(at + 1),
                     Some(&b'\''),
-                    "the scanner ends a string at the first apostrophe not doubled"
+                    "a lone apostrophe inside a string the scanner delimited"
                 );
                 out.push('\'');
                 at += 2;
@@ -52,10 +57,16 @@ fn escape(
         // `\S\c` is the character c moved into the upper half of the current
         // 8-bit page, which is ISO 8859-1 unless `\P` said otherwise, and `\P`
         // saying otherwise is refused below.
+        //
+        // c is a character of the string and not a raw byte, so a doubled
+        // apostrophe there is one apostrophe and both bytes belong to this
+        // directive. Reading only the first is how the fuzzer found a panic:
+        // the rest of the decoder then met the second on its own, where the
+        // string's own grammar says one cannot stand.
         Some(b'S') if body.get(at + 2) == Some(&b'\\') => match body.get(at + 3) {
             Some(&letter) if letter.is_ascii() => {
                 out.push(char::from(letter | 0x80));
-                Ok(at + 4)
+                Ok(at + 3 + how_wide_one_character_is(body, at + 3))
             }
             _ => Err(unknown_escape(body, at, body_at, whole)),
         },
@@ -167,6 +178,15 @@ fn utf8(
     };
     out.push_str(text);
     Ok(at + length)
+}
+
+/// How many bytes one character of a string takes at this spot: two for the
+/// doubled apostrophe Part 21 writes one apostrophe as, one for anything else.
+fn how_wide_one_character_is(body: &[u8], at: usize) -> usize {
+    match body.get(at) {
+        Some(b'\'') if body.get(at + 1) == Some(&b'\'') => 2,
+        _ => 1,
+    }
 }
 
 fn hex(body: &[u8], at: usize, digits: usize) -> Option<u32> {
