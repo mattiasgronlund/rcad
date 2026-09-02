@@ -111,6 +111,11 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
         denominator, 46,
         "the count of KiCad files that import must not shift without somebody saying so"
     );
+    assert_eq!(
+        scale_metadata_differed, 0,
+        "Scale::nominal_size is set from the file's vertices alone, so a round trip must not \
+         move it even when a LINE's own point or a PLANE's placement origin rounds"
+    );
     assert!(
         round_tripped > 0,
         "nothing round-tripped, so this test compared nothing"
@@ -147,14 +152,16 @@ fn round_trip_one(name: &str, source: &Model) -> Outcome {
     };
     let there = there.model();
 
-    // `Scale::nominal_size` is the largest coordinate any `CARTESIAN_POINT` in
-    // the file carries — including ones that name no vertex at all, such as
-    // the arbitrary point a `LINE` is defined through, or a coordinate a
-    // general-normal `PLANE` rounds by a few ULPs on the way out
-    // (`crates/rcad-step/src/write.rs`'s own documented gap). Neither changes
-    // the solid, so it is counted rather than failed here, and the two sides
-    // are still measured with **one** `Deflection`, taken from `source`, so
-    // the comparison below is not asking the two a different question.
+    // `Scale::nominal_size` is the largest coordinate any of the file's
+    // vertices carries (`Import::biggest_coordinate_in`). It used to also
+    // walk points that name no vertex at all — a `LINE`'s own defining point,
+    // a general-normal `PLANE`'s placement origin, rounded by a few ULPs on
+    // the way out — and ten corpus files came back with a moved
+    // `Scale::nominal_size` for a reason that was never the solid. Fixed;
+    // this is still measured and reported rather than assumed, and the two
+    // sides are still measured with **one** `Deflection`, taken from
+    // `source`, so the comparison below is not asking the two a different
+    // question.
     let scale_metadata_differed = there.scale() != source.scale();
     if let Err(why) = there.validate(&policy, &mut log) {
         panic!("{name}: the round trip came back as a model that is not sound: {why}");

@@ -190,8 +190,19 @@ impl Import {
     }
 }
 
-/// The largest coordinate magnitude anywhere in the file, which is what
-/// [`Scale::nominal_size`] is set from.
+/// The largest coordinate magnitude of any corner the file's solids actually
+/// have, which is what [`Scale::nominal_size`] is set from.
+///
+/// **Walks `VERTEX_POINT`, not every `CARTESIAN_POINT` in the file.** A file
+/// holds many points that name no corner of anything: a `LINE`'s own
+/// defining point (some tools put it near a vertex it supports, not on it),
+/// a `PLANE`'s placement origin, a `CIRCLE`'s centre. None of those bound the
+/// solid, so a file that carries one far from every real corner must not move
+/// the nominal size — measured on
+/// `PinHeader_2x01_P2.54mm_Vertical.step`, whose `LINE` reference point sits
+/// at `8.646666666667` on one axis while every vertex on that axis tops out
+/// at `8.54`, a 1.2% difference with no shape behind it.
+/// `a_lines_own_reference_point_does_not_move_the_nominal_size` is the test.
 ///
 /// **Chosen because it scales exactly.** A part written twice, once with every
 /// coordinate multiplied by a power of two, gets a nominal size multiplied by
@@ -201,8 +212,20 @@ impl Import {
 /// is the test.
 fn biggest_coordinate_in(file: &StepFile) -> f64 {
     let mut biggest = 0.0_f64;
-    for point in file.instances_named("CARTESIAN_POINT") {
-        let Some(coordinates) = point.parts()[0].attribute(1).and_then(Value::as_list) else {
+    for vertex in file.instances_named("VERTEX_POINT") {
+        let Some(point) = vertex
+            .part("VERTEX_POINT")
+            .and_then(|record| record.attribute(1))
+            .and_then(Value::as_reference)
+            .and_then(|id| file.instance(id))
+        else {
+            continue;
+        };
+        let Some(coordinates) = point
+            .part("CARTESIAN_POINT")
+            .and_then(|record| record.attribute(1))
+            .and_then(Value::as_list)
+        else {
             continue;
         };
         for number in coordinates {
@@ -311,4 +334,65 @@ fn is_the_identity(reading: &Reading<'_>, id: EntityId) -> Result<bool, Refusal>
     Ok(place.origin == Point::origin()
         && place.axis == Vector::new(0.0, 0.0, 1.0)
         && place.reference.unwrap_or(Vector::new(1.0, 0.0, 0.0)) == Vector::new(1.0, 0.0, 0.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::biggest_coordinate_in;
+    use crate::graph::StepFile;
+
+    /// A file with one corner at `(1.0, 2.0, 3.0)` and, unconnected to any
+    /// vertex, a lone `CARTESIAN_POINT` far past it — the same shape a real
+    /// file's `LINE` reference point takes: a defining point for a curve,
+    /// sitting near but not on the corner it supports.
+    fn a_file_whose_only_corner_is_small(far_point: [f64; 3]) -> String {
+        format!(
+            "ISO-10303-21;\n\
+             HEADER;\n\
+             FILE_DESCRIPTION((''),'2;1');\n\
+             FILE_NAME('','',(''),(''),'','','');\n\
+             FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\n\
+             ENDSEC;\n\
+             DATA;\n\
+             #1=CARTESIAN_POINT('',(1.0,2.0,3.0));\n\
+             #2=VERTEX_POINT('',#1);\n\
+             #3=CARTESIAN_POINT('',({:?},{:?},{:?}));\n\
+             ENDSEC;\n\
+             END-ISO-10303-21;\n",
+            far_point[0], far_point[1], far_point[2]
+        )
+    }
+
+    /// The measured defect: `PinHeader_2x01_P2.54mm_Vertical.step` holds a
+    /// `LINE` whose own defining point is `(5.333333333333E-02,
+    /// 5.333333333333E-02, 8.646666666667)`, sitting near but not on the
+    /// vertex `(0.16, 0.16, 8.54)` it supports. Before this fix,
+    /// `Scale::nominal_size` came back `8.646666666667`; the part's own
+    /// corners top out at `8.54`.
+    #[test]
+    fn a_lines_own_reference_point_does_not_move_the_nominal_size() {
+        let text = a_file_whose_only_corner_is_small([
+            5.333_333_333_333E-02,
+            5.333_333_333_333E-02,
+            8.646_666_666_667,
+        ]);
+        let file = StepFile::read(text.as_bytes()).expect("a small hand-written file reads");
+
+        assert_eq!(
+            biggest_coordinate_in(&file),
+            3.0,
+            "the biggest coordinate must come from the one corner the file has, not from a \
+             point that names no vertex"
+        );
+    }
+
+    /// A `CARTESIAN_POINT` with no `VERTEX_POINT` at all — a placement origin,
+    /// say — is walked past the same way.
+    #[test]
+    fn a_point_with_no_vertex_at_all_does_not_move_the_nominal_size() {
+        let text = a_file_whose_only_corner_is_small([1000.0, 1000.0, 1000.0]);
+        let file = StepFile::read(text.as_bytes()).expect("a small hand-written file reads");
+
+        assert_eq!(biggest_coordinate_in(&file), 3.0);
+    }
 }

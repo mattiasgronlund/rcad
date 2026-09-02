@@ -452,6 +452,36 @@ impl Writing {
     /// the file wrote, with no division — and the slope is the round trip of
     /// two library functions. `a_cone_is_the_one_surface_whose_round_trip_goes_through_a_library_function`
     /// measures what that costs.
+    ///
+    /// # A general-normal plane also rounds, by 1–4 ULPs, and no point choice
+    ///   here closes it
+    ///
+    /// STEP has no way to write a plane except as a point plus a normal, and
+    /// [`Plane::from_point_and_normal`](rcad_geom::Plane::from_point_and_normal)
+    /// re-derives the offset by dotting them back together on the way in. For
+    /// a normal that is not axis-aligned that dot product has three nonzero
+    /// terms, and a three-term dot product is not, in general, the exact
+    /// inverse of the multiply that built the offset in the first place — a
+    /// plane with normal `(−9,−4,5)` and offset `0` reads a point that sits
+    /// exactly on it, `(0,−10,−8)`, back `4.44e-16` off itself.
+    ///
+    /// **Checked, not assumed, that a different point does not fix it**:
+    /// [`plane_round_trip_tests::choosing_a_different_point_does_not_fix_a_general_normal_plane`]
+    /// tries the obvious other candidate — a point with only one nonzero
+    /// coordinate, along the normal's largest component, rather than the
+    /// foot of the perpendicular this writer sends — against 5 000 random
+    /// general-normal planes. It differs about as often as the point this
+    /// writer already sends (in one run, 2 327 against 2 132 out of 5 000),
+    /// which is not an improvement; nothing in this family of fixes is. This
+    /// is a limit of STEP's own encoding of a plane, not a gap in this
+    /// writer.
+    ///
+    /// **It does not move [`Scale::nominal_size`]** — that is set from the
+    /// solid's own vertices (`Import::biggest_coordinate_in`), and a plane's
+    /// placement point is not one — so the rounding here changes no
+    /// published bound, only the plane's own stored coefficients by an
+    /// amount `Model::what_writing_a_plane_down_costs` (`rcad-topo`) already
+    /// prices in.
     fn surface(&mut self, surface: &Surface) -> Result<u64, CannotWrite> {
         Ok(match surface {
             Surface::Plane(flat) => {
@@ -636,4 +666,105 @@ fn text(string: &str) -> String {
     close(&mut written, &mut wide);
     written.push('\'');
     written
+}
+
+#[cfg(test)]
+mod plane_round_trip_tests {
+    use rcad_geom::{Plane, Point, Vector};
+
+    /// The demonstration behind `Writing::surface`'s doc comment: a
+    /// plane through the origin with normal `(−9,−4,5)` and offset `0` reads
+    /// back a point that is exactly on it, `(0,−10,−8)` — the dot product is
+    /// `0·(−9) + (−10)·(−4) + (−8)·5 = 0 + 40 − 40 = 0` on paper — off itself
+    /// by a few ULPs.
+    #[test]
+    fn a_plane_through_the_origin_still_rounds_reading_its_own_point_back() {
+        let normal = Vector::new(-9.0, -4.0, 5.0).normalized().unwrap();
+        let point = Point::new(0.0, -10.0, -8.0);
+        assert_eq!(normal.dot(point - Point::origin()), 0.0, "exact on paper");
+
+        let plane = Plane::from_point_and_normal(point, normal).unwrap();
+        assert_ne!(
+            plane.offset(),
+            0.0,
+            "a general-normal plane's own defining point should not read back exactly"
+        );
+        assert!(
+            plane.offset().abs() < 1e-14,
+            "the rounding should still be a few ULPs, not something bigger: {}",
+            plane.offset()
+        );
+    }
+
+    /// Whether writing a different point — one with only one nonzero
+    /// coordinate, along the normal's own largest component, rather than the
+    /// foot of the perpendicular `Writing::surface` sends — reads
+    /// back exactly more often. It does not: this is the evidence for "no
+    /// point choice closes it" in that doc comment.
+    #[test]
+    fn choosing_a_different_point_does_not_fix_a_general_normal_plane() {
+        let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+        let mut next_u64 = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut next_f64 = |lo: f64, hi: f64| {
+            let unit = (next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
+            lo + unit * (hi - lo)
+        };
+
+        let trials = 5000;
+        let mut foot_of_perpendicular_rounds = 0;
+        let mut single_coordinate_rounds = 0;
+        for _ in 0..trials {
+            let raw = Vector::new(
+                next_f64(-100.0, 100.0),
+                next_f64(-100.0, 100.0),
+                next_f64(-100.0, 100.0),
+            );
+            let Ok(normal) = raw.normalized() else {
+                continue;
+            };
+            let offset = next_f64(-1000.0, 1000.0);
+
+            let foot = Point::origin() + normal * offset;
+            if Plane::from_point_and_normal(foot, normal).unwrap().offset() != offset {
+                foot_of_perpendicular_rounds += 1;
+            }
+
+            let components = normal.components();
+            let (axis, &biggest) = components
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap())
+                .unwrap();
+            let mut single = [0.0; 3];
+            single[axis] = offset / biggest;
+            let single = Point::new(single[0], single[1], single[2]);
+            if Plane::from_point_and_normal(single, normal)
+                .unwrap()
+                .offset()
+                != offset
+            {
+                single_coordinate_rounds += 1;
+            }
+        }
+        println!(
+            "{trials} random general-normal planes: foot-of-perpendicular rounds \
+             {foot_of_perpendicular_rounds} times, single-coordinate rounds \
+             {single_coordinate_rounds} times"
+        );
+        assert!(
+            foot_of_perpendicular_rounds > trials / 10,
+            "the writer's own point choice should round often enough that a fix would show up \
+             clearly: {foot_of_perpendicular_rounds}"
+        );
+        assert!(
+            single_coordinate_rounds > trials / 10,
+            "picking a different point should not make the rounding disappear: \
+             {single_coordinate_rounds}"
+        );
+    }
 }
