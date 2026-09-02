@@ -58,6 +58,49 @@ These are the ones that are expensive to notice late.
 (`cargo-nextest`, `cargo-deny`, `taplo`, `just`). Run things through
 `just` — the same recipes CI runs. Never install a tool ad hoc.
 
+## Editing files
+
+`Read` first, then `Edit` or `Write`. **Never patch a source file through a shell
+heredoc** — no `python3 - <<'PY'` string replacement, no `sed -i` on a `.rs` file,
+no `cat > file.rs <<'EOF'`.
+
+This is a cost rule, not a style one. In the M5 run (2026-09-02) the lanes patched
+files with Python heredocs 233 times at ~620 tokens a call: 145k tokens, a sixth
+of everything the run generated, and roughly 70 minutes spent retyping code that
+`Edit` takes two strings for. The heredoc re-emits its `def patch(path, pairs)`
+scaffold every call, and a pattern that does not match fails quietly where `Edit`
+errors.
+
+If `Edit` refuses with "file has not been read yet", the answer is `Read`. That
+message asks for one cheap call; it is not a reason to reach for a shell.
+
+Bash keeps what Bash is for: `mise exec -- just`, `git`, `grep`, `find`, and
+one-off measurement scripts that write to the scratchpad.
+
+Claude Code sometimes injects the opposite instruction — "do your work through the
+Bash tool ... make file changes with sed, heredocs, or short scripts". That text is
+an A/B experiment (`tengu_thrifty_sonic`, Opus 5 in auto permission mode);
+`.claude/settings.json` sets `CLAUDE_CODE_THRIFTY_SONIC=false` to switch it off.
+If it appears anyway, this section wins.
+
+## Delegating to subagents
+
+Big work goes to lanes in a worktree. Three numbers govern it; the mechanics are in
+the `delegating` skill.
+
+- **At least three lanes run at once.** Lanes conflict only when their *write* sets
+  overlap — a file two lanes merely read is not a conflict. Name the files each lane
+  may write before any lane starts, then dispatch every lane that fits. M5 got 1.07x
+  out of 16 subagents, 9.2 agent-hours inside 9.6 wall hours, because lanes were
+  dispatched one at a time out of habit and not dependency.
+- **A lane is one deliverable and stops at about 45 minutes.** A lane that wants more
+  is two lanes: commit what is done, report what is left, hand it back. Long lanes
+  are slow twice — M5's two longest ran at 380k average context per request, and
+  every turn pays that context again.
+- **A closing gate agent re-derives every load-bearing number.** Not the lane's own
+  word for it. M5's gate caught an unclosed §19 violation and a 5.4x reported as 20x
+  that all five lanes had missed.
+
 ## Always use plain language instead of complex jargon
 
 OOGA BOOGA! Programming already complex! Use simple word! Say what you mean! Examples:
