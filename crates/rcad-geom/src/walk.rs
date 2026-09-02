@@ -804,6 +804,17 @@ impl Conic {
         let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
             return Ok((from, from + core::f64::consts::TAU));
         };
+        // **A run with no ends at all is the whole of its curve, whatever picks
+        // it**, and [`NamedRun::the_whole_of`] is how a pair of surfaces says so.
+        // The two arcs below are then the same whole turn twice over, so both
+        // are picked and the half-spaces are blamed for a tie they did not
+        // make. Nothing reached this before a torus did: every other
+        // `PartOfWhereItCrosses` that lies on a conic is a seam and has two
+        // poles for ends, and the two loops of a degree-four crossing go to the
+        // marcher instead.
+        if run.is_the_whole_curve() {
+            return Ok((from, from + core::f64::consts::TAU));
+        }
         let to = ends[1].map_or(from + core::f64::consts::TAU, |end| self.angle_of(end));
 
         // The two arcs between the same two ends, going each way round.
@@ -1215,18 +1226,28 @@ fn circles_round_the_axis(flat: &Plane, ring: &Torus) -> Vec<Conic> {
     let half_width = (tube * tube - axial * axial).max(0.0).sqrt();
     let (across, and) = ring.basis();
 
-    [
-        ring.ring_radius() + half_width,
-        ring.ring_radius() - half_width,
-    ]
-    .into_iter()
-    .map(|radius| Conic {
-        centre: middle,
-        across: across * radius,
-        and: and * radius,
-        size: how_big_this_is(&[middle, ring.centre()], &[radius, tube]),
-    })
-    .collect()
+    // The plane resting exactly on the tube cuts **one** circle and not two.
+    // Written out rather than left to the two radii coming out equal, because a
+    // caller with no picker on its run needs one candidate to take, and two
+    // copies of the same circle would be a tie.
+    let radii: &[f64] = if half_width == 0.0 {
+        &[ring.ring_radius()]
+    } else {
+        &[
+            ring.ring_radius() + half_width,
+            ring.ring_radius() - half_width,
+        ]
+    };
+    radii
+        .iter()
+        .copied()
+        .map(|radius| Conic {
+            centre: middle,
+            across: across * radius,
+            and: and * radius,
+            size: how_big_this_is(&[middle, ring.centre()], &[radius, tube]),
+        })
+        .collect()
 }
 
 /// The two circles a plane through a torus's axis cuts, each of the tube's own

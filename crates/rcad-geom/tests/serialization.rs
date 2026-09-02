@@ -10,7 +10,7 @@ use core::f64::consts::FRAC_PI_3;
 
 use rcad_geom::{
     Axis, BSplineCurve, BSplineSurface, Cone, Cylinder, Isometry, KnotVector, Orientation, Plane,
-    Point, Scale, Segment, Sphere, Surface, Unit, Vector,
+    Point, Scale, Segment, Sphere, Surface, Torus, Unit, Vector,
 };
 
 fn there_and_back<T>(value: T) -> T
@@ -256,6 +256,99 @@ fn a_cone_takes_the_next_tag_and_moves_nobody() {
     assert_eq!(tag(Surface::from(ball)), 1);
     assert_eq!(tag(Surface::from(pipe)), 2);
     assert_eq!(tag(Surface::from(cone)), 3);
+}
+
+/// A torus comes back bit for bit, centre, axis and both radii.
+#[test]
+fn a_torus_comes_back_with_the_same_centre_axis_and_two_radii() {
+    let ring = Torus::new(
+        Axis::new(Point::new(1.0, -2.0, 3.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a direction with length"),
+        4.0,
+        1.5,
+    )
+    .expect("a tube narrower than its ring");
+    assert_eq!(there_and_back(ring), ring);
+    assert_eq!(there_and_back(Surface::from(ring)), Surface::from(ring));
+}
+
+/// Every way a torus's numbers can be a torus's numbers and not name a torus,
+/// off the wire.
+///
+/// `Model` derives `Deserialize`, so a torus arrives from a stranger's bytes and
+/// every `# Panics` a torus can reach has to be a shape the arenas cannot hold.
+/// `Torus::basis` panics on an axis direction with no length, and
+/// `#[serde(try_from = "(Axis, f64, f64)")]` makes `Torus::new` — and through it
+/// `Axis::new` — the only route in, on the wire as in code.
+///
+/// **The tube-against-ring row is the one no other surface has.** A ball, a pipe
+/// and a cone each carry one size and it is either a size or it is not; a torus
+/// carries two whose *relation* decides whether the numbers name a surface at
+/// all, and `a_tube_wider_than_its_ring_would_certify_the_wrong_side` in
+/// `torus.rs` is why letting one through would be worse than refusing it.
+#[test]
+fn a_torus_stored_with_radii_that_do_not_name_a_ring_is_refused_on_the_way_in() {
+    for radius in [
+        0.0f64,
+        -1.0,
+        -0.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
+        for pair in [(radius, 1.0f64), (4.0f64, radius)] {
+            let bytes = postcard::to_allocvec(&(Axis::z(), pair.0, pair.1)).unwrap();
+            assert!(
+                postcard::from_bytes::<Torus>(&bytes).is_err(),
+                "{pair:?} is not a pair of radii"
+            );
+        }
+    }
+    for (ring, tube) in [(1.0f64, 1.0f64), (1.0, 2.0)] {
+        let bytes = postcard::to_allocvec(&(Axis::z(), ring, tube)).unwrap();
+        assert!(
+            postcard::from_bytes::<Torus>(&bytes).is_err(),
+            "a tube of {tube} on a ring of {ring} runs through itself"
+        );
+    }
+
+    let no_direction =
+        postcard::to_allocvec(&((Point::origin(), Vector::zero()), 4.0f64, 1.0f64)).unwrap();
+    assert!(postcard::from_bytes::<Torus>(&no_direction).is_err());
+
+    let centre_at_infinity = postcard::to_allocvec(&(
+        (
+            Point::new(f64::INFINITY, 0.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+        ),
+        4.0f64,
+        1.0f64,
+    ))
+    .unwrap();
+    assert!(postcard::from_bytes::<Torus>(&centre_at_infinity).is_err());
+}
+
+/// **`FORMAT_VERSION` does not move for the torus either**, and the reason is
+/// the cone's word for word: a fifth variant on the end of `Surface` takes the
+/// next `postcard` index and moves nobody.
+///
+/// The four tags that were there are asserted again beside the new one, because
+/// what would break a file is one of *them* moving and not the new one arriving.
+#[test]
+fn a_torus_takes_the_next_tag_and_moves_nobody() {
+    let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+        .expect("the z axis is a unit normal");
+    let ball = Sphere::new(Point::origin(), 1.0).expect("a radius");
+    let pipe = Cylinder::new(Axis::z(), 1.0).expect("a radius");
+    let cone = Cone::new(Axis::z(), 1.0).expect("a slope");
+    let ring = Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
+
+    let tag = |surface: Surface| postcard::to_allocvec(&surface).expect("a surface writes out")[0];
+    assert_eq!(tag(Surface::from(plane)), 0);
+    assert_eq!(tag(Surface::from(ball)), 1);
+    assert_eq!(tag(Surface::from(pipe)), 2);
+    assert_eq!(tag(Surface::from(cone)), 3);
+    assert_eq!(tag(Surface::from(ring)), 4);
 }
 
 #[test]
