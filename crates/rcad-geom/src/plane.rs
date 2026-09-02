@@ -269,6 +269,16 @@ impl Plane {
     /// route in on the wire. `a_plane_stored_with_no_normal_is_refused_on_the_way_in`
     /// (`crates/rcad-geom/tests/serialization.rs`) shows the bytes refused
     /// before a `Plane` exists to ask.
+    ///
+    /// **There is a third route in and it is not a constructor.**
+    /// [`Plane::transformed`] does not re-normalize — deliberately, so a normal
+    /// that was exactly square to something stays exactly square to it
+    /// (`docs/decisions.md` §32.3). What keeps that safe is two types away: an
+    /// [`Isometry`] turns by a quaternion scaled to length one, whatever scale
+    /// its four coefficients arrived at, so it never shrinks a normal to
+    /// nothing. `a_rotation_written_at_any_scale_is_the_same_rotation` is that
+    /// demonstration, and §41.4 is why an unreachability claim has to name every
+    /// route rather than the constructors it thought of.
     #[must_use]
     pub fn basis(&self) -> (Vector, Vector) {
         let [x, y, z] = self.normal.components().map(f64::abs);

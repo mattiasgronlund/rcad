@@ -3,6 +3,7 @@
 use nalgebra as na;
 use serde::{Deserialize, Serialize};
 
+use crate::exact::{binary_exponent, multiplied_by_a_power_of_two};
 use crate::point::{Axis, Point, Vector};
 use crate::{Error, Result};
 
@@ -20,6 +21,12 @@ use crate::{Error, Result};
 /// the last bit or two of a rotation that was already very nearly unit length,
 /// so a movement that has been written and read back puts points in the same
 /// places to within rounding, not bit for bit.
+///
+/// The scale the four coefficients are written at makes no difference to the
+/// rotation they name, and none to the one that comes back: they are brought
+/// onto a power of two of their own first, so the squares the scaling back needs
+/// can neither overflow nor underflow
+/// (`brought_into_the_range_its_squares_fit_in`).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "([f64; 3], [f64; 4])", into = "([f64; 3], [f64; 4])")]
 pub struct Isometry(na::Isometry3<f64>);
@@ -241,25 +248,69 @@ impl Default for Isometry {
 impl TryFrom<([f64; 3], [f64; 4])> for Isometry {
     type Error = Error;
 
-    fn try_from((offset, [w, i, j, k]): ([f64; 3], [f64; 4])) -> Result<Self> {
+    fn try_from((offset, stored): ([f64; 3], [f64; 4])) -> Result<Self> {
         let offset = Vector::from(offset);
         if !offset.is_finite() {
             return Err(Error::NotFinite {
                 what: "translation",
             });
         }
-        let stored = na::Quaternion::new(w, i, j, k);
-        if !stored.coords.iter().all(|c| c.is_finite()) {
+        if !stored.iter().all(|coefficient| coefficient.is_finite()) {
             return Err(Error::NotFinite { what: "rotation" });
         }
-        if stored.norm() == 0.0 {
+        if stored.iter().all(|coefficient| *coefficient == 0.0) {
             return Err(Error::ZeroLength { what: "rotation" });
         }
+        let [w, i, j, k] = brought_into_the_range_its_squares_fit_in(stored);
         Ok(Self(na::Isometry3::from_parts(
             na::Translation3::new(offset.x(), offset.y(), offset.z()),
-            na::UnitQuaternion::from_quaternion(stored),
+            na::UnitQuaternion::from_quaternion(na::Quaternion::new(w, i, j, k)),
         )))
     }
+}
+
+/// `coefficients`, every one multiplied by the same power of two, chosen so the
+/// largest of them lands in `[1, 2)`.
+///
+/// A quaternion names a rotation by the direction of its four coefficients, so
+/// multiplying all four by one nonzero factor names the very same rotation, and
+/// a power of two costs no bits while the results stay normal. Where the
+/// squares were already in range this hands back the identical unit quaternion,
+/// bit for bit.
+///
+/// **Where they were not, this is what reaches the answer at all.** The sum of
+/// the four squares spans twice the range the coefficients do. Written above
+/// about `1.3e154` it overflows, `norm()` is infinity, dividing by it gives four
+/// zeros, and four zeros normalize to the *identity* — a rotation the caller's
+/// bytes did not name, which `docs/decisions.md` §4.1 ranks below both crashing
+/// and refusing. Written below about `1.5e-162` the same sum underflows to zero
+/// and the rotation is refused for having no length. Brought into `[1, 2)` the
+/// largest square is between 1 and 4 and neither end is anywhere near.
+///
+/// **What the scaling can lose, and why it is nothing.** A coefficient more than
+/// 1022 binades under the largest is pushed into the subnormals and rounds
+/// there, by at most half of `2^-1074`. It is that far under the norm as well,
+/// so the number it stands for in the unit quaternion is itself under
+/// `2^-1022` — dividing by a norm that is now between 1 and 2 keeps the slip
+/// where it was, and half of the smallest number an `f64` holds is the closest
+/// any answer gets. So no quaternion is refused for being unscalable: the
+/// refusals left above are four zeros and a coefficient that is not a number,
+/// and both are bytes that name no rotation for any arithmetic to find.
+///
+/// `a_rotation_written_at_any_scale_is_the_same_rotation` is the demonstration,
+/// over every one of the 2098 scales an `f64` exponent field holds.
+fn brought_into_the_range_its_squares_fit_in(coefficients: [f64; 4]) -> [f64; 4] {
+    let largest = coefficients
+        .iter()
+        .copied()
+        .map(f64::abs)
+        .fold(0.0, f64::max);
+    assert!(
+        largest > 0.0,
+        "a quaternion of four zeros is refused before it gets here"
+    );
+    let exponent = -binary_exponent(largest);
+    coefficients.map(|coefficient| multiplied_by_a_power_of_two(coefficient, exponent))
 }
 
 impl From<Isometry> for ([f64; 3], [f64; 4]) {
