@@ -255,6 +255,7 @@ fn every_number_this_writer_writes_reads_back_bit_for_bit() {
             checked += 1;
         }
     }
+    println!("{checked} numbers written as decimal text and read back bit for bit");
     assert!(
         checked > 6000,
         "the draw must not shrink without somebody saying so: {checked}"
