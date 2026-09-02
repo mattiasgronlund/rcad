@@ -447,7 +447,7 @@ fn how_this_domain_is_scaled(surface: &Surface, corners: &[[f64; 2]]) -> (f64, f
             how_wide_a_cone_is_over(cone, the_range_of_each_coordinate(corners)[1]),
             cone.slope().hypot(1.0),
         ),
-        Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | _ => {
+        Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => {
             surface.furthest_a_unit_step_goes()
         }
     }
@@ -1459,6 +1459,13 @@ mod tests {
     /// surface *reaches* and not against its radius, because a ball of radius
     /// one a million units from the origin has coordinates of a million and
     /// rounds like a million.
+    ///
+    /// A ball, a pipe and a cone are one rotation each; a ring composes two,
+    /// so it was the one arm of [`how_far_a_point_lands_off_its_surface`] this
+    /// search had never actually reached — cone and torus landed after the
+    /// evaluator's own bound was last measured. It comes in under the same
+    /// constant with room to spare (worst seen: an eighth of it), so the extra
+    /// rotation costs nothing this constant does not already cover.
     #[test]
     fn a_point_from_the_evaluator_lands_this_close_to_its_surface() {
         let mut worst = 0.0_f64;
@@ -1499,6 +1506,22 @@ mod tests {
                         .sqrt();
                         let reach = origin.largest_coordinate_magnitude() + radius + along.abs();
                         worst = worst.max((across - radius).abs() / reach);
+                    }
+                }
+
+                let ring = Torus::new(axis, radius * 3.0, radius).expect("a tube inside its ring");
+                let reach =
+                    origin.largest_coordinate_magnitude() + ring.ring_radius() + ring.tube_radius();
+                for tube in -16..=16 {
+                    for round in -16..=16 {
+                        let point = ring.point_at(f64::from(tube) * 0.2, f64::from(round) * 0.2);
+                        let radial = ((point.x() - origin.x()).powi(2)
+                            + (point.y() - origin.y()).powi(2))
+                        .sqrt();
+                        let height = point.z() - origin.z();
+                        let from_the_ring_circle = (radial - ring.ring_radius()).hypot(height);
+                        let off = (from_the_ring_circle - ring.tube_radius()).abs();
+                        worst = worst.max(off / reach);
                     }
                 }
             }
