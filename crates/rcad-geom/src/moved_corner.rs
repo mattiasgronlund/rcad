@@ -84,6 +84,46 @@ use crate::{Error, Result, Surface};
 /// measures the worst a search can find and prints the figure (§15.6).
 pub const CORNER_AFTER_MOVING_ROUNDOFF: f64 = 128.0 * f64::EPSILON;
 
+/// How far a **shift** can put a surface or a picker from where it truly goes,
+/// as a multiple of the largest number involved.
+///
+/// The size to multiply by is the largest magnitude among the shift's own
+/// components and the numbers the surface places and sizes itself with, before
+/// and after — the same list [`CORNER_AFTER_MOVING_ROUNDOFF`] reads.
+///
+/// # Where the eight comes from
+///
+/// [`CORNER_AFTER_MOVING_ROUNDOFF`]'s reckoning with every term that comes from
+/// *turning* struck out, because a shift does not turn. Writing
+/// `u = f64::EPSILON / 2`:
+///
+/// - **A ball or a pipe.** The centre or the axis origin gains the shift one
+///   coordinate at a time, each an addition on terms under `2L`, so under `u·2L`
+///   apiece and under `2√3·u·L` as a vector. The direction and the radius are
+///   carried over untouched, so nothing else moves. **Under `3.5u·L`.**
+/// - **A plane or a half-space.** The normal is carried over untouched and the
+///   offset gains `n·t`: three products on terms under `L`, two sums on partial
+///   sums under `√3·L`, and the last addition on terms under `2L`. That is under
+///   `(3 + 2√3 + 2)·u·L`, divided by `|n|` — which a plane makes one and a
+///   half-space leaves to its caller. **Under `9u·L` for a unit normal.**
+///
+/// The worst is the plane's, `4.5 · f64::EPSILON · L`. The constant is eight,
+/// and the room left over is the same room
+/// [`Isometry::POINT_ROUNDOFF`](crate::Isometry::POINT_ROUNDOFF) leaves for
+/// second-order terms — a rounding is a relative slip of the *computed* value
+/// rather than of the true one.
+///
+/// **Nothing here holds for a movement that turns**, and the types say so:
+/// [`HalfSpace::shifted`](crate::HalfSpace::shifted) and
+/// [`EdgeRun::shifted`](crate::EdgeRun::shifted) take a shift rather than an
+/// [`Isometry`], because a turned picking normal stops being exactly square to
+/// whatever it was written square to (§32.3).
+///
+/// `a_surface_moved_by_a_shift_stays_inside_its_published_bound` measures the
+/// worst a search can find and prints the figure (§15.6). `rcad-topo`'s mesher
+/// is what spends it.
+pub const SURFACE_AFTER_SHIFTING_ROUNDOFF: f64 = 8.0 * f64::EPSILON;
+
 /// Where a corner with two surfaces round it lands once `movement` is applied,
 /// as the box it is really known to be inside.
 ///
@@ -161,5 +201,182 @@ fn how_big_a_surface_is(surface: &Surface) -> f64 {
             .origin()
             .largest_coordinate_magnitude()
             .max(pipe.radius()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::exact::Exact;
+    use crate::point::Vector;
+    use crate::{Axis, Cylinder, HalfSpace, Plane, Sphere};
+
+    use super::*;
+
+    /// §15.6 for [`SURFACE_AFTER_SHIFTING_ROUNDOFF`]: a search for the worst a
+    /// shift can do to a surface or a picker, against the number published for
+    /// it.
+    ///
+    /// **The truth is summed exactly and not in `f64`**, so what this compares
+    /// against is where the shifted surface really goes rather than a second
+    /// rounded guess at it. A plane and a half-space are the interesting rows —
+    /// their offset moves by a dot product — and a ball and a pipe are here to
+    /// show that the coordinate-at-a-time rows are the small ones.
+    ///
+    /// The bound is also checked from the other side: a search that found
+    /// nothing at all would pass whatever the constant said.
+    #[test]
+    fn a_surface_moved_by_a_shift_stays_inside_its_published_bound() {
+        let mut worst: [f64; 4] = [0.0; 4];
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            // Numbers spread over sixty octaves, positive and negative, so the
+            // dot product has both cancellation and none to work with.
+            // A whole fifty-three bits of mantissa: a number with only
+            // twenty-four significant bits rounds far less than one that fills
+            // the word, and a search over those would understate every slip.
+            let mantissa = (seed >> 11) as f64 / (1u64 << 53) as f64;
+            let octave = ((seed >> 3) % 60) as i32 - 30;
+            let sign = if seed & 1 == 0 { 1.0 } else { -1.0 };
+            sign * (1.0 + mantissa) * 2.0f64.powi(octave)
+        };
+
+        for _ in 0..20_000 {
+            let by = Vector::new(next(), next(), next());
+            let shift = Isometry::translation(by).expect("a finite shift");
+            let normal = Vector::new(next(), next(), next());
+            let through = Point::new(next(), next(), next());
+
+            let flat = Plane::from_point_and_normal(through, normal).expect("a plane");
+            worst[0] = worst[0].max(how_far_a_flat_surface_slipped(
+                flat.normal(),
+                flat.offset(),
+                flat.transformed(&shift).offset(),
+                by,
+            ));
+
+            let picker = HalfSpace::new(normal, normal.dot(through - Point::origin()))
+                .expect("a half-space");
+            worst[1] = worst[1].max(how_far_a_flat_surface_slipped(
+                picker.normal(),
+                picker.offset(),
+                picker.shifted(by).offset(),
+                by,
+            ));
+
+            let ball = Sphere::new(through, next().abs()).expect("a ball");
+            worst[2] = worst[2].max(how_far_a_place_slipped(
+                ball.centre(),
+                ball.transformed(&shift).centre(),
+                by,
+            ));
+
+            let pipe = Cylinder::new(
+                Axis::new(through, Vector::new(next(), next(), next())).expect("an axis"),
+                next().abs(),
+            )
+            .expect("a pipe");
+            worst[3] = worst[3].max(how_far_a_place_slipped(
+                pipe.axis().origin(),
+                pipe.transformed(&shift).axis().origin(),
+                by,
+            ));
+        }
+
+        println!(
+            "worst shift slip, as a multiple of f64::EPSILON times the size: \
+             plane {}, half-space {}, ball {}, pipe {}",
+            worst[0] / f64::EPSILON,
+            worst[1] / f64::EPSILON,
+            worst[2] / f64::EPSILON,
+            worst[3] / f64::EPSILON
+        );
+        for (what, slip) in ["plane", "half-space", "ball", "pipe"].iter().zip(worst) {
+            assert!(
+                slip <= SURFACE_AFTER_SHIFTING_ROUNDOFF,
+                "a shifted {what} slipped {slip}, over the published \
+                 {SURFACE_AFTER_SHIFTING_ROUNDOFF}"
+            );
+        }
+        assert!(
+            worst[0] > 0.0 && worst[1] > 0.0 && worst[2] > 0.0 && worst[3] > 0.0,
+            "a search that found no slip at all would pass whatever the \
+             constant said, and found {worst:?}"
+        );
+    }
+
+    /// How far a shifted flat surface is from where it truly goes, as a multiple
+    /// of the largest number involved.
+    ///
+    /// The true offset is `offset + n · by` summed through [`Exact`], and the
+    /// answer is divided by the normal's length because that is what turns a
+    /// slip in the offset into a distance.
+    fn how_far_a_flat_surface_slipped(
+        normal: Vector,
+        offset: f64,
+        shifted: f64,
+        by: Vector,
+    ) -> f64 {
+        let Some(carried) = Exact::dot_of(normal.components(), by.components()) else {
+            return 0.0;
+        };
+        // Both the slip and the size are divided by the normal's length,
+        // because an offset is a distance times that length and only the
+        // distance is comparable with a shift.
+        let long = normal.length();
+        let slipped = Exact::of(offset)
+            .plus(&carried)
+            .minus(&Exact::of(shifted))
+            .nearest_f64()
+            .abs()
+            / long;
+        let size = (the_largest_number_in([offset, shifted]) / long).max(
+            by.components()
+                .into_iter()
+                .map(f64::abs)
+                .fold(0.0, f64::max),
+        );
+        if slipped.is_finite() && size > 0.0 {
+            slipped / size
+        } else {
+            0.0
+        }
+    }
+
+    /// How far a shifted place is from where it truly goes, as a multiple of the
+    /// largest number involved.
+    fn how_far_a_place_slipped(place: Point, shifted: Point, by: Vector) -> f64 {
+        let mut worst = 0.0f64;
+        for axis in 0..3 {
+            let truth =
+                Exact::of(place.coordinates()[axis]).plus(&Exact::of(by.components()[axis]));
+            let slipped = truth
+                .minus(&Exact::of(shifted.coordinates()[axis]))
+                .nearest_f64()
+                .abs();
+            let size = place
+                .largest_coordinate_magnitude()
+                .max(shifted.largest_coordinate_magnitude())
+                .max(
+                    by.components()
+                        .into_iter()
+                        .map(f64::abs)
+                        .fold(0.0, f64::max),
+                );
+            if slipped.is_finite() && size > 0.0 {
+                worst = worst.max(slipped / size);
+            }
+        }
+        worst
+    }
+
+    /// The largest magnitude in a handful of numbers, never zero.
+    fn the_largest_number_in(numbers: [f64; 2]) -> f64 {
+        numbers
+            .into_iter()
+            .map(f64::abs)
+            .fold(f64::MIN_POSITIVE, f64::max)
     }
 }

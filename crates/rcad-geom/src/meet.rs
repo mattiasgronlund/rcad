@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use crate::error::{Error, Result};
-use crate::{Picker, Surface};
+use crate::point::Vector;
+use crate::{Isometry, Picker, Surface};
 
 /// Where two surfaces cross.
 ///
@@ -230,6 +231,38 @@ pub enum EdgeRun {
         /// [`Picker`] says in the type system rather than in a comment (§33).
         picked_by: SmallVec<[Picker; 1]>,
     },
+}
+
+impl EdgeRun {
+    /// This run, shifted by `by`.
+    ///
+    /// **A run is written in the frame its face is stored in**, so anything that
+    /// works a face out somewhere else has to bring the run along or it picks a
+    /// piece of a crossing that is not there. `rcad-topo`'s mesher shifts a face
+    /// stored far from the origin until its numbers are small, and this is how
+    /// the run goes with it.
+    ///
+    /// A shift and not a movement, for the reason [`HalfSpace::shifted`] gives.
+    /// [`EdgeRun::Straight`] and [`EdgeRun::RightRoundWhereItsFacesCross`] hold
+    /// no geometry of their own and come back unchanged.
+    ///
+    /// [`HalfSpace::shifted`]: crate::HalfSpace::shifted
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if `by` has a component that is not a finite number.
+    pub fn shifted(&self, by: Vector) -> Result<Self> {
+        let EdgeRun::PartOfWhereItCrosses { and, picked_by } = self else {
+            return Ok(self.clone());
+        };
+        Ok(EdgeRun::PartOfWhereItCrosses {
+            and: and.transformed(&Isometry::translation(by)?),
+            picked_by: picked_by
+                .iter()
+                .map(|picker| picker.shifted(by))
+                .collect::<Result<_>>()?,
+        })
+    }
 }
 
 #[cfg(test)]
