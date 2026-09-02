@@ -270,6 +270,12 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// The middle family, a frustum against an ordinary upright block, is reported
 /// and not judged at all: what it measures is what the hyperbola row costs a
 /// real fuse.
+///
+/// **And the corner-up rate is not the cone's rate.** A round bar of the same
+/// size in the same place, against the same cubes, answers exactly as often —
+/// `a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike`
+/// is that control, and without it these numbers read as a cone's fault when
+/// they are the family's.
 #[test]
 fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
     let mut every = Vec::new();
@@ -549,4 +555,104 @@ fn a_grid_of_points_is_classified_the_way_the_cone_says() {
         }
     }
     assert!(counted > 1000, "only {counted} points were decided");
+}
+
+/// **The control that says the rate above is the family's and not the cone's.**
+///
+/// A frustum against a corner-up cube answers 9 of 96, which reads like a
+/// damning number for a cone until the same cubes are put to a **round bar** of
+/// the same size in the same place. It answers **9 of 96 too**, and refuses in
+/// the same two ways in nearly the same proportions:
+///
+/// | | answered | wire will not lie flat | a decision nobody could settle |
+/// |---|---:|---:|---:|
+/// | a frustum | 9 | 27 | 60 |
+/// | a round bar of the same size | 9 | 21 | 66 |
+///
+/// So what those 87 refusals measure is **a hard family**, not a hard surface: a
+/// cube stood on its corner brings six planes at an awkward angle to a curved
+/// solid, and the arrangement gives up at about the same rate on a cylinder,
+/// which has been in this kernel since M2. A cone's own cost is the row above
+/// it in `how_often_a_certified_fuse_with_a_cone_in_it_refuses` — the upright
+/// block, refused 96 of 96 for a hyperbola — and that one a bar answers
+/// completely.
+///
+/// Without this control the cone's number would have been read as the cone's
+/// fault and the next lane would have gone looking in the wrong place.
+#[test]
+fn a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike() {
+    let policy = Policy::certified();
+    let mut gave_up: [BTreeMap<String, usize>; 2] = [BTreeMap::new(), BTreeMap::new()];
+    let mut answered = [0usize; 2];
+    let mut tries = 0;
+    let mut draw = Draw(0x5EED);
+
+    for _ in 0..DRAWS {
+        let slope = 2.0_f64.powi(i32::try_from(draw.next() % 3).expect("a small number") - 3);
+        let far = draw.whole(6, 12);
+        let near = draw.whole(1, 4);
+        let side = draw.whole(4, 9);
+        let up = draw.whole(1, far as i64 - 1);
+
+        for which in 0..2 {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            // A bar as wide as the frustum's wide end and as tall as it is, so
+            // the cube meets the same amount of curved surface either way.
+            let solid = if which == 0 {
+                a_frustum(&mut model, slope, near, far)
+            } else {
+                model
+                    .add_round_bar(
+                        slope * far,
+                        far - near,
+                        &Isometry::translation(Vector::new(0.0, 0.0, near))
+                            .expect("a finite shift"),
+                    )
+                    .expect("a bar of that radius")
+            };
+            let Some(cube) = a_block(&mut model, [side; 3], Vector::new(0.0, 0.0, 0.0)) else {
+                continue;
+            };
+            model.place_solid(
+                cube,
+                &Isometry::translation(Vector::new(0.0, 0.0, up))
+                    .expect("a finite shift")
+                    .compose(&stood_on_its_corner()),
+            );
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                for (arguments, tools) in [([solid], [cube]), ([cube], [solid])] {
+                    if which == 0 {
+                        tries += 1;
+                    }
+                    match model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new()) {
+                        Ok(_) => answered[which] += 1,
+                        Err(why) => *gave_up[which].entry(format!("{why}")).or_default() += 1,
+                    }
+                }
+            }
+        }
+    }
+
+    println!("over {tries} fuses each:");
+    println!("  a frustum: {} answered, {:?}", answered[0], gave_up[0]);
+    println!(
+        "  a bar of the same size: {} answered, {:?}",
+        answered[1], gave_up[1]
+    );
+    assert!(tries >= 90, "only {tries} fuses were drawn");
+    // Within a quarter of each other, which is the claim: the two rates are the
+    // same rate, and a cone is not what makes this family hard.
+    let gap = (answered[0] as f64 - answered[1] as f64).abs();
+    assert!(
+        gap <= 0.25 * (answered[0].max(answered[1]) as f64).max(4.0),
+        "a frustum answered {} of these and a bar answered {}, which is not the same rate — \
+         so a cone *is* what makes this family hard, and the note above is wrong",
+        answered[0],
+        answered[1]
+    );
+    assert!(
+        answered[1] > 0 && answered[1] < tries,
+        "the bar has to answer some and refuse some, or it is not a control"
+    );
 }
