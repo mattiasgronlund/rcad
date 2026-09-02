@@ -50,8 +50,8 @@ impl StepFile {
 
     /// Every instance the file wrote under a given type name.
     ///
-    /// A complex instance is yielded once for each of its parts that matches,
-    /// which is at most once because a complex instance may not repeat a type.
+    /// Each matching instance is yielded once, including a complex one that
+    /// wears the name among several others.
     pub fn instances_named<'a>(&'a self, keyword: &'a str) -> impl Iterator<Item = &'a Instance> {
         self.instances
             .iter()
@@ -162,7 +162,9 @@ impl Instance {
     ///
     /// For a simple instance this asks "is it an `ADVANCED_FACE`?". For a
     /// complex one it asks "is an `ADVANCED_FACE` one of the things it is?",
-    /// which is the question the mapping stage wants either way.
+    /// which is the question the mapping stage wants either way. There is never
+    /// more than one part to choose between: a complex instance that names a
+    /// type twice is refused when it is read.
     pub fn part(&self, keyword: &str) -> Option<&Record> {
         self.parts.iter().find(|part| part.keyword == keyword)
     }

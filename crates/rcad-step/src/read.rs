@@ -188,10 +188,32 @@ fn one_instance(tokens: &mut Tokens<'_>) -> Result<Instance, Error> {
         if parts.is_empty() {
             return Err(tokens.fault(at, Problem::ComplexInstanceHasNoParts { id }));
         }
+        if let Some(twice) = a_type_written_twice(&parts) {
+            return Err(tokens.fault(
+                at,
+                Problem::ComplexInstanceRepeatsAType {
+                    id,
+                    keyword: twice.into(),
+                },
+            ));
+        }
     } else {
         parts.push(one_record(tokens, Section::Data)?);
     }
     Ok(Instance { id, parts, at })
+}
+
+/// The first type name a complex instance gives twice, if it gives one twice.
+///
+/// It is quadratic in the number of parts, which is what a complex instance has
+/// four of in a real file and eleven of at the corpus's worst.
+fn a_type_written_twice(parts: &[Record]) -> Option<&str> {
+    parts.iter().enumerate().find_map(|(position, part)| {
+        parts[..position]
+            .iter()
+            .any(|earlier| earlier.keyword == part.keyword)
+            .then_some(part.keyword.as_str())
+    })
 }
 
 fn one_record(tokens: &mut Tokens<'_>, section: Section) -> Result<Record, Error> {

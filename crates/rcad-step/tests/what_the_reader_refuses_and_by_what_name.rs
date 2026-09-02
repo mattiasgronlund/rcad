@@ -412,3 +412,15 @@ fn every_refusal_says_which_line_and_column_it_happened_at() {
         "what a caller reads has to carry the place too: {refusal}"
     );
 }
+
+#[test]
+fn a_complex_instance_that_says_it_is_the_same_thing_twice_is_refused_with_the_name() {
+    assert_eq!(
+        refusal_for("#1=(LENGTH_UNIT()NAMED_UNIT(*)LENGTH_UNIT());"),
+        Problem::ComplexInstanceRepeatsAType {
+            id: EntityId(1),
+            keyword: "LENGTH_UNIT".into(),
+        },
+        "nothing could say which of the two Instance::part should hand back"
+    );
+}

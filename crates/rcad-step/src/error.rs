@@ -159,6 +159,19 @@ pub enum Problem {
         id: EntityId,
     },
 
+    /// A complex instance naming the same type twice.
+    ///
+    /// ISO 10303-21 says the parts of a complex instance are distinct, and
+    /// nothing here could say which of two `ADVANCED_FACE` parts
+    /// [`Instance::part`](crate::Instance::part) should hand back.
+    #[error("{id} is a complex instance that says it is a {keyword} twice")]
+    ComplexInstanceRepeatsAType {
+        /// The instance's id.
+        id: EntityId,
+        /// The type name written twice.
+        keyword: String,
+    },
+
     /// A `#123` reference in the header section, where Part 21 has no entities
     /// for it to point at.
     #[error("the header mentions {id}, and the header has no entities to point at")]
