@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_step::{Import, Refusal, StepFile};
+use rcad_step::{Import, Refusal, StepFile, Value};
 use written_by_hand::{a_block, a_quarter_disc_plate};
 
 /// Every file this kernel wrote itself imports, and the model it makes is
@@ -201,6 +201,19 @@ fn how_big_it_is(import: &Import) -> [f64; 3] {
 /// because the name is about the body and the leads reach wider than it. A name
 /// that describes a part of the part is not a claim about the whole one, and a
 /// check built on it would have failed for a reason that is nobody's mistake.
+///
+/// **`P2.54mm` is a pitch, and a pitch is not a width.** For a plain
+/// `_Vertical` pin header the claim `axis 0 = rows * 2.54` holds because the
+/// rows genuinely sit one pitch apart — measured on every `1x*` and `2x*`
+/// `_Vertical` file in the corpus that imports, exactly, `assert_eq!`-tight.
+/// For an `_SMD` header it does not: an SMD row's solder legs splay out to a
+/// fixed width regardless of pitch or row count, which
+/// `an_smd_pin_headers_width_across_its_rows_does_not_scale_with_row_count`
+/// below measures directly off ten files' own `VERTEX_POINT` entities at
+/// **exactly** 5.0 mm for one row and 5.0 + 2.54 mm for two, never `rows *
+/// 2.54` (2.54 mm and 5.08 mm). So axis 0 is only claimed for the plain
+/// family; axis 1 — the spacing along a row, which the pitch does fix — is
+/// claimed for both.
 fn what_the_name_says(name: &str) -> Vec<(usize, f64)> {
     if let Some(rest) = name.strip_prefix("PinHeader_")
         && name.contains("_P2.54mm_Vertical")
@@ -208,9 +221,100 @@ fn what_the_name_says(name: &str) -> Vec<(usize, f64)> {
         && let Some((columns, _)) = rest.split_once('_')
         && let (Ok(rows), Ok(columns)) = (rows.parse::<u32>(), columns.parse::<u32>())
     {
-        return vec![(0, f64::from(rows) * 2.54), (1, f64::from(columns) * 2.54)];
+        let along_a_row = (1, f64::from(columns) * 2.54);
+        if name.contains("_SMD") {
+            return vec![along_a_row];
+        }
+        return vec![(0, f64::from(rows) * 2.54), along_a_row];
     }
     Vec::new()
+}
+
+/// The width an `_SMD` pin header keeps across its rows, no matter how many
+/// pins or rows it has — settled by measuring the file directly rather than
+/// assumed, because the whole `_SMD` family is refused by the curved-face
+/// check before `Import` ever sees its dimensions (`RCAD_STEP_CORPUS`'s
+/// `kicad/` corpus has no `_SMD` pin header import today).
+///
+/// This reads `VERTEX_POINT` straight off [`StepFile`] — no [`Import`], no
+/// dependence on the sweep — because the point of the test is to pin the
+/// geometric fact down independently of whether the mapping can reach it yet.
+///
+/// Ten files, five one-row and five two-row, every one exact: a one-row `_SMD`
+/// header is **5.0 mm** across and a two-row one is **7.54 mm** — `5.0 + 2.54`,
+/// one row's fixed splay plus one more pitch for the second row's centre.
+/// Neither number is `rows * 2.54` (2.54 mm, 5.08 mm), which is what a plain
+/// `_Vertical` header of the same row count measures instead. That gap is why
+/// `what_the_name_says` does not claim axis 0 for an `_SMD` file: the file
+/// really does measure what it measures, and the name's `2.54mm` is a pitch
+/// that never governs this axis.
+#[test]
+fn an_smd_pin_headers_width_across_its_rows_does_not_scale_with_row_count() {
+    let Some(root) = corpus() else {
+        return;
+    };
+    let kicad = root.join("kicad");
+    let one_row = [
+        "PinHeader_1x06_P2.54mm_Vertical_SMD_Pin1Right.step",
+        "PinHeader_1x08_P2.54mm_Vertical_SMD_Pin1Left.step",
+        "PinHeader_1x13_P2.54mm_Vertical_SMD_Pin1Right.step",
+        "PinHeader_1x20_P2.54mm_Vertical_SMD_Pin1Right.step",
+        "PinHeader_1x36_P2.54mm_Vertical_SMD_Pin1Left.step",
+    ];
+    let two_row = [
+        "PinHeader_2x06_P2.54mm_Vertical_SMD.step",
+        "PinHeader_2x13_P2.54mm_Vertical_SMD.step",
+        "PinHeader_2x20_P2.54mm_Vertical_SMD.step",
+        "PinHeader_2x27_P2.54mm_Vertical_SMD.step",
+        "PinHeader_2x34_P2.54mm_Vertical_SMD.step",
+    ];
+    let mut checked = 0;
+    for name in one_row {
+        checked += 1;
+        assert_vertex_width(&kicad.join(name), 5.0);
+    }
+    for name in two_row {
+        checked += 1;
+        assert_vertex_width(&kicad.join(name), 5.0 + 2.54);
+    }
+    assert_eq!(checked, 10, "this test has to run over the files it names");
+}
+
+/// The extent, along axis 0, of every `VERTEX_POINT` a file holds — read
+/// straight off its `CARTESIAN_POINT`s, bypassing `Import` entirely.
+fn assert_vertex_width(path: &Path, expected: f64) {
+    let bytes = fs::read(path).unwrap_or_else(|why| panic!("{}: {why}", path.display()));
+    let file = StepFile::read(&bytes).expect("every file in the corpus parses");
+    let mut least = f64::INFINITY;
+    let mut most = f64::NEG_INFINITY;
+    for vertex in file.instances_named("VERTEX_POINT") {
+        let Some(at) = vertex
+            .part("VERTEX_POINT")
+            .and_then(|part| part.attribute(1))
+            .and_then(Value::as_reference)
+        else {
+            continue;
+        };
+        let Some(x) = file
+            .instance(at)
+            .and_then(|point| point.part("CARTESIAN_POINT"))
+            .and_then(|part| part.attribute(1))
+            .and_then(Value::as_list)
+            .and_then(|coordinates| coordinates.first())
+            .and_then(Value::as_real)
+        else {
+            continue;
+        };
+        least = least.min(x);
+        most = most.max(x);
+    }
+    let width = most - least;
+    assert_eq!(
+        width,
+        expected,
+        "{} should measure {expected} mm across axis 0 and measures {width}",
+        path.display()
+    );
 }
 
 /// What one corpus came to.

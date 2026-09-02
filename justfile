@@ -88,6 +88,18 @@ fuzz-reader duration="60":
         cargo +nightly fuzz run no_step_file_makes_the_reader_panic -- \
         -max_total_time={{duration}}
 
+# The Part 21 writer, over an arbitrary `Model` (docs/decisions.md §42.12).
+#
+# Same nightly-compiler caveat as `fuzz` above. `Model` is `Deserialize`
+# (`crates/rcad-topo/src/serialize.rs`), so this target draws bytes through
+# `postcard::from_bytes` — the same route a stranger's saved file takes — and
+# whatever `Model` comes out, sound or not, goes straight into
+# `rcad_step::write`, which owes an `Err` and never a panic either way.
+fuzz-writer duration="60":
+    cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
+        cargo +nightly fuzz run no_model_makes_the_writer_panic -- \
+        -max_total_time={{duration}}
+
 bench:
     cargo bench --workspace
 
