@@ -58,11 +58,10 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
-use crate::measure::signed_volume_over;
 use crate::model::{FaceUse, ShellUse, WireStep};
 use crate::validate::{
-    a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets,
-    every_side_of_the_skin_is_used_both_ways, gradient_of, the_curved_one_of, winding_round,
+    a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
+    how_much_space_a_curved_solid_encloses, the_curved_one_of, winding_round,
 };
 use crate::{
     Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
@@ -1525,10 +1524,19 @@ struct JoinedFace {
 ///
 /// A polyhedron's own fan *is* its volume and is summed exactly. A **curved**
 /// shell has no such fan — a bar's wall fans into two triangles on its seam and
-/// a round cap into none at all (§35.4) — so it is summed over a mesh instead,
-/// which is what `Model::validate` already does about the same question one
-/// layer up. Only the sign is read here, and the coarsest mesh there is says
-/// which way round a shell is.
+/// a round cap into none at all (§35.4) — so it goes to
+/// [`how_much_space_a_curved_solid_encloses`], which is the same question
+/// `Model::validate` asks one layer up and now the same code as well. Only the
+/// sign is read here.
+///
+/// **Both halves of that are asked here rather than left to the sweep, and that
+/// is the difference between a refusal and a corrupt solid.**
+/// `Assembly::commit` re-validates what it wrote, but only in a debug build and
+/// only as a *panic* — it is there to catch a bug in this crate, and a release
+/// build would write the answer out regardless. A curved answer whose two faces
+/// along one side disagree which way they face is exactly that, so it is asked
+/// before anything is written and comes back as a refusal (§4.1: refusing beats
+/// corrupting, and both beat crashing on a caller's solid).
 ///
 /// # Errors
 ///
@@ -1541,17 +1549,7 @@ fn how_much_space_it_encloses(
     if solid.is_wholly_flat() {
         return Ok(solid.signed_volume());
     }
-    let mesh = solid.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
-    // **Asked here rather than left to the sweep, and that is the difference
-    // between a refusal and a corrupt solid.** `Assembly::commit` re-validates
-    // what it wrote, but only in a debug build and only as a *panic* — it is
-    // there to catch a bug in this crate, and a release build would write the
-    // answer out regardless. A curved answer whose two faces along one side
-    // disagree which way they face is exactly that, so it is asked before
-    // anything is written and comes back as a refusal (§4.1: refusing beats
-    // corrupting, and both beat crashing on a caller's solid).
-    every_side_of_the_skin_is_used_both_ways(&mesh)?;
-    Ok(signed_volume_over(&mesh))
+    how_much_space_a_curved_solid_encloses(solid, policy, log)
 }
 
 /// The other dart along the same edge.

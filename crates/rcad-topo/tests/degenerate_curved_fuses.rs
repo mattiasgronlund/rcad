@@ -48,7 +48,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
 /// How fine the meshes every volume here is read off are.
 const A_DEFLECTION: f64 = 0.02;
@@ -420,38 +420,33 @@ fn two_balls_that_cross(model: &mut Model, apart: f64) -> Pair {
 /// it cannot do is keep the touching one.
 ///
 /// `π(4r + d)(2r − d)²/12` is the lens of two balls of one radius `d` apart, so
-/// `10π/3` at two apart. Measured at a fifth of [`A_DEFLECTION`] because a lens
-/// is thin — see [`volume_of_at`].
+/// `10π/3` at two apart and `11π/12` at three. Measured at a fifth of
+/// [`A_DEFLECTION`] because a lens is thin — see [`volume_of_at`].
 ///
-/// **Three apart is not here and refuses for a different reason.** That lens is
-/// `π/4`, and the coarsest mesh there is — the one the fuse reads a shell's
-/// *sign* off, not the one a caller asks for — encloses nothing at all of it, so
-/// the fuse refuses `VolumeIsNotPositive { volume: 0.0 }` before any deflection
-/// of this file's choosing is reached. A **gap**: the answer exists and a finer
-/// sign-reading mesh would find it.
+/// **Three apart used to refuse and now answers**, and it is the second half of
+/// what §41.6 found. The lens there spans under a quarter turn of either ball,
+/// so the coarsest mesh — the one the fuse reads a shell's *sign* off, not the
+/// one this file asks for — put no point inside it and it came back flat,
+/// enclosing exactly nothing, and the fuse refused `VolumeIsNotPositive`. The
+/// sign is read off a finer mesh now when a coarse one encloses nothing, and
+/// this is the smallest shape in the suite that reaches it.
 #[test]
 fn what_two_balls_that_really_cross_share_is_the_lens_between_them() {
-    let mut model = a_model();
-    let pair = two_balls_that_cross(&mut model, 2.0);
-    let shared = fused(&mut model, &pair, Rule::Intersection);
-    assert_eq!(
-        shared.solids().len(),
-        1,
-        "two crossing balls share one lens"
-    );
-    measures(
-        volume_of_at(&model, shared.solids(), A_DEFLECTION / 5.0),
-        10.0 * PI / 3.0,
-        Side::Under,
-    );
-
-    let mut model = a_model();
-    let pair = two_balls_that_cross(&mut model, 3.0);
-    let why = refusal(&mut model, &pair, Rule::Intersection, &Policy::certified());
-    assert!(
-        matches!(why, Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume == 0.0),
-        "a lens of pi/4 refused with {why:?}"
-    );
+    for (apart, lens) in [(2.0, 10.0 * PI / 3.0), (3.0, 11.0 * PI / 12.0)] {
+        let mut model = a_model();
+        let pair = two_balls_that_cross(&mut model, apart);
+        let shared = fused(&mut model, &pair, Rule::Intersection);
+        assert_eq!(
+            shared.solids().len(),
+            1,
+            "two balls {apart} apart share one lens"
+        );
+        measures(
+            volume_of_at(&model, shared.solids(), A_DEFLECTION / 5.0),
+            lens,
+            Side::Under,
+        );
+    }
 }
 
 /// What is *round* two crossing balls is refused by name, and the name says

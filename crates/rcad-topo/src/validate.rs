@@ -480,9 +480,7 @@ impl Model {
             let volume = if self.solid_is_wholly_flat(slot) {
                 view.signed_volume()
             } else {
-                let mesh = view.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
-                every_side_of_the_skin_is_used_both_ways(&mesh)?;
-                signed_volume_over(&mesh)
+                how_much_space_a_curved_solid_encloses(view, policy, log)?
             };
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
@@ -616,6 +614,91 @@ impl Model {
     }
 }
 
+/// How much space a curved solid encloses, signed by which way its faces point,
+/// and whether the two faces along each of its sides agree.
+///
+/// A polyhedron's own fan *is* its volume; a curved solid has no such fan — a
+/// round bar's caps fan into no triangles at all and its wall into two with no
+/// area (§35.4) — so it is summed over a mesh instead. Only the **sign** is read
+/// off this, never the size.
+///
+/// # A coarse mesh that encloses exactly nothing has not answered
+///
+/// [`as_coarse_as_a_mesh_gets`] leans on the mesher never stepping more than a
+/// quarter turn, which is what keeps a *whole* curved surface from collapsing.
+/// **It says nothing about a patch that spans less than a quarter turn**, and
+/// there the mesher has no reason to put a point anywhere: the patch is handed
+/// to the triangulator with a budget it already meets, so it comes back as its
+/// own boundary and nothing else — flat. Closed off by the flat face on the
+/// other side of that boundary it encloses zero, to the last bit.
+///
+/// A ball cut by a plane is exactly that, and it is `docs/decisions.md` §41.6: a
+/// cap under `h/r = 1 − cos(π/4) = 0.2929` spans under a quarter turn, and on a
+/// ball of radius four that is a cap of 15.52 and 5.8% of the ball. **Cut square
+/// to the ball's own polar axis the same cap answers**, because then it holds a
+/// pole and is fanned up to it whatever the deflection — so the same two solids
+/// a quarter turn apart answered one way round and refused the other, which is
+/// the §19 violation §39.7 item 1 leads with.
+///
+/// So a zero is asked again with less room. Halving from the mesh's own width
+/// rather than down from [`as_coarse_as_a_mesh_gets`] is what keeps it to a
+/// handful of meshes: the bulge a flat patch is hiding is at most that width, and
+/// every halving that does not find it rules out half of what is left. It stops
+/// when the mesher will go no finer, which every solid reaches — the floor under
+/// a deflection is a real length — and then the zero stands and the caller
+/// refuses it. **The finer meshes are read for a sign and thrown away**; nothing
+/// a caller measures is worked out here.
+///
+/// # Errors
+///
+/// Whatever meshing the solid at its coarsest makes of it, and
+/// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one side do
+/// not.
+pub(crate) fn how_much_space_a_curved_solid_encloses(
+    view: SolidView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<f64> {
+    let coarsest = view.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
+    every_side_of_the_skin_is_used_both_ways(&coarsest)?;
+    let enclosed = signed_volume_over(&coarsest);
+    if enclosed != 0.0 {
+        return Ok(enclosed);
+    }
+    let mut room = how_far_across(&coarsest) / 2.0;
+    while let Ok(less) = Deflection::of(room) {
+        // A finer mesh that refuses is the stopping condition and not a
+        // failure: the coarsest one was built and checked, and what this is
+        // looking for is a point off the flat that no mesh of this solid holds.
+        // Handing the refusal on would replace a named answer about the shape
+        // with one about a deflection nobody asked for.
+        let Ok(finer) = view.mesh(less, policy, log) else {
+            break;
+        };
+        let enclosed = signed_volume_over(&finer);
+        if enclosed != 0.0 {
+            return Ok(enclosed);
+        }
+        room /= 2.0;
+    }
+    Ok(0.0)
+}
+
+/// The longest side of the box a mesh's points sit in.
+fn how_far_across(mesh: &Mesh) -> f64 {
+    let mut lowest = [f64::MAX; 3];
+    let mut highest = [f64::MIN; 3];
+    for point in mesh.points() {
+        for (axis, coordinate) in point.coordinates().into_iter().enumerate() {
+            lowest[axis] = lowest[axis].min(coordinate);
+            highest[axis] = highest[axis].max(coordinate);
+        }
+    }
+    (0..3).fold(0.0, |widest: f64, axis| {
+        widest.max(highest[axis] - lowest[axis])
+    })
+}
+
 /// How far the mesh the sweep checks a curved solid over may stray.
 ///
 /// **As coarse as it goes, and that is not a corner cut.** What is asked of this
@@ -627,6 +710,12 @@ impl Model {
 /// turn goes, so a bar still comes out four ways round and a ball still comes
 /// out an octahedron. The sweep runs at every test boundary, and a mesh at the
 /// model's own deflection would cost it a hundredfold for the same two answers.
+///
+/// **That is an argument about a whole surface and it does not carry to a
+/// patch.** A face spanning less than a quarter turn is one step whatever the
+/// deflection, and one step is flat.
+/// [`how_much_space_a_curved_solid_encloses`] is where that is paid for; nothing
+/// else reads a mesh this coarse.
 ///
 /// **A number and not a fraction of the solid, because a fraction has a worst
 /// case and this does not.** Half a radius sounds like the coarsest sensible
