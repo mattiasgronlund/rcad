@@ -259,3 +259,114 @@ fn a_place_that_is_not_a_number_still_comes_back_in_a_narrow_box() {
         "and the same two places a quadric's route would have found"
     );
 }
+
+/// **The whole ladder swept, against a count worked out by hand.**
+///
+/// The five tests above pick one line each; this sweeps a family where the
+/// answer has a closed form, so nothing here is checked against the solver's own
+/// opinion. A line in the ring's own equator plane running parallel to `x` at
+/// `y = k` sits `√(x² + k²)` from the axis, and the surface is where that is
+/// `R − r` or `R + r`. So the count falls straight out of `k`:
+///
+/// | `|k|` | places |
+/// |---|---:|
+/// | more than `R + r` | 0 |
+/// | exactly `R + r` | 1, a touch at the outer equator |
+/// | between the two | 2 |
+/// | exactly `R − r` | 3, a touch at the inner equator and two crossings |
+/// | less than `R − r` | 4 |
+///
+/// `k` steps in eighths, so both boundaries are landed on square rather than
+/// stepped over, and every one of the five rows is reached many times.
+///
+/// **Nothing here may refuse.** Every plane is written along a coordinate
+/// direction, every radius and every offset is a number `f64` holds exactly, and
+/// both touches are at `x = 0`. A refusal in this family would be a filter
+/// giving up on arithmetic it can do, which is §17.7's control argument applied
+/// to a family whose answer is known.
+///
+/// ```text
+/// RCAD_SOAK_FACTOR=100 cargo nextest run -p rcad-geom --no-capture \
+///     every_line_across_the_equator_plane_meets_the_ring_as_often_as_the_closed_form_says
+/// ```
+#[test]
+fn every_line_across_the_equator_plane_meets_the_ring_as_often_as_the_closed_form_says() {
+    let finer = std::env::var("RCAD_SOAK_FACTOR")
+        .ok()
+        .and_then(|factor| factor.parse::<i64>().ok())
+        .unwrap_or(1)
+        .max(1);
+    let steps_per_unit = 8 * finer;
+
+    let mut counted = [0u32; 5];
+    for (ring_radius, tube_radius) in [(4.0, 1.0), (4.0, 3.5), (2.5, 0.5), (10.0, 9.0)] {
+        let ring =
+            Torus::new(Axis::z(), ring_radius, tube_radius).expect("a tube narrower than its ring");
+        let inner = ring_radius - tube_radius;
+        let outer = ring_radius + tube_radius;
+        let across = a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_precision_loss,
+            reason = "the sweep is over whole eighths of a unit"
+        )]
+        for step in 0..=((outer + 1.0) * steps_per_unit as f64) as i64 {
+            let sideways = step as f64 / steps_per_unit as f64;
+            let expected = if sideways > outer {
+                0
+            } else if sideways == outer {
+                1
+            } else if sideways > inner {
+                2
+            } else if sideways == inner {
+                3
+            } else {
+                4
+            };
+
+            let answer = meet_of_three_surfaces(
+                [
+                    &a_plane([0.0, 1.0, 0.0], [0.0, sideways, 0.0]),
+                    &across,
+                    &Surface::Torus(ring),
+                ],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| {
+                panic!(
+                    "a ring of {ring_radius} and {tube_radius} against y = {sideways}, both \
+                     written in numbers f64 holds: {refused:?}"
+                )
+            });
+
+            let found = if matches!(answer, MeetOfThree::Nowhere) {
+                0
+            } else {
+                let MeetOfThree::At(places) = &answer else {
+                    panic!("a line never lies along a ring: {answer:?}");
+                };
+                for place in places {
+                    let side = ring.side_of(*place);
+                    assert!(
+                        !matches!(side, Decision::Pos | Decision::Neg),
+                        "a place off the ring it came from, at y = {sideways}: {side:?}"
+                    );
+                }
+                places.len()
+            };
+            assert_eq!(
+                found, expected,
+                "a ring of {ring_radius} and {tube_radius} at y = {sideways}"
+            );
+            counted[expected] += 1;
+        }
+    }
+    for (places, times) in counted.iter().enumerate() {
+        assert!(
+            *times > 0,
+            "no line in the sweep met the ring {places} times"
+        );
+    }
+}
