@@ -1,6 +1,6 @@
 [package]
 name = "rcad-step"
-description = "Reads ISO 10303-21 (STEP Part 21) text into a resolved entity graph"
+description = "Reads ISO 10303-21 (STEP Part 21) text into an entity graph, and its solids into a Model"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,10 @@ publish.workspace = true
 repository.workspace = true
 
 [dependencies]
+rcad-geom.workspace = true
+rcad-predicates.workspace = true
+rcad-topo.workspace = true
+smallvec.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

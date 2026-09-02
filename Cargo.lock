@@ -819,6 +819,10 @@ dependencies = [
 name = "rcad-step"
 version = "0.0.0"
 dependencies = [
+ "rcad-geom",
+ "rcad-predicates",
+ "rcad-topo",
+ "smallvec",
  "step-io",
  "thiserror",
 ]

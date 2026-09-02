@@ -85,8 +85,20 @@ mod text;
 
 mod error;
 
+mod geometry;
+
+mod units;
+
+mod brep;
+
+mod import;
+
+mod refusal;
+
 pub use error::{Error, Problem};
 pub use graph::{BrokenReference, EntityId, Header, Instance, Record, StepFile, Value};
+pub use import::Import;
+pub use refusal::Refusal;
 
 /// How deep lists, and values wearing type names, may nest.
 ///
