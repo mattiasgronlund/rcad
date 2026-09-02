@@ -262,7 +262,13 @@ impl Plane {
     ///
     /// # Panics
     ///
-    /// If the stored normal has no length. The constructors do not allow that.
+    /// If the stored normal has no length. That never happens: both public
+    /// constructors, [`Plane::from_point_and_normal`] and
+    /// [`Plane::from_coefficients`], check it, and `Deserialize` goes through
+    /// the second one — `#[serde(try_from = "[f64; 4]")]` makes it the only
+    /// route in on the wire. `a_plane_stored_with_no_normal_is_refused_on_the_way_in`
+    /// (`crates/rcad-geom/tests/serialization.rs`) shows the bytes refused
+    /// before a `Plane` exists to ask.
     #[must_use]
     pub fn basis(&self) -> (Vector, Vector) {
         let [x, y, z] = self.normal.components().map(f64::abs);

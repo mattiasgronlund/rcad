@@ -170,7 +170,7 @@ fn where_two_planes_cross(
         // against each other and cross in one endless line.
         Decision::Pos => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
             EdgeRun::Straight,
-        )])),
+        )?])),
         // Parallel. Either the same plane or two that never meet, and what tells
         // them apart is whether the offsets are in the same ratio as the
         // normals — `d₂·n₁ − d₁·n₂`, componentwise (§17.4).
@@ -228,7 +228,7 @@ fn where_a_plane_and_a_ball_cross(
     match ask(&room, Measures::Area, &at, policy, log)? {
         Decision::Pos => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
             EdgeRun::RightRoundWhereItsFacesCross,
-        )])),
+        )?])),
         Decision::Zero => Ok(SurfaceMeet::TouchAtOnePoint {
             at: where_a_plane_is_nearest(flat, ball.centre()),
         }),
@@ -276,7 +276,7 @@ fn where_a_plane_and_a_pipe_cross(
         Decision::Pos | Decision::Neg => {
             return Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
                 EdgeRun::RightRoundWhereItsFacesCross,
-            )]));
+            )?]));
         }
         Decision::Zero => (),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
@@ -305,7 +305,7 @@ fn where_a_plane_and_a_pipe_cross(
         Decision::Pos => two_lines_along_a_pipe(flat, pipe),
         Decision::Zero => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
             EdgeRun::Straight,
-        )])),
+        )?])),
         Decision::Neg => Ok(SurfaceMeet::Nothing),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
@@ -429,7 +429,7 @@ fn where_two_balls_cross(
     match ask(&apart(-1.0), Measures::Area, &at, policy, log)? {
         Decision::Pos => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
             EdgeRun::RightRoundWhereItsFacesCross,
-        )])),
+        )?])),
         // The centres are the same distance apart as the radii differ. With
         // equal radii that distance is nothing at all and the two are one ball;
         // otherwise the smaller rests against the inside of the larger.
@@ -525,7 +525,7 @@ fn where_a_ball_and_a_pipe_cross(
         | (Decision::Zero, Decision::Pos | Decision::Zero) => {
             Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
                 EdgeRun::RightRoundWhereItsFacesCross,
-            )]))
+            )?]))
         }
         // Both discriminants above zero: the ball swallows a whole cross-section
         // of the pipe, so what is left is two closed loops, one either side of
@@ -586,7 +586,7 @@ fn a_ball_centred_on_a_pipes_axis(
         // resting along a pipe answering with one line (§24.10).
         Decision::Zero => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
             EdgeRun::RightRoundWhereItsFacesCross,
-        )])),
+        )?])),
         Decision::Neg => Ok(SurfaceMeet::Nothing),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
@@ -682,6 +682,7 @@ fn two_loops_either_side_of_a_ball(
                     and: pipe,
                     picked_by: smallvec![Picker::from(half_space)],
                 })
+                .expect("picked_by always holds the one half-space just built")
             })
             .collect(),
     ))
@@ -892,7 +893,7 @@ fn where_two_pipes_side_by_side_cross(
                 Decision::Neg => two_lines_between_two_pipes(one, other),
                 Decision::Zero => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
                     EdgeRun::Straight,
-                )])),
+                )?])),
                 Decision::Pos => Ok(SurfaceMeet::Nothing),
                 other => unreachable!("a sign question answers with a sign: {other:?}"),
             }
@@ -1026,7 +1027,7 @@ fn where_two_leaning_pipes_cross(
     match ask(&reach(-1.0, 1.0, 1.0), Measures::Length, &at, policy, log)? {
         Decision::Pos => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
             EdgeRun::RightRoundWhereItsFacesCross,
-        )])),
+        )?])),
         Decision::Zero => Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo),
         Decision::Neg => two_loops_either_side_of_a_pipe(other, one),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
@@ -1110,6 +1111,7 @@ fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<Su
                     and: fat,
                     picked_by: smallvec![Picker::from(half_space)],
                 })
+                .expect("picked_by always holds the one half-space just built")
             })
             .collect(),
     ))
@@ -1545,6 +1547,7 @@ fn two_lines_told_apart(
                     and,
                     picked_by: smallvec![Picker::from(half_space)],
                 })
+                .expect("picked_by always holds the one half-space just built")
             })
             .collect(),
     ))

@@ -318,6 +318,40 @@ pub enum Error {
     #[error("an end of this run does not say where it is")]
     AnEndOfARunNamesNoPlace,
 
+    /// A run that goes right round a closed curve does not come back to where
+    /// it started.
+    ///
+    /// A closed run comes back to where it started by definition, so a pair of
+    /// different ends on one names a curve that is not there. Bad caller input
+    /// rather than a broken invariant: [`NamedRun::new`] is public, and
+    /// `rcad-topo`'s `Model` — the crate that calls it with a stored edge's
+    /// ends — is `Deserialize`, so the two ends an edge's stored curve
+    /// carries are whatever the bytes say, not something this constructor
+    /// was ever handed a chance to check earlier (CLAUDE.md's rule on panics
+    /// vs. bad caller input, not §16.11 — that section is about the
+    /// dynamic-range check being a ratio and says nothing about this).
+    ///
+    /// [`NamedRun::new`]: crate::NamedRun::new
+    #[error(
+        "a run that goes right round comes back to where it started, but {start:?} and {end:?} \
+         are different points"
+    )]
+    AClosedRunDoesNotComeBackToWhereItStarted {
+        /// Where the run says it starts.
+        start: rcad_predicates::Point,
+        /// Where the run says it ends.
+        end: rcad_predicates::Point,
+    },
+
+    /// A piece of a crossing was named with no ends and nothing picking it
+    /// out.
+    ///
+    /// [`EdgeRun::PartOfWhereItCrosses`](crate::EdgeRun::PartOfWhereItCrosses)
+    /// exists to say *which* piece of a crossing a run is; with no ends and
+    /// no half-space it says nothing at all.
+    #[error("a piece of a crossing with no ends and nothing picking it is not a piece of anything")]
+    ACrossingPieceHasNoEndsAndNothingPickingIt,
+
     /// How big the curve where two surfaces cross is could not be worked out,
     /// because a product it needs falls out of `f64`'s range.
     ///

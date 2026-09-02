@@ -1110,7 +1110,8 @@ mod tests {
                     picked_by: smallvec![picker],
                 },
                 [north, end],
-            );
+            )
+            .expect("a picked run does not have to come back to where it started");
             assert_eq!(
                 walk(
                     &run,
@@ -1148,7 +1149,8 @@ mod tests {
             let pipe =
                 Surface::Cylinder(Cylinder::new(crate::Axis::z(), radius).expect("a radius"));
             walk(
-                &NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross),
+                &NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+                    .expect("a closed curve is never a piece with nothing picking it"),
                 [&pipe, &shallow],
                 Deflection::of(deflection).expect("a length"),
                 &Policy::certified(),
@@ -1173,7 +1175,8 @@ mod tests {
     #[test]
     fn a_run_with_no_ends_at_all_is_walked_right_round() {
         let (ball, meridian, _) = a_ball_and_the_meridian_of_its_seam();
-        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross);
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it");
         let along_it = walk(
             &whole,
             [&ball, &meridian],
@@ -1196,7 +1199,8 @@ mod tests {
     /// leans on this being order-free and it was not.
     #[test]
     fn a_closed_crossing_starts_at_the_same_place_whichever_of_its_faces_asks() {
-        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross);
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it");
         let start = |along: [&Surface; 2]| {
             where_a_closed_crossing_starts(&whole, along, &mut ProvenanceLog::new())
                 .expect("these pairs all cross")
@@ -1224,7 +1228,8 @@ mod tests {
     /// exactly the thing a caller assumes away.
     #[test]
     fn a_conic_walks_the_same_way_round_whichever_face_asks_and_a_marched_loop_does_not() {
-        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross);
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it");
         let walked = |along: [&Surface; 2]| {
             walk(
                 &whole,
@@ -1265,7 +1270,8 @@ mod tests {
     /// it, which is what makes it fit to be a vertex.
     #[test]
     fn where_a_closed_crossing_starts_is_on_both_the_surfaces_that_named_it() {
-        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross);
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it");
         for [one, other] in every_pair_that_crosses_in_a_closed_curve() {
             let start =
                 where_a_closed_crossing_starts(&whole, [&one, &other], &mut ProvenanceLog::new())
@@ -1301,7 +1307,8 @@ mod tests {
             )
             .expect("a radius"),
         );
-        let straight = NamedRun::the_whole_of(EdgeRun::Straight);
+        let straight = NamedRun::the_whole_of(EdgeRun::Straight)
+                .expect("a straight run is never a piece with nothing picking it");
 
         for [one, other] in [[&ground, &wall], [&wall, &pipe], [&pipe, &beside_it]] {
             assert_eq!(

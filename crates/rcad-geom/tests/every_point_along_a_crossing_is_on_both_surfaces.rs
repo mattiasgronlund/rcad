@@ -164,7 +164,8 @@ fn the_cap_circle_of_a_round_bar_is_walked_into_points_on_the_bar() {
     );
 
     let walked = walk_it(
-        &NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross),
+        &NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it"),
         [&pipe, &cap],
         3.0,
     );
@@ -197,7 +198,8 @@ fn a_bar_cut_off_at_an_angle_is_walked_into_points_on_an_ellipse() {
     );
 
     let walked = walk_it(
-        &NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross),
+        &NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it"),
         [&pipe, &cut],
         3.0,
     );
@@ -251,7 +253,8 @@ fn a_balls_seam_is_walked_down_the_half_of_the_meridian_its_half_space_picks() {
             PredicatePoint::from([0.0, 0.0, radius]),
             PredicatePoint::from([0.0, 0.0, -radius]),
         ],
-    );
+    )
+    .expect("a picked run does not have to come back to where it started");
 
     let walked = walk_it(&seam, [&ball, &ball], radius);
     every_point_is_on_both(
@@ -289,7 +292,8 @@ fn a_straight_run_is_walked_into_no_points_at_all_and_no_slop() {
             .expect("a unit normal"),
     );
     let walked = walk_it(
-        &NamedRun::the_whole_of(EdgeRun::Straight),
+        &NamedRun::the_whole_of(EdgeRun::Straight)
+            .expect("a straight run is never a piece with nothing picking it"),
         [&ground, &wall],
         1.0,
     );
@@ -307,7 +311,8 @@ fn a_deflection_finer_than_a_point_can_be_placed_is_a_policy_question() {
         Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
             .expect("a unit normal"),
     );
-    let circle = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross);
+    let circle = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a closed curve is never a piece with nothing picking it");
     let hopeless = Deflection::of(1e-18).expect("a length");
 
     match walk(
