@@ -42,7 +42,8 @@ fn the_hardest_edge_the_kernel_builds_can_be_said_in_this_vocabulary() {
             picked_by: [Picker::from(facing_x)].into_iter().collect(),
         },
         poles,
-    );
+    )
+    .expect("a picked run does not have to come back to where it started");
 
     assert_eq!(seam.ends(), poles);
     let EdgeRun::PartOfWhereItCrosses { and, .. } = seam.run() else {
@@ -69,13 +70,16 @@ fn every_way_two_surfaces_can_meet_is_something_a_caller_can_match_on() {
         SurfaceMeet::TouchAtOnePoint {
             at: PredicatePoint::from([1.0, 0.0, 0.0]),
         },
-        SurfaceMeet::Curves(vec![NamedRun::new(
-            EdgeRun::PartOfWhereItCrosses {
-                and: pipe,
-                picked_by: [ball].into_iter().collect(),
-            },
-            [PredicatePoint::from([1.0, 0.0, 0.0]); 2],
-        )]),
+        SurfaceMeet::Curves(vec![
+            NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: pipe,
+                    picked_by: [ball].into_iter().collect(),
+                },
+                [PredicatePoint::from([1.0, 0.0, 0.0]); 2],
+            )
+            .expect("the same point twice does come back to where it started"),
+        ]),
         SurfaceMeet::SameSurface,
     ];
 

@@ -1832,6 +1832,9 @@ fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Option<bool>
         at,
         meet.material_side,
     )
+    .expect(
+        "the curved check just above already ruled out the one case this returns an error for",
+    )
 }
 
 /// Which of the two arcs between an edge's two corners this face walks, as the

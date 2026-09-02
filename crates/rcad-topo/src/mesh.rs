@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use rcad_geom::{
     Deflection, Isometry, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, Surface, Vector,
 };
-use rcad_mesh::{CannotTriangulate, Loop, TrimmedDomain, triangulate};
+use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate};
 use rcad_predicates::{
     Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
     ProvenanceLog, Record,
@@ -32,7 +32,7 @@ use smallvec::SmallVec;
 use crate::fuse::name_of_surface_bits;
 use crate::validate::side_of_surface;
 use crate::view::{EdgeView, FaceView, VertexView, WireStepView, WireView};
-use crate::{EdgeKey, Error, FaceKey, Result, SolidView, VertexKey};
+use crate::{EdgeKey, Error, FaceKey, Invalid, Result, SolidView, VertexKey};
 
 /// A solid cut into triangles.
 ///
@@ -147,23 +147,19 @@ impl SolidView<'_> {
     /// refuses a face, carrying what it said. [`Error::Undecidable`] when a
     /// predicate inside a triangulation could not settle a sign.
     /// [`Error::AWireWillNotLieFlatOnItsFace`],
-    /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`] and
-    /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] for a solid that
-    /// arrived from a file with a shape no builder here makes. All three are
-    /// refusals rather than asserts precisely because
-    /// [`Model::validate`](crate::Model::validate) meshes what it is given, and
-    /// a sweep over untrusted bytes has to hand back a refusal (§16.11, §4.1).
-    /// Whatever [`rcad_geom::walk`] makes of an edge it cannot follow, which
-    /// includes a seam whose half-spaces pick both halves of its meridian or
-    /// neither.
-    ///
-    /// # Panics
-    ///
-    /// If a wire fans into fewer than three corners in the surface's own two
-    /// coordinates. Nothing does: a wire has three steps or it closes on one
-    /// edge, and a closed edge on a curved face is walked four ways round
-    /// whatever the deflection, because the evaluator will not step past a
-    /// quarter turn either.
+    /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`],
+    /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] and
+    /// [`Error::AWireDoesNotFanIntoALoopToMesh`] for a solid that arrived from
+    /// a file with a shape no builder here makes — a wall face storing a
+    /// [`Plane`](rcad_geom::Plane) where its own
+    /// [`Cylinder`](rcad_geom::Cylinder) belongs fans a four-step wire into
+    /// one corner in the plane's own two coordinates. All four are refusals
+    /// rather than asserts precisely because
+    /// [`Model::validate`](crate::Model::validate) is a separate call this
+    /// does not require first, `Model` derives `Deserialize`, and a caller's
+    /// bytes may not panic (CLAUDE.md, §4.1). Whatever [`rcad_geom::walk`]
+    /// makes of an edge it cannot follow, which includes a seam whose
+    /// half-spaces pick both halves of its meridian or neither.
     pub fn mesh(
         self,
         deflection: Deflection,
@@ -366,7 +362,7 @@ impl BuildingAMesh {
             edge.run().clone(),
             [from, to]
                 .map(|end| PredicatePoint::from(back.apply_to_point(end.point()).coordinates())),
-        );
+        )?;
         let along = the_two_surfaces_either_side(edge, &self.along_each_edge, &back)?;
 
         let along_it = rcad_geom::walk(
@@ -874,14 +870,16 @@ impl BuildingAMesh {
         let mut loops = Vec::with_capacity(patch.len());
         for one in patch {
             corner_is.extend(one.points);
-            loops.push(Loop::through(one.corners).expect(
-                "a wire of a valid solid fans into at least three corners made \
-                 of finite numbers",
-            ));
+            loops.push(Loop::through(one.corners).map_err(|why: NotALoop| {
+                Error::AWireDoesNotFanIntoALoopToMesh {
+                    face: face.key(),
+                    why,
+                }
+            })?);
         }
         let (outer, holes) = loops
             .split_first()
-            .expect("a face of a valid solid has at least one wire");
+            .ok_or(Invalid::FaceHasNoWires)?;
 
         let domain = TrimmedDomain::new(
             *stored,
@@ -1784,6 +1782,53 @@ mod tests {
         );
     }
 
+    /// A wire fanned onto the wrong surface is refused and does not panic.
+    ///
+    /// `docs/decisions.md` §39.7 item 3's third demonstrated panic: a round
+    /// bar's wall face, its own [`rcad_geom::Cylinder`] swapped out for a
+    /// [`Plane`] with nothing else changed. The wire round it is unchanged —
+    /// walked from the same 3D edges, the same four steps — but a wire that
+    /// fans out round a circle in the cylinder's own `(u, v)` collapses into
+    /// one corner in the plane's, because every point on the circle sits
+    /// directly below the plane's own normal at the corner where the seam
+    /// meets it. **The route is `Deserialize` and not a builder**: no builder
+    /// here stores a flat surface under a curved wire, but nothing stops
+    /// `Model`'s `Deserialize` from holding it, and [`SolidView::mesh`] is
+    /// public in its own right.
+    #[test]
+    fn a_wall_stored_with_the_wrong_surface_is_refused_rather_than_asserted_against() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = model
+            .add_round_bar(5.0, 10.0, &Isometry::identity())
+            .expect("a bar five across and ten tall");
+
+        let wall = model
+            .data()
+            .faces
+            .iter()
+            .find(|(_, face)| face.surface.as_plane().is_none())
+            .map(|(slot, _)| slot)
+            .expect("a bar has one curved face");
+
+        let flat =
+            Plane::from_point_and_normal(Point::new(5.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .expect("the x axis is a unit normal");
+        model.data_mut().faces[wall].surface = Surface::Plane(flat);
+
+        let refusal = model
+            .solid(bar)
+            .mesh(
+                Deflection::of(1.0).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a wire fanned onto the wrong surface cannot be cut up");
+        assert!(
+            matches!(refusal, Error::AWireDoesNotFanIntoALoopToMesh { .. }),
+            "got {refusal:?}"
+        );
+    }
+
     /// An edge with three faces along it is refused and does not panic.
     ///
     /// Where an edge runs is what the surfaces either side of it say, so the
@@ -2003,7 +2048,8 @@ mod tests {
             let run = NamedRun::new(
                 edge.run().clone(),
                 [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
-            );
+            )
+            .expect("every edge the kernel builds itself comes back to where it started");
             if run.run() == &EdgeRun::RightRoundWhereItsFacesCross {
                 closed += 1;
                 assert_eq!(
@@ -2045,7 +2091,8 @@ mod tests {
             let run = NamedRun::new(
                 edge.run().clone(),
                 [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
-            );
+            )
+            .expect("every edge the kernel builds itself comes back to where it started");
             let faces: Vec<Surface> = model
                 .faces_along_edge(slot)
                 .map(|face| model.data().faces[face].surface)

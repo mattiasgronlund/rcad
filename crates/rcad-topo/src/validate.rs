@@ -423,7 +423,8 @@ impl Model {
                         [outward(face), outward(across)],
                         at,
                         turned_by(material, across.orientation()),
-                    ) else {
+                    )?
+                    else {
                         continue;
                     };
                     if walks_it_forward
@@ -806,20 +807,36 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 /// answer back with it, and two spellings of one question is how those two come
 /// to disagree (§23.8).
 ///
+/// # Errors
+///
+/// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] if neither surface is curved. Two
+/// planes cross in a straight line, which does not close, so no closed edge is
+/// named by a flat pair — this is bad caller input rather than a broken
+/// invariant, because `Model` derives `Deserialize` and nothing upstream of
+/// this check has confirmed the edge's own claim is possible
+/// (`docs/decisions.md` §39.7 item 4, not §16.11 — that section is about the
+/// dynamic-range check being a ratio and says nothing about panics on a
+/// caller's bytes; the rule is CLAUDE.md's).
+///
 /// # Panics
 ///
-/// If neither surface is curved. Two planes cross in a straight line, which does
-/// not close, so no closed edge is named by a flat pair. And if `material_side`
-/// is neither [`Decision::Pos`] nor [`Decision::Neg`], which a side that was read
-/// at all never is.
+/// If `material_side` is neither [`Decision::Pos`] nor [`Decision::Neg`].
+/// This one *is* a broken internal invariant and not caller input: the only
+/// caller, [`Model::validate`](crate::Model::validate)'s own
+/// `check_closed_edges_are_walked_the_way_their_surfaces_wind`, only ever
+/// passes a value [`which_side_of_it_this_face_lies_on`] read off a real
+/// corner, and that function's own `Ok(Some(_))` is never anything but
+/// [`Decision::Pos`] or [`Decision::Neg`] — it filters `Zero` out and turns
+/// `Undecidable` into an `Err` before it can reach here.
 pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     pair: [&Surface; 2],
     outward: [Vector; 2],
     at: Point,
     material_side: Decision,
-) -> Option<bool> {
-    let curved = the_curved_one_of(&[*pair[0], *pair[1]])
-        .expect("two planes cross in a straight line, which never closes");
+) -> Result<Option<bool>> {
+    let Some(curved) = the_curved_one_of(&[*pair[0], *pair[1]]) else {
+        return Err(Invalid::ClosedEdgeBetweenTwoFlatFaces.into());
+    };
     let longitude = the_way_it_is_parametrised_about(&curved).cross(gradient_of(&curved, at));
     // **At a pole there is no longitude to compare against** (§38.3). Every
     // longitude runs through the one point there, so `ẑ × ∇C` is exactly the
@@ -828,14 +845,14 @@ pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     // that reads one back skips, the same way it skips a face with no corner off
     // its partner.
     if longitude == Vector::zero() {
-        return None;
+        return Ok(None);
     }
     let runs_along_stored = outward[0].cross(outward[1]).dot(longitude) > 0.0;
-    Some(match material_side {
+    Ok(Some(match material_side {
         Decision::Neg => runs_along_stored,
         Decision::Pos => !runs_along_stored,
         other => panic!("a face with no side to its material: {other:?}"),
-    })
+    }))
 }
 
 /// A side read against a surface, turned round when the face on it is used
@@ -1694,6 +1711,74 @@ mod tests {
 
             assert_eq!(refusal(&model), expected);
         }
+    }
+
+    /// Whether the coedge, walked the way its wire uses it, starts at `vertex`.
+    fn coedge_starts_at(model: &Model, coedge: CoedgeSlot, vertex: VertexSlot) -> bool {
+        let data = model.data();
+        let edge = &data.edges[data.coedges[coedge].edge];
+        let start = match data.coedges[coedge].orientation {
+            Orientation::Forward => edge.start,
+            Orientation::Reversed => edge.end,
+        };
+        start == vertex
+    }
+
+    /// `docs/decisions.md` §39.7 item 3's first demonstrated panic: a cube
+    /// with one extra closed edge spliced into two of its wires, so a
+    /// `RightRoundWhereItsFacesCross` edge sits between two flat faces —
+    /// which no builder in this crate makes, and nothing stops `Model`'s
+    /// `Deserialize` from holding it anyway.
+    ///
+    /// Two planes cross in a straight line, which never closes, so
+    /// `a_closed_crossing_is_walked_the_way_it_is_stored` used to reach for
+    /// the curved surface of the pair with `.expect(...)` and find neither —
+    /// a panic on exactly the kind of bytes `Model::validate` exists to
+    /// refuse instead.
+    #[test]
+    fn a_closed_edge_between_two_flat_faces_is_caught() {
+        let mut model = a_cube();
+        let corner = model
+            .data()
+            .vertices
+            .keys()
+            .next()
+            .expect("a cube has corners");
+
+        let closed_edge = model.add_closed_edge(corner);
+        let forward = model.add_coedge(closed_edge, Orientation::Forward);
+        let backward = model.add_coedge(closed_edge, Orientation::Reversed);
+
+        let wires_through_corner: Vec<WireSlot> = model
+            .data()
+            .wires
+            .keys()
+            .filter(|&wire| {
+                model.data().wires[wire]
+                    .coedges()
+                    .any(|coedge| coedge_starts_at(&model, coedge, corner))
+            })
+            .collect();
+        assert!(
+            wires_through_corner.len() >= 2,
+            "a cube corner sits on at least two faces' wires, and this has {}",
+            wires_through_corner.len()
+        );
+
+        for (&wire, new_coedge) in wires_through_corner.iter().zip([forward, backward]) {
+            let position = model.data().wires[wire]
+                .coedges()
+                .position(|coedge| coedge_starts_at(&model, coedge, corner))
+                .expect("just filtered the wires for this");
+            model.data_mut().wires[wire]
+                .steps
+                .insert(position, crate::model::WireStep::Along(new_coedge));
+        }
+        // `data_mut` only touches the downward links; the reverse index that
+        // `faces_along_edge` reads is derived and stays stale until rebuilt.
+        let model = Model::from_parts(model.data().clone());
+
+        assert_eq!(refusal(&model), Invalid::ClosedEdgeBetweenTwoFlatFaces);
     }
 
     /// §23.9's first gap, closed. A round cap's wire has one corner and no

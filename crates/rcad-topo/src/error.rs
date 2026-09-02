@@ -170,6 +170,31 @@ pub enum Error {
         why: rcad_mesh::CannotTriangulate,
     },
 
+    /// A wire the boundary walk placed does not fan into a loop the
+    /// triangulator can use — fewer than three distinct corners in the
+    /// surface's own two coordinates, or one that is not a finite number.
+    ///
+    /// A wire this crate builds itself always has at least three, because a
+    /// closed edge is walked several ways round no matter how coarse the
+    /// deflection and a straight one has three sides or more (§16.10's family
+    /// of fixes is empty for the geometry). But a face's *stored surface* is
+    /// data, not a fact this checks before walking it: a wall face carrying a
+    /// [`Plane`](rcad_geom::Plane) where its own [`Cylinder`](rcad_geom::Cylinder)
+    /// belongs still has a four-step wire in space, and the same wire fans
+    /// into one corner in the plane's own two coordinates instead of four. A
+    /// panic is the wrong answer to a caller's bytes — `Model` derives
+    /// `Deserialize` and nothing between a file and this call has agreed the
+    /// surface matches the wire (CLAUDE.md's rule on panics vs. bad caller
+    /// input, not §16.11, which is about the dynamic-range check being a
+    /// ratio and says nothing about this).
+    #[error("a wire of this face does not fan into a loop the triangulator can use: {why}")]
+    AWireDoesNotFanIntoALoopToMesh {
+        /// Which face.
+        face: crate::FaceKey,
+        /// What was wrong with the corners it fanned into.
+        why: rcad_mesh::NotALoop,
+    },
+
     /// The deflection asks for a mesh closer to the surfaces than a point of one
     /// can be placed.
     ///
@@ -632,6 +657,20 @@ pub enum Invalid {
     /// do not agree about which side the material is on.
     #[error("both coedges of an edge run the same way round")]
     CoedgesRunTheSameWay,
+
+    /// A closed edge — one whose [`EdgeRun`](crate::model::EdgeRun) says it
+    /// goes right round where its two faces cross — sits between two flat
+    /// faces.
+    ///
+    /// Two planes cross in a straight line, which never closes, so a name that
+    /// claims a closed curve where two planes meet describes a curve that is
+    /// not there. `Model` derives `Deserialize`, so nothing between a caller's
+    /// bytes and this check has agreed the edge's own claim is even possible.
+    #[error(
+        "a closed edge is walked between two flat faces, and two planes cross in a straight \
+         line, which never closes"
+    )]
+    ClosedEdgeBetweenTwoFlatFaces,
 
     /// A curved face stands on both sides of a surface that trims it.
     ///
