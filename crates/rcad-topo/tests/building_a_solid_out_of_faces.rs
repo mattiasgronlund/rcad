@@ -29,14 +29,18 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale, Surface,
-    Vector,
+    Axis, Cylinder, Deflection, EdgeRun, Error as GeomError, HalfSpace, Isometry, Orientation,
+    Picker, Plane, Point, Scale, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
     DraftEdge, DraftStep, DraftVertex, EdgeKey, EdgeView, Error, Invalid, Measurement, Model,
     ProfileBuilder, Result, Rule, SolidBuilder, SolidKey, VertexKey, VertexView, WireStepView,
 };
+
+mod rings;
+
+use rings::a_quarter_bend;
 
 fn a_working_size() -> Scale {
     Scale::millimetres(100.0).expect("100 mm is a working size")
@@ -130,6 +134,141 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
     the_same_numbers(&model, built, rebuilt, &|model| {
         a_block(model, [12.0, 12.0, 12.0], Vector::new(-6.0, -6.0, 2.0))
     });
+}
+
+/// A quarter bend built face by face is the bend `rings::a_quarter_bend`
+/// builds.
+///
+/// The measurement half of the oracle is exactly the cube's, the bar's and
+/// the ball's: volume, area and centroid, read through views only, compared
+/// bit for bit. The fuse half cannot copy `the_same_numbers`'s shape, because
+/// **no solid this kernel holds fuses successfully with a torus-faced solid
+/// today** — not a plane-bounded block, not a second bend on the bend's own
+/// axis, not even a bit-for-bit copy of the bend itself
+/// (`a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule` in
+/// `how_often_a_fuse_with_a_torus_refuses.rs` is the demonstration: a fuse
+/// asks where three surfaces meet before it asks what two of them cross in,
+/// and a line meets a torus four times whatever the pair is, so the refusal
+/// fires before either surface's shape or the tool's placement is read).
+///
+/// So the fuse half of the oracle here compares the **refusal**: the same
+/// rule against the same third solid must refuse the same way for both.
+/// That still reads topology the measurement never touches — the refusal is
+/// raised while the arrangement is walking the corners the rebuild itself
+/// produced, so a coedge walked backwards or a picker handed the wrong sign
+/// would have to be caught before that walk gets as far as the question both
+/// descriptions are shown to answer alike.
+#[test]
+fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(a_working_size());
+    let built = a_quarter_bend(&mut model, 4.0, 1.0);
+
+    let rebuilt = Walk::of(&model, built)
+        .describe_again(&a_seam_of_a_bend_named_the_way_a_file_names_one)
+        .expect("a bend can be described again")
+        .build(&mut model, &policy, &mut log)
+        .expect("and the sweep is happy with the description");
+
+    model
+        .validate(&policy, &mut log)
+        .expect("the model holding both is sound");
+
+    let deflection = Deflection::for_scale(model.scale());
+    let one = model
+        .solid(built)
+        .measure(deflection, &policy, &mut log)
+        .expect("the bend the rings module built measures");
+    let other = model
+        .solid(rebuilt)
+        .measure(deflection, &policy, &mut log)
+        .expect("and so does the one described again");
+    assert_eq!(one.volume(), other.volume(), "volume");
+    assert_eq!(one.surface_area(), other.surface_area(), "area");
+    assert_eq!(one.centroid(), other.centroid(), "centroid");
+
+    // A second bend, sharing the ring, tube and axis exactly and so sharing
+    // the torus surface itself, turned a quarter of the way round the ring so
+    // it overlaps the first without being a plain duplicate of it.
+    let a_turned_bend_of_the_same_ring_and_tube = |model: &mut Model| -> SolidKey {
+        let second = a_quarter_bend(model, 4.0, 1.0);
+        model.place_solid(
+            second,
+            &Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_4)
+                .expect("a quarter turn is a real angle"),
+        );
+        second
+    };
+    let refusal_of_built =
+        refused_fusing_a_third_solid(&model, built, &a_turned_bend_of_the_same_ring_and_tube);
+    let refusal_of_rebuilt =
+        refused_fusing_a_third_solid(&model, rebuilt, &a_turned_bend_of_the_same_ring_and_tube);
+    assert!(
+        matches!(
+            refusal_of_built,
+            Error::Geometry(GeomError::WhereALineMeetsATorusIsAQuartic)
+        ),
+        "expected the corner search to refuse on the torus's own quartic, got \
+         {refusal_of_built:?}"
+    );
+    assert_eq!(
+        format!("{refusal_of_built}"),
+        format!("{refusal_of_rebuilt}"),
+        "the kernel-built bend and the one described again refused the same fuse differently"
+    );
+}
+
+/// The seam of a bend, named from geometry a file carries rather than from
+/// the model — exactly `rings::a_quarter_bend`'s own construction of it,
+/// which is what a reader reconstructing a `surface_curve` off a torus does.
+fn a_seam_of_a_bend_named_the_way_a_file_names_one(edge: EdgeView<'_>) -> EdgeRun {
+    if edge.is_closed() {
+        return EdgeRun::RightRoundWhereItsFacesCross;
+    }
+    let flat_through_the_middle =
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal");
+    EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(flat_through_the_middle),
+        picked_by: smallvec::smallvec![
+            Picker::InsideAPipe(Cylinder::new(Axis::z(), 4.0).expect("the ring's own radius")),
+            Picker::from(
+                HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.0).expect("a normal with a length")
+            ),
+        ],
+    }
+}
+
+/// One solid of the model, fused with a third one under [`Rule::Difference`],
+/// on a clone so the two runs this is called from cannot see each other's
+/// answer — the refusal `cut_by_a_third_solid` expects not to happen here.
+fn refused_fusing_a_third_solid(
+    model: &Model,
+    which: SolidKey,
+    cutter: &dyn Fn(&mut Model) -> SolidKey,
+) -> Error {
+    let policy = Policy::certified();
+    let position = model
+        .solids()
+        .position(|solid| solid.key() == which)
+        .expect("the solid is in the model it came from");
+    let mut scratch = model.clone();
+    let keep = scratch
+        .solids()
+        .nth(position)
+        .expect("a clone holds the same solids in the same order")
+        .key();
+    let knife = cutter(&mut scratch);
+    scratch
+        .fuse(
+            &[keep],
+            &[knife],
+            Rule::Difference,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect_err("a bend does not fuse successfully with anything this lane found")
 }
 
 /// A box of the given lengths, with its low corner at `at`.
