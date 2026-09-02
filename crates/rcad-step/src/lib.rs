@@ -1,5 +1,6 @@
 //! Reads an ISO 10303-21 file — a STEP "Part 21" file — into an entity graph,
-//! and that graph's solids into a [`Model`](rcad_topo::Model).
+//! and that graph's solids into a [`Model`](rcad_topo::Model). [`write`] goes
+//! back the other way.
 //!
 //! **This reader maps solids bounded by planes, spheres, cylinders, cones and
 //! tori, whose edges run along straight lines, circles and ellipses. Every
@@ -20,6 +21,28 @@
 //! `advanced_face`, `face_bound`, `edge_loop`, `oriented_edge`, `edge_curve`,
 //! `vertex_point` — into one `Model`, or refuses it by a [`Refusal`] that says
 //! which `#id` stopped it and why.
+//!
+//! # Writing, and the oracle it exists for
+//!
+//! [`write`] turns a `Model`'s solids back into those same entities, or refuses
+//! by a [`CannotWrite`] that says what it could not put in the file. What it is
+//! *for* is a check the reader could never make on its own: a solid this kernel
+//! built, written out and read back, has to measure the same bit for bit and
+//! fuse the same against a third solid, piece for piece
+//! (`crates/rcad-step/tests/a_solid_written_out_and_read_back_is_the_same_solid.rs`).
+//!
+//! **A round trip checks a writer against the reader beside it**, so a
+//! misunderstanding of AP203 the two share cancels out and passes green. Two
+//! things stand against that: `tests/written_by_hand/` holds files nothing in
+//! this crate produced, and `step-io` — a dev-dependency only — reads the bytes
+//! this writer produces in
+//! `crates/rcad-step/tests/a_second_reader_reads_what_this_writer_wrote.rs`.
+//!
+//! **Nothing rounds on the way out.** A coordinate is written with `{:?}`,
+//! which is the shortest decimal text that reads back as the same `f64`, so
+//! there is no conversion cost to publish a bound for — there is no conversion.
+//! `every_number_this_writer_writes_reads_back_bit_for_bit` is that claim as a
+//! test, through this crate's own reader.
 //!
 //! # How often a real file imports
 //!
@@ -137,10 +160,13 @@ mod import;
 
 mod refusal;
 
+mod write;
+
 pub use error::{Error, Problem};
 pub use graph::{BrokenReference, EntityId, Header, Instance, Record, StepFile, Value};
 pub use import::Import;
 pub use refusal::Refusal;
+pub use write::{CannotWrite, write};
 
 /// How deep lists, and values wearing type names, may nest.
 ///
