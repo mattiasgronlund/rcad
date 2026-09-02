@@ -242,9 +242,9 @@ impl EdgeRun {
     /// stored far from the origin until its numbers are small, and this is how
     /// the run goes with it.
     ///
-    /// A shift and not a movement, for the reason [`HalfSpace::shifted`] gives.
-    /// [`EdgeRun::Straight`] and [`EdgeRun::RightRoundWhereItsFacesCross`] hold
-    /// no geometry of their own and come back unchanged.
+    /// A shift keeps every picking normal bit for bit, which
+    /// [`HalfSpace::shifted`] is for and [`EdgeRun::transformed`] cannot
+    /// promise. `rcad-topo`'s mesher wants that one.
     ///
     /// [`HalfSpace::shifted`]: crate::HalfSpace::shifted
     ///
@@ -252,16 +252,36 @@ impl EdgeRun {
     ///
     /// [`Error::NotFinite`] if `by` has a component that is not a finite number.
     pub fn shifted(&self, by: Vector) -> Result<Self> {
+        Ok(self.transformed(&Isometry::translation(by)?))
+    }
+
+    /// This run, moved by `movement`.
+    ///
+    /// [`EdgeRun::Straight`] and [`EdgeRun::RightRoundWhereItsFacesCross`] hold
+    /// no geometry of their own and come back unchanged; they name the crossing
+    /// of the two faces either side, and moving those faces moves the crossing.
+    /// [`EdgeRun::PartOfWhereItCrosses`] carries a second surface and its
+    /// pickers, and each of those moves by its own type's rule.
+    ///
+    /// **The one thing this loses is the exact squareness a picker on an endless
+    /// piece was written with**, and [`HalfSpace::transformed`] sets out why —
+    /// including which of the fixes is a limit there and a gap here. This is
+    /// where the gap is: the direction the piece runs along is the crossing of
+    /// the face's surface with `and`, so a fix could write a fresh normal
+    /// exactly square to the *moved* direction rather than turning the old one.
+    /// Nothing calls that due yet, so it is not built (§13).
+    #[must_use]
+    pub fn transformed(&self, movement: &Isometry) -> Self {
         let EdgeRun::PartOfWhereItCrosses { and, picked_by } = self else {
-            return Ok(self.clone());
+            return self.clone();
         };
-        Ok(EdgeRun::PartOfWhereItCrosses {
-            and: and.transformed(&Isometry::translation(by)?),
+        EdgeRun::PartOfWhereItCrosses {
+            and: and.transformed(movement),
             picked_by: picked_by
                 .iter()
-                .map(|picker| picker.shifted(by))
-                .collect::<Result<_>>()?,
-        })
+                .map(|picker| picker.transformed(movement))
+                .collect(),
+        }
     }
 }
 
@@ -271,7 +291,9 @@ mod tests {
     use smallvec::smallvec;
 
     use super::{EdgeRun, Error, NamedRun, PredicatePoint, SurfaceMeet};
-    use crate::{Axis, Cylinder, HalfSpace, Picker, Plane, Point, Sphere, Surface, Vector};
+    use crate::{
+        Axis, Cylinder, HalfSpace, Isometry, Picker, Plane, Point, Sphere, Surface, Vector,
+    };
 
     fn a_pole(up: f64) -> PredicatePoint {
         PredicatePoint::from([0.0, 0.0, up])
@@ -388,6 +410,74 @@ mod tests {
                 picked_by: smallvec![],
             }),
             Err(Error::ACrossingPieceHasNoEndsAndNothingPickingIt)
+        );
+    }
+
+    /// Moving a run takes its second surface and every one of its pickers along,
+    /// and leaves the two variants that hold no geometry alone.
+    ///
+    /// A run left half moved names a piece of a crossing that is not there —
+    /// the picker would still be cutting the crossing where the face used to be
+    /// — so this checks every piece against what its own type does, rather than
+    /// only that something changed.
+    #[test]
+    fn moving_a_run_moves_its_second_surface_and_every_one_of_its_pickers() {
+        let movement = Isometry::rotation(&Axis::z(), 0.7)
+            .expect("a finite angle about a finite axis")
+            .compose(&Isometry::translation(Vector::new(2.5, -7.25, 11.0)).expect("a shift"));
+        let meridian = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal"),
+        );
+        let pickers = [
+            Picker::from(
+                HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+                    .expect("the x axis has length"),
+            ),
+            Picker::from(Sphere::new(Point::origin(), 1.0).expect("a radius")),
+            Picker::from(Cylinder::new(Axis::z(), 1.0).expect("a radius")),
+        ];
+
+        let moved = EdgeRun::PartOfWhereItCrosses {
+            and: meridian,
+            picked_by: pickers.into_iter().collect(),
+        }
+        .transformed(&movement);
+        let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &moved else {
+            unreachable!("a picked piece stays a picked piece");
+        };
+        assert_eq!(and, &meridian.transformed(&movement));
+        for (was, is) in pickers.iter().zip(picked_by.as_slice()) {
+            assert_eq!(&was.transformed(&movement), is);
+        }
+
+        for plain in [EdgeRun::Straight, EdgeRun::RightRoundWhereItsFacesCross] {
+            assert_eq!(plain.transformed(&movement), plain);
+        }
+    }
+
+    /// §16.10 for [`EdgeRun::shifted`] going through [`EdgeRun::transformed`]:
+    /// a movement with no turn still moves a whole run by the shift and nothing
+    /// else.
+    ///
+    /// `rcad-topo`'s mesher shifts a face stored far from the origin into a
+    /// frame where its numbers are small, and brings the run along. That whole
+    /// frame rests on the shift being exact, so a shift that had quietly started
+    /// paying for a turn of the identity would understate what a mesh point
+    /// costs — and nothing in the mesher would say so.
+    #[test]
+    fn shifting_a_run_is_moving_it_by_a_movement_with_no_turn() {
+        let by = Vector::new(2.5, -7.25, 11.0);
+        let run = EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Sphere(Sphere::new(Point::new(1.0, 2.0, 3.0), 3.0).expect("a radius")),
+            picked_by: smallvec![
+                Picker::from(HalfSpace::new(Vector::new(0.0, 5.0, -3.0), 2.5).expect("a normal")),
+                Picker::from(Cylinder::new(Axis::z(), 1.0).expect("a radius")),
+            ],
+        };
+        assert_eq!(
+            run.shifted(by).expect("a finite shift"),
+            run.transformed(&Isometry::translation(by).expect("a finite shift"))
         );
     }
 
