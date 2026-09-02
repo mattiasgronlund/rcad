@@ -625,6 +625,11 @@ fn a_bend(along: [f64; 3], centre: [f64; 3], ring: f64, tube: f64) -> Surface {
 /// added to neither, and those twelve pairs crashed the evaluator where the
 /// namer refused them by name — reached from `Import::read` on a real KiCad file
 /// (§24.5). A list is only checked by walking all of it.
+///
+/// Three pairs cross in straight lines and are not on the twelve. They have
+/// their own row, `a_closed_run_a_caller_names_on_a_crossing_of_straight_lines_is_refused_by_name`,
+/// because they are not refused *on kind* — the same two kinds cross in a conic
+/// as often as in a line, and which one it is depends on the numbers.
 #[test]
 fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_of_kinds_under_the_same_name() {
     let one = [
@@ -703,4 +708,54 @@ fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_of_kinds_under_the_s
         refused_on_kind, 12,
         "a cone or a torus against another curved surface is twelve of the twenty-five pairs"
     );
+}
+
+/// The three pairs that cross in straight lines, walked as a closed run a caller
+/// named on them.
+///
+/// `where_a_plane_cuts_a_pipe` asserts that a plane never runs down a pipe's own
+/// axis, and the two-pipe conic builder is never asked for a pair pointing the
+/// same way. Both are true, and this is why: `what_a_run_between_these_two_lies_on`
+/// answers `StraightLine` for all three *before* it reaches either builder, on
+/// the same `f64` expression the assert reads. This walks the three pairs in
+/// through the two public doors so the guard is exercised rather than argued
+/// for — the same demand that turned four plane-and-cone panics into names.
+#[test]
+fn a_closed_run_a_caller_names_on_a_crossing_of_straight_lines_is_refused_by_name() {
+    let down_the_axis = a_plane([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]);
+    let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
+
+    for pair in [
+        [
+            a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]),
+            a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 4.0]),
+        ],
+        [down_the_axis, pipe],
+        [pipe, down_the_axis],
+        [pipe, a_pipe([0.0, 0.0, 1.0], [5.0, 0.0, 0.0], 2.0)],
+    ] {
+        let [first, second] = [&pair[0], &pair[1]];
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it");
+
+        assert_eq!(
+            where_a_closed_crossing_starts(&whole, [first, second], &mut ProvenanceLog::new()),
+            Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+            "{first:?} against {second:?}"
+        );
+        // Walking one is not a refusal: a straight run is its own two ends, and
+        // a whole-curve run between two of these has no ends to put down.
+        let walked = walk(
+            &whole,
+            [first, second],
+            Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a straight run is walked by its ends and never reaches a conic builder");
+        assert!(
+            walked.points().is_empty(),
+            "{first:?} against {second:?} put points on a crossing with no curve in it"
+        );
+    }
 }

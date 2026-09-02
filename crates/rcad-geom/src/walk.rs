@@ -168,6 +168,13 @@ impl PointsAlongACrossing {
 /// [`intersect`](crate::intersect) gives those pairs. Nothing in this crate
 /// builds such a run, and a file read in states one whenever it holds a pipe
 /// running into a bend.
+///
+/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
+/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
+/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for a run
+/// between a plane and a cone that cross in none of those — again the four
+/// names [`intersect`](crate::intersect) gives the same four shapes, so a run
+/// this crate did not build is refused rather than crashing the walk.
 pub fn walk(
     run: &NamedRun,
     along: [&Surface; 2],
@@ -254,6 +261,12 @@ pub fn walk(
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a cone or a
 /// torus against another curved surface, exactly as [`walk`] does.
+///
+/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
+/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
+/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for a plane
+/// against a cone they do not cross in a closed curve, again exactly as
+/// [`walk`] does.
 pub fn where_a_closed_crossing_starts(
     run: &NamedRun,
     along: [&Surface; 2],
@@ -338,6 +351,13 @@ enum WhatARunLiesOn {
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed for a degree-four
 /// crossing comes out as something that is not a point.
 ///
+/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
+/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
+/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for a run a
+/// caller named between a plane and a cone that cross in no closed curve — the
+/// namer's own four names, given back here because a run is something a caller
+/// states and a file stores, and this used to assert instead.
+///
 /// Whatever the conic builders refuse, for the pairs that have one.
 fn what_a_run_between_these_two_lies_on(
     pair: [Surface; 2],
@@ -360,11 +380,11 @@ fn what_a_run_between_these_two_lies_on(
             }
             where_a_plane_cuts_a_pipe(&flat, &pipe).map(WhatARunLiesOn::Conic)
         }
-        // The only shape a plane and a cone cross in that reaches here is the
-        // ellipse; the four that are not one closed curve are refused by name
-        // before a run exists (`where_a_plane_and_a_cone_cross`), and the fifth,
-        // a plane through the apex and nothing else, is a touching point and not
-        // a curve.
+        // Every shape a plane and a cone cross in reaches here, not only the
+        // ellipse: `where_a_plane_and_a_cone_cross` refuses four of them before
+        // a run exists, but a run is something a caller states and a file
+        // stores. So `where_a_plane_cuts_a_cone` asks the same sign again and
+        // gives back the same four names.
         [Surface::Plane(flat), Surface::Cone(cone)]
         | [Surface::Cone(cone), Surface::Plane(flat)] => {
             where_a_plane_cuts_a_cone(&flat, &cone).map(WhatARunLiesOn::Conic)
@@ -965,6 +985,19 @@ fn where_a_plane_cuts_a_ball(flat: &Plane, ball: &Sphere) -> Result<Conic> {
 /// the pipe's own radius; along the plane's slope it is that radius stretched by
 /// how far the plane leans, which is `√(n·n) / |n·w|` — and that is a division
 /// by the very number "is this plane parallel to the axis" decided is not zero.
+///
+/// # Panics
+///
+/// Never, and unlike [`where_a_plane_cuts_a_cone`] below this one can say so
+/// without asking anything twice. The only call is in
+/// [`what_a_run_between_these_two_lies_on`], which answers `StraightLine` three
+/// lines earlier on `flat.normal().dot(pipe.axis().direction()) == 0.0` — the
+/// same two `f64`s through the same product as the assert reads, in the same
+/// function, with no branch between. A caller-stated run gets that answer and
+/// never arrives here, which
+/// `a_closed_run_a_caller_names_on_a_crossing_of_straight_lines_is_refused_by_name`
+/// (`crates/rcad-geom/tests/the_degeneracies_a_crossing_has_to_answer.rs`)
+/// walks in through both public doors to show.
 fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
     let normal = flat.normal();
     let along = pipe.axis().direction();
@@ -1013,10 +1046,27 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
 /// centre is `apex − h·n̂ + s_c·û₁`.
 ///
 /// `E` is the very number [`intersect`](crate::intersect) decided the sign of to
-/// call this an ellipse, so a positive `E` is the caller's precondition and not
-/// something asked again here — and it is summed through [`Exact`] for the same
-/// reason a nearly-tangent circle's radius is: a plane leaning at nearly the
-/// cone's own half-angle makes it a small difference of two large numbers.
+/// call this an ellipse, and it is **asked again here** rather than assumed of
+/// the caller: a run between any two surfaces is something a caller states and a
+/// file stores, so the four shapes that are not one closed curve arrive here and
+/// are refused by the namer's own four names. It is summed through [`Exact`] for
+/// the same reason a nearly-tangent circle's radius is: a plane leaning at
+/// nearly the cone's own half-angle makes it a small difference of two large
+/// numbers.
+///
+/// # Errors
+///
+/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
+/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
+/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for the four
+/// shapes with no closed curve in them, and
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a product leaves `f64`'s
+/// range.
+///
+/// A plane through the apex that does cut across the cone meets it at the apex
+/// and nowhere else, and that comes back as a conic of no size centred exactly
+/// on the apex — the same answer, built the same way, that a plane resting on a
+/// ball gets from [`where_a_plane_cuts_a_ball`].
 ///
 /// **The two directions come from [`two_directions_in`]**, which hands back
 /// `(−û₂, −û₁)` — the same pair a pipe uses, in the same roles: its first is
@@ -1050,10 +1100,26 @@ fn where_a_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Result<Conic> {
     let Some((leaning, squared_normal, squared_along, up, sideways, reach)) = worked_out() else {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     };
-    assert!(
-        leaning > 0.0,
-        "a plane that does not cut across a cone crosses it in no closed curve, and          `where_a_plane_and_a_cone_cross` refuses every one of those by name"
-    );
+    // `E ≤ 0` means the crossing is a parabola, a hyperbola, one ruling or two,
+    // and none of those is a closed curve to walk. This used to assert that
+    // `where_a_plane_and_a_cone_cross` had already refused all four — but that
+    // is a claim about a *caller*, and this one is reached from
+    // [`walk`] and [`where_a_closed_crossing_starts`], both public, both taking
+    // whatever pair of surfaces and whatever [`NamedRun`] they are handed.
+    // `EdgeRun` is `Deserialize` too, so a file states such a run. All four
+    // reached the assert; the test names them one at a time.
+    //
+    // They are told apart here the way the namer tells them apart, and given
+    // the namer's four names, so the two never disagree about what a pair is.
+    if leaning <= 0.0 {
+        let through_the_apex = reach == 0.0;
+        return Err(match (through_the_apex, leaning == 0.0) {
+            (false, true) => Error::ACrossingThatIsAParabola,
+            (false, false) => Error::ACrossingThatIsAHyperbola,
+            (true, true) => Error::APlaneTouchingAConeAlongOneOfItsRulings,
+            (true, false) => Error::TwoLinesThroughAConesApexAreOneCurveThroughItself,
+        });
+    }
 
     // `E = leaning / (‖n‖²‖w‖²)`, `h = reach / ‖n‖`, `A = up / (‖n‖‖w‖)` and
     // `k = √sideways / (‖n‖‖w‖)`, all substituted into the three lines above and

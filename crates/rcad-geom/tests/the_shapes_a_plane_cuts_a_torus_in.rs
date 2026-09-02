@@ -384,17 +384,19 @@ fn where_two_planes_and_a_ring_meet_is_refused_because_a_line_meets_it_four_time
         );
     }
 
+    // **All three positions, because the refusal is one check and the argument
+    // for it is a sorting order.** `meet_of_three_surfaces` asks only whether
+    // the *last* of the three sorted surfaces is a torus, and `how_a_quadric_cuts_the_line`
+    // panics on one that gets past. What makes the one check enough is that a
+    // torus sorts after every other kind, so a lone torus is always last — and
+    // that is a claim about `Surface::how_it_sorts_against`, three files away,
+    // which nothing but this makes anyone re-check.
+    let flat = [Surface::Plane(one), Surface::Plane(other)];
+    let ring = Surface::Torus(ring);
     for triple in [
-        [
-            &Surface::Plane(one),
-            &Surface::Plane(other),
-            &Surface::Torus(ring),
-        ],
-        [
-            &Surface::Torus(ring),
-            &Surface::Plane(one),
-            &Surface::Plane(other),
-        ],
+        [&flat[0], &flat[1], &ring],
+        [&flat[0], &ring, &flat[1]],
+        [&ring, &flat[0], &flat[1]],
     ] {
         assert_eq!(
             rcad_geom::meet_of_three_surfaces(
@@ -402,7 +404,28 @@ fn where_two_planes_and_a_ring_meet_is_refused_because_a_line_meets_it_four_time
                 &Policy::certified(),
                 &mut ProvenanceLog::new()
             ),
-            Err(Error::WhereALineMeetsATorusIsAQuartic)
+            Err(Error::WhereALineMeetsATorusIsAQuartic),
+            "{triple:?}"
+        );
+    }
+
+    // Two tori or three never get as far as that check, and they must not fall
+    // through it either: two of the three have to be planes, and a second torus
+    // is what takes that away.
+    let another = Surface::Torus(Torus::new(Axis::x(), 4.0, 1.0).expect("a ring the other way"));
+    for triple in [
+        [&flat[0], &ring, &another],
+        [&ring, &another, &flat[0]],
+        [&ring, &another, &ring],
+    ] {
+        assert_eq!(
+            rcad_geom::meet_of_three_surfaces(
+                triple,
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat),
+            "{triple:?}"
         );
     }
 }
