@@ -197,7 +197,7 @@ impl Import {
 /// coordinate multiplied by a power of two, gets a nominal size multiplied by
 /// exactly that power of two — so the tolerance `Model::validate` allows a flat
 /// face scales with the part and the two imports answer the same question. An
-/// average or a diagonal would round. `a_part_written_at_twice_the_size_is_the_same_part_twice_the_size`
+/// average or a diagonal would round. `a_part_written_at_a_power_of_two_scale_is_exactly_the_same_part_at_that_scale`
 /// is the test.
 fn biggest_coordinate_in(file: &StepFile) -> f64 {
     let mut biggest = 0.0_f64;

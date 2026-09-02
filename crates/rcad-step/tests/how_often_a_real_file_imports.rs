@@ -25,6 +25,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, Refusal, StepFile};
 use written_by_hand::{a_block, a_quarter_disc_plate};
@@ -41,6 +42,11 @@ use written_by_hand::{a_block, a_quarter_disc_plate};
 /// **One refusal here is one bug**, and it is what makes the two rates below
 /// mean anything: a rate with no control cannot tell a reader that refuses real
 /// files from a reader that refuses everything (§42.12 criterion 10).
+///
+/// The plate is **measured** as well as swept, because a sound solid and the
+/// solid the file describes are two claims and the sweep only makes the first.
+/// A quarter-disc of radius `r` and height `h` encloses `πr²h/4`, which is a
+/// number nothing in this kernel supplied.
 #[test]
 fn every_file_this_kernel_wrote_itself_imports() {
     let mut written = 0;
@@ -59,6 +65,28 @@ fn every_file_this_kernel_wrote_itself_imports() {
                     .model()
                     .validate(&Policy::certified(), &mut log)
                     .expect("and every imported model validates under a certified policy");
+                if what == "a plate" {
+                    let [(_, key)] = import.solids() else {
+                        panic!("one MANIFOLD_SOLID_BREP is one solid");
+                    };
+                    let measured = import
+                        .model()
+                        .solid(*key)
+                        .measure(
+                            Deflection::for_scale(import.model().scale()),
+                            &Policy::certified(),
+                            &mut log,
+                        )
+                        .expect("a plate measures");
+                    let space = core::f64::consts::PI * size * size * (size * 2.0) / 4.0;
+                    assert!(
+                        (measured.volume() - space).abs() <= measured.volume_error(),
+                        "a plate of radius {size} encloses {space} and this one says {} give \
+                         or take {}",
+                        measured.volume(),
+                        measured.volume_error()
+                    );
+                }
                 written += 1;
             }
         }

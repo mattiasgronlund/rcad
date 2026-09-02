@@ -919,3 +919,149 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
         _ => f64::NAN,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rcad_geom::{Axis, Point, Vector};
+    use rcad_predicates::{Decision, Point as PredicatePoint};
+
+    use super::a_half_space_holding_both;
+
+    /// A point on the circle of `radius` about `centre`, at `angle` round the
+    /// frame `(across, and)`.
+    fn round_the_circle(
+        centre: Point,
+        across: Vector,
+        and: Vector,
+        radius: f64,
+        angle: f64,
+    ) -> Point {
+        centre + across * (radius * angle.cos()) + and * (radius * angle.sin())
+    }
+
+    /// The claim [`Walk::the_arc_between`] rests on, drawn rather than argued.
+    ///
+    /// Writing `w` for the axis a circle turns about and `A`, `B` for two points
+    /// on it, every point of the arc that runs from `A` to `B` the way the
+    /// parameter grows is on the **positive** side of `(B − A) × w`. That is
+    /// what says which of the two arcs an edge is without computing a point on
+    /// either, and it is what an imported arc's picking half-space is built
+    /// from.
+    ///
+    /// 6 480 draws: nine axes, four radii, six starting angles, six spans and
+    /// five points along each arc. The spans stay clear of `0` and `2π` and the
+    /// sampled points clear of the two ends, because the points here are worked
+    /// out with `sin` and `cos` and a quantity a rounding wide would be a
+    /// statement about `sin` rather than about the geometry.
+    #[test]
+    fn the_far_side_of_a_chord_is_where_the_arc_is() {
+        let mut drawn = 0;
+        for axis in [
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(0.0, 0.0, -1.0),
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(1.0, 1.0, 1.0),
+            Vector::new(-2.0, 1.0, 3.0),
+            Vector::new(0.5, -0.25, 0.125),
+            Vector::new(1e6, 1.0, -1.0),
+            Vector::new(1e-6, 2.0, 5.0),
+        ] {
+            let along = Axis::new(Point::origin(), axis)
+                .expect("a direction with length")
+                .direction();
+            let across = Axis::new(Point::origin(), along.cross(Vector::new(0.0, 1.0, 3.0)))
+                .expect("no axis drawn here runs along (0, 1, 3)")
+                .direction();
+            let and = along.cross(across);
+            let centre = Point::new(3.0, -7.5, 0.25);
+            for radius in [1.0, 0.001, 1000.0, 12.7] {
+                for start in 0..6 {
+                    let start = f64::from(start) * 1.047;
+                    for span in 1..=6 {
+                        let span = f64::from(span) * 0.897;
+                        let from = round_the_circle(centre, across, and, radius, start);
+                        let to = round_the_circle(centre, across, and, radius, start + span);
+                        let facing = (to - from).cross(axis);
+                        for part in 1..=5 {
+                            let along_the_arc = span * f64::from(part) / 6.0;
+                            let at = round_the_circle(
+                                centre,
+                                across,
+                                and,
+                                radius,
+                                start + along_the_arc,
+                            );
+                            assert!(
+                                facing.dot(at - from) > 0.0,
+                                "a point {along_the_arc} round an arc of {span} at radius \
+                                 {radius} about {axis:?} came out on the wrong side"
+                            );
+                            drawn += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            drawn, 6480,
+            "the draw must not shrink without somebody saying so"
+        );
+    }
+
+    /// The bound [`a_half_space_holding_both`] publishes: eight epsilons of the
+    /// dot product's own term magnitudes is enough that **neither** end of the
+    /// chord is ever provably behind the half-space standing on it.
+    ///
+    /// `Model::validate` refuses an edge whose corner is provably outside
+    /// something picking it, so an offset put exactly through one end lands on a
+    /// coin-toss side of the other. This is the demonstration §15.6 asks a
+    /// published bound for.
+    ///
+    /// The control is the same draw with the slack taken out, which **has** to
+    /// put an end behind the surface somewhere or the bound is describing
+    /// something that does not happen.
+    #[test]
+    fn a_chord_never_leaves_its_own_ends_outside() {
+        let mut drawn = 0;
+        let mut coin_tosses_lost = 0;
+        for first in [0.1, 1.0 / 3.0, 12.7, 1e6, 1e-6] {
+            for second in [0.7, 2.0 / 7.0, -25.4, 3e5, 7e-7] {
+                for third in [-0.3, 1.0 / 11.0, 100.1, 1e7] {
+                    let from = Point::new(first, second, third);
+                    let to = Point::new(second, third, first);
+                    let facing = (to - from).cross(Vector::new(third, first, second));
+                    let Some(picking) = a_half_space_holding_both([from, to], facing) else {
+                        continue;
+                    };
+                    for corner in [from, to] {
+                        let at = PredicatePoint::from(corner.coordinates());
+                        assert_ne!(
+                            picking.side_of_point(at),
+                            Decision::Neg,
+                            "an end of the chord came out behind the half-space standing on it"
+                        );
+                        // The same half-space with the slack taken out: its
+                        // offset is the dot product as `f64` rounded it, and the
+                        // exact one is on whichever side the rounding fell.
+                        let unslacked = rcad_geom::HalfSpace::through_a_point_facing(from, facing)
+                            .expect("the same normal the picking one holds");
+                        if unslacked.side_of_point(at) == Decision::Neg {
+                            coin_tosses_lost += 1;
+                        }
+                        drawn += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            drawn, 200,
+            "the draw must not shrink without somebody saying so"
+        );
+        assert!(
+            coin_tosses_lost > 0,
+            "with no slack at all an end has to land behind the surface somewhere, or \
+             the eight epsilons are paying for nothing"
+        );
+    }
+}
