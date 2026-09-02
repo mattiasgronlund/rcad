@@ -227,6 +227,9 @@ impl HalfSpace {
     /// and **nothing about the half-space is worked out a second time from
     /// points that have themselves been moved** — which is the whole reason the
     /// function exists rather than callers rebuilding a picker in the new frame.
+    /// `a_point_lands_in_the_moved_half_space_exactly_when_it_was_in_this_one`
+    /// is what checks the formula itself; the three bullets below are what it
+    /// cannot see.
     ///
     /// # What is exact, bit for bit
     ///
@@ -694,6 +697,73 @@ mod tests {
             picker.side_of_point(PredicatePoint::from((start + along * far).coordinates())),
             Decision::Zero,
             "so the point asked about is on the run rather than beside it, and reads Zero"
+        );
+    }
+
+    /// A point moves into the moved half-space exactly when it was in this one.
+    ///
+    /// **The formula's own demonstration, and the one thing the three exactness
+    /// tests below cannot see.** Every one of them still passes if the offset is
+    /// carried over with the *un-turned* normal — `d + n·t` rather than
+    /// `d + Rn·t`, which is what copying [`HalfSpace::shifted`] gives. That
+    /// half-space is a different flat surface, and only asking where a point
+    /// lands says so. Measured by making that change and running the file: this
+    /// test fails and the other twelve pass.
+    ///
+    /// Points nearer the surface than a hundred million roundings are skipped,
+    /// because moving a point is only good to
+    /// [`Isometry::POINT_ROUNDOFF`](crate::Isometry::POINT_ROUNDOFF) and a point
+    /// on the skin may honestly land either side. Both signs are counted, so a
+    /// run that drew every point on one side would fail rather than pass on
+    /// nothing.
+    #[test]
+    fn a_point_lands_in_the_moved_half_space_exactly_when_it_was_in_this_one() {
+        let mut numbers = SpreadOverFortyOctaves::seeded();
+        let (mut in_front, mut behind, mut too_close) = (0, 0, 0);
+        for movement in turns_with_a_shift() {
+            let facing = numbers
+                .a_vector()
+                .normalized()
+                .expect("a direction from a fixed seed is not exactly zero");
+            let half_space =
+                HalfSpace::new(facing, numbers.a_number()).expect("a normal with length");
+            let moved = half_space.transformed(&movement);
+            for _ in 0..4 {
+                let place = Point::new(numbers.a_number(), numbers.a_number(), numbers.a_number());
+                let size = place
+                    .largest_coordinate_magnitude()
+                    .max(half_space.offset().abs())
+                    .max(1.0);
+                let clearance =
+                    half_space.normal().dot(place - Point::origin()) - half_space.offset();
+                if clearance.abs() < 1e8 * Isometry::POINT_ROUNDOFF * size {
+                    too_close += 1;
+                    continue;
+                }
+
+                let was = half_space.side_of_point(PredicatePoint::from(place.coordinates()));
+                let is = moved.side_of_point(PredicatePoint::from(
+                    movement.apply_to_point(place).coordinates(),
+                ));
+                assert_eq!(
+                    was, is,
+                    "{place:?} read {was:?} of {half_space:?} and {is:?} once both were moved"
+                );
+                assert!(
+                    matches!(was, Decision::Pos | Decision::Neg),
+                    "a point clear of the surface read {was:?}"
+                );
+                if was == Decision::Pos {
+                    in_front += 1;
+                } else {
+                    behind += 1;
+                }
+            }
+        }
+        println!("{in_front} points in front, {behind} behind, {too_close} too close to ask");
+        assert!(
+            in_front > 1_000 && behind > 1_000,
+            "only {in_front} in front and {behind} behind, so one side is barely drawn"
         );
     }
 
