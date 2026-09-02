@@ -396,17 +396,14 @@ impl BuildingAMesh {
         // the way round instead comes to nothing on a circle that encircles no
         // pole, and leaving the direction to the evaluator there is what
         // [`the_way_a_closed_edge_is_stored_running`] measures the cost of.
-        if edge.is_closed()
-            && let Some(reference) = the_curved_surface_that_names_a_closed_edge(&along)
-            && let Some(first) = points.first()
-            && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(
-                &reference,
-                &along,
-                back.apply_to_point(from.point()),
-            )
-            && (*first - back.apply_to_point(from.point())).dot(stored_way) < 0.0
-        {
-            points.reverse();
+        if edge.is_closed() {
+            let corner = back.apply_to_point(from.point());
+            if let Some(first) = points.first()
+                && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(&along, corner)
+                && (*first - corner).dot(stored_way) < 0.0
+            {
+                points.reverse();
+            }
         }
 
         self.worst = self
@@ -486,11 +483,12 @@ impl BuildingAMesh {
         // `18π = 56.55` is the union and `10π/3 = 10.47` is the *lens* between
         // them — the complement of the piece that was asked for.
         //
-        // **Only asked of a surface that pinches**, which here is only a ball.
-        // A loop on a pipe that does not go right round bounds a patch one way
-        // and an endless tube the other, and the endless one is not a face at
-        // all — §38.6's limit, refused further down for want of anything to cut
-        // across to rather than misread here.
+        // **Only asked of a surface that pinches**, which here is only a ball,
+        // and on a pipe there is nothing to ask. A pipe's two coordinates are
+        // longitude and height and it runs on for ever, so a loop that does not
+        // go right round it bounds a patch one way and an **unbounded** region
+        // the other. A solid is bounded, so its faces are, so the material is
+        // the patch — there is no second case for a sign to tell apart.
         if walked.len() == 1
             && walked[0].closes_on_one_curve
             && !walked[0].goes_right_round
@@ -1576,16 +1574,14 @@ fn the_two_surfaces_either_side(
 /// Nothing read the direction, so nothing failed — until something needs it, and
 /// [`how_much_of_the_chart_this_loop_encloses`] does.
 ///
-/// `None` when neither sign is a fact: the two surfaces are tangent here, so
-/// there is no crossing direction, or the corner is at a pole, where every
-/// longitude runs through the one point and `axis × ∇S` is exactly zero (§38.3).
-fn the_way_a_closed_edge_is_stored_running(
-    reference: &Surface,
-    along: &[Surface; 2],
-    at: Point,
-) -> Option<Vector> {
+/// `None` when neither sign is a fact: neither surface is curved, so there is no
+/// longitude at all; the two are tangent here, so there is no crossing
+/// direction; or the corner is at a pole, where every longitude runs through the
+/// one point and `axis × ∇S` is exactly zero (§38.3).
+fn the_way_a_closed_edge_is_stored_running(along: &[Surface; 2], at: Point) -> Option<Vector> {
+    let reference = the_curved_surface_that_names_a_closed_edge(along)?;
     let forward = gradient_of(&along[0], at).cross(gradient_of(&along[1], at));
-    let longitude = the_way_it_is_parametrised_about(reference).cross(gradient_of(reference, at));
+    let longitude = the_way_it_is_parametrised_about(&reference).cross(gradient_of(&reference, at));
     let with_the_longitude = forward.dot(longitude);
     if with_the_longitude == 0.0 {
         return None;
