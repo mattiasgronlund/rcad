@@ -945,10 +945,25 @@ impl<'m> EdgeView<'m> {
 
     /// What this edge runs along between its two ends.
     ///
-    /// Not public. What an edge runs along is how the *model* names it, and
-    /// there is no consumer outside this crate — a caller that wants the shape
-    /// of a crossing asks the intersector, which hands back its own
-    /// [`NamedRun`](rcad_geom::NamedRun).
+    /// **Not public, and the reason changed with
+    /// [`SolidBuilder`](crate::SolidBuilder).** It used to be that no caller
+    /// outside this crate wanted one. Now one does: anything taking a solid
+    /// apart to describe it again has to hand an [`EdgeRun`] back, and for an
+    /// arc it cannot work one out from `is_closed` alone.
+    ///
+    /// What stops it is that a run is **un-located geometry**. It carries a
+    /// [`Surface`] and [`Picker`](rcad_geom::Picker)s written in the frame the
+    /// face is stored in, and this view has a location composed onto it —
+    /// handing the stored run out is exactly what CLAUDE.md's rule about views
+    /// forbids. Returning a located one wants an `EdgeRun::transformed`, and
+    /// `rcad-geom` has only `shifted`, for [`HalfSpace`](rcad_geom::HalfSpace)
+    /// as well as for the run.
+    ///
+    /// So this is a **gap and not a limit** (§16.10), and it is the same gap as
+    /// the missing placement argument on
+    /// [`SolidBuilder`](crate::SolidBuilder): one function in
+    /// `rcad-geom` closes both. Until then a caller does what an importer does
+    /// and names the run from the geometry it holds.
     pub(crate) fn run(self) -> &'m EdgeRun {
         &self.data().run
     }

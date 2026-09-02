@@ -38,11 +38,18 @@ use crate::{Error, Model, Result, SolidKey};
 /// ones handed over, which is §42.8's decision to bake. A caller placing one
 /// shape at several occurrences moves the points itself and describes the shape
 /// once per occurrence: N occurrences are N solids and cost N times the
-/// entities. There is no placement argument, and the reason is not taste — an
-/// [`EdgeRun::PartOfWhereItCrosses`] carries
-/// [`Picker`](rcad_geom::Picker)s, and `rcad-geom` can shift one but cannot turn
-/// one, so a builder that took an [`Isometry`] could not move an arc's own name
-/// with it.
+/// entities.
+///
+/// **There is no placement argument, and that is a gap rather than a limit**
+/// (§16.10). An [`EdgeRun::PartOfWhereItCrosses`] carries
+/// [`Picker`](rcad_geom::Picker)s; `HalfSpace` and `Picker` have `shifted` and
+/// nothing else, so a `build` taking an [`Isometry`] could not move an arc's own
+/// name with it and would have to refuse every turned arc. The answer plainly
+/// exists — a half-space stores four raw numbers and a movement takes
+/// `(n, d)` to `(Rn, d + Rn·t)`, exact wherever `R` is — and the family of fixes
+/// is one function, `HalfSpace::transformed`, in a crate this lane does not own
+/// (§15.9). What calls it due is a reader that wants to place an occurrence
+/// without redescribing its points.
 ///
 /// # Errors
 ///
@@ -417,8 +424,12 @@ impl SolidBuilder {
     /// Write the description into an arena, in the order it was described.
     ///
     /// Called twice per build — once into the model the sweep judges and once
-    /// into the caller's — and that is the point: one writer means the arena
-    /// that was checked and the arena that was kept cannot differ.
+    /// into the caller's — and that is the point. The alternative was to write
+    /// once and then move the entities across, which is a second piece of code
+    /// that has to agree with this one about what a solid's arena looks like.
+    /// This walks the same description in the same order into a fresh arena
+    /// twice, so the only way the two can differ is if this function is not a
+    /// function of its arguments.
     fn write_into(&self, model: &mut Model, shell: &[(usize, Orientation)]) -> SolidSlot {
         let vertices: Vec<VertexSlot> = self
             .points
