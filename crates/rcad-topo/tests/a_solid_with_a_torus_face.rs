@@ -210,3 +210,43 @@ fn a_bend_moved_far_out_stays_inside_its_bound_and_slips_further_than_a_bar() {
          {bar_slipped} against {bend_slipped}"
     );
 }
+
+/// A bend written out and read back is the same solid, at the version that was
+/// already there.
+///
+/// `FORMAT_VERSION` does not move for a fifth [`Surface`] variant, for the
+/// cone's own reason (`a_cone_takes_the_next_tag_and_moves_nobody` in
+/// `rcad-geom`, and `a_torus_takes_the_next_tag_and_moves_nobody` beside it):
+/// `postcard` writes an enum as its variant index, the four tags that were
+/// there keep theirs, and a torus takes the next one. What would break a file
+/// is one of the *old* four moving, and this and that test between them are
+/// the demonstration that neither happened.
+#[test]
+fn a_model_holding_a_bend_reads_back_at_the_version_that_was_already_there() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(a_working_size());
+    let solid = a_quarter_bend(&mut model, 4.0, 1.0);
+    let how_fine = Deflection::of(0.01).expect("a positive length");
+    let before = model
+        .solid(solid)
+        .measure(how_fine, &policy, &mut log)
+        .expect("a bend measures");
+
+    assert_eq!(
+        rcad_topo::FORMAT_VERSION,
+        3,
+        "a fifth variant on the end of `Surface` takes the next tag and moves nobody"
+    );
+
+    let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+    let after: Model = postcard::from_bytes(&bytes).expect("and reads back");
+    after.validate(&policy, &mut log).expect("still sound");
+
+    let back = after.solids().next().expect("the bend came back");
+    assert_eq!(
+        back.measure(how_fine, &policy, &mut log)
+            .expect("and still measures"),
+        before
+    );
+}
