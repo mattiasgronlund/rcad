@@ -358,8 +358,9 @@ pub use rcad_predicates::{
     orient2d, orient2d_tolerantly, orient3d, orient3d_of_points, orient3d_tolerantly,
 };
 pub use rcad_topo::{
-    CoedgeKey, CoedgeView, Containment, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef,
-    FaceView, Fused, Invalid, Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile,
-    ProfileBuilder, Rule, ShellKey, ShellView, SolidKey, SolidView, VertexKey, VertexView, WireKey,
+    CoedgeKey, CoedgeView, Containment, DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex,
+    DraftWire, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef, FaceView, Fused, Invalid,
+    Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile, ProfileBuilder, Rule, ShellKey,
+    ShellView, SolidBuilder, SolidKey, SolidView, VertexKey, VertexView, WireKey, WireStepView,
     WireView,
 };

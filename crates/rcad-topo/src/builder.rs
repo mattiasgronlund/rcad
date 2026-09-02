@@ -579,3 +579,54 @@ define_handle!(DraftEdge, "edge");
 define_handle!(DraftCoedge, "coedge");
 define_handle!(DraftWire, "wire");
 define_handle!(DraftFace, "face");
+
+#[cfg(test)]
+mod tests {
+    use rcad_geom::Scale;
+    use rcad_predicates::{Policy, ProvenanceLog};
+
+    use crate::Model;
+
+    /// The one refusal in this module the sweep will not make for us, shown
+    /// rather than claimed.
+    ///
+    /// [`SolidBuilder::add_shell`] refuses a second shell by name, and the
+    /// reason it has to is here: `check_shells_and_solids` counts how many
+    /// **solids** use each shell and refuses anything but one, and says nothing
+    /// at all about how many shells a solid has. So a solid carrying two is a
+    /// model this crate never builds, never meshes and never measures, and the
+    /// sweep calls it sound.
+    ///
+    /// `Model` derives `Deserialize`, so those bytes are reachable. That makes
+    /// this a **gap** and not a limit (`docs/decisions.md` §16.10): the data
+    /// model holds `shells` as a list, a void inside a solid and a solid in two
+    /// lumps are both real shapes, and what is missing is the code that means
+    /// anything by them. §42.12 has no criterion for it, and this test is the
+    /// record that it is open.
+    #[test]
+    fn the_sweep_does_not_refuse_a_solid_with_two_shells() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_cube(2.0, &policy, &mut log)
+            .expect("a cube of side two");
+        model
+            .add_cube(3.0, &policy, &mut log)
+            .expect("and a cube of side three, on top of it");
+
+        let solids: Vec<_> = model.data().solids.keys().collect();
+        let [first, second] = solids[..] else {
+            panic!("two cubes are two solids");
+        };
+        let moved = model.data().solids[second].shells[0];
+        model.data_mut().solids[first].shells.push(moved);
+        model.data_mut().solids.remove(second);
+
+        assert_eq!(model.solid_count(), 1);
+        assert_eq!(model.shell_count(), 2);
+        model
+            .validate(&policy, &mut log)
+            .expect("nothing in the sweep counts how many shells a solid has");
+    }
+}
