@@ -162,12 +162,12 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 
     let deflection = domain.deflection().length();
     let slop = how_far_a_point_lands_off_its_surface(surface, &corners);
-    let whole_patch = how_far_up_its_axis_this_reaches(&corners);
+    let whole_patch = the_range_of_each_coordinate(&corners);
     let step = a_step_that_stays_within(surface, whole_patch, deflection, slop);
     if step <= 0.0 {
         return Err(CannotTriangulate::NoMeshCanGetThatCloseToTheSurface {
             deflection,
-            closest: how_far_a_flat_piece_strays(surface, whole_patch, 0.0, slop),
+            closest: how_far_a_flat_piece_strays(surface, whole_patch, [0.0; 2], slop),
         });
     }
     // Size first and the loops after, because how many triangles the deflection
@@ -175,9 +175,9 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
     // are fine enough is a question about both.
     refuse_a_patch_too_big_to_hold(domain, (across, along), step)?;
     for (from, to) in every_side(domain) {
-        let across = how_far_up_its_axis_this_reaches(&[corners[from], corners[to]]);
-        let chord = chord_across_the_curve(surface, across, corners[from], corners[to]);
-        let strays = how_far_a_flat_piece_strays(surface, across, chord, slop);
+        let across = the_range_of_each_coordinate(&[corners[from], corners[to]]);
+        let chords = chords_across_the_curve(surface, across, corners[from], corners[to]);
+        let strays = how_far_a_flat_piece_strays(surface, across, chords, slop);
         if strays > deflection {
             return Err(
                 CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection {
@@ -354,7 +354,7 @@ fn how_far_a_point_lands_off_its_surface(surface: &Surface, corners: &[[f64; 2]]
         // A cone is endless the same way, and how far out its points are is
         // about how far along it the patch reaches, times the slope.
         Surface::Cone(cone) => {
-            let [lowest, highest] = how_far_up_its_axis_this_reaches(corners);
+            let [lowest, highest] = the_range_of_each_coordinate(corners)[1];
             let reach = lowest.abs().max(highest.abs());
             HOW_FAR_THE_EVALUATOR_ROUNDS
                 * (cone.apex().largest_coordinate_magnitude() + cone.radius_at(reach) + reach)
@@ -387,16 +387,42 @@ fn how_far_a_point_lands_off_its_surface(surface: &Surface, corners: &[[f64; 2]]
 /// and is not a surface patch at all; nothing in the kernel builds one, and
 /// `SolidBuilder` is public so a caller can describe one — which is why it is
 /// caught here rather than assumed away.
-fn how_far_up_its_axis_this_reaches(corners: &[[f64; 2]]) -> [f64; 2] {
-    let lowest = corners
-        .iter()
-        .map(|corner| corner[1])
-        .fold(f64::INFINITY, f64::min);
-    let highest = corners
-        .iter()
-        .map(|corner| corner[1])
-        .fold(f64::NEG_INFINITY, f64::max);
-    [lowest, highest]
+fn the_range_of_each_coordinate(corners: &[[f64; 2]]) -> [[f64; 2]; 2] {
+    core::array::from_fn(|which| {
+        let lowest = corners
+            .iter()
+            .map(|corner| corner[which])
+            .fold(f64::INFINITY, f64::min);
+        let highest = corners
+            .iter()
+            .map(|corner| corner[which])
+            .fold(f64::NEG_INFINITY, f64::max);
+        [lowest, highest]
+    })
+}
+
+/// How far from the axis a torus reaches over a patch — the widest circle round
+/// the ring that any point of it sits on.
+///
+/// `R + r·cos v` at the largest `cos v` the patch's **first** coordinate covers,
+/// which is one where the patch straddles the outer equator and an end of the
+/// range where it does not. Never below `R − r`, so it is always a size.
+///
+/// **The chord round the ring is measured here and divided by here**, which is
+/// the same discipline `how_wide_a_cone_is_over` follows and for the same
+/// reason: a chord read on a wider circle than the one it is charged against
+/// leaves a boundary side that the walker refined by the sagitta of the circle
+/// it really lies on failing a bound written for a circle it does not.
+fn how_wide_a_torus_is_over(ring: &Torus, [lowest, highest]: [f64; 2]) -> f64 {
+    let whole_turn = core::f64::consts::TAU;
+    let straddles_the_outer_equator =
+        highest - lowest >= whole_turn || (lowest / whole_turn).ceil() * whole_turn <= highest;
+    let widest = if straddles_the_outer_equator {
+        1.0
+    } else {
+        lowest.cos().max(highest.cos())
+    };
+    ring.ring_radius() + ring.tube_radius() * widest
 }
 
 /// How far out a cone reaches over a patch, and [`f64::INFINITY`] when the patch
@@ -418,7 +444,7 @@ fn how_wide_a_cone_is_over(cone: &Cone, [lowest, highest]: [f64; 2]) -> f64 {
 fn how_this_domain_is_scaled(surface: &Surface, corners: &[[f64; 2]]) -> (f64, f64) {
     match surface {
         Surface::Cone(cone) => (
-            how_wide_a_cone_is_over(cone, how_far_up_its_axis_this_reaches(corners)),
+            how_wide_a_cone_is_over(cone, the_range_of_each_coordinate(corners)[1]),
             cone.slope().hypot(1.0),
         ),
         Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | _ => {
@@ -449,29 +475,35 @@ const HOW_FAR_THE_EVALUATOR_ROUNDS: f64 = 8.0 * f64::EPSILON;
 ///
 /// On a surface this crate has not been taught — see
 /// [`how_far_a_point_lands_off_its_surface`].
-fn chord_across_the_curve(
+fn chords_across_the_curve(
     surface: &Surface,
-    across: [f64; 2],
+    across: [[f64; 2]; 2],
     from: [f64; 2],
     to: [f64; 2],
-) -> f64 {
+) -> [f64; 2] {
     match surface {
-        Surface::Plane(_) => 0.0,
-        Surface::Sphere(ball) => ball
-            .point_at(from[0], from[1])
-            .distance_to(ball.point_at(to[0], to[1])),
+        Surface::Plane(_) => [0.0, 0.0],
+        Surface::Sphere(ball) => [
+            ball.point_at(from[0], from[1])
+                .distance_to(ball.point_at(to[0], to[1])),
+            0.0,
+        ],
         // Twice the radius times the sine of half the turn, which is the chord
         // for any turn and not only for a short one.
-        Surface::Cylinder(pipe) => 2.0 * pipe.radius() * ((from[0] - to[0]) / 2.0).sin().abs(),
+        Surface::Cylinder(pipe) => [
+            2.0 * pipe.radius() * ((from[0] - to[0]) / 2.0).sin().abs(),
+            0.0,
+        ],
         // A cone is flat along its rulings too, so this is the pipe's chord
         // measured on the widest circle the piece touches. **Measured there and
         // not at either end**, because that is the radius
         // [`how_far_a_flat_piece_strays`] divides by, and a chord read at a
         // smaller radius than the one it is charged against is a bound on
         // nothing.
-        Surface::Cone(cone) => {
-            2.0 * how_wide_a_cone_is_over(cone, across) * ((from[0] - to[0]) / 2.0).sin().abs()
-        }
+        Surface::Cone(cone) => [
+            2.0 * how_wide_a_cone_is_over(cone, across[1]) * ((from[0] - to[0]) / 2.0).sin().abs(),
+            0.0,
+        ],
         // **A torus curves two ways by two different amounts, so it has two
         // chords and this is the longer.** Round the ring the chord is measured
         // on the outer equator, which is the widest circle the surface has —
@@ -479,10 +511,11 @@ fn chord_across_the_curve(
         // chord read on a smaller circle than the one it is charged against is a
         // bound on nothing. Round the tube it is the tube's own chord.
         Surface::Torus(ring) => {
-            let widest = ring.ring_radius() + ring.tube_radius();
-            let around = 2.0 * widest * ((from[0] - to[0]) / 2.0).sin().abs();
-            let over = 2.0 * ring.tube_radius() * ((from[1] - to[1]) / 2.0).sin().abs();
-            around.max(over)
+            let widest = how_wide_a_torus_is_over(ring, across[0]);
+            [
+                2.0 * ring.tube_radius() * ((from[0] - to[0]) / 2.0).sin().abs(),
+                2.0 * widest * ((from[1] - to[1]) / 2.0).sin().abs(),
+            ]
         }
         other => panic!("this crate cannot say which way {other:?} curves"),
     }
@@ -533,7 +566,7 @@ fn chord_across_the_curve(
 /// because a convex combination is at most its largest term. Take `k` to be the
 /// corner with the **largest** radius, `R_c = maxᵢ rᵢ`. Measuring every chord on
 /// the circle of that radius — which is what
-/// [`chord_across_the_curve`] does for a cone — gives
+/// [`chords_across_the_curve`] does for a cone — gives
 /// `C² = 2R_c²(1 − cos Δ)`, so `rᵢ(1 − cos Δ) = rᵢC²/(2R_c²) ≤ C²/(2R_c)`, and
 ///
 /// ```text
@@ -582,31 +615,33 @@ fn chord_across_the_curve(
 /// how far the piece strays  ≤  C_v²/(3r)  +  C_u²/(2·S_max)
 /// ```
 ///
-/// **Measured with one chord and not two.** [`chord_across_the_curve`] hands
-/// back the larger of the two, both taken on the widest circle the surface has,
-/// `S = R + r`; measuring `C_u` on a circle wider than the corners' own and
-/// dividing by that same wider number is conservative, because
-/// `C_u²/(2S) = 2S·sin²(Δu/2)` **rises** with `S`. With one chord `C` for both,
+/// **Two chords and not one, and that is why this takes a pair.** Collapsing
+/// them into `C²/ρ` for one `ρ` is sound for a triangle only if `C` covers both
+/// — and the two terms are largest on two different sides as often as on one, so
+/// a single number would have to double itself to be safe. It also makes a
+/// *boundary* side unaffordable: a side running purely round the ring is charged
+/// `C²/(2S)` here and `C²/ρ` collapsed, five times more on a ring of four and
+/// one, while the walker that drew it sizes its steps by the sagitta of the
+/// circle it really lies on and has nothing to pay that with.
 ///
-/// ```text
-/// ≤ C²·(1/(3r) + 1/(2S))  =  C² / ρ,      ρ = 6rS / (2S + 3r)
-/// ```
+/// **`S` is the patch's own widest reach and not the surface's.** A patch high
+/// up the tube sits on a circle of radius `R + r·cos v`, which is `R − r` at the
+/// inner equator; measuring the chord on `R + r` and dividing by `R + r` is a
+/// valid bound but leaves the same boundary side over budget, for the same
+/// reason. [`how_wide_a_torus_is_over`] is the number, and it follows
+/// [`how_wide_a_cone_is_over`]'s discipline exactly.
 ///
-/// which is the `share = 1` arm below and is what
-/// [`how_far_a_torus_bends_over_a_patch`] returns.
-///
-/// **Nothing about it can degenerate.** `ρ` lies between `2r` and `3r` for every
-/// torus there is, because `R + r` is always more than `r`. So a torus reaches
-/// neither of the two shapes a cone does — no patch of one is bounded by
-/// nothing, and none has a radius of zero — and both guards below are dead code
-/// for a torus rather than arms it takes.
+/// **Nothing about it can degenerate.** Both denominators are positive for every
+/// torus and every patch — `r > 0` and `S ≥ R − r > 0` — so a torus reaches
+/// neither of the two shapes a cone does: no patch of one is bounded by nothing
+/// and none has a radius of zero.
 ///
 /// `how_far_a_flat_piece_of_a_torus_really_strays_stays_under_the_published_bound`
 /// is the search §15.6 asks for: 450 triangles over six shapes of ring, five
 /// spans in each of the two coordinates, and three places round the tube
 /// including the **inner** equator, where a torus bends the other way and where
 /// a bound derived on the outer one is likeliest to be wrong. The worst uses
-/// **56.7%** of the bound — tighter than the cone's 39.4%, because the two
+/// **59.2%** of the bound — tighter than the cone's 39.4%, because the two
 /// halves of this one are added rather than one covering both.
 ///
 /// A boundary side is a piece with two corners rather than three, and the same
@@ -624,20 +659,37 @@ fn chord_across_the_curve(
 /// [`how_far_a_point_lands_off_its_surface`].
 fn how_far_a_flat_piece_strays(
     surface: &Surface,
-    across: [f64; 2],
-    longest_chord: f64,
+    across: [[f64; 2]; 2],
+    longest_chords: [f64; 2],
     slop: f64,
 ) -> f64 {
+    // **A torus is charged on both of its chords and every other surface on
+    // one**, which is what the two-term derivation above needs and what
+    // collapsing it into a single `chord²/ρ` cannot give: the two terms are
+    // largest on two different sides of a triangle as often as on one, and a
+    // single number would have to double itself to cover that. It is also what
+    // keeps a *boundary* side affordable — a side running purely round the ring
+    // is charged `C²/(2S)` here where the collapsed form charged it `C²/ρ`,
+    // five times more on a ring of four and one, and the walker that drew it
+    // sizes its steps by a sagitta and has no way to pay that.
+    if let Surface::Torus(ring) = surface {
+        let widest = how_wide_a_torus_is_over(ring, across[0]);
+        let [over, around] = longest_chords.map(|chord| chord + 2.0 * slop);
+        return over * over / (3.0 * ring.tube_radius()) + around * around / (2.0 * widest) + slop;
+    }
+    let longest_chord = longest_chords[0];
     let (radius, share) = match surface {
         Surface::Plane(_) => return 0.0,
         Surface::Sphere(ball) => (ball.radius(), 3.0),
         Surface::Cylinder(pipe) => (pipe.radius(), 3.0),
-        Surface::Torus(ring) => (how_far_a_torus_bends_over_a_patch(ring), 1.0),
         Surface::Cone(cone) => (
-            how_wide_a_cone_is_over(cone, across) * cone.slope().hypot(1.0),
+            how_wide_a_cone_is_over(cone, across[1]) * cone.slope().hypot(1.0),
             2.0,
         ),
-        other => panic!("this crate cannot say how far a flat piece of {other:?} strays"),
+        // Answered above, because it is charged on two chords rather than one.
+        other @ Surface::Torus(_) | other => {
+            panic!("this crate cannot say how far a flat piece of {other:?} strays")
+        }
     };
     // **A patch spanning both nappes is bounded by nothing**, and infinity in
     // the denominator would say the opposite — `chord²/(share·∞)` is no stray at
@@ -674,8 +726,8 @@ fn how_far_a_flat_piece_strays(
 /// towards `3r` as `S` grows. So a torus never reaches the two shapes a cone
 /// does — a patch that is bounded by nothing, and a patch whose radius is
 /// nothing at all — and neither guard below can fire for one.
-fn how_far_a_torus_bends_over_a_patch(ring: &Torus) -> f64 {
-    let widest = ring.ring_radius() + ring.tube_radius();
+fn how_far_a_torus_bends_over_a_patch(ring: &Torus, across: [[f64; 2]; 2]) -> f64 {
+    let widest = how_wide_a_torus_is_over(ring, across[0]);
     let tube = ring.tube_radius();
     6.0 * tube * widest / (2.0 * widest + 3.0 * tube)
 }
@@ -693,7 +745,7 @@ fn how_far_a_torus_bends_over_a_patch(ring: &Torus) -> f64 {
 /// [`how_far_a_point_lands_off_its_surface`].
 fn a_step_that_stays_within(
     surface: &Surface,
-    across: [f64; 2],
+    across: [[f64; 2]; 2],
     deflection: f64,
     slop: f64,
 ) -> f64 {
@@ -701,9 +753,9 @@ fn a_step_that_stays_within(
         Surface::Plane(_) => return f64::INFINITY,
         Surface::Sphere(ball) => (ball.radius(), 3.0),
         Surface::Cylinder(pipe) => (pipe.radius(), 3.0),
-        Surface::Torus(ring) => (how_far_a_torus_bends_over_a_patch(ring), 1.0),
+        Surface::Torus(ring) => (how_far_a_torus_bends_over_a_patch(ring, across), 1.0),
         Surface::Cone(cone) => (
-            how_wide_a_cone_is_over(cone, across) * cone.slope().hypot(1.0),
+            how_wide_a_cone_is_over(cone, across[1]) * cone.slope().hypot(1.0),
             2.0,
         ),
         other => panic!("this crate cannot size a step across {other:?}"),
@@ -819,19 +871,22 @@ fn refine_the_inside(
             }
             // **The reach comes first and over the whole triangle**, because it
             // is the radius every one of the three chords below is charged
-            // against — see [`chord_across_the_curve`].
-            let across = how_far_up_its_axis_this_reaches(
+            // against — see [`chords_across_the_curve`].
+            let across = the_range_of_each_coordinate(
                 &face
                     .vertices()
                     .map(|vertex| corners[corner_of[vertex.index()] as usize]),
             );
-            let mut longest_chord = f64::NEG_INFINITY;
+            let mut longest_chords = [f64::NEG_INFINITY; 2];
             let mut to_split: Option<(f64, [f64; 2], [f64; 2])> = None;
             for edge in face.adjacent_edges() {
                 let from = corners[corner_of[edge.from().index()] as usize];
                 let to = corners[corner_of[edge.to().index()] as usize];
-                longest_chord =
-                    longest_chord.max(chord_across_the_curve(aim.surface, across, from, to));
+                let chords = chords_across_the_curve(aim.surface, across, from, to);
+                longest_chords = [
+                    longest_chords[0].max(chords[0]),
+                    longest_chords[1].max(chords[1]),
+                ];
                 if edge.is_constraint_edge() {
                     continue;
                 }
@@ -843,7 +898,7 @@ fn refine_the_inside(
                 }
             }
 
-            let strays = how_far_a_flat_piece_strays(aim.surface, across, longest_chord, aim.slop);
+            let strays = how_far_a_flat_piece_strays(aim.surface, across, longest_chords, aim.slop);
             furthest = furthest.max(strays);
             if strays <= aim.deflection {
                 continue;
@@ -1232,13 +1287,13 @@ mod tests {
                         let at = [[0.0, start], [round, start], [round / 2.0, start + over]];
                         let corners = at.map(|[u, v]| ring.point_at(u, v));
 
-                        let across = how_far_up_its_axis_this_reaches(&at);
-                        let mut longest = 0.0_f64;
+                        let across = the_range_of_each_coordinate(&at);
+                        let mut longest = [0.0_f64; 2];
                         for one in 0..3 {
                             for other in (one + 1)..3 {
-                                longest = longest.max(chord_across_the_curve(
-                                    &surface, across, at[one], at[other],
-                                ));
+                                let chords =
+                                    chords_across_the_curve(&surface, across, at[one], at[other]);
+                                longest = [longest[0].max(chords[0]), longest[1].max(chords[1])];
                             }
                         }
                         let bound = how_far_a_flat_piece_strays(&surface, across, longest, 0.0);
@@ -1325,15 +1380,16 @@ mod tests {
                     let at = [[0.0, far], [span, far], [span / 2.0, near]];
                     let corners = at.map(|[round, along]| cone.point_at(round, along));
 
-                    let across = how_far_up_its_axis_this_reaches(&at);
+                    let across = the_range_of_each_coordinate(&at);
                     let mut longest = 0.0_f64;
                     for one in 0..3 {
                         for other in (one + 1)..3 {
-                            longest = longest
-                                .max(chord_across_the_curve(&surface, across, at[one], at[other]));
+                            longest = longest.max(
+                                chords_across_the_curve(&surface, across, at[one], at[other])[0],
+                            );
                         }
                     }
-                    let bound = how_far_a_flat_piece_strays(&surface, across, longest, 0.0);
+                    let bound = how_far_a_flat_piece_strays(&surface, across, [longest, 0.0], 0.0);
                     if bound == 0.0 {
                         continue;
                     }
@@ -1378,8 +1434,8 @@ mod tests {
         assert_eq!(
             how_far_a_flat_piece_strays(
                 &Surface::from(cone),
-                how_far_up_its_axis_this_reaches(&both_nappes),
-                1.0,
+                the_range_of_each_coordinate(&both_nappes),
+                [1.0, 0.0],
                 0.0
             ),
             f64::INFINITY

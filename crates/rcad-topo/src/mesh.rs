@@ -1605,7 +1605,8 @@ fn the_two_surfaces_either_side(
 fn the_way_a_closed_edge_is_stored_running(along: &[Surface; 2], at: Point) -> Option<Vector> {
     let reference = the_curved_surface_that_names_a_closed_edge(along)?;
     let forward = gradient_of(&along[0], at).cross(gradient_of(&along[1], at));
-    let longitude = the_way_it_is_parametrised_about(&reference).cross(gradient_of(&reference, at));
+    let longitude =
+        the_way_it_is_parametrised_about(&reference, at).cross(gradient_of(&reference, at));
     let with_the_longitude = forward.dot(longitude);
     if with_the_longitude == 0.0 {
         return None;
@@ -1719,7 +1720,7 @@ fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room:
             (
                 effective,
                 1.0,
-                (widest * round).hypot(tube * up) / effective,
+                (tube * round).hypot(widest * up) / effective,
             )
         }
         other => panic!("this crate cannot walk along {other:?}"),

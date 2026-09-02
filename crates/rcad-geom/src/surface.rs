@@ -197,7 +197,9 @@ impl Surface {
             Surface::Sphere(sphere) => (sphere.radius(), sphere.radius()),
             Surface::Cylinder(cylinder) => (cylinder.radius(), 1.0),
             Surface::Cone(cone) => (f64::INFINITY, cone.slope().hypot(1.0)),
-            Surface::Torus(ring) => (ring.ring_radius() + ring.tube_radius(), ring.tube_radius()),
+            // Round the tube first, because that is the coordinate a face on a
+            // bend of pipe wraps in — see [`Torus::point_at`].
+            Surface::Torus(ring) => (ring.tube_radius(), ring.ring_radius() + ring.tube_radius()),
         }
     }
 

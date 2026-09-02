@@ -965,7 +965,7 @@ pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     let Some(curved) = the_curved_one_of(&[*pair[0], *pair[1]]) else {
         return Err(Invalid::ClosedEdgeBetweenTwoFlatFaces.into());
     };
-    let longitude = the_way_it_is_parametrised_about(&curved).cross(gradient_of(&curved, at));
+    let longitude = the_way_it_is_parametrised_about(&curved, at).cross(gradient_of(&curved, at));
     // **At a pole there is no longitude to compare against** (§38.3). Every
     // longitude runs through the one point there, so `ẑ × ∇C` is exactly the
     // zero vector and the sign of a dot with it is not a fact about the shape.
@@ -1036,25 +1036,41 @@ pub(crate) fn the_curved_one_of(carried_by: &[Surface; 2]) -> Option<Surface> {
     curved.first().copied()
 }
 
-/// The axis a surface's own two coordinates are wound about.
+/// The axis a surface's first coordinate is wound about, at `at`.
 ///
-/// A sphere is parametrised about the frame's own `z` — `Sphere::point_at` says
-/// so in its arithmetic — and a pipe about its stored axis direction. This is
-/// read only for the *sign* of a dot product, so nothing here is normalized.
+/// Crossed into the surface's own gradient it gives the way that coordinate
+/// runs, which is what a closed edge is walked by. A sphere is parametrised
+/// about the frame's own `z` — `Sphere::point_at` says so in its arithmetic —
+/// and a pipe and a cone about their stored axis direction. This is read only
+/// for the *sign* of a dot product, so nothing here is normalized.
+///
+/// # A torus's is not one direction, and that is why this takes a point
+///
+/// A torus's first coordinate runs round the **tube**, so the axis it is wound
+/// about is the tangent to the centre circle — which turns as you go round the
+/// ring. Handed the torus's own axis instead, the answer at a meridian circle's
+/// corner is square to that circle and the dot product below is **exactly
+/// zero**, so the rule reads a sign off nothing and a bend of pipe is refused
+/// whichever way round it is described. The tangent is `ê × w` with `ê` the way
+/// out from the axis at `at`, and crossed into the gradient it comes out as
+/// exactly the direction `Torus::point_at`'s first coordinate takes.
+///
+/// Every other surface here ignores `at` and gives what it always gave.
 ///
 /// # Panics
 ///
 /// On a flat surface, which has no longitude, and on a kind this has not been
 /// taught.
-pub(crate) fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
+pub(crate) fn the_way_it_is_parametrised_about(surface: &Surface, at: Point) -> Vector {
     match surface {
         Surface::Sphere(_) => Vector::new(0.0, 0.0, 1.0),
         Surface::Cylinder(pipe) => pipe.axis().direction(),
         Surface::Cone(cone) => cone.axis().direction(),
-        // A torus's *first* coordinate winds about its axis, which is the one
-        // this is read for; its second winds about the centre circle, which is
-        // not one direction and is not what anybody asks here.
-        Surface::Torus(ring) => ring.axis().direction(),
+        Surface::Torus(ring) => {
+            let along = ring.axis().direction();
+            let out = at - ring.centre();
+            (out - along * (out.dot(along) / along.dot(along))).cross(along)
+        }
         Surface::Plane(_) => panic!("a plane has no longitude to be wound about"),
         other => panic!("this crate cannot say what {other:?} is wound about"),
     }

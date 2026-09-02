@@ -766,6 +766,22 @@ impl Conic {
         self.size
     }
 
+    /// How far `point` sits off this circle, measured in its own plane and
+    /// across it.
+    ///
+    /// Only ever asked of a circle — both semi-axes the same length — which is
+    /// the whole of what a plane and a torus cross in. Two candidates that lie
+    /// in one plane and differ only in radius are told apart by the first term;
+    /// the second is what says a point is on the plane at all.
+    fn how_far_off_it(&self, point: Point) -> f64 {
+        let out = point - self.centre;
+        let radius = self.across.length();
+        let across = out.dot(self.across) / radius;
+        let and = out.dot(self.and) / self.and.length();
+        let up = out - self.across * (across / radius) - self.and * (and / self.and.length());
+        (across.hypot(and) - radius).abs() + up.length()
+    }
+
     /// The furthest from its own centre this conic goes.
     ///
     /// **Not [`Conic::the_size_it_was_worked_out_from`], and the difference
@@ -1147,12 +1163,23 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
 /// [`intersect`](crate::intersect) before a run exists, so this never has to
 /// stand in for a quartic.
 ///
-/// **Which of the two circles is asked of the run's own pickers**, at the point
-/// each candidate starts from, taken as the box it is really known to be inside
-/// — the same question `the_seed_this_run_is_picked_up_at` puts to the marcher's
-/// seeds, asked the same way. A run with no picker on it is the whole of a
-/// crossing that comes in one piece, which is the tangent circle and nothing
-/// else.
+/// # Which of the two circles this run is, is asked two ways
+///
+/// **The run's own ends first.** An end that names a place is a point on the
+/// crossing, and a point on one of two disjoint circles says which one it is
+/// with nothing to decide. That is what a *closed* edge on a torus needs: a cap
+/// of a bend is one whole circle of the two its plane cuts, so it is
+/// `RightRoundWhereItsFacesCross` with one corner at both ends and no picker on
+/// it at all, and the corner is the whole of what tells the two apart.
+///
+/// **Then the run's pickers**, at the point each surviving candidate starts
+/// from, taken as the box it is really known to be inside — the same question
+/// `the_seed_this_run_is_picked_up_at` puts to the marcher's seeds, asked the
+/// same way. That is what a run with **no** ends needs: what
+/// [`intersect`](crate::intersect) hands back names a whole curve and nothing
+/// on it.
+///
+/// A candidate has to pass both, and exactly one may.
 ///
 /// # Which family this is, is asked in `f64`
 ///
@@ -1193,16 +1220,28 @@ fn where_a_plane_cuts_a_torus(
         EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
         EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
     };
+    let ends: Vec<Point> = run
+        .ends()
+        .into_iter()
+        .filter(|end| *end != nowhere_in_particular())
+        .map(|end| Point::from(end.enclosure().map(middle_of)))
+        .collect();
+
     let mut held: Vec<Conic> = Vec::new();
     for circle in candidates {
         let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * circle.the_size_it_was_worked_out_from();
-        if picked_by.is_empty() || every_half_space_holds(picked_by, circle.at(0.0), deviation, log)
+        let holds_every_end = ends
+            .iter()
+            .all(|end| circle.how_far_off_it(*end) <= deviation);
+        if holds_every_end
+            && (picked_by.is_empty()
+                || every_half_space_holds(picked_by, circle.at(0.0), deviation, log))
         {
             held.push(circle);
         }
     }
-    match (picked_by.is_empty(), held.as_slice()) {
-        (_, [only]) => Ok(*only),
+    match held.as_slice() {
+        [only] => Ok(*only),
         _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
     }
 }

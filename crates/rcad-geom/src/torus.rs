@@ -186,28 +186,40 @@ impl Torus {
         (u, along.cross(u))
     }
 
-    /// The point at `round` radians round the ring and `over` radians round the
-    /// tube.
+    /// The point at `over` radians round the tube and `round` radians round the
+    /// ring.
     ///
-    /// `round = 0` is [`Torus::basis`]'s first direction and `over = 0` is the
-    /// outer equator, furthest from the axis. `over = π` is the inner equator,
-    /// down in the hole.
+    /// `over = 0` is the outer equator, furthest from the axis, and `over = π`
+    /// is the inner one, down in the hole. `round = 0` is [`Torus::basis`]'s
+    /// first direction.
+    ///
+    /// # Round the tube comes first, and that is not arbitrary
+    ///
+    /// A mesher cuts a face open along the coordinate that **wraps**, and it is
+    /// the first one it looks at — a pipe's angle wraps and its height does not,
+    /// a ball's longitude wraps and its latitude does not. A bend of pipe is a
+    /// piece of a torus that goes right round the **tube** and part way round
+    /// the ring, so putting the tube first makes a bend the same shape in its
+    /// chart as a straight bar: one wrapping coordinate, one running from cap to
+    /// cap, one seam.
     ///
     /// **Both coordinates run right round, and neither ever pinches.** That is
     /// the whole of what makes a torus's chart different from a ball's and from
     /// a cone's: a ball's longitude collapses at its two poles and a cone's
     /// angle collapses at its apex, so a face on either has a place where one
-    /// coordinate stops meaning anything. A torus has none — the step a unit of
-    /// `round` takes is `ring_radius + tube_radius·cos(over)`, which is at least
+    /// coordinate stops meaning anything. A torus has none — a unit of `over`
+    /// carries `tube_radius` everywhere, and a unit of `round` carries
+    /// `ring_radius + tube_radius·cos(over)`, which is at least
     /// `ring_radius − tube_radius` and so is never nothing. What a torus has
-    /// instead is **two seams**, one for each coordinate.
+    /// instead is **two seams**, one for each coordinate, and the second of them
+    /// is what a face going right round the ring as well would need.
     ///
     /// Only exactly on the torus where the sines and cosines are exact, which in
     /// practice means both angles zero. No corner of a face is ever made this
     /// way, for the reason [`Cylinder::point_at`](crate::Cylinder::point_at)
     /// gives.
     #[must_use]
-    pub fn point_at(&self, round: f64, over: f64) -> Point {
+    pub fn point_at(&self, over: f64, round: f64) -> Point {
         let (u, v) = self.basis();
         let out = u * round.cos() + v * round.sin();
         self.axis.origin()
@@ -225,7 +237,7 @@ impl Torus {
         self.ring_radius + self.tube_radius * over.cos()
     }
 
-    /// Which angle round the ring and which round the tube `point` sits at —
+    /// Which angle round the tube and which round the ring `point` sits at —
     /// [`Torus::point_at`] the other way round.
     ///
     /// Both angles come back on `atan2`'s branch, `(−π, π]`.
@@ -251,10 +263,10 @@ impl Torus {
         let out = from_centre.dot(across);
         let sideways = from_centre.dot(and);
         (
-            sideways.atan2(out),
             from_centre
                 .dot(self.axis.direction())
                 .atan2(out.hypot(sideways) - self.ring_radius),
+            sideways.atan2(out),
         )
     }
 }
@@ -755,9 +767,22 @@ mod tests {
     fn a_point_on_the_outer_equator_reads_back_to_itself() {
         let torus = a_ring_of_four_and_one();
         let on_it = Point::new(5.0, 0.0, 0.0);
-        let (round, over) = torus.coordinates_of(on_it);
-        assert_eq!((round, over), (0.0, 0.0));
-        assert_eq!(torus.point_at(round, over), on_it);
+        let (over, round) = torus.coordinates_of(on_it);
+        assert_eq!((over, round), (0.0, 0.0));
+        assert_eq!(torus.point_at(over, round), on_it);
+    }
+
+    /// Round the tube is the first coordinate and round the ring the second,
+    /// which is what makes a bend of pipe the same shape in its chart as a
+    /// straight bar. The inner equator is half a turn round the tube and no way
+    /// round the ring.
+    #[test]
+    fn the_first_coordinate_is_the_one_that_goes_round_the_tube() {
+        let torus = a_ring_of_four_and_one();
+        let (over, round) = torus.coordinates_of(Point::new(3.0, 0.0, 0.0));
+        assert_eq!((over, round), (core::f64::consts::PI, 0.0));
+        let (over, round) = torus.coordinates_of(Point::new(0.0, 5.0, 0.0));
+        assert_eq!((over, round), (0.0, core::f64::consts::FRAC_PI_2));
     }
 
     /// Neither coordinate ever pinches, which is what a ball's and a cone's do.
