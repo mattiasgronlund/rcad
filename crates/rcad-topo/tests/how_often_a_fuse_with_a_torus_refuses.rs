@@ -68,7 +68,7 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Isometry, Point, Scale, Vector};
+use rcad_geom::{Error as GeomError, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -398,6 +398,44 @@ fn no_box_of_planes_can_close_round_a_torus_axis_without_a_quartic() {
             counted[2] > 0,
             "{named} closes round the axis with no plane in the quartic row, which the note \
              above says cannot happen"
+        );
+    }
+}
+
+/// **The strongest possible case, and it still refuses.**
+///
+/// The table above only shows that every *tool this corpus drew* fails —
+/// eighty planes and curves picked at random, none of them the torus's own.
+/// This is the case a corpus can never draw: a bend and a bit-for-bit copy of
+/// itself, in the same place. If anything ever fuses with a bend it is this,
+/// because every corner the arrangement would need to find is one the two
+/// solids already agree on exactly.
+///
+/// It refuses anyway, under all three rules, and always with the same
+/// complaint: `fuse/arrange.rs` asks where three surfaces meet **before** it
+/// asks what two of them cross in, and a straight line meets a torus in a
+/// quartic whatever the pair behind it is — the same reason
+/// `WhereALineMeetsATorusIsAQuartic` answers for every family in
+/// `how_often_a_certified_fuse_with_a_torus_in_it_refuses`. So this is not
+/// four more measurements of the same thing; it is the demonstration that
+/// there is no tool, drawn or undrawn, this kernel fuses a bend with today.
+#[test]
+fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let first = a_quarter_bend(&mut model, 4.0, 1.0);
+    let second = a_quarter_bend(&mut model, 4.0, 1.0);
+
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        let mut log = ProvenanceLog::new();
+        let refused = model.fuse(&[first], &[second], rule, &policy, &mut log);
+        assert!(
+            matches!(
+                refused,
+                Err(Error::Geometry(GeomError::WhereALineMeetsATorusIsAQuartic))
+            ),
+            "{rule:?} of a bend and a bit-for-bit copy of itself: expected the three-surface \
+             quartic to refuse it, got {refused:?}"
         );
     }
 }
