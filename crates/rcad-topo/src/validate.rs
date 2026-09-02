@@ -16,9 +16,10 @@ use slotmap::SecondaryMap;
 
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on, what_trims_this_face};
-use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
+use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
+use crate::model::WireData;
 use crate::view::{CoedgeView, FaceView, SolidView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
 
@@ -89,6 +90,53 @@ impl Model {
         self.check_dynamic_range(policy, log)
     }
 
+    /// The shape checks a public method is allowed to take for granted, asked
+    /// of every entity, with no arithmetic and no [`Policy`].
+    ///
+    /// **A key resolving is not the same as a shape being possible.** A file
+    /// naming an entity that is not there is refused before it becomes a
+    /// `Model` (`ModelData::check_keys_resolve`), and every key in a face's
+    /// wire list resolving says nothing about the list being empty. So a face
+    /// with no wires, a wire that does not close and an edge walked by three
+    /// coedges all read back cleanly — and then
+    /// [`FaceView::outer_wire`](crate::FaceView::outer_wire) has no wire to
+    /// hand back and [`Model::place_solid`]'s after-the-mutation checks assert
+    /// about a shape the mutation did not make.
+    ///
+    /// Which is why this is asked at the door rather than at each of those
+    /// sites. Making every accessor answer `Option` would hand the invalidity
+    /// to every caller for ever; refusing the bytes keeps one truth, and it is
+    /// the same truth [`Model::validate`] already tells — these three checks
+    /// **are** the ones `check_edges`, `check_wires` and `check_faces` make,
+    /// called from here as well.
+    ///
+    /// The rest of the sweep stays out: a corner off its face's plane, a wire
+    /// wound against its normal or a solid enclosing negative space all need
+    /// predicates, a `Policy` to say how hard to try, and for a curved solid a
+    /// mesh. Reading a file is not the place to spend that, and
+    /// [`Model::validate`] is right there.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::FaceHasNoWires`], [`Invalid::WireTooShort`],
+    /// [`Invalid::WireDoesNotClose`], [`Invalid::EdgeCoedgeCount`] or
+    /// [`Invalid::CoedgesRunTheSameWay`], naming the first one that does not
+    /// hold.
+    pub(crate) fn check_shape_is_possible(&self) -> Result<()> {
+        for face in self.data().faces.values() {
+            if face.wires.is_empty() {
+                return Err(Invalid::FaceHasNoWires.into());
+            }
+        }
+        for wire in self.data().wires.values() {
+            self.check_wire_closes(wire)?;
+        }
+        for slot in self.data().edges.keys() {
+            self.check_edge_is_walked_by_two_opposite_coedges(slot)?;
+        }
+        Ok(())
+    }
+
     fn check_vertices(&self) -> Result<()> {
         for (slot, vertex) in &self.data().vertices {
             if !vertex.point.is_finite() {
@@ -118,18 +166,7 @@ impl Model {
                 return Err(Invalid::EdgeHasNoLength.into());
             }
 
-            let coedges = self.index().coedges_of_edge(slot);
-            if coedges.len() != 2 {
-                return Err(Invalid::EdgeCoedgeCount {
-                    count: coedges.len(),
-                }
-                .into());
-            }
-            if self.data().coedges[coedges[0]].orientation
-                == self.data().coedges[coedges[1]].orientation
-            {
-                return Err(Invalid::CoedgesRunTheSameWay.into());
-            }
+            self.check_edge_is_walked_by_two_opposite_coedges(slot)?;
 
             // The other half of Q16's invariant, and the half that keeps an
             // edge's *name* honest. An edge named by a crossing has to be on
@@ -236,29 +273,7 @@ impl Model {
             }
         }
         for (slot, wire) in &self.data().wires {
-            if wire.steps.len() < 3 && !self.wire_closes_on_one_edge(wire) {
-                return Err(Invalid::WireTooShort {
-                    count: wire.steps.len(),
-                }
-                .into());
-            }
-            // A pole is walked like any other step and simply goes nowhere, so
-            // closure is one rule rather than two.
-            let mut previous_end = None;
-            for (position, &step) in wire.steps.iter().enumerate() {
-                let (start, end) = self.step_ends(step);
-                if previous_end.is_some_and(|previous| previous != start) {
-                    return Err(Invalid::WireDoesNotClose { position }.into());
-                }
-                previous_end = Some(end);
-            }
-            let first_start = self.step_ends(wire.steps[0]).0;
-            if previous_end != Some(first_start) {
-                return Err(Invalid::WireDoesNotClose {
-                    position: wire.steps.len(),
-                }
-                .into());
-            }
+            self.check_wire_closes(wire)?;
 
             match used.get(slot).copied().unwrap_or(0) {
                 0 => return Err(Invalid::Orphan { entity: "wire" }.into()),
@@ -271,6 +286,73 @@ impl Model {
                     .into());
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// A wire long enough to bound something, whose steps chain end to start
+    /// and come back to where they set off.
+    ///
+    /// Also the check [`Model::check_touched_wire`] makes after a mutation, and
+    /// that is on purpose: one of the two audiences wants a refusal and the
+    /// other wants a crash, and there being two of them is no reason for two
+    /// answers.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::WireTooShort`] or [`Invalid::WireDoesNotClose`].
+    pub(crate) fn check_wire_closes(&self, wire: &WireData) -> Result<()> {
+        if wire.steps.len() < 3 && !self.wire_closes_on_one_edge(wire) {
+            return Err(Invalid::WireTooShort {
+                count: wire.steps.len(),
+            }
+            .into());
+        }
+        // A pole is walked like any other step and simply goes nowhere, so
+        // closure is one rule rather than two.
+        let mut previous_end = None;
+        for (position, &step) in wire.steps.iter().enumerate() {
+            let (start, end) = self.step_ends(step);
+            if previous_end.is_some_and(|previous| previous != start) {
+                return Err(Invalid::WireDoesNotClose { position }.into());
+            }
+            previous_end = Some(end);
+        }
+        let first_start = self.step_ends(wire.steps[0]).0;
+        if previous_end != Some(first_start) {
+            return Err(Invalid::WireDoesNotClose {
+                position: wire.steps.len(),
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    /// An edge walked by exactly two coedges, running opposite ways — which is
+    /// what says the two faces meeting there agree which side the material is
+    /// on.
+    ///
+    /// Shared with [`Model::check_touched_edge`] for the reason
+    /// [`Model::check_wire_closes`] gives.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::EdgeCoedgeCount`] or [`Invalid::CoedgesRunTheSameWay`].
+    pub(crate) fn check_edge_is_walked_by_two_opposite_coedges(
+        &self,
+        slot: EdgeSlot,
+    ) -> Result<()> {
+        let coedges = self.index().coedges_of_edge(slot);
+        if coedges.len() != 2 {
+            return Err(Invalid::EdgeCoedgeCount {
+                count: coedges.len(),
+            }
+            .into());
+        }
+        if self.data().coedges[coedges[0]].orientation
+            == self.data().coedges[coedges[1]].orientation
+        {
+            return Err(Invalid::CoedgesRunTheSameWay.into());
         }
         Ok(())
     }

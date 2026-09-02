@@ -1885,11 +1885,26 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
             one.axis().direction().cross(other.axis().direction()) == Vector::zero()
         }
-        // **A cone never reaches here running straight.** The only crossing with
-        // a cone on it that `intersect` names at all is the ellipse a plane cuts
-        // across it; the two shapes that *are* straight — a tangent plane's one
-        // ruling, and two rulings meeting at the apex — are refused by name in
-        // `where_a_plane_and_a_cone_cross`, so no run carrying either exists.
+        // **A cone never reaches *here* running straight, and that is a fact
+        // about this function's one caller rather than about the kernel.** The
+        // only crossing with a cone on it that `intersect` names is the ellipse
+        // a plane cuts across it; the two shapes that *are* straight — a tangent
+        // plane's one ruling, and two rulings meeting at the apex — come back
+        // `APlaneTouchingAConeAlongOneOfItsRulings` and
+        // `TwoLinesThroughAConesApexAreOneCurveThroughItself` from
+        // `where_a_plane_and_a_cone_cross`. So the fuse never builds a
+        // `FaceMeet` carrying such a pair, and `which_arc_this_is` is private
+        // and reached from nowhere else.
+        //
+        // This used to say "no run carrying either exists". That is false and
+        // the geom lane demonstrated it: `EdgeRun` is `Deserialize` and
+        // `rcad_geom::walk` is public, so a run carrying one of those shapes can
+        // be handed in with nothing forged. What does not exist is one arriving
+        // here.
+        //
+        // **And the answer below is right because of that caller, not on its
+        // own.** A pair that really did cross in one ruling would be told
+        // `false`, which is the two-arc path, and one ruling is one arc.
         [
             Surface::Cone(_),
             Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),

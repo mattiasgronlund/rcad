@@ -543,7 +543,23 @@ impl<'m> FaceView<'m> {
     ///
     /// # Panics
     ///
-    /// If the face has no wires at all.
+    /// If the face has no wires at all, which is a bug in this crate rather
+    /// than something a caller can hand in.
+    ///
+    /// **That was not true until the shape check went on the door.** An empty
+    /// wire list holds no bad keys, so a file carrying one used to read back
+    /// cleanly and panic here, and nothing forces a caller through
+    /// [`Model::validate`](crate::Model::validate) first. Now
+    /// `Model::check_shape_is_possible` refuses those bytes —
+    /// `a_file_whose_shape_is_impossible_never_becomes_a_model` is the
+    /// demonstration — and the only other routes into the arenas are
+    /// `Model::from_parts`, which is `pub(crate)` and only reached through that
+    /// same check, `data_mut`, which is `#[cfg(test)]`, and the builders, which
+    /// end in `Model::check_touched_solid` and refuse a face with no wires
+    /// themselves.
+    ///
+    /// So handing back an `Option` would say a face with no wires is a state
+    /// worth carrying, at every call site, for ever. It is not one.
     #[must_use]
     pub fn outer_wire(self) -> WireView<'m> {
         self.wires().next().expect("a face has at least one wire")

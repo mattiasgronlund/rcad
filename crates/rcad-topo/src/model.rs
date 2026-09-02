@@ -515,6 +515,16 @@ impl Model {
     /// operations cost O(n²) and the suite stops being runnable long before the
     /// milestone that needs it (decisions.md §4.3).
     ///
+    /// **These run in debug builds only, and that is now a choice about cost
+    /// rather than a difference in what a caller sees.** It was the second
+    /// thing until [`Model::check_shape_is_possible`] closed the door: a file
+    /// holding a wire that does not close read back cleanly, and
+    /// [`Model::place_solid`] on it crashed a debug-built caller and said
+    /// nothing to a release-built one — the same bytes, two answers, decided by
+    /// how the caller happened to be compiled. A shape these can refuse cannot
+    /// be deserialized any more, so what is left for them to catch is a bug in
+    /// this crate, which is what a debug assertion is for.
+    ///
     /// # Panics
     ///
     /// If any of them fail. Breaking one of these is a bug in this crate, and a
@@ -552,30 +562,13 @@ impl Model {
             return;
         }
         let wire = self.data.wires.get(slot).expect("touched wire is gone");
-        assert!(
-            wire.steps.len() >= 3 || self.wire_closes_on_one_edge(wire),
-            "a closed wire needs at least three steps unless its one edge is \
-             closed already, this one has {}",
-            wire.steps.len()
-        );
-        let mut previous_end = None;
-        let mut first_start = None;
+        self.check_wire_closes(wire)
+            .unwrap_or_else(|broken| panic!("a touched wire is broken: {broken}"));
         for &step in &wire.steps {
-            let (start, end) = self.step_ends(step);
-            if let Some(previous) = previous_end {
-                assert!(start == previous, "a touched wire does not close");
-            } else {
-                first_start = Some(start);
-            }
-            previous_end = Some(end);
             if let WireStep::Along(coedge) = step {
                 self.check_touched_edge(self.data.coedges[coedge].edge);
             }
         }
-        assert!(
-            previous_end == first_start,
-            "a touched wire does not close back to where it started"
-        );
     }
 
     /// Where one step round a wire starts and where it leaves off.
@@ -608,16 +601,8 @@ impl Model {
                 && self.data.vertices.contains_key(edge.end),
             "a touched edge names a vertex that is gone"
         );
-        let coedges = self.index.coedges_of_edge(slot);
-        assert!(
-            coedges.len() == 2,
-            "a closed solid uses every edge exactly twice, this one {} times",
-            coedges.len()
-        );
-        assert!(
-            self.data.coedges[coedges[0]].orientation != self.data.coedges[coedges[1]].orientation,
-            "the two coedges of an edge must run opposite ways"
-        );
+        self.check_edge_is_walked_by_two_opposite_coedges(slot)
+            .unwrap_or_else(|broken| panic!("a touched edge is broken: {broken}"));
     }
 
     /// The check that runs in release builds too (decisions.md §4.3).
