@@ -1875,6 +1875,11 @@ fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> WhichArc
 /// to disagree about how many pieces there are. **Read off the surfaces and
 /// never off the chord**: a short enough arc has a chord that rounds to its own
 /// tangent, and this question has to stay one about the pair.
+///
+/// Every pair of the five surfaces there are is named below. The `_` left at the
+/// bottom is for a sixth [`Surface`] and nothing else, which is what §40 asks
+/// for — a sixth kind arriving should be a compile error here and not a silent
+/// `false`.
 fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
     match carried_by {
         [Surface::Plane(_), Surface::Plane(_)] => true,
@@ -1912,6 +1917,37 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
         | [
             Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_),
             Surface::Cone(_),
+        ] => false,
+        // **A ball's skin and a ring's skin are bounded, and a straight line is
+        // not, so no line lies on either** — which settles every remaining pair
+        // at once and without a case analysis. Whatever the partner is, the
+        // crossing lies on the ball or the ring, so it holds no line, so two
+        // corners on it leave two arcs and not one. `Torus::new` refuses a tube
+        // wider than its ring, so every ring here is a ring and not a pinched
+        // or self-crossing one, and that is what makes "bounded" true of the
+        // *stored* shape rather than only of the nice case.
+        //
+        // A plane and a ball is the pair that arrives: it reached
+        // `which_arc_this_is` twelve times in one run of this crate's suite,
+        // and was answered by the `_` arm that used to sit below here, unnamed
+        // and uncounted. `a_crossing_with_a_ball_or_a_ring_on_it_holds_no_line`
+        // is the demonstration rather than the paragraph.
+        [
+            Surface::Sphere(_),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_),
+        ]
+        | [Surface::Plane(_) | Surface::Cylinder(_), Surface::Sphere(_)] => false,
+        [
+            Surface::Torus(_),
+            Surface::Plane(_)
+            | Surface::Sphere(_)
+            | Surface::Cylinder(_)
+            | Surface::Cone(_)
+            | Surface::Torus(_),
+        ]
+        | [
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+            Surface::Torus(_),
         ] => false,
         _ => false,
     }
@@ -2030,7 +2066,108 @@ fn sides_of(
 
 #[cfg(test)]
 mod tests {
-    use super::{Point, Vector, the_half_space_both_ends_are_on};
+    use rcad_geom::{Axis, Cylinder, Plane, Sphere, Surface, Torus};
+
+    use super::{
+        Point, Vector, the_crossing_of_these_runs_straight, the_half_space_both_ends_are_on,
+    };
+
+    /// Why every pair with a ball or a ring on it is answered `false`.
+    ///
+    /// Three points on the crossing, each checked onto **both** surfaces with
+    /// exact arithmetic — every number here is a whole one or a 3-4-5 side, so
+    /// the equalities are the real ones and not near ones — and then shown not
+    /// to be collinear. A crossing three of whose points miss a line is not a
+    /// line, so two corners on it leave two arcs, which is what `false` says.
+    ///
+    /// This replaces a `_` arm that answered the same `false` without being
+    /// counted or named. A plane and a ball is the pair that actually arrives.
+    #[test]
+    fn a_crossing_with_a_ball_or_a_ring_on_it_holds_no_line() {
+        let up = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a direction with length");
+        let ball = Sphere::new(Point::new(0.0, 0.0, 0.0), 5.0).expect("a ball of radius five");
+        let flat =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("the plane through the ball's middle");
+        let other_ball =
+            Sphere::new(Point::new(8.0, 0.0, 0.0), 5.0).expect("a ball eight away, of radius five");
+        let pipe = Cylinder::new(up, 3.0).expect("a pipe of radius three");
+        let ring = Torus::new(up, 2.0, 1.0).expect("a ring of radius two round a tube of one");
+
+        let on_the_ball = |p: Point| (p - Point::new(0.0, 0.0, 0.0)).length_squared() == 25.0;
+        let on_the_other_ball = |p: Point| (p - Point::new(8.0, 0.0, 0.0)).length_squared() == 25.0;
+        let on_the_flat = |p: Point| p.z() == 0.0;
+        let on_the_pipe = |p: Point| p.x() * p.x() + p.y() * p.y() == 9.0;
+        let on_the_ring = |p: Point| {
+            let from_the_axis = (p.x() * p.x() + p.y() * p.y()).sqrt() - 2.0;
+            from_the_axis * from_the_axis + p.z() * p.z() == 1.0
+        };
+
+        let three_points_off_a_line =
+            |pair: [Surface; 2],
+             points: [Point; 3],
+             on_one: &dyn Fn(Point) -> bool,
+             on_other: &dyn Fn(Point) -> bool| {
+                for point in points {
+                    assert!(on_one(point), "{point:?} is not on the first surface");
+                    assert!(on_other(point), "{point:?} is not on the second surface");
+                }
+                let [first, second, third] = points;
+                assert_ne!(
+                    (second - first).cross(third - first),
+                    Vector::zero(),
+                    "three points of this crossing lie on a line"
+                );
+                for [one, other] in [pair, [pair[1], pair[0]]] {
+                    assert!(
+                        !the_crossing_of_these_runs_straight(&[one, other]),
+                        "a crossing with three points off a line was called straight"
+                    );
+                }
+            };
+
+        three_points_off_a_line(
+            [Surface::Plane(flat), Surface::Sphere(ball)],
+            [
+                Point::new(5.0, 0.0, 0.0),
+                Point::new(0.0, 5.0, 0.0),
+                Point::new(-5.0, 0.0, 0.0),
+            ],
+            &on_the_flat,
+            &on_the_ball,
+        );
+        three_points_off_a_line(
+            [Surface::Sphere(ball), Surface::Sphere(other_ball)],
+            [
+                Point::new(4.0, 3.0, 0.0),
+                Point::new(4.0, 0.0, 3.0),
+                Point::new(4.0, -3.0, 0.0),
+            ],
+            &on_the_ball,
+            &on_the_other_ball,
+        );
+        three_points_off_a_line(
+            [Surface::Sphere(ball), Surface::Cylinder(pipe)],
+            [
+                Point::new(3.0, 0.0, 4.0),
+                Point::new(0.0, 3.0, 4.0),
+                Point::new(-3.0, 0.0, 4.0),
+            ],
+            &on_the_ball,
+            &on_the_pipe,
+        );
+        three_points_off_a_line(
+            [Surface::Torus(ring), Surface::Plane(flat)],
+            [
+                Point::new(3.0, 0.0, 0.0),
+                Point::new(0.0, 3.0, 0.0),
+                Point::new(-3.0, 0.0, 0.0),
+            ],
+            &on_the_ring,
+            &on_the_flat,
+        );
+    }
 
     /// The whole of what
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] is left refusing,

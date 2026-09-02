@@ -2725,11 +2725,28 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 
 /// Whether the pair is a plane parallel to a pipe's axis, which crosses it in
 /// straight lines rather than in a closed curve.
+///
+/// The other twenty-three pairs are named rather than swept up, because `false`
+/// here is right for a reason that would not survive a sixth [`Surface`]: it is
+/// true of every pair that is *not one plane and one pipe*, which is a fact
+/// about the question and not about the shapes. A sixth kind should be a compile
+/// error here, and the `_` at the bottom is for that and nothing else (§40).
 fn a_plane_along_a_pipes_axis(one: &Surface, other: &Surface) -> bool {
     match (one, other) {
         (Surface::Plane(flat), Surface::Cylinder(pipe))
         | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
             flat.normal().dot(pipe.axis().direction()) == 0.0
+        }
+        (
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_),
+        )
+        | (
+            Surface::Cylinder(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        )
+        | (Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_), Surface::Cylinder(_)) => {
+            false
         }
         _ => false,
     }

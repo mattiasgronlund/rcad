@@ -1095,25 +1095,91 @@ mod tests {
         assert_eq!(model.solid(cube).signed_volume(), -volume);
     }
 
-    /// The half of `measure`'s old assert that is still an assert.
+    /// §20.1 settled that `measure` panics on a solid whose faces point
+    /// inwards, because the only way to get one was a bug in this crate.
+    /// `Model` is `Deserialize`, so there is a second way: these bytes read
+    /// back with nothing forged, and a caller's bytes may not panic.
     ///
-    /// That assert was doing two jobs: refusing an overflowed sum and refusing
-    /// a solid whose faces point inwards. Only the second is its own. Splitting
-    /// the first off into an `Err` must not take this one with it — a solid
-    /// enclosing negative space is corrupt, and a crash beats a corruption.
+    /// The number in the refusal is the one `validate` gives for the same
+    /// bytes, which is what makes the two answers comparable rather than
+    /// merely both being errors.
     #[test]
-    #[should_panic(expected = "a solid must enclose a positive amount of space")]
-    fn a_solid_whose_faces_point_inwards_still_panics_rather_than_measuring() {
-        let (mut model, cube) = a_cube();
+    fn measuring_a_solid_read_back_inside_out_is_refused_rather_than_crashing() {
+        let (mut model, _) = a_cube();
         for shell in model.data.shells.values_mut() {
             for used in &mut shell.faces {
                 used.orient = used.orient.reversed();
             }
         }
-        let _ = model.solid(cube).measure(
-            rcad_geom::Deflection::of(0.1).expect("a length a polyhedron ignores"),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+        let read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");
+
+        let refused = read_back
+            .solids()
+            .next()
+            .expect("the cube came back")
+            .measure(
+                rcad_geom::Deflection::of(0.1).expect("a length a polyhedron ignores"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a solid enclosing negative space has no measurement");
+
+        assert!(
+            matches!(
+                refused,
+                Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume == -8.0
+            ),
+            "measure gave {refused:?}"
+        );
+        let swept = read_back
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect_err("validate refuses the same bytes");
+        assert!(
+            matches!(
+                swept,
+                Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume == -8.0
+            ),
+            "validate gave {swept:?}"
+        );
+    }
+
+    /// The same for a solid with no fan, whose volume is summed over a mesh.
+    ///
+    /// A ball is the one shape the direction rule cannot catch — its only seam
+    /// runs pole to pole, so no closed edge is walked against its surface — and
+    /// the sum over its triangles is all that is left to notice it (§23.9).
+    #[test]
+    fn measuring_a_ball_read_back_inside_out_is_refused_rather_than_crashing() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(2.0, &rcad_geom::Isometry::identity())
+            .expect("a ball of radius two");
+        for shell in model.data.shells.values_mut() {
+            for used in &mut shell.faces {
+                used.orient = used.orient.reversed();
+            }
+        }
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+        let read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");
+
+        let refused = read_back
+            .solids()
+            .next()
+            .expect("the ball came back")
+            .measure(
+                rcad_geom::Deflection::of(0.1).expect("a length a ball can be meshed to"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a ball enclosing negative space has no measurement");
+
+        assert!(
+            matches!(
+                refused,
+                Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume < 0.0
+            ),
+            "measure gave {refused:?}"
         );
     }
 
