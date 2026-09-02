@@ -287,30 +287,38 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
-    /// A curved face is bounded by one curve that goes right round its surface —
-    /// **or by nothing at all** — and the surface does not pinch to a point for
-    /// the face to close on.
+    /// A curved face is bounded by one closed curve — **or by nothing at all** —
+    /// and there is no way to cut it open into a patch.
     ///
-    /// The second half is §38.1's. A face with no boundary once its seam is left
-    /// out is the whole of its surface, and the fuse writes one back out by
-    /// cutting it open along a seam of its own, which has to end somewhere: a
-    /// ball pinches at two poles and is answered, while a plane and a pipe run on
-    /// for ever, so a face on one of them with nothing trimming it is unbounded
-    /// and there is no answer to give.
+    /// Three shapes reach it and they are not one shape. All three have no seam
+    /// and no pole in the model: a [`WireStep::Pole`](crate::model::WireStep)
+    /// and a seam edge are what say those, and a fuse can invent neither from a
+    /// single closed edge, because a seam wants two corners at one longitude and
+    /// such a face has one corner in all.
     ///
-    /// Such a face has no seam and no pole in the model — a
-    /// [`WireStep::Pole`](crate::model::WireStep) and a seam edge are what say
-    /// those, and a fuse can invent neither, because a seam wants two corners at
-    /// a single longitude and this face has one corner in all. Where the surface
-    /// **does** pinch, the mesher cuts the face up to that pole four times and
-    /// there is nothing to refuse; a cap a plane takes off a ball is that, and it
-    /// is what §36.18 closed.
+    /// **Nothing bounding it, on a surface that never closes.** §38.1's: a face
+    /// with no boundary once its seam is left out is the whole of its surface,
+    /// and the fuse writes one back out by cutting it open along a seam of its
+    /// own, which has to end somewhere. A ball pinches at two poles and is
+    /// answered; a plane and a pipe run on for ever, so a face on one of them
+    /// with nothing trimming it is unbounded. **A limit** — no answer exists.
+    /// `Model` is `Deserialize` and `validate` is the untrusted import boundary
+    /// (§16.11), so it is a refusal and not an assert.
     ///
-    /// What is left is a face bounded that way on a surface with no pole, which
-    /// is half an endless tube round a cylinder — **not a face at all**, so this
-    /// is a model whose topology and geometry disagree rather than a gap in the
-    /// arithmetic. `Model` is `Deserialize` and `validate` is the untrusted
-    /// import boundary (§16.11), so it is a refusal and not an assert.
+    /// **One curve right round a surface that never closes**, which is half an
+    /// endless tube round a cylinder — not a face at all, so the model's
+    /// topology and its geometry disagree. **A limit** for the same reason.
+    ///
+    /// **One curve on a ball with the material outside it**, which is the whole
+    /// ball less a disc: a ball with a cap taken off, or either half of a
+    /// two-ball union. The answer plainly exists — `18π` for two balls of radius
+    /// two whose centres are two apart — and writing it wants the other half of
+    /// what §38.1 built, a *cut* closed face carrying a seam and two poles of
+    /// its own. Nothing builds that, so this one is **a gap**. The piece on the
+    /// other side of the very same curve is answered, cut into patches no more
+    /// than a quarter turn wide, and what tells the two apart is the sign of the
+    /// area the wire encloses in the surface's own two coordinates, because a
+    /// wire keeps its face's material on its left.
     #[error("a curved face is bounded by one curve right round it and has no seam to open at")]
     ACurvedFaceGoesRightRoundWithNoSeam {
         /// Which face.

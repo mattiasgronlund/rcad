@@ -556,8 +556,11 @@ impl BuildingAMesh {
     /// Cut a **cap** — one loop right round a surface that pinches to a point,
     /// with nothing else bounding it — into four patches with one loop each.
     ///
-    /// A ball cut by a plane leaves one, and it is about the simplest curved
-    /// boolean there is. Its patch in the sphere's own two coordinates is a
+    /// A ball cut by a plane square to its polar axis leaves one, and it is
+    /// about the simplest curved boolean there is. A plane at any other angle
+    /// leaves a loop that climbs in longitude and comes straight back, which
+    /// goes to [`BuildingAMesh::cut_in_two`] instead and needs no pole at all.
+    /// Its patch in the sphere's own two coordinates is a
     /// rectangle whose top edge is the pole and whose two sides are one meridian
     /// used twice, and **the model says neither**: a
     /// [`WireStep::Pole`](crate::model::WireStep) and a seam are what say them,
