@@ -5,7 +5,7 @@ use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::mesh::{Mesh, MeshTriangle};
 use crate::view::FaceView;
-use crate::{Error, FaceKey, Result, SolidView};
+use crate::{Error, FaceKey, Invalid, Result, SolidView};
 
 /// How much space a solid takes up, how much skin it has, where it balances,
 /// and how far each of those three could be out.
@@ -163,13 +163,22 @@ impl SolidView<'_> {
     /// [`Error::MoreMeshPointsThanASolidWillHold`], [`Error::CannotMeshAFace`]
     /// or [`Error::Undecidable`].
     ///
+    /// [`Invalid::VolumeIsNotPositive`] when the solid encloses a negative
+    /// amount of space, or none — the same refusal
+    /// [`Model::validate`](crate::Model::validate) gives for the same bytes,
+    /// with the same number in it.
+    ///
+    /// **This used to be an assert, and §20.1 settled it that way.** The
+    /// argument then was that the only route to an inside-out solid was a bug
+    /// in this crate, so a crash beat a corruption. `Model` is `Deserialize`,
+    /// which is a second route: a stranger's bytes can carry a solid whose
+    /// faces point inwards, `validate` already answers `Err` for them, and a
+    /// caller's bytes may not panic. `measuring_a_solid_read_back_inside_out_is_refused_rather_than_crashing`
+    /// is the demonstration.
+    ///
     /// # Panics
     ///
-    /// If the solid encloses a negative amount of space, or none. A closed
-    /// solid with its faces pointing outwards cannot, and
-    /// [`Model::validate`](crate::Model::validate) says so, which makes this a
-    /// broken model rather than bad input. For a curved solid, also everything
-    /// [`SolidView::mesh`] panics on, and for the same reason.
+    /// For a curved solid, everything [`SolidView::mesh`] panics on.
     pub fn measure(
         self,
         deflection: Deflection,
@@ -193,15 +202,12 @@ impl SolidView<'_> {
         let shifts = self.axis_shifts(hub);
         let (six_volumes, moment) = self.volume_and_moment(hub, shifts);
 
-        assert!(
-            six_volumes > 0.0,
-            "a solid must enclose a positive amount of space, this one gives {}",
-            six_volumes / 6.0
-        );
-
         let volume = shift(six_volumes / 6.0, shifts.iter().sum());
         if !volume.is_finite() {
             return Err(Error::VolumeTooLargeToMeasure);
+        }
+        if volume <= 0.0 {
+            return Err(Invalid::VolumeIsNotPositive { volume }.into());
         }
         let surface_area = self.surface_area();
         if !surface_area.is_finite() {
@@ -232,15 +238,12 @@ impl SolidView<'_> {
         let shifts = axis_shifts_over(mesh, hub);
         let (six_volumes, moment) = volume_and_moment_over(mesh, hub, shifts);
 
-        assert!(
-            six_volumes > 0.0,
-            "a solid must enclose a positive amount of space, this one gives {}",
-            six_volumes / 6.0
-        );
-
         let volume = shift(six_volumes / 6.0, shifts.iter().sum());
         if !volume.is_finite() {
             return Err(Error::VolumeTooLargeToMeasure);
+        }
+        if volume <= 0.0 {
+            return Err(Invalid::VolumeIsNotPositive { volume }.into());
         }
         let skin = self.skin_of(mesh);
         if !skin.area.is_finite() {
