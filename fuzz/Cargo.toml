@@ -40,3 +40,10 @@ path = "fuzz_targets/no_model_makes_the_writer_panic.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "two_solids_fused_by_a_stranger"
+path = "fuzz_targets/two_solids_fused_by_a_stranger.rs"
+test = false
+doc = false
+bench = false

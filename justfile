@@ -198,6 +198,18 @@ fuzz-writer duration="60":
         cargo +nightly fuzz run no_model_makes_the_writer_panic -- \
         -max_total_time={{duration}}
 
+# The fuse, over two arbitrary `Model`s (docs/decisions.md §17).
+#
+# Same nightly-compiler caveat as `fuzz` above. Decodes two `Model`s per run
+# and, for each that passes `Model::validate`, fuses a byte-chosen split of
+# its own solids against each other — see
+# `fuzz/fuzz_targets/two_solids_fused_by_a_stranger.rs` for why two `Model`s
+# and not one cross-fused pair.
+fuzz-fuse duration="60":
+    cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
+        cargo +nightly fuzz run two_solids_fused_by_a_stranger -- \
+        -max_total_time={{duration}}
+
 bench:
     cargo bench --workspace
 
