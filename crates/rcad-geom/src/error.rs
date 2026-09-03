@@ -459,27 +459,6 @@ pub enum Error {
     #[error("a torus crossing another curved surface is a space curve of degree up to eight")]
     ACrossingBetweenATorusAndAnotherCurvedSurface,
 
-    /// A straight line meets a torus in a quartic, and nothing here solves one.
-    ///
-    /// **Nothing raises this any more, and it is kept because it is public.** A
-    /// straight line meeting a torus is solved: `real_roots` isolates the
-    /// quartic's real roots off its derivative and settles every sign exactly,
-    /// [`MeetOfThree::At`](crate::MeetOfThree::At) carries up to four places, and
-    /// `where_a_line_meets_a_torus.rs` walks nought, one, two, three and four of
-    /// them. Of the three fixes this doc used to weigh, none was taken: (a)
-    /// Ferrari on interval coefficients was not needed, (b) widening
-    /// `MeetOfThree` was, and (c) — isolating the roots — is what happened, and
-    /// it did not turn an exact question into a search: the search picks the
-    /// brackets and exact arithmetic decides every sign inside them.
-    ///
-    /// What is left of the gap is narrower and is
-    /// [`Error::Undecidable`](Error::Undecidable) rather than this: a line that
-    /// touches the tube at a place no `f64` names cannot be told from one that
-    /// all but touches it, because neither has a sign to change. `real_roots`'s
-    /// module doc names that family of fixes.
-    #[error("a straight line meets this torus in a quartic, and nothing here solves one")]
-    WhereALineMeetsATorusIsAQuartic,
-
     /// A point cannot be worked out as close to a crossing as was asked for.
     ///
     /// Two knobs meet here and they do different jobs: the deflection says how

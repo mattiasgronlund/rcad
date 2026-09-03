@@ -106,9 +106,6 @@ pub enum Containment {
     /// every predicate was asked and none could prove an answer. Here the
     /// question was never put, and no policy makes it go away
     /// (`docs/decisions.md` §4.2).
-    ///
-    /// A **gap**, and `rcad_geom::Error::WhereALineMeetsATorusIsAQuartic` names
-    /// the same one from the other side and lists the family of fixes.
     CannotFireARayAtAFacesSurface {
         /// Which face.
         face: FaceKey,
