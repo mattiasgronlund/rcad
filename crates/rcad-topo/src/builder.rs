@@ -123,8 +123,9 @@ impl SolidBuilder {
     /// # Errors
     ///
     /// [`Error::ADraftHandleCameFromAnotherBuilder`] if either end was made
-    /// elsewhere, and [`Error::ADraftEdgeHasNoLength`] if a straight edge would
-    /// start and finish in the same place.
+    /// elsewhere, and [`Error::ADraftEdgeHasNoLength`] if the two ends are in
+    /// one place and the run does not say the edge comes back there — see
+    /// [`the_ends_are_the_whole_of_it`].
     pub fn add_edge(
         &mut self,
         start: DraftVertex,
@@ -134,7 +135,8 @@ impl SolidBuilder {
         let start = start.index_in(self.id)?;
         let end = end.index_in(self.id)?;
         let edge = self.edges.len();
-        if run == EdgeRun::Straight && (start == end || self.points[start] == self.points[end]) {
+        let both_ends_in_one_place = start == end || self.points[start] == self.points[end];
+        if both_ends_in_one_place && the_ends_are_the_whole_of_it(&run) {
             return Err(Error::ADraftEdgeHasNoLength { edge });
         }
         self.vertex_is_used[start] = true;
@@ -530,6 +532,29 @@ impl SolidBuilder {
             orient: Orientation::Forward,
         }]))
     }
+}
+
+/// Whether an edge's two ends are the whole of what says where it runs.
+///
+/// Only [`EdgeRun::Straight`] says that. A run that names a curve puts the edge
+/// where its ends do not, so two ends in one place is a closed loop and not an
+/// edge with no length.
+///
+/// **A kind of run this crate does not know is not taken for one of those.**
+/// [`EdgeRun`] is `#[non_exhaustive]` and lives in `rcad-geom`, so a fourth kind
+/// arrives here with no compile error at all, and reading it as "not straight"
+/// would walk an edge with its two ends in one place through the public door —
+/// where nothing downstream asks again, because
+/// [`Model::validate`](crate::Model::validate) reads the same list. Refusing it
+/// names the edge and is one word here to undo; letting it in is a zero-length
+/// edge inside a model somebody will go on to mesh.
+///
+/// `tests/a_fourth_kind_of_run.rs` is what says a fourth kind arrived.
+fn the_ends_are_the_whole_of_it(run: &EdgeRun) -> bool {
+    !matches!(
+        run,
+        EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::PartOfWhereItCrosses { .. }
+    )
 }
 
 impl Default for SolidBuilder {
