@@ -1654,24 +1654,46 @@ fn two_lines_told_apart(
 /// - **The parabola only has to be held**, so the offset is rounded *down* — the
 ///   largest `f64` at or below `ŵ·apex`. The half-space then contains the whole
 ///   closed nappe whatever the rounding did, because `ŵ·x − offset` is at least
-///   `ŵ·(x − apex)`, which is what being in the nappe means. This never refuses.
-/// - **The hyperbola's two branches have to be told apart**, so its offset has
-///   to be `ŵ·apex` *exactly*: rounded down, the half-space facing one way holds
-///   a thin slab of the other nappe as well, and a branch that reached into that
-///   slab would be held by both pickers. Where that dot product does not round
-///   exactly this refuses with
-///   [`Error::CannotNameWhichPieceOfACrossingThisIs`] rather than picking
-///   something it cannot prove, which is C1's rule 3 on
-///   [`two_lines_through_a_cones_apex`] over again and for the same reason.
+///   `ŵ·(x − apex)`, which is what being in the nappe means. The only ways this
+///   refuses are the two [`the_whole_of_one_of_a_cones_nappes`] documents: the
+///   apex's dot product with the axis leaving `f64`'s range, and the offset that
+///   comes out of it not being a finite number.
+/// - **The hyperbola's two branches have to be told apart**, so its offset is
+///   rounded *up* instead — the smallest `f64` at or above `ŵ·apex`. Rounding
+///   down would put the boundary below the apex, and then the half-space facing
+///   one way holds a thin slab of the other nappe as well; rounding up puts the
+///   boundary at or just above the apex, so **no point of the far branch is ever
+///   held** — every point of it has `ŵ·x` strictly below `ŵ·apex`. What rounding
+///   up costs is the *near* branch, which is now held only if the offset did not
+///   climb past it, and that is a comparison this can make rather than assume.
+///   See [`one_of_a_cones_nappes_and_none_of_the_other`].
 ///
-/// **Rounding down is not enough for the hyperbola and nothing else is
-/// cheaper.** The families weighed: scaling the picker by a power of two rounds
-/// nothing but does not make a sum representable that was not; rounding the
-/// offset *up* instead swaps which of the two properties is lost; and measuring
-/// the branch's own clearance from the apex plane and comparing it against the
-/// rounding is arithmetic on a vertex that is itself only known to a bound. The
-/// exact offset is the only one that makes the picker's boundary the nappe
-/// boundary, which is the thing being claimed.
+/// **Neither rounding is enough on its own, and what closes the gap is measuring
+/// the branch.** The families weighed: scaling the picker by a power of two
+/// rounds nothing but does not make a sum representable that was not; rounding
+/// down keeps the near branch and loses the far one; rounding up keeps the far
+/// one and puts the near one in question. The third family — round up and then
+/// *prove* the near branch clears the offset — is the one that works, because a
+/// hyperbola's branch does not come near the apex: its vertex stands off the
+/// apex plane by
+///
+/// ```text
+/// v  =  |n·a − d| · ‖w‖ / (slope · ‖n × w‖ + |n·w|)
+/// ```
+///
+/// which is a strictly positive length whenever the apex is off the plane, and
+/// **only a lower bound on it is needed**, which is exactly what an enclosure
+/// gives. That the vertex is "only known to a bound" is the reason this works
+/// and not the reason it cannot: the rounding to beat is one ulp of `ŵ·apex`,
+/// and `v` is a length of the model. Where the rounding does climb past the
+/// bound — an apex so far out that one ulp of `ŵ·apex` swallows the branch's
+/// clearance — this still refuses with
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] rather than picking
+/// something it cannot prove, which is C1's rule 3 on
+/// [`two_lines_through_a_cones_apex`] over again and for the same reason.
+/// `a_tilted_cone_whose_axis_dot_apex_does_not_round_exactly_still_names_its_two_branches`
+/// is the demonstration that the old exact-offset rule refused answers that
+/// exist.
 ///
 /// # The two shapes through the apex are straight, so they need no new curve
 ///
@@ -1744,7 +1766,7 @@ fn where_a_plane_and_a_cone_cross(
         (false, Decision::Zero) => {
             one_parabola_in_one_of_a_cones_nappes(flat, cone, standing_off, policy, log)
         }
-        (false, Decision::Neg) => the_two_branches_of_a_hyperbola(cone),
+        (false, Decision::Neg) => the_two_branches_of_a_hyperbola(flat, cone),
         (true, Decision::Pos) => Ok(SurfaceMeet::TouchAtOnePoint {
             at: PredicatePoint::from(apex),
         }),
@@ -1832,16 +1854,14 @@ fn one_parabola_in_one_of_a_cones_nappes(
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the flat surface
-/// through the apex square to the axis cannot be written down with its offset
-/// exact, which is what telling the two branches apart needs and what
-/// [`where_a_plane_and_a_cone_cross`] argues for.
-fn the_two_branches_of_a_hyperbola(cone: &Cone) -> Result<SurfaceMeet> {
+/// through the apex square to the axis cannot be written down with an offset
+/// that both branches clear, which is what telling the two branches apart needs
+/// and what [`where_a_plane_and_a_cone_cross`] argues for.
+fn the_two_branches_of_a_hyperbola(flat: &Plane, cone: &Cone) -> Result<SurfaceMeet> {
+    let clearance = how_far_a_hyperbolas_vertex_stands_off_the_apex_plane(flat, cone);
     let mut runs = Vec::new();
     for towards in [1.0, -1.0] {
-        let picker = the_whole_of_one_of_a_cones_nappes(cone, towards)?;
-        if !its_flat_surface_passes_exactly_through_the_apex(&picker, cone.apex()) {
-            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-        }
+        let picker = one_of_a_cones_nappes_and_none_of_the_other(cone, towards, clearance)?;
         runs.push(NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
             and: Surface::Cone(*cone),
             picked_by: smallvec![Picker::from(picker)],
@@ -1862,7 +1882,8 @@ fn the_two_branches_of_a_hyperbola(cone: &Cone) -> Result<SurfaceMeet> {
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the dot product of the
 /// axis direction with the apex leaves `f64`'s range, so there is no offset to
-/// round in either direction.
+/// round in either direction, and [`Error::NotFinite`] when the offset that
+/// comes out of it is not a finite number.
 fn the_whole_of_one_of_a_cones_nappes(cone: &Cone, towards: f64) -> Result<HalfSpace> {
     let facing = cone.axis().direction() * towards;
     let Some(exactly) = Exact::dot_of(facing.components(), cone.apex().coordinates()) else {
@@ -1877,18 +1898,93 @@ fn the_whole_of_one_of_a_cones_nappes(cone: &Cone, towards: f64) -> Result<HalfS
     HalfSpace::new(facing, offset)
 }
 
-/// Whether `picker`'s flat surface passes exactly through `apex`, so that it
-/// holds one nappe and rules out every point of the other.
+/// The half-space holding the whole of the nappe the axis points `towards` and
+/// **no point at all** of the other one, with its offset rounded **up**.
 ///
-/// The same question C1's third rule asks on
-/// [`two_lines_through_a_cones_apex`], and the same one exact dot product
-/// answers it.
-fn its_flat_surface_passes_exactly_through_the_apex(picker: &HalfSpace, apex: Point) -> bool {
-    matches!(
-        Exact::dot_of(picker.normal().components(), apex.coordinates())
-            .map(|reach| reach.minus(&Exact::of(picker.offset())).sign()),
-        Some(Decision::Zero)
+/// An offset at or above `ŵ·apex` rules out every point of the far nappe on its
+/// own, since each of those has `ŵ·x` strictly below `ŵ·apex`. What has to be
+/// checked is the near branch: it is held only while the offset stays at or
+/// below `ŵ·apex + clearance`, and `clearance` is a lower bound on how far that
+/// branch's own vertex stands off the apex plane. The comparison is exact — the
+/// rounded offset, the unrounded dot product and the bound go through the same
+/// expansion arithmetic — so nothing here compares a distance against a
+/// tolerance.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the dot product of the
+/// axis direction with the apex leaves `f64`'s range, and when rounding it up
+/// climbs past `clearance`, so the half-space could no longer be shown to hold
+/// the whole of the branch it is meant to name.
+fn one_of_a_cones_nappes_and_none_of_the_other(
+    cone: &Cone,
+    towards: f64,
+    clearance: f64,
+) -> Result<HalfSpace> {
+    let facing = cone.axis().direction() * towards;
+    let Some(exactly) = Exact::dot_of(facing.components(), cone.apex().coordinates()) else {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    };
+    let nearest = exactly.nearest_f64();
+    let offset = if exactly.minus(&Exact::of(nearest)).sign() == Decision::Pos {
+        nearest.next_up()
+    } else {
+        nearest
+    };
+    let climbed = Exact::of(offset).minus(&exactly);
+    if climbed.minus(&Exact::of(clearance)).sign() == Decision::Pos {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    }
+    HalfSpace::new(facing, offset)
+}
+
+/// A lower bound on how far the vertex of either branch of the hyperbola `flat`
+/// cuts `cone` in stands off the flat surface through the apex square to the
+/// axis, or zero when that bound cannot be worked out.
+///
+/// Put a point of the crossing at `apex + u·ŵ + r·q̂` with `q̂` square to the
+/// axis. The cone makes `r = slope·|u|`, and feeding that into the plane leaves
+/// `u·(n̂·ŵ ± slope·‖n̂ × ŵ‖·μ) = −(n̂·apex − d̂)` for some `μ` in `[−1, 1]`, so
+/// the smallest `|u|` either branch reaches is
+///
+/// ```text
+/// |n̂·apex − d̂| / (slope·‖n̂ × ŵ‖ + |n̂·ŵ|)
+/// ```
+///
+/// Written with the *stored* normal and axis direction rather than unit ones,
+/// the normal's own length cancels top and bottom and the axis direction's
+/// length multiplies through, which is the `‖w‖` below. Nothing is normalized
+/// here, for the reason the module note opens with.
+fn how_far_a_hyperbolas_vertex_stands_off_the_apex_plane(flat: &Plane, cone: &Cone) -> f64 {
+    let normal = flat.normal().components();
+    let along = cone.axis().direction().components();
+    let slope = cone.slope();
+
+    let stands_off =
+        dot_enclosing(exactly(normal), exactly(cone.apex().coordinates()))
+            - Interval::exactly(flat.offset());
+    if stands_off.contains_zero() {
+        return 0.0;
+    }
+    let how_far_off = Interval::exactly(stands_off.lo().abs().min(stands_off.hi().abs()));
+    let axis_length = root_enclosing(squared_length_enclosing(exactly(along)));
+    let up = dot_enclosing(exactly(normal), exactly(along));
+    let leaning = Interval::exactly(up.lo().abs().max(up.hi().abs()));
+    let across = root_enclosing(squared_length_enclosing(cross_enclosing(
+        exactly(normal),
+        exactly(along),
+    )));
+
+    let clearance = quotient_or_everything(
+        how_far_off * axis_length,
+        Interval::exactly(slope) * across + leaning,
     )
+    .lo();
+    if clearance > 0.0 && clearance.is_finite() {
+        clearance
+    } else {
+        0.0
+    }
 }
 
 /// The two rulings a plane through a cone's apex cuts it in, each picked out by

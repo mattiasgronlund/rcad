@@ -214,6 +214,98 @@ fn a_plane_steeper_than_a_cones_side_cuts_it_in_two_endless_bends_one_per_nappe(
     }
 }
 
+/// Row 4 again, on a cone whose apex is **not** a place the axis direction dots
+/// with exactly — which used to be refused outright.
+///
+/// The old rule wanted the picker's flat surface to pass through the apex
+/// exactly, so every hyperbola on a tilted cone standing off the origin was
+/// refused however far apart its two branches were. Rounding the offset *up*
+/// instead rules out the far branch on its own, and the near branch's vertex
+/// stands a whole length of the model off the apex plane, which is a bound this
+/// works out and compares against. Both facts are asserted below: the flat
+/// surface misses the apex — `Neg`, so the offset really is above `ŵ·apex` and
+/// the old rule really would have refused — and each picker still holds one
+/// whole branch and no point of the other.
+#[test]
+fn a_tilted_cone_whose_axis_dot_apex_does_not_round_exactly_still_names_its_two_branches() {
+    let apex = Point::new(0.1, 0.2, 0.3);
+    let cone = Cone::new(
+        Axis::new(apex, Vector::new(1.0, 2.0, 2.0)).expect("a direction with length"),
+        1.0,
+    )
+    .expect("a positive slope");
+
+    // Square to the axis exactly — `2·1 − 1·2 + 0·2` — so `n·w` is zero and
+    // `E = −slope²‖n × w‖²` is plainly negative: a hyperbola.
+    let facing = Vector::new(2.0, -1.0, 0.0)
+        .normalized()
+        .expect("a direction with length");
+    let steeper = a_plane(apex + facing, facing);
+
+    let axis = cone.axis().direction();
+    let sideways = axis.cross(facing);
+    // `apex + u·axis + |u|·(cos φ · facing + sin φ · sideways)` is on the cone
+    // of slope one, and it is on the plane when `|u| · cos φ` is one.
+    let on_a_branch = |up: f64, phi: f64| {
+        let reach = up / phi.cos();
+        let point = apex + axis * reach + (facing * phi.cos() + sideways * phi.sin()) * reach.abs();
+        rcad_predicates::Point::from(point.coordinates())
+    };
+    // A tilted cone's branch points are not `f64` triples, so they are checked
+    // as places rather than by an exact predicate: each sits on both surfaces to
+    // within the roundings that put it there.
+    for up in [1.0_f64, -1.0] {
+        for phi in [0.0_f64, 0.5, -0.9] {
+            let reach = up / phi.cos();
+            let point =
+                apex + axis * reach + (facing * phi.cos() + sideways * phi.sin()) * reach.abs();
+            let out = point - apex;
+            let along = out.dot(axis);
+            let round = (out - axis * along).length();
+            assert!(
+                (round - along.abs()).abs() < 1e-12,
+                "on the cone of slope one: {round} against {along}"
+            );
+            assert!(
+                (steeper.normal().dot(point - Point::origin()) - steeper.offset()).abs() < 1e-12,
+                "on the plane"
+            );
+        }
+    }
+
+    let SurfaceMeet::Curves(runs) = crossed(&steeper, &cone).expect("a hyperbola is named") else {
+        panic!("a plane steeper than a cone's side cuts two endless bends");
+    };
+    assert_eq!(runs.len(), 2);
+
+    let mut nappes_held = Vec::new();
+    for run in &runs {
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+            panic!("one of two branches is a piece of where the two surfaces cross");
+        };
+        assert_eq!(
+            picked_by[0].side_of_point(rcad_predicates::Point::from(apex.coordinates())),
+            Decision::Neg,
+            "the offset is above `ŵ·apex`, which is what the old exact rule refused"
+        );
+
+        let held: Vec<f64> = [1.0, -1.0]
+            .into_iter()
+            .filter(|up| {
+                [0.0, 0.5, -0.9, 1.5]
+                    .into_iter()
+                    .all(|phi| picked_by[0].side_of_point(on_a_branch(*up, phi)) != Decision::Neg)
+            })
+            .collect();
+        assert_eq!(held.len(), 1, "one run holds one whole branch, got {held:?}");
+        nappes_held.push(held[0]);
+    }
+    assert!(
+        nappes_held[0] != nappes_held[1],
+        "the two runs are the two different branches, got {nappes_held:?}"
+    );
+}
+
 /// Row 5: a plane through the apex and leaning less than the cone's side meets
 /// it at the apex and nowhere else, and the point is **exact**.
 #[test]
