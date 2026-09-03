@@ -591,6 +591,29 @@ impl Model {
         self.data.edges[self.data.coedges[only].edge].run == EdgeRun::RightRoundWhereItsFacesCross
     }
 
+    /// Whether this wire is two steps that go somewhere and come back a
+    /// different way, which is a face — an arc and the chord that closes it, or
+    /// two arcs bulging opposite ways.
+    ///
+    /// One edge walked out and back retraces the same curve, and two straight
+    /// edges between the same two corners are the same segment written twice.
+    /// Both sweep exactly no area.
+    ///
+    /// [`SolidBuilder`](crate::SolidBuilder)'s `two_steps_that_bound_a_face` is
+    /// the same rule asked of a description, and says why those two and not
+    /// every two-step wire that bounds nothing — two curved edges can name the
+    /// same curve too, and what says so is the pair of faces either side rather
+    /// than the run.
+    pub(crate) fn wire_of_two_steps_bounds_a_face(&self, wire: &WireData) -> bool {
+        let [WireStep::Along(one), WireStep::Along(other)] = wire.steps[..] else {
+            return false;
+        };
+        let (one, other) = (self.data.coedges[one].edge, self.data.coedges[other].edge);
+        one != other
+            && (self.data.edges[one].run != EdgeRun::Straight
+                || self.data.edges[other].run != EdgeRun::Straight)
+    }
+
     pub(crate) fn check_touched_edge(&self, slot: EdgeSlot) {
         if !cfg!(debug_assertions) {
             return;

@@ -83,11 +83,13 @@ pub enum Refusal {
     ///
     /// **Gap.** A wire standing still at one point is exactly
     /// [`DraftStep::Pole`](rcad_topo::DraftStep::Pole), which a ball's boundary
-    /// already uses twice — but a wire of *only* a pole has one step and
-    /// `SolidBuilder::add_wire` wants three or a closed edge, and
-    /// `Invalid::WireTooShort` wants the same. What closes it is a wire of one
-    /// pole meaning "this whole bound is that point", in the builder and in the
-    /// sweep together.
+    /// already uses twice — but a wire of *only* a pole is one step that is not
+    /// an edge, and neither door takes it. Both ask for three steps, or one edge
+    /// that closes already, or two different edges that are not both straight
+    /// (§44.11 item 3), and a lone pole is none of the three. What closes it is
+    /// a fourth arm on that rule — one pole meaning "this whole bound is that
+    /// point" — in `SolidBuilder::add_wire` and `Invalid::WireTooShort`
+    /// together, which is where the two-step arm went.
     #[error("{id} is a {keyword} and this reader walks EDGE_LOOPs (on face {face})")]
     ALoopThisReaderDoesNotWalk {
         /// The face it bounds.

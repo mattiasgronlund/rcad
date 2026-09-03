@@ -232,12 +232,27 @@ pub fn a_quarter_disc_plate(radius: f64, height: f64, unit: &str) -> String {
 /// The same plate cut down to the segment between the arc and its chord, so
 /// each flat face is bounded by two steps: an arc and a straight.
 ///
-/// **This is the smallest file that reaches the gap that refuses 59 of the 323
-/// KiCad files and 16 of the 44 NIST ones.** Two steps is not enough for
-/// `SolidBuilder::add_wire` or for `Invalid::WireTooShort`, and a face bounded
-/// by two curves is a real face — a lune on a sphere is the other one. The gap
-/// is the kernel's and was named before this reader existed (§42.5's lane, its
-/// §2, `ADraftWireIsTooShort`); what this adds is a file that reaches it.
+/// **Written for a gap that is now closed, and it still does not import.** Two
+/// steps used to be too few for `SolidBuilder::add_wire` and for
+/// `Invalid::WireTooShort` — the reason 59 of the 323 KiCad files and 16 of the
+/// 44 NIST ones stopped first — and both rules now take an arc and its chord
+/// (§44.11 item 3). What holds this file out is behind that: its arc is a
+/// **quarter** turn, `rcad_geom::walk` never steps an arc more than a quarter at
+/// a time nor fewer than once, and the sweep meshes as coarsely as a mesh gets,
+/// so the arc contributes no corner between its two ends and the flat face fans
+/// into two. `a_two_step_loop_is_no_longer_the_mappings_to_refuse` is where that
+/// is written down, with the repro it belongs to.
+///
+/// **A half turn gets past the mesh**, and that is the arm this module is
+/// missing: the far corner at `(−r, 0, z)` — which `a_pie` currently shares with
+/// the quarter-disc, where three collinear corners would break it — a chord face
+/// facing `[0, −1, 0]`, and a row in
+/// `every_file_this_kernel_wrote_itself_imports` measuring `πr²h/2`. That the
+/// *solid* holds up is demonstrated: `a_face_bounded_by_two_steps.rs` builds it
+/// face by face and sweeps it with nothing approximated. That the *file* holds
+/// up is not, because nobody has written the file — the reader sits between them
+/// and this module is where that would be settled. Until then nothing proves the
+/// two-step rule from bytes.
 pub fn a_plate_bounded_by_an_arc_and_its_chord(radius: f64, height: f64, unit: &str) -> String {
     a_pie(radius, height, unit, false)
 }
@@ -308,9 +323,13 @@ fn a_pie(radius: f64, height: f64, unit: &str, through_the_middle: bool) -> Stri
                     vec![(2, true), (3, true)],
                     Face::Flat([0.0, 0.0, 1.0], [0.0, 0.0, height]),
                 ),
+                // The segment's material is the arc side, `x + y >= r`, so out
+                // of it is *towards* the axis. This read `[1, 1, 0]` until the
+                // two-step rule let the file get far enough to be judged, and
+                // then the sweep said `OuterWireWindsAgainstTheNormal`.
                 (
                     vec![(4, true), (3, false), (5, false), (1, true)],
-                    Face::Flat([1.0, 1.0, 0.0], [radius, 0.0, 0.0]),
+                    Face::Flat([-1.0, -1.0, 0.0], [radius, 0.0, 0.0]),
                 ),
                 (
                     vec![(0, true), (5, true), (2, false), (4, false)],

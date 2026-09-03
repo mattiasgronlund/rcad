@@ -333,7 +333,10 @@ impl SolidBuilder {
     /// surface has pinched to a point and the boundary is standing on it. So
     /// closure is one rule rather than two.
     fn check_the_steps_close(&self, steps: &[Step]) -> Result<()> {
-        if steps.len() < 3 && !self.closes_on_one_edge(steps) {
+        if steps.len() < 3
+            && !self.closes_on_one_edge(steps)
+            && !self.two_steps_that_bound_a_face(steps)
+        {
             return Err(Error::ADraftWireIsTooShort { steps: steps.len() });
         }
         let mut previous_end = None;
@@ -359,6 +362,42 @@ impl SolidBuilder {
             return false;
         };
         self.edges[self.coedges[only].edge].run == EdgeRun::RightRoundWhereItsFacesCross
+    }
+
+    /// Whether these steps are two that go somewhere and come back a different
+    /// way, which is a face — an arc and the chord that closes it, or two arcs
+    /// bulging opposite ways.
+    ///
+    /// The rule is about the edges rather than about the count. **One edge
+    /// walked out and back** retraces the same curve, whatever that curve is.
+    /// **Two straight edges between the same two corners** are the same segment
+    /// written twice, since a straight edge is the whole of what its two ends
+    /// say (see [`EdgeRun::Straight`]). Both sweep exactly no area.
+    ///
+    /// **Those are the two this can see, and not every two-step wire that
+    /// bounds nothing.** Two *curved* edges can name the same curve as well,
+    /// and equal [`EdgeRun`]s do not say so: a run names a piece of where the
+    /// faces **either side** of the edge cross, so the same run between
+    /// different pairs of faces is a different curve — the segment plate's arc
+    /// and its chord carry equal runs and are a circle and a straight line. A
+    /// wire is described before the face it trims, so the pair is not known
+    /// here at all. Two edges that really do name the same curve are refused by
+    /// the sweep's mesh instead, as `CornersCoincide`; that is not new to two
+    /// steps, and a three-step wire holding such a pair is refused there too.
+    ///
+    /// `docs/decisions.md` §44.11 item 3. This and
+    /// [`Model::wire_of_two_steps_bounds_a_face`](crate::Model) are the same
+    /// rule at the kernel's two doors, for the reason
+    /// [`Model::check_wire_closes`](crate::Model) gives: one audience wants a
+    /// refusal and the other a crash, and that is no reason for two answers.
+    fn two_steps_that_bound_a_face(&self, steps: &[Step]) -> bool {
+        let [Step::Along(one), Step::Along(other)] = steps[..] else {
+            return false;
+        };
+        let (one, other) = (self.coedges[one].edge, self.coedges[other].edge);
+        one != other
+            && (self.edges[one].run != EdgeRun::Straight
+                || self.edges[other].run != EdgeRun::Straight)
     }
 
     /// Where one step round a wire starts and where it leaves off.
