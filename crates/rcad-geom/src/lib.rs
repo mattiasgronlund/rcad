@@ -117,8 +117,8 @@ pub use crate::segment::Segment;
 pub use crate::sphere::{SIDE_OF_SPHERE, Sphere};
 pub use crate::surface::Surface;
 pub use crate::three_surfaces::{
-    MeetOfThree, WHERE_A_LINE_MEETS_A_SURFACE, WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces,
-    where_a_line_meets_a_surface,
+    MeetOfThree, MeetsAt, WHERE_A_LINE_MEETS_A_SURFACE, WHERE_THREE_SURFACES_MEET,
+    WhereALineMeetsIt, meet_of_three_surfaces, where_a_line_meets_a_surface,
 };
 pub use crate::torus::{SIDE_OF_TORUS, Torus};
 pub use crate::walk::{

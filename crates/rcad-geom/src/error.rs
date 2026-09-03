@@ -642,6 +642,29 @@ pub enum Error {
     )]
     WhereThreeSurfacesMeetNeedsTwoOfThemFlat,
 
+    /// A line that is only known as a box, asked where it meets a torus.
+    ///
+    /// Where a line meets a quadric is read off a discriminant, and a
+    /// discriminant that is a box still says which way it points whenever the
+    /// box stays clear of zero. A torus is a **quartic**, and its roots are not
+    /// read off anything: they are found by evaluating the quartic's sign at
+    /// places along the line and narrowing where the sign changes
+    /// ([`real_roots`](crate::real_roots)). A coefficient that is a box has no
+    /// sign to evaluate anywhere near a root, so the search has nothing to
+    /// bisect on.
+    ///
+    /// A **gap** and not a limit: the roots exist, and where the line's own six
+    /// numbers each name an `f64` — which is what a corner on the lattice comes
+    /// to — they are found. The family of fixes is (a) bisecting on interval
+    /// signs and handing back the stretches where the sign is undecided, which
+    /// is [`MeetsAt::MaybeATouch`](crate::MeetsAt::MaybeATouch)'s shape applied
+    /// to a whole bracket rather than to a turning point, and is a lane;
+    /// (b) exact rational line data, which wants an arithmetic this kernel does
+    /// not have; (c) narrowing the box first, which is not this question's to
+    /// do — the box is what the caller knows.
+    #[error("where a line meets a torus is found by exact signs, and this line is only a box")]
+    WhereALineMeetsARingNeedsTheLineExactly,
+
     /// A predicate refused the input it was handed — three planes with no
     /// single meeting point, for instance.
     #[error(transparent)]
