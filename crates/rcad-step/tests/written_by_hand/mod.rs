@@ -220,11 +220,23 @@ pub fn real(number: f64) -> String {
 /// `x² + y² − r²` cancels to nothing, and the arcs' plane is `z = const` with
 /// its corners exactly on it.
 ///
-/// A quarter and not a half, and the reason is a finding rather than a taste: a
-/// half-disc's three corners are **collinear**, and `check_flat_face` reads a
-/// wire's winding off its corners alone, so the area a half-disc's arc encloses
-/// is invisible to it and the face is refused as winding against its own normal.
-/// A quarter's three corners make a triangle.
+/// **A quarter and not a half, and the reason it used to give is gone.** It read
+/// that a half-disc's three corners — the apex and the two on the rim — are
+/// collinear, that `check_flat_face` reads a wire's winding off its corners
+/// alone, and so that the area a half-disc's arc encloses is invisible and the
+/// face is refused as winding against its own normal, while a quarter's three
+/// corners make a triangle. The middle step of that is no longer true:
+/// `rcad-topo`'s `winding_of` winds the corners **plus the points
+/// `rcad_geom::walk` puts along every curved step**, which is the same boundary
+/// the mesher draws, so an arc's area is not invisible to it and collinear
+/// corners are not a refusal. `a_file_bounded_by_two_half_circles.rs` is a whole
+/// file that turns on exactly that.
+///
+/// So nothing about the winding forces a quarter here now. It stays one because
+/// `πr²h/4` is what `a_quarter_disc_plate_written_by_hand_measures_what_its_numbers_say`
+/// checks against and because `a_pie` shares its far corner at `(0, r, z)`
+/// between the two shapes it writes — a half-turn arm wants a corner of its own,
+/// which is the arm the module note below is still missing.
 pub fn a_quarter_disc_plate(radius: f64, height: f64, unit: &str) -> String {
     a_pie(radius, height, unit, true)
 }
@@ -232,27 +244,25 @@ pub fn a_quarter_disc_plate(radius: f64, height: f64, unit: &str) -> String {
 /// The same plate cut down to the segment between the arc and its chord, so
 /// each flat face is bounded by two steps: an arc and a straight.
 ///
-/// **Written for a gap that is now closed, and it still does not import.** Two
-/// steps used to be too few for `SolidBuilder::add_wire` and for
-/// `Invalid::WireTooShort` — the reason 59 of the 323 KiCad files and 16 of the
-/// 44 NIST ones stopped first — and both rules now take an arc and its chord
-/// (§44.11 item 3). What holds this file out is behind that: its arc is a
-/// **quarter** turn, `rcad_geom::walk` never steps an arc more than a quarter at
-/// a time nor fewer than once, and the sweep meshes as coarsely as a mesh gets,
-/// so the arc contributes no corner between its two ends and the flat face fans
-/// into two. `a_two_step_loop_is_no_longer_the_mappings_to_refuse` is where that
-/// is written down, with the repro it belongs to.
+/// **Written for a gap that is now closed, and it imports.** Two steps used to
+/// be too few for `SolidBuilder::add_wire` and for `Invalid::WireTooShort` — the
+/// reason 59 of the 323 KiCad files and 16 of the 44 NIST ones stopped first —
+/// and both rules now take an arc and its chord (§44.11 item 3). Behind that sat
+/// a second thing: this file's arc is a **quarter** turn, `rcad_geom::walk`
+/// never steps an arc more than a quarter at a time and used to allow a floor of
+/// one step, and the sweep meshes as coarsely as a mesh gets, so the arc
+/// contributed no corner between its two ends and the flat face fanned into two.
+/// The floor is now `FEWEST_STEPS_THAT_SHOW_A_BEND`, which is two, and this file
+/// goes all the way through. **So this is the shape that proves the two-step
+/// rule from bytes**, which is what nothing did before.
 ///
-/// **A half turn gets past the mesh**, and that is the arm this module is
-/// missing: the far corner at `(−r, 0, z)` — which `a_pie` currently shares with
-/// the quarter-disc, where three collinear corners would break it — a chord face
-/// facing `[0, −1, 0]`, and a row in
+/// What is still missing is the *half*-turn arm — the far corner at
+/// `(−r, 0, z)`, which `a_pie` currently shares with the quarter-disc, a chord
+/// face facing `[0, −1, 0]`, and a row in
 /// `every_file_this_kernel_wrote_itself_imports` measuring `πr²h/2`. That the
-/// *solid* holds up is demonstrated: `a_face_bounded_by_two_steps.rs` builds it
-/// face by face and sweeps it with nothing approximated. That the *file* holds
-/// up is not, because nobody has written the file — the reader sits between them
-/// and this module is where that would be settled. Until then nothing proves the
-/// two-step rule from bytes.
+/// half-turn *solid* holds up is demonstrated already:
+/// `a_face_bounded_by_two_steps.rs` builds it face by face and sweeps it with
+/// nothing approximated.
 pub fn a_plate_bounded_by_an_arc_and_its_chord(radius: f64, height: f64, unit: &str) -> String {
     a_pie(radius, height, unit, false)
 }
