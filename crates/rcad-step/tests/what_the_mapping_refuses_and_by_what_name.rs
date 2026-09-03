@@ -301,17 +301,60 @@ fn geometry_that_is_not_a_working_shape_is_refused_by_name() {
     ));
 }
 
+/// A two-step `EDGE_LOOP` is no longer the mapping's to refuse, and what stops
+/// this file now is a mesh that cannot be drawn rather than a loop that cannot
+/// be held.
+///
+/// **What changed.** `SolidBuilder::add_wire` and `Model::validate` both wanted
+/// three steps, so this file died at entity 740 with
+/// `ADraftWireIsTooShort { steps: 2 }` and the mapping named the loop. Both now
+/// take two different edges that are not both straight, so the loop goes
+/// through, four faces are built, and the refusal comes back from the sweep with
+/// the whole solid's name on it.
+///
+/// **This test is green because of a defect, and here is the defect by name.**
+/// [`a_plate_bounded_by_an_arc_and_its_chord`] writes a **quarter** arc, and
+/// `rcad_geom::walk` steps an arc a quarter turn at a time and never takes fewer
+/// than one step — so at `as_coarse_as_a_mesh_gets`, which is what the sweep
+/// meshes with, that arc gets no point between its ends and the flat face fans
+/// into two corners `rcad-mesh` will not take as a loop. The repro is the
+/// ignored `a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh`
+/// in `rcad-topo/tests/a_face_bounded_by_two_steps.rs`, and closing it — a floor
+/// on how coarsely a curved boundary may be walked — changes this test again.
+///
+/// **Letting the loop through found a second thing, and it was in front rather
+/// than behind.** The file's chord face read
+/// `Face::Flat([1.0, 1.0, 0.0], [radius, 0.0, 0.0])`, and that module documents
+/// and emits the first vector as the **outward** normal with `same_sense` true.
+/// A segment's material is the arc side, `x + y >= r`, so out of it is towards
+/// the axis and the file had the normal back to front. Nothing had caught it
+/// because no face of this file had ever been oriented — the old rule stopped it
+/// at the loop, three entities earlier. With two steps allowed, the sweep said
+/// `OuterWireWindsAgainstTheNormal` instead, which is how it was found; it is
+/// fixed in `written_by_hand`, and that fix is what this test's refusal moving
+/// to the mesh demonstrates.
+///
+/// The half-turn version of this shape does mesh:
+/// `a_face_bounded_by_two_steps.rs` builds it face by face and sweeps it. What
+/// is missing is that shape **as a file**, so something proves the rule from
+/// bytes — a third arm on `written_by_hand::a_pie` with its own chord normal,
+/// and a row in this crate's control. That is a lane rather than a line.
 #[test]
-fn a_face_bounded_by_an_arc_and_its_chord_is_refused_by_the_loop_the_file_wrote() {
+fn a_two_step_loop_is_no_longer_the_mappings_to_refuse() {
     let segment = a_plate_bounded_by_an_arc_and_its_chord(2.0, 4.0, ".MILLI.");
-    let Refusal::ThisEntityOfTheSolidWasRefused { solid, entity, why } = refusal(&segment) else {
-        panic!("two steps do not close round anything this kernel can hold");
+    let Refusal::TheSolidTheFileDescribesIsNotOne { solid, why } = refusal(&segment) else {
+        panic!("the loop is held now, so the refusal is the whole solid's");
     };
     assert_eq!(solid, EntityId(801));
-    assert_eq!(entity, EntityId(740), "the EDGE_LOOP the file wrote");
-    assert!(
-        matches!(*why, rcad_topo::Error::ADraftWireIsTooShort { steps: 2 }),
-        "got {why:?}"
+    let rcad_topo::Error::AWireDoesNotFanIntoALoopToMesh { why: fanned, .. } = &*why else {
+        panic!("the sweep should get as far as meshing the plate, and said {why:?}");
+    };
+    // `rcad-mesh` is not a dependency here, so the count is read off the text
+    // rather than off `NotALoop::TooFewCorners`.
+    assert_eq!(
+        fanned.to_string(),
+        "a loop needs at least three corners, and this has 2",
+        "the quarter arc puts no corner between its two ends"
     );
 }
 

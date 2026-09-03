@@ -97,10 +97,14 @@ pub enum CannotWrite {
     /// **Gap.** An `EDGE_LOOP` is a list of `ORIENTED_EDGE`s and a pole is not
     /// one; STEP says it with a `VERTEX_LOOP`, which
     /// [`Refusal::ALoopThisReaderDoesNotWalk`](crate::Refusal::ALoopThisReaderDoesNotWalk)
-    /// refuses to read because a wire of only a pole has one step and both
-    /// `SolidBuilder::add_wire` and `Invalid::WireTooShort` want three. Writing
-    /// a file this kernel will not read back is not a round trip. What closes
-    /// it is the same wire-length gap, in `rcad-topo`.
+    /// refuses to read, because a wire of only a pole is one step that is not an
+    /// edge and neither `SolidBuilder::add_wire` nor `Invalid::WireTooShort`
+    /// takes it: both ask for three steps, or one edge that closes already, or
+    /// two different edges that are not both straight. Writing a file this
+    /// kernel will not read back is not a round trip. What closes it is a fourth
+    /// arm on that same rule, in `rcad-topo`; the two-step arm landed there with
+    /// §44.11 item 3 and this one has its own consumer waiting — four NIST files
+    /// stop first at a `VERTEX_LOOP`.
     #[error("a wire in this model stands still at a pole, and an EDGE_LOOP has no step for that")]
     AWireThatStandsStillAtAPole,
 

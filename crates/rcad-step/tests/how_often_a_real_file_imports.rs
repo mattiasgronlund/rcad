@@ -477,7 +477,7 @@ fn how_often_a_real_file_imports() {
     assert_pinned_kicad_imports(&kicad_imports);
 }
 
-/// The 96 KiCad files that import today, out of 323.
+/// The 97 KiCad files that import today, out of 323.
 ///
 /// **Pinned by name, not by rate** (§44.10): a rate cannot tell a reader which
 /// file moved. This list moves only by an edit to this constant, made by
@@ -501,6 +501,19 @@ fn how_often_a_real_file_imports() {
 /// that corner stopped *first*, so a file freed of it may meet a second blocker
 /// — 29 `B_SPLINE_CURVE_WITH_KNOTS` and 13 `B_SPLINE_SURFACE_WITH_KNOTS` are
 /// waiting in this same corpus.
+///
+/// **The two-step wire lane then moved it by one, and that is a correction to
+/// §44.3 rather than a disappointing result.** §44.3 priced *a face bounded by
+/// an arc and its chord is a face* at 75 files — the 59 KiCad and 16 NIST whose
+/// **first** refusal was a two-step wire. Lifting it emptied that row of both
+/// tables, and exactly one file came all the way through:
+/// `LED_SideEmitter_Rectangular_W4.5mm_H1.6mm`. The other 74 met their second
+/// blocker the same run — *a corner is not on the curved face the file says it
+/// is on* went 103 to 160 here and 5 to 11 in the NIST table, and
+/// `B_SPLINE_CURVE_WITH_KNOTS` went 29 to 30 and 15 to 25. So §44.11 item 5's
+/// warning — a count of files a blocker stops **first** is an upper bound on
+/// what removing it is worth, never a projection — governs the two-step item
+/// exactly as it governs the curved one, and 75 was that upper bound.
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -523,6 +536,7 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z3.0mm.step",
     "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z5.0mm.step",
     "LED_Rectangular_W5.0mm_H5.0mm.step",
+    "LED_SideEmitter_Rectangular_W4.5mm_H1.6mm.step",
     "PinHeader_1x03_P2.54mm_Horizontal.step",
     "PinHeader_1x04_P2.54mm_Vertical.step",
     "PinHeader_1x06_P2.54mm_Vertical_SMD_Pin1Right.step",
