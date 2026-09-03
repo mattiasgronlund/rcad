@@ -63,10 +63,21 @@
 //! closes, an edge is walked twice the opposite ways round. What *belongs* in
 //! that list is settled: **no [`Policy`](rcad_predicates::Policy), no
 //! arithmetic beyond `is_finite`, and no sweep over pairs**
-//! (`docs/decisions.md` §44.5). The list is not yet everything the rule
-//! reaches — counting how many times a face is used qualifies and is not there
-//! — so `Model::check_shape_is_possible` names what is still owed. Everything
-//! that needs a policy or a predicate stays in [`Model::validate`].
+//! (`docs/decisions.md` §44.5). Everything that needs a policy or a predicate
+//! stays in [`Model::validate`].
+//!
+//! **And a file where two owners claim one entity is refused before the index
+//! is built**, which is the one door check asked earlier than the rest rather
+//! than beside them. Counting owners passes the rule above — one pass per
+//! level and an integer per entity — and `Model::from_parts` derives the
+//! upward links from the downward ones, so a wire named by two faces reaches
+//! `face_of_wire.insert` twice and the last write used to win. The model that
+//! came back said six faces with one wire each while its index handed one of
+//! those wires to the wrong face. Refusing after that would still keep the
+//! model from escaping; refusing before it means the index builder never has
+//! two candidates to choose between and can say so with an `assert!`. So
+//! `ModelData::check_nothing_is_used_more_than_once` runs beside
+//! `check_keys_resolve`, before there is a `Model` at all.
 //!
 //! **And a number a constructor would refuse is refused here too, by the type
 //! that holds it.** Every surface, [`Scale`](rcad_geom::Scale),
@@ -131,6 +142,10 @@ impl<'de> Deserialize<'de> for Model {
         payload
             .data
             .check_keys_resolve()
+            .map_err(D::Error::custom)?;
+        payload
+            .data
+            .check_nothing_is_used_more_than_once()
             .map_err(D::Error::custom)?;
         let model = Model::from_parts(payload.data);
         model.check_shape_is_possible().map_err(D::Error::custom)?;
@@ -276,6 +291,91 @@ mod tests {
             .is_err(),
             "an edge walked by three coedges read back, and Model::place_solid \
              asserts there are two"
+        );
+    }
+
+    /// **A file where two faces name the same wire never becomes a `Model`.**
+    ///
+    /// Every other check at the door passes: the wire slot resolves, both faces
+    /// have a wire, every wire still closes and every edge is still walked by
+    /// two coedges. The model that came back looked entirely ordinary — six
+    /// faces, one wire each — while `Index::rebuilt_from` had given the shared
+    /// wire to whichever face was written last, so the index and the data
+    /// disagreed about who owns it.
+    ///
+    /// `Model::validate` catches it, and `Deserialize` does not call
+    /// `validate`.
+    #[test]
+    fn a_model_naming_one_wire_from_two_faces_never_becomes_a_model() {
+        assert!(
+            a_cube_broken_by(|model| {
+                let mut faces = model.data().faces.keys();
+                let first = faces.next().expect("a cube has faces");
+                let second = faces.next().expect("a cube has six of them");
+                let shared = model.data().faces[first].wires[0];
+                model.data_mut().faces[second].wires[0] = shared;
+            })
+            .is_err(),
+            "a wire bounding two faces read back, and the index it built \
+             disagreed with the data it was built from"
+        );
+    }
+
+    /// **And neither does one where two wires walk the same coedge.**
+    ///
+    /// The other single-valued upward link, broken the same way: the second
+    /// wire is handed a copy of the first wire's steps, so it still closes and
+    /// every edge is still walked by exactly two coedges. What has no answer is
+    /// which wire each of those four coedges belongs to.
+    #[test]
+    fn a_model_naming_one_coedge_from_two_wires_never_becomes_a_model() {
+        assert!(
+            a_cube_broken_by(|model| {
+                let mut wires = model.data().wires.keys();
+                let first = wires.next().expect("a cube has wires");
+                let second = wires.next().expect("a cube has six of them");
+                let steps = model.data().wires[first].steps.clone();
+                model.data_mut().wires[second].steps = steps;
+            })
+            .is_err(),
+            "a coedge walked by two wires read back, and the index it built \
+             disagreed with the data it was built from"
+        );
+    }
+
+    /// **A face used twice by a shell is refused at the door too.**
+    ///
+    /// `docs/decisions.md` §43.8 item 10: this deserialized and then crashed
+    /// the fuse, because `Model::fuse` documents a panic on an input
+    /// `Model::validate` rejects and nothing forced a caller through
+    /// `validate`. No upward link is derived from a shell's face list, so
+    /// nothing was silently overwritten here — what was missing is only the
+    /// count.
+    #[test]
+    fn a_model_naming_one_face_from_two_shells_never_becomes_a_model() {
+        assert!(
+            a_cube_broken_by(|model| {
+                let shell = model.data().shells.keys().next().expect("a cube's skin");
+                let used = model.data().shells[shell].faces[0];
+                model.data_mut().shells[shell].faces.push(used);
+            })
+            .is_err(),
+            "a face used twice by a shell read back, and the fuse crashes on one"
+        );
+    }
+
+    /// **And so is a shell used twice by a solid**, which is the same shape one
+    /// level up and the level `Model::validate` has always counted.
+    #[test]
+    fn a_model_naming_one_shell_from_two_solids_never_becomes_a_model() {
+        assert!(
+            a_cube_broken_by(|model| {
+                let solid = model.data().solids.keys().next().expect("a cube");
+                let used = model.data().solids[solid].shells[0];
+                model.data_mut().solids[solid].shells.push(used);
+            })
+            .is_err(),
+            "a shell used twice by a solid read back"
         );
     }
 

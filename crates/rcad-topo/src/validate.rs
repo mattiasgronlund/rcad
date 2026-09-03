@@ -135,15 +135,14 @@ impl Model {
     /// coordinate that is not a number. `check_vertices` has always caught it,
     /// and `check_vertices` is in the sweep a file's own read never runs.
     ///
-    /// **The rule reaches further than this list does, and the next one it
-    /// reaches is [`Invalid::UsedMoreThanOnce`].** Counting how many shells
-    /// name a face is one pass and an integer per face — no policy, no
-    /// arithmetic, and nothing that looks at a pair — so by the rule it belongs
-    /// here, and it is not here yet. What it costs while it is missing is not
-    /// only that `Model::validate` refuses later: `Index::rebuilt_from` resolves
-    /// a wire named by two faces with `insert`, so the index that comes out of
-    /// the door says the wire belongs to whichever face was written last, and
-    /// the model disagrees with itself before anything asks it a question.
+    /// **The rule also reaches [`Invalid::UsedMoreThanOnce`], and that check is
+    /// asked one step earlier than this one.** Counting how many shells name a
+    /// face is one pass and an integer per face — no policy, no arithmetic, and
+    /// nothing that looks at a pair — so it belongs at the door; it is not in
+    /// *this* function because what it protects is the index, and
+    /// [`Model::from_parts`] builds the index before there is a `Model` to ask
+    /// this of. [`ModelData::check_nothing_is_used_more_than_once`] runs beside
+    /// `check_keys_resolve` instead, and says why there.
     ///
     /// # Errors
     ///
