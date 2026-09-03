@@ -538,18 +538,47 @@ impl Model {
     /// coedge's own turn is read **unturned** for the same reason: it is what the
     /// fuse stored after turning the wire round, not what a view composes back.
     ///
+    /// # A run kind this does not know is refused, not passed over
+    ///
+    /// Which edges this asks about used to be `run != RightRoundWhereItsFacesCross`,
+    /// which reads a fourth kind of [`EdgeRun`] as an open one and asks nothing
+    /// further. `tests/a_fourth_kind_of_run.rs` names that exact shape — a solid
+    /// that came back sound with nobody having looked at it — and three other
+    /// sites were closed against it before this one. The three kinds are named
+    /// now and anything else is [`Error::ACrossingThisCannotBeOrderedAlong`],
+    /// the name the fuse already gives a run it cannot follow.
+    ///
+    /// **[`EdgeView::is_closed`] still asks it the old way**, and it is a bare
+    /// `==` with no wildcard for `just check-wildcards` to count, so the day the
+    /// enum grows nothing warns about it. Six production sites read it —
+    /// `fuse/mod.rs`, `mesh.rs`, `holds.rs`, `view.rs`'s own `segment`,
+    /// `rcad-step`'s writer, and [`Model::validate`]'s edge sweep. Closing them
+    /// one at a time makes six copies of one list, which is the drift the
+    /// collapsed-edge check was pulled back into one list to stop; what it wants
+    /// is for `is_closed` itself to name the kinds and hand back an answer that
+    /// can say *"a kind I do not know"*, once, for all six.
+    ///
     /// # Errors
     ///
-    /// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`], and whatever reading a
-    /// corner's side refuses.
+    /// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`],
+    /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a run kind this does not
+    /// know, and whatever reading a corner's side refuses.
     fn check_closed_edges_are_walked_the_way_their_surfaces_wind(&self) -> Result<()> {
         for (slot, _) in &self.data().solids {
             let solid = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
             for face in solid.faces() {
                 for coedge in face.wires().flat_map(WireView::coedges) {
                     let edge = coedge.edge();
-                    if *edge.stored_run() != EdgeRun::RightRoundWhereItsFacesCross {
-                        continue;
+                    match edge.stored_run() {
+                        EdgeRun::RightRoundWhereItsFacesCross => {}
+                        EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } => continue,
+                        // A kind of run this crate has never seen may well come
+                        // back to the corner it left, and taking it for an open
+                        // one skips the only check there is that a closed edge
+                        // is walked the way its surfaces wind. That is
+                        // `a_fourth_kind_of_run.rs`'s worse shape: the solid
+                        // comes back sound and nobody has looked at it.
+                        _ => return Err(Error::ACrossingThisCannotBeOrderedAlong),
                     }
                     let Some(across) = the_face_across(solid, face, edge)? else {
                         continue;
@@ -1528,14 +1557,28 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
 ///
 /// # Why the answer does not depend on how finely it is walked
 ///
-/// It would, if a deflection were simply picked. A polygon inscribed in a
-/// bigger arc can enclose *less* than one inscribed in a slightly smaller arc
-/// walked one step finer: a half-circle of radius `r` walked into `k` inside
-/// points spans `r²(k + 1)·sin(π/(k + 1))/2`, which is `1.000` for `r = 1` at
-/// one point and `1.273` for `r = 0.99` at two. The two arcs of a half-pipe's
-/// cap are that pair, and the cap between them would come out wound backwards.
-/// So a rule that read the sign off whatever points came back would be a guess
-/// with a test, and would move when somebody changed how coarse a walk may be.
+/// It would, if a deflection were simply picked. **A ring's sampled area can
+/// come out with the wrong sign, and change to the right one when the same wire
+/// is walked one step finer.** The sliver in
+/// `a_walk_that_came_back_with_no_points.rs` is bounded by a shallow arc closed
+/// underneath by three straights; walked into one inside point its ring sweeps
+/// `+3.97e-7`, walked into two it sweeps `−1.86e-7`, and the shape is wound the
+/// second way. So a rule that read the sign off whatever points came back would
+/// be a guess with a test, and would move when somebody changed how coarse a
+/// walk may be.
+///
+/// **This used to give a different reason and that reason was false.** It named
+/// a pair of half-circles — radius `1` walked into one inside point spanning
+/// `1.000`, radius `0.99` into two spanning `1.273` — and said a half-pipe's cap
+/// was that pair. Both numbers are right and the pair cannot occur.
+/// [`rcad_geom::walk`] sets its widest step from `room / reach` with
+/// `room = deflection − deviation`, so of two circles drawn in the same place at
+/// one deflection the **bigger** is walked into at least as many pieces, never
+/// fewer, and the ordering that argument needs never arises.
+/// `a_bigger_arc_is_never_walked_into_fewer_pieces_than_a_smaller_one` sweeps
+/// radii and deflections through the real walk and says so. Numbers in a
+/// paragraph are still a paragraph when they describe something that cannot
+/// happen (§16.10).
 ///
 /// So the sign is only taken when the sampled area **outweighs what the
 /// sampling could have hidden**. Between one sample point and the next the true
@@ -1549,6 +1592,14 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
 /// the ring's own width — which is [`how_much_space_a_curved_solid_encloses`]'s
 /// loop and terminates for the same reason: halving a finite length reaches
 /// zero and [`Deflection::of`] refuses a length that is not positive.
+///
+/// **What is not the same as that loop is where the margin bottoms out.** The
+/// deflection halves away but the points' own deviation does not, so the margin
+/// never falls below `perimeter · deviation` — and a walked point's deviation is
+/// `256 · f64::EPSILON` of the size the crossing was worked out from. So this
+/// answers only for a face whose area beats `perimeter · 5.7e-14 · size`, and
+/// **any** face thinner than that runs the loop out, not only one that encloses
+/// nothing. The volume loop's test has no such floor.
 ///
 /// The walk's own coarseness therefore only decides **which pass answers**,
 /// never what the answer is.
@@ -1569,6 +1620,18 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
 /// shape — how thin it is against how far round it goes — and not of how many
 /// entities there are, so this is one more per-face cost in a sweep that was
 /// already a pass over every face (§4.3).
+///
+/// **That is the cost of a wire that answers, and the other path is not like
+/// it.** A wire too thin to beat the margin is walked again at every halving
+/// until the walk itself gives up — the sliver in
+/// `a_walk_that_came_back_with_no_points.rs` takes twenty-seven passes, and a
+/// wire that keeps refining reaches
+/// [`MOST_POINTS_ALONG_ONE_CROSSING`](rcad_geom::MOST_POINTS_ALONG_ONE_CROSSING),
+/// a million points, before it does. Each of those passes walks the wire again
+/// and sums a polygon over what came back; the polygon used to be summed over a
+/// *copy* of the points, which is twenty-five megabytes a pass at the far end,
+/// and [`AreaSweptRoundTheNormal`] borrows them now. This is the
+/// untrusted-import boundary, so it is a shape a file can ask for.
 ///
 /// Reversing a face reverses this ring and negates every term of the sum
 /// exactly, so a face put on back to front is caught exactly as it was before.
@@ -1674,10 +1737,37 @@ struct RingAWireTraces {
 /// its points back in the direction the edge is *stored* running, so a step
 /// walked the other way has them turned round here.
 ///
+/// # A curved step nobody sampled is refused, whatever the policy says
+///
+/// [`rcad_geom::walk`] hands a **tolerant** caller an empty list rather than a
+/// refusal when the deflection asked for is finer than a point along the
+/// crossing can be placed — the caller has already said it will accept a wobble
+/// that big, so `room_left_over` gives it the crossing with nothing along it. A
+/// certified caller gets [`Error::CannotPlaceAPointThatCloseToACrossing`]
+/// instead.
+///
+/// Taking that silently puts the corners back as the whole ring, which is the
+/// bug [`winding_of`] was written to fix. Worse, the margin the sign is weighed
+/// against is `perimeter · (deflection + deviation)`, and that is a bound on how
+/// far a *sampled* piece strays; the chord of a step nobody sampled strays by
+/// the whole of the step's own bend, which nothing here bounds. So the same
+/// refusal the certified caller gets is raised here, and the two policies answer
+/// this alike. `a_walk_that_came_back_with_no_points.rs` is the shape that
+/// reaches it, and was wound backwards before this.
+///
+/// A run that is not [`EdgeRun::Straight`] but turns out to lie on a straight
+/// line comes back empty too, with a deviation of zero — nothing is hidden
+/// between its ends and its corners really are the whole of it, which is why
+/// what is asked is whether the deflection was the thing that could not be paid
+/// for.
+///
+/// [`Error::CannotPlaceAPointThatCloseToACrossing`]: rcad_geom::Error::CannotPlaceAPointThatCloseToACrossing
+///
 /// # Errors
 ///
-/// Whatever [`rcad_geom::walk`] refuses, and whatever [`NamedRun::new`] makes of
-/// a run whose ends do not match it.
+/// [`Error::CannotPlaceAPointThatCloseToACrossing`] for a curved step the walk
+/// came back empty-handed from, whatever else [`rcad_geom::walk`] refuses, and
+/// whatever [`NamedRun::new`] makes of a run whose ends do not match it.
 fn the_ring_a_wire_traces(
     model: &Model,
     face: FaceView<'_>,
@@ -1705,7 +1795,15 @@ fn the_ring_a_wire_traces(
         )?;
         let along = the_two_surfaces_along_this_edge(model, face, edge);
         let walked = rcad_geom::walk(&run, [&along[0], &along[1]], deflection, policy, log)?;
-        deviation = deviation.max(walked.deviation().magnitude());
+        let strays = walked.deviation().magnitude();
+        if walked.points().is_empty() && deflection.length() <= strays {
+            return Err(rcad_geom::Error::CannotPlaceAPointThatCloseToACrossing {
+                asked: deflection.length(),
+                closest: strays,
+            }
+            .into());
+        }
+        deviation = deviation.max(strays);
         let mut between: Vec<[f64; 3]> = walked
             .points()
             .iter()
@@ -1769,7 +1867,7 @@ impl RingAWireTraces {
         deflection: Deflection,
     ) -> Result<Option<Decision>> {
         let swept = AreaSweptRoundTheNormal {
-            corners: self.points.clone(),
+            corners: &self.points,
             normal,
         };
         let enclosed = swept.on_intervals();
@@ -1830,10 +1928,7 @@ fn a_boundary_that_encloses_too_little_to_wind(corners: &[[f64; 3]]) -> Provenan
 ///
 /// [`Error::Undecidable`]: crate::Error::Undecidable
 pub(crate) fn winding_round(corners: &[[f64; 3]], normal: [f64; 3]) -> Result<Decision> {
-    let swept = AreaSweptRoundTheNormal {
-        corners: corners.to_vec(),
-        normal,
-    };
+    let swept = AreaSweptRoundTheNormal { corners, normal };
     let every_number_is_real = are_real_numbers(corners.iter().flatten().copied().chain(normal));
     let (decision, level) = if every_number_is_real {
         decide(&swept)
@@ -1874,8 +1969,13 @@ const SWEPT_AREA: &str = "area swept by a wire round a normal";
 /// this one is a sum of plain products of stored coordinates — which is what
 /// lets level 3 work in exact arithmetic over the numbers the model actually
 /// holds, instead of over differences it would have to round first.
-struct AreaSweptRoundTheNormal {
-    corners: Vec<[f64; 3]>,
+///
+/// **It borrows its corners.** A wire walked to the point cap carries a million
+/// of them, and the halving loop builds one of these per pass; owning them
+/// copied twenty-five megabytes a pass at the untrusted-import boundary for
+/// nothing.
+struct AreaSweptRoundTheNormal<'a> {
+    corners: &'a [[f64; 3]],
     normal: [f64; 3],
 }
 
@@ -1884,7 +1984,7 @@ struct AreaSweptRoundTheNormal {
 /// `(u × v)_x = u_y*v_z − u_z*v_y`, and the other two follow it round.
 const CROSS_PRODUCT_AXES: [(usize, usize); 3] = [(1, 2), (2, 0), (0, 1)];
 
-impl Predicate for AreaSweptRoundTheNormal {
+impl Predicate for AreaSweptRoundTheNormal<'_> {
     fn name(&self) -> &'static str {
         SWEPT_AREA
     }
@@ -1953,7 +2053,7 @@ impl Predicate for AreaSweptRoundTheNormal {
     }
 }
 
-impl AreaSweptRoundTheNormal {
+impl AreaSweptRoundTheNormal<'_> {
     /// Every corner paired with the one after it, the last with the first.
     fn edges(&self) -> impl Iterator<Item = ([f64; 3], [f64; 3])> + '_ {
         let count = self.corners.len();

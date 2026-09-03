@@ -12,9 +12,10 @@
 //!    (`CannotPlaceAPointThatCloseToACrossing`) and a **tolerant** one that
 //!    accepts a wobble that big gets `Ok` with an empty point list.
 //! 3. The ring is then the wire's corners and nothing else.
-//! 4. The margin the sign has to beat collapses to `2·perimeter·deviation`,
-//!    which a corner polygon of any size clears — so the sign is certified off
-//!    the corners, which is the whole of the bug the rewrite was for.
+//! 4. The margin the sign has to beat is then `2·perimeter·deviation` and
+//!    nothing else, because the deflection halving away is the only other term
+//!    in it — so the sign is certified off the corners, which is the whole of
+//!    the bug the rewrite was for.
 //!
 //! Nothing about that is a corner case of the policy: `Policy::tolerant(s)`
 //! accepts the wobble whenever the crossing's own size is under `s/4`, and the
@@ -45,9 +46,12 @@ use rcad_topo::{DraftEdge, DraftStep, DraftWire, Model, Result, SolidBuilder, So
 const RADIUS: f64 = 1e6;
 
 /// How far the arc stands off its chord, counted in the deviation a point along
-/// it carries. Below about fourteen the corner polygon no longer beats the
-/// margin; above about fifty-eight the sliver's own area answers before the walk
-/// runs out of room.
+/// it carries.
+///
+/// It has a window either side of it and the tests above are what says so: too
+/// small and the corner polygon stops beating the margin, too large and the
+/// sliver's own area answers before the walk runs out of room. Thirty sits in
+/// the middle of it, about twice clear of each end.
 const SAGITTAS_OF_DEVIATION: f64 = 30.0;
 
 const THICKNESS: f64 = 1.0;
@@ -178,6 +182,69 @@ fn the_walk_comes_back_with_no_points_and_the_corners_wind_the_other_way() {
         area_swept_by(&ring),
         deflection.length()
     );
+}
+
+/// The pair `winding_of`'s rustdoc used to be justified by, and cannot happen.
+///
+/// It said a half-circle of radius `1` walked into one inside point encloses
+/// less than one of radius `0.99` walked into two, and that a half-pipe's cap is
+/// that pair. The arithmetic is right and the pair is not reachable:
+/// [`rcad_geom::walk`] sets its widest step from `room / reach` with
+/// `room = deflection − deviation`, so a bigger circle drawn in the same place
+/// gets a smaller widest step and at least as many pieces.
+///
+/// Swept over ascending radii at each of a spread of deflections, through the
+/// real walk and not a model of it.
+#[test]
+fn a_bigger_arc_is_never_walked_into_fewer_pieces_than_a_smaller_one() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut asked = 0;
+
+    for coarseness in 0..24 {
+        let deflection = Deflection::of(2.0_f64.powi(-coarseness)).expect("a positive length");
+        let mut fewest_so_far = 0;
+        for step in 0..64 {
+            let radius = 0.25 * f64::from(step + 1);
+            let Ok(walked) = a_half_circle_of_radius(radius, deflection, &policy, &mut log) else {
+                continue;
+            };
+            assert!(
+                walked >= fewest_so_far,
+                "a half-circle of radius {radius} was walked into {walked} pieces at a deflection \
+                 of {}, where a smaller one got {fewest_so_far}",
+                deflection.length()
+            );
+            fewest_so_far = walked;
+            asked += 1;
+        }
+    }
+    assert!(asked > 1000, "only {asked} pairs were reachable");
+}
+
+/// How many points a walk puts inside the half of a circle of `radius` that lies
+/// over the `x` axis.
+fn a_half_circle_of_radius(
+    radius: f64,
+    deflection: Deflection,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<usize> {
+    let flat = a_plane_at(0.0, Vector::new(0.0, 0.0, -1.0));
+    let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a positive radius"));
+    let run = NamedRun::new(
+        the_arc_on(&flat),
+        [[radius, 0.0, 0.0], [-radius, 0.0, 0.0]].map(PredicatePoint::from),
+    )?;
+    Ok(rcad_geom::walk(
+        &run,
+        [&Surface::Plane(flat), &pipe],
+        deflection,
+        policy,
+        log,
+    )?
+    .points()
+    .len())
 }
 
 fn a_working_size() -> Scale {
