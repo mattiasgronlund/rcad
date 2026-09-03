@@ -267,9 +267,14 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// being reported; a floor on the refusals too, because a family measured at
 /// none refused would be a rate to re-derive rather than one to relax (§19.1).
 ///
-/// The middle family, a frustum against an ordinary upright block, is reported
-/// and not judged at all: what it measures is what the hyperbola row costs a
-/// real fuse.
+/// The middle family, a frustum against an ordinary upright block, is asserted
+/// at **nothing answered**: what it measures is what the hyperbola row costs a
+/// real fuse, and every one of its fuses pays it today. It is pinned rather than
+/// printed because the number that says a cone can be cut is this one, and a
+/// number that only ever moves inside a `println!` is a number CI cannot tell
+/// you about. **The assertion is meant to be broken**, by the lane that teaches
+/// `where_a_plane_and_a_cone_cross` the hyperbola — and breaking it is the
+/// evidence that lane landed.
 ///
 /// **And the corner-up rate is not the cone's rate.** A round bar of the same
 /// size in the same place, against the same cubes, answers exactly as often —
@@ -320,8 +325,15 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                  here can name, and this answered {answered} of {fuses}",
                 family.named()
             ),
-            // Reported, not judged. See the doc above.
-            Family::AFrustumAgainstABlock => (),
+            Family::AFrustumAgainstABlock => assert_eq!(
+                answered,
+                0,
+                "{}: every plane of an upright block that cuts this frustum at all cuts it in a \
+                 hyperbola, which `where_a_plane_and_a_cone_cross` refuses, so none of {fuses} \
+                 can come through — and {answered} did. If a lane just taught it the hyperbola, \
+                 this is the test that says so: re-derive the row here rather than delete it",
+                family.named()
+            ),
         }
     }
 }
