@@ -169,12 +169,12 @@ impl PointsAlongACrossing {
 /// builds such a run, and a file read in states one whenever it holds a pipe
 /// running into a bend.
 ///
-/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
-/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
-/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for a run
-/// between a plane and a cone that cross in none of those — again the four
-/// names [`intersect`](crate::intersect) gives the same four shapes, so a run
-/// this crate did not build is refused rather than crashing the walk.
+/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
+/// for a run between a plane and a cone that cross in one of those — again the
+/// two names [`intersect`](crate::intersect) gives the same two shapes, so a run
+/// this crate did not build is refused rather than crashing the walk. The two
+/// shapes through the apex are straight lines, and a straight run gets the same
+/// empty answer here that a run between two planes does.
 pub fn walk(
     run: &NamedRun,
     along: [&Surface; 2],
@@ -262,11 +262,11 @@ pub fn walk(
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a cone or a
 /// torus against another curved surface, exactly as [`walk`] does.
 ///
-/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
-/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
-/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for a plane
-/// against a cone they do not cross in a closed curve, again exactly as
-/// [`walk`] does.
+/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
+/// for a plane against a cone that cross in one of those, again exactly as
+/// [`walk`] does. A plane through the apex crosses the cone in straight lines,
+/// so it gets [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] like every
+/// other pair that does.
 pub fn where_a_closed_crossing_starts(
     run: &NamedRun,
     along: [&Surface; 2],
@@ -351,12 +351,10 @@ enum WhatARunLiesOn {
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed for a degree-four
 /// crossing comes out as something that is not a point.
 ///
-/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
-/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
-/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for a run a
-/// caller named between a plane and a cone that cross in no closed curve — the
-/// namer's own four names, given back here because a run is something a caller
-/// states and a file stores, and this used to assert instead.
+/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
+/// for a run a caller named between a plane and a cone that cross in one of
+/// those — the namer's own two names, given back here because a run is something
+/// a caller states and a file stores, and this used to assert instead.
 ///
 /// Whatever the conic builders refuse, for the pairs that have one.
 fn what_a_run_between_these_two_lies_on(
@@ -381,14 +379,13 @@ fn what_a_run_between_these_two_lies_on(
             where_a_plane_cuts_a_pipe(&flat, &pipe).map(WhatARunLiesOn::Conic)
         }
         // Every shape a plane and a cone cross in reaches here, not only the
-        // ellipse: `where_a_plane_and_a_cone_cross` refuses four of them before
+        // ellipse: `where_a_plane_and_a_cone_cross` refuses two of them before
         // a run exists, but a run is something a caller states and a file
-        // stores. So `where_a_plane_cuts_a_cone` asks the same sign again and
-        // gives back the same four names.
+        // stores. So `where_a_plane_cuts_a_cone` asks the same signs again and
+        // gives back the same two names — and the same straight answer for the
+        // two shapes through the apex.
         [Surface::Plane(flat), Surface::Cone(cone)]
-        | [Surface::Cone(cone), Surface::Plane(flat)] => {
-            where_a_plane_cuts_a_cone(&flat, &cone).map(WhatARunLiesOn::Conic)
-        }
+        | [Surface::Cone(cone), Surface::Plane(flat)] => where_a_plane_cuts_a_cone(&flat, &cone),
         // A plane cuts a torus in **two** circles as often as in one, and which
         // of them this run is is the picker's to say — which is why this is the
         // one arm here that reads the run rather than only the pair.
@@ -1056,12 +1053,12 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
 ///
 /// # Errors
 ///
-/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
-/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
-/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for the four
-/// shapes with no closed curve in them, and
+/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
+/// for the two bending shapes with no closed curve in them, and
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a product leaves `f64`'s
-/// range.
+/// range. The two shapes through the apex are **not** refused: a ruling and a
+/// pair of rulings are straight lines, so they come back as
+/// [`WhatARunLiesOn::StraightLine`] and are walked the way two planes' line is.
 ///
 /// A plane through the apex that does cut across the cone meets it at the apex
 /// and nowhere else, and that comes back as a conic of no size centred exactly
@@ -1073,7 +1070,7 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
 /// square to the axis, which for a cone is the *minor* axis, and its second runs
 /// down the plane's slope, which is the major one. Negating both leaves
 /// `across × and` where it was, so the ellipse is traced the way a pipe's is.
-fn where_a_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Result<Conic> {
+fn where_a_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Result<WhatARunLiesOn> {
     let normal = flat.normal().components();
     let along = cone.axis().direction().components();
     let apex = cone.apex();
@@ -1109,15 +1106,18 @@ fn where_a_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Result<Conic> {
     // `EdgeRun` is `Deserialize` too, so a file states such a run. All four
     // reached the assert; the test names them one at a time.
     //
-    // They are told apart here the way the namer tells them apart, and given
-    // the namer's four names, so the two never disagree about what a pair is.
+    // They are told apart here the way the namer tells them apart, and given the
+    // namer's own answers, so the two never disagree about what a pair is: the
+    // two shapes through the apex are straight lines and walked as such, and the
+    // two that bend are refused by the namer's two names.
     if leaning <= 0.0 {
-        let through_the_apex = reach == 0.0;
-        return Err(match (through_the_apex, leaning == 0.0) {
-            (false, true) => Error::ACrossingThatIsAParabola,
-            (false, false) => Error::ACrossingThatIsAHyperbola,
-            (true, true) => Error::APlaneTouchingAConeAlongOneOfItsRulings,
-            (true, false) => Error::TwoLinesThroughAConesApexAreOneCurveThroughItself,
+        if reach == 0.0 {
+            return Ok(WhatARunLiesOn::StraightLine);
+        }
+        return Err(if leaning == 0.0 {
+            Error::ACrossingThatIsAParabola
+        } else {
+            Error::ACrossingThatIsAHyperbola
         });
     }
 
@@ -1134,12 +1134,12 @@ fn where_a_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Result<Conic> {
     let (across, and) = two_directions_in(flat, cone.axis().direction());
     let centre = apex - flat.normal() * (reach / squared_normal) - and * off_centre;
 
-    Ok(Conic {
+    Ok(WhatARunLiesOn::Conic(Conic {
         centre,
         across: across * minor,
         and: and * major,
         size: how_big_this_is(&[centre, apex], &[major, minor, off_centre]),
-    })
+    }))
 }
 
 /// Two directions in `flat`, square to each other, the first of them square to

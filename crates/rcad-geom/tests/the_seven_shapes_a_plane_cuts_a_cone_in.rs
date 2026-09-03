@@ -2,7 +2,7 @@
 //!
 //! A plane cuts a cone in a circle, an ellipse, a parabola, a hyperbola, one
 //! point, one line or two — seven answers, and `intersect` has to give a
-//! different one for each. Two of them it names and five it refuses, and this
+//! different one for each. Five of them it names and two it refuses, and this
 //! file is the table: **not one of the seven may come back as another**, because
 //! a hyperbola named as an ellipse is a closed curve where there is none and
 //! that is the wrong answer §4.1 ranks below both crashing and refusing.
@@ -165,16 +165,28 @@ fn a_plane_through_the_apex_and_across_the_cone_touches_it_at_one_point() {
 }
 
 /// Row 6: a plane through the apex and parallel to one ruling touches the cone
-/// along the whole of that ruling.
+/// along the whole of that ruling, which is one endless straight run.
+///
+/// The same naming a plane resting along a pipe's own side gets
+/// (`intersect.rs`'s `where_a_plane_and_a_pipe_cross`, the `Decision::Zero` arm):
+/// one [`EdgeRun::Straight`] with no ends, because the crossing is the whole line
+/// and topology is what puts vertices on it.
 #[test]
-fn a_plane_touching_a_cone_along_a_ruling_is_refused_by_name() {
+fn a_plane_touching_a_cone_along_a_ruling_is_one_straight_run() {
     let cone = a_right_angled_cone();
     let tangent = a_plane(Point::origin(), Vector::new(0.0, 1.0, 1.0));
 
-    assert_eq!(
+    for answer in [
         crossed(&tangent, &cone),
-        Err(Error::APlaneTouchingAConeAlongOneOfItsRulings)
-    );
+        crossed_the_other_way(&tangent, &cone),
+    ] {
+        let SurfaceMeet::Curves(runs) = answer.expect("a ruling is one straight line") else {
+            panic!("a plane along a ruling touches the cone along the whole of it");
+        };
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].run(), &EdgeRun::Straight);
+        assert!(runs[0].is_the_whole_curve());
+    }
 
     // The ruling really is on both: `(0, −v, v)` is on the cone for every `v`,
     // and the plane through the origin facing `(0, 1, 1)` holds all of it.
@@ -191,37 +203,99 @@ fn a_plane_touching_a_cone_along_a_ruling_is_refused_by_name() {
 }
 
 /// Row 7: a plane through the apex and steeper than the cone's side cuts two
-/// rulings that meet at the apex — one curve that runs through itself.
+/// rulings that meet at the apex — **two** straight runs, told apart by a pair
+/// of opposite half-spaces each.
+///
+/// The refusal this replaces said no half-space picks one of the two lines,
+/// *"because both pass through the apex and a half-space that holds one holds
+/// half of the other"*. Both halves of that are true and the conclusion is not:
+/// a piece is picked by **every** half-space on it, so the two opposite ones
+/// about one flat surface pick what lies *in* that surface. The flat surface
+/// through the apex holding `(0, −v, v)` meets `(0, v, v)` at the apex alone.
+///
+/// The two lines are `(0, ±v, v)`, both exactly on the cone and exactly in the
+/// plane `x = 0`, and this walks a long way out along each: a line is endless,
+/// and a picker that leans into its direction by one rounding stops holding it
+/// somewhere far along.
 #[test]
-fn a_plane_through_the_apex_and_down_it_cuts_two_lines_and_is_refused_by_name() {
+fn a_plane_through_the_apex_and_down_it_cuts_two_straight_lines_told_apart_by_pickers() {
     let cone = a_right_angled_cone();
     let down_the_axis = a_plane(Point::origin(), Vector::new(1.0, 0.0, 0.0));
+
+    let far_along_each_line = |sideways: f64| {
+        [1.0, 3.0, -2.0, 1e15].map(|v| rcad_predicates::Point::from([0.0, sideways * v, v]))
+    };
+    for sideways in [1.0, -1.0] {
+        for point in far_along_each_line(sideways) {
+            assert_eq!(cone.side_of(point), Decision::Zero, "{point:?}");
+            assert_eq!(down_the_axis.side_of_point(point), Decision::Zero, "{point:?}");
+        }
+    }
 
     for answer in [
         crossed(&down_the_axis, &cone),
         crossed_the_other_way(&down_the_axis, &cone),
     ] {
-        assert_eq!(
-            answer,
-            Err(Error::TwoLinesThroughAConesApexAreOneCurveThroughItself)
-        );
-    }
+        let SurfaceMeet::Curves(runs) = answer.expect("two rulings are two straight lines") else {
+            panic!("a plane down a cone's axis cuts two lines through the apex");
+        };
+        assert_eq!(runs.len(), 2);
 
-    // The two lines are `(0, ±v, v)`, and they share the apex, which is why no
-    // half-space picks one of them: a half-space holding one holds half the
-    // other.
-    for sideways in [1.0, -1.0] {
+        let picked: Vec<_> = runs
+            .iter()
+            .map(|run| {
+                assert!(run.is_the_whole_curve(), "a ruling has no end to be cut at");
+                let EdgeRun::PartOfWhereItCrosses { and, picked_by } = run.run() else {
+                    panic!("one of two lines is a piece of where the two surfaces cross");
+                };
+                assert_eq!(and, &Surface::Cone(cone));
+                assert_eq!(
+                    picked_by.len(),
+                    2,
+                    "one flat surface, read from both sides, is what holds a line that runs \
+                     through the apex"
+                );
+                picked_by.clone()
+            })
+            .collect();
+
+        // Each run holds the whole of one line and, of the other, only the apex.
+        // That is what makes them two pieces and not one said twice.
+        let holds = |pickers: &[rcad_geom::Picker], point| {
+            pickers
+                .iter()
+                .all(|picker| picker.side_of_point(point) != Decision::Neg)
+        };
+        let mut lines_held = Vec::new();
+        for pickers in &picked {
+            let held: Vec<f64> = [1.0, -1.0]
+                .into_iter()
+                .filter(|sideways| {
+                    far_along_each_line(*sideways)
+                        .into_iter()
+                        .all(|point| holds(pickers, point))
+                })
+                .collect();
+            assert_eq!(held.len(), 1, "one run holds one whole line, got {held:?}");
+            lines_held.push(held[0]);
+            assert!(
+                holds(pickers, rcad_predicates::Point::from([0.0, 0.0, 0.0])),
+                "both lines run through the apex, so every picker holds it"
+            );
+        }
         assert_eq!(
-            cone.side_of(rcad_predicates::Point::from([0.0, sideways, 1.0])),
-            Decision::Zero
+            lines_held.len(),
+            2,
+            "the two runs are the two different lines, not one line twice"
         );
+        assert!(lines_held[0] != lines_held[1], "got {lines_held:?}");
     }
 }
 
-/// Rows 3, 4, 6 and 7 again, reached this time through [`walk`] and
-/// [`where_a_closed_crossing_starts`] — which used to panic on all four.
+/// Rows 3 and 4 again, reached this time through [`walk`] and
+/// [`where_a_closed_crossing_starts`] — which used to panic on both.
 ///
-/// `intersect` refuses these four shapes before a run exists, and
+/// `intersect` refuses these two shapes before a run exists, and
 /// `where_a_plane_cuts_a_cone` asserted that that was enough. **It is not.**
 /// [`NamedRun`] and [`EdgeRun`] are public, [`EdgeRun`] is `Deserialize`, and
 /// both walk entry points are public and take whatever pair of surfaces the
@@ -230,13 +304,11 @@ fn a_plane_through_the_apex_and_down_it_cuts_two_lines_and_is_refused_by_name() 
 /// Nothing here forges an internal state: every value goes in through a
 /// published constructor.
 ///
-/// The four are told apart the same way `intersect` tells them apart, so the
+/// The two are told apart the same way `intersect` tells them apart, so the
 /// namer and the walker never disagree about what a pair is called.
 #[test]
-fn a_run_a_caller_names_between_a_plane_and_a_cone_that_has_no_closed_crossing_is_refused_by_name()
-{
+fn a_run_a_caller_names_between_a_plane_and_a_cone_that_bends_endlessly_is_refused_by_name() {
     let cone = Surface::Cone(a_right_angled_cone());
-    let apex = Point::origin();
     for (through, facing, refusal) in [
         (
             Point::new(0.0, 0.0, 4.0),
@@ -247,16 +319,6 @@ fn a_run_a_caller_names_between_a_plane_and_a_cone_that_has_no_closed_crossing_i
             Point::new(1.0, 0.0, 0.0),
             Vector::new(1.0, 0.0, 0.0),
             Error::ACrossingThatIsAHyperbola,
-        ),
-        (
-            apex,
-            Vector::new(0.0, 1.0, 1.0),
-            Error::APlaneTouchingAConeAlongOneOfItsRulings,
-        ),
-        (
-            apex,
-            Vector::new(1.0, 0.0, 0.0),
-            Error::TwoLinesThroughAConesApexAreOneCurveThroughItself,
         ),
     ] {
         let flat = Surface::Plane(a_plane(through, facing));
@@ -291,6 +353,62 @@ fn a_run_a_caller_names_between_a_plane_and_a_cone_that_has_no_closed_crossing_i
             Some(refusal),
             "the other public way in reaches the same place: {flat:?}"
         );
+    }
+}
+
+/// Rows 6 and 7 through the same two public doors, where the answer is now
+/// *straight* rather than a refusal.
+///
+/// A run the two arms mint is walked into no points at all, which is what a
+/// straight run is: its two ends are the whole of it, and the ends are
+/// topology's to put on. And a run a caller states as closed on the same pair
+/// gets the answer every other pair that crosses in straight lines gets — the
+/// empty walk, and `TheCrossingOfTheseTwoSurfacesIsNotClosed` from the door that
+/// has to place a vertex.
+#[test]
+fn a_run_along_a_cones_ruling_is_walked_as_a_straight_line_from_both_public_doors() {
+    let cone = Surface::Cone(a_right_angled_cone());
+    let apex = Point::origin();
+    for facing in [Vector::new(0.0, 1.0, 1.0), Vector::new(1.0, 0.0, 0.0)] {
+        let flat = Surface::Plane(a_plane(apex, facing));
+        let SurfaceMeet::Curves(runs) = intersect(
+            &flat,
+            &cone,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a plane through the apex cuts straight lines")
+        else {
+            panic!("a plane through the apex cuts the cone in one line or two: {flat:?}");
+        };
+
+        for stated in runs
+            .into_iter()
+            .chain([
+                NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+                    .expect("a closed curve is never a piece with nothing picking it"),
+            ])
+        {
+            assert_eq!(
+                walk(
+                    &stated,
+                    [&flat, &cone],
+                    Deflection::of(1.0).expect("a positive length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a straight run is walked without complaint")
+                .points(),
+                &[],
+                "a straight run needs nothing between its ends: {stated:?}"
+            );
+            assert_eq!(
+                where_a_closed_crossing_starts(&stated, [&flat, &cone], &mut ProvenanceLog::new())
+                    .err(),
+                Some(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                "there is no closed curve here to put a vertex on: {stated:?}"
+            );
+        }
     }
 }
 

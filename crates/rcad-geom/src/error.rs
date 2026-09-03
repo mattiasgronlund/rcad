@@ -361,41 +361,6 @@ pub enum Error {
     #[error("a plane cuts this cone in a hyperbola, which is two endless curves that bend")]
     ACrossingThatIsAHyperbola,
 
-    /// A plane through a cone's apex cuts it in two lines that meet there.
-    ///
-    /// A **limit**, and the same one
-    /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] names. Two
-    /// straight lines crossing at a point are one curve that runs through
-    /// itself: no half-space picks one of them, because both pass through the
-    /// apex and a half-space that holds one holds half of the other. Splitting
-    /// them at the apex would be four half-lines and would need a *point* to
-    /// split at, which is topology's and not a surface pair's (§24.3).
-    #[error(
-        "a plane through this cone's apex cuts two lines that meet there, which is one curve \
-         that runs through itself"
-    )]
-    TwoLinesThroughAConesApexAreOneCurveThroughItself,
-
-    /// A plane touches a cone along one whole ruling.
-    ///
-    /// A **gap**. The crossing is one endless straight line and
-    /// [`EdgeRun::Straight`](crate::EdgeRun::Straight) says exactly that — a
-    /// plane along a pipe's axis and tangent to it is named that way already.
-    /// What is missing is one step further on: `rcad-topo`'s arrangement has to
-    /// tell this pair from the pair that crosses in an ellipse *before* it asks
-    /// for a crossing, and the only thing that tells them apart is the sign of
-    /// `(n·w)² − slope²·|n × w|²`, which is a sign question with a policy and a
-    /// log and the arrangement's dispatch has neither. A pipe gets away with the
-    /// same dispatch because its version, `n·w == 0`, is one exact `f64`
-    /// comparison.
-    ///
-    /// The fix is to hand the arrangement the crossing it already asked for
-    /// instead of re-deriving the pair's shape from the surfaces, which is one
-    /// signature change in `how_a_crossing_runs`. Its consumer is a cone with a
-    /// plane resting against one of its sides.
-    #[error("this plane touches the cone along one whole ruling")]
-    APlaneTouchingAConeAlongOneOfItsRulings,
-
     /// A cone against a ball, a pipe, or another cone.
     ///
     /// A **gap** and the same one two leaning pipes have (§29): the crossing is
