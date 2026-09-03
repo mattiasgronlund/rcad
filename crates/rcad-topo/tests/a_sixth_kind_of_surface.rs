@@ -17,10 +17,25 @@
 //! `rcad_geom::walk` can make it — exhaustiveness bites in the crate that owns
 //! the enum.
 //!
-//! So this test is the guard instead. It is not a tautology: it asks the
-//! `Deserialize` derive, which is generated from the variant list itself, to
-//! name every kind there is. A sixth kind changes that list and this fails,
-//! which is the notice the five silent drifts never got.
+//! `just check-wildcards` does catch a sixth kind at most sites, and loudly:
+//! twenty matches in this crate that name all five today start warning the
+//! moment there is a sixth, measured by running
+//! `cargo clippy -p rcad-topo --all-targets -- -W clippy::wildcard_enum_match_arm`
+//! against the same clone — thirty sites become fifty, none stop.
+//!
+//! **The three it does not catch are the three lists of surface pairs**, and
+//! they are where all five silent drifts happened. Clippy asks only what the
+//! scrutinee's own type is, and theirs is a tuple or an array of two
+//! `Surface`, so it never looks inside; the composite scan behind the other
+//! half of `check-wildcards` counts sites and not variants, so its number does
+//! not move either. Naming all twenty-five pairs at each of them does not
+//! change that — it puts every pair in front of a reader, which is worth
+//! having, and it is not a guard.
+//!
+//! So this test is the guard. It is not a tautology: it asks the `Deserialize`
+//! derive, which is generated from the variant list itself, to name every kind
+//! there is. A sixth kind changes that list and this fails, which is the notice
+//! the five silent drifts never got.
 
 use rcad_geom::Surface;
 use serde::Deserialize;
