@@ -64,7 +64,9 @@ use super::bake::{BakedFace, BakedSolid};
 ///
 /// [`Error::ArgumentIntersectsItself`] when a solid has two faces that really do
 /// run through each other, [`Error::Undecidable`] when a decision that takes
-/// could not be settled under `policy`.
+/// could not be settled under `policy`, and
+/// [`Error::ACrossingThisCannotBeOrderedAlong`] when two surfaces meet in a
+/// shape [`how_two_faces_meet`] has no word for.
 pub(crate) fn gather(
     solids: &mut [BakedSolid],
     policy: &Policy,
@@ -101,8 +103,9 @@ pub(crate) fn gather(
 /// The crossings each of two faces cuts in the other, each as the second surface
 /// of the pair — the face's own surface is the first and is not repeated.
 ///
-/// [`intersect`] is the one authority on how two surfaces meet (§24.3), so this
-/// asks it rather than working the three cases out again. That is also what
+/// [`intersect`] is the one authority on how two surfaces meet (§24.3), so
+/// [`how_two_faces_meet`] asks it rather than working the three cases out again.
+/// That is also what
 /// makes the coincident case one rule for all three surface kinds: two faces on
 /// one *cylinder* answer [`SurfaceMeet::SameSurface`] exactly as two on one
 /// plane do, and the boundary of each is what cuts the other (§31.3).
@@ -118,14 +121,10 @@ fn cuts_between(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<(Vec<Surface>, Vec<Surface>)> {
-    match intersect(&face.surface, &against.surface, policy, log)? {
-        SurfaceMeet::SameSurface => Ok((boundary_of(against), boundary_of(face))),
-        // A pair that touches at one point cuts nothing (§31.3): neither face is
-        // split and neither solid learns about the other. Two tangent balls
-        // united come back as two shells that share no vertex.
-        SurfaceMeet::Nothing | SurfaceMeet::TouchAtOnePoint { .. } => Ok((Vec::new(), Vec::new())),
-        SurfaceMeet::Curves(_) => Ok((vec![against.surface], vec![face.surface])),
-        other => panic!("two surfaces crossed in a way nothing here knows: {other:?}"),
+    match how_two_faces_meet(&face.surface, &against.surface, policy, log)? {
+        HowTwoFacesMeet::OnOneSurface => Ok((boundary_of(against), boundary_of(face))),
+        HowTwoFacesMeet::Nowhere => Ok((Vec::new(), Vec::new())),
+        HowTwoFacesMeet::AlongCurves => Ok((vec![against.surface], vec![face.surface])),
     }
 }
 
@@ -155,6 +154,11 @@ fn boundary_of(face: &BakedFace) -> Vec<Surface> {
 /// touch have not been shown to run through each other, and refusing them would
 /// refuse a solid whose faces meet at a single corner.
 ///
+/// **Every skip above is a pair this has a reason to skip.** A pair whose
+/// crossing has no word in [`HowTwoFacesMeet`] is refused there instead, because
+/// a check that quietly does not run reports a solid sound that nobody looked
+/// at.
+///
 /// [`Model::validate`]: crate::Model::validate
 fn check_it_does_not_cross_itself(
     solid: &BakedSolid,
@@ -166,10 +170,9 @@ fn check_it_does_not_cross_itself(
             if !face.bounds.overlap(against.bounds) || share_a_corner(face, against) {
                 continue;
             }
-            if !matches!(
-                intersect(&face.surface, &against.surface, policy, log)?,
-                SurfaceMeet::Curves(_)
-            ) {
+            if how_two_faces_meet(&face.surface, &against.surface, policy, log)?
+                != HowTwoFacesMeet::AlongCurves
+            {
                 continue;
             }
             let mine = stretches_of_a_line_inside(face, &against.surface, policy, log)?;
@@ -190,6 +193,55 @@ fn share_a_corner(face: &BakedFace, against: &BakedFace) -> bool {
             .flatten()
             .any(|theirs| theirs.start.vertex == edge.start.vertex)
     })
+}
+
+/// What two faces' surfaces do to each other, in the three words the cutting
+/// here is written in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HowTwoFacesMeet {
+    /// The two are one surface, so the boundary of each is what cuts the other.
+    OnOneSurface,
+    /// Nothing to cut along: they miss each other altogether, or they touch at
+    /// one point and cross nowhere.
+    ///
+    /// A pair that touches at one point cuts nothing (§31.3): neither face is
+    /// split and neither solid learns about the other. Two tangent balls united
+    /// come back as two shells that share no vertex.
+    Nowhere,
+    /// They cross along one curve, or two.
+    AlongCurves,
+}
+
+/// Read a crossing in those three words, and refuse a shape that has no word
+/// here.
+///
+/// The one place in this file that looks at a [`SurfaceMeet`]. There used to be
+/// two, and each drew its own wrong conclusion from a shape it did not know: one
+/// crashed the fuse, and the other — the self-crossing check — **skipped the
+/// pair in silence**, so a solid nobody had looked at came back sound.
+///
+/// A sixth shape two surfaces can meet in is `rcad-geom` growing a word, not a
+/// broken invariant here and not bad input: the two solids are as sound as they
+/// were. So it refuses by name, and the name is the one its twin in
+/// [`arrange`](super::arrange) already uses for the same arrival — a cut this
+/// hangs on a face is ordered along there, and a shape with no word here has no
+/// order there either.
+///
+/// [`SurfaceMeet`] is `#[non_exhaustive]` and belongs to another crate, so a
+/// sixth shape arriving here is not a compile error. `a_fourth_kind_of_run.rs`
+/// is what says so out loud.
+fn how_two_faces_meet(
+    face: &Surface,
+    against: &Surface,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<HowTwoFacesMeet> {
+    match intersect(face, against, policy, log)? {
+        SurfaceMeet::SameSurface => Ok(HowTwoFacesMeet::OnOneSurface),
+        SurfaceMeet::Nothing | SurfaceMeet::TouchAtOnePoint { .. } => Ok(HowTwoFacesMeet::Nowhere),
+        SurfaceMeet::Curves(_) => Ok(HowTwoFacesMeet::AlongCurves),
+        _ => Err(Error::ACrossingThisCannotBeOrderedAlong),
+    }
 }
 
 #[cfg(test)]
