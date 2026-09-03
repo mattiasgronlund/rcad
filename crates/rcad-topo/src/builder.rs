@@ -387,11 +387,36 @@ impl SolidBuilder {
     /// the sweep's mesh instead, as `CornersCoincide`; that is not new to two
     /// steps, and a three-step wire holding such a pair is refused there too.
     ///
+    /// **A run this crate does not know reads as one that bends, and that is the
+    /// right way round here** — the opposite of what
+    /// [`the_ends_are_the_whole_of_it`] does with the same unknown, and the
+    /// difference is what stands behind each.
+    ///
+    /// There, the length rule is the *only* thing that asks, so a run read
+    /// generously is a zero-length edge nobody looks at again: measured on a
+    /// clone of this tree carrying a fourth [`EdgeRun`], `check_edges` handed
+    /// back `Ok(())` for a cube with one edge pointed at the corner it left.
+    ///
+    /// Here nothing is being decided about the shape. All this says is whether a
+    /// two-step wire may skip the floor of three steps, and every other check
+    /// still runs over it — a wire that really does bound nothing is refused by
+    /// the mesh, by name, and
+    /// `tests/a_face_bounded_by_two_steps.rs`'s
+    /// `a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh`
+    /// is the test that says so rather than this paragraph. Reading the unknown
+    /// strictly would buy nothing and cost a real refusal: a new run kind names
+    /// a curve, which is exactly the thing two steps *can* bound a face with, and
+    /// the refusal it would get is [`Error::ADraftWireIsTooShort`] — a complaint
+    /// about how many steps there are, when the number of steps was never the
+    /// problem.
+    ///
     /// `docs/decisions.md` §44.11 item 3. This and
     /// [`Model::wire_of_two_steps_bounds_a_face`](crate::Model) are the same
     /// rule at the kernel's two doors, for the reason
     /// [`Model::check_wire_closes`](crate::Model) gives: one audience wants a
     /// refusal and the other a crash, and that is no reason for two answers.
+    /// Both read an unknown run the same way, so there is nothing to bring back
+    /// into step.
     fn two_steps_that_bound_a_face(&self, steps: &[Step]) -> bool {
         let [Step::Along(one), Step::Along(other)] = steps[..] else {
             return false;
