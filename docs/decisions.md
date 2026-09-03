@@ -13607,6 +13607,32 @@ starting from a file that imports and cutting one line.
 | `CannotFollowACrossingWhereItsSurfacesAreTangent` | **limit** — `∇S × ∇T` is zero at every point of a plane resting on a torus's tube, so the direction does not exist. A convention picked out of thin air is not the crossing's direction (§17.4) |
 | `WhereALineMeetsATorusIsAQuartic` | **neither: it is dead.** `800fd85` solved it, and the variant is `pub` and is **constructed nowhere in `crates/*/src`.** Kept because removing a public variant is a breaking change; it should be deprecated or removed at the next break |
 
+**Amended 2026-09-03, by the unit called *the six arms*. The first four rows
+above are closed, and one of them was a limit that was really a gap.**
+
+- `ACrossingThatIsAParabola` and `ACrossingThatIsAHyperbola` — **deleted.** Both
+  are named and drawn. The shortest fix this table named turned out to be the
+  fix that landed: `PartOfWhereItCrosses` for naming, and `walk` taught arms for
+  curves that are not a centre and two semi-axes.
+- `APlaneTouchingAConeAlongOneOfItsRulings` — **deleted**, answered as
+  `EdgeRun::Straight` exactly as this row predicted. What this row got wrong was
+  the price: *"one signature change in `how_a_crossing_runs`"* is wrong about the
+  word, since it already takes the run, and §46.8 item 1 records the correction
+  being mis-priced in its turn.
+- `TwoLinesThroughAConesApexAreOneCurveThroughItself` — **deleted, and it was
+  never a limit.** The row's argument — *"a half-space holding either holds half
+  the other"* — has both halves true and the conclusion false: a piece is picked
+  by **every** half-space on it, so a pair of opposite half-spaces picks what
+  lies in one flat surface, and the flat surface through the apex holding one
+  line meets the other at the apex alone. Two straight runs told apart by
+  pickers, which `two_lines_told_apart` was already doing for another pair. **A
+  limit is a claim that the answer does not exist; this one existed and was one
+  file away.**
+- `CannotFollowACrossingWhereItsSurfacesAreTangent` stands, and the unit's fuse
+  lane hit it again from the other side: the single ruling of a plane resting
+  along a cone's own side still refuses, because `∇S × ∇Q` is exactly nothing
+  there. Same limit, one more surface pair.
+
 **Two `rcad-geom` refusals M5 did not close, and should say so out loud:**
 
 - `CannotWorkOutHowBigACrossingIs` still refuses **a round bar of radius
