@@ -328,17 +328,20 @@ fn geometry_that_is_not_a_working_shape_is_refused_by_name() {
 /// and emits the first vector as the **outward** normal with `same_sense` true.
 /// A segment's material is the arc side, `x + y >= r`, so out of it is towards
 /// the axis and the file had the normal back to front. Nothing had caught it
-/// because no face of this file had ever been oriented — the old rule stopped it
-/// at the loop, three entities earlier. With two steps allowed, the sweep said
-/// `OuterWireWindsAgainstTheNormal` instead, which is how it was found; it is
-/// fixed in `written_by_hand`, and that fix is what this test's refusal moving
-/// to the mesh demonstrates.
+/// because no face of this file had ever been oriented: the old rule stopped the
+/// mapping at the loop, and a face is built from a loop. With two steps allowed
+/// the sweep got as far as the faces and said
+/// `OuterWireWindsAgainstTheNormal`, which is how it was found. It is fixed in
+/// `written_by_hand`, and this test's refusal moving from the winding to the
+/// mesh is the test of that fix.
 ///
-/// The half-turn version of this shape does mesh:
-/// `a_face_bounded_by_two_steps.rs` builds it face by face and sweeps it. What
-/// is missing is that shape **as a file**, so something proves the rule from
-/// bytes — a third arm on `written_by_hand::a_pie` with its own chord normal,
-/// and a row in this crate's control. That is a lane rather than a line.
+/// The half-turn version of this shape does hold up as a *solid*:
+/// `a_face_bounded_by_two_steps.rs` builds it face by face and sweeps it with
+/// nothing approximated. What is missing is that shape **as a file**, so
+/// something proves the rule from bytes. It is not one value: `a_pie` shares its
+/// far corner between both arms and the quarter-disc needs that corner where it
+/// is, so a half-turn arm wants its own corner, its own chord normal, and a row
+/// in this crate's control with `πr²h/2` to check.
 #[test]
 fn a_two_step_loop_is_no_longer_the_mappings_to_refuse() {
     let segment = a_plate_bounded_by_an_arc_and_its_chord(2.0, 4.0, ".MILLI.");

@@ -243,12 +243,16 @@ pub fn a_quarter_disc_plate(radius: f64, height: f64, unit: &str) -> String {
 /// into two. `a_two_step_loop_is_no_longer_the_mappings_to_refuse` is where that
 /// is written down, with the repro it belongs to.
 ///
-/// **A half turn would import**, and that is the arm this module is missing: the
-/// far corner at `(−r, 0, z)`, a chord face facing `[0, −1, 0]`, and a row in
-/// `every_file_this_kernel_wrote_itself_imports` measuring `πr²h/2`. Until it
-/// exists nothing proves the two-step rule from bytes, and
-/// `rcad-topo/tests/a_face_bounded_by_two_steps.rs` proves it face by face
-/// instead.
+/// **A half turn gets past the mesh**, and that is the arm this module is
+/// missing: the far corner at `(−r, 0, z)` — which `a_pie` currently shares with
+/// the quarter-disc, where three collinear corners would break it — a chord face
+/// facing `[0, −1, 0]`, and a row in
+/// `every_file_this_kernel_wrote_itself_imports` measuring `πr²h/2`. That the
+/// *solid* holds up is demonstrated: `a_face_bounded_by_two_steps.rs` builds it
+/// face by face and sweeps it with nothing approximated. That the *file* holds
+/// up is not, because nobody has written the file — the reader sits between them
+/// and this module is where that would be settled. Until then nothing proves the
+/// two-step rule from bytes.
 pub fn a_plate_bounded_by_an_arc_and_its_chord(radius: f64, height: f64, unit: &str) -> String {
     a_pie(radius, height, unit, false)
 }
