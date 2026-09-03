@@ -105,9 +105,9 @@ pub const WHERE_A_PLANE_AND_A_TORUS_CROSS: &str = "where a plane and a torus cro
 /// crossing runs to degree eight and none of the machinery for that exists. Two
 /// tori that hold the same numbers are the same surface and come back as one.
 ///
-/// **A cone against a plane is classified whole and named in two of its seven
+/// **A cone against a plane is classified whole and named in four of its seven
 /// shapes** — see [`where_a_plane_and_a_cone_cross`] for the table and for what
-/// each of the five refusals is and what would close it. **A cone against a
+/// each of the two refusals is and what would close it. **A cone against a
 /// ball, a pipe or another cone is not named at all**: the crossing is a
 /// degree-four space curve and none of the machinery §29 built for two pipes
 /// exists for a cone. Two cones that hold the same numbers are the same surface
@@ -129,11 +129,9 @@ pub const WHERE_A_PLANE_AND_A_TORUS_CROSS: &str = "where a plane and a torus cro
 /// surfaces are tangent along the curve rather than at a point, so what they
 /// cross in is one curve that runs through itself.
 ///
-/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
-/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
-/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for the four
-/// shapes of a plane against a cone that this vocabulary cannot say, and
-/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against
+/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
+/// for the two shapes of a plane against a cone that this vocabulary cannot say,
+/// and [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against
 /// anything curved.
 ///
 /// [`Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic`] for every plane
@@ -1608,8 +1606,8 @@ fn two_lines_told_apart(
     ))
 }
 
-/// A plane and a cone: seven shapes, two of them named here and five refused by
-/// name.
+/// A plane and a cone: seven shapes, four of them named here and three refused
+/// by name.
 ///
 /// # The two signs that settle all seven
 ///
@@ -1633,17 +1631,26 @@ fn two_lines_told_apart(
 /// | off the plane | `= 0` | a parabola | [`Error::ACrossingThatIsAParabola`] |
 /// | off the plane | `< 0` | a hyperbola | [`Error::ACrossingThatIsAHyperbola`] |
 /// | on the plane | `> 0` | the apex and nothing else | **named** — one touching point, exactly |
-/// | on the plane | `= 0` | one ruling, touched along its whole length | [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] |
-/// | on the plane | `< 0` | two rulings crossing at the apex | [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] |
+/// | on the plane | `= 0` | one ruling, touched along its whole length | **named** — one straight run, endless |
+/// | on the plane | `< 0` | two rulings crossing at the apex | **named** — two straight runs, told apart by a picker each — or [`Error::CannotNameWhichPieceOfACrossingThisIs`] |
 ///
 /// The seventh shape a plane and a quadric can make is *the same surface*, and a
 /// plane is never a cone.
 ///
-/// **Every one of the five refusals is a refusal of the vocabulary and not of
-/// the arithmetic**, and each variant says which of a limit and a gap it is and
-/// what closing it would take. Both signs above are polynomials in stored `f64`
-/// and level 3 settles them; nothing here is ever undecided except when a
-/// product leaves `f64`'s range.
+/// **Both remaining refusals are refusals of the vocabulary and not of the
+/// arithmetic**, and each variant says which of a limit and a gap it is and what
+/// closing it would take. Both signs above are polynomials in stored `f64` and
+/// level 3 settles them; nothing here is ever undecided except when a product
+/// leaves `f64`'s range.
+///
+/// # The two shapes through the apex are straight, so they need no new curve
+///
+/// A ruling is one endless straight line and [`EdgeRun::Straight`] says exactly
+/// that — a plane resting along a pipe's own side is named that way already. Two
+/// rulings crossing at the apex are two of those, and
+/// [`two_lines_through_a_cones_apex`] says which is which. Neither asks the
+/// walker for anything: [`walk`](crate::walk) puts no points between the ends of
+/// a straight run.
 ///
 /// **The touching point is exact.** Where the plane passes through the apex and
 /// nothing else, the one point they share is the apex, which is a stored `f64`
@@ -1708,10 +1715,146 @@ fn where_a_plane_and_a_cone_cross(
         (true, Decision::Pos) => Ok(SurfaceMeet::TouchAtOnePoint {
             at: PredicatePoint::from(apex),
         }),
-        (true, Decision::Zero) => Err(Error::APlaneTouchingAConeAlongOneOfItsRulings),
-        (true, Decision::Neg) => Err(Error::TwoLinesThroughAConesApexAreOneCurveThroughItself),
+        (true, Decision::Zero) => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
+            EdgeRun::Straight,
+        )?])),
+        (true, Decision::Neg) => two_lines_through_a_cones_apex(flat, cone),
         (_, other) => unreachable!("a sign question answers with a sign: {other:?}"),
     }
+}
+
+/// The two rulings a plane through a cone's apex cuts it in, each picked out by
+/// the flat surface that holds the whole of it and meets the other only at the
+/// apex.
+///
+/// # A pair of opposite half-spaces is what picks one of two lines that meet
+///
+/// The old refusal here said no half-space picks one of them, *"because both
+/// pass through the apex and a half-space that holds one holds half of the
+/// other"*. Both halves of that are true and the conclusion does not follow. A
+/// piece is picked by **every** half-space on it, so the two opposite ones about
+/// one flat surface pick what lies *in* that surface — the idiom
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] already names for
+/// two ellipses in one plane. The flat surface through the apex holding line one
+/// meets line two at the apex alone, so the pair picks line one and nothing else.
+///
+/// # What has to be exact, and why each one has to be
+///
+/// A line is endless, so a picker that leans into its direction by one rounding
+/// reads a different sign a long way along it and holds nothing — the argument
+/// [`HalfSpace`] opens with, and the same one [`two_lines_told_apart`] rests on.
+/// Three things are therefore decided exactly and this refuses rather than
+/// rounding any of them:
+///
+/// 1. **The ruling direction is a stored triple.** Its two components along the
+///    plane are `‖w‖²·p ± √(−E·‖w‖²)·(n × w)`, and that root is irrational for
+///    almost every pair. So the direction is worked out in `f64` and then *asked*
+///    whether the endless line through the apex along it lies on both surfaces,
+///    which is two exact polynomial signs. A cone whose rulings `f64` cannot
+///    write down is refused.
+/// 2. **The picker is exactly square to the line it holds**, which
+///    [`HalfSpace::through_a_point_square_to`] gives and a [`Plane`] would round
+///    away (§32.3).
+/// 3. **The picker's flat surface passes exactly through the apex.** Its offset
+///    is one dot product and rounds; a rounded one moves the surface off the
+///    apex, and then it holds one of the two lines and not the other rather than
+///    holding one and half of the other. That is the one place here where the
+///    usual *"a rounded offset only slides the surface"* argument fails, because
+///    both lines lie in it.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when any of those three
+/// cannot be had, and whatever [`HalfSpace::through_a_point_square_to`] refuses.
+/// A **gap** and not a limit (§16.10): the two lines are there and they are
+/// tellable apart, and what runs out is `f64`'s supply of exact ruling
+/// directions.
+fn two_lines_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<SurfaceMeet> {
+    let normal = flat.normal();
+    let along = cone.axis().direction();
+    let squared_axis = along.dot(along);
+    let up = normal.dot(along);
+    let sideways = normal.dot(normal) * squared_axis - up * up;
+    let leaning = up * up - cone.slope() * cone.slope() * sideways;
+
+    let down_the_plane = along * normal.dot(normal) - normal * up;
+    let across_the_plane = normal.cross(along);
+    let spread = (-leaning * squared_axis).max(0.0).sqrt();
+    let rulings =
+        [1.0, -1.0].map(|side| down_the_plane * squared_axis + across_the_plane * (spread * side));
+
+    let mut runs = Vec::new();
+    for [this, other] in [[rulings[0], rulings[1]], [rulings[1], rulings[0]]] {
+        if !a_line_through_the_apex_along_it_lies_on_both(this, flat, cone) {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        }
+        let picker = HalfSpace::through_a_point_square_to(cone.apex(), this, other)?;
+        if !it_holds_this_line_and_only_the_apex_of_the_other(&picker, cone.apex(), this, other) {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        }
+        runs.push(NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Cone(*cone),
+            picked_by: smallvec![Picker::from(picker), Picker::from(picker.reversed())],
+        })?);
+    }
+    Ok(SurfaceMeet::Curves(runs))
+}
+
+/// Whether the endless line through the apex along `direction` is on the plane
+/// and on the cone, both decided exactly.
+///
+/// The apex is on the cone by definition and on the plane because the caller
+/// decided so, so what is left is two signs about the direction alone: `n·d = 0`
+/// puts the line in the plane, and `(d·d)(w·w) = (1 + slope²)(d·w)²` puts it on
+/// the cone.
+fn a_line_through_the_apex_along_it_lies_on_both(
+    direction: Vector,
+    flat: &Plane,
+    cone: &Cone,
+) -> bool {
+    if !direction.is_finite() || direction == Vector::zero() {
+        return false;
+    }
+    let d = direction.components();
+    let along = cone.axis().direction().components();
+    let on_the_cone = || {
+        let up = Exact::dot_of(d, along)?;
+        let up_squared = up.times(&up)?;
+        let slope_squared = Exact::product_of(cone.slope(), cone.slope())?;
+        Some(
+            Exact::dot_of(d, d)?
+                .times(&Exact::dot_of(along, along)?)?
+                .minus(&up_squared)
+                .minus(&slope_squared.times(&up_squared)?)
+                .sign(),
+        )
+    };
+    matches!(
+        Exact::dot_of(flat.normal().components(), d).map(|reach| reach.sign()),
+        Some(Decision::Zero)
+    ) && matches!(on_the_cone(), Some(Decision::Zero))
+}
+
+/// Whether `picker`'s flat surface holds the whole of the line along `this` and
+/// meets the line along `other` at the apex alone.
+///
+/// The squareness is asked rather than assumed: it is what
+/// [`HalfSpace::through_a_point_square_to`] promises, and a promise a caller
+/// leans on for an *endless* run is worth one exact dot product.
+fn it_holds_this_line_and_only_the_apex_of_the_other(
+    picker: &HalfSpace,
+    apex: Point,
+    this: Vector,
+    other: Vector,
+) -> bool {
+    let facing = picker.normal().components();
+    let square_to_this = Exact::dot_of(facing, this.components()).map(|reach| reach.sign());
+    let across_the_other = Exact::dot_of(facing, other.components()).map(|reach| reach.sign());
+    let through_the_apex = Exact::dot_of(facing, apex.coordinates())
+        .map(|reach| reach.minus(&Exact::of(picker.offset())).sign());
+    matches!(square_to_this, Some(Decision::Zero))
+        && matches!(across_the_other, Some(Decision::Pos | Decision::Neg))
+        && matches!(through_the_apex, Some(Decision::Zero))
 }
 
 /// A plane and a torus: two circles, one circle, nothing, or a quartic nobody
