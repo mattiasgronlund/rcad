@@ -21,7 +21,8 @@
 //!   caller of `step-io`'s parser layer gets text it still has to decode.
 //! - **Nothing else.** Every other difference is a failure of this test.
 //!
-//! Without `RCAD_STEP_CORPUS` the corpus half skips and the hand-written half
+//! Without `RCAD_STEP_CORPUS` the corpus half **fails** rather than skips
+//! (decisions.md §44.10) and the hand-written half, which needs no corpus,
 //! still runs, so the file is never green on nothing.
 
 use std::collections::BTreeSet;
@@ -68,9 +69,7 @@ END-ISO-10303-21;
 
 #[test]
 fn the_two_readers_agree_about_every_corpus_file_except_where_escapes_are_decoded() {
-    let Some(root) = corpus() else {
-        return;
-    };
+    let root = corpus();
     for source in ["nist", "kicad"] {
         let files = files_under(&root.join(source));
         assert!(
@@ -277,18 +276,20 @@ fn same(mine: &Value, theirs: &Attribute, id: u64) -> Option<Difference> {
     }
 }
 
-fn corpus() -> Option<PathBuf> {
-    let Some(root) = env::var_os("RCAD_STEP_CORPUS") else {
-        println!("RCAD_STEP_CORPUS is not set, so there is no corpus to compare; skipping");
-        return None;
-    };
+fn corpus() -> PathBuf {
+    let root = env::var_os("RCAD_STEP_CORPUS").unwrap_or_else(|| {
+        panic!(
+            "RCAD_STEP_CORPUS is not set. Point it at a directory holding nist/ and kicad/ (see \
+             this file's header) — this test does not skip on a missing corpus."
+        )
+    });
     let root = PathBuf::from(root);
     assert!(
         root.is_dir(),
         "RCAD_STEP_CORPUS points at {}, which is not a directory",
         root.display()
     );
-    Some(root)
+    root
 }
 
 fn files_under(directory: &Path) -> Vec<PathBuf> {

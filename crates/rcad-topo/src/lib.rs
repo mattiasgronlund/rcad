@@ -97,6 +97,7 @@ mod key;
 mod measure;
 mod mesh;
 mod model;
+mod overlap;
 pub mod serialize;
 mod validate;
 mod view;
@@ -113,6 +114,7 @@ pub use key::{CoedgeKey, EdgeKey, FaceKey, ShellKey, SolidKey, VertexKey, WireKe
 pub use measure::Measurement;
 pub use mesh::{Mesh, MeshTriangle};
 pub use model::Model;
+pub use overlap::SharedSpace;
 pub use serialize::FORMAT_VERSION;
 pub use view::{
     CoedgeView, EdgeView, FaceRef, FaceView, ShellView, SolidView, VertexView, WireStepView,
