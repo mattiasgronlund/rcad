@@ -99,6 +99,80 @@ fn every_file_this_kernel_wrote_itself_imports() {
     );
 }
 
+/// A build stopped for one reason is published as **that** reason, so the
+/// `miss=` column above measures the corner of the refusal beside it.
+///
+/// Two things are broken in one plate, and the point is which one gets
+/// published. The pipe is widened by a nanometre, which leaves a corner
+/// provably off a curved face for anything scanning for one; and the bottom
+/// face's plane is turned to face along `y`, which the sweep reaches first —
+/// `check_faces` walks the bottom face before the round one — and stops at.
+///
+/// Before `arms0` the mapping scanned every curved face of any refused build
+/// whatever the build had said, so this file was published as a corner off a
+/// pipe, with a `miss=` measuring a corner that had nothing to do with why the
+/// build failed. The first half of the test is the control that keeps the trap
+/// baited: take the turned plane away and the corner off the pipe really is
+/// what stops it.
+#[test]
+fn a_build_stopped_by_a_leaning_face_is_not_published_as_a_corner_off_a_pipe() {
+    let widened = one_line_changed(
+        &a_quarter_disc_plate(2.0, 4.0, ".MILLI."),
+        "#774=CYLINDRICAL_SURFACE('',#768,2.0);",
+        "#774=CYLINDRICAL_SURFACE('',#768,2.000000001);",
+    );
+    let what_the_widening_alone_does = refusal_for(&widened);
+    assert!(
+        matches!(
+            what_the_widening_alone_does,
+            Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn { .. }
+        ),
+        "the widened pipe has to be a corner off a curved face on its own, or this proves \
+         nothing about which of two reasons wins: {what_the_widening_alone_does}"
+    );
+
+    let leaning = one_line_changed(
+        &widened,
+        "#758=DIRECTION('',(0.0,0.0,-1.0));",
+        "#758=DIRECTION('',(0.0,1.0,0.0));",
+    );
+    let Refusal::TheSolidTheFileDescribesIsNotOne { why, .. } = refusal_for(&leaning) else {
+        panic!("a corner off its face's plane is the sweep's refusal about the whole solid");
+    };
+    assert!(
+        matches!(
+            &*why,
+            rcad_topo::Error::Invalid(rcad_topo::Invalid::VertexOffItsFacePlane { .. })
+        ),
+        "the sweep stopped at the turned plane and the refusal has to say so: {why}"
+    );
+}
+
+/// `text` with `from` swapped for `to`, and a panic if `from` was not there.
+///
+/// `str::replace` on a line that has moved does nothing and says nothing, which
+/// would leave a test passing on a file it did not mean to write.
+fn one_line_changed(text: &str, from: &str, to: &str) -> String {
+    assert!(
+        text.contains(from),
+        "this fixture no longer holds {from}, so the test is breaking something else"
+    );
+    text.replace(from, to)
+}
+
+/// What the mapping refused a hand-written file for, and a panic if it imports.
+fn refusal_for(text: &str) -> Refusal {
+    let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
+    let mut log = ProvenanceLog::new();
+    match Import::read(&file, &Policy::certified(), &mut log) {
+        Ok(import) => panic!(
+            "this was supposed to be refused, and instead it imported {} solids",
+            import.solids().len()
+        ),
+        Err(why) => why,
+    }
+}
+
 /// A real file measures what its own name says it should.
 ///
 /// **The independent figure this lane needs, and it is not this kernel's.**
@@ -371,6 +445,12 @@ struct Tally {
     walked_past: BTreeMap<&'static str, usize>,
     units: BTreeMap<String, usize>,
     over_precise: usize,
+    /// How many files got a whole solid described and handed to
+    /// `SolidBuilder`, which is the only denominator the corner-miss bucket
+    /// below may be read against. A file the reader stopped at a `B_SPLINE`
+    /// never had a corner judged at all, and counting it in would make the
+    /// bucket a statement about which shapes this reader holds.
+    reached_the_solid_builder: usize,
     corner_misses_in_spacings: Vec<f64>,
     imported_names: BTreeSet<String>,
     /// Every refused file's own reason, one entry each — never a rate, so a
@@ -382,6 +462,11 @@ struct Tally {
 /// One refused file's reason: the filename, and, where the refusal was a
 /// corner missing its surface, how far off in that corner's own coordinate
 /// spacings.
+///
+/// **The miss belongs to the reason beside it.** It is read off the refusal
+/// that is being printed and off nothing else, so a file whose build stopped
+/// for a wire or a winding gets no miss at all rather than one measured on some
+/// other corner of the same file (`arms0`).
 struct RefusedFile {
     name: String,
     reason: String,
@@ -393,6 +478,7 @@ fn how_often_a_real_file_imports() {
     let root = corpus();
 
     let mut kicad_imports: BTreeSet<String> = BTreeSet::new();
+    let mut every_corner_miss: Vec<f64> = Vec::new();
     for source in ["nist", "kicad"] {
         let files = files_under(&root.join(source));
         assert!(
@@ -407,6 +493,7 @@ fn how_often_a_real_file_imports() {
             match Import::read(&file, &Policy::certified(), &mut log) {
                 Ok(import) => {
                     tally.imported += 1;
+                    tally.reached_the_solid_builder += 1;
                     tally.imported_names.insert(name_of(path));
                     tally.solids += import.solids().len();
                     *tally
@@ -437,6 +524,9 @@ fn how_often_a_real_file_imports() {
                 Err(why) => {
                     let reason = grouped(&why);
                     *tally.refused.entry(reason.clone()).or_default() += 1;
+                    if got_as_far_as_the_solid_builder(&why) {
+                        tally.reached_the_solid_builder += 1;
+                    }
                     let mut corner_miss_in_spacings = None;
                     match &why {
                         Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn {
@@ -470,11 +560,47 @@ fn how_often_a_real_file_imports() {
             }
         }
         report(source, &files, &tally);
+        every_corner_miss.extend(&tally.corner_misses_in_spacings);
         if source == "kicad" {
             kicad_imports = tally.imported_names;
         }
     }
+    assert_a_corner_off_its_surface_is_two_problems(&every_corner_miss);
     assert_pinned_kicad_imports(&kicad_imports);
+}
+
+/// A corner off the surface it is meant to be on is **two** problems, and both
+/// corpora together have to hold both or the report is describing a corpus this
+/// is not being run on.
+///
+/// Under one spacing the file's numbers are as close to the surface as an `f64`
+/// can be written and the refusal is about what a `Decision` can certify, not
+/// about the file. Over one spacing — and the tail runs into the tens of
+/// thousands — the file carries a modelling tolerance somebody chose, and no
+/// arithmetic anywhere would make those corners land on their surfaces.
+///
+/// **Asked of both corpora together and no longer of each, which is `arms0`'s
+/// finding and not a weakening slipped in.** It used to hold per source, on a
+/// population that included refusals the mapping had *substituted*: a build
+/// stopped for a winding or a leaning face was published as a corner off a
+/// curved face, scanned for after the fact. With the substitution gone, `nist`
+/// keeps four such files and all four are a modelling tolerance. One corpus of
+/// 44 files holding no near-miss is a fact about that corpus; the claim the
+/// report makes is about the refusal.
+fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
+    let within_a_spacing = misses.iter().filter(|miss| **miss < 1.0).count();
+    assert!(
+        within_a_spacing > 0 && within_a_spacing < misses.len(),
+        "{within_a_spacing} of {} corner misses are inside one spacing, and both halves have to \
+         be there or this is not the corpus it was measured on",
+        misses.len()
+    );
+    let worst = misses.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    assert!(
+        worst > 1000.0,
+        "a worst corner of {worst} spacings means no file anywhere here carries a modelling \
+         tolerance, and they do"
+    );
 }
 
 /// The 97 KiCad files that import today, out of 323.
@@ -668,7 +794,14 @@ fn report(source: &str, files: &[PathBuf], tally: &Tally) {
     if !tally.curves_wanted.is_empty() {
         println!("    curves asked for: {:?}", tally.curves_wanted);
     }
-    report_the_corner_misses(&tally.corner_misses_in_spacings);
+    println!(
+        "    {} files got a whole solid described and handed to SolidBuilder",
+        tally.reached_the_solid_builder
+    );
+    report_the_corner_misses(
+        &tally.corner_misses_in_spacings,
+        tally.reached_the_solid_builder,
+    );
     report_per_file_refusals(source, &tally.refused_files);
 }
 
@@ -697,20 +830,25 @@ fn report_per_file_refusals(source: &str, refused: &[RefusedFile]) {
 /// How far the worst corner of each refused file is off the curved surface the
 /// file says it is on, in that corner's own coordinate spacings.
 ///
-/// **The split is the finding and it is a split.** Under one spacing the file's
-/// numbers are as close to the surface as an `f64` can be written and the
-/// refusal is about what a `Decision` can certify, not about the file. Over one
-/// spacing — and the tail runs into the tens of thousands — the file carries a
-/// modelling tolerance somebody chose, and no arithmetic anywhere would make
-/// those corners land on their surfaces.
+/// **Counted against the files that got as far as `SolidBuilder`** and never
+/// against the whole corpus. A file the reader stopped at a `B_SPLINE` never had
+/// a corner judged, so putting it in the denominator would turn this into a
+/// statement about which shapes this reader holds.
 ///
-/// Two different problems with two different answers, and a single median would
-/// hide that they are different. Both halves have to be there or this is not
-/// the corpus it was measured on.
-fn report_the_corner_misses(misses: &[f64]) {
+/// **The split is the finding and it is a split**, so both halves are printed
+/// and a single median never stands alone. That both halves exist at all is
+/// asked of the two corpora together, in
+/// [`assert_a_corner_off_its_surface_is_two_problems`].
+fn report_the_corner_misses(misses: &[f64], reached_the_solid_builder: usize) {
     if misses.is_empty() {
         return;
     }
+    assert!(
+        misses.len() <= reached_the_solid_builder,
+        "{} files were refused for a corner off a surface and only {reached_the_solid_builder} \
+         got as far as the builder, so the bucket is being counted against the wrong thing",
+        misses.len()
+    );
     let mut sorted = misses.to_vec();
     sorted.sort_by(f64::total_cmp);
     let at = |part: f64| {
@@ -725,7 +863,8 @@ fn report_the_corner_misses(misses: &[f64]) {
     };
     let within_a_spacing = sorted.iter().filter(|miss| **miss < 1.0).count();
     println!(
-        "    the worst corner of each of the {} refused files, in its own coordinate spacings: \
+        "    the worst corner of each of the {} files refused for one, out of the \
+         {reached_the_solid_builder} that reached the builder, in its own coordinate spacings: \
          least {:.3}, quartile {:.3}, median {:.3}, upper quartile {:.3}, most {:.1}",
         sorted.len(),
         at(0.0),
@@ -739,16 +878,31 @@ fn report_the_corner_misses(misses: &[f64]) {
          written — and {} are a modelling tolerance",
         sorted.len() - within_a_spacing
     );
-    assert!(
-        within_a_spacing > 0 && within_a_spacing < sorted.len(),
-        "this refusal is two different problems and the corpus has to hold both, or the \
-         report is describing a corpus this is not being run on"
-    );
-    assert!(
-        at(1.0) > 1000.0,
-        "a corpus whose worst corner is within a thousand spacings holds no file with a \
-         modelling tolerance in it, and both corpora do"
-    );
+}
+
+/// Whether a refused file got a whole solid described and handed to
+/// `SolidBuilder`, or was stopped by the reader before that.
+///
+/// Four refusals are the builder's or the sweep's and every other one is the
+/// reader's, which is what makes this readable off the variant.
+///
+/// **`ThisEntityOfTheSolidWasRefused` is the loose one**: the mapping makes it
+/// both for a draft entity `SolidBuilder` would not take and for a
+/// `SolidBuilder::build` that came back with an index, so a file counted here
+/// may have stopped one call short of `build`. That is an over-count of at most
+/// however many rows carry it, and both corpora carry none today.
+fn got_as_far_as_the_solid_builder(why: &Refusal) -> bool {
+    match why {
+        Refusal::ThisEntityOfTheSolidWasRefused { .. }
+        | Refusal::TheSolidTheFileDescribesIsNotOne { .. }
+        | Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn { .. }
+        | Refusal::ACornerIsNotOnThePlaneOfTheArcItEndsOn { .. } => true,
+        // `Refusal` is `#[non_exhaustive]` and grows. Every other variant the
+        // reader makes before a solid is described — a surface or curve this
+        // kernel does not hold, a unit, a placement, a schema mismatch — and a
+        // new one is the reader's until somebody says otherwise here.
+        _ => false,
+    }
 }
 
 /// The name a refusal is counted under, which is the variant and never the
