@@ -94,12 +94,12 @@ fn a_pointed_cone_is_described_measured_and_named_from_the_front_door() {
     let radius = SLOPE * HOW_FAR_UP_THE_RIM_SITS;
     let height = HOW_FAR_UP_THE_RIM_SITS;
     let volume = core::f64::consts::PI * radius * radius * height / 3.0;
-    let skin = core::f64::consts::PI
+    let area = core::f64::consts::PI
         * (radius * (radius * radius + height * height).sqrt() + radius * radius);
     // A statement about *this test* and not a published bound — see the doc
     // above. The mesh is inscribed in a convex solid, so its volume is below the
     // true one and short of it by no more than the deflection times the skin.
-    let room = deflection * skin;
+    let room = deflection * area;
     println!(
         "a pointed cone at a deflection of {deflection}: volume {} against πr²h/3 = {volume}, \
          short by {}, with {room} of room and a published bound of {}",
