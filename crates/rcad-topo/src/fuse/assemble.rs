@@ -1951,8 +1951,9 @@ fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> WhichArc
 ///
 /// Every pair of the five surfaces there are is named below. The `_` left at the
 /// bottom is for a sixth [`Surface`] and nothing else, which is what §40 asks
-/// for — a sixth kind arriving should be a compile error here and not a silent
-/// `false`.
+/// for — but a sixth kind arriving lands in it as a silent `false` rather than
+/// as a compile error, because [`Surface`] is `#[non_exhaustive]` and belongs to
+/// another crate. `tests/a_sixth_kind_of_surface.rs` is what notices instead.
 fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
     match carried_by {
         [Surface::Plane(_), Surface::Plane(_)] => true,

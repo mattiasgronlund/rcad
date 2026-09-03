@@ -2725,31 +2725,46 @@ fn how_a_crossing_runs(
 /// refusal is what this function returning `true` too often costs. Returning it
 /// too *rarely* costs a bend every fuse it has, which is what it used to.
 ///
-/// # This is still a hand-kept list, and it is still the fifth of its kind
+/// # All twenty-five ordered pairs are named, and that is not the guard
 ///
-/// Seven `|`-ed pairs out of twenty-five, so a cone and a torus landed this
-/// milestone and fell out of it in silence — the same shape as `walk`'s three
-/// hand-kept lists (§24.5) and the fifth time this milestone that a list of
-/// surface pairs did not learn about a new surface kind. What would stop the
-/// sixth is naming all twenty-five and letting the `_` cover only a kind that
-/// does not exist, which is what [`a_plane_along_a_pipes_axis`] below does. It
-/// is not done here because that arm costs one wildcard and `check-wildcards`'
-/// budget lives in the `justfile`, outside this crate.
+/// This was seven `|`-ed pairs out of twenty-five under a `matches!`, and a cone
+/// and a torus landed this milestone and fell out of it in silence — the same
+/// shape as `walk`'s three hand-kept lists (§24.5), and the fifth time this
+/// milestone that a list of surface pairs did not learn about a new surface
+/// kind. Naming all twenty-five puts every pair in front of a reader and leaves
+/// the `_` covering only a kind that does not exist, which is §40's form.
+///
+/// **It does not make a sixth [`Surface`] a compile error, and nothing in this
+/// crate can.** [`Surface`] is `#[non_exhaustive]` and lives in `rcad-geom`, so
+/// a match over it here must carry a wildcard; a sixth kind adding zero errors
+/// to `cargo check -p rcad-topo` is measured in
+/// `tests/a_sixth_kind_of_surface.rs`, which is the guard that does fire.
 fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
-    matches!(
-        (one, other),
+    match (one, other) {
         // A plane cuts a ball, a pipe and a cone in a conic lying in the plane.
         // A plane along a pipe's axis cuts straight lines instead, and never
         // reaches here: `a_plane_along_a_pipes_axis` answers it one step up.
         (Surface::Plane(_), Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_))
-            | (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_), Surface::Plane(_))
-            // Two balls cross in the circle their radical plane cuts.
-            | (Surface::Sphere(_), Surface::Sphere(_))
-            // A plane and a torus: circles in the two families `intersect`
-            // names, and no run of any other family exists to be asked.
-            | (Surface::Plane(_), Surface::Torus(_))
-            | (Surface::Torus(_), Surface::Plane(_))
-    )
+        | (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_), Surface::Plane(_))
+        // Two balls cross in the circle their radical plane cuts.
+        | (Surface::Sphere(_), Surface::Sphere(_))
+        // A plane and a torus: circles in the two families `intersect` names,
+        // and no run of any other family exists to be asked.
+        | (Surface::Plane(_), Surface::Torus(_))
+        | (Surface::Torus(_), Surface::Plane(_)) => true,
+        // Two planes cross in a straight line and are answered one step up, so
+        // this arm is about the shape of the crossing and not about reaching it.
+        (Surface::Plane(_), Surface::Plane(_))
+        // A ball against a pipe, a cone or a ring crosses in a quartic.
+        | (Surface::Sphere(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_))
+        | (Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_), Surface::Sphere(_))
+        // So does every pair among the pipe, the cone and the ring.
+        | (
+            Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+            Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        ) => false,
+        _ => false,
+    }
 }
 
 /// Whether the pair is a plane parallel to a pipe's axis, which crosses it in
@@ -2758,8 +2773,11 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 /// The other twenty-three pairs are named rather than swept up, because `false`
 /// here is right for a reason that would not survive a sixth [`Surface`]: it is
 /// true of every pair that is *not one plane and one pipe*, which is a fact
-/// about the question and not about the shapes. A sixth kind should be a compile
-/// error here, and the `_` at the bottom is for that and nothing else (§40).
+/// about the question and not about the shapes. The `_` at the bottom is for a
+/// sixth kind and nothing else (§40) — but a sixth kind falls into it silently
+/// rather than failing to compile, because [`Surface`] is `#[non_exhaustive]`
+/// and belongs to another crate. `tests/a_sixth_kind_of_surface.rs` is what
+/// notices, and says why the compiler cannot.
 fn a_plane_along_a_pipes_axis(one: &Surface, other: &Surface) -> bool {
     match (one, other) {
         (Surface::Plane(flat), Surface::Cylinder(pipe))
