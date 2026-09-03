@@ -321,46 +321,6 @@ pub enum Error {
     )]
     CannotNameWhichPieceOfACrossingThisIs,
 
-    /// A plane cuts a cone in a parabola.
-    ///
-    /// A **gap**, and the gap is in the vocabulary rather than in the
-    /// arithmetic. Which of the seven shapes a plane cuts a cone in is settled
-    /// exactly, here, by one sign — so nothing was undecided. What
-    /// [`EdgeRun`](crate::EdgeRun) has no arm for is **one curve that runs on
-    /// for ever and bends**: `Straight` says the two ends are the whole of it,
-    /// `RightRoundWhereItsFacesCross` says the curve closes, and
-    /// `PartOfWhereItCrosses` says which of several pieces this is. A parabola
-    /// is one piece, unbounded, and not straight.
-    ///
-    /// The family of fixes, so that this is a demonstration and not a paragraph:
-    /// (a) a fourth `EdgeRun` variant for an endless curve, which every match on
-    /// that enum then grows an arm for; (b) naming it as
-    /// `PartOfWhereItCrosses` picked by a half-space that holds the whole of it,
-    /// which is expressible today — a parabola lies wholly in one nappe, so the
-    /// half-space through the apex square to the axis holds it — but which
-    /// `walk` cannot then draw, because [`Conic`] is a centre and two semi-axes
-    /// and a parabola has neither; (c) a bounded stand-in cut at the two places
-    /// the face's own wire reaches, which is not this function's to know because
-    /// [`intersect`](crate::intersect) is handed two surfaces and no topology.
-    /// (b) plus a parabolic arm in the walker is the shortest, and its consumer
-    /// is a cone fused with a plane parallel to one of its rulings.
-    ///
-    /// [`Conic`]: crate::Surface
-    #[error("a plane cuts this cone in a parabola, which is one endless curve that bends")]
-    ACrossingThatIsAParabola,
-
-    /// A plane cuts a cone in a hyperbola.
-    ///
-    /// A **gap**, for the reason [`Error::ACrossingThatIsAParabola`] gives, and
-    /// twice over: a hyperbola is two endless curves that bend. The one extra
-    /// thing this case has is that the two branches *are* tellable apart with
-    /// what is already here — each lies wholly in one nappe of the cone, so the
-    /// half-space through the apex square to the axis holds one and rules out
-    /// the other. What is missing is the same missing thing: nothing can draw
-    /// an endless bending curve once it has been named.
-    #[error("a plane cuts this cone in a hyperbola, which is two endless curves that bend")]
-    ACrossingThatIsAHyperbola,
-
     /// A cone against a ball, a pipe, or another cone.
     ///
     /// A **gap** and the same one two leaning pipes have (§29): the crossing is
@@ -535,18 +495,25 @@ pub enum Error {
         most: usize,
     },
 
-    /// Two surfaces that cross in straight lines rather than in a closed curve.
+    /// Two surfaces that cross in a curve that runs on for ever rather than in a
+    /// closed one.
     ///
     /// A closed edge needs one vertex on it and
     /// [`where_a_closed_crossing_starts`](crate::where_a_closed_crossing_starts)
     /// is where it goes. Two planes, a plane down a pipe's own axis, and two
     /// pipes pointing the same way cross in lines that run on for ever, and a
-    /// line has no place on it that the pair alone picks out.
+    /// line has no place on it that the pair alone picks out. **A plane and a
+    /// cone crossing in a parabola or a hyperbola get this too**, and it is the
+    /// honest name for what is wrong with such a run: those two shapes are
+    /// walked without complaint, and what they have no answer for is only the
+    /// question this error is asked by. A caller that *states* a run as closed
+    /// on one of them gets it from [`walk`](crate::walk) as well, because a
+    /// crossing that does not close is not a piece of what that run named.
     ///
     /// A **limit** and not a gap (§16.10): the vertex this would name does not
     /// exist, because the edge those pairs contribute is cut by corners at both
     /// ends rather than closing on itself.
-    #[error("these two surfaces cross in straight lines rather than in a closed curve")]
+    #[error("these two surfaces cross in a curve that runs on for ever rather than a closed one")]
     TheCrossingOfTheseTwoSurfacesIsNotClosed,
 
     /// Two surfaces whose crossing is not one closed curve lying in a plane.
