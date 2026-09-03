@@ -62,10 +62,11 @@
 //!
 //! [`SurfaceMeet`](rcad_geom::SurfaceMeet) has **no such derive**, so there is
 //! no list to ask it for and no guard of this shape to write. Nor does
-//! `just check-wildcards` move for it: the two matches over a `SurfaceMeet` in
-//! this crate already carry a wildcard and are already counted, so a fifth shape
-//! changes no number. For those two sites the refusal *is* the guard, which is
-//! why they were worth changing before anything could reach them.
+//! `just check-wildcards` move for it: a match over a `SurfaceMeet` out here
+//! cannot be exhaustive, the compiler makes every one carry a wildcard, and a
+//! wildcard already there is already counted — so a fifth shape moves no number.
+//! For the two sites in `fuse/cuts.rs` the refusal *is* the guard, which is why
+//! they were worth changing before anything could reach them.
 
 use rcad_geom::{EdgeRun, Plane, Point, Surface, Vector};
 use rcad_topo::{Error, SolidBuilder};
