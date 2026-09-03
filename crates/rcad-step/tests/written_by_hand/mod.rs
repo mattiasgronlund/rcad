@@ -257,6 +257,210 @@ pub fn a_plate_bounded_by_an_arc_and_its_chord(radius: f64, height: f64, unit: &
     a_pie(radius, height, unit, false)
 }
 
+/// A plate whose flat top and bottom are **bounded by two half-circles**: the
+/// upper half of a circle of `outer` radius, closed by the lower half of a
+/// circle of `inner` radius, with a straight along the `x` axis at each end.
+///
+/// A half-round plate with a half-round rib under it. Both half-circles bulge
+/// away from the axis they are cut by, so both walls are cylinders with their
+/// material inside them and every face is written the way it sits — nothing in
+/// the file is turned round.
+///
+/// **All four corners sit on the `x` axis.** A polygon through four collinear
+/// corners sweeps exactly nothing, so the whole of this face's area is in how
+/// its two arcs bulge: `π(outer² + inner²)/2`, times `height` for the solid.
+/// That is what makes the file worth writing — the STEP door adds each arc's
+/// bulge and `Model::validate` reads the corners alone, and this is a shape the
+/// two disagree about.
+pub fn a_plate_bounded_by_two_half_circles(
+    outer: f64,
+    inner: f64,
+    height: f64,
+    unit: &str,
+) -> String {
+    let corners = [
+        [outer, 0.0, 0.0],
+        [inner, 0.0, 0.0],
+        [-inner, 0.0, 0.0],
+        [-outer, 0.0, 0.0],
+        [outer, 0.0, height],
+        [inner, 0.0, height],
+        [-inner, 0.0, height],
+        [-outer, 0.0, height],
+    ];
+    // An arc runs from its first corner to its second the way the circle turns,
+    // so `v0 → v3` is the half over `y > 0` and `v2 → v1` the half under it.
+    let edges: [Edge; 12] = [
+        (0, 3, Some(960)),
+        (3, 2, None),
+        (2, 1, Some(961)),
+        (1, 0, None),
+        (4, 7, Some(962)),
+        (7, 6, None),
+        (6, 5, Some(963)),
+        (5, 4, None),
+        (0, 4, None),
+        (1, 5, None),
+        (2, 6, None),
+        (3, 7, None),
+    ];
+    let faces: [(Loop, Face); 6] = [
+        (
+            vec![(3, false), (2, false), (1, false), (0, false)],
+            Face::Flat([0.0, 0.0, -1.0], [0.0, 0.0, 0.0]),
+        ),
+        (
+            vec![(4, true), (5, true), (6, true), (7, true)],
+            Face::Flat([0.0, 0.0, 1.0], [0.0, 0.0, height]),
+        ),
+        (
+            vec![(0, true), (11, true), (4, false), (8, false)],
+            Face::Round(outer),
+        ),
+        (
+            vec![(2, true), (9, true), (6, false), (10, false)],
+            Face::Round(inner),
+        ),
+        (
+            vec![(3, true), (8, true), (7, false), (9, false)],
+            Face::Flat([0.0, -1.0, 0.0], [0.0, 0.0, 0.0]),
+        ),
+        (
+            vec![(1, true), (10, true), (5, false), (11, false)],
+            Face::Flat([0.0, -1.0, 0.0], [0.0, 0.0, 0.0]),
+        ),
+    ];
+
+    let mut text = a_header(unit);
+    for (which, corner) in corners.iter().enumerate() {
+        text += &format!(
+            "#{}=CARTESIAN_POINT('',{});\n",
+            900 + which,
+            triple(*corner)
+        );
+        text += &format!("#{}=VERTEX_POINT('',#{});\n", 910 + which, 900 + which);
+    }
+    for (which, radius, z) in [
+        (0_usize, outer, 0.0),
+        (1, inner, 0.0),
+        (2, outer, height),
+        (3, inner, height),
+    ] {
+        text += &format!(
+            "#{}=CARTESIAN_POINT('',{});\n",
+            920 + which,
+            triple([0.0, 0.0, z])
+        );
+        text += &format!(
+            "#{}=DIRECTION('',{});\n",
+            930 + which,
+            triple([0.0, 0.0, 1.0])
+        );
+        text += &format!(
+            "#{}=DIRECTION('',{});\n",
+            940 + which,
+            triple([1.0, 0.0, 0.0])
+        );
+        text += &format!(
+            "#{}=AXIS2_PLACEMENT_3D('',#{},#{},#{});\n",
+            950 + which,
+            920 + which,
+            930 + which,
+            940 + which
+        );
+        text += &format!(
+            "#{}=CIRCLE('',#{},{});\n",
+            960 + which,
+            950 + which,
+            real(radius)
+        );
+    }
+    for (which, (from, to, arc)) in edges.iter().enumerate() {
+        let curve = match arc {
+            Some(circle) => *circle,
+            None => {
+                let way = direction_from(corners[*from], corners[*to]);
+                text += &format!("#{}=DIRECTION('',{});\n", 970 + which, triple(way));
+                text += &format!(
+                    "#{}=VECTOR('',#{},{});\n",
+                    985 + which,
+                    970 + which,
+                    real(1.0)
+                );
+                text += &format!(
+                    "#{}=LINE('',#{},#{});\n",
+                    1000 + which,
+                    900 + from,
+                    985 + which
+                );
+                1000 + which
+            }
+        };
+        text += &format!(
+            "#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n",
+            1020 + which,
+            910 + from,
+            910 + to,
+            curve
+        );
+    }
+    for (which, (round, sits_on)) in faces.iter().enumerate() {
+        let mut steps = Vec::new();
+        for (step, (edge, forwards)) in round.iter().enumerate() {
+            let id = 1100 + which * 8 + step;
+            text += &format!(
+                "#{id}=ORIENTED_EDGE('',*,*,#{},{});\n",
+                1020 + edge,
+                if *forwards { ".T." } else { ".F." }
+            );
+            steps.push(format!("#{id}"));
+        }
+        text += &format!("#{}=EDGE_LOOP('',({}));\n", 1160 + which, steps.join(","));
+        text += &format!(
+            "#{}=FACE_OUTER_BOUND('',#{},.T.);\n",
+            1170 + which,
+            1160 + which
+        );
+        let (origin, axis) = match sits_on {
+            Face::Flat(normal, at) => (*at, *normal),
+            Face::Round(_) => ([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        };
+        text += &format!(
+            "#{}=CARTESIAN_POINT('',{});\n",
+            1180 + which,
+            triple(origin)
+        );
+        text += &format!("#{}=DIRECTION('',{});\n", 1190 + which, triple(axis));
+        text += &format!(
+            "#{}=AXIS2_PLACEMENT_3D('',#{},#{},$);\n",
+            1200 + which,
+            1180 + which,
+            1190 + which
+        );
+        text += &match sits_on {
+            Face::Flat(_, _) => format!("#{}=PLANE('',#{});\n", 1210 + which, 1200 + which),
+            Face::Round(radius) => format!(
+                "#{}=CYLINDRICAL_SURFACE('',#{},{});\n",
+                1210 + which,
+                1200 + which,
+                real(*radius)
+            ),
+        };
+        text += &format!(
+            "#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n",
+            1220 + which,
+            1170 + which,
+            1210 + which
+        );
+    }
+    let skin: Vec<String> = (0..faces.len())
+        .map(|which| format!("#{}", 1220 + which))
+        .collect();
+    text += &format!("#1300=CLOSED_SHELL('',({}));\n", skin.join(","));
+    text += "#1301=MANIFOLD_SOLID_BREP('',#1300);\n";
+    text + "ENDSEC;\nEND-ISO-10303-21;\n"
+}
+
 fn a_pie(radius: f64, height: f64, unit: &str, through_the_middle: bool) -> String {
     let mut corners = vec![[radius, 0.0, 0.0]];
     if through_the_middle {
