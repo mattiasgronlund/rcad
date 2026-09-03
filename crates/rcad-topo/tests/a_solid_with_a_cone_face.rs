@@ -22,13 +22,17 @@
 //! # Everything here is exact on purpose, and a cone makes that harder
 //!
 //! `Model::validate` asks that every corner of a curved face be **certified** on
-//! its surface — no wobble allowed. A bar gets that for free: its corner sits at
-//! `(r, 0, z)` and `x² + y² − r²` cancels whatever `r` is. A cone's corner has to
-//! satisfy `radius = slope · height`, a relation between three stored numbers, so
-//! one of them is a product that has to round to nothing. Every cone below has a
-//! slope that is a **power of two**, which makes `slope · height` exact for every
-//! height `f64` can hold. A slope of `0.6` would not, and the corner would be
-//! certified *off* its own face.
+//! its surface, or else be inside the width of the number. A bar gets the first
+//! for free: its corner sits at `(r, 0, z)` and `x² + y² − r²` cancels whatever
+//! `r` is. A cone's corner has to satisfy `radius = slope · height`, a relation
+//! between three stored numbers, so one of them is a product that has to round
+//! to nothing. Every cone below has a slope that is a **power of two**, which
+//! makes `slope · height` exact for every height `f64` can hold.
+//!
+//! A slope of `0.1` does not, and the last two tests here are that pair: the
+//! corner at `0.1 · 3.0` misses the cone by half a coordinate spacing and is
+//! **built**, because no `f64` puts it nearer; a corner ninety times the width
+//! of the number off is still refused.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
@@ -248,30 +252,81 @@ fn a_pointed_cone_asked_for_a_finer_mesh_than_its_apex_allows_is_refused_by_name
     }
 }
 
-/// A corner that is a rounding off the cone it claims to sit on is caught.
+const A_SLOPE_WHOSE_PRODUCT_ROUNDS: f64 = 0.1;
+const HOW_FAR_UP_THE_RIM_SITS: f64 = 3.0;
+
+/// A corner that is a *rounding* off the cone it claims to sit on is built.
 ///
-/// The whole reason every cone in this file has a power-of-two slope. With a
-/// slope of `0.6` the corner at `(0.6·5, 0, 5)` is `(3.0000000000000004, 0, 5)`,
-/// which is *not* on the cone `√(x² + y²) = 0.6z` — and the sweep says so rather
-/// than accepting a face whose own boundary is off it.
+/// **This test said the opposite until the curved rounding landed**, and the
+/// reversal is the point of it. `0.1 · 3.0` is `0.30000000000000004`, the `f64`
+/// one step above `0.3`. The cone's own question at `z = 3` is `x² = 9·slope²`,
+/// and `3·slope` in exact arithmetic needs 54 bits of mantissa and is odd, so
+/// **no `f64` on that ray is on this cone at all** — the exact predicate
+/// certifies the corner off it and always will. Refusing it refused a corner
+/// nobody could have written any nearer, which is what 88 of the 161 KiCad files
+/// with a corner off a curved face were refused for.
+///
+/// The true miss is *half* a coordinate spacing, not one: `3·slope` falls exactly
+/// midway between two `f64`, so the corner is as far off as a correctly rounded
+/// write ever gets and neither neighbour is nearer than the other.
+///
+/// Nothing here is nudged: the miss is what ordinary `f64` multiplication does
+/// to `slope · height`, which is why this pair is worth having beside the
+/// synthetic pair in `validate.rs`.
 #[test]
-fn a_cone_whose_corner_does_not_sit_on_it_is_refused_by_the_sweep() {
+fn a_cone_whose_corner_is_a_rounding_off_it_is_built() {
     let mut model = Model::new(a_working_size());
-    let slope = 0.1;
-    let far = 3.0;
+    let rim = A_SLOPE_WHOSE_PRODUCT_ROUNDS * HOW_FAR_UP_THE_RIM_SITS;
     assert_ne!(
-        slope * far,
-        0.3,
+        rim, 0.3,
         "a tenth times three does not land on three tenths, which is the whole point"
     );
+    assert_eq!(
+        rim,
+        f64::from_bits(0.3f64.to_bits() + 1),
+        "and it lands on the very next f64 above it"
+    );
 
-    let skin = Cone::new(Axis::z(), slope).expect("a positive slope");
+    a_cone_capped_at_a_rim_of(&mut model, rim)
+        .expect("a corner half a spacing off is one no writer could improve on");
+}
+
+/// And the half that keeps the allowance from being a tolerance.
+///
+/// A corner `1e-12` out is one somebody chose: the budget at this size is
+/// `16 · f64::EPSILON · 3`, about `1.1e-14`, so this is ninety times it. The
+/// sweep still says so rather than accepting a face whose own boundary is off
+/// it.
+#[test]
+fn a_cone_whose_corner_is_further_off_than_writing_it_down_could_explain_is_refused_by_the_sweep() {
+    let mut model = Model::new(a_working_size());
+    let rim = A_SLOPE_WHOSE_PRODUCT_ROUNDS * HOW_FAR_UP_THE_RIM_SITS + 1.0e-12;
+
+    let refused = a_cone_capped_at_a_rim_of(&mut model, rim);
+    assert!(
+        refused.is_err(),
+        "a corner a millionth of a millionth off its own cone is one somebody \
+         chose, and this was accepted"
+    );
+}
+
+/// A cone under a flat cap, with the one circle they share put at `rim`.
+///
+/// The cap's plane is square to the axis at the rim's own height, so moving the
+/// rim across leaves the cap exactly where it was and the cone's face is the
+/// only thing with an opinion.
+fn a_cone_capped_at_a_rim_of(
+    model: &mut Model,
+    rim: f64,
+) -> Result<rcad_topo::SolidKey, rcad_topo::Error> {
+    let far = HOW_FAR_UP_THE_RIM_SITS;
+    let skin = Cone::new(Axis::z(), A_SLOPE_WHOSE_PRODUCT_ROUNDS).expect("a positive slope");
     let mut builder = SolidBuilder::new();
-    let rim = builder
-        .add_vertex(Point::new(slope * far, 0.0, far))
+    let corner = builder
+        .add_vertex(Point::new(rim, 0.0, far))
         .expect("a finite point");
     let circle = builder
-        .add_edge(rim, rim, EdgeRun::RightRoundWhereItsFacesCross)
+        .add_edge(corner, corner, EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a closed edge");
     let plane = Plane::from_point_and_normal(Point::new(0.0, 0.0, far), Vector::new(0.0, 0.0, 1.0))
         .expect("the z axis is a unit normal");
@@ -297,11 +352,7 @@ fn a_cone_whose_corner_does_not_sit_on_it_is_refused_by_the_sweep() {
         .add_shell(&[(cap, Orientation::Forward), (side, Orientation::Forward)])
         .expect("two faces close");
 
-    let refused = builder.build(&mut model, &Policy::certified(), &mut ProvenanceLog::new());
-    assert!(
-        refused.is_err(),
-        "a corner a rounding off its own cone is refused, and this was accepted"
-    );
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
 /// A cone-faced solid written out and read back is the same solid.
