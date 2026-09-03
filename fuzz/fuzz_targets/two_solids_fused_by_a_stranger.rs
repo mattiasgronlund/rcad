@@ -41,6 +41,15 @@
 //! is the one left open: can a model that *passes* `validate` still crash
 //! `fuse`?
 //!
+//! **What the door promised is asserted before `validate` runs, not assumed.**
+//! A corner at no point and a slop that is not a length are both refused on
+//! the way in (`docs/decisions.md` §44.5), and the infinite slop is the one
+//! that matters here: `not_provably_off` keeps any magnitude above zero and
+//! widens the corner into an interval straddling every surface, so a model
+//! carrying one *passes* `validate` and reaches `fuse` with its corners
+//! nowhere near its faces. Checking it here rather than after `validate` is
+//! deliberate — `validate` is the thing that would be fooled.
+//!
 //! `Policy::tolerant`'s scale always comes from the model's own
 //! `Scale::nominal_size()`, never from fuzzed bytes directly, because a bad
 //! numeric parameter there is an already-known, already-reported panic
@@ -70,6 +79,7 @@ fn fuse_a_split_of_its_own_solids(bytes: &[u8], header: u8) {
     let Ok(mut model) = postcard::from_bytes::<Model>(bytes) else {
         return;
     };
+    every_number_the_door_promised_is_real(&model);
     if model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .is_err()
@@ -96,4 +106,33 @@ fn fuse_a_split_of_its_own_solids(bytes: &[u8], header: u8) {
     };
 
     let _ = model.fuse(arguments, tools, rule, &policy, &mut ProvenanceLog::new());
+}
+
+/// What `Deserialize for Model` promised about the numbers in it.
+///
+/// Every corner is at a point, and every amount of slop is a length.
+fn every_number_the_door_promised_is_real(model: &Model) {
+    for vertex in model.vertices() {
+        assert!(
+            vertex.point().is_finite(),
+            "a corner that is at no point came through the door: {:?}",
+            vertex.point()
+        );
+        assert_it_is_a_length(vertex.approximation().map(|tag| tag.magnitude()));
+    }
+    for edge in model.edges() {
+        assert_it_is_a_length(edge.approximation().map(|tag| tag.magnitude()));
+    }
+    for face in model.faces() {
+        assert_it_is_a_length(face.approximation().map(|tag| tag.magnitude()));
+    }
+}
+
+fn assert_it_is_a_length(magnitude: Option<f64>) {
+    if let Some(magnitude) = magnitude {
+        assert!(
+            magnitude.is_finite() && magnitude >= 0.0,
+            "a slop of {magnitude} came through the door, and it is not a length"
+        );
+    }
 }

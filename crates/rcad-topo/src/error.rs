@@ -924,6 +924,22 @@ pub enum Invalid {
         inner_magnitude: f64,
     },
 
+    /// An entity says it is out of place by an amount that is not a length —
+    /// negative, infinite, or not a number.
+    ///
+    /// Infinity is the one that costs something: `not_provably_off` keeps any
+    /// magnitude above zero and widens the corner it is asked about into an
+    /// interval reaching every surface, so a model tagged that way passes the
+    /// certified check without being anywhere near its own faces
+    /// (`docs/decisions.md` §44.5).
+    #[error("a {entity} says it is {magnitude} out of place, which is not a length")]
+    ApproximationIsNotALength {
+        /// What carries the tag: a vertex, an edge or a face.
+        entity: &'static str,
+        /// The magnitude it claims.
+        magnitude: f64,
+    },
+
     /// The model's coordinates span too wide a range to compute in
     /// (decisions.md §3.5).
     #[error("coordinates span a range of {ratio:e}, which is too wide to compute in")]

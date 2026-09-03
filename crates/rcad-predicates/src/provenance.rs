@@ -1,13 +1,29 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Decision, Level, Measures, Point};
+use crate::{Decision, Error, Level, Measures, Point};
 
 /// The tag an entity carries because a decision put slop into it.
 ///
 /// Small, self-contained and serializable on purpose: it has to survive being
 /// written to disk without the log it came from. A pointer into a log would
 /// dangle the moment the model is serialized on its own (decisions.md §5).
+///
+/// **Read back through [`Approximation::new`]'s condition**, the way
+/// `rcad-geom`'s `Scale` and every surface is, because a plain derive would
+/// let a file set a
+/// magnitude that no constructor can produce. An infinite one is not a wider
+/// allowance but the certified check switched off: `rcad-topo`'s
+/// `not_provably_off` keeps any magnitude above zero and widens the corner it
+/// is asked about into an interval that reaches every surface, so a model whose
+/// corners are nowhere near their faces reads back and validates
+/// (`docs/decisions.md` §44.5).
+///
+/// A two-field struct and a two-element tuple are the same bytes in `postcard`,
+/// so the door cost the format nothing —
+/// `a_guarded_approximation_is_still_the_same_bytes_it_always_was` is that,
+/// checked rather than argued.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "(f64, Cause)", into = "(f64, Cause)")]
 pub struct Approximation {
     magnitude: f64,
     cause: Cause,
@@ -27,9 +43,14 @@ impl Approximation {
     /// If `magnitude` is negative, infinite, or not a number. An approximation
     /// you cannot compare is worse than none, and neither infinity nor `NaN` is
     /// a length `rcad-topo`'s `check_approximation_ordering` can put in order.
+    ///
+    /// A caller in this workspace passing one of those has a bug, which is why
+    /// this panics; a *file* carrying one is data, and
+    /// [`TryFrom<(f64, Cause)>`](Approximation::try_from) is the same condition
+    /// asked the other way round for it.
     pub fn new(magnitude: f64, cause: Cause) -> Self {
         assert!(
-            magnitude.is_finite() && magnitude >= 0.0,
+            is_a_real_amount(magnitude),
             "an approximation magnitude must be a real amount, got {magnitude}"
         );
         Self { magnitude, cause }
@@ -44,6 +65,28 @@ impl Approximation {
     pub fn cause(self) -> Cause {
         self.cause
     }
+}
+
+impl TryFrom<(f64, Cause)> for Approximation {
+    type Error = Error;
+
+    fn try_from((magnitude, cause): (f64, Cause)) -> Result<Self, Error> {
+        if !is_a_real_amount(magnitude) {
+            return Err(Error::ApproximationIsNotALength { magnitude });
+        }
+        Ok(Self { magnitude, cause })
+    }
+}
+
+impl From<Approximation> for (f64, Cause) {
+    fn from(tag: Approximation) -> Self {
+        (tag.magnitude, tag.cause)
+    }
+}
+
+/// Whether a magnitude is a length something could really be out of place by.
+fn is_a_real_amount(magnitude: f64) -> bool {
+    magnitude.is_finite() && magnitude >= 0.0
 }
 
 /// Why an entity ended up approximate.

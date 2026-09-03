@@ -16,6 +16,14 @@
 //! with whatever it accepts, sound or not — a `Model` a fuzzer built is under
 //! no obligation to be one `Model::validate` would let through, and the
 //! writer owes an `Err` either way, never a crash.
+//!
+//! **A model that does come out is checked against what the door promised**,
+//! not just handed on. `Deserialize` refuses a corner that is at no point and
+//! a slop that is not a length (`docs/decisions.md` §44.5), and a fuzzer
+//! reaching the writer is the one thing in the tree that tries every byte
+//! string there is against that promise. Walking past a model whose corner is
+//! `NaN` would leave the door untested by the only target that knocks on it a
+//! billion times.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -25,5 +33,39 @@ fuzz_target!(|bytes: &[u8]| {
     let Ok(model) = postcard::from_bytes::<Model>(bytes) else {
         return;
     };
+    every_number_the_door_promised_is_real(&model);
     let _ = rcad_step::write(&model, "fuzz");
 });
+
+/// What `Deserialize for Model` promised about the numbers in it.
+///
+/// Every corner is at a point, and every amount of slop is a length. The second
+/// one is the one that costs something if it is wrong: `rcad-topo`'s
+/// `not_provably_off` keeps any magnitude above zero and widens the corner it
+/// is asked about into an interval that straddles every surface, so an infinite
+/// tag is the certified check switched off rather than loosened.
+fn every_number_the_door_promised_is_real(model: &Model) {
+    for vertex in model.vertices() {
+        assert!(
+            vertex.point().is_finite(),
+            "a corner that is at no point came through the door: {:?}",
+            vertex.point()
+        );
+        assert_it_is_a_length(vertex.approximation().map(|tag| tag.magnitude()));
+    }
+    for edge in model.edges() {
+        assert_it_is_a_length(edge.approximation().map(|tag| tag.magnitude()));
+    }
+    for face in model.faces() {
+        assert_it_is_a_length(face.approximation().map(|tag| tag.magnitude()));
+    }
+}
+
+fn assert_it_is_a_length(magnitude: Option<f64>) {
+    if let Some(magnitude) = magnitude {
+        assert!(
+            magnitude.is_finite() && magnitude >= 0.0,
+            "a slop of {magnitude} came through the door, and it is not a length"
+        );
+    }
+}
