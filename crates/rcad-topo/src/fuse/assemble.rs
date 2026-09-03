@@ -69,7 +69,8 @@ use crate::{
 };
 
 use super::arrange::{
-    agreement_of_two_planes, name_of_surface_bits, name_of_the_surface_either_way_round,
+    a_plane_cuts_a_cone_in_rulings, agreement_of_two_planes, name_of_surface_bits,
+    name_of_the_surface_either_way_round,
 };
 use super::select::Chosen;
 use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
@@ -1978,34 +1979,26 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
             one.axis().direction().cross(other.axis().direction()) == Vector::zero()
         }
-        // **A cone never reaches *here* running straight, and that is a fact
-        // about this function's one caller rather than about the kernel.** The
-        // only crossing with a cone on it that `intersect` names is the ellipse
-        // a plane cuts across it; the two shapes that *are* straight — a tangent
-        // plane's one ruling, and two rulings meeting at the apex — come back
-        // `APlaneTouchingAConeAlongOneOfItsRulings` and
-        // `TwoLinesThroughAConesApexAreOneCurveThroughItself` from
-        // `where_a_plane_and_a_cone_cross`. So the fuse never builds a
-        // `FaceMeet` carrying such a pair, and `which_arc_this_is` is private
-        // and reached from nowhere else.
+        // A plane and a cone cross in rulings when the plane goes through the
+        // apex and leans no shallower than the cone's own side: one ruling the
+        // plane rests along, two where it is steeper. Both are straight, and
+        // both are what `where_a_plane_and_a_cone_cross` hands back for those
+        // two signs.
         //
-        // This used to say "no run carrying either exists". That is false and
-        // the geom lane demonstrated it: `EdgeRun` is `Deserialize` and
-        // `rcad_geom::walk` is public, so a run carrying one of those shapes can
-        // be handed in with nothing forged. What does not exist is one arriving
-        // here.
-        //
-        // **And the answer below is right because of that caller, not on its
-        // own.** A pair that really did cross in one ruling would be told
-        // `false`, which is the two-arc path, and one ruling is one arc.
+        // This used to answer the whole cone row `false` and say a cone never
+        // reached here running straight, because the two shapes above came back
+        // refused by name. They are named now, so a `FaceMeet` carrying such a
+        // pair is built by the ordinary path and the old claim would put two
+        // arcs where a ruling has one.
+        [Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)] => a_plane_cuts_a_cone_in_rulings(flat, cone),
+        // A cone against a ball, a pipe or another cone crosses in a degree-four
+        // space curve, which holds no line; the ring row below covers the fourth.
         [
             Surface::Cone(_),
-            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
         ]
-        | [
-            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_),
-            Surface::Cone(_),
-        ] => false,
+        | [Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)] => false,
         // **A ball's skin and a ring's skin are bounded, and a straight line is
         // not, so no line lies on either** — which settles every remaining pair
         // at once and without a case analysis. Whatever the partner is, the
@@ -2154,7 +2147,8 @@ fn sides_of(
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cylinder, Plane, Sphere, Surface, Torus};
+    use rcad_geom::{Axis, Cone, Cylinder, EdgeRun, Plane, Sphere, Surface, SurfaceMeet, Torus};
+    use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::{
         Point, Vector, the_crossing_of_these_runs_straight, the_half_space_both_ends_are_on,
@@ -2255,6 +2249,86 @@ mod tests {
             &on_the_ring,
             &on_the_flat,
         );
+    }
+
+    /// A plane and a cone run straight exactly where the plane goes through the
+    /// apex and leans no shallower than the cone's own side.
+    ///
+    /// The four rows are the four this pair has, and each one is put to
+    /// `intersect` as well so that the two never disagree about what the pair
+    /// is. Two of them are straight lines a caller has to leave **one** arc
+    /// between and not two — the ruling a tangent plane rests along, and the two
+    /// rulings a steeper plane cuts. The other two are not straight: a plane
+    /// cutting across leaves an ellipse, and a plane through the apex shallower
+    /// than the cone shares the apex with it and nothing else.
+    ///
+    /// This row used to be a blanket `false` resting on the claim that no run
+    /// with a cone on it ever arrived here straight. That was true only while
+    /// `intersect` refused both apex shapes by name, and it does not any more.
+    #[test]
+    fn a_plane_and_a_cone_run_straight_at_the_apex_and_no_shallower() {
+        let cone = Cone::new(Axis::z(), 0.5).expect("a cone leaning a half");
+        let flat = |normal: Vector, through: Point| {
+            Plane::from_point_and_normal(through, normal).expect("a normal with length")
+        };
+
+        // A tangent plane holding the ruling `(t/2, 0, t)`, a plane down the
+        // axis that cuts two rulings, a plane square to the axis clear of the
+        // apex, and the same plane slid onto the apex.
+        let touching = flat(Vector::new(-1.0, 0.0, 0.5), Point::origin());
+        let down_the_axis = flat(Vector::new(0.0, 1.0, 0.0), Point::origin());
+        let across = flat(Vector::new(0.0, 0.0, 1.0), Point::new(0.0, 0.0, 4.0));
+        let on_the_apex = flat(Vector::new(0.0, 0.0, 1.0), Point::origin());
+
+        for (named, plane, runs_straight) in [
+            ("a plane resting along one ruling", touching, true),
+            (
+                "a plane down the axis cutting two rulings",
+                down_the_axis,
+                true,
+            ),
+            ("a plane cutting across the cone", across, false),
+            (
+                "a plane through the apex square to the axis",
+                on_the_apex,
+                false,
+            ),
+        ] {
+            for pair in [
+                [Surface::Plane(plane), Surface::Cone(cone)],
+                [Surface::Cone(cone), Surface::Plane(plane)],
+            ] {
+                assert_eq!(
+                    the_crossing_of_these_runs_straight(&pair),
+                    runs_straight,
+                    "{named} was read the wrong way round {pair:?}"
+                );
+            }
+
+            // A second spelling of this question is how the two come to
+            // disagree about how many pieces a pair has, so `intersect` is asked
+            // the same four rows and has to hand back straight lines for exactly
+            // the two above: one [`EdgeRun::Straight`] for the ruling a tangent
+            // plane rests along, and two [`EdgeRun::PartOfWhereItCrosses`] with
+            // a picker each for the pair a steeper plane cuts.
+            let met = rcad_geom::intersect(
+                &Surface::Plane(plane),
+                &Surface::Cone(cone),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{named} is a shape `intersect` names: {why:?}"));
+            let intersect_says_lines = matches!(&met, SurfaceMeet::Curves(runs) if runs
+            .iter()
+            .all(|run| matches!(
+                run.run(),
+                EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. }
+            )));
+            assert_eq!(
+                intersect_says_lines, runs_straight,
+                "{named} came back from `intersect` as {met:?}"
+            );
+        }
     }
 
     /// The whole of what
