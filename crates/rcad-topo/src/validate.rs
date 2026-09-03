@@ -47,7 +47,9 @@ impl Model {
     ///   edges that are not both straight,
     /// - every face sits on a plane, with its corners on that plane, its outer
     ///   wire winding with the face normal and its holes winding against it,
-    ///   so the material is on one consistent side,
+    ///   so the material is on one consistent side — over the boundary the wire
+    ///   traces, arcs walked and all, and not over its corners alone
+    ///   ([`winding_of`]),
     /// - nothing is orphaned and nothing is used twice where it may only be
     ///   used once,
     /// - every solid encloses a positive amount of space, which is what says
@@ -1541,6 +1543,23 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
 /// The walk's own coarseness therefore only decides **which pass answers**,
 /// never what the answer is.
 ///
+/// # What it costs the sweep
+///
+/// Nothing at all for a wire whose every step is straight, which is every wire
+/// of a polyhedron and both end faces of the plate below. For a wire with an arc
+/// in it, one walk per pass and a polygon sum over what came back.
+///
+/// Measured on `a_face_bounded_by_two_half_circles.rs`'s plate, whose two caps
+/// are the only walked wires in it: the whole of [`Model::validate`] goes from
+/// 64.0 µs to 86.4 µs, so about 11 µs a walked wire. Each cap answers on the
+/// fifth pass, at a deflection of 0.375 on a plate 6 across, over a ring of
+/// eight points.
+///
+/// **It stays linear in the model.** The passes are a property of one wire's own
+/// shape — how thin it is against how far round it goes — and not of how many
+/// entities there are, so this is one more per-face cost in a sweep that was
+/// already a pass over every face (§4.3).
+///
 /// Reversing a face reverses this ring and negates every term of the sum
 /// exactly, so a face put on back to front is caught exactly as it was before.
 ///
@@ -1746,10 +1765,10 @@ impl RingAWireTraces {
         let enclosed = swept.on_intervals();
         let hidden = 2.0 * self.how_far_round_it_is() * (deflection.length() + self.deviation);
         let certainly_enclosed = enclosed.lo().abs().min(enclosed.hi().abs());
-        if enclosed.contains_zero() || !(certainly_enclosed > hidden) {
-            return Ok(None);
+        if !enclosed.contains_zero() && certainly_enclosed > hidden {
+            return winding_round(&self.points, normal).map(Some);
         }
-        winding_round(&self.points, normal).map(Some)
+        Ok(None)
     }
 
     fn how_far_round_it_is(&self) -> f64 {
@@ -1758,7 +1777,9 @@ impl RingAWireTraces {
             .map(|index| {
                 let from = self.points[index];
                 let to = self.points[(index + 1) % count];
-                (0..3).map(|axis| (to[axis] - from[axis]).abs()).sum::<f64>()
+                (0..3)
+                    .map(|axis| (to[axis] - from[axis]).abs())
+                    .sum::<f64>()
             })
             .sum()
     }
