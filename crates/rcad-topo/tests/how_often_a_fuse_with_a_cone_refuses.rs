@@ -591,6 +591,13 @@ fn a_grid_of_points_is_classified_the_way_the_cone_says() {
 ///
 /// Without this control the cone's number would have been read as the cone's
 /// fault and the next lane would have gone looking in the wrong place.
+///
+/// **What is checked is a floor, not a band.** The bar is the floor the frustum
+/// has to stand on; the frustum answering *more* is not a failure of the claim
+/// but this kernel learning a crossing with a cone on it. The bar has no
+/// hyperbola row to gain, so it cannot follow that gain, and a band on both
+/// sides would report a cone as the family's problem exactly when the cone had
+/// stopped being one.
 #[test]
 fn a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike() {
     let policy = Policy::certified();
@@ -653,15 +660,19 @@ fn a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike() 
         answered[1], gave_up[1]
     );
     assert!(tries >= 90, "only {tries} fuses were drawn");
-    // Within a quarter of each other, which is the claim: the two rates are the
-    // same rate, and a cone is not what makes this family hard.
-    let gap = (answered[0] as f64 - answered[1] as f64).abs();
+    // **A floor and not a band.** The bar is a floor on the frustum: a cone is
+    // not what makes this family hard, so the frustum must not answer *fewer*
+    // than the bar by more than a quarter. It may answer more, and a two-sided
+    // band would go red saying the opposite of what had happened — the bar has
+    // no hyperbola row to gain, so every crossing a cone learns to name is a
+    // gain the control cannot follow.
+    let shortfall = answered[1] as f64 - answered[0] as f64;
     assert!(
-        gap <= 0.25 * (answered[0].max(answered[1]) as f64).max(4.0),
-        "a frustum answered {} of these and a bar answered {}, which is not the same rate — \
-         so a cone *is* what makes this family hard, and the note above is wrong",
-        answered[0],
-        answered[1]
+        shortfall <= 0.25 * (answered[1] as f64).max(4.0),
+        "a bar answered {} of these and a frustum only {}, so a cone *is* what makes this \
+         family hard, and the note above is wrong",
+        answered[1],
+        answered[0]
     );
     assert!(
         answered[1] > 0 && answered[1] < tries,
