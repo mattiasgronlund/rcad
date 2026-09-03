@@ -27,10 +27,12 @@ check:
 #
 # `crates/rcad-step/tools/composite_wildcards.awk` is the second mechanism: a
 # line-based scan for an arm that names one of our enum's variants inside a
-# `[`, a `(`, or a `&`, standing in the same match as a bare `_`. It is a
-# count of *sites*, same as the clippy half — naming every pair a match sees
-# today and keeping `_` for the one that does not exist yet is correct, and
-# still counted, same as a fully-named single-enum match still is.
+# `[`, a `(`, or a `&`, standing in the same match as a bare `_`. It counts how
+# many of that enum's own variants the match never names anywhere in its arms
+# — not the match itself — so a fully-named composite match, the same as a
+# fully-named single-enum one, counts zero. The proper mechanism for this is
+# rustc's own `non_exhaustive_omitted_patterns`, unstable on the 1.96 this repo
+# pins; the script's own header comment says so first.
 #
 # `check-wildcards-selftest`, below, pins two small fixtures the scan must
 # catch and two it must not, against a made-up enum rather than one of ours —
@@ -44,8 +46,12 @@ check:
 # The number moves for three reasons and all three want looking at. A new
 # wildcard raises it, of either kind. So does a new *variant*, because a site
 # that names every variant there is today starts matching a known one
-# tomorrow — which is the whole point of naming them.
-wildcard_arms := "90"
+# tomorrow — which is the whole point of naming them. That used to be true of
+# the clippy half only; §43.8 item 8 found the composite half counted sites
+# and not variants, so a fourth surface-pair list could drift out of step with
+# the other three and this number would never say so. It counts uncovered
+# variants now, and moves with a new one on the composite side too.
+wildcard_arms := "88"
 
 check-wildcards:
     @find crates -name lib.rs -path '*/src/*' -exec touch {} +
@@ -59,7 +65,7 @@ check-wildcards:
     enums=$(grep -hoE '^[ \t]*pub enum [A-Za-z0-9_]+' $(find crates -path '*/src/*' -name '*.rs') \
             | awk '{print $NF}' | sort -u | paste -sd'|'); \
     composite=$(awk -v enums="$enums" -f crates/rcad-step/tools/composite_wildcards.awk $files \
-            | grep -c '^crates/'); \
+            | grep '^COUNT=' | cut -d= -f2); \
     found=$((direct + composite)); \
     if [ "$found" != "{{wildcard_arms}}" ]; then \
         echo "wildcard arms over our own enums: $found ($direct direct, $composite composite), expected {{wildcard_arms}}"; \
@@ -72,9 +78,14 @@ check-wildcards:
 #
 # `Toy` is not one of our enums — the fixtures pass it to the script by name
 # so the test is about the *script*, not about what today's `crates` happen
-# to hold. `commented.rs` pins the bug the script had while this recipe was
-# being written: a doc comment that says the word "match" opened a match
-# this script never closed, and every line after it stopped being read.
+# to hold, and `toy_enum.rs` gives it a two-variant body of its own so the
+# scan has a real total to judge the others against. `commented.rs` pins the
+# bug the script had while this recipe was being written: a doc comment that
+# says the word "match" opened a match this script never closed, and every
+# line after it stopped being read. Every fixture below names only `Toy::A`
+# and never `Toy::B`, so each is one variant short — 1 apiece, 3 in all — not
+# because three sites were found, but because three fixtures each leave one
+# of `Toy`'s two variants uncovered.
 check-wildcards-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -121,9 +132,15 @@ check-wildcards-selftest:
         }
     }
     RS
+    cat > "$dir/toy_enum.rs" <<'RS'
+    pub enum Toy {
+        A,
+        B,
+    }
+    RS
     got=$(awk -v enums="Toy" -f crates/rcad-step/tools/composite_wildcards.awk \
         "$dir/bad_array.rs" "$dir/bad_tuple_ref.rs" "$dir/good_named.rs" \
-        "$dir/good_single_enum_wildcard.rs" "$dir/commented.rs" | sort)
+        "$dir/good_single_enum_wildcard.rs" "$dir/commented.rs" "$dir/toy_enum.rs" | sort)
     want=$(printf '%s\n' \
         "$dir/bad_array.rs:2" \
         "$dir/bad_tuple_ref.rs:2" \
