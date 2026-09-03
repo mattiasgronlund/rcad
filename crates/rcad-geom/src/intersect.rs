@@ -129,10 +129,10 @@ pub const WHERE_A_PLANE_AND_A_TORUS_CROSS: &str = "where a plane and a torus cro
 /// surfaces are tangent along the curve rather than at a point, so what they
 /// cross in is one curve that runs through itself.
 ///
-/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
-/// for the two shapes of a plane against a cone that this vocabulary cannot say,
-/// and [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against
-/// anything curved.
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against
+/// anything curved. **All seven shapes of a plane against a cone are named**,
+/// including the parabola and the two branches of the hyperbola, which used to
+/// be refused under names of their own.
 ///
 /// [`Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic`] for every plane
 /// against a torus but the two families that cut circles, and
@@ -1606,8 +1606,7 @@ fn two_lines_told_apart(
     ))
 }
 
-/// A plane and a cone: seven shapes, four of them named here and three refused
-/// by name.
+/// A plane and a cone: seven shapes, and **every one of them is named**.
 ///
 /// # The two signs that settle all seven
 ///
@@ -1628,8 +1627,8 @@ fn two_lines_told_apart(
 /// | apex | `E` | the crossing | here |
 /// |---|---|---|---|
 /// | off the plane | `> 0` | an ellipse, a circle when the plane is square to the axis | **named** — one closed curve |
-/// | off the plane | `= 0` | a parabola | [`Error::ACrossingThatIsAParabola`] |
-/// | off the plane | `< 0` | a hyperbola | [`Error::ACrossingThatIsAHyperbola`] |
+/// | off the plane | `= 0` | a parabola | **named** — one endless bending run, held by the nappe it lies in |
+/// | off the plane | `< 0` | a hyperbola | **named** — two endless bending runs, one per nappe — or [`Error::CannotNameWhichPieceOfACrossingThisIs`] |
 /// | on the plane | `> 0` | the apex and nothing else | **named** — one touching point, exactly |
 /// | on the plane | `= 0` | one ruling, touched along its whole length | **named** — one straight run, endless |
 /// | on the plane | `< 0` | two rulings crossing at the apex | **named** — two straight runs, told apart by a picker each — or [`Error::CannotNameWhichPieceOfACrossingThisIs`] |
@@ -1637,11 +1636,42 @@ fn two_lines_told_apart(
 /// The seventh shape a plane and a quadric can make is *the same surface*, and a
 /// plane is never a cone.
 ///
-/// **Both remaining refusals are refusals of the vocabulary and not of the
-/// arithmetic**, and each variant says which of a limit and a gap it is and what
-/// closing it would take. Both signs above are polynomials in stored `f64` and
-/// level 3 settles them; nothing here is ever undecided except when a product
-/// leaves `f64`'s range.
+/// Both signs above are polynomials in stored `f64` and level 3 settles them;
+/// nothing here is ever undecided except when a product leaves `f64`'s range.
+///
+/// # The two bending shapes are picked out by the nappe they lie in
+///
+/// A parabola lies wholly in **one** nappe of the cone and a hyperbola puts one
+/// branch in each, so the flat surface through the apex square to the axis is
+/// what names them — the fix the refusal that stood here used to describe as
+/// the shortest one, taken. The
+/// half-space's normal is the cone's axis direction **bit for bit**, so it is
+/// exactly square to nothing and exactly parallel to the axis, and the sign it
+/// reads at a point is the sign of `(x − apex)·ŵ`, which is the very number the
+/// cone's own equation squares. The offset is the one thing that rounds, and the
+/// two shapes want two different things of it:
+///
+/// - **The parabola only has to be held**, so the offset is rounded *down* — the
+///   largest `f64` at or below `ŵ·apex`. The half-space then contains the whole
+///   closed nappe whatever the rounding did, because `ŵ·x − offset` is at least
+///   `ŵ·(x − apex)`, which is what being in the nappe means. This never refuses.
+/// - **The hyperbola's two branches have to be told apart**, so its offset has
+///   to be `ŵ·apex` *exactly*: rounded down, the half-space facing one way holds
+///   a thin slab of the other nappe as well, and a branch that reached into that
+///   slab would be held by both pickers. Where that dot product does not round
+///   exactly this refuses with
+///   [`Error::CannotNameWhichPieceOfACrossingThisIs`] rather than picking
+///   something it cannot prove, which is C1's rule 3 on
+///   [`two_lines_through_a_cones_apex`] over again and for the same reason.
+///
+/// **Rounding down is not enough for the hyperbola and nothing else is
+/// cheaper.** The families weighed: scaling the picker by a power of two rounds
+/// nothing but does not make a sum representable that was not; rounding the
+/// offset *up* instead swaps which of the two properties is lost; and measuring
+/// the branch's own clearance from the apex plane and comparing it against the
+/// rounding is arithmetic on a vertex that is itself only known to a bound. The
+/// exact offset is the only one that makes the picker's boundary the nappe
+/// boundary, which is the thing being claimed.
 ///
 /// # The two shapes through the apex are straight, so they need no new curve
 ///
@@ -1677,7 +1707,8 @@ fn where_a_plane_and_a_cone_cross(
         enclosing: || dot_enclosing(exactly(normal), exactly(apex)) - Interval::exactly(d),
         exactly: || Some(Exact::dot_of(normal, apex)?.minus(&Exact::of(d))),
     };
-    let apex_is_on_the_plane = match ask(&stands_off, Measures::Length, &at, policy, log)? {
+    let standing_off = ask(&stands_off, Measures::Length, &at, policy, log)?;
+    let apex_is_on_the_plane = match standing_off {
         Decision::Zero => true,
         Decision::Pos | Decision::Neg => false,
         other => unreachable!("a sign question answers with a sign: {other:?}"),
@@ -1710,8 +1741,10 @@ fn where_a_plane_and_a_cone_cross(
         (false, Decision::Pos) => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
             EdgeRun::RightRoundWhereItsFacesCross,
         )?])),
-        (false, Decision::Zero) => Err(Error::ACrossingThatIsAParabola),
-        (false, Decision::Neg) => Err(Error::ACrossingThatIsAHyperbola),
+        (false, Decision::Zero) => {
+            one_parabola_in_one_of_a_cones_nappes(flat, cone, standing_off, policy, log)
+        }
+        (false, Decision::Neg) => the_two_branches_of_a_hyperbola(cone),
         (true, Decision::Pos) => Ok(SurfaceMeet::TouchAtOnePoint {
             at: PredicatePoint::from(apex),
         }),
@@ -1721,6 +1754,141 @@ fn where_a_plane_and_a_cone_cross(
         (true, Decision::Neg) => two_lines_through_a_cones_apex(flat, cone),
         (_, other) => unreachable!("a sign question answers with a sign: {other:?}"),
     }
+}
+
+/// The parabola a plane parallel to one of a cone's rulings cuts it in, named
+/// as the piece of the crossing the nappe it lies in holds.
+///
+/// # Which nappe, worked out and not guessed
+///
+/// Put the parabola into the cone's own equation in the plane's two directions
+/// and everything but the sign cancels: for a point `x` of it,
+///
+/// ```text
+/// (x − apex)·ŵ  =  −(r² + h²(1 + t²)) / (2(1 + t²)·h·(n̂·ŵ))
+/// ```
+///
+/// with `r` the distance along the direction square to the axis. The numerator
+/// is a sum of squares and is never zero, so the whole curve is on the side
+/// **opposite** the sign of `h·(n̂·ŵ)` — which is the sign of `reach` times the
+/// sign of `n·w`, both of them exact polynomial questions this asks rather than
+/// reads off a rounded product. Neither can be zero in this row: a zero `n·w`
+/// makes `E = −t²` and a zero `reach` puts the apex on the plane.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] if the sign of `n·w` cannot be settled, and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] if the apex's own dot
+/// product with the axis leaves `f64`'s range.
+fn one_parabola_in_one_of_a_cones_nappes(
+    flat: &Plane,
+    cone: &Cone,
+    standing_off: Decision,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<SurfaceMeet> {
+    let normal = flat.normal().components();
+    let along = cone.axis().direction().components();
+    let at = [
+        PredicatePoint::from(flat.origin().coordinates()),
+        PredicatePoint::from(cone.apex().coordinates()),
+    ];
+    let leans_up = Question {
+        named: WHERE_A_PLANE_AND_A_CONE_CROSS,
+        enclosing: || dot_enclosing(exactly(normal), exactly(along)),
+        exactly: || Exact::dot_of(normal, along),
+    };
+    let towards = match (
+        standing_off,
+        ask(&leans_up, Measures::Length, &at, policy, log)?,
+    ) {
+        (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => -1.0,
+        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => 1.0,
+        (apex, axis) => unreachable!(
+            "a parabola stands off the plane and leans on the axis: {apex:?}, {axis:?}"
+        ),
+    };
+
+    let picker = the_whole_of_one_of_a_cones_nappes(cone, towards)?;
+    Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
+        EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Cone(*cone),
+            picked_by: smallvec![Picker::from(picker)],
+        },
+    )?]))
+}
+
+/// The two branches a plane steeper than a cone's side cuts it in, one per
+/// nappe.
+///
+/// **Which branch is which is not asked here and does not have to be.** The
+/// crossing comes in two pieces, one in each nappe, and the pair of runs this
+/// hands back is exactly *the piece in the nappe the axis points along* and *the
+/// piece in the other one*. Which of them a caller later calls the first is the
+/// picker's to say, and [`walk`](crate::walk) reads it off the picker when it
+/// draws — so no branch geometry is worked out on this side of the wall §24.3
+/// puts between naming a crossing and drawing one.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the flat surface
+/// through the apex square to the axis cannot be written down with its offset
+/// exact, which is what telling the two branches apart needs and what
+/// [`where_a_plane_and_a_cone_cross`] argues for.
+fn the_two_branches_of_a_hyperbola(cone: &Cone) -> Result<SurfaceMeet> {
+    let mut runs = Vec::new();
+    for towards in [1.0, -1.0] {
+        let picker = the_whole_of_one_of_a_cones_nappes(cone, towards)?;
+        if !its_flat_surface_passes_exactly_through_the_apex(&picker, cone.apex()) {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        }
+        runs.push(NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Cone(*cone),
+            picked_by: smallvec![Picker::from(picker)],
+        })?);
+    }
+    Ok(SurfaceMeet::Curves(runs))
+}
+
+/// The half-space holding the whole of the nappe the axis points `towards`,
+/// with its offset rounded **down** so that it holds all of that nappe whatever
+/// the rounding did.
+///
+/// `towards` is `1.0` or `-1.0`, and multiplying a direction by either of those
+/// rounds nothing, so the normal is the axis direction's own three `f64`s with
+/// at most a sign flipped.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the dot product of the
+/// axis direction with the apex leaves `f64`'s range, so there is no offset to
+/// round in either direction.
+fn the_whole_of_one_of_a_cones_nappes(cone: &Cone, towards: f64) -> Result<HalfSpace> {
+    let facing = cone.axis().direction() * towards;
+    let Some(exactly) = Exact::dot_of(facing.components(), cone.apex().coordinates()) else {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    };
+    let nearest = exactly.nearest_f64();
+    let offset = if exactly.minus(&Exact::of(nearest)).sign() == Decision::Neg {
+        nearest.next_down()
+    } else {
+        nearest
+    };
+    HalfSpace::new(facing, offset)
+}
+
+/// Whether `picker`'s flat surface passes exactly through `apex`, so that it
+/// holds one nappe and rules out every point of the other.
+///
+/// The same question C1's third rule asks on
+/// [`two_lines_through_a_cones_apex`], and the same one exact dot product
+/// answers it.
+fn its_flat_surface_passes_exactly_through_the_apex(picker: &HalfSpace, apex: Point) -> bool {
+    matches!(
+        Exact::dot_of(picker.normal().components(), apex.coordinates())
+            .map(|reach| reach.minus(&Exact::of(picker.offset())).sign()),
+        Some(Decision::Zero)
+    )
 }
 
 /// The two rulings a plane through a cone's apex cuts it in, each picked out by

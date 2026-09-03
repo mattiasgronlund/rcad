@@ -89,6 +89,87 @@ use crate::{
 /// search can find and prints the figure.
 pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 
+/// How far a point [`walk`] hands back can sit off an **endless bend** — the
+/// parabola or one branch of the hyperbola a plane cuts a cone in — as a
+/// multiple of the largest number involved.
+///
+/// **A separate constant because it is a separate chain.**
+/// [`POINT_ALONG_A_CROSSING_ROUNDOFF`] is derived for a centre, a reach, two
+/// normalizations and a `cos`/`sin` pair, and none of the three shapes here has
+/// that shape of arithmetic. What they have instead is a **division by `K`**,
+/// the number the quadratic's linear term carries, and that division is the one
+/// step neither the conic nor the marcher takes. A bound derived for one chain
+/// is not a bound for another, and borrowing it would be the paragraph §15.6
+/// refuses.
+///
+/// Written with `u = f64::EPSILON / 2`, `L` the size below, `h` for how far the
+/// apex stands off the plane, `t` for the cone's slope, and
+///
+/// ```text
+/// K = 2(1 + t²)·h·(n̂·ŵ)·(and·ŵ),   C = h²(1 − (1 + t²)(n̂·ŵ)²)
+/// ```
+///
+/// so that the parabola is `vertex + across·s + bend·s²` with
+/// `vertex = foot − and·(C/K)` and `bend = −and/K`. `L` is the largest of the
+/// vertex's own coordinates, the apex's, `|K|`, `|C/K|` and `|h|`, which is what
+/// [`how_big_this_is`] is handed — and `|K|` and `|C/K|` are in that list
+/// **because this derivation needs them there**, not for tidiness.
+///
+/// - The **foot** is a dot product, a division and three scaled subtractions:
+///   about six roundings on terms under `2L`, so under `12u·L`.
+/// - `n̂·ŵ` and `and·ŵ` are each an exactly-summed dot over a square root of a
+///   dot: about ten roundings apiece, and both are ratios no bigger than one
+///   with nothing to cancel, so each is right to a relative `10u`.
+/// - **`K`** is five more products on top of those: relative `25u`. It is a
+///   length, `|K| = 2|h|t`, and `L` covers it.
+/// - **`C`** is where the cancellation is. `(1 + t²)(n̂·ŵ)²` is `t² + E` and `E`
+///   is zero on the parabola, so the bracket `1 − (1 + t²)(n̂·ŵ)²` is a
+///   difference that loses its leading digits when `t` is near one. Its
+///   *absolute* error stays under `4u·t²`, so `C` is out by under `6u·h²t²` —
+///   and that is the term the division turns into a position:
+///   `6u·h²t²/|K| = 3u·|h|t`, which is `1.5u·|K|` and so under `2u·L`.
+/// - **`C/K`** also carries `K`'s own relative `25u`, on a term `L` covers:
+///   under `25u·L`. Adding the vertex's own two roundings per coordinate gives
+///   the vertex under `43u·L` all told.
+/// - **`bend`** is `−and/K`: relative `27u`, on a vector of length `1/|K|`.
+/// - **Evaluating** `vertex + across·s + bend·s²` over `|s| ≤ |K|` puts both
+///   moving terms at no more than `|K| ≤ L`, so it is five roundings per
+///   coordinate on terms under `3L` — under `15u·L` — plus `across`'s own
+///   relative `4u` and `bend`'s `27u` on terms under `L`.
+/// - **The parameter** `s` is worked out as `from + (to − from)·step/steps`,
+///   three roundings on a term under `|K|`; the curve moves by at most
+///   `‖across + 2·bend·s‖ ≤ 3` times that, so under `9u·L`.
+///
+/// That comes to about `98u·L`, which is `49 · f64::EPSILON · L`. The constant
+/// is `64 · f64::EPSILON`, a factor of 1.3 on top — **and no more, because a
+/// safety factor nothing measures is a guess** (§15.6). There is no `cos` or
+/// `sin` here to buy a libm's slack for; `cosh` and `sinh` on the hyperbola
+/// branch are the one place that does, and the two roundings the parabola does
+/// not spend on `C`'s cancellation pay for them.
+///
+/// # What the test can and cannot fail on, with the number
+///
+/// `every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bound`
+/// is the test §15.6 asks for. Over 10,981 walks and 339,576 points it finds a
+/// worst of **0.049 of this bound** — about `3.1 · ε · L`.
+///
+/// **So halving this constant would not fail that test, and saying so is the
+/// point.** 98 roundings charged their full half-ulp each is a *count*; the
+/// same 98 signed errors add to about `√98/√3` of the count, which is a
+/// sixteenth of it, and 0.049 is that sixteenth with the derivation's own 1.3
+/// on top. §15.6 says this in as many words — *"that test cannot show a bound
+/// is tight — rounding errors cancel"* — and what makes `64 · ε` a bound here
+/// is the derivation above and not the search.
+///
+/// The half a search *can* pin is the **scaling**, and
+/// `what_an_endless_bend_strays_grows_with_the_size_it_was_worked_out_from` is
+/// that half: the same bend at four scales 32,768 apart uses the same 0.011 of
+/// its own bound at every one of them, which is what says the error really is
+/// proportional to `L` and not an absolute number that happens to hold once. A
+/// term dropped out of [`how_big_this_is`]'s list would pass the wide search and
+/// fail that one.
+pub const POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF: f64 = 64.0 * f64::EPSILON;
+
 /// The most points one crossing is walked into.
 ///
 /// A million. What sets it is not memory but honesty: a deflection close to
@@ -111,6 +192,13 @@ impl PointsAlongACrossing {
     /// The ends are corners the model already holds, so whoever reads this puts
     /// them back at either side. An edge that needs no help at all — a straight
     /// one — gives an empty list.
+    ///
+    /// **The one exception is a run that names no end at all on a crossing that
+    /// runs on for ever** — a plane and a cone crossing in a parabola or a
+    /// hyperbola. There is no corner on that side for the model to put back and
+    /// nothing else knows where the walk was cut off, so the extreme point of
+    /// the stretch comes back with the rest. [`walk`] says which stretch and
+    /// why.
     #[must_use]
     pub fn points(&self) -> &[Point] {
         &self.points
@@ -169,12 +257,20 @@ impl PointsAlongACrossing {
 /// builds such a run, and a file read in states one whenever it holds a pipe
 /// running into a bend.
 ///
-/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
-/// for a run between a plane and a cone that cross in one of those — again the
-/// two names [`intersect`](crate::intersect) gives the same two shapes, so a run
-/// this crate did not build is refused rather than crashing the walk. The two
-/// shapes through the apex are straight lines, and a straight run gets the same
-/// empty answer here that a run between two planes does.
+/// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller
+/// states as going right round a crossing that runs on for ever — a plane and a
+/// cone crossing in a parabola or a hyperbola. The two shapes through the apex
+/// are straight lines, and a straight run gets the same empty answer here that a
+/// run between two planes does.
+///
+/// # A run with no ends keeps the two points at the ends of what was walked
+///
+/// [`PointsAlongACrossing::points`] leaves both ends out because they are
+/// corners the model already holds. **An endless bend has no such corners** —
+/// [`where_a_closed_crossing_starts`] refuses it, and nothing else knows where
+/// the walk was cut off — so the two extreme points of the stretch come back
+/// with the rest. An end the run *does* name is left out, exactly as everywhere
+/// else, and a run that names one end and not the other has one of each.
 pub fn walk(
     run: &NamedRun,
     along: [&Surface; 2],
@@ -196,6 +292,12 @@ pub fn walk(
         WhatARunLiesOn::StraightLine => return Ok(nothing_between_the_ends()),
         WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
             return follow_the_quartic(run, pair, seeds, deflection, policy, log);
+        }
+        WhatARunLiesOn::Parabola(bend) => {
+            return walk_an_endless_bend(&bend, run, deflection, policy);
+        }
+        WhatARunLiesOn::OneBranchOfAHyperbola(branch) => {
+            return walk_an_endless_bend(&branch, run, deflection, policy);
         }
         WhatARunLiesOn::Conic(conic) => conic,
     };
@@ -262,11 +364,11 @@ pub fn walk(
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a cone or a
 /// torus against another curved surface, exactly as [`walk`] does.
 ///
-/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
-/// for a plane against a cone that cross in one of those, again exactly as
-/// [`walk`] does. A plane through the apex crosses the cone in straight lines,
-/// so it gets [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] like every
-/// other pair that does.
+/// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a plane against a
+/// cone that cross in a parabola or a hyperbola, which is the same refusal as
+/// for the straight lines above and for the same reason: a curve that runs on
+/// for ever has no one place a vertex has to go. A plane through the apex
+/// crosses the cone in straight lines and gets it too.
 pub fn where_a_closed_crossing_starts(
     run: &NamedRun,
     along: [&Surface; 2],
@@ -277,6 +379,9 @@ pub fn where_a_closed_crossing_starts(
         WhatARunLiesOn::StraightLine => Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
         WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
             the_seed_this_run_is_picked_up_at(run, &pair, seeds, log)
+        }
+        WhatARunLiesOn::Parabola(_) | WhatARunLiesOn::OneBranchOfAHyperbola(_) => {
+            Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed)
         }
         WhatARunLiesOn::Conic(conic) => Ok(conic.at(0.0)),
     }
@@ -311,7 +416,7 @@ fn middle_of(side: Interval) -> f64 {
 /// What a run between two surfaces lies on: one of three things, and which one
 /// is worked out in a single place.
 ///
-/// **Exhaustive on purpose.** A fourth shape of crossing would mean a fourth
+/// **Exhaustive on purpose.** A sixth shape of crossing would mean a sixth
 /// way of walking one, and the point of this enum is that both callers handle
 /// every shape there is.
 enum WhatARunLiesOn {
@@ -323,6 +428,12 @@ enum WhatARunLiesOn {
     /// A degree-four loop, with one point near each piece it can come in for
     /// the marcher to start from.
     QuarticPickedUpAt([Point; 2]),
+    /// A parabola: one curve that runs on for ever both ways and bends.
+    Parabola(Parabola),
+    /// One of a hyperbola's two branches, which runs on for ever both ways and
+    /// bends too. The other branch is the sibling run, and which of the two
+    /// this is was settled by the half-spaces on it.
+    OneBranchOfAHyperbola(HyperbolaBranch),
 }
 
 /// Which of those three the crossing of these two surfaces is, and the thing
@@ -351,10 +462,10 @@ enum WhatARunLiesOn {
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed for a degree-four
 /// crossing comes out as something that is not a point.
 ///
-/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
-/// for a run a caller named between a plane and a cone that cross in one of
-/// those — the namer's own two names, given back here because a run is something
-/// a caller states and a file stores, and this used to assert instead.
+/// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller named
+/// as closed between a plane and a cone that cross in a parabola or a
+/// hyperbola, and [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the
+/// half-spaces on a hyperbola's run hold both branches or neither.
 ///
 /// Whatever the conic builders refuse, for the pairs that have one.
 fn what_a_run_between_these_two_lies_on(
@@ -378,14 +489,16 @@ fn what_a_run_between_these_two_lies_on(
             }
             where_a_plane_cuts_a_pipe(&flat, &pipe).map(WhatARunLiesOn::Conic)
         }
-        // Every shape a plane and a cone cross in reaches here, not only the
-        // ellipse: `where_a_plane_and_a_cone_cross` refuses two of them before
-        // a run exists, but a run is something a caller states and a file
-        // stores. So `where_a_plane_cuts_a_cone` asks the same signs again and
-        // gives back the same two names — and the same straight answer for the
-        // two shapes through the apex.
+        // Every shape a plane and a cone cross in reaches here, and every one
+        // of them is answered: `where_a_plane_cuts_a_cone` asks the same two
+        // signs the namer asks and builds whichever of the four shapes they
+        // name. It is the second of the two places that reads a run rather than
+        // only a pair, because a hyperbola comes in two branches and which one
+        // this is is the picker's to say.
         [Surface::Plane(flat), Surface::Cone(cone)]
-        | [Surface::Cone(cone), Surface::Plane(flat)] => where_a_plane_cuts_a_cone(&flat, &cone),
+        | [Surface::Cone(cone), Surface::Plane(flat)] => {
+            where_a_plane_cuts_a_cone(&flat, &cone, run, log)
+        }
         // A plane cuts a torus in **two** circles as often as in one, and which
         // of them this run is is the picker's to say — which is why this is the
         // one arm here that reads the run rather than only the pair.
@@ -565,6 +678,262 @@ fn the_seed_this_run_is_picked_up_at(
         (true, [first, ..]) => Ok(*first),
         (false, [only]) => Ok(*only),
         _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
+}
+
+/// A run that goes on for ever and bends, walked over the stretch of it this
+/// module chose.
+///
+/// # How far along an endless run to walk is a choice, and here is the argument
+///
+/// A parabola and a hyperbola branch have no ends, so *something* has to say
+/// where the drawing stops. Two families of answer were weighed.
+///
+/// **(a) Let the topology say.** Refuse an endless run in [`walk`] and add an
+/// [`EdgeRun`] that carries its own stretch, so a fuse that cuts a face along a
+/// parabola hands over the two places the face's own wire reaches.
+/// The refusal this replaced said as much in its own doc, and it is honest —
+/// the range really does belong where the topology is. It is **not free**, and
+/// the cost is the reason it is not taken here:
+///
+/// - Every match on [`EdgeRun`] outside this crate grows an arm, and §40's own
+///   note says a wildcard is where the next variant goes to be ignored. The
+///   variant is `Serialize`, so a file states one, so every reader has to handle
+///   a stretch it did not compute.
+/// - **The stretch would then be geometry a caller supplies**, and this module's
+///   whole reason for existing is that there is *one* authority on where the
+///   points along an edge are (§27.5). A run carrying two parameters is a second
+///   one, and the two would have to be kept in step by hand — which is the
+///   shape §23.8 kept finding.
+/// - It cannot be built now anyway: no fuse in the tree cuts a face along a
+///   cone's parabola, so the variant would arrive with no consumer, which §13
+///   is about.
+///
+/// **(b) Pick a stretch from the two surfaces alone**, which is what is done.
+/// The rule is one sentence: **walk out until the curve has bent one of its own
+/// characteristic lengths away from its vertex, each way.** For a parabola
+/// `vertex + across·s + bend·s²` that is `|s| ≤ 1/‖bend‖`, where the `bend·s²`
+/// term is exactly `1/‖bend‖` long; for a hyperbola branch it is
+/// `cosh σ ≤ 2`, where the curve has moved one transverse semi-axis past its
+/// vertex.
+///
+/// Two properties earn it, and a third rules out the obvious alternative:
+///
+/// - **It depends on the two surfaces and on nothing else**, so `walk(A, B)` and
+///   `walk(B, A)` agree, which is what §34 and §31.3 need.
+/// - **It is translation-invariant and scales with the model.** Moving the plane
+///   and the cone together does not change a single point of what comes back
+///   relative to them, and doubling both doubles the stretch. That is §19: where
+///   a shape sits is not allowed to change how it is cut.
+/// - **The 20-minute spike's `√(size/‖bend‖)` fails the second of those**, and
+///   that is why it is not the rule. `size` is
+///   [`how_big_this_is`], which reads the *coordinates* of the vertex and the
+///   apex — so the same parabola written a thousand units further out gets a
+///   longer stretch and different points.
+///   `moving_a_cone_and_its_plane_together_moves_the_walked_parabola_and_nothing_else`
+///   is the demonstration.
+///
+/// **What (b) is not.** It is not a claim that this stretch is the right one for
+/// any particular consumer; it is a claim that it is a *function of the two
+/// surfaces*, which is the only property anything downstream relies on. A
+/// consumer that needs more takes (a), and (a) becomes short the day a fuse
+/// wants it.
+trait AnEndlessBend {
+    /// The point at `along` — a length for a parabola, an angle-like number for
+    /// a hyperbola branch.
+    fn at(&self, along: f64) -> Point;
+    /// Which `along` `point` sits at, so a run that names an end is walked
+    /// between the ends it names.
+    fn along_of(&self, point: Point) -> f64;
+    /// How far either way from the vertex this is walked when the run names no
+    /// end on that side. See the note above.
+    fn how_far_out_it_is_walked(&self) -> f64;
+    /// How far the curve stands off its own chord over a step of `1`, so that a
+    /// step of `Δ` anywhere between `from` and `to` stands off by at most this
+    /// times `Δ²`.
+    ///
+    /// **The stretch is an argument because a hyperbola's bend is not
+    /// constant.** A run that names its own ends can reach further out than
+    /// [`AnEndlessBend::how_far_out_it_is_walked`] would, and a curvature read
+    /// at the wrong end of the stretch is a step count that is too small.
+    fn how_far_it_stands_off_a_chord(&self, from: f64, to: f64) -> f64;
+    /// The largest magnitude anything about it was worked out from, which is
+    /// what [`POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`] is a multiple of.
+    fn the_size_it_was_worked_out_from(&self) -> f64;
+}
+
+/// Points along one endless bend, over the stretch [`AnEndlessBend`] argues for.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when the bend's own size does not
+/// come out finite, [`Error::CannotPlaceAPointThatCloseToACrossing`] when no
+/// point can be put as close to the curve as `deflection` asks, and
+/// [`Error::TooManyPointsAlongOneCrossing`] when it asks for more than
+/// [`MOST_POINTS_ALONG_ONE_CROSSING`].
+fn walk_an_endless_bend(
+    bend: &impl AnEndlessBend,
+    run: &NamedRun,
+    deflection: Deflection,
+    policy: &Policy,
+) -> Result<PointsAlongACrossing> {
+    let deviation = POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * bend.the_size_it_was_worked_out_from();
+    if !deviation.is_finite() {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
+    let tag = Approximation::new(deviation, Cause::PointAlongACrossing);
+    let Some(room) = room_left_over(deflection, deviation, policy)? else {
+        return Ok(PointsAlongACrossing {
+            points: Vec::new(),
+            deviation: tag,
+        });
+    };
+
+    let out = bend.how_far_out_it_is_walked();
+    let ends = run.ends().map(|end| {
+        (end != nowhere_in_particular())
+            .then(|| bend.along_of(Point::from(end.enclosure().map(middle_of))))
+    });
+    let from = ends[0].unwrap_or(-out);
+    let to = ends[1].unwrap_or(out);
+    let steps = how_many_pieces_an_endless_bend_takes(
+        bend.how_far_it_stands_off_a_chord(from, to),
+        to - from,
+        room,
+    )?;
+
+    // The two ends of the stretch are kept when the run names no corner there,
+    // because nothing else knows where the walk was cut off. See [`walk`].
+    let first = usize::from(ends[0].is_some());
+    let last = steps - usize::from(ends[1].is_some());
+    let points = (first..=last)
+        .map(|step| bend.at(from + (to - from) * (step as f64) / (steps as f64)))
+        .collect();
+
+    Ok(PointsAlongACrossing {
+        points,
+        deviation: tag,
+    })
+}
+
+/// How many straight pieces a stretch of an endless bend has to be walked into.
+///
+/// **Derived exactly rather than bounded**, which is what a bend with a constant
+/// or monotone second derivative allows and [`how_many_steps`]'s
+/// `reach · (1 − cos(step / 2))` does not. A curve stands off the chord of a
+/// step of `Δ` by at most `‖p″‖ · Δ² / 8`, and for a parabola that is an
+/// equality with `‖p″‖ = 2‖bend‖`. So the widest step is `√(room / that)`, and
+/// there is no turning limit to add: an endless bend never comes back round.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when the count is not a number,
+/// which is the same refusal and the same reason [`how_many_steps`] gives it,
+/// and [`Error::TooManyPointsAlongOneCrossing`] past
+/// [`MOST_POINTS_ALONG_ONE_CROSSING`].
+fn how_many_pieces_an_endless_bend_takes(
+    stands_off_a_chord: f64,
+    over: f64,
+    room: f64,
+) -> Result<usize> {
+    let widest = (room / stands_off_a_chord).sqrt();
+    let steps = (over.abs() / widest.max(f64::MIN_POSITIVE)).ceil();
+    if steps.is_nan() {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
+    if steps > MOST_POINTS_ALONG_ONE_CROSSING as f64 {
+        return Err(Error::TooManyPointsAlongOneCrossing {
+            most: MOST_POINTS_ALONG_ONE_CROSSING,
+        });
+    }
+    Ok(steps.max(1.0) as usize)
+}
+
+/// A parabola: `vertex + across·s + bend·s²`, with `across` of length one and
+/// square to `bend`.
+///
+/// **[`Conic`] cannot hold one**, and that is why this type exists rather than a
+/// flag on that one. A conic is a centre and two semi-axes walked round in an
+/// angle; a parabola has no centre, no semi-axis and no angle to go round.
+#[derive(Clone, Copy, Debug)]
+struct Parabola {
+    vertex: Point,
+    across: Vector,
+    bend: Vector,
+    size: f64,
+}
+
+impl AnEndlessBend for Parabola {
+    fn at(&self, along: f64) -> Point {
+        self.vertex + self.across * along + self.bend * (along * along)
+    }
+
+    fn along_of(&self, point: Point) -> f64 {
+        (point - self.vertex).dot(self.across)
+    }
+
+    fn how_far_out_it_is_walked(&self) -> f64 {
+        self.bend.length().recip()
+    }
+
+    /// An **equality** and not a bound: a quadratic's second derivative is the
+    /// same everywhere, so the stretch does not come into it and the furthest a
+    /// step of `Δ` gets from its own chord is exactly `‖bend‖Δ²/4`.
+    fn how_far_it_stands_off_a_chord(&self, _from: f64, _to: f64) -> f64 {
+        self.bend.length() / 4.0
+    }
+
+    fn the_size_it_was_worked_out_from(&self) -> f64 {
+        self.size
+    }
+}
+
+/// One branch of a hyperbola: `centre + out·cosh σ + across·sinh σ`, with `out`
+/// the transverse semi-axis pointing the branch's own way and `across` the
+/// conjugate one.
+///
+/// **A hyperbola has a centre and two axes, so it very nearly is a [`Conic`] —
+/// and it still is not one.** What differs is not the numbers but the two
+/// functions the parameter goes through: `cos`/`sin` close the curve after a
+/// turn and `cosh`/`sinh` run off to infinity, and everything [`Conic`] does
+/// with an angle — `angle_of` on `atan2`'s branch, the two arcs between two
+/// ends, `from + τ` for a whole turn — is about a curve that closes. Sharing the
+/// four fields and branching on a flag inside `at` would put a curve with no
+/// turn through code whose every other method assumes one, so the fields are
+/// shared by being written twice and the methods are not shared at all.
+#[derive(Clone, Copy, Debug)]
+struct HyperbolaBranch {
+    centre: Point,
+    out: Vector,
+    across: Vector,
+    size: f64,
+}
+
+impl AnEndlessBend for HyperbolaBranch {
+    fn at(&self, along: f64) -> Point {
+        self.centre + self.out * along.cosh() + self.across * along.sinh()
+    }
+
+    fn along_of(&self, point: Point) -> f64 {
+        ((point - self.centre).dot(self.across) / self.across.length_squared()).asinh()
+    }
+
+    /// Out to `cosh σ = 2`: one transverse semi-axis past the vertex, which is
+    /// the hyperbola's reading of [`AnEndlessBend`]'s one sentence.
+    fn how_far_out_it_is_walked(&self) -> f64 {
+        2.0f64.acosh()
+    }
+
+    /// `p″(σ)` is `p(σ) − centre`, whose length grows with `|σ|`, so the widest
+    /// it gets is at whichever end of the stretch is further from the vertex.
+    fn how_far_it_stands_off_a_chord(&self, from: f64, to: f64) -> f64 {
+        let furthest_out = from.abs().max(to.abs());
+        let furthest = self.out * furthest_out.cosh() + self.across * furthest_out.sinh();
+        furthest.length() / 8.0
+    }
+
+    fn the_size_it_was_worked_out_from(&self) -> f64 {
+        self.size
     }
 }
 
@@ -1022,7 +1391,8 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
     })
 }
 
-/// The ellipse where a plane cuts across a cone.
+/// Whichever of a plane and a cone's four bending shapes this pair makes: an
+/// ellipse, a parabola, one branch of a hyperbola, or a straight line.
 ///
 /// # The two semi-axes, derived
 ///
@@ -1045,20 +1415,51 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
 /// `E` is the very number [`intersect`](crate::intersect) decided the sign of to
 /// call this an ellipse, and it is **asked again here** rather than assumed of
 /// the caller: a run between any two surfaces is something a caller states and a
-/// file stores, so the four shapes that are not one closed curve arrive here and
-/// are refused by the namer's own four names. It is summed through [`Exact`] for
-/// the same reason a nearly-tangent circle's radius is: a plane leaning at
+/// file stores, so all four shapes arrive here. It is summed through [`Exact`]
+/// for the same reason a nearly-tangent circle's radius is: a plane leaning at
 /// nearly the cone's own half-angle makes it a small difference of two large
 /// numbers.
 ///
+/// # The other three shapes come out of the same completed square
+///
+/// Written in the two directions [`two_directions_in`] hands back, with `s`
+/// along the second and `r` along the first, the line above is one equation:
+///
+/// ```text
+/// r² + E·s² + K·s + C = 0,   K = 2(1 + t²)h·(n̂·ŵ)·(and·ŵ),   C = h²(1 − (1 + t²)(n̂·ŵ)²)
+/// ```
+///
+/// — and `K²/(4E) − C` is `h²t²/E`, which is how the ellipse's two semi-axes
+/// above come out of it. The other three are the other signs of `E`:
+///
+/// - **`E = 0` is the statement that the quadratic loses a term**, and what is
+///   left is `r² + K·s + C = 0`, a parabola `s = −(r² + C)/K` with its vertex
+///   `C/K` along `and` from the foot of the perpendicular from the apex and its
+///   bend `−and/K`. `K` cannot be zero in this row: `n̂·ŵ = 0` makes `E = −t²`
+///   and `‖n̂ × ŵ‖ = 0` makes `E = 1`, so neither factor vanishes where `E` does.
+/// - **`E < 0` is a hyperbola**, and the *same three formulas the ellipse uses*
+///   give it, read with `|E|`: the transverse semi-axis along `and` is `|h|t/|E|`
+///   and the conjugate one across is `|h|t/√|E|`, about the same centre
+///   `s_c = −K/(2E)`, which the signed `E` gets right on its own. **It is not a
+///   [`Conic`]**, because a hyperbola's two branches are `cosh`/`sinh` and not
+///   `cos`/`sin` — [`HyperbolaBranch`] says why sharing the four fields would be
+///   worse than writing them twice.
+/// - **`E ≤ 0` with the apex *on* the plane** is a ruling or a pair of them,
+///   which are straight and are walked by their ends.
+///
+/// This used to assert that `where_a_plane_and_a_cone_cross` had already refused
+/// the two bending shapes — but that is a claim about a *caller*, and this is
+/// reached from [`walk`] and [`where_a_closed_crossing_starts`], both public,
+/// both taking whatever pair of surfaces and whatever [`NamedRun`] they are
+/// handed. `EdgeRun` is `Deserialize` too, so a file states such a run.
+///
 /// # Errors
 ///
-/// [`Error::ACrossingThatIsAParabola`] and [`Error::ACrossingThatIsAHyperbola`]
-/// for the two bending shapes with no closed curve in them, and
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a product leaves `f64`'s
-/// range. The two shapes through the apex are **not** refused: a ruling and a
-/// pair of rulings are straight lines, so they come back as
-/// [`WhatARunLiesOn::StraightLine`] and are walked the way two planes' line is.
+/// range, [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller
+/// states as closed on a crossing that runs on for ever, and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on a
+/// hyperbola's run hold both of its branches or neither.
 ///
 /// A plane through the apex that does cut across the cone meets it at the apex
 /// and nowhere else, and that comes back as a conic of no size centred exactly
@@ -1070,7 +1471,12 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
 /// square to the axis, which for a cone is the *minor* axis, and its second runs
 /// down the plane's slope, which is the major one. Negating both leaves
 /// `across × and` where it was, so the ellipse is traced the way a pipe's is.
-fn where_a_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Result<WhatARunLiesOn> {
+fn where_a_plane_cuts_a_cone(
+    flat: &Plane,
+    cone: &Cone,
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<WhatARunLiesOn> {
     let normal = flat.normal().components();
     let along = cone.axis().direction().components();
     let apex = cone.apex();
@@ -1097,42 +1503,60 @@ fn where_a_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Result<WhatARunLiesOn
     let Some((leaning, squared_normal, squared_along, up, sideways, reach)) = worked_out() else {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     };
-    // `E ≤ 0` means the crossing is a parabola, a hyperbola, one ruling or two,
-    // and none of those is a closed curve to walk. This used to assert that
-    // `where_a_plane_and_a_cone_cross` had already refused all four — but that
-    // is a claim about a *caller*, and this one is reached from
-    // [`walk`] and [`where_a_closed_crossing_starts`], both public, both taking
-    // whatever pair of surfaces and whatever [`NamedRun`] they are handed.
-    // `EdgeRun` is `Deserialize` too, so a file states such a run. All four
-    // reached the assert; the test names them one at a time.
-    //
-    // They are told apart here the way the namer tells them apart, and given the
-    // namer's own answers, so the two never disagree about what a pair is: the
-    // two shapes through the apex are straight lines and walked as such, and the
-    // two that bend are refused by the namer's two names.
-    if leaning <= 0.0 {
-        if reach == 0.0 {
-            return Ok(WhatARunLiesOn::StraightLine);
-        }
-        return Err(if leaning == 0.0 {
-            Error::ACrossingThatIsAParabola
-        } else {
-            Error::ACrossingThatIsAHyperbola
-        });
-    }
-
     // `E = leaning / (‖n‖²‖w‖²)`, `h = reach / ‖n‖`, `A = up / (‖n‖‖w‖)` and
     // `k = √sideways / (‖n‖‖w‖)`, all substituted into the three lines above and
     // the lengths cancelled by hand so that nothing takes a root it need not.
     let normal_length = squared_normal.sqrt();
     let along_length = squared_along.sqrt();
+    let (across, and) = two_directions_in(flat, cone.axis().direction());
+    let foot = apex - flat.normal() * (reach / squared_normal);
+    // `−s_c = K/(2E)`, which the signed `leaning` gets right for both the
+    // ellipse and the hyperbola. Read in neither of the other two rows, where
+    // there is no centre to be off, and a division by a `leaning` of zero is
+    // why it waits until it is.
+    let how_far_off_the_foot_the_centre_is =
+        || -(1.0 + slope * slope) * reach * up * sideways.sqrt() / (normal_length * leaning);
+
+    if leaning <= 0.0 {
+        if reach == 0.0 {
+            return Ok(WhatARunLiesOn::StraightLine);
+        }
+        if run.run() == &EdgeRun::RightRoundWhereItsFacesCross {
+            return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
+        }
+        let standing_off = reach / normal_length;
+        let axis_up = up / (normal_length * along_length);
+        let bend_up = and.dot(cone.axis().direction()) / along_length;
+        let linear_term = 2.0 * (1.0 + slope * slope) * standing_off * axis_up * bend_up;
+        if leaning == 0.0 {
+            let constant_term =
+                standing_off * standing_off * (1.0 - (1.0 + slope * slope) * axis_up * axis_up);
+            return Ok(WhatARunLiesOn::Parabola(
+                the_parabola_a_plane_along_a_ruling_cuts(
+                    apex,
+                    foot,
+                    across,
+                    and,
+                    [standing_off, linear_term, constant_term],
+                ),
+            ));
+        }
+        let towards = reach.abs() * slope * normal_length * squared_along / leaning.abs();
+        let sideways_reach = reach.abs() * slope * along_length / leaning.abs().sqrt();
+        let centre = foot - and * how_far_off_the_foot_the_centre_is();
+        return which_branch_of_a_hyperbola_this_run_is(
+            [towards, sideways_reach, standing_off],
+            [apex, centre],
+            [across, and],
+            run,
+            log,
+        );
+    }
+
     let major = reach.abs() * slope * normal_length * squared_along / leaning;
     let minor = reach.abs() * slope * along_length / leaning.sqrt();
-    let off_centre =
-        -(1.0 + slope * slope) * reach * up * sideways.sqrt() / (normal_length * leaning);
-
-    let (across, and) = two_directions_in(flat, cone.axis().direction());
-    let centre = apex - flat.normal() * (reach / squared_normal) - and * off_centre;
+    let off_centre = how_far_off_the_foot_the_centre_is();
+    let centre = foot - and * off_centre;
 
     Ok(WhatARunLiesOn::Conic(Conic {
         centre,
@@ -1140,6 +1564,87 @@ fn where_a_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Result<WhatARunLiesOn
         and: and * major,
         size: how_big_this_is(&[centre, apex], &[major, minor, off_centre]),
     }))
+}
+
+/// The parabola `foot − and·(C/K) + across·s − and·(s²/K)`, put together from
+/// the three numbers `where_a_plane_cuts_a_cone` derived.
+///
+/// `spread` is `[h, K, C]`, and all three go into the size this publishes its
+/// bound against: `|K|` and `|C/K|` are lengths this parabola is genuinely made
+/// of — `|K|` is twice the focal parameter and `|C/K|` is how far the vertex
+/// stands from the foot — and
+/// [`POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`]'s derivation needs both of them
+/// there to stay a bound.
+fn the_parabola_a_plane_along_a_ruling_cuts(
+    apex: Point,
+    foot: Point,
+    across: Vector,
+    and: Vector,
+    spread: [f64; 3],
+) -> Parabola {
+    let [standing_off, linear_term, constant_term] = spread;
+    let off_the_foot = constant_term / linear_term;
+    let vertex = foot - and * off_the_foot;
+    Parabola {
+        vertex,
+        across,
+        bend: and * -linear_term.recip(),
+        size: how_big_this_is(&[vertex, apex], &[linear_term, off_the_foot, standing_off]),
+    }
+}
+
+/// Which of a hyperbola's two branches this run names, told by the half-spaces
+/// on it.
+///
+/// **The same shape as [`where_a_plane_cuts_a_torus`]**, and for the same
+/// reason: the two candidates are built, each is asked whether every picker on
+/// the run holds it, and one held candidate is an answer while two or none is
+/// not. Each branch lies wholly in one nappe of the cone, so the half-space
+/// through the apex square to the axis is what tells them apart — and
+/// `intersect` mints exactly that pair.
+///
+/// The point each is asked at is its own vertex, and one point settles the
+/// whole branch: the picker's normal is the cone's axis direction bit for bit,
+/// so the sign it reads is the sign of `(x − apex)·ŵ`, which does not change
+/// anywhere on one branch.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the pickers hold both
+/// branches or neither, which is what a run with nothing picking it gets.
+fn which_branch_of_a_hyperbola_this_run_is(
+    spread: [f64; 3],
+    places: [Point; 2],
+    directions: [Vector; 2],
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<WhatARunLiesOn> {
+    let [towards, sideways_reach, standing_off] = spread;
+    let [apex, centre] = places;
+    let [across, and] = directions;
+    let size = how_big_this_is(&[centre, apex], &[towards, sideways_reach, standing_off]);
+    let picked_by: &[Picker] = match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
+    };
+
+    let mut held = Vec::new();
+    for side in [1.0, -1.0] {
+        let branch = HyperbolaBranch {
+            centre,
+            out: and * (towards * side),
+            across: across * sideways_reach,
+            size,
+        };
+        let deviation = POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * size;
+        if every_half_space_holds(picked_by, branch.at(0.0), deviation, log) {
+            held.push(branch);
+        }
+    }
+    match held.as_slice() {
+        [only] => Ok(WhatARunLiesOn::OneBranchOfAHyperbola(*only)),
+        _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
 }
 
 /// Two directions in `flat`, square to each other, the first of them square to
