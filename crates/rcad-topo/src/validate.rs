@@ -15,6 +15,7 @@ use rcad_predicates::{
 };
 use slotmap::SecondaryMap;
 
+use crate::builder::the_ends_are_the_whole_of_it;
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on, what_trims_this_face};
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, WireSlot};
@@ -196,9 +197,16 @@ impl Model {
             };
             // A closed edge is *supposed* to come back to where it started, so
             // its two ends being one vertex says it is a whole circle and not
-            // that it has no length. Only a straight edge is refused for it.
-            if edge.run == EdgeRun::Straight && (edge.start == edge.end || start.point == end.point)
-            {
+            // that it has no length. What says which is the run, and the list of
+            // runs that put an edge somewhere its ends do not is
+            // `the_ends_are_the_whole_of_it` — the same list `SolidBuilder`'s
+            // door reads, because a builder writes its description into a
+            // scratch model and runs this sweep over it, so two lists would mean
+            // one door refusing what the other keeps. This used to ask
+            // `run == Straight`, which read a kind it did not know as *not
+            // straight* and skipped the check.
+            let both_ends_in_one_place = edge.start == edge.end || start.point == end.point;
+            if both_ends_in_one_place && the_ends_are_the_whole_of_it(&edge.run) {
                 return Err(Invalid::EdgeHasNoLength.into());
             }
 
@@ -2201,6 +2209,63 @@ mod tests {
         model.data_mut().edges[edge].end = start;
 
         assert_eq!(refusal(&model), Invalid::EdgeHasNoLength);
+    }
+
+    /// A collapsed edge is refused unless its run says it comes back where it
+    /// started, and the run kinds that say so are a list — not "anything that is
+    /// not straight".
+    ///
+    /// The sweep used to ask `run == Straight`, which reads a kind it has never
+    /// seen as *not straight* and keeps a zero-length edge. It asks
+    /// `the_ends_are_the_whole_of_it` now, which is the same list
+    /// [`crate::SolidBuilder::add_edge`] refuses on, so neither door keeps what
+    /// the other throws out.
+    ///
+    /// **A fourth kind cannot be forged from in here**, because [`EdgeRun`] can
+    /// only grow in `rcad-geom`, so this pins the three that exist and
+    /// `tests/a_fourth_kind_of_run.rs` is what says a fourth arrived.
+    #[test]
+    fn a_collapsed_edge_is_kept_only_when_its_run_names_a_curve() {
+        let corner = a_cube_with_one_edge_collapsed_to(EdgeRun::Straight).1;
+        let flat_through_the_corner = Surface::Plane(
+            Plane::from_point_and_normal(corner, Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+
+        for run in [
+            EdgeRun::RightRoundWhereItsFacesCross,
+            EdgeRun::PartOfWhereItCrosses {
+                and: flat_through_the_corner,
+                picked_by: SmallVec::new(),
+            },
+        ] {
+            let model = a_cube_with_one_edge_collapsed_to(run.clone()).0;
+            let broken = model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .err();
+
+            assert!(
+                !matches!(broken, Some(Error::Invalid(Invalid::EdgeHasNoLength))),
+                "{run:?} names a curve, so an edge back at its one corner has \
+                 run right round that curve and has a length: got {broken:?}"
+            );
+        }
+
+        let model = a_cube_with_one_edge_collapsed_to(EdgeRun::Straight).0;
+
+        assert_eq!(refusal(&model), Invalid::EdgeHasNoLength);
+    }
+
+    /// A cube with one edge pointed back at the corner it left, running along
+    /// what this says — and where that corner is.
+    fn a_cube_with_one_edge_collapsed_to(run: EdgeRun) -> (Model, Point) {
+        let mut model = a_cube();
+        let edge = model.data().edges.keys().next().expect("a cube has edges");
+        let start = model.data().edges[edge].start;
+        model.data_mut().edges[edge].end = start;
+        model.data_mut().edges[edge].run = run;
+        let corner = model.data().vertices[start].point;
+        (model, corner)
     }
 
     #[test]

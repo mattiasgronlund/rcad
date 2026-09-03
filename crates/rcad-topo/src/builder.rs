@@ -544,21 +544,41 @@ impl SolidBuilder {
 /// [`EdgeRun`] is `#[non_exhaustive]` and lives in `rcad-geom`, so a fourth kind
 /// arrives here with no compile error at all — a clone of this tree carrying one
 /// checks clean — and reading it as "not straight" would walk an edge with its
-/// two ends in one place through the public door —
-/// where nothing downstream asks again, because
-/// [`Model::validate`](crate::Model::validate) reads the same list. Refusing it
-/// names the edge and is one word here to undo; letting it in is a zero-length
-/// edge inside a model somebody will go on to mesh.
+/// two ends in one place through a public door. Refusing it names the edge and is
+/// one word here to undo; letting it in is a zero-length edge inside a model
+/// somebody will go on to mesh.
+///
+/// **This is the one list, and both of the kernel's doors read it.**
+/// [`SolidBuilder::add_edge`] asks it of a description, and `check_edges` in
+/// [`Model::validate`](crate::Model::validate) asks it of an edge already in an
+/// arena, so [`Model::add_edge_running`](crate::Model::add_edge_running) cannot
+/// keep what [`SolidBuilder::add_edge`] refuses. It was two lists until this
+/// unit, and they had already drifted apart on exactly the case above: the sweep
+/// asked `run == Straight`, so a run it did not know read as *not straight* and
+/// the whole check was skipped. Two copies of a rule that must agree is the drift
+/// waiting to happen, so there is one copy (`docs/decisions.md` §44.11, one rule
+/// at the kernel's two doors).
 ///
 /// Written as a match with all three kinds named rather than as a `matches!`,
 /// because a wildcard that covers nothing today is what `just check-wildcards`
 /// starts counting the day it covers something: measured on that same clone,
 /// `cargo clippy -p rcad-topo --all-targets -- -W clippy::wildcard_enum_match_arm`
 /// says nothing about this line now and names it the moment there is a fourth
-/// kind. A `matches!` is invisible to the lint either way.
+/// kind. A `matches!` is invisible to the lint either way. One list is also one
+/// warning to answer instead of two, with no way to answer one and forget the
+/// other.
 ///
-/// `tests/a_fourth_kind_of_run.rs` is what says a fourth kind arrived.
-fn the_ends_are_the_whole_of_it(run: &EdgeRun) -> bool {
+/// `tests/a_fourth_kind_of_run.rs` is what says a fourth kind arrived. What each
+/// door then does about it cannot be tested from inside this tree at all, and was
+/// measured on the clone instead: with a fourth kind forged into `rcad-geom`, a
+/// cube with one edge pointed back at the corner it left gets `Ok(())` out of
+/// `check_edges` when the sweep asks `run == Straight`, and
+/// `Invalid::EdgeHasNoLength` when it asks this. `add_edge` says
+/// `ADraftEdgeHasNoLength` either way.
+///
+/// `validate::tests::a_collapsed_edge_is_kept_only_when_its_run_names_a_curve`
+/// pins the three kinds that do exist, in both directions.
+pub(crate) fn the_ends_are_the_whole_of_it(run: &EdgeRun) -> bool {
     match run {
         EdgeRun::Straight => true,
         EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::PartOfWhereItCrosses { .. } => false,
