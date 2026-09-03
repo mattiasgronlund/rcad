@@ -43,11 +43,14 @@ use crate::exact::Exact;
 use crate::intersect::{Question, ask, intersect, squared_length_of_a_cross_product};
 use crate::real_roots::{Maybe, where_a_polynomial_is_zero};
 use crate::{
-    Cone, Cylinder, Error, Plane, PlaneAgreement, Result, Sphere, Surface, SurfaceMeet, Torus,
+    Axis, Cone, Cylinder, Error, Plane, PlaneAgreement, Result, Sphere, Surface, SurfaceMeet, Torus,
 };
 
 /// The name the three-surface meet goes by in provenance records.
 pub const WHERE_THREE_SURFACES_MEET: &str = "where three surfaces meet";
+
+/// The name a line-meets-one-surface question goes by in provenance records.
+pub const WHERE_A_LINE_MEETS_A_SURFACE: &str = "where a line meets a surface";
 
 /// What three surfaces have in common.
 ///
@@ -114,11 +117,87 @@ pub fn meet_of_three_surfaces(
     // a torus anywhere in the triple is `third` — which is what makes this one
     // check cover every route in.
     if let Surface::Torus(ring) = &third {
-        return where_a_line_meets_a_ring(&line, ring, &at, policy, log);
+        return where_a_line_meets_a_ring(WHERE_THREE_SURFACES_MEET, &line, ring, &at, policy, log);
     }
     let quadratic = how_a_quadric_cuts_the_line(&line, &third)
-        .ok_or_else(|| an_exact_step_could_not_be_taken(&at))?;
-    where_a_line_meets_a_quadric(&line, &quadratic, &at, policy, log)
+        .ok_or_else(|| an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, &at))?;
+    where_a_line_meets_a_quadric(
+        WHERE_THREE_SURFACES_MEET,
+        &line,
+        &quadratic,
+        &at,
+        policy,
+        log,
+    )
+}
+
+/// Where a line meets one surface: nowhere, at one or more points, or lying
+/// along the whole of it.
+///
+/// This is [`meet_of_three_surfaces`] with the line handed over directly
+/// instead of built from two crossing planes — the same coefficients, the same
+/// cascade, the same four kinds of refusal. It is what a ray caster calls: a
+/// ray is not two planes, and [`real_roots`](crate::real_roots) — the machinery
+/// a torus needs — is `pub(crate)`, so a caller outside this crate could reach
+/// a plane, a ball, a pipe or a cone but never a ring without this.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when a sign the answer depends on could not be
+/// settled, or when a product the exact arithmetic needs falls out of `f64`'s
+/// range — both carry the records, and both are the same **gap** every
+/// discriminant in [`intersect`](crate::intersect) has: the same line and
+/// surface written elsewhere on the number line are answered.
+pub fn where_a_line_meets_a_surface(
+    line: &Axis,
+    surface: &Surface,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    let at = [
+        PredicatePoint::from(line.origin().coordinates()),
+        the_point_a_surface_sits_at(surface),
+    ];
+    let along = the_line_itself(line);
+    match surface {
+        Surface::Plane(flat) => where_a_line_crosses_one_plane(
+            WHERE_A_LINE_MEETS_A_SURFACE,
+            &along,
+            flat,
+            &at,
+            policy,
+            log,
+            || an_exact_step_could_not_be_taken(WHERE_A_LINE_MEETS_A_SURFACE, &at),
+        ),
+        Surface::Torus(ring) => {
+            where_a_line_meets_a_ring(WHERE_A_LINE_MEETS_A_SURFACE, &along, ring, &at, policy, log)
+        }
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) => {
+            let quadratic = how_a_quadric_cuts_the_line(&along, surface).ok_or_else(|| {
+                an_exact_step_could_not_be_taken(WHERE_A_LINE_MEETS_A_SURFACE, &at)
+            })?;
+            where_a_line_meets_a_quadric(
+                WHERE_A_LINE_MEETS_A_SURFACE,
+                &along,
+                &quadratic,
+                &at,
+                policy,
+                log,
+            )
+        }
+    }
+}
+
+/// A line built directly from an [`Axis`], written the way
+/// [`WhereTwoPlanesCross`] writes one — `(through + s·direction) / divided_by`
+/// — with the divisor left at one because there are no two planes here to
+/// divide by.
+fn the_line_itself(line: &Axis) -> WhereTwoPlanesCross {
+    WhereTwoPlanesCross {
+        through: Exact::of_each(line.origin().coordinates()),
+        direction: Exact::of_each(line.direction().components()),
+        divided_by: Exact::of(1.0),
+    }
 }
 
 /// The three surfaces in a fixed order, so what comes back depends on which
@@ -140,14 +219,17 @@ fn the_places_these_three_sit(
     second: &Surface,
     third: &Surface,
 ) -> [PredicatePoint; 3] {
-    [first, second, third].map(|surface| {
-        PredicatePoint::from(match surface {
-            Surface::Plane(flat) => flat.origin().coordinates(),
-            Surface::Sphere(ball) => ball.centre().coordinates(),
-            Surface::Cylinder(pipe) => pipe.axis().origin().coordinates(),
-            Surface::Cone(cone) => cone.apex().coordinates(),
-            Surface::Torus(ring) => ring.centre().coordinates(),
-        })
+    [first, second, third].map(the_point_a_surface_sits_at)
+}
+
+/// The point a provenance record names one surface by.
+fn the_point_a_surface_sits_at(surface: &Surface) -> PredicatePoint {
+    PredicatePoint::from(match surface {
+        Surface::Plane(flat) => flat.origin().coordinates(),
+        Surface::Sphere(ball) => ball.centre().coordinates(),
+        Surface::Cylinder(pipe) => pipe.axis().origin().coordinates(),
+        Surface::Cone(cone) => cone.apex().coordinates(),
+        Surface::Torus(ring) => ring.centre().coordinates(),
     })
 }
 
@@ -194,7 +276,7 @@ fn where_three_planes_meet(
     }
     let refused = by_cramers_rule
         .err()
-        .unwrap_or_else(|| an_exact_step_could_not_be_taken(&at));
+        .unwrap_or_else(|| an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, &at));
 
     let Some(line) = the_line_two_planes_cross_in(one, other, &at, policy, log)? else {
         return what_a_third_surface_leaves_of_one_plane(
@@ -207,41 +289,19 @@ fn where_three_planes_meet(
         );
     };
 
-    let normal = last.normal().components();
-    let (Some(along), Some(across)) = (
-        Exact::dot_of_two_exact(&line.direction, &Exact::of_each(normal)),
-        Exact::dot_of_two_exact(&line.through, &Exact::of_each(normal)).and_then(|reach| {
-            Some(reach.minus(&line.divided_by.times(&Exact::of(last.offset()))?))
-        }),
-    ) else {
-        return Err(an_exact_step_could_not_be_taken(&at));
-    };
-
-    // `along` is the determinant of the three normals, which is dimensionless.
-    // `Measures` has no arm for that; see the note in
-    // `intersect::where_a_plane_and_a_pipe_cross` for why `Length` is the one
-    // whose conversion is the identity, and §28 for what should replace it.
-    match ask(&the_sign_of(&along), Measures::Length, &at, policy, log)? {
-        Decision::Pos | Decision::Neg => {
-            let step = quotient_or_everything(-across.enclosure(), along.enclosure());
-            let placed = the_point_at(&line, step);
-            // Three planes leaning at a shrinking angle meet further and further
-            // away, and past the top of `f64`'s range there is nothing left for
-            // a box to be around — so this route runs out where Cramer's did,
-            // and what is passed on is the first refusal rather than a second
-            // one saying the same thing.
-            if !placed.uncertainty().is_finite() {
-                return Err(refused);
-            }
-            Ok(MeetOfThree::At(smallvec![placed]))
-        }
-        Decision::Zero => match ask(&the_sign_of(&across), Measures::Length, &at, policy, log)? {
-            Decision::Zero => Ok(MeetOfThree::MoreThanAPoint),
-            Decision::Pos | Decision::Neg => Ok(MeetOfThree::Nowhere),
-            other => unreachable!("a sign question answers with a sign: {other:?}"),
-        },
-        other => unreachable!("a sign question answers with a sign: {other:?}"),
-    }
+    // Three planes leaning at a shrinking angle meet further and further away,
+    // and past the top of `f64`'s range there is nothing left for a box to be
+    // around — so this route runs out where Cramer's did, and what is passed on
+    // is the first refusal rather than a second one saying the same thing.
+    where_a_line_crosses_one_plane(
+        WHERE_THREE_SURFACES_MEET,
+        &line,
+        last,
+        &at,
+        policy,
+        log,
+        || refused,
+    )
 }
 
 /// What a third surface leaves of two planes that never cross in a line.
@@ -269,7 +329,10 @@ fn what_a_third_surface_leaves_of_one_plane(
                 }
             }
         }
-        PlaneAgreement::CannotTell => Err(an_exact_step_could_not_be_taken(at)),
+        PlaneAgreement::CannotTell => Err(an_exact_step_could_not_be_taken(
+            WHERE_THREE_SURFACES_MEET,
+            at,
+        )),
     }
 }
 
@@ -347,8 +410,73 @@ fn the_line_two_planes_cross_in(
     let across = squared_length_of_a_cross_product(WHERE_THREE_SURFACES_MEET, mine, theirs);
     match ask(&across, Measures::Length, at, policy, log)? {
         Decision::Zero => Ok(None),
-        Decision::Pos => Err(an_exact_step_could_not_be_taken(at)),
+        Decision::Pos => Err(an_exact_step_could_not_be_taken(
+            WHERE_THREE_SURFACES_MEET,
+            at,
+        )),
         other => unreachable!("a sum of squares is never below zero: {other:?}"),
+    }
+}
+
+/// Where a line crosses one plane: nowhere, at one point, or lying in it.
+///
+/// Shared between two callers that reach a plane by a different road each:
+/// [`where_three_planes_meet`] already has the line two other planes cross in,
+/// and [`where_a_line_meets_a_surface`] has a line handed straight over.
+/// `unplaceable` says what to return when the crossing exists but sits past the
+/// top of `f64`'s range — `where_three_planes_meet` has a refusal from Cramer's
+/// rule to hand back there, and a caller with no Cramer's rule to fall back on
+/// does not.
+fn where_a_line_crosses_one_plane(
+    named: &'static str,
+    line: &WhereTwoPlanesCross,
+    plane: &Plane,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+    unplaceable: impl FnOnce() -> Error,
+) -> Result<MeetOfThree> {
+    let normal = plane.normal().components();
+    let (Some(along), Some(across)) = (
+        Exact::dot_of_two_exact(&line.direction, &Exact::of_each(normal)),
+        Exact::dot_of_two_exact(&line.through, &Exact::of_each(normal)).and_then(|reach| {
+            Some(reach.minus(&line.divided_by.times(&Exact::of(plane.offset()))?))
+        }),
+    ) else {
+        return Err(an_exact_step_could_not_be_taken(named, at));
+    };
+
+    // `along` is the determinant of the three normals, which is dimensionless.
+    // `Measures` has no arm for that; see the note in
+    // `intersect::where_a_plane_and_a_pipe_cross` for why `Length` is the one
+    // whose conversion is the identity, and §28 for what should replace it.
+    match ask(
+        &the_sign_of(named, &along),
+        Measures::Length,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Pos | Decision::Neg => {
+            let step = quotient_or_everything(-across.enclosure(), along.enclosure());
+            let placed = the_point_at(line, step);
+            if !placed.uncertainty().is_finite() {
+                return Err(unplaceable());
+            }
+            Ok(MeetOfThree::At(smallvec![placed]))
+        }
+        Decision::Zero => match ask(
+            &the_sign_of(named, &across),
+            Measures::Length,
+            at,
+            policy,
+            log,
+        )? {
+            Decision::Zero => Ok(MeetOfThree::MoreThanAPoint),
+            Decision::Pos | Decision::Neg => Ok(MeetOfThree::Nowhere),
+            other => unreachable!("a sign question answers with a sign: {other:?}"),
+        },
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
 }
 
@@ -369,20 +497,21 @@ fn the_line_two_planes_cross_in(
 /// touch that lands on an `f64` is answered rather than refused, and a bend of
 /// pipe's own seam is that case.
 fn where_a_line_meets_a_ring(
+    named: &'static str,
     line: &WhereTwoPlanesCross,
     ring: &Torus,
     at: &[PredicatePoint],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<MeetOfThree> {
-    let quartic =
-        how_a_ring_cuts_the_line(line, ring).ok_or_else(|| an_exact_step_could_not_be_taken(at))?;
+    let quartic = how_a_ring_cuts_the_line(line, ring)
+        .ok_or_else(|| an_exact_step_could_not_be_taken(named, at))?;
     assert!(
         matches!(quartic[0].sign(), Decision::Pos),
         "a line's direction and a ring's axis both have length, so this is above zero"
     );
-    let found =
-        where_a_polynomial_is_zero(&quartic).ok_or_else(|| an_exact_step_could_not_be_taken(at))?;
+    let found = where_a_polynomial_is_zero(&quartic)
+        .ok_or_else(|| an_exact_step_could_not_be_taken(named, at))?;
 
     let mut places: SmallVec<[PredicatePoint; 2]> = found
         .at
@@ -395,7 +524,7 @@ fn where_a_line_meets_a_ring(
         // taken rather than a new one invented here, and §28 says what should
         // replace the lot.
         let touching = ask(
-            &how_far_it_reaches(unsure),
+            &how_far_it_reaches(named, unsure),
             Measures::Volume,
             at,
             policy,
@@ -488,11 +617,12 @@ fn twice(value: &Exact) -> Option<Exact> {
 /// turning point is not an `f64`, so no exact evaluation reaches it. What level
 /// 2 hands over is a box round the height of the turn, and a policy that will
 /// not read a zero out of a box that straddles one is refused.
-fn how_far_it_reaches(
-    unsure: &Maybe,
-) -> Question<impl Fn() -> Interval + '_, impl Fn() -> Option<Exact> + '_> {
+fn how_far_it_reaches<'a>(
+    named: &'static str,
+    unsure: &'a Maybe,
+) -> Question<impl Fn() -> Interval + 'a, impl Fn() -> Option<Exact> + 'a> {
     Question {
-        named: WHERE_THREE_SURFACES_MEET,
+        named,
         enclosing: move || unsure.how_far_it_reaches,
         exactly: move || None,
     }
@@ -643,6 +773,7 @@ fn squared_radius_of(line: &WhereTwoPlanesCross, radius: f64) -> Option<Exact> {
 /// Where the line meets the quadric: nowhere, at one point, at two, or along the
 /// whole of it.
 fn where_a_line_meets_a_quadric(
+    named: &'static str,
     line: &WhereTwoPlanesCross,
     quadratic: &Quadratic,
     at: &[PredicatePoint],
@@ -660,7 +791,7 @@ fn where_a_line_meets_a_quadric(
     // [`the_two_places_along_it`] never divides by `A` except through Forsythe's
     // pairing, so nothing below cares about the sign.
     match ask(
-        &the_sign_of(&quadratic.squared),
+        &the_sign_of(named, &quadratic.squared),
         Measures::Length,
         at,
         policy,
@@ -669,7 +800,7 @@ fn where_a_line_meets_a_quadric(
         Decision::Pos | Decision::Neg => (),
         Decision::Zero => {
             return where_a_line_meets_a_quadric_it_runs_alongside(
-                line, quadratic, at, policy, log,
+                named, line, quadratic, at, policy, log,
             );
         }
         other => unreachable!("a sign question answers with a sign: {other:?}"),
@@ -678,7 +809,7 @@ fn where_a_line_meets_a_quadric(
     let squared = quadratic.squared.enclosure();
     let half_linear = quadratic.half_linear.enclosure();
     match ask(
-        &the_discriminant_of(quadratic),
+        &the_discriminant_of(named, quadratic),
         Measures::Area,
         at,
         policy,
@@ -716,6 +847,7 @@ fn where_a_line_meets_a_quadric(
 /// exactly-zero vector — so this asks one more question than it used to and
 /// gives every old answer back unchanged.
 fn where_a_line_meets_a_quadric_it_runs_alongside(
+    named: &'static str,
     line: &WhereTwoPlanesCross,
     quadratic: &Quadratic,
     at: &[PredicatePoint],
@@ -723,7 +855,7 @@ fn where_a_line_meets_a_quadric_it_runs_alongside(
     log: &mut ProvenanceLog,
 ) -> Result<MeetOfThree> {
     match ask(
-        &the_sign_of(&quadratic.half_linear),
+        &the_sign_of(named, &quadratic.half_linear),
         Measures::Length,
         at,
         policy,
@@ -740,7 +872,7 @@ fn where_a_line_meets_a_quadric_it_runs_alongside(
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
     match ask(
-        &the_sign_of(&quadratic.constant),
+        &the_sign_of(named, &quadratic.constant),
         Measures::Area,
         at,
         policy,
@@ -817,22 +949,24 @@ fn the_point_at(line: &WhereTwoPlanesCross, step: Interval) -> PredicatePoint {
 }
 
 /// The sign of an exact number, as a question the cascade can ask.
-fn the_sign_of(
-    value: &Exact,
-) -> Question<impl Fn() -> Interval + '_, impl Fn() -> Option<Exact> + '_> {
+fn the_sign_of<'a>(
+    named: &'static str,
+    value: &'a Exact,
+) -> Question<impl Fn() -> Interval + 'a, impl Fn() -> Option<Exact> + 'a> {
     Question {
-        named: WHERE_THREE_SURFACES_MEET,
+        named,
         enclosing: move || value.enclosure(),
         exactly: move || Some(value.clone()),
     }
 }
 
 /// `B² − A·C`, as a question the cascade can ask.
-fn the_discriminant_of(
-    quadratic: &Quadratic,
-) -> Question<impl Fn() -> Interval + '_, impl Fn() -> Option<Exact> + '_> {
+fn the_discriminant_of<'a>(
+    named: &'static str,
+    quadratic: &'a Quadratic,
+) -> Question<impl Fn() -> Interval + 'a, impl Fn() -> Option<Exact> + 'a> {
     Question {
-        named: WHERE_THREE_SURFACES_MEET,
+        named,
         enclosing: move || the_size_of_the_discriminant(quadratic),
         exactly: move || {
             quadratic
@@ -885,10 +1019,10 @@ fn exact_cross_of(u: [f64; 3], v: [f64; 3]) -> Option<[Exact; 3]> {
 /// [`intersect`](crate::intersect) has: a product whose low half would land
 /// among the subnormals, or one that overflows. The same three surfaces written
 /// somewhere else on the number line are answered.
-fn an_exact_step_could_not_be_taken(at: &[PredicatePoint]) -> Error {
+fn an_exact_step_could_not_be_taken(named: &'static str, at: &[PredicatePoint]) -> Error {
     let mut records = ProvenanceLog::new();
     records.push(Record::new(
-        WHERE_THREE_SURFACES_MEET,
+        named,
         at,
         Level::Exact,
         Decision::Undecidable {
