@@ -441,15 +441,21 @@ fn how_wide_a_cone_is_over(cone: &Cone, [lowest, highest]: [f64; 2]) -> f64 {
 /// `slope · v`, which grows for ever — so the patch's own furthest reach stands
 /// in, which is exactly the ceiling over *this* patch and is what a scaling is
 /// for.
+///
+/// # Panics
+///
+/// On a surface this crate has not been taught — see
+/// [`how_far_a_point_lands_off_its_surface`].
 fn how_this_domain_is_scaled(surface: &Surface, corners: &[[f64; 2]]) -> (f64, f64) {
     match surface {
         Surface::Cone(cone) => (
             how_wide_a_cone_is_over(cone, the_range_of_each_coordinate(corners)[1]),
             cone.slope().hypot(1.0),
         ),
-        Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => {
+        Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_) => {
             surface.furthest_a_unit_step_goes()
         }
+        other => panic!("this crate cannot say how {other:?} scales its domain"),
     }
 }
 
