@@ -148,6 +148,20 @@ pub enum CannotWrite {
         walks: usize,
     },
 
+    /// An [`EdgeRun`](rcad_geom::EdgeRun) kind that has arrived since this
+    /// writer was written.
+    ///
+    /// **Gap, and the twin of the one below.** Which curve an edge is written as
+    /// turns on whether it comes back to the corner it left — a `LINE` between
+    /// two planes, a `CIRCLE` where a plane crosses a pipe — and
+    /// [`EdgeView::is_closed`](rcad_topo::EdgeView::is_closed) is what says so.
+    /// A run kind this writer has never seen has no answer there, and taking it
+    /// for an open edge writes a straight `LINE` where the model holds a curve:
+    /// a file describing a shape that is not the one in the model, which is the
+    /// same thing guessing the nearest surface would do.
+    #[error("an edge in this model runs along a kind of curve this writer has no STEP entity for")]
+    ARunKindThisWriterHasNoCurveFor,
+
     /// A [`Surface`] kind that has arrived since this writer was written.
     ///
     /// **Gap.** `Surface` grows a variant every milestone; a new one has no
@@ -352,7 +366,10 @@ impl Writing {
         end: (VertexKey, Point),
         either_side: &[Surface],
     ) -> Result<u64, CannotWrite> {
-        let closed = model.edge(edge).is_closed();
+        let closed = model
+            .edge(edge)
+            .is_closed()
+            .map_err(|_| CannotWrite::ARunKindThisWriterHasNoCurveFor)?;
         let [first, second] = match either_side {
             [first, second] => [first, second],
             _ => {

@@ -548,15 +548,15 @@ impl Model {
     /// now and anything else is [`Error::ACrossingThisCannotBeOrderedAlong`],
     /// the name the fuse already gives a run it cannot follow.
     ///
-    /// **[`EdgeView::is_closed`] still asks it the old way**, and it is a bare
-    /// `==` with no wildcard for `just check-wildcards` to count, so the day the
-    /// enum grows nothing warns about it. Six production sites read it —
-    /// `fuse/mod.rs`, `mesh.rs`, `holds.rs`, `view.rs`'s own `segment`,
-    /// `rcad-step`'s writer, and [`Model::validate`]'s edge sweep. Closing them
-    /// one at a time makes six copies of one list, which is the drift the
-    /// collapsed-edge check was pulled back into one list to stop; what it wants
-    /// is for `is_closed` itself to name the kinds and hand back an answer that
-    /// can say *"a kind I do not know"*, once, for all six.
+    /// **[`EdgeView::is_closed`] asks it the same way now.** It used to be a
+    /// bare `==` with no wildcard for `just check-wildcards` to count, read by
+    /// six production sites — `fuse/mod.rs`, `mesh.rs`, `holds.rs`, `view.rs`'s
+    /// own `segment`, `rcad-step`'s writer, and `check_dynamic_range` below.
+    /// Closing them one at a time would have made six copies of one list, which
+    /// is the drift the collapsed-edge check was pulled back into one list to
+    /// stop, so the list lives in `is_closed` and it hands back a [`Result`]:
+    /// five of the six refuse with it, and `holds.rs` refuses under its own name
+    /// because that one points at the face.
     ///
     /// # Errors
     ///
@@ -770,11 +770,20 @@ impl Model {
         // a whole circle. What stands in for it is the radius of the curved
         // surface it runs round, taken from the faces below, which is the
         // smallest thing about such an edge that anything here can name.
-        let smallest_chord = self
-            .edges()
-            .filter(|edge| !edge.is_closed())
-            .map(EdgeView::distance_between_its_ends)
-            .fold(f64::INFINITY, f64::min);
+        //
+        // A run kind this crate cannot read is refused rather than measured. Its
+        // chord is either nothing, and then the smallest feature of the model is
+        // reported as zero and the refusal names a number instead of the edge,
+        // or it is a real length that stands in for a curve nobody here can
+        // measure. `EdgeView::is_closed` refuses under the name
+        // `check_closed_edges_are_walked_the_way_their_surfaces_wind` already
+        // gives the same arrival, ten checks up this file.
+        let mut smallest_chord = f64::INFINITY;
+        for edge in self.edges() {
+            if !edge.is_closed()? {
+                smallest_chord = smallest_chord.min(edge.distance_between_its_ends());
+            }
+        }
         let smallest_radius = self
             .solids()
             .flat_map(|solid| solid.faces())

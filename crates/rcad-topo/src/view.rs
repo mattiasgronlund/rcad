@@ -6,7 +6,9 @@ use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlo
 use crate::model::{
     CoedgeData, EdgeData, FaceData, ShellData, SolidData, VertexData, WireData, WireStep,
 };
-use crate::{CoedgeKey, EdgeKey, FaceKey, Model, Result, ShellKey, SolidKey, VertexKey, WireKey};
+use crate::{
+    CoedgeKey, EdgeKey, Error, FaceKey, Model, Result, ShellKey, SolidKey, VertexKey, WireKey,
+};
 
 /// A solid, with the location and orientation it is being looked at through.
 ///
@@ -944,9 +946,52 @@ impl<'m> EdgeView<'m> {
     ///
     /// A round cap's boundary is one of these. Anything that reads an edge as a
     /// straight side between two different corners has to ask this first.
-    #[must_use]
-    pub fn is_closed(self) -> bool {
-        self.data().run == EdgeRun::RightRoundWhereItsFacesCross
+    ///
+    /// **This is the one list of run kinds that close, and six sites read it.**
+    /// The mesher's direction rule, the fuse's shortest chord, the winding count
+    /// on a round wire, [`EdgeView::segment`] below, `check_dynamic_range` in
+    /// [`Model::validate`](crate::Model::validate) and `rcad-step`'s writer all
+    /// ask this and nothing else. Naming the kinds at each of the six would be
+    /// six copies of one rule, which is the drift
+    /// [`the_ends_are_the_whole_of_it`](crate::SolidBuilder) was pulled back
+    /// into one list to stop (§44.11).
+    ///
+    /// # Why this refuses rather than answering `false`
+    ///
+    /// It used to be `run == EdgeRun::RightRoundWhereItsFacesCross`, a bare `==`
+    /// with no wildcard for `just check-wildcards` to count and nothing for
+    /// clippy to warn about, so a fourth kind of [`EdgeRun`] — the enum is
+    /// `#[non_exhaustive]` and lives in `rcad-geom`, and this milestone did grow
+    /// its vocabulary — arrived at all six sites reading as *not closed*, with
+    /// zero compile errors. `tests/a_fourth_kind_of_run.rs` is what says a
+    /// fourth kind arrived.
+    ///
+    /// A [`Result`] and not a three-way answer of its own. The kernel's
+    /// three-way answer is
+    /// [`Decision`](rcad_predicates::Decision), and its third value is a
+    /// *measurement* that the arithmetic could not settle — a fact about the
+    /// numbers, which a caller may reasonably carry on from. This third value is
+    /// nothing about the edge at all: it is this crate not knowing a word, and
+    /// there is no more arithmetic that would settle it. That is a refusal, and
+    /// it refuses under [`Error::ACrossingThisCannotBeOrderedAlong`] — the name
+    /// `check_closed_edges_are_walked_the_way_their_surfaces_wind` and the fuse
+    /// already give a run kind they cannot follow, so a new kind of run refuses
+    /// under one name across the kernel rather than under a fresh one per site.
+    ///
+    /// **What each of the six then does is not the same**, and each says so
+    /// where it asks: five refuse, and the winding count refuses under its own
+    /// name because its refusal points at the face.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a kind of run this crate
+    /// has never seen.
+    pub fn is_closed(self) -> Result<bool> {
+        match self.data().run {
+            EdgeRun::RightRoundWhereItsFacesCross => Ok(true),
+            EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } => Ok(false),
+            _ => Err(Error::ACrossingThisCannotBeOrderedAlong),
+        }
     }
 
     /// The straight line this edge follows, already located and running the way
@@ -967,8 +1012,14 @@ impl<'m> EdgeView<'m> {
     /// `Deserialize`, and this is called on models `validate` never saw, so a
     /// `Straight` edge with two equal ends is a real caller-input case and
     /// not a broken invariant.
+    ///
+    /// **A kind of run this crate cannot read gets neither answer.** `None` says
+    /// the two ends are one corner and a segment says they are the whole of the
+    /// edge; a kind nothing here knows has not earned either, and handing back a
+    /// chord for one would put a straight line where a curve is. So
+    /// [`EdgeView::is_closed`]'s refusal travels out of here unchanged.
     pub fn segment(self) -> Result<Option<Segment>> {
-        if self.is_closed() {
+        if self.is_closed()? {
             return Ok(None);
         }
         Ok(Some(Segment::new(

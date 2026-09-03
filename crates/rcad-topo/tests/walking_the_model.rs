@@ -117,8 +117,11 @@ fn a_round_bars_closed_cap_edges_have_no_segment_and_do_not_panic() {
     let mut closed = 0;
     for edge in model.edges() {
         let segment = edge.segment().expect("a round bar's edges are all finite");
-        assert_eq!(segment.is_none(), edge.is_closed());
-        if edge.is_closed() {
+        let is_closed = edge
+            .is_closed()
+            .expect("a round bar's edges are straight or whole circles");
+        assert_eq!(segment.is_none(), is_closed);
+        if is_closed {
             closed += 1;
         }
     }

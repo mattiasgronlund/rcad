@@ -192,7 +192,7 @@ impl Model {
         // lower size short of zero. `Assembly::commit` writes and then asserts
         // the model is still valid, so an answer `Model::validate` would reject
         // has to be refused here or it is a crash.
-        if the_inputs_fit_in_f64(self, arguments, tools) {
+        if the_inputs_fit_in_f64(self, arguments, tools)? {
             assembly.check_dynamic_range(policy, log)?;
         }
 
@@ -224,7 +224,25 @@ impl Model {
 /// the stricter of the two, not a hole — and a model whose radius is what puts
 /// it out of range fails `Model::validate` going in, which is what already
 /// stops [`Assembly::commit`] asserting on it.
-fn the_inputs_fit_in_f64(model: &Model, arguments: &[SolidKey], tools: &[SolidKey]) -> bool {
+///
+/// # Errors
+///
+/// [`Error::ACrossingThisCannotBeOrderedAlong`] for an input edge whose run is a
+/// kind this crate has never seen. **This one answers `bool` and cannot say
+/// "skip me", which is why it refuses instead of guessing.** Read as an open
+/// edge, a closed run of a kind nothing here knows contributes a chord of
+/// nothing; that makes the ratio hopeless, which makes this `false`, which
+/// stands the *answer's* range check down and leaves [`Assembly::commit`]'s
+/// assert as the only thing between a bad answer and the model — a panic where
+/// there was a refusal to be had. Read the other way it would understate the
+/// smallest feature of the input. Neither reading is a measurement of anything,
+/// and a fuse whose input carries a word this crate cannot read has no business
+/// deciding whose fault the numbers are.
+fn the_inputs_fit_in_f64(
+    model: &Model,
+    arguments: &[SolidKey],
+    tools: &[SolidKey],
+) -> Result<bool> {
     let mut largest = 0.0_f64;
     let mut shortest = f64::INFINITY;
     for &solid in arguments.iter().chain(tools) {
@@ -235,7 +253,7 @@ fn the_inputs_fit_in_f64(model: &Model, arguments: &[SolidKey], tools: &[SolidKe
                 }
                 for coedge in wire.coedges() {
                     let edge = coedge.edge();
-                    if !edge.is_closed() {
+                    if !edge.is_closed()? {
                         shortest = shortest.min(edge.distance_between_its_ends());
                     }
                 }
@@ -243,9 +261,10 @@ fn the_inputs_fit_in_f64(model: &Model, arguments: &[SolidKey], tools: &[SolidKe
         }
     }
     if !shortest.is_finite() || largest == 0.0 {
-        return true;
+        return Ok(true);
     }
-    DynamicRange::measure(largest, shortest).is_ok_and(|range| range.is_within_supported_range())
+    Ok(DynamicRange::measure(largest, shortest)
+        .is_ok_and(|range| range.is_within_supported_range()))
 }
 
 /// The worst slop any entity of any input carries, if any of them carries one.

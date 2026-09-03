@@ -268,7 +268,9 @@ fn a_solid_whose_sides_are_a_cones_rulings_passes_the_full_sweep() {
                     continue;
                 }
                 assert!(
-                    !edge.is_closed(),
+                    !edge
+                        .is_closed()
+                        .expect("a cone's edges are runs this kernel named"),
                     "a ruling does not come back to where it started"
                 );
                 assert_ne!(
@@ -351,7 +353,10 @@ fn an_arc_trimmed_face_refuses_point_in_solid_by_name_and_a_closed_one_does_not(
         .flat_map(|wire| wire.coedges())
         .any(|coedge| {
             let edge = coedge.edge();
-            !edge.is_closed() && edge.run() != EdgeRun::Straight
+            !edge
+                .is_closed()
+                .expect("a cone's edges are runs this kernel named")
+                && edge.run() != EdgeRun::Straight
         });
     assert!(
         trimmed_by_an_arc,
