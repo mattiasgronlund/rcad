@@ -699,6 +699,38 @@ pub enum Error {
     #[error("no shell was described, so there is no solid to build")]
     ADraftSolidHasNoShell,
 
+    /// Two solids of one model fill some of the same space.
+    ///
+    /// Comes back from [`Model::check_no_two_solids_share_space`](crate::Model::check_no_two_solids_share_space),
+    /// which is a pass of its own and not part of
+    /// [`Model::validate`](crate::Model::validate): the sweep looks at one solid
+    /// at a time and this takes a pair.
+    #[error("two solids of this model fill some of the same space")]
+    TwoSolidsShareSpace {
+        /// One of the two.
+        one: crate::SolidKey,
+        /// The other.
+        other: crate::SolidKey,
+    },
+
+    /// Whether two solids fill any of the same space could not be settled.
+    ///
+    /// Its own error rather than [`Error::Undecidable`] because it carries the
+    /// pair and the width that straddled instead of a log of records: the search
+    /// asks [`SolidView::classify_point`](crate::SolidView::classify_point),
+    /// which puts its own records in the caller's log and hands back a width.
+    #[error(
+        "could not tell whether two solids share space; the widest enclosure that straddled was {enclosure}"
+    )]
+    CannotTellWhetherTwoSolidsShareSpace {
+        /// One of the two.
+        one: crate::SolidKey,
+        /// The other.
+        other: crate::SolidKey,
+        /// How wide the widest enclosure that straddled zero was.
+        enclosure: f64,
+    },
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the
