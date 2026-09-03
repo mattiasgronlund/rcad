@@ -15058,3 +15058,26 @@ list if the unit runs out of budget.
    enough, and `two_lines_told_apart` (`intersect.rs:1578-1608`) already does
    exactly that for another pair. The name argues for a representation the fix
    does not need.
+
+### 46.13 The decision rule was written twice and the two forms disagree
+
+§46.6 says the bucket **"shrinks by more than half"**. The unit's own plan, in
+the dispatcher's notes, says **"≥ 50%"**. Nobody noticed until a lane came back
+with a number that lands exactly between them: the KiCad bucket goes **168 → 84**,
+which is 50.0% — over the line by one reading and short of it by the other.
+
+**§46.6's text wins**, and the reason is written here rather than discovered
+later: it is the form that is committed to the repository, and it is the
+*stricter* of the two, so choosing it is choosing against the branch that
+flatters the unit. A rule read after the number is a rule that was not a rule.
+
+This is not the score. The gate generates the table at the final tree, over
+**both** corpora and against the denominator §46.6 names — files that reach
+`SolidBuilder::build`, now counted and printed by the lane as
+`reached_the_solid_builder`. What is fixed here is only which side of the line
+50.0% falls on if the final number lands there again.
+
+**And a lane's number is not the unit's.** A later lane in this same unit fixes
+the mesher bound that makes a hand-built fixture start importing, which moves
+these rates — §45.7's failure mode, which is why no lane in this unit publishes
+a rate and the gate publishes all of them.
