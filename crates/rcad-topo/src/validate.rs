@@ -1521,11 +1521,13 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
 /// # Why the answer does not depend on how finely it is walked
 ///
 /// It would, if a deflection were simply picked. A polygon inscribed in a
-/// bigger arc can enclose less than one inscribed in a slightly smaller arc
-/// walked one step finer, and the two arcs of a half-pipe's cap are exactly
-/// that pair — so a rule that read the sign off whatever points came back
-/// would be a guess with a test, and would move when somebody changed how
-/// coarse a walk may be.
+/// bigger arc can enclose *less* than one inscribed in a slightly smaller arc
+/// walked one step finer: a half-circle of radius `r` walked into `k` inside
+/// points spans `r²(k + 1)·sin(π/(k + 1))/2`, which is `1.000` for `r = 1` at
+/// one point and `1.273` for `r = 0.99` at two. The two arcs of a half-pipe's
+/// cap are that pair, and the cap between them would come out wound backwards.
+/// So a rule that read the sign off whatever points came back would be a guess
+/// with a test, and would move when somebody changed how coarse a walk may be.
 ///
 /// So the sign is only taken when the sampled area **outweighs what the
 /// sampling could have hidden**. Between one sample point and the next the true
