@@ -13617,11 +13617,16 @@ starting from a file that imports and cutting one line.
   wants the same treatment one level up: work the conic out at a power-of-two
   scale and scale the size back. `crates/rcad-topo/tests/meshing_a_curved_solid.rs:737`
   is the recorded case.
-- `Point::distance_to` still sums squares. `EdgeView::distance_between_its_ends`
-  no longer goes through it, but every other caller does, and it reports a real
-  separation below about `1.5e-162` as zero. A model at very small *absolute*
-  scale — coordinates at `1e-200`, features at `1e-210` — has a dynamic range of
-  only `1e10`, passes both range checks, and is measured wrongly. **Gap**, one
+- ~~`Point::distance_to` still sums squares.~~ **This gate wrote that and it is
+  false**, checked against the tree after the merge: `distance_to` is one line,
+  `(other - *self).length()`, and `Vector::length` took the power-of-two rescale
+  in the same lane. What still squares is `length_squared` and
+  `distance_squared_to`, deliberately and documented, because the square of a
+  separation of `1e-200` is not an `f64` at all — that one is a **limit**, not
+  the gap this row claimed. The rest of the row described a model at very small
+  *absolute* scale — coordinates at `1e-200`, features at `1e-210` — which has a
+  dynamic range of only `1e10` and passes both range checks; that shape is real
+  and is covered by the `CannotWorkOutHowBigACrossingIs` row above. **Gap**, one
   line, and nobody took it.
 
 **`rcad-topo::Error` — thirteen new builder refusals.** Eleven are limits. The two
@@ -13783,7 +13788,8 @@ amend.
    fix — the same power-of-two rescale `Vector::length` just took, one level up,
    which `Vector::length` itself does not reach. **Gap. Consumer:
    `crates/rcad-topo/tests/meshing_a_curved_solid.rs:737`, already in the tree.**
-   Its neighbour is `Point::distance_to`, which still squares.
+   Its neighbour is **not** `Point::distance_to`, which this gate said still
+   squares and which does not — see §43.6's struck row.
 5. **`arrange.rs:203` is unsettled, and it is the least-covered assert in the
    fuse** — 4 hits in a whole suite run, against 1 394 856 for the busiest. Its
    doc says *"Both come from the same pair of surfaces, so both pick the same
