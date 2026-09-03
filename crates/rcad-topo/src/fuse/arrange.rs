@@ -60,9 +60,9 @@
 use core::cmp::Ordering;
 
 use rcad_geom::{
-    EdgeRun, MeetOfThree, NamedRun, Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane,
-    PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector, intersect, meet_of_three_surfaces,
-    where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
+    Cone, EdgeRun, MeetOfThree, NamedRun, Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Picker,
+    Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector, intersect,
+    meet_of_three_surfaces, where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
@@ -2970,7 +2970,7 @@ fn how_a_crossing_runs(
     //    it. `cuts.rs`'s own module comment turns down the same shape of skip
     //    for the same reason: leave a pair out and only one side of a shared
     //    edge gets split, and the answer is not a manifold (§17.4).
-    if a_plane_along_a_pipes_axis(surface, partner) {
+    if a_pair_that_crosses_in_straight_lines(surface, partner) {
         let (axis, forward_climbs_the_axis) = dominant_axis_of_a_direction(
             cross_of(gradient_at(surface, at), gradient_at(partner, at)),
             log,
@@ -3034,8 +3034,10 @@ fn how_a_crossing_runs(
 fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
     match (one, other) {
         // A plane cuts a ball, a pipe and a cone in a conic lying in the plane.
-        // A plane along a pipe's axis cuts straight lines instead, and never
-        // reaches here: `a_plane_along_a_pipes_axis` answers it one step up.
+        // The two that cut straight lines instead — a plane along a pipe's axis,
+        // and a plane through a cone's apex leaning no shallower than the cone —
+        // never reach here: `a_pair_that_crosses_in_straight_lines` answers both
+        // one step up.
         (Surface::Plane(_), Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_))
         | (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_), Surface::Plane(_))
         // Two balls cross in the circle their radical plane cuts.
@@ -3059,36 +3061,70 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
     }
 }
 
-/// Whether the pair is a plane parallel to a pipe's axis, which crosses it in
-/// straight lines rather than in a closed curve.
+/// Whether the pair crosses in endless straight lines rather than in a closed
+/// curve: a plane parallel to a pipe's axis, or a plane through a cone's apex
+/// that is no shallower than the cone's own side.
 ///
-/// The other twenty-three pairs are named rather than swept up, because `false`
-/// here is right for a reason that would not survive a sixth [`Surface`]: it is
-/// true of every pair that is *not one plane and one pipe*, which is a fact
-/// about the question and not about the shapes. The `_` at the bottom is for a
-/// sixth kind and nothing else (§40) — but a sixth kind falls into it silently
-/// rather than failing to compile, because [`Surface`] is `#[non_exhaustive]`
-/// and belongs to another crate. `tests/a_sixth_kind_of_surface.rs` is what
-/// notices, and says why the compiler cannot.
-fn a_plane_along_a_pipes_axis(one: &Surface, other: &Surface) -> bool {
+/// Two planes cross in a straight line too, and are answered a step up before
+/// this is asked.
+///
+/// The other pairs are named rather than swept up, because `false` for them is a
+/// fact about the question and not about the shapes: nothing but a plane holds a
+/// straight line with a ball or a ring on the other side of it, and every pair
+/// among the pipe, the cone and the ring is a degree-four space curve. The `_`
+/// at the bottom is for a sixth kind and nothing else (§40) — but a sixth kind
+/// falls into it silently rather than failing to compile, because [`Surface`] is
+/// `#[non_exhaustive]` and belongs to another crate.
+/// `tests/a_sixth_kind_of_surface.rs` is what notices, and says why the compiler
+/// cannot.
+fn a_pair_that_crosses_in_straight_lines(one: &Surface, other: &Surface) -> bool {
     match (one, other) {
         (Surface::Plane(flat), Surface::Cylinder(pipe))
         | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
             flat.normal().dot(pipe.axis().direction()) == 0.0
         }
-        (
-            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_),
-            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_),
-        )
-        | (
-            Surface::Cylinder(_),
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
-        )
-        | (Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_), Surface::Cylinder(_)) => {
+        (Surface::Plane(flat), Surface::Cone(cone))
+        | (Surface::Cone(cone), Surface::Plane(flat)) => a_plane_cuts_a_cone_in_rulings(flat, cone),
+        (Surface::Plane(_), Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_))
+        | (Surface::Sphere(_) | Surface::Torus(_), Surface::Plane(_))
+        | (Surface::Sphere(_) | Surface::Torus(_), Surface::Sphere(_) | Surface::Torus(_))
+        | (Surface::Cylinder(_) | Surface::Cone(_), Surface::Sphere(_) | Surface::Torus(_))
+        | (Surface::Sphere(_) | Surface::Torus(_), Surface::Cylinder(_) | Surface::Cone(_))
+        | (Surface::Cylinder(_) | Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_)) => {
             false
         }
         _ => false,
     }
+}
+
+/// Whether a plane cuts a cone in rulings rather than in a conic that closes.
+///
+/// The two signs [`where_a_plane_and_a_cone_cross`](rcad_geom::intersect) reads
+/// to tell its six cases apart, asked here in the same two forms: **where the
+/// apex stands**, `n·a − d`, and **how the plane leans**, `E = (n·w)² −
+/// slope²‖n × w‖²`. With the apex on the plane and `E` at or below nothing the
+/// crossing is one ruling the plane rests along (`E = 0`) or two rulings meeting
+/// at the apex (`E < 0`), and both are endless straight lines.
+///
+/// Every other pair of signs is a curve: off the plane the crossing is an
+/// ellipse, a parabola or a hyperbola, and through the apex with `E > 0` the two
+/// share the apex alone, which is no curve at all.
+///
+/// **Rounded here and exact in `intersect`**, which is the same footing the pipe
+/// row above stands on: both dot products are one `f64` sum each. Where the two
+/// disagree the answer is a run ordered along the wrong shape, not a wrong
+/// shape built, and the ordering refuses rather than guessing — a nearly-tangent
+/// plane is the case, and it is the same case a plane nearly along a pipe's axis
+/// has had since M2.
+pub(super) fn a_plane_cuts_a_cone_in_rulings(flat: &Plane, cone: &Cone) -> bool {
+    if flat.signed_distance_to(cone.apex()) != 0.0 {
+        return false;
+    }
+    let normal = flat.normal();
+    let along = cone.axis().direction();
+    let up = normal.dot(along);
+    let sideways = normal.cross(along).length_squared();
+    up * up - cone.slope() * cone.slope() * sideways <= 0.0
 }
 
 /// The cross product of two boxes.
@@ -4065,7 +4101,7 @@ mod curved {
 #[cfg(test)]
 mod what_the_curved_arrangement_reaches {
     use rcad_geom::{
-        Axis, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus, Vector, intersect,
+        Axis, Cone, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus, Vector, intersect,
     };
     use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 
@@ -4405,6 +4441,98 @@ mod what_the_curved_arrangement_reaches {
         let inner = ordered_round_the_axis(3.0);
         assert_eq!(outer, Decision::Pos, "the outer circle winds about `+n`");
         assert_eq!(inner, Decision::Neg, "and the inner one about `-n`");
+    }
+
+    /// The two rulings a plane down a cone's axis cuts are ordered along an
+    /// axis, and the ellipse a plane across it cuts still runs round a closed
+    /// curve.
+    ///
+    /// Both used to end in `ACrossingThisCannotBeOrderedAlong`: the straight
+    /// gate asked only about a plane and a *pipe*, so a ruling fell past it into
+    /// the conic gate, which is `false` for a pair that does not close. A ruling
+    /// is an endless straight line and is ordered the way a plane along a pipe's
+    /// axis already was.
+    ///
+    /// **The tangent plane is left out on purpose and the last block says why.**
+    #[test]
+    fn the_two_rulings_a_plane_through_a_cones_apex_cuts_are_ordered_along_an_axis() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let cone = Surface::Cone(Cone::new(Axis::z(), 0.5).expect("a cone leaning a half"));
+        let down_the_axis = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("a plane holding the cone's axis"),
+        );
+
+        let SurfaceMeet::Curves(runs) = intersect(&down_the_axis, &cone, &policy, &mut log)
+            .expect("a plane down a cone's axis cuts it in two rulings")
+        else {
+            panic!("a plane down a cone's axis cuts curves and nothing else");
+        };
+        assert_eq!(runs.len(), 2, "it cuts two rulings, one either side");
+
+        // `(2, 0, 4)` is on the cone — `2² = (4/2)²` — and on the plane `y = 0`.
+        let at = PredicatePoint::from([2.0, 0.0, 4.0]);
+        for run in &runs {
+            let ran = how_a_crossing_runs(&down_the_axis, &cone, run, at, &mut log)
+                .expect("a ruling is ordered along the axis it climbs fastest");
+            let HowItRuns::AlongAnAxis { axis, .. } = ran else {
+                panic!("a ruling runs on for ever, so it is not ordered round a closed curve");
+            };
+            assert_eq!(axis, 2, "the ruling climbs `z` twice as fast as `x`");
+        }
+
+        // The ellipse is the row the straight gate must not swallow.
+        let across = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a plane square to the cone's axis"),
+        );
+        let SurfaceMeet::Curves(circle) = intersect(&across, &cone, &policy, &mut log)
+            .expect("a plane across a cone cuts one closed curve")
+        else {
+            panic!("a plane across a cone cuts curves and nothing else");
+        };
+        assert!(
+            matches!(
+                how_a_crossing_runs(
+                    &across,
+                    &cone,
+                    &circle[0],
+                    PredicatePoint::from([2.0, 0.0, 4.0]),
+                    &mut log
+                )
+                .expect("a circle round a cone is ordered"),
+                HowItRuns::RoundAClosedCurve { .. }
+            ),
+            "a plane cutting across a cone still runs round a closed curve"
+        );
+
+        // **A tangent plane's one ruling is still refused, and by the same gap
+        // as a plane resting on a pipe.** The gate lets it through now, and the
+        // line under the gate is `∇S × ∇Q`, which for a plane lying along a
+        // cone's own side is exactly nothing — the two gradients are parallel
+        // everywhere on the ruling. `how_a_crossing_runs`'s own note names the
+        // four families of fix and why the working one is not a small change.
+        let touching = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.5))
+                .expect("a plane resting along one ruling"),
+        );
+        let SurfaceMeet::Curves(ruling) = intersect(&touching, &cone, &policy, &mut log)
+            .expect("a tangent plane touches the cone along one ruling")
+        else {
+            panic!("a tangent plane touches along a curve and nothing else");
+        };
+        assert!(
+            how_a_crossing_runs(
+                &touching,
+                &cone,
+                &ruling[0],
+                PredicatePoint::from([2.0, 0.0, 4.0]),
+                &mut log
+            )
+            .is_err(),
+            "the direction of a tangent plane's ruling is `∇S × ∇Q`, which is nothing"
+        );
     }
 }
 
