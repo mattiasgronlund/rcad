@@ -45,11 +45,16 @@ use serde::de::value::{Error, StrDeserializer};
 /// The kinds this crate's hand-kept lists of surface pairs were written
 /// against.
 ///
-/// `a_pair_that_crosses_in_a_conic` and `a_plane_along_a_pipes_axis` in
-/// `fuse/arrange.rs` and `the_crossing_of_these_runs_straight` in
+/// `a_pair_that_crosses_in_a_conic` and `a_pair_that_crosses_in_straight_lines`
+/// in `fuse/arrange.rs` and `the_crossing_of_these_runs_straight` in
 /// `fuse/assemble.rs` each name all twenty-five ordered pairs of these five and
 /// send everything else to a `_`. A sixth kind falls into those wildcards and
 /// gets whatever the wildcard says, which for all three is `false`.
+///
+/// The middle one was called `a_plane_along_a_pipes_axis` while a plane along a
+/// pipe's axis was the one pair it knew. A plane through a cone's apex cuts
+/// rulings as well, so it learned a second row and took a name that covers both
+/// — still twenty-five pairs named and one `_` under them.
 #[test]
 fn the_five_kinds_the_fuses_lists_of_surface_pairs_were_written_against() {
     let name: StrDeserializer<Error> = "a sixth kind".into_deserializer();
