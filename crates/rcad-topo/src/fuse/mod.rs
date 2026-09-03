@@ -215,9 +215,15 @@ impl Model {
 /// input solids instead of the whole model so that it stays local to the
 /// entities this operation touched (§4.3).
 ///
-/// Chords only, matching `Assembly::check_dynamic_range` — a radius of the
-/// answer is a radius of an input (§17.1), so measuring radii on both sides
-/// would only ever cancel out.
+/// Chords only, on both sides, where `Model::validate` also takes the radii of
+/// curved faces. A face of the answer keeps its ancestor's surface bit for bit
+/// (§17.1), so the smallest radius in the answer is the smallest radius in the
+/// inputs: were it the smallest thing about either, both measures would come
+/// out the same and this would report the inputs as not fitting, which only
+/// ever makes the check below stand down. Leaving the radii out is therefore
+/// the stricter of the two, not a hole — and a model whose radius is what puts
+/// it out of range fails `Model::validate` going in, which is what already
+/// stops [`Assembly::commit`] asserting on it.
 fn the_inputs_fit_in_f64(model: &Model, arguments: &[SolidKey], tools: &[SolidKey]) -> bool {
     let mut largest = 0.0_f64;
     let mut shortest = f64::INFINITY;
