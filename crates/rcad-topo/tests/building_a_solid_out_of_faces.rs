@@ -146,10 +146,10 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// today** — not a plane-bounded block, not a second bend on the bend's own
 /// axis, not even a bit-for-bit copy of the bend itself
 /// (`a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule` in
-/// `how_often_a_fuse_with_a_torus_refuses.rs` is the demonstration: the corner
-/// search answers now — a straight line meets a torus in up to four places and
-/// each of them is worked out — and the arrangement gives up one step later,
-/// on putting the corners it found in order along the curve they sit on).
+/// `how_often_a_fuse_with_a_torus_refuses.rs` is the demonstration: two bends
+/// sharing a torus get further than anything else does — the corners are found
+/// and put in order round the circles they sit on — and stop at two coincident
+/// curves touching on one face without crossing).
 ///
 /// So the fuse half of the oracle here compares the **refusal**: the same
 /// rule against the same third solid must refuse the same way for both.
@@ -205,8 +205,11 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let refusal_of_rebuilt =
         refused_fusing_a_third_solid(&model, rebuilt, &a_turned_bend_of_the_same_ring_and_tube);
     assert!(
-        matches!(refusal_of_built, Error::ACrossingThisCannotBeOrderedAlong),
-        "expected the arrangement to refuse on ordering points along the crossing, got \
+        matches!(
+            refusal_of_built,
+            Error::TwoCurvesTouchWithoutCrossing { .. }
+        ),
+        "expected the arrangement to reach the two coincident curves and refuse there, got \
          {refusal_of_built:?}"
     );
     assert_eq!(
