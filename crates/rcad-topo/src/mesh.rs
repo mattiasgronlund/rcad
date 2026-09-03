@@ -2261,7 +2261,7 @@ fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceL
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, EdgeRun, Orientation, Plane, Scale, Vector};
+    use rcad_geom::{Axis, EdgeRun, Orientation, Plane, Scale, Sphere, Vector};
     use rcad_predicates::{Decision, Interval};
 
     use super::*;
@@ -2894,10 +2894,27 @@ mod tests {
     /// **Two roads that must differ.** An equality that holds because both sides
     /// walked the same road proves nothing, so this also measures the road not
     /// taken and fails if the round trip never moves a surface at all. And it
-    /// checks the stray against the ceiling the derivation gives it — two
-    /// movements of a point, `36 · f64::EPSILON · L` — because a stray past that
-    /// would mean the derivation is wrong about what a round trip costs, however
-    /// dead the code that makes one now is.
+    /// checks the stray against the ceiling the derivation gives it, because a
+    /// stray past that would mean the derivation is wrong about what a round
+    /// trip costs, however dead the code that makes one now is.
+    ///
+    /// **Each surface is charged its own ceiling and not the loosest one.**
+    /// [`the_surface_this_face_is_meshed_on`] derives two different numbers:
+    /// two movements of a point for a ball, `36 · f64::EPSILON · L`, because a
+    /// ball is placed by its centre alone, and four for a pipe,
+    /// `72 · f64::EPSILON · L`, because a pipe is placed by a point *and* a
+    /// direction. Holding a ball to the pipe's number would leave half the
+    /// derivation untested, so a ball here is held to 36.
+    ///
+    /// **A ball the mesher can reach has to be built by hand to move at all.**
+    /// [`Model::add_ball`] stores its sphere on the origin of the frame the
+    /// placement moves, and `M⁻¹(M(origin))` cancels to the bit whatever the
+    /// placement is — so every ball *face* below strays exactly zero, and a
+    /// count that lumped balls in with pipes would have said the road not taken
+    /// was walked when for balls it never was. The ball's own ceiling is
+    /// exercised by round-tripping a sphere stored **away** from that origin,
+    /// which [`Builder::add_face`](crate::Builder::add_face) and a STEP import
+    /// both accept.
     ///
     /// **The stray is not measured by sampling** and
     /// [`how_far_apart`](tests::how_far_apart) says why.
@@ -2910,9 +2927,12 @@ mod tests {
             Vector::new(7.0, 1.0, -3.0),
         ]
         .map(|way| Axis::new(Point::origin(), way).expect("a direction with length"));
+        let charged = Isometry::POINT_ROUNDOFF / f64::EPSILON;
+        let ceilings = [("a ball", 2.0 * charged), ("a pipe", 4.0 * charged)];
         let mut compared = 0_u32;
-        let mut moved = 0_u32;
-        let mut worst = 0.0_f64;
+        let mut moved = [0_u32; 2];
+        let mut worst = [0.0_f64; 2];
+        let mut ball_faces_that_moved = 0_u32;
 
         for axis in &leaning {
             for sixteenths in 1..16 {
@@ -2929,8 +2949,14 @@ mod tests {
                     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
                     let ball = model.add_ball(2.0, &placement).expect("a ball");
                     let bar = model.add_round_bar(3.0, 7.0, &placement).expect("a bar");
+                    assert_eq!(
+                        model.solid(ball).faces().count(),
+                        1,
+                        "a ball whose one face is its sphere is what makes the two-movement \
+                         ceiling below the right one to charge it"
+                    );
 
-                    for solid in [ball, bar] {
+                    for (kind, solid) in [ball, bar].into_iter().enumerate() {
                         for face in model.solid(solid).faces() {
                             if face.surface().as_plane().is_some() {
                                 continue;
@@ -2958,34 +2984,66 @@ mod tests {
                             let stray =
                                 how_far_apart(&face.stored_surface(), &round_tripped, reach);
                             if stray > 0.0 {
-                                moved += 1;
+                                moved[kind] += 1;
+                                if kind == 0 {
+                                    ball_faces_that_moved += 1;
+                                }
                             }
-                            worst = worst.max(stray / (f64::EPSILON * reach));
+                            worst[kind] = worst[kind].max(stray / (f64::EPSILON * reach));
                         }
                     }
+
+                    // `add_ball` stores its sphere on the origin of the frame
+                    // the placement moves, and `M⁻¹(M(origin))` cancels to the
+                    // bit whatever the placement is — so the ball faces above
+                    // never move and never exercise a ball's own ceiling. A
+                    // sphere stored away from that origin does move, and both
+                    // `Builder::add_face` and a STEP import accept one, so it
+                    // is not a shape nothing can build.
+                    let off_centre = Surface::Sphere(
+                        Sphere::new(Point::new(0.7, -1.3, 2.9), 2.0).expect("a positive radius"),
+                    );
+                    let there_and_back = off_centre
+                        .transformed(&placement)
+                        .transformed(&placement.inverse());
+                    let reach = 2.9 + away;
+                    let stray = how_far_apart(&off_centre, &there_and_back, reach);
+                    if stray > 0.0 {
+                        moved[0] += 1;
+                    }
+                    worst[0] = worst[0].max(stray / (f64::EPSILON * reach));
                 }
             }
         }
 
-        let charged = Isometry::POINT_ROUNDOFF / f64::EPSILON;
-        println!(
-            "{compared} placed curved faces, {moved} of them on a surface the \
-             round trip moved. Worst stray {worst} · f64::EPSILON · L, against \
-             {charged} · f64::EPSILON · L charged for placing a mesh point and \
-             a ceiling of {} for the stray",
-            4.0 * charged
-        );
         assert!(compared >= 400, "only {compared} placed curved faces");
-        assert!(
-            moved > 0,
-            "the round trip moved no surface at all, so the equality above is \
-             comparing a road with itself and proves nothing"
+        assert_eq!(
+            ball_faces_that_moved, 0,
+            "a ball face's round trip moved its sphere, which the note above says cannot \
+             happen while add_ball stores that sphere on its placement's own origin — so \
+             either the note is wrong now or the ball entries below are counting the wrong \
+             thing"
         );
-        assert!(
-            worst <= 4.0 * charged,
-            "the round trip strayed {worst} · f64::EPSILON · L, past the \
-             ceiling the derivation gives it"
-        );
+        for (kind, (surface, ceiling)) in ceilings.into_iter().enumerate() {
+            println!(
+                "{compared} placed curved faces, every one meshed on the surface the arena \
+                 holds. Round trips on {surface}: {} moved it, and the worst strayed {} · \
+                 f64::EPSILON · L against a ceiling of {ceiling}, with {charged} charged \
+                 for placing a mesh point",
+                moved[kind], worst[kind],
+            );
+            assert!(
+                moved[kind] > 0,
+                "the round trip moved no surface of {surface} at all, so the equality \
+                 above is comparing a road with itself and proves nothing"
+            );
+            assert!(
+                worst[kind] <= ceiling,
+                "a round trip on {surface} strayed {} · f64::EPSILON · L, past the \
+                 ceiling of {ceiling} the derivation gives it",
+                worst[kind]
+            );
+        }
     }
 
     /// How far apart two surfaces of the same kind sit in space, out to `reach`
