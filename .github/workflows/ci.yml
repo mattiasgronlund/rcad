@@ -1,3 +1,24 @@
+# This workflow has never run. There is no remote and no CI (`git remote -v` is
+# empty), so what follows is a scaffold from `0a8aa33` and a note to whoever
+# adds the first remote.
+#
+# **`just test` will fail here until the runner has a STEP corpus.** Four tests
+# in `rcad-step` refuse to skip when `RCAD_STEP_CORPUS` is unset — they used to
+# print "skipping" and return green, which meant a green suite had never read a
+# real file (`docs/decisions.md` §45). Point the variable at a directory holding
+# `nist/` and `kicad/` and they run; leave it unset and they say so and fail.
+#
+# That failure is the mechanism working, not a bug to route around. The corpus
+# is 375 MB of third-party files and is deliberately not in this tree, so a
+# runner has to fetch or cache it. **No fetching mechanism is built here**: it
+# would have no consumer until a remote exists, and §13 rule 3 says a part with
+# no named consumer is not built. Decide it when the consumer appears.
+#
+# Note also that this runs `just test` rather than `just default`, so
+# `check-enums`, `check-wildcards` and `check-wildcards-selftest` are not
+# enforced here even though they gate every local run. That predates the corpus
+# question and wants settling at the same time.
+
 name: CI
 
 on:

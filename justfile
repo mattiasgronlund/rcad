@@ -57,6 +57,22 @@ check:
 # panic!` for the rest, stops matching anything once the case it named is
 # answered. That is what took it from 88 to 87 — a block corner on a ball's
 # skin, which the mesher used to refuse.
+#
+# **A fifth reason, and the one that makes this number not a ratchet: the
+# instrument changed.** 90 → 87 over the unit called "the door" looks like three
+# arms going away and is not. Measured both ways on both trees:
+#
+#     old awk, before   82 direct + 8 composite = 90
+#     new awk, before   82 direct + 6 composite = 88
+#     old awk, after    81 direct + 8 composite = 89
+#     new awk, after    81 direct + 6 composite = 87
+#
+# So the composite half moved **entirely** because the scan started counting
+# uncovered variants instead of sites, and not at all because the tree did. Only
+# one point of the three — the direct half's 82 → 81 — is a real arm going away.
+# A ratchet that resets its own instrument in the same commit range as the tree
+# has lost its baseline, so the bridging figures are written here rather than
+# left to be re-derived. Whoever changes the scan again owes the same four rows.
 wildcard_arms := "87"
 
 check-wildcards:
