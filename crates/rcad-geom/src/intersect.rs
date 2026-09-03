@@ -1960,9 +1960,8 @@ fn how_far_a_hyperbolas_vertex_stands_off_the_apex_plane(flat: &Plane, cone: &Co
     let along = cone.axis().direction().components();
     let slope = cone.slope();
 
-    let stands_off =
-        dot_enclosing(exactly(normal), exactly(cone.apex().coordinates()))
-            - Interval::exactly(flat.offset());
+    let stands_off = dot_enclosing(exactly(normal), exactly(cone.apex().coordinates()))
+        - Interval::exactly(flat.offset());
     if stands_off.contains_zero() {
         return 0.0;
     }

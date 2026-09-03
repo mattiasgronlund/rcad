@@ -147,23 +147,48 @@ pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 /// branch are the one place that does, and the two roundings the parabola does
 /// not spend on `C`'s cancellation pay for them.
 ///
+/// **This is the parabola's chain, and the worst a search finds is a
+/// hyperbola.** `cosh`/`sinh` and the `centre + out·cosh σ + across·sinh σ`
+/// evaluation are not counted above; they get the one sentence at the end of the
+/// last bullet and no term count of their own. So §15.6's "a published bound
+/// needs a derivation" is, as this stands, satisfied for the shape that is *not*
+/// the measured worst case. That is a **known hole in the derivation, not a
+/// claim that the hyperbola is cheaper** — writing its chain out is work this
+/// note does not do.
+///
 /// # What the test can and cannot fail on, with the number
 ///
 /// `every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bound`
-/// is the test §15.6 asks for. Over 10,981 walks and 339,576 points it finds a
-/// worst of **0.049 of this bound** — about `3.1 · ε · L`.
+/// is the test §15.6 asks for. Over 158,623 walks and 8,462,349 points it finds
+/// a worst of **0.071 of this bound** — about `4.6 · ε · L`, on a random plane
+/// against a random cone.
 ///
-/// **So halving this constant would not fail that test, and saying so is the
-/// point.** 98 roundings charged their full half-ulp each is a *count*; the
-/// same 98 signed errors add to about `√98/√3` of the count, which is a
-/// sixteenth of it, and 0.049 is that sixteenth with the derivation's own 1.3
-/// on top. §15.6 says this in as many words — *"that test cannot show a bound
-/// is tight — rounding errors cancel"* — and what makes `64 · ε` a bound here
-/// is the derivation above and not the search.
+/// **So halving this constant would not fail that test**, and the reason to
+/// believe that is a table rather than a paragraph. Six families were tried,
+/// each on top of the last, and the test prints what each one reached: sweeping
+/// the slope and the height alone gets 0.0392; adding the deflection over 21
+/// octaves, slopes off the eighths grid, planes barely steeper than a ruling,
+/// scales that are not powers of two and finally 120,000 random pairs walks it
+/// up to 0.0713. **Five families the old sweep never varied moved the number by
+/// 1.8x between them**, so the honest reading is that a search pins the constant
+/// to within a factor of about fourteen, not that it is tight. §15.6 says the
+/// rest in as many words — *"that test cannot show a bound is tight — rounding
+/// errors cancel"* — and what makes `64 · ε` a bound here is the derivation
+/// above and not the search.
+///
+/// **The measurement itself had to be fixed before the search could be
+/// widened, and the old 0.049 was an artefact of it.** The harness read the
+/// distance to the cone off `√(‖out‖² − up²) − slope·|up|` in plain `f64`, and
+/// both of those subtractions cancel. Checked against exact rational arithmetic
+/// on two points: on a narrow cone it reported 3.0x the true distance, and at
+/// the place the widened search now calls its worst it reported 0.5x — so it was
+/// not even reliably pessimistic. Re-running the *identical* old sweep with the
+/// residual worked out in twice the precision gives 0.0392 where it used to
+/// print 0.0490.
 ///
 /// The half a search *can* pin is the **scaling**, and
 /// `what_an_endless_bend_strays_grows_with_the_size_it_was_worked_out_from` is
-/// that half: the same bend at four scales 32,768 apart uses the same 0.011 of
+/// that half: the same bend at four scales 32,768 apart uses the same 0.0078 of
 /// its own bound at every one of them, which is what says the error really is
 /// proportional to `L` and not an absolute number that happens to hold once. A
 /// term dropped out of [`how_big_this_is`]'s list would pass the wide search and
@@ -689,27 +714,31 @@ fn the_seed_this_run_is_picked_up_at(
 /// A parabola and a hyperbola branch have no ends, so *something* has to say
 /// where the drawing stops. Two families of answer were weighed.
 ///
-/// **(a) Let the topology say.** Refuse an endless run in [`walk`] and add an
-/// [`EdgeRun`] that carries its own stretch, so a fuse that cuts a face along a
-/// parabola hands over the two places the face's own wire reaches.
-/// The refusal this replaced said as much in its own doc, and it is honest —
-/// the range really does belong where the topology is. It is **not free**, and
-/// the cost is the reason it is not taken here:
+/// **(a) Let the topology say** — and the cheapest member of that family is
+/// already here. [`NamedRun::new`] is `pub` and takes two ends, and the walk
+/// below reads them: `ends[0].unwrap_or(-out)`. A fuse that cuts a face along a
+/// parabola and knows both places the face's own wire reaches names them, and
+/// nothing in this module chooses anything. **So (a) is not rejected, and the
+/// rule below settles only the case (a) leaves open: a run that names no end on
+/// a side.** There is no corner there for anything to have worked out.
 ///
-/// - Every match on [`EdgeRun`] outside this crate grows an arm, and §40's own
-///   note says a wildcard is where the next variant goes to be ignored. The
-///   variant is `Serialize`, so a file states one, so every reader has to handle
-///   a stretch it did not compute.
-/// - **The stretch would then be geometry a caller supplies**, and this module's
-///   whole reason for existing is that there is *one* authority on where the
-///   points along an edge are (§27.5). A run carrying two parameters is a second
-///   one, and the two would have to be kept in step by hand — which is the
-///   shape §23.8 kept finding.
-/// - It cannot be built now anyway: no fuse in the tree cuts a face along a
-///   cone's parabola, so the variant would arrive with no consumer, which §13
-///   is about.
+/// The *expensive* member of the family — a new [`EdgeRun`] variant carrying its
+/// own stretch as two numbers — is the one that is not taken, and only one of
+/// the three costs once charged against the whole family really is a cost:
 ///
-/// **(b) Pick a stretch from the two surfaces alone**, which is what is done.
+/// - It has no consumer. No fuse in the tree cuts a face along a cone's
+///   parabola; a frustum against a block refuses at *ordering* with
+///   `ACrossingThisCannotBeOrderedAlong` in 90 of 96 pairs, which is upstream of
+///   any walk. A variant with no consumer is what §13 defers.
+///
+/// The other two were charged against the wrong thing. Growing an arm on a
+/// `#[non_exhaustive]` enum (§40) and taking geometry from a caller (§27.5) are
+/// prices of the *variant*, not of letting the topology say where a run stops —
+/// which two `PredicatePoint`s on a run already do, through a public
+/// constructor, with neither price paid.
+///
+/// **(b) Pick a stretch from the two surfaces alone** for the ends nothing
+/// names, which is what is done.
 /// The rule is one sentence: **walk out until the curve has bent one of its own
 /// characteristic lengths away from its vertex, each way.** For a parabola
 /// `vertex + across·s + bend·s²` that is `|s| ≤ 1/‖bend‖`, where the `bend·s²`
@@ -736,8 +765,8 @@ fn the_seed_this_run_is_picked_up_at(
 /// **What (b) is not.** It is not a claim that this stretch is the right one for
 /// any particular consumer; it is a claim that it is a *function of the two
 /// surfaces*, which is the only property anything downstream relies on. A
-/// consumer that needs more takes (a), and (a) becomes short the day a fuse
-/// wants it.
+/// consumer that knows where the run stops names its ends and never reaches
+/// this rule at all.
 trait AnEndlessBend {
     /// The point at `along` — a length for a parabola, an angle-like number for
     /// a hyperbola branch.
@@ -866,8 +895,14 @@ fn how_many_pieces_an_endless_bend_takes(
 /// of `D` is `‖bend‖·D³/6` and `n` pieces leave `n` slivers of `‖bend‖(D/n)³/6`.
 /// For a circular arc turning by `θ` it is
 /// `(n·sin(θ/n) − sin θ) / (θ − sin θ)`, which is `1 − 1/n²` as the pieces get
-/// short and never below `0.63` while [`how_many_steps`] keeps a piece under a
-/// quarter turn.
+/// short and never below `2/π = 0.6366`, which it is exactly at `n = 2`,
+/// `θ = π`.
+///
+/// **That floor needs two restrictions and not one.** [`how_many_steps`] keeps
+/// a piece under a quarter turn, so `θ/n ≤ π/2`; and it walks a conic, which
+/// closes, so `θ ≤ 2π`. Drop the second and the floor is false — at `n = 5`,
+/// `θ = 5π/2` the pieces are exactly quarter turns and the fraction is `0.5836`.
+/// Under both, `2/π` is the infimum over every `n ≥ 2` and every `θ`.
 ///
 /// So the sequence is `0`, about `3/4`, about `8/9`. **One piece shows none of
 /// the bend, for every `θ`, at every deflection** — the run comes back as its

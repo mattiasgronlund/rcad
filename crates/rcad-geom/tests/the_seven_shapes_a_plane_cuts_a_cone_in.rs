@@ -33,6 +33,7 @@ use rcad_geom::{
     POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF, Plane, Point, PointsAlongACrossing, Sphere, Surface,
     SurfaceMeet, Vector, intersect, walk, where_a_closed_crossing_starts,
 };
+use rcad_predicates::expansion::{two_product, two_sum};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
 
 /// The 45-degree cone about `+z` with its apex at the origin.
@@ -297,7 +298,11 @@ fn a_tilted_cone_whose_axis_dot_apex_does_not_round_exactly_still_names_its_two_
                     .all(|phi| picked_by[0].side_of_point(on_a_branch(*up, phi)) != Decision::Neg)
             })
             .collect();
-        assert_eq!(held.len(), 1, "one run holds one whole branch, got {held:?}");
+        assert_eq!(
+            held.len(),
+            1,
+            "one run holds one whole branch, got {held:?}"
+        );
         nappes_held.push(held[0]);
     }
     assert!(
@@ -781,29 +786,135 @@ fn the_ellipse_a_leaning_plane_cuts_out_of_a_cone_matches_the_closed_form() {
 /// How far off both surfaces the worst point of a walk sits, as a share of the
 /// bound the walk itself published for that run.
 ///
-/// The distance to the plane is exact for a stored unit normal; the distance to
-/// the cone is `|√(x² + y²) − |z||` scaled by `1/√(1 + t²)`, which is the
-/// perpendicular distance to the nearer nappe for a point beside it.
+/// # The measurement is done in twice the precision, and it has to be
+///
+/// This used to read the distance to the cone off
+/// `√(‖out‖² − up²) − slope·|up|`, and **both of those subtractions cancel**.
+/// The second cancels always — it is the residual being measured, so its
+/// leading digits are meant to go — and in plain `f64` what comes back is the
+/// residual plus a few ulps of `‖out‖`, which is a sizeable share of a bound
+/// that is itself `64 · ε · L`. Checked against exact rational arithmetic on two
+/// points: on a narrow cone, where `‖out‖ ≈ up` makes the first subtraction
+/// cancel too, it read **3.0x** the true distance; at the place the widened
+/// search below calls its worst it read **0.5x** of it. **A search widened on
+/// top of that metric reports rubbish in both directions**, so the metric is
+/// fixed first.
+///
+/// [`Doubled`] carries the roundings the `f64` chain throws away. The residual
+/// is worked out as `‖out‖²·(w·w) − (1 + slope²)·(out·w)²` — a polynomial in
+/// stored numbers with no subtraction of nearly-equal square roots in it —
+/// divided by `(across + slope·|up|)·(w·w)`, which is a sum of non-negative
+/// terms and needs no extra precision at all.
 fn the_worst_share_of_its_own_bound(
     walked: &PointsAlongACrossing,
     flat: &Plane,
     cone: &Cone,
-) -> f64 {
+) -> (f64, Point) {
     let room = walked.deviation().magnitude();
-    let along = cone.axis().direction();
+    let normal = flat.normal().components();
+    let apex = cone.apex().coordinates();
+    let along = cone.axis().direction().components();
     let slope = cone.slope();
+    let axis_squared = Doubled::dot_of(along, along);
+    // Never `1.0 + slope * slope`: that rounding is `ε/2` on a term the residual
+    // multiplies by `(out·w)²`, which on a narrow cone is forty times the
+    // residual being measured. The `1` is kept as its own subtraction.
+    let slope_squared = Doubled::of(slope).times(Doubled::of(slope));
+
     walked
         .points()
         .iter()
         .map(|point| {
-            let off_the_plane = (flat.normal().dot(*point - Point::origin()) - flat.offset()).abs();
-            let out = *point - cone.apex();
-            let up = out.dot(along) / along.length();
-            let across = (out.length_squared() - up * up).max(0.0).sqrt();
-            let off_the_cone = (across - slope * up.abs()).abs() / (1.0 + slope * slope).sqrt();
-            off_the_plane.max(off_the_cone) / room
+            let at = point.coordinates();
+            let off_the_plane = Doubled::dot_of(normal, at)
+                .minus(Doubled::of(flat.offset()))
+                .value()
+                .abs();
+
+            let out = [0, 1, 2].map(|i| Doubled::of(at[i]).minus(Doubled::of(apex[i])));
+            let out_squared = Doubled::dot_of_doubled(out, out);
+            let up = Doubled::dot_of_doubled(out, along.map(Doubled::of));
+            let up_squared = up.times(up);
+            let residual = out_squared
+                .times(axis_squared)
+                .minus(up_squared)
+                .minus(up_squared.times(slope_squared));
+
+            // `across²·(w·w)` is the residual with the cone's own term added
+            // back, so this square root cancels nothing either.
+            let up_over_axis = up.value() / axis_squared.value().sqrt();
+            let across = (residual.plus(up_squared.times(slope_squared)).value()
+                / axis_squared.value())
+            .max(0.0)
+            .sqrt();
+            let under = (across + slope * up_over_axis.abs()) * axis_squared.value();
+            let off_the_cone = if under > 0.0 {
+                (residual.value() / under).abs() / (1.0 + slope * slope).sqrt()
+            } else {
+                0.0
+            };
+            (off_the_plane.max(off_the_cone) / room, *point)
         })
-        .fold(0.0, f64::max)
+        .fold((0.0, Point::origin()), |worst, here| {
+            if here.0 > worst.0 { here } else { worst }
+        })
+}
+
+/// An `f64` and the rounding it threw away, so a subtraction that cancels can
+/// still be read.
+///
+/// Twice `f64`'s precision, which is what the residuals above need: the
+/// cancellation there is a few tens of bits, not a few hundred.
+#[derive(Clone, Copy, Debug)]
+struct Doubled {
+    high: f64,
+    low: f64,
+}
+
+impl Doubled {
+    fn of(value: f64) -> Self {
+        Self {
+            high: value,
+            low: 0.0,
+        }
+    }
+
+    fn value(self) -> f64 {
+        self.high + self.low
+    }
+
+    fn plus(self, other: Self) -> Self {
+        let (high, rounding) = two_sum(self.high, other.high);
+        let (high, low) = two_sum(high, rounding + self.low + other.low);
+        Self { high, low }
+    }
+
+    fn minus(self, other: Self) -> Self {
+        self.plus(Self {
+            high: -other.high,
+            low: -other.low,
+        })
+    }
+
+    fn times(self, other: Self) -> Self {
+        let (high, rounding) = two_product(self.high, other.high);
+        let (high, low) = two_sum(
+            high,
+            rounding + self.high * other.low + self.low * other.high,
+        );
+        Self { high, low }
+    }
+
+    fn dot_of(left: [f64; 3], right: [f64; 3]) -> Self {
+        Self::dot_of_doubled(left.map(Self::of), right.map(Self::of))
+    }
+
+    fn dot_of_doubled(left: [Self; 3], right: [Self; 3]) -> Self {
+        left[0]
+            .times(right[0])
+            .plus(left[1].times(right[1]))
+            .plus(left[2].times(right[2]))
+    }
 }
 
 fn walked(flat: &Surface, cone: &Surface, run: &NamedRun, deflection: f64) -> PointsAlongACrossing {
@@ -946,19 +1057,36 @@ fn the_two_branches_a_steeper_plane_cuts_are_walked_one_per_nappe() {
 ///   step of the chain that costs more than the derivation allows is caught.
 ///   The scaling assertion below is the sharper half: it fails if the error
 ///   stops being proportional to `L`.
-/// - **It cannot fail on the constant being twice too big.** The worst this
-///   search finds is printed, and it is around a twentieth of the bound. That is
-///   the ordinary gap between a rounding *count* and a rounding *sum*: the
-///   derivation charges 98 roundings their full half-ulp each and the same 98
-///   errors, being signed and near enough independent, add to about `√98/√3`
-///   of that. **Halving the constant does not fail this test**, and neither
-///   would quartering it — what makes `64 · ε` a bound is the derivation, and
-///   what this test does is stop the derivation being fiction.
+/// - **It cannot fail on the constant being twice too big, and the number that
+///   says so is measured rather than argued.** Six families were tried, each
+///   adding to the one above it, with the worst share of the published bound
+///   each reached:
 ///
-/// The search sweeps what the chain is actually sensitive to: the **slope**,
-/// because `C`'s bracket `1 − (1 + t²)(n̂·ŵ)²` loses its leading digits as `t`
-/// nears one; how far off the plane the **apex** stands, because every term is a
-/// multiple of it; and **both bending rows**, the parabola reached with the
+///   | sweep | worst |
+///   |---|---|
+///   | the slope-and-height sweep and the parabola row alone | 0.0392 |
+///   | + the deflection over 21 octaves, which those two pin at `1/64` | 0.0424 |
+///   | + slopes off the eighths grid, so `slope²` is not a stored square | 0.0438 |
+///   | + planes nudged either side of a ruling, so it is barely a hyperbola | 0.0458 |
+///   | + scales that are not powers of two | 0.0458 |
+///   | + 120,000 random plane-and-cone pairs | **0.0713** |
+///
+///   Each line is printed as the test runs, so the table is checkable and not a
+///   remembered number. Five untried families moved the worst by **1.8x**
+///   between them, and the one that moved it most is the one that holds nothing
+///   still. The constant would have to come down by a factor of **14** before
+///   this test could fail, so **halving it would not fail this test** — what
+///   makes `64 · ε` a bound is the derivation, and what this test does is stop
+///   the derivation being fiction. That is a different claim from the
+///   error-cancelling `√98/√3` argument this used to make, which named no
+///   families at all and was silent about the five that moved the number.
+///
+/// The search sweeps what the chain is sensitive to: the **slope**, because
+/// `C`'s bracket `1 − (1 + t²)(n̂·ŵ)²` loses its leading digits as `t` nears
+/// one; how far off the plane the **apex** stands, because every term is a
+/// multiple of it; the **deflection**, because the step count and so the
+/// parameter arithmetic hangs off it; the **scale**, because a power of two
+/// rounds nothing; and **both bending rows**, the parabola reached with the
 /// power-of-two slopes whose `E` is exactly zero.
 #[test]
 fn every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bound() {
@@ -967,15 +1095,21 @@ fn every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bo
     let mut walks = 0;
     let mut points = 0;
 
-    let mut measure = |flat: Plane, cone: Cone, told: String, worst: &mut f64| {
+    let mut measure = |flat: Plane, cone: Cone, deflection: f64, told: String, worst: &mut f64| {
         let Ok(SurfaceMeet::Curves(runs)) = crossed(&flat, &cone) else {
             return;
         };
         for run in &runs {
+            // Only the two bending rows. An ellipse comes back as
+            // `RightRoundWhereItsFacesCross` and publishes the *other* constant,
+            // and measuring it here would be measuring the wrong bound.
+            if !matches!(run.run(), EdgeRun::PartOfWhereItCrosses { .. }) {
+                continue;
+            }
             let Ok(drawn) = walk(
                 run,
                 [&Surface::Plane(flat), &Surface::Cone(cone)],
-                Deflection::of(1.0 / 64.0).expect("a positive length"),
+                Deflection::of(deflection).expect("a positive length"),
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             ) else {
@@ -983,10 +1117,14 @@ fn every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bo
             };
             walks += 1;
             points += drawn.points().len();
-            let share = the_worst_share_of_its_own_bound(&drawn, &flat, &cone);
+            let (share, at) = the_worst_share_of_its_own_bound(&drawn, &flat, &cone);
             if share > *worst {
                 *worst = share;
-                worst_at = told.clone();
+                worst_at = format!(
+                    "{told}, {} points over a published {}, at {at:?} on {flat:?} against {cone:?}",
+                    drawn.points().len(),
+                    drawn.deviation().magnitude()
+                );
             }
         }
     };
@@ -1006,12 +1144,15 @@ fn every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bo
                 measure(
                     flat,
                     cone,
+                    1.0 / 64.0,
                     format!("hyperbola, slope {slope}, height {height}, lean {lean}"),
                     &mut worst,
                 );
             }
         }
     }
+
+    println!("after the slope-and-height sweep: {worst:.4}");
 
     // The parabola row. `E = 0` on a **stored** normal wants `c = t·b` after the
     // normalizing division, and a slope that is a power of two is what makes
@@ -1027,11 +1168,166 @@ fn every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bo
                 measure(
                     flat,
                     cone,
+                    1.0 / 64.0,
                     format!("parabola, slope {slope}, height {height}, out {out}"),
                     &mut worst,
                 );
             }
         }
+    }
+
+    println!("and the parabola row: {worst:.4}");
+
+    // The deflection, which the two rows above pin at `1/64`. It sets the step
+    // count, so it is the one knob the parameter arithmetic hangs off.
+    for octave in -12..9 {
+        let deflection = (2.0f64).powi(octave);
+        for slope in [0.5, 1.0, 1.375, 3.0] {
+            let cone = Cone::new(Axis::z(), slope).expect("a positive slope");
+            for height in [0.37, 3.7, 37.0] {
+                let flat = a_plane(
+                    Point::new(height, 0.0, height / 3.0),
+                    Vector::new(1.0, 0.0, 0.625),
+                );
+                measure(
+                    flat,
+                    cone,
+                    deflection,
+                    format!("deflection {deflection}, slope {slope}, height {height}"),
+                    &mut worst,
+                );
+            }
+        }
+    }
+
+    println!("and the deflection over 21 octaves: {worst:.4}");
+
+    // Slopes off the eighths grid, so `slope²` is not a stored square and `E` is
+    // not a difference of two numbers that happen to be equal.
+    for slope_step in 0..37 {
+        let slope = 0.113 + f64::from(slope_step) * 0.0917;
+        let cone = Cone::new(Axis::z(), slope).expect("a positive slope");
+        for height_step in 1..17 {
+            let height = f64::from(height_step) * 0.2903;
+            for lean in [0.0, 0.1913, 0.6251] {
+                let flat = a_plane(
+                    Point::new(height, 0.0, height / 3.0),
+                    Vector::new(1.0, 0.0, lean),
+                );
+                measure(
+                    flat,
+                    cone,
+                    1.0 / 64.0,
+                    format!("off-grid slope {slope}, height {height}, lean {lean}"),
+                    &mut worst,
+                );
+            }
+        }
+    }
+
+    println!("and slopes off the eighths grid: {worst:.4}");
+
+    // Barely a hyperbola: the plane nudged either side of one of the cone's own
+    // rulings, so `E` is as close to zero as a stored normal can put it.
+    for slope in [0.5, 1.0, 2.0] {
+        let cone = Cone::new(Axis::z(), slope).expect("a positive slope");
+        for nudge_step in 0..26 {
+            let size = (2.0f64).powi(-nudge_step - 2);
+            for nudge in [size, -size] {
+                for height in [0.37, 3.7] {
+                    let flat = a_plane(
+                        Point::new(0.0, 0.0, height),
+                        Vector::new(0.0, 1.0, slope + nudge),
+                    );
+                    measure(
+                        flat,
+                        cone,
+                        1.0 / 64.0,
+                        format!("near a ruling, slope {slope}, nudge {nudge}, height {height}"),
+                        &mut worst,
+                    );
+                }
+            }
+        }
+    }
+
+    println!("and planes barely steeper than a ruling: {worst:.4}");
+
+    // Scales that are not powers of two, so the whole configuration is written
+    // with numbers that round on the way in.
+    for scale_step in 0..49 {
+        let scale = (1.37f64).powi(scale_step - 24);
+        for slope in [0.75, 1.375] {
+            let cone = Cone::new(
+                Axis::new(
+                    Point::new(0.13 * scale, -0.7 * scale, 0.29 * scale),
+                    Vector::new(0.0, 0.0, 1.0),
+                )
+                .expect("a direction with length"),
+                slope,
+            )
+            .expect("a positive slope");
+            for lean in [0.0, 0.3, 0.625] {
+                let flat = a_plane(
+                    Point::new(2.9 * scale, 0.0, 1.1 * scale),
+                    Vector::new(1.0, 0.0, lean),
+                );
+                measure(
+                    flat,
+                    cone,
+                    scale / 64.0,
+                    format!("scale {scale}, slope {slope}, lean {lean}"),
+                    &mut worst,
+                );
+            }
+        }
+    }
+
+    println!("and scales that are not powers of two: {worst:.4}");
+
+    // Random pairs, which is the family that reaches furthest: the four sweeps
+    // above each hold something still, and a plane and a cone in general
+    // position hold nothing still at all.
+    let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+    let mut next = move || {
+        seed = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut mixed = seed;
+        mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        ((mixed ^ (mixed >> 31)) >> 11) as f64 / (1u64 << 53) as f64
+    };
+    for draw in 0..120_000 {
+        let scale = (2.0f64).powi(((next() * 21.0) as i32) - 10);
+        let apex = Point::new(
+            (next() * 2.0 - 1.0) * scale,
+            (next() * 2.0 - 1.0) * scale,
+            (next() * 2.0 - 1.0) * scale,
+        );
+        let axis_way = Vector::new(next() * 2.0 - 1.0, next() * 2.0 - 1.0, next() * 2.0 - 1.0);
+        let slope = (32.0f64).powf(next() * 2.0 - 1.0);
+        let on_the_plane = Point::new(
+            (next() * 2.0 - 1.0) * scale,
+            (next() * 2.0 - 1.0) * scale,
+            (next() * 2.0 - 1.0) * scale,
+        );
+        let facing = Vector::new(next() * 2.0 - 1.0, next() * 2.0 - 1.0, next() * 2.0 - 1.0);
+
+        let Ok(axis) = Axis::new(apex, axis_way) else {
+            continue;
+        };
+        let Ok(cone) = Cone::new(axis, slope) else {
+            continue;
+        };
+        let Ok(flat) = Plane::from_point_and_normal(on_the_plane, facing) else {
+            continue;
+        };
+        measure(
+            flat,
+            cone,
+            scale / 64.0,
+            format!("random pair {draw}, scale {scale}, slope {slope}"),
+            &mut worst,
+        );
     }
 
     println!(
@@ -1082,7 +1378,7 @@ fn what_an_endless_bend_strays_grows_with_the_size_it_was_worked_out_from() {
             &runs[0],
             scale / 128.0,
         );
-        shares.push(the_worst_share_of_its_own_bound(&drawn, &flat, &cone));
+        shares.push(the_worst_share_of_its_own_bound(&drawn, &flat, &cone).0);
     }
 
     println!("the share of the bound used at four scales: {shares:?}");
