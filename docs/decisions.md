@@ -14900,3 +14900,161 @@ rule is written first so there is nothing to read motivatedly:
 - **Either way**, no projection is published.
 
 Both branches are survivable, which is the point.
+
+### 46.7 The unit is renamed *the six arms*, and the sentence changes with it
+
+§46.1 through §46.6 were written before the plan was grilled. The grilling read
+the tree four more times and moved eight decisions; what follows corrects the
+sections above, and where they disagree, these win.
+
+**The name.** *The cut* is held for the unit where the conic-drawing half lands,
+if it lands. This unit is **the six arms**, after the match it is named for. A
+title is a claim, and §45.2's rule — a headline priced before a lane runs is
+priced twice too high — applies to titles as much as to file counts. The unit's
+guaranteed deliverable is in `rcad-geom`; the fuse clause sits behind a spike, a
+lane and a merge.
+
+**The sentence.** §46.1's is replaced by:
+
+> **`where_a_plane_and_a_cone_cross` answers all six of its arms, and the kernel
+> can draw every shape a plane cuts a cone in.**
+
+Falsifiable by counting: open `intersect.rs:1702-1714` and see whether any arm
+still returns `Err`. If the spike in §46.10 fails, the sentence keeps its drawing
+clause for the two straight shapes and says plainly which two it lost and why.
+The fuse clause — *and a frustum can be cut by a block* — is added only against
+the assertion §46.9 pins, never against a printed number.
+
+### 46.8 Six corrections, and the first of them is to a correction
+
+Three of these correct §46.3, which was itself written as the corrections
+section. That is worth saying out loud rather than filing quietly.
+
+**1. §46.3 item 1 mis-priced the very mis-pricing it was correcting.** It said
+the ruling's write sites are *"four, in three files"*. They are in **one file**:
+the definition `arrange.rs:2914`, the callers `:1043` and `:4342`, the `HowItRuns`
+enum `:452-464` and its `closes()` helper `:466-470`. §43.6 and
+`error.rs:392-395` were wrong about the word (*"one signature change"* — it
+already takes `run: &NamedRun`), and the correction was wrong about the scale, in
+the same pass that produced three re-pricings the other way. A price nobody
+checks stays wrong however many times it is rewritten.
+
+**2. The match has six arms, not four, and it already answers two.** §46.2's
+table lists four. `intersect.rs:1702-1714` also carries `(true, Pos)` →
+`TouchAtOnePoint` at the apex, which is **answered**, and `(true, Neg)` →
+`TwoLinesThroughAConesApexAreOneCurveThroughItself`, which is **refused and on no
+previous list**. Two answered, four refused:
+
+| arm | today |
+|---|---|
+| `(false, Pos)` | the ellipse — `the_whole_of(RightRoundWhereItsFacesCross)` |
+| `(false, Zero)` | `Err(ACrossingThatIsAParabola)` |
+| `(false, Neg)` | `Err(ACrossingThatIsAHyperbola)` |
+| `(true, Pos)` | `TouchAtOnePoint` at the apex |
+| `(true, Zero)` | `Err(APlaneTouchingAConeAlongOneOfItsRulings)` |
+| `(true, Neg)` | `Err(TwoLinesThroughAConesApexAreOneCurveThroughItself)` |
+
+**3. §45.10 understates the writer** — as §46.3 item 2 already said, kept here so
+the corrected list is one list. Deferred, described correctly.
+
+**4. `Cone` and `Torus` cannot be named through the front door, and five
+`SIDE_OF_*` bounds for surfaces the kernel supports were never published.**
+§46.3 item 3 found the first half. The second half is that of six `SIDE_OF_*`
+constants — `cone.rs:18`, `torus.rs:15`, `plane.rs:15`, `sphere.rs:16`,
+`cylinder.rs:18`, `half_space.rs:12` — `crates/rcad/src/lib.rs:357` re-exports
+**one**. A facade caller cannot name the bound its own results were certified
+against for any surface but a half-space.
+
+**5. `brep.rs` overwrites the real refusal twice, and a published column measures
+the wrong corner.** `brep.rs:600-626` substitutes
+`a_corner_provably_off_a_curved_face` (`:643-675`, which takes nothing derived
+from `why` and rescans every non-planar face), and when that finds nothing falls
+through to `a_corner_provably_off_the_plane_of_its_own_arc` (`:698`), whose own
+rustdoc at `:680-697` calls it a rounding artefact of how the plane is stored.
+The corpus report's `miss={...} spacings` column
+(`how_often_a_real_file_imports.rs:409-419, :688`) is computed from the
+**substituted** refusal — a measurement of a corner that may have had nothing to
+do with the failure. §45.3 said the refusal name is not the reason; this says the
+number beside the name is not the reason's either.
+
+**6. `Invalid::Orphan` already exists** — `error.rs:950`, raised in five places
+in the full sweep (`validate.rs:179, :291, :318, :431, :578`). What is missing is
+a check at the deserialize door, not a variant. Worth a correction because a lane
+that did not know would have budgeted for one.
+
+### 46.9 The headline family was unasserted, and is pinned before any lane runs
+
+`how_often_a_fuse_with_a_cone_refuses.rs` asserted every family in its table
+except the one the unit rests on. `AFrustumAgainstABlock` was *"reported, not
+judged"*: a lane could have taken it from 0 answered to 96 and no test would have
+noticed.
+
+It now carries `assert_eq!(answered, 0)`, written by the dispatcher **before the
+first lane was briefed**, so nobody can be said to have written their own
+scorecard. Measured at the pin: **96 fuses, 0 answered, 96 refused, and all 96
+give one reason** — *"a plane cuts this cone in a hyperbola"*. The family is
+hyperbola-blocked outright, not partly, which prices the fuse work more sharply
+than §46.2 could: what stands between this family and an answer is the drawing
+lane, and the arrangement arms are behind it rather than beside it.
+
+### 46.10 The spike, and what a fail re-scopes
+
+Four explorations removed every structural risk the plan feared but one.
+`what_a_run_between_these_two_lies_on` (`walk.rs:362-366`) is **already
+run-keyed**; one pair yielding two differently-shaped runs is a working, tested
+pattern (`intersect.rs:1836-1847` mints two runs differing only in `picked_by`,
+and `walk.rs:1332-1348` filters by the run's ends and pickers and demands exactly
+one survivor); and three of the four refused shapes need **no new geometry at
+all**.
+
+What no precedent covers is **endlessness**. A parabola arrives with
+`nowhere_in_particular` ends both sides (`meet.rs:130-133`) and `walk` produces
+points *between* the ends — of which there are none. `error.rs:343-346` already
+raises this as the objection to fix (c).
+
+So: a **20-minute spike**, its rule written before it runs. Target a right-angled
+cone and a plane with normal `(0,1,1)` — the `E = 0` case
+`the_seven_shapes_a_plane_cuts_a_cone_in.rs:1-29` says is reached exactly.
+**Pass:** `walk` returns at least two points from a run with
+`nowhere_in_particular` ends, every point on both surfaces within the published
+roundoff. **Fail:** twenty minutes gone without that. *"It looks tractable"* is a
+fail. *"The representation works but the range is open"* is a fail.
+
+On fail the drawing lane drops to naming-only, the sentence loses its drawing
+clause for parabola and hyperbola and keeps it for the two straight shapes, and
+the recorded finding is that **endlessness, not conic classification, is what the
+record has been mis-pricing since §43.6**. The spike runs beside the first wave,
+which is dispatched without the lanes that depend on it: the spike can re-scope a
+lane, not the unit.
+
+### 46.11 The budget, in agent-hours, with the gate's share reserved first
+
+§46.4 said the gate's budget is reserved before the first lane starts. Here is
+the number: **9 agent-hours total, of which the gate takes 1.5, reserved first.**
+The spike takes 0.35. What is left buys lanes at ~0.75 each.
+
+If wave 2 runs short, the drop order is **the fuse lane > the quarter arc > the
+two half-circles**: the fuse lane is the headline, the quarter arc pairs with the
+front-door lane's `--ignored` fix, and the half-circles lane changes no published
+sentence. Every lane commits at its halfway point whether or not its deliverable
+is done, and every report carries a *what is left* section, empty if it finished
+— lanes died mid-work last unit and their work died with them.
+
+### 46.12 Three findings this unit hands the gate rather than fixing
+
+Named here so the gate does not have to rediscover them, and so they are on a
+list if the unit runs out of budget.
+
+1. **The compiler forces zero edits when the run vocabulary grows.** `EdgeRun`
+   and `SurfaceMeet` are `#[non_exhaustive]` in `rcad-geom` (`meet.rs:28-55`,
+   `:171-173`), so every `match` on them in `rcad-topo` carries a wildcard and can
+   never be exhaustive. `a_sixth_kind_of_surface.rs:9-18` already records this for
+   `Surface`; nothing records it for runs, and a new run reads as *not straight*
+   and *not closed* in a dozen places without a compiler error.
+2. **22 production `panic!`/`unreachable!` in the fuse have gone uncounted for
+   three units**, alongside the 30 `expect`s that have been counted.
+3. **`TwoLinesThroughAConesApexAreOneCurveThroughItself` asserts a curve the
+   kernel does not have to build.** Two straight runs told apart by pickers is
+   enough, and `two_lines_told_apart` (`intersect.rs:1578-1608`) already does
+   exactly that for another pair. The name argues for a representation the fix
+   does not need.
