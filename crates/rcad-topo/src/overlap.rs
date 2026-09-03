@@ -31,28 +31,34 @@
 //! - [`SharedSpace::NothingFound`] is **not** a proof that they share nothing.
 //!   It says the search above turned nothing up. Two bars crossing in a plus,
 //!   with no corner of either inside the other and no shared plane, land here
-//!   and really do share space. Closing that needs an edge of one solid tested
-//!   against a face of the other, which is boolean-grade work and is not done
-//!   here.
+//!   and really do share space —
+//!   `two_bars_crossing_in_a_plus_share_space_and_this_pass_does_not_see_it`
+//!   is that, run, rather than said. Closing it needs an edge of one solid
+//!   tested against a face of the other, which is boolean-grade work and is not
+//!   done here.
 //!
 //! Two identical balls also land in [`SharedSpace::NothingFound`]: the
 //! coincident-face rule reads a plane off each face and a ball has none.
+//! `two_balls_at_the_same_place_share_space_and_this_pass_does_not_see_it` is
+//! that one run too.
+//!
+//! Both proofs take the two solids to be sound — faces wound so that the
+//! outward normal points out of the material, which is what
+//! [`Model::validate`] is for. Handed a solid whose skin points inwards, the
+//! coincident-face rule reads its material on the wrong side of the plane.
 //!
 //! # Cost
 //!
 //! Over a model: one box test per pair of solids. Inside a pair whose boxes
 //! meet: one point classification per corner of each solid against the other,
 //! and one plane comparison per pair of faces. The plane comparison is the
-//! quadratic one and it does not have to be — a stored plane normal has length
-//! one, so two planes that [`Plane::agreement_with`] calls the same have
-//! coefficients that are equal or negated one by one, and a hash of the
-//! canonicalised four could bucket the faces instead. Nothing asks for that
-//! yet, so it is not built (`docs/decisions.md` §13).
+//! quadratic one.
 //!
-//! The *fully contained* case on its own is cheaper than what runs: if a solid
-//! is wholly inside another then **every** one of its corners is inside, so one
-//! corner would settle it. Every corner is asked because the same loop then also
-//! catches an overlap that is not containment.
+//! The *fully contained* case on its own is cheaper than what runs: a solid
+//! inside another and clear of its skin has **every** corner strictly inside, so
+//! one corner would settle it. Every corner is asked because the same loop then
+//! also catches an overlap that is not containment, and because a contained
+//! solid that touches its host's skin can have corners on it.
 
 use std::collections::HashSet;
 
@@ -146,6 +152,10 @@ impl<'m> SolidView<'m> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> SharedSpace {
+        // No box means there was nothing of the solid to measure — no face with
+        // any reach at all — and a solid that fills nothing shares nothing.
+        // `Model::validate` refuses one, so this is what a model that never went
+        // through the door gets rather than a case the kernel makes.
         let (Some(mine), Some(theirs)) = (self.box_around_it(), other.box_around_it()) else {
             return SharedSpace::Apart;
         };
