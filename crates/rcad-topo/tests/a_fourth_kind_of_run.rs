@@ -15,19 +15,49 @@
 //!
 //! - `SolidBuilder::add_edge` skipped the zero-length check, because an
 //!   unrecognised run reads as *not straight*. An edge whose two corners are
-//!   one point walked in through the public door, and
-//!   `Model::validate` never asked again — it reads the same list.
+//!   one point walked in through the public door, and `check_edges` — which
+//!   reads the same list — did not ask again.
 //! - `fuse::cuts::cuts_between` panicked, crashing a fuse over two solids that
 //!   were as sound as they had ever been.
 //! - `fuse::cuts::check_it_does_not_cross_itself` **skipped the pair without a
 //!   word**, which is the worse of the two: the solid came back sound and
 //!   nobody had looked at it.
 //!
-//! All three now refuse by name — `ADraftEdgeHasNoLength` at the door, and
-//! `ACrossingThisCannotBeOrderedAlong` in the fuse, the name its twin in
-//! `fuse/arrange.rs` already used for the same arrival. A new word in
-//! `rcad-geom` is neither bad caller input nor a broken invariant here, and
-//! CLAUDE.md's rule leaves a refusal as the only honest answer.
+//! Those three refuse now, under two names: `ADraftEdgeHasNoLength` at the
+//! door, and `ACrossingThisCannotBeOrderedAlong` in the fuse — the name its
+//! twin in `fuse/arrange.rs` already used for the same arrival. Three sites
+//! carry two names because the last two are one function now,
+//! `fuse::cuts::how_two_faces_meet`.
+//!
+//! **The first bullet is about `check_edges` and not about the sweep.** A
+//! zero-length edge that gets past the length rule is still refused by
+//! `check_dynamic_range`, which measures every edge that is not
+//! `RightRoundWhereItsFacesCross` end to end and will not take a chord of
+//! nothing for a feature size —
+//! `tests/what_the_whole_sweep_says_about_a_two_step_wire.rs` hands it a whole
+//! model and reads back
+//! `Error::Geometry(FeatureSizeNotPositive { size: 0.0 })`. What the door's
+//! refusal buys is the name: it points at the edge, where a feature size points
+//! at a number.
+//!
+//! # A fourth site answers the same arrival a third way, on purpose
+//!
+//! `pickers_of` in `fuse/arrange.rs` reads a run too, and it **panics** rather
+//! than refusing. That is right for the reason it gives: empty is what says
+//! "this pair names one curve", so handing empty back for a kind that carries
+//! pickers does not refuse — it silently picks the wrong curve of two, which is
+//! a wrong answer and not a refusal.
+//!
+//! So a new word in `rcad-geom` is not answered one way here. It is refused
+//! where there is something whole to refuse — an edge being described, a
+//! crossing being ordered — and crashed where answering would put a different
+//! curve where the caller asked for this one. Both calls are right and
+//! **neither site says so about the other**, four hundred lines apart. What
+//! they need is that rule written down once — `docs/decisions.md` is where it
+//! belongs — with `pickers_of`'s `# Panics` and `crossing_for`'s refusal each
+//! naming it, so the next site to read a run has something to be consistent
+//! with instead of two precedents. This file is the pin that names both in one
+//! place until then.
 //!
 //! **Measured, not argued.** A clone of this tree grew a fourth `EdgeRun`
 //! variant and a fifth `SurfaceMeet` variant, four arms inside `rcad-geom` were
