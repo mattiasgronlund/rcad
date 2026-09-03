@@ -58,10 +58,27 @@
 //! list can resolve while the list is empty; a wire's steps can all name
 //! coedges that are there and still not chain up. Those files read back
 //! cleanly and then panicked whichever public method next assumed the shape,
-//! so `Model::check_shape_is_possible` asks the three questions that cost no
-//! arithmetic either — a face has a wire, a wire closes, an edge is walked
-//! twice the opposite ways round. Everything else the sweep asks needs a
-//! [`Policy`](rcad_predicates::Policy) and stays in [`Model::validate`].
+//! so `Model::check_shape_is_possible` asks the questions that cost no
+//! arithmetic either — a corner is at a point, a face has a wire, a wire
+//! closes, an edge is walked twice the opposite ways round. What *belongs* in
+//! that list is settled: **no [`Policy`](rcad_predicates::Policy), no
+//! arithmetic beyond `is_finite`, and no sweep over pairs**
+//! (`docs/decisions.md` §44.5). The list is not yet everything the rule
+//! reaches — counting how many times a face is used qualifies and is not there
+//! — so `Model::check_shape_is_possible` names what is still owed. Everything
+//! that needs a policy or a predicate stays in [`Model::validate`].
+//!
+//! **And a number a constructor would refuse is refused here too, by the type
+//! that holds it.** Every surface, [`Scale`](rcad_geom::Scale),
+//! [`Isometry`](rcad_geom::Isometry) and
+//! [`Approximation`](rcad_predicates::Approximation) reads back through
+//! `#[serde(try_from)]`, so its own constructor's condition is what a file has
+//! to satisfy. The deliberate exceptions are [`Point`](rcad_geom::Point) and
+//! [`Vector`](rcad_geom::Vector), which read back with `#[serde(from)]` and
+//! cannot refuse — a fallible branch on every coordinate in the kernel is a
+//! real cost — and for the one of the two a model stores on its own, a
+//! vertex's point, `check_shape_is_possible` is where that condition is asked
+//! instead.
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

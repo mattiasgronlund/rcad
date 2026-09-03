@@ -52,8 +52,9 @@ impl Model {
     ///   and over a coarse mesh when it is not,
     /// - every side of that mesh is used by exactly two triangles running
     ///   opposite ways, which is what says a round cap is not on back to front,
-    /// - `tol(vertex) >= tol(edge) >= tol(face)` over the entities carrying an
-    ///   [`Approximation`] (roadmap §5.4, decisions.md §1.2),
+    /// - every [`Approximation`] claims a length, and
+    ///   `tol(vertex) >= tol(edge) >= tol(face)` over the entities carrying one
+    ///   (roadmap §5.4, decisions.md §1.2),
     /// - the coordinate range is narrow enough to compute in, as loudly as
     ///   `policy` asks for (decisions.md §3.5).
     ///
@@ -116,13 +117,43 @@ impl Model {
     /// mesh. Reading a file is not the place to spend that, and
     /// [`Model::validate`] is right there.
     ///
+    /// # What belongs here
+    ///
+    /// **Every check that needs no [`Policy`], no arithmetic beyond
+    /// `is_finite`, and no sweep over pairs** — because those are exactly the
+    /// checks a public method is entitled to take for granted, and a model that
+    /// fails one of them is not a model at any strictness
+    /// (`docs/decisions.md` §44.5). The membership was decided one panic at a
+    /// time until that was written down.
+    ///
+    /// [`Invalid::VertexNotFinite`] is the first check the rule moved. A corner
+    /// at no point at all passes every question above it — its slot resolves,
+    /// its wires close — and then every predicate downstream is asked about a
+    /// coordinate that is not a number. `check_vertices` has always caught it,
+    /// and `check_vertices` is in the sweep a file's own read never runs.
+    ///
+    /// **The rule reaches further than this list does, and the next one it
+    /// reaches is [`Invalid::UsedMoreThanOnce`].** Counting how many shells
+    /// name a face is one pass and an integer per face — no policy, no
+    /// arithmetic, and nothing that looks at a pair — so by the rule it belongs
+    /// here, and it is not here yet. What it costs while it is missing is not
+    /// only that `Model::validate` refuses later: `Index::rebuilt_from` resolves
+    /// a wire named by two faces with `insert`, so the index that comes out of
+    /// the door says the wire belongs to whichever face was written last, and
+    /// the model disagrees with itself before anything asks it a question.
+    ///
     /// # Errors
     ///
-    /// [`Invalid::FaceHasNoWires`], [`Invalid::WireTooShort`],
-    /// [`Invalid::WireDoesNotClose`], [`Invalid::EdgeCoedgeCount`] or
-    /// [`Invalid::CoedgesRunTheSameWay`], naming the first one that does not
-    /// hold.
+    /// [`Invalid::VertexNotFinite`], [`Invalid::FaceHasNoWires`],
+    /// [`Invalid::WireTooShort`], [`Invalid::WireDoesNotClose`],
+    /// [`Invalid::EdgeCoedgeCount`] or [`Invalid::CoedgesRunTheSameWay`],
+    /// naming the first one that does not hold.
     pub(crate) fn check_shape_is_possible(&self) -> Result<()> {
+        for vertex in self.data().vertices.values() {
+            if !vertex.point.is_finite() {
+                return Err(Invalid::VertexNotFinite.into());
+            }
+        }
         for face in self.data().faces.values() {
             if face.wires.is_empty() {
                 return Err(Invalid::FaceHasNoWires.into());
@@ -560,7 +591,31 @@ impl Model {
         Ok(())
     }
 
+    /// A thing built from another may not claim less slop than what it is built
+    /// from — and every amount claimed is a length to begin with.
+    ///
+    /// **The second half is asked first, because the first half is a `<`.**
+    /// Infinity and `NaN` are not ordered by `<`, so a sweep that only compared
+    /// magnitudes would file "this face is infinitely out of place" as tidy.
+    /// What that magnitude really does is switch the certified check off:
+    /// [`not_provably_off`] keeps any magnitude above zero and widens the corner
+    /// into an interval that straddles every surface there is.
+    ///
+    /// **There are two ways an [`Approximation`] gets into a model and both
+    /// refuse one**: [`Approximation::new`](rcad_predicates::Approximation::new)
+    /// is the only constructor and it asserts, and `serde` is the only other
+    /// route in and it errors
+    /// (`a_file_saying_a_corner_is_infinitely_out_of_place_never_becomes_a_model`).
+    /// So this arm cannot be reached today. It is here for the same reason
+    /// `check_keys_resolve` is at the head of [`Model::validate`] when
+    /// `Deserialize` has already run it: the sweep says what it depends on out
+    /// loud rather than depending on it silently.
     fn check_approximation_ordering(&self) -> Result<()> {
+        for (entity, magnitude) in self.every_amount_of_slop_claimed() {
+            if !(magnitude.is_finite() && magnitude >= 0.0) {
+                return Err(Invalid::ApproximationIsNotALength { entity, magnitude }.into());
+            }
+        }
         for edge in self.data().edges.values() {
             let on_edge = magnitude_of(edge.approximation);
             for end in [edge.start, edge.end] {
@@ -595,6 +650,33 @@ impl Model {
             }
         }
         Ok(())
+    }
+
+    /// Every slop any entity in the model claims, named by what claims it.
+    ///
+    /// An entity with no tag is left out rather than reported as zero. Zero is
+    /// what `magnitude_of` stands in for a missing tag when the ordering is
+    /// being read, and a missing tag is not a claim about anything.
+    fn every_amount_of_slop_claimed(&self) -> impl Iterator<Item = (&'static str, f64)> + '_ {
+        let vertices = self
+            .data()
+            .vertices
+            .values()
+            .filter_map(|vertex| vertex.approximation)
+            .map(|tag| ("vertex", tag.magnitude()));
+        let edges = self
+            .data()
+            .edges
+            .values()
+            .filter_map(|edge| edge.approximation)
+            .map(|tag| ("edge", tag.magnitude()));
+        let faces = self
+            .data()
+            .faces
+            .values()
+            .filter_map(|face| face.approximation)
+            .map(|tag| ("face", tag.magnitude()));
+        vertices.chain(edges).chain(faces)
     }
 
     /// The coordinate magnitude is measured **where the solids actually are**,

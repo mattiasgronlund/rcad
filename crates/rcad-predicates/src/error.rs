@@ -27,4 +27,16 @@ pub enum Error {
         /// exactly parallel; anything larger means we could not tell.
         determinant_enclosure: f64,
     },
+
+    /// A file said something was out of place by an amount that is not a
+    /// length — negative, infinite, or not a number.
+    ///
+    /// Raised by
+    /// [`TryFrom<(f64, Cause)> for Approximation`](crate::Approximation),
+    /// which is what a `serde` read of one goes through.
+    #[error("{magnitude} is not an amount anything can be out of place by")]
+    ApproximationIsNotALength {
+        /// The magnitude the file asked for.
+        magnitude: f64,
+    },
 }
