@@ -513,6 +513,16 @@ struct Direction {
     forward: bool,
 }
 
+impl Direction {
+    /// The way back down the same crossing.
+    fn the_other_way(self) -> Self {
+        Direction {
+            crossing: self.crossing,
+            forward: !self.forward,
+        }
+    }
+}
+
 impl<'f> Arrangement<'f> {
     fn of(
         face: &'f BakedFace,
@@ -1615,18 +1625,18 @@ impl<'f> Arrangement<'f> {
         match self.turns_anticlockwise(node, reference, direction, policy, log)? {
             Decision::Pos => Ok(0),
             Decision::Neg => Ok(1),
-            // Two different curves through one node are never tangent there, or
-            // the arrangement could not be walked at all, so a turn of nothing
-            // at all means this is the reference's own crossing, one way or the
-            // other.
-            Decision::Zero => {
-                if direction.crossing != reference.crossing {
-                    return Err(Error::TwoCurvesTouchWithoutCrossing {
-                        face: self.face.keys[0],
-                    });
-                }
+            // The reference's own crossing is the one pair the turn cannot be
+            // measured for — the determinant has the same gradient in two rows,
+            // and a gradient that is a box makes an interval evaluation of that
+            // straddle zero (§35.2) — so which half it is in is read off the two
+            // `forward` flags instead. Its own way starts half zero and its way
+            // back starts half one.
+            Decision::Zero if direction.crossing == reference.crossing => {
                 Ok(u8::from(direction.forward != reference.forward))
             }
+            Decision::Zero => Err(Error::TwoCurvesTouchWithoutCrossing {
+                face: self.face.keys[0],
+            }),
             other => panic!("a turn came back with a decision nothing here knows: {other:?}"),
         }
     }
@@ -1645,6 +1655,14 @@ impl<'f> Arrangement<'f> {
     /// determinant of three stored normals with a gradient in each normal's
     /// place. For three planes the gradients *are* the stored normals and the
     /// arithmetic is bit for bit what it was.
+    ///
+    /// A determinant of nothing at all means the three gradients lie in one
+    /// plane, so both cross products point along that plane's normal and the two
+    /// curves leave the node along **one line**. That is not one answer but two:
+    /// the same way along it, or opposite ways. Opposite ways is half a turn and
+    /// stays `Zero`, which is what a comparator for "less than half a turn"
+    /// should say about it. The same way is a tangency, and
+    /// [`Arrangement::which_way_two_tangent_curves_bend`] answers it.
     fn turns_anticlockwise(
         &self,
         node: usize,
@@ -1674,11 +1692,153 @@ impl<'f> Arrangement<'f> {
             policy,
             log,
         )?;
+        if decision == Decision::Zero {
+            // Against `first`'s own way back when the two go opposite ways: that
+            // is the one direction at exactly half a turn, so the turn asked for
+            // here is half a turn and whatever the bend adds, and the sign of
+            // what the bend adds is the sign asked for turned round.
+            let same_way = self.leaves_the_node_the_same_way(node, first, second, policy, log)?;
+            let from = if same_way {
+                first
+            } else {
+                first.the_other_way()
+            };
+            let bend = self.which_way_two_tangent_curves_bend(node, from, second, policy, log)?;
+            return Ok(if same_way { bend } else { the_other_way(bend) });
+        }
         Ok(if first.forward == second.forward {
             decision
         } else {
             the_other_way(decision)
         })
+    }
+
+    /// Whether two ways out of a node that lie on one line go the same way along
+    /// it.
+    ///
+    /// The two directions are parallel, so the sign of their dot product says
+    /// which. Nothing at all means one of them is the zero vector, which is a
+    /// cut surface tangent to the face's own here: that crossing has no
+    /// direction to compare and nothing about the drawing follows from it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::TwoCurvesTouchWithoutCrossing`] for that last case.
+    fn leaves_the_node_the_same_way(
+        &self,
+        node: usize,
+        first: Direction,
+        second: Direction,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<bool> {
+        let at = self.nodes[node].point;
+        let mine = self.way_out_of(node, first);
+        let theirs = self.way_out_of(node, second);
+        let same_way = must_decide(
+            dot_of(mine, theirs).sign(),
+            THE_SAME_WAY_ALONG_ONE_LINE,
+            &[
+                at,
+                PredicatePoint::Constructed(mine),
+                PredicatePoint::Constructed(theirs),
+            ],
+            Measures::ManyLengths { how_many: 4 },
+            policy,
+            log,
+        )?;
+        if same_way == Decision::Zero {
+            return Err(Error::TwoCurvesTouchWithoutCrossing {
+                face: self.face.keys[0],
+            });
+        }
+        Ok(same_way == Decision::Pos)
+    }
+
+    /// Which of two curves that leave a node along one direction bends further
+    /// anticlockwise about the face's own gradient.
+    ///
+    /// The two tangents agree, so the first-order determinant above is nothing
+    /// at all and the order is settled one derivative up. Walk a curve `S ∩ Q`
+    /// by arc length and differentiating `S(c(s)) = 0` twice gives
+    /// `∇S·k = −(t·H_S·t)` for the unit tangent `t` and the curvature vector
+    /// `k`, and the same for `Q`. With `m = ∇S × t` those two, plus `k·t = 0`,
+    /// fix how far `k` leans along `m`:
+    ///
+    /// ```text
+    /// k = a·m + b·∇S,   b = −(t·H_S·t)/|∇S|²
+    ///                   a = [−(t·H_Q·t) − b(∇Q·∇S)] / (∇Q·m)
+    /// ```
+    ///
+    /// so the lean is `A/B` with `A = −(t·H_Q·t)|∇S|² + (t·H_S·t)(∇Q·∇S)` and
+    /// `B = ∇Q·m`. Perturbing the first-order cross product by one step of
+    /// curvature, `(t + εk₁) × (t + εk₂) · ∇S = ε(a₂ − a₁)|t|²|∇S|²`, so the
+    /// turn is the sign of `A₂/B₂ − A₁/B₁`, which is the sign of
+    /// `(A₂B₁ − A₁B₂)·B₁·B₂`.
+    ///
+    /// **`t` is the same vector for both**, taken from `first`. A curvature
+    /// vector does not care which way the curve is walked but `m` does, so
+    /// asking each curve about its own tangent would compare two leans measured
+    /// against opposite sides. `|t|` cancels out of every term, so the unit
+    /// tangent is never formed.
+    ///
+    /// `B` is nothing at all exactly when `∇Q` is along `∇S`, which is the two
+    /// *surfaces* tangent rather than the two curves. Then the whole value is
+    /// nothing at all and the caller refuses, which is right: this says nothing
+    /// about a crossing that has no direction to begin with.
+    ///
+    /// **Eighteen lengths**, counting a gradient as one the way the determinant
+    /// above does: `t` is two, `A` is six, `B` is four, and the value multiplies
+    /// an `A·B` by two more `B`s.
+    fn which_way_two_tangent_curves_bend(
+        &self,
+        node: usize,
+        first: Direction,
+        second: Direction,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Decision> {
+        let at = self.nodes[node].point;
+        let normal = gradient_at(&self.surface, at);
+        let along = self.way_out_of(node, first);
+        let sideways = cross_of(normal, PredicatePoint::Constructed(along));
+        let normal_squared = dot_of(normal.enclosure(), normal.enclosure());
+        let face_bend = bend_along(&self.surface, at, along);
+
+        let lean = |which: Direction| {
+            let partner = gradient_at(&self.crossings[which.crossing].partner, at);
+            let bend = bend_along(&self.crossings[which.crossing].partner, at, along);
+            (
+                face_bend * dot_of(partner.enclosure(), normal.enclosure()) - bend * normal_squared,
+                dot_of(partner.enclosure(), sideways),
+            )
+        };
+        let (mine, over_mine) = lean(first);
+        let (theirs, over_theirs) = lean(second);
+        let value = (theirs * over_mine - mine * over_theirs) * over_mine * over_theirs;
+        must_decide(
+            value.sign(),
+            HOW_TWO_TANGENT_CURVES_BEND,
+            &[at, normal, PredicatePoint::Constructed(along)],
+            Measures::ManyLengths { how_many: 18 },
+            policy,
+            log,
+        )
+    }
+
+    /// The direction a half-edge leaves a node in: `±(∇S × ∇Q)` for the crossing
+    /// it runs on, the sign being which way along the crossing it goes.
+    fn way_out_of(&self, node: usize, direction: Direction) -> [Interval; 3] {
+        let at = self.nodes[node].point;
+        let run = cross_of(
+            gradient_at(&self.surface, at),
+            gradient_at(&self.crossings[direction.crossing].partner, at),
+        );
+        if direction.forward {
+            run
+        } else {
+            run.map(|component| Interval::exactly(0.0) - component)
+        }
     }
 
     /// Which cell of the surface each walk bounds.
@@ -2654,6 +2814,68 @@ fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
     }
 }
 
+/// How fast a surface's gradient turns along a direction: `d·H·d` for the very
+/// polynomial [`gradient_at`] differentiates, with no normalization in it.
+///
+/// A plane's gradient is the same everywhere, so nothing turns. A ball's is
+/// `x − c`, so `H` is the identity. A pipe's and a cone's are linear in the
+/// point, so `H` is the constant `|w|²I − k·w wᵀ` with `k` one for a pipe and
+/// `1 + slope²` for a cone. Only the ring depends on where it is asked:
+/// differentiating `|w|²(x·x − R² − r²)x + 2R²(x·w)w` gives
+/// `|w|²(2x xᵀ + (x·x − R² − r²)I) + 2R² w wᵀ`.
+fn bend_along(surface: &Surface, at: PredicatePoint, along: [Interval; 3]) -> Interval {
+    let squared_length = |vector: [f64; 3]| {
+        (0..3)
+            .map(|axis| Interval::exactly(vector[axis]) * Interval::exactly(vector[axis]))
+            .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
+    };
+    let shadow = |vector: [f64; 3]| {
+        (0..3)
+            .map(|axis| Interval::exactly(vector[axis]) * along[axis])
+            .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
+    };
+    let step_from = |origin: [f64; 3]| {
+        let box_of_it = at.enclosure();
+        [0, 1, 2].map(|axis| box_of_it[axis] - Interval::exactly(origin[axis]))
+    };
+    let along_squared = dot_of(along, along);
+    match surface {
+        Surface::Plane(_) => Interval::exactly(0.0),
+        Surface::Sphere(_) => along_squared,
+        Surface::Cylinder(pipe) => {
+            let axis = pipe.axis().direction().components();
+            let leaning = shadow(axis);
+            squared_length(axis) * along_squared - leaning * leaning
+        }
+        Surface::Cone(cone) => {
+            let axis = cone.axis().direction().components();
+            let leaning = shadow(axis);
+            let slope = Interval::exactly(cone.slope());
+            let steepness = Interval::exactly(1.0) + slope * slope;
+            squared_length(axis) * along_squared - steepness * leaning * leaning
+        }
+        Surface::Torus(ring) => {
+            let axis = ring.axis().direction().components();
+            let step = step_from(ring.centre().coordinates());
+            let out = dot_of(step, step);
+            let big = Interval::exactly(ring.ring_radius());
+            let small = Interval::exactly(ring.tube_radius());
+            let bulge = out - big * big - small * small;
+            let reach = dot_of(step, along);
+            let leaning = shadow(axis);
+            squared_length(axis) * (Interval::exactly(2.0) * reach * reach + bulge * along_squared)
+                + Interval::exactly(2.0) * big * big * leaning * leaning
+        }
+        other => panic!("a surface whose gradient nothing here knows: {other:?}"),
+    }
+}
+
+fn dot_of(one: [Interval; 3], other: [Interval; 3]) -> Interval {
+    (0..3)
+        .map(|axis| one[axis] * other[axis])
+        .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
+}
+
 /// How points along `surface ∩ partner` are put in order, read at a point `at`
 /// that is already known to be on both.
 ///
@@ -2811,6 +3033,14 @@ fn cross_of(one: PredicatePoint, other: PredicatePoint) -> [Interval; 3] {
 /// The name the ordering of two points along a crossing goes by in provenance
 /// records.
 const ALONG_A_CROSSING: &str = "order along a crossing";
+
+/// The name the choice between "the same way" and "opposite ways" along one line
+/// goes by in provenance records.
+const THE_SAME_WAY_ALONG_ONE_LINE: &str = "two ways out of a node along one line";
+
+/// The name the second-order order of two tangent curves goes by in provenance
+/// records.
+const HOW_TWO_TANGENT_CURVES_BEND: &str = "which way two tangent curves bend";
 
 /// The name the search for the piece a hole sits in goes by in provenance
 /// records.
