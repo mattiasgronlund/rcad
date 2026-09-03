@@ -30,9 +30,11 @@ const HEIGHT: f64 = 5.0;
 /// polygon through them sweeps exactly zero and the winding this face is judged
 /// by has to come from somewhere else. Before the fix this was
 /// [`Invalid::OuterWireWindsAgainstTheNormal`](rcad_topo::Invalid), raised by
-/// `SolidBuilder::build` and again by `Model::validate`.
+/// `SolidBuilder::build` and again by `Model::validate`. Now the winding is read
+/// off the boundary the wire actually traces — its corners with the points
+/// `rcad_geom::walk` puts along each arc — so the area is where the shape has
+/// it.
 #[test]
-#[ignore = "open: a flat face whose area is all in its arcs sweeps zero over its corners and is refused"]
 fn a_plate_bounded_by_two_half_circles_is_a_sound_solid() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
@@ -50,7 +52,6 @@ fn a_plate_bounded_by_two_half_circles_is_a_sound_solid() {
 /// two half-circles say, so the winding the sweep now reads is the winding the
 /// shape has.
 #[test]
-#[ignore = "open: the plate cannot be built while the winding rule reads its corners alone"]
 fn the_plate_encloses_what_its_two_half_circles_say() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
@@ -79,7 +80,6 @@ fn the_plate_encloses_what_its_two_half_circles_say() {
 /// The four flat corners are on one line, which is what makes this face worth a
 /// test rather than a rerun of the quarter-disc's.
 #[test]
-#[ignore = "open: the plate cannot be built while the winding rule reads its corners alone"]
 fn the_plates_four_flat_corners_are_all_on_the_x_axis() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
