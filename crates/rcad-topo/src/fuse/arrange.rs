@@ -1550,7 +1550,7 @@ impl<'f> Arrangement<'f> {
                 .iter()
                 .map(|&half_edge| self.direction(half_edge).crossing)
                 .min()
-                .expect("there is at least one way out of this node"),
+                .expect("the line just above handed back every node with fewer than two ways out"),
             forward: true,
         };
 
@@ -2063,7 +2063,7 @@ impl<'f> Arrangement<'f> {
         self.arcs
             .iter()
             .position(|other| core::ptr::eq(other, arc))
-            .expect("an arc of this arrangement")
+            .expect("the only caller borrows the arc straight out of this same list")
     }
 
     /// Which walk elsewhere in the drawing a lump of endless curves sits inside,
@@ -2690,7 +2690,22 @@ fn how_often_the_rim_winds_round(
 /// same sentence [`as_exact_as_it_is`] makes about a box of no width. It matters
 /// as much: a circle drawn on the lattice starts at a whole number, and a box
 /// round it would turn every sign the arrangement asks about it into a refusal.
+///
+/// # Panics
+///
+/// If the walk handed back a seed that is not a place. A [`Point`] carries no
+/// promise of being finite — `Point`'s own docs say the types that build
+/// geometry out of one check [`Point::is_finite`] and refuse — so the promise
+/// has to come from somewhere, and here it is the walk: a seed is marched
+/// between two surfaces the model already accepted, and both refuse a
+/// coordinate that is not finite when they are built. A seed that is not a
+/// place is a bug in the walk, and a box round it is not a box.
 fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) -> PredicatePoint {
+    assert!(
+        from.is_finite(),
+        "a closed crossing is walked between two surfaces built from finite numbers, so where it \
+         starts is a real place"
+    );
     let exact = PredicatePoint::from(from.coordinates());
     if side_of_surface(surface, exact) == Decision::Zero
         && side_of_surface(partner, exact) == Decision::Zero
@@ -2699,7 +2714,8 @@ fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) 
     }
     let reach = POINT_ALONG_A_CROSSING_ROUNDOFF * from.largest_coordinate_magnitude().max(1.0);
     PredicatePoint::Constructed(from.coordinates().map(|coordinate| {
-        Interval::new(coordinate - reach, coordinate + reach).expect("a reach is a positive length")
+        Interval::new(coordinate - reach, coordinate + reach)
+            .expect("a finite seed and a positive reach leave a low end below a high one")
     }))
 }
 
@@ -3110,6 +3126,14 @@ enum MetAt {
     AnEnd(usize),
 }
 
+/// Where a node sits in the order along one crossing.
+///
+/// # Panics
+///
+/// If the node is not on that crossing. [`Arrangement::place_the_corners`]
+/// starts every corner's crossing list with the crossing its own edge runs
+/// along, and the corner an edge stops at picks that crossing up from the
+/// surfaces it already knows meet there, so both ends of an edge are on it.
 fn at_in(order: &[usize], node: usize) -> usize {
     order
         .iter()
@@ -3292,10 +3316,10 @@ fn relation_of_two_lines(
 }
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Isometry, Plane, Scale, Surface, Vector};
+    use rcad_geom::{Isometry, Plane, Point, Scale, Surface, Vector};
     use rcad_predicates::{Decision, Policy, ProvenanceLog, orient3d};
 
-    use super::{Piece, split_a_face, the_other_way};
+    use super::{Piece, split_a_face, the_other_way, where_the_crossing_starts};
     use crate::fuse::bake::{BakedFace, bake};
     use crate::fuse::{FaceMeet, MeetPoint};
     use crate::{Model, ProfileBuilder, SolidKey};
@@ -3781,6 +3805,21 @@ mod tests {
         assert_eq!(pieces.len(), 1);
         assert_eq!(pieces[0].wires[0].len(), 4);
         assert_eq!(twice_the_area_of(&pieces[0]), 8.0);
+    }
+
+    /// A `Point` is plain data and may hold a coordinate that is not a number —
+    /// `Plane::transformed` overflows a solid placed far enough out into one —
+    /// so where a walk says a closed crossing starts is checked and not
+    /// trusted. Without the check the box round it comes out as
+    /// `Interval::new(NaN, NaN)` and the failure is reported against the reach.
+    #[test]
+    #[should_panic(expected = "where it starts is a real place")]
+    fn a_closed_crossing_that_starts_nowhere_is_a_bug_and_not_a_box() {
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+        where_the_crossing_starts(&flat, &flat, Point::new(f64::INFINITY, 0.0, 0.0));
     }
 }
 

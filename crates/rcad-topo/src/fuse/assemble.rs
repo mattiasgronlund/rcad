@@ -661,9 +661,13 @@ impl Assembly {
 
     /// # Panics
     ///
-    /// If more than one ring winds with the plane's normal. Two outlines means
-    /// the joined region touches itself at a corner, which is a solid this
-    /// kernel cannot hold.
+    /// If more than one ring winds with the plane's normal, or if none does.
+    /// Two outlines means the joined region touches itself at a corner, which
+    /// is a solid this kernel cannot hold. No outline means the region is
+    /// bounded by holes alone, which is a region with no outside — every face
+    /// that got here came out of [`Assembly::from_the_pieces`] or
+    /// [`Assembly::from_one_input_solid`] with an outline of its own, and
+    /// joining only ever takes an edge *away* from between two of them.
     fn rings_round(
         &self,
         members: &[usize],
@@ -702,7 +706,10 @@ impl Assembly {
                 }
             }
         }
-        let outline = outline.expect("a joined face has an outline");
+        let outline = outline.expect(
+            "every face joined here brought an outline of its own and joining only takes edges \
+             away, so the joined face has one too",
+        );
         Ok(core::iter::once(outline).chain(holes).collect())
     }
 
@@ -926,7 +933,10 @@ impl Assembly {
                 "a piece of a face has a straight side with no length"
             );
             made.push(Edge {
-                ends: ends.map(|end| renumbered.corner_now[end].expect("an end is still a corner")),
+                ends: ends.map(|end| {
+                    renumbered.corner_now[end]
+                        .expect("an end the lump does not walk straight through is still a corner")
+                }),
                 carried_by: self.edges[leader].carried_by,
                 arc: self.arc_of_a_joined_run(&arcs, ends, &dropped, renumbered),
                 from: each_one_once(from.into_iter()),
@@ -997,7 +1007,11 @@ impl Assembly {
                     .straight_through
                     .contains(&(lump, self.starts_at(dart)))
             })
-            .expect("a ring of a face has a corner on it");
+            .expect(
+                "a corner walked straight through has the two edges either side of it in one \
+                 straight run, and a ring cannot be straight the whole way round, so some corner \
+                 of it is still a corner",
+            );
 
         let mut sides: Vec<Side> = Vec::new();
         for step in 0..ring.len() {
@@ -1018,7 +1032,7 @@ impl Assembly {
             let edge = renumbered.runs.leader(self.edge_of(dart));
             let edge = renumbered.edge_now[edge].expect("a run of edges that stays becomes one");
             let from = renumbered.corner_now[self.starts_at(dart)]
-                .expect("a run of edges starts at a corner");
+                .expect("the step just above skipped every corner walked straight through");
             // A **closed** edge starts and ends at its one corner, so the corner
             // says nothing about which way this face walks it and the side it
             // already had is the only thing that does. A closed edge is always a
