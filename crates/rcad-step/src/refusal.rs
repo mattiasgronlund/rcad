@@ -338,22 +338,27 @@ pub enum Refusal {
     /// the file carries a modelling tolerance somebody chose, and no arithmetic
     /// would put those corners on their surfaces.
     ///
-    /// **The first half is closed and the second is not, which is why this
-    /// variant is still here.** A corner within `NEAREST_F64_POINT_ROUNDOFF` of
-    /// the surface is let through: `Model::what_writing_a_point_down_costs` is
-    /// the width of the number, `not_provably_off` widens the corner into a box
-    /// that wide, and the cascade says whether anything can still prove it off.
-    /// That is §42.9's option A asked with the right budget rather than option
-    /// C, which tags a corner with a slop of its own and stays out of scope: a
-    /// tag equal to the miss makes the check pass by construction, which is a
-    /// check that has stopped asking anything.
+    /// **The sweep no longer refuses the first kind, and this variant is still
+    /// here for the second.** `Model::what_writing_a_point_down_costs` is the
+    /// width of the number, `not_provably_off` widens the corner into a box that
+    /// wide, and the cascade says whether anything can still prove it off. That
+    /// is §42.9's option A asked with the right budget rather than option C,
+    /// which tags a corner with a slop of its own and stays out of scope: a tag
+    /// equal to the miss makes the check pass by construction, which is a check
+    /// that has stopped asking anything.
+    ///
+    /// **This variant's own scan is now looser than the sweep it explains**, and
+    /// says so here rather than in a report. It names a corner on the exact
+    /// predicate alone, so it fires for a file the sweep would have let through
+    /// and which was refused for something else — the name is read as *what this
+    /// file's numbers do* and no longer as *what stopped this file*.
     ///
     /// **Option C costs one decision and no new mechanism.**
-    /// `Cause::ImportedUncertainty` and `Measures::Length` both already exist
-    /// and neither is constructed anywhere in production, so what is missing is
-    /// a settled answer to what an imported corner's slop *is* and not a
-    /// variant to carry it (`docs/decisions.md` §44.11 item 1, correcting
-    /// §42.9 and §43.8 item 12).
+    /// `Cause::ImportedUncertainty` and `Measures::Length` both already exist,
+    /// and the `Cause` is constructed in tests alone, so what is missing is a
+    /// settled answer to what an imported corner's slop *is* and not a variant
+    /// to carry it (`docs/decisions.md` §44.11 item 1, correcting §42.9 and
+    /// §43.8 item 12).
     #[error("{corner}, on the curved face {face}, is {off_by} off the surface it sits on")]
     ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn {
         /// The `MANIFOLD_SOLID_BREP` being built.

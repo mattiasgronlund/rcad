@@ -832,11 +832,11 @@ impl Model {
     ///
     /// The size it is measured against is the largest coordinate any corner of
     /// the model holds, which is the same size the flat check uses so that the
-    /// two have one standard. A surface whose own numbers are far larger than
-    /// any corner of it — a pipe of radius `1e9` with a face at the origin —
-    /// therefore gets less room than its own radius rounds by, and its corners
-    /// are refused. That is the safe direction: a budget too small refuses a
-    /// sound corner, where one too large accepts a corner nobody placed.
+    /// two have one standard. It does **not** grow with a surface's own numbers,
+    /// so a pipe of radius `1e9` carrying a face at the origin gets a budget
+    /// smaller than its own radius rounds by. That is the safe direction and it
+    /// is untested here: too small a budget refuses a sound corner, where too
+    /// large a one accepts a corner nobody placed.
     fn what_writing_a_point_down_costs(&self) -> f64 {
         MEASURING_SLACK * NEAREST_F64_POINT_ROUNDOFF * self.largest_coordinate()
     }
