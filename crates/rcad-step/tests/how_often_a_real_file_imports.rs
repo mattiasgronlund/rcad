@@ -15,12 +15,13 @@
 //! The two real corpora disagree by a factor of eight about what a real file
 //! holds (§42's spike) and are never added together. Neither is in the tree;
 //! point `RCAD_STEP_CORPUS` at a directory holding `nist/` and `kicad/` and this
-//! runs, and without it the corpus half skips and says so while the control half
-//! still runs.
+//! runs. Without it, the corpus half **fails** rather than skips — green has
+//! to mean the corpus ran (decisions.md §44.10) — while the control half,
+//! which needs no corpus, still runs either way.
 
 mod written_by_hand;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -113,9 +114,7 @@ fn every_file_this_kernel_wrote_itself_imports() {
 /// own uncertainty to be and a ten-millionth of the smallest thing they hold.
 #[test]
 fn a_real_file_measures_what_its_own_name_says() {
-    let Some(root) = corpus() else {
-        return;
-    };
+    let root = corpus();
     let mut checked = 0;
     let mut dip_switches: Vec<(u32, f64)> = Vec::new();
     for path in files_under(&root.join("kicad")) {
@@ -250,9 +249,7 @@ fn what_the_name_says(name: &str) -> Vec<(usize, f64)> {
 /// that never governs this axis.
 #[test]
 fn an_smd_pin_headers_width_across_its_rows_does_not_scale_with_row_count() {
-    let Some(root) = corpus() else {
-        return;
-    };
+    let root = corpus();
     let kicad = root.join("kicad");
     let one_row = [
         "PinHeader_1x06_P2.54mm_Vertical_SMD_Pin1Right.step",
@@ -331,14 +328,27 @@ struct Tally {
     units: BTreeMap<String, usize>,
     over_precise: usize,
     corner_misses_in_spacings: Vec<f64>,
+    imported_names: BTreeSet<String>,
+    /// Every refused file's own reason, one entry each — never a rate, so a
+    /// reader can tell which file moved (§44.10) and check §44.6's D trigger
+    /// and §44.11 item 6 against measured per-file data rather than a count.
+    refused_files: Vec<RefusedFile>,
+}
+
+/// One refused file's reason: the filename, and, where the refusal was a
+/// corner missing its surface, how far off in that corner's own coordinate
+/// spacings.
+struct RefusedFile {
+    name: String,
+    reason: String,
+    corner_miss_in_spacings: Option<f64>,
 }
 
 #[test]
 fn how_often_a_real_file_imports() {
-    let Some(root) = corpus() else {
-        return;
-    };
+    let root = corpus();
 
+    let mut kicad_imports: BTreeSet<String> = BTreeSet::new();
     for source in ["nist", "kicad"] {
         let files = files_under(&root.join(source));
         assert!(
@@ -353,6 +363,7 @@ fn how_often_a_real_file_imports() {
             match Import::read(&file, &Policy::certified(), &mut log) {
                 Ok(import) => {
                     tally.imported += 1;
+                    tally.imported_names.insert(name_of(path));
                     tally.solids += import.solids().len();
                     *tally
                         .units
@@ -380,7 +391,9 @@ fn how_often_a_real_file_imports() {
                         });
                 }
                 Err(why) => {
-                    *tally.refused.entry(grouped(&why)).or_default() += 1;
+                    let reason = grouped(&why);
+                    *tally.refused.entry(reason.clone()).or_default() += 1;
+                    let mut corner_miss_in_spacings = None;
                     match &why {
                         Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn {
                             off_by,
@@ -391,9 +404,11 @@ fn how_often_a_real_file_imports() {
                             off_by,
                             coordinate_spacing,
                             ..
-                        } => tally
-                            .corner_misses_in_spacings
-                            .push(off_by / coordinate_spacing),
+                        } => {
+                            let miss = off_by / coordinate_spacing;
+                            tally.corner_misses_in_spacings.push(miss);
+                            corner_miss_in_spacings = Some(miss);
+                        }
                         Refusal::ASurfaceThisKernelDoesNotHold { keyword, .. } => {
                             *tally.surfaces_wanted.entry(keyword.clone()).or_default() += 1;
                         }
@@ -402,11 +417,98 @@ fn how_often_a_real_file_imports() {
                         }
                         _ => {}
                     }
+                    tally.refused_files.push(RefusedFile {
+                        name: name_of(path),
+                        reason,
+                        corner_miss_in_spacings,
+                    });
                 }
             }
         }
         report(source, &files, &tally);
+        if source == "kicad" {
+            kicad_imports = tally.imported_names;
+        }
     }
+    assert_pinned_kicad_imports(&kicad_imports);
+}
+
+/// The 46 KiCad files that import today, out of 323, at `d23c700`.
+///
+/// **Pinned by name, not by rate** (§44.10): a rate cannot tell a reader which
+/// file moved. This list moves only by an edit to this constant, made by
+/// whoever's change moved it — most likely the curved-rounding lane, which
+/// closes the curved-face gap this same corpus run measures at 88 of the 161
+/// KiCad-and-NIST files with a corner off a curved face (§44.6). Regenerate it
+/// with `RCAD_STEP_CORPUS=<path> mise exec -- cargo test -p rcad-step \
+/// --release --test how_often_a_real_file_imports -- --nocapture`, which
+/// prints the failing assertion's "now imports" and "stopped importing" sets
+/// when this list is stale.
+const KICAD_FILES_THAT_IMPORT: &[&str] = &[
+    "LED_Rectangular_W3.0mm_H2.0mm.step",
+    "LED_Rectangular_W3.9mm_H1.8mm.step",
+    "LED_Rectangular_W3.9mm_H1.9mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O1.27mm_Z1.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O1.27mm_Z3.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O1.27mm_Z5.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O3.81mm_Z1.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O3.81mm_Z3.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O3.81mm_Z5.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z1.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z3.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z5.0mm.step",
+    "LED_Rectangular_W5.0mm_H5.0mm.step",
+    "PinHeader_1x04_P2.54mm_Vertical.step",
+    "PinHeader_1x11_P2.54mm_Vertical.step",
+    "PinHeader_1x18_P2.54mm_Vertical.step",
+    "PinHeader_1x25_P2.54mm_Vertical.step",
+    "PinHeader_1x32_P2.54mm_Vertical.step",
+    "PinHeader_1x39_P2.54mm_Vertical.step",
+    "PinHeader_2x01_P2.54mm_Vertical.step",
+    "PinHeader_2x08_P2.54mm_Vertical.step",
+    "PinHeader_2x15_P2.54mm_Vertical.step",
+    "PinHeader_2x22_P2.54mm_Vertical.step",
+    "PinHeader_2x29_P2.54mm_Vertical.step",
+    "PinHeader_2x36_P2.54mm_Vertical.step",
+    "Relay_DPDT_Finder_30.22.step",
+    "Relay_DPDT_Omron_G5V-2.step",
+    "Relay_SPDT_HJR-4102.step",
+    "Relay_SPDT_Omron_G6E.step",
+    "Relay_SPDT_Omron_G6EK.step",
+    "Relay_SPDT_StandexMeder_SIL_Form1C.step",
+    "Relay_SPST_StandexMeder_SIL_Form1A.step",
+    "Relay_SPST_StandexMeder_SIL_Form1B.step",
+    "Relay_StandexMeder_UMS.step",
+    "SW_DIP_SPSTx02_Piano_CTS_Series194-2MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx03_Piano_CTS_Series194-3MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx04_Piano_CTS_Series194-4MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx05_Piano_CTS_Series194-5MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx06_Piano_CTS_Series194-6MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx07_Piano_CTS_Series194-7MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx08_Piano_CTS_Series194-8MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx09_Piano_CTS_Series194-9MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx10_Piano_CTS_Series194-10MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx11_Piano_CTS_Series194-11MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx12_Piano_CTS_Series194-12MSTN_W7.62mm_P2.54mm.step",
+];
+
+/// Every KiCad file that imports must be one of [`KICAD_FILES_THAT_IMPORT`],
+/// and every one of those must import — checked as a set so a failure names
+/// what appeared and what disappeared, never just a count.
+fn assert_pinned_kicad_imports(imported: &BTreeSet<String>) {
+    let pinned: BTreeSet<&str> = KICAD_FILES_THAT_IMPORT.iter().copied().collect();
+    let got: BTreeSet<&str> = imported.iter().map(String::as_str).collect();
+    let newly_importing: Vec<&str> = got.difference(&pinned).copied().collect();
+    let stopped_importing: Vec<&str> = pinned.difference(&got).copied().collect();
+    assert!(
+        newly_importing.is_empty() && stopped_importing.is_empty(),
+        "the kicad files that import moved since d23c700 (docs/decisions.md §44.10): \
+         {} file(s) now import and are not pinned: {newly_importing:?}; \
+         {} pinned file(s) stopped importing: {stopped_importing:?}",
+        newly_importing.len(),
+        stopped_importing.len()
+    );
 }
 
 fn report(source: &str, files: &[PathBuf], tally: &Tally) {
@@ -446,6 +548,29 @@ fn report(source: &str, files: &[PathBuf], tally: &Tally) {
         println!("    curves asked for: {:?}", tally.curves_wanted);
     }
     report_the_corner_misses(&tally.corner_misses_in_spacings);
+    report_per_file_refusals(source, &tally.refused_files);
+}
+
+/// One line per refused file: its family, its name, the reason `Import::read`
+/// gave first, and — for a corner missing its surface — the miss in that
+/// corner's own coordinate spacings. §44.6's D trigger and §44.11 item 6 both
+/// need this rather than a count: whether a family's rate hides one file or
+/// many, and whether a lumped row double-counted another, are both questions
+/// a rate cannot answer and a per-file list can.
+fn report_per_file_refusals(source: &str, refused: &[RefusedFile]) {
+    let mut sorted: Vec<&RefusedFile> = refused.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    for file in sorted {
+        match file.corner_miss_in_spacings {
+            Some(miss) => {
+                println!(
+                    "    refused  {source}  {}  {}  miss={miss:.3} spacings",
+                    file.name, file.reason
+                );
+            }
+            None => println!("    refused  {source}  {}  {}", file.name, file.reason),
+        }
+    }
 }
 
 /// How far the worst corner of each refused file is off the curved surface the
@@ -576,18 +701,20 @@ fn first_line(text: &str) -> String {
     text.lines().next().unwrap_or(text).to_owned()
 }
 
-fn corpus() -> Option<PathBuf> {
-    let Some(root) = env::var_os("RCAD_STEP_CORPUS") else {
-        println!("RCAD_STEP_CORPUS is not set, so there is no corpus to import; skipping");
-        return None;
-    };
+fn corpus() -> PathBuf {
+    let root = env::var_os("RCAD_STEP_CORPUS").unwrap_or_else(|| {
+        panic!(
+            "RCAD_STEP_CORPUS is not set. Point it at a directory holding nist/ and kicad/ (see \
+             this file's header) — this test does not skip on a missing corpus."
+        )
+    });
     let root = PathBuf::from(root);
     assert!(
         root.is_dir(),
         "RCAD_STEP_CORPUS points at {}, which is not a directory",
         root.display()
     );
-    Some(root)
+    root
 }
 
 fn files_under(directory: &Path) -> Vec<PathBuf> {
