@@ -181,12 +181,13 @@ impl Plane {
     /// therefore the same `f64`, whatever `s` is. What comes out depends on the
     /// ratios between the components and on nothing else.
     ///
-    /// It also widens what can be answered at all, in both directions, because
-    /// every component that comes out is in `[-1, 1]` and the largest is
-    /// exactly `±1`. The length that follows cannot overflow on a vector near
-    /// [`f64::MAX`], and cannot underflow to zero on a subnormal one. Both were
-    /// refused before, and both are §16.10 *gaps* rather than limits — the
-    /// answer existed and this arithmetic reaches it.
+    /// It used to widen what could be answered at all as well: every component
+    /// that comes out is in `[-1, 1]` with the largest exactly `±1`, so the
+    /// length that follows could not overflow on a vector near [`f64::MAX`] nor
+    /// underflow to zero on a subnormal one, and both of those were refused
+    /// before. `Vector::length` scales by a power of two of its own now, so
+    /// nobody is refused for that any more and what is left here is the
+    /// paragraph above: same ratios, same bits.
     ///
     /// # Errors
     ///
@@ -914,51 +915,43 @@ mod tests {
         }
     }
 
-    /// What the unfixed path does to a normal near the top of the range, kept
-    /// as the evidence for the claim on
-    /// [`Plane::reduced_by_largest_component`] that dividing first widens what
-    /// can be answered.
+    /// A normal at each end of the `f64` range names the plane the same ratio
+    /// names at an ordinary size.
     ///
-    /// [`Vector::normalized`] is the arithmetic the plane constructors used to
-    /// run: the length overflows, every component is divided by infinity, and
-    /// what comes back is a direction of length zero. Not an error — a silent
-    /// wrong answer, which §4.1 ranks below a crash.
+    /// This used to be the evidence that dividing by the largest component first
+    /// widens what can be answered: `(1e308, 1e308, 0)` had a length that
+    /// overflowed and normalized to a direction of length zero, and
+    /// `(5e-324, 5e-324, 0)` had a length that underflowed and was refused
+    /// outright. [`Vector::length`] scales by a power of two now, so neither
+    /// happens to any caller and the plane constructors are no longer the only
+    /// ones that get an answer.
+    ///
+    /// The claim it is evidence for now is the surviving one, §22.6: what
+    /// [`Plane::reduced_by_largest_component`] gives depends on the ratios
+    /// between the components and on nothing else, so a plane written at either
+    /// end of the range carries the same four numbers as one written at one.
     #[test]
-    fn normalizing_a_huge_vector_gives_back_no_direction_at_all() {
-        let huge = Vector::new(1e308, 1e308, 0.0);
-        assert!(huge.is_finite());
-        assert_eq!(huge.length(), f64::INFINITY);
-        assert_eq!(huge.normalized(), Ok(Vector::zero()));
-    }
-
-    /// And the plane built from that same normal is a real plane.
-    #[test]
-    fn a_normal_near_the_top_of_the_range_still_names_its_plane() {
-        let huge = Plane::from_point_and_normal(Point::origin(), Vector::new(1e308, 1e308, 0.0))
-            .expect("the ratio 1:1 says which way this faces");
+    fn a_normal_at_either_end_of_the_range_names_the_plane_its_ratio_names() {
         let ordinary = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 1.0, 0.0))
             .expect("a diagonal normal has length");
-        assert_eq!(huge.coefficients(), ordinary.coefficients());
-    }
 
-    /// The bottom of the range, where the length underflows to zero and the old
-    /// path refused outright.
-    #[test]
-    fn a_normal_deep_in_the_subnormals_still_names_its_plane() {
-        let tiny = Vector::new(5e-324, 5e-324, 0.0);
-        assert!(tiny.is_finite());
-        assert_eq!(tiny.length(), 0.0);
-        assert_eq!(
-            tiny.normalized(),
-            Err(Error::ZeroLength { what: "vector" }),
-            "the arithmetic the plane constructors used to run"
-        );
-
-        let plane = Plane::from_point_and_normal(Point::origin(), tiny)
-            .expect("the ratio 1:1 says which way this faces");
-        let ordinary = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 1.0, 0.0))
-            .expect("a diagonal normal has length");
-        assert_eq!(plane.coefficients(), ordinary.coefficients());
+        for extreme in [
+            Vector::new(1e308, 1e308, 0.0),
+            Vector::new(5e-324, 5e-324, 0.0),
+        ] {
+            assert!(extreme.is_finite());
+            assert!(
+                extreme.length() > 0.0 && extreme.length().is_finite(),
+                "{extreme:?} has a length that is an ordinary number"
+            );
+            assert_eq!(
+                Plane::from_point_and_normal(Point::origin(), extreme)
+                    .expect("the ratio 1:1 says which way this faces")
+                    .coefficients(),
+                ordinary.coefficients(),
+                "the plane named by {extreme:?}"
+            );
+        }
     }
 
     #[test]

@@ -79,12 +79,27 @@ impl Point {
     }
 
     /// How far it is from here to `other`.
+    ///
+    /// Two points that are not the same point never measure zero apart, however
+    /// close together they are, and two points that are very far apart measure
+    /// a number rather than an infinity — see [`Vector::length`], which is where
+    /// both of those used to go wrong.
+    ///
+    /// What it cannot do is measure a separation the coordinates never held:
+    /// two points a hair apart at `1e300` are the same `f64` triple, because the
+    /// hair was lost when the coordinates were written down.
     #[must_use]
     pub fn distance_to(&self, other: Point) -> f64 {
         (other - *self).length()
     }
 
     /// The square of [`Point::distance_to`], which avoids a square root.
+    ///
+    /// The square of a distance is a different quantity with a different range:
+    /// squaring a separation of `1e-200` gives zero and squaring one of `1e200`
+    /// gives infinity, and no arithmetic recovers either, because neither answer
+    /// is an `f64`. Compare two of these only when both distances are ordinary
+    /// sizes; otherwise take [`Point::distance_to`] and compare that.
     #[must_use]
     pub fn distance_squared_to(&self, other: Point) -> f64 {
         (other - *self).length_squared()
@@ -199,12 +214,75 @@ impl Vector {
     }
 
     /// How long the vector is.
+    ///
+    /// Adding up the squares and taking the root is the whole of this in the
+    /// ordinary range, and outside it the squares are the problem rather than
+    /// the answer. A vector `3.8e-211` long squares to `1.4e-421`, under the
+    /// smallest `f64` there is, so it came back **exactly zero** — a distinct
+    /// pair of points reported as one point, which is the confident wrong
+    /// answer §4.1 ranks below both crashing and refusing. A vector `1e200`
+    /// long squares to infinity and came back infinite. Both answers are
+    /// ordinary `f64`s that the intermediate could not hold, so both are
+    /// **gaps** rather than limits (§16.10).
+    ///
+    /// So when the largest component is too big or too small for its own square
+    /// to be a normal `f64`, every component is scaled by a power of two first
+    /// and the answer is scaled back by the same power afterwards. Both scalings
+    /// are exact, which is what makes the answer the one the unscaled arithmetic
+    /// would have given if `f64` had the range for it.
+    ///
+    /// Inside the ordinary range nothing is scaled and every bit is what it
+    /// always was. That is why this is not `f64::hypot`, which is the obvious
+    /// instrument and would also have worked: `hypot` is a *different* rounding
+    /// of the same real number, up to two ulps from this one over the unit cube,
+    /// so it would have moved lengths everywhere in the kernel to fix a range
+    /// nothing in the ordinary range was in. It is also a libm call whose
+    /// accuracy is the platform's business, and this is three multiplications,
+    /// two additions and a root whose accuracy is IEEE 754's.
+    ///
+    /// The answer is within about two ulps of the true length, which is what the
+    /// unscaled arithmetic was always worth and is unchanged by the scaling.
     #[must_use]
     pub fn length(&self) -> f64 {
-        self.0.norm()
+        match self.power_of_two_that_keeps_the_squares_in_range() {
+            None => self.0.norm(),
+            Some(scale) => (*self * scale).0.norm() / scale,
+        }
+    }
+
+    /// A power of two to measure this vector at, or `None` to measure it where
+    /// it is.
+    ///
+    /// The square of the largest component has to be a normal `f64`, which puts
+    /// the largest component in `[2^-511, 2^512)`. Outside that, six hundred
+    /// doublings either way land it well inside: a largest component of `2^-1074`
+    /// becomes `2^-474` and one of `2^1023` becomes `2^423`, and the squares of
+    /// both are normal. Components far smaller than the largest may lose bits or
+    /// vanish under the scaling down, and cannot matter — one that vanishes was
+    /// more than `2^474` times smaller than the largest, so its square is more
+    /// than `2^948` times smaller than the largest square.
+    ///
+    /// `powi` on a base of two is exact: every intermediate in its squaring
+    /// chain is a power of two comfortably inside the `f64` range.
+    fn power_of_two_that_keeps_the_squares_in_range(&self) -> Option<f64> {
+        let widest = self.x().abs().max(self.y().abs()).max(self.z().abs());
+        let squared = widest * widest;
+        if widest == 0.0 || squared.is_normal() {
+            return None;
+        }
+        if squared.is_finite() {
+            Some(2.0f64.powi(600))
+        } else {
+            Some(2.0f64.powi(-600))
+        }
     }
 
     /// The square of [`Vector::length`], which avoids a square root.
+    ///
+    /// Unlike [`Vector::length`] this cannot be rescued outside the ordinary
+    /// range, and it is not a shortcoming of the arithmetic: the square of a
+    /// length of `1e-200` is not an `f64` at all. Use it to compare two lengths
+    /// that are both ordinary sizes, and [`Vector::length`] otherwise.
     #[must_use]
     pub fn length_squared(&self) -> f64 {
         self.0.norm_squared()
@@ -235,19 +313,16 @@ impl Vector {
         self.normalized_as("vector")
     }
 
-    /// The same direction, scaled to length one, for a vector whose own squared
-    /// length is not a number `f64` can hold.
-    ///
-    /// [`Vector::normalized`] divides by `√(x² + y² + z²)`, and that squaring is
-    /// where it stops working: a direction whose components are around `1e-180`
-    /// squares into the subnormals and back out again as noise, so what comes
-    /// back is not a unit vector at all — it is merely near one, and the caller
-    /// has no way to tell.
+    /// The same direction, scaled to length one, and the same bits for every
+    /// vector along one line however long it was.
     ///
     /// This divides by the largest component first and then normalizes what is
     /// left. Every component is then in `[-1, 1]` with the largest exactly `±1`,
-    /// so the squared length is between one and three and nothing underflows. A
-    /// **gap** closed rather than a limit met (`docs/decisions.md` §16.10).
+    /// so the length is between one and the root of three.
+    ///
+    /// It once earned its place by keeping the squares out of the subnormals,
+    /// which [`Vector::length`] now does for every caller. What it still does
+    /// and plain normalizing still does not is the part below.
     ///
     /// **The first division is not exact**, and the doc here used to say it was.
     /// `a/|m|` is one correctly rounded division and lands on a different real
@@ -277,15 +352,27 @@ impl Vector {
         Vector::new(x / widest, y / widest, z / widest).normalized_as(what)
     }
 
+    /// Dividing by the length is done at the scale the length was measured at,
+    /// not back where the vector started.
+    ///
+    /// A vector `5e-324` long has a length that is one bit wide, so dividing by
+    /// it hands back a "unit" vector of length `√2`. Scaling first and dividing
+    /// there gives the direction that does exist. In the ordinary range the
+    /// scale is one and nothing moves; outside it, numerator and denominator are
+    /// scaled by the same exact power of two, which a division does not notice.
     pub(crate) fn normalized_as(&self, what: &'static str) -> Result<Vector> {
         if !self.is_finite() {
             return Err(Error::NotFinite { what });
         }
-        let length = self.length();
+        let measured_at = match self.power_of_two_that_keeps_the_squares_in_range() {
+            None => *self,
+            Some(scale) => *self * scale,
+        };
+        let length = measured_at.0.norm();
         if length == 0.0 {
             return Err(Error::ZeroLength { what });
         }
-        Ok(Self(self.0 / length))
+        Ok(Self(measured_at.0 / length))
     }
 
     /// The same vector with each component rounded to the nearest multiple of
@@ -567,6 +654,115 @@ mod tests {
         let normalized = Vector::new(0.0, 3.0, 4.0).normalized().unwrap();
         assert!((normalized.length() - 1.0).abs() < 1e-15);
         assert_eq!(normalized, Vector::new(0.0, 0.6, 0.8));
+    }
+
+    /// The separation a fuzzer found by fusing two boxes one of them
+    /// `3.80218313259032e-211` mm up `y`. That is too small to move the top face
+    /// and just big enough to move the bottom one, so the union really does have
+    /// a step one hair high, and the edge along it really is that long. Squaring
+    /// the hair gives `1.4e-421`, which is no `f64`, so the length came back
+    /// zero and the kernel was told a real edge had no length.
+    #[test]
+    fn two_points_a_hair_apart_are_not_reported_as_the_same_point() {
+        let hair = 3.80218313259032e-211;
+        assert_eq!(
+            Point::origin().distance_to(Point::new(0.0, hair, 0.0)),
+            hair
+        );
+    }
+
+    /// The other end of the same defect. Whole numbers times a power of two, so
+    /// the true answer is exactly representable and the test needs no tolerance:
+    /// squaring `4 · 2^600` overflows, and `5 · 2^600` is an ordinary `f64`.
+    #[test]
+    fn two_points_too_far_apart_to_square_are_a_finite_distance_apart() {
+        let far = 2.0f64.powi(600);
+        assert_eq!(
+            Point::origin().distance_to(Point::new(3.0 * far, 4.0 * far, 0.0)),
+            5.0 * far
+        );
+    }
+
+    #[test]
+    fn two_points_too_close_together_to_square_are_still_apart() {
+        let close = 2.0f64.powi(-600);
+        assert_eq!(
+            Point::origin().distance_to(Point::new(3.0 * close, 4.0 * close, 0.0)),
+            5.0 * close
+        );
+    }
+
+    /// A vector whose length underflowed used to have no direction either,
+    /// because `normalized` divides by that length and refuses when it is zero.
+    #[test]
+    fn a_vector_far_too_short_to_square_still_has_a_direction() {
+        let close = 2.0f64.powi(-600);
+        assert_eq!(
+            Vector::new(0.0, 3.0 * close, 4.0 * close)
+                .normalized()
+                .unwrap(),
+            Vector::new(0.0, 0.6, 0.8)
+        );
+    }
+
+    #[test]
+    fn a_vector_far_too_long_to_square_still_has_a_direction() {
+        let far = 2.0f64.powi(600);
+        assert_eq!(
+            Vector::new(0.0, 3.0 * far, 4.0 * far).normalized().unwrap(),
+            Vector::new(0.0, 0.6, 0.8)
+        );
+    }
+
+    /// The very bottom of the range, where the length is one bit wide.
+    ///
+    /// `√2 · 2^-1074` rounds to `2^-1074`, so dividing the components by the
+    /// length where they stand gives `(1, 1, 0)` — a "unit" vector of length
+    /// `√2`. Measuring and dividing at the same scale gives the direction that
+    /// does exist down there.
+    #[test]
+    fn a_direction_written_in_the_smallest_subnormals_is_still_a_direction() {
+        let smallest = 5e-324;
+        assert_eq!(
+            Vector::new(smallest, smallest, 0.0).normalized().unwrap(),
+            Vector::new(1.0, 1.0, 0.0).normalized().unwrap()
+        );
+    }
+
+    /// The claim that pays for the rescale being a threshold rather than
+    /// `f64::hypot`: no length an ordinary model asks for goes down the new
+    /// path, so no length an ordinary model asks for changed by a bit.
+    #[test]
+    fn nothing_of_an_ordinary_size_is_rescaled_to_be_measured() {
+        for magnitude in [
+            2.0f64.powi(-511),
+            1e-150,
+            1e-9,
+            1.0,
+            1e9,
+            1e150,
+            2.0f64.powi(511),
+        ] {
+            assert_eq!(
+                Vector::new(magnitude, -magnitude, magnitude)
+                    .power_of_two_that_keeps_the_squares_in_range(),
+                None,
+                "a vector around {magnitude} is measured where it stands"
+            );
+        }
+        assert_eq!(
+            Vector::zero().power_of_two_that_keeps_the_squares_in_range(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_length_that_cannot_exist_is_still_an_infinity() {
+        assert_eq!(
+            Vector::new(f64::MAX, f64::MAX, f64::MAX).length(),
+            f64::INFINITY
+        );
+        assert!(Vector::new(1.0, f64::NAN, 0.0).length().is_nan());
     }
 
     #[test]
