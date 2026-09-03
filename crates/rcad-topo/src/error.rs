@@ -604,13 +604,20 @@ pub enum Error {
         vertex: usize,
     },
 
-    /// A straight edge was described between one vertex and itself, or between
-    /// two vertices at the same point.
+    /// An edge was described between one vertex and itself, or between two
+    /// vertices at the same point, and its run does not say it comes back there.
     ///
     /// A closed edge is not this: it comes back to where it started because it
     /// runs right round a whole curve, which is what its
-    /// [`EdgeRun`](rcad_geom::EdgeRun) says.
-    #[error("the edge described at position {edge} is straight and has no length")]
+    /// [`EdgeRun`](rcad_geom::EdgeRun) says. **Straight is not the whole of what
+    /// is refused here**, and the message used to say it was: the two runs that
+    /// name a curve are the two that may start and finish at one corner, and a
+    /// kind of run this kernel has never seen is not taken for one of them
+    /// (`SolidBuilder`'s `the_ends_are_the_whole_of_it`).
+    #[error(
+        "the edge described at position {edge} has both ends in one place, and \
+         its run does not say it comes back there"
+    )]
     ADraftEdgeHasNoLength {
         /// Which edge of the description, counting from zero.
         edge: usize,
@@ -792,11 +799,14 @@ pub enum Invalid {
     #[error("a vertex is not at a finite point")]
     VertexNotFinite,
 
-    /// A straight edge starts and ends in the same place.
+    /// An edge starts and ends in the same place, and its run does not say it
+    /// comes back there.
     ///
     /// A closed edge is not this: it comes back to where it started because it
     /// is a whole circle, which is what its
-    /// [`EdgeRun`](crate::model::EdgeRun) says.
+    /// [`EdgeRun`](crate::model::EdgeRun) says. The sweep reads the same list
+    /// the builder's door does, so a run neither of them knows is refused here
+    /// too rather than read as *not straight*.
     #[error("an edge starts and ends at the same point")]
     EdgeHasNoLength,
 
