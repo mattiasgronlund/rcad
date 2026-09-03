@@ -277,7 +277,7 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// instead of moving a `println!` nobody reads. **It broke**, and what it says
 /// having broken is worth more than the pin was:
 ///
-/// - **6 of 96 answered**, so a block can now take a piece out of a frustum.
+/// - **6 of 96 answered.**
 /// - The other **90 refusals all moved**, from `where_a_plane_and_a_cone_cross`
 ///   refusing to name the curve, to *"nothing can put points in order along this
 ///   curve"*. Naming and drawing a hyperbola were the whole of the geometry's
@@ -287,6 +287,24 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// So the assertion is now a **floor at what has been measured**, in the shape
 /// §19.1 asks for: this family may not answer fewer than it does today. Re-derive
 /// it when it moves; do not relax it.
+///
+/// # The six are not six cuts, and a count could not say so
+///
+/// `answered` counts fuses that came back `Ok`. It says nothing about what is in
+/// them, and here the difference matters: **all six answers are one draw of the
+/// sixteen, the one whose block misses the frustum altogether.** The block starts
+/// at `x = 1` and the frustum is never wider than `slope · far`, so they are
+/// disjoint exactly when `slope · far < 1`, and one row of this grid lands there.
+///
+/// No block in this family has ever taken a piece out of a frustum. What the six
+/// are is the six ways of asking about two solids that do not meet, and every one
+/// of them hands an input straight back.
+///
+/// `what_the_six_answered_block_fuses_actually_say.rs` is that finding turned
+/// into assertions: which six, that each is a sound model, that each is the right
+/// size against a closed form and `measure`'s own bound, that each holds the same
+/// grid of points as the input it must return, and that union and intersection
+/// give the same answer whichever way round they are asked.
 ///
 /// **And the corner-up rate is not the cone's rate.** A round bar of the same
 /// size in the same place, against the same cubes, answers exactly as often —
@@ -773,5 +791,95 @@ fn uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_as
     assert!(
         compared >= 4,
         "only {compared} pairs were ever compared, so this proved almost nothing"
+    );
+}
+
+/// The 90 refusals stop where they say they stop, and this is the step named.
+///
+/// *"Nothing can put points in order along this curve"* is a late message: it is
+/// what four separate arrivals in the fuse all print, and one of them is a
+/// wildcard arm for a shape `intersect` has no word for. A refusal that had
+/// really gone wrong two steps earlier would look exactly the same from outside,
+/// so the label is checked here rather than believed.
+///
+/// Three things, in the order the fuse asks them, over the block plane that
+/// actually refuses:
+///
+/// 1. **`intersect` names the curve.** The geometry is not where this stops any
+///    more — that is what the unit changed, and the pin at the top of this file
+///    is what caught it changing.
+/// 2. **`where_a_closed_crossing_starts` refuses it**, and its own name for the
+///    refusal is the sharp one: *these two surfaces cross in a curve that runs on
+///    for ever rather than a closed one*. A hyperbola branch is a conic and is
+///    not closed, and going round a closed curve is the only order the
+///    arrangement has for a conic.
+/// 3. **The fuse of that same pair refuses**, so the two above are on the path
+///    and not beside it.
+///
+/// So the label means what it says: the arrangement, not the intersector, and
+/// ordering, not naming. What the message loses on the way out is precision —
+/// `arrange`'s `Err(_) =>` turns the geometry's *"this crossing is not closed"*
+/// into *"nothing can put points in order"*, which is true but says less than
+/// what was known one line earlier.
+#[test]
+fn a_block_wall_beside_a_cone_stops_at_a_hyperbola_that_never_closes() {
+    let policy = Policy::certified();
+    let mut draw = Draw(0x5EED);
+    let (mut model, cone, block) =
+        a_pair(Family::AFrustumAgainstABlock, &mut draw).expect("the family's first draw");
+
+    let skin = model
+        .solid(cone)
+        .faces()
+        .find(|face| matches!(face.surface(), rcad_geom::Surface::Cone(_)))
+        .expect("a frustum has a cone face")
+        .surface();
+    let wall = model
+        .solid(block)
+        .faces()
+        .map(|face| face.surface())
+        .find(|surface| {
+            surface
+                .as_plane()
+                .is_some_and(|flat| flat.normal().z() == 0.0)
+        })
+        .expect("four of a block's walls run parallel to the cone's axis");
+
+    let met = rcad_geom::intersect(&wall, &skin, &policy, &mut ProvenanceLog::new())
+        .expect("naming a plane against a cone is no longer where this stops");
+    let rcad_geom::SurfaceMeet::Curves(runs) = met else {
+        panic!("a wall beside a cone cuts it in a curve, and this came back {met:?}");
+    };
+    println!("a block wall against the cone: {} run(s)", runs.len());
+
+    for run in &runs {
+        let stopped = rcad_geom::where_a_closed_crossing_starts(
+            run,
+            [&wall, &skin],
+            &mut ProvenanceLog::new(),
+        )
+        .expect_err("a hyperbola branch never closes, so it has no place to start");
+        assert!(
+            matches!(
+                stopped,
+                rcad_geom::Error::TheCrossingOfTheseTwoSurfacesIsNotClosed
+            ),
+            "the ordering has to stop because the curve does not close, and it stopped on \
+             {stopped:?}"
+        );
+    }
+
+    let refused = model
+        .fuse(
+            &[cone],
+            &[block],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect_err("and the fuse of that same pair refuses");
+    assert!(
+        format!("{refused}").contains("put points in order"),
+        "this family's 90 refusals are supposed to be that one, and this said {refused}"
     );
 }
