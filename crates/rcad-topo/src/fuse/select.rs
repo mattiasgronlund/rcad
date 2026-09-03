@@ -1046,7 +1046,7 @@ fn back_onto_the_surface(surface: &Surface, candidate: PredicatePoint) -> Option
     Some(PredicatePoint::Constructed(there.coordinates().map(
         |coordinate| {
             Interval::new(coordinate - reach, coordinate + reach)
-                .expect("a reach is a positive length")
+                .expect("the check just above sent every point that is not a place back as None")
         },
     )))
 }
