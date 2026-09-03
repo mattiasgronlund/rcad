@@ -441,10 +441,7 @@ impl Crossing {
     /// What picks this curve out of the others the pair names. Empty when the
     /// pair names one curve and there is nothing to pick.
     fn picked_by(&self) -> &[Picker] {
-        match self.run.run() {
-            EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-            EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross | _ => &[],
-        }
+        pickers_of(&self.run)
     }
 }
 
@@ -719,7 +716,15 @@ impl<'f> Arrangement<'f> {
                     face: self.face.keys[0],
                 });
             }
-            other => panic!("two surfaces crossed in a way nothing here knows: {other:?}"),
+            // A sixth shape two surfaces can meet in is `rcad-geom` growing a
+            // word, not a broken invariant here and not bad input: the two
+            // solids are as sound as they were. So this refuses by name rather
+            // than crashing a fuse over well-formed solids, and the name is the
+            // true one — a shape this arrangement has no order along.
+            //
+            // [`SurfaceMeet`] is `#[non_exhaustive]` and belongs to another
+            // crate, so a sixth shape arriving here is not a compile error.
+            _ => return Err(Error::ACrossingThisCannotBeOrderedAlong),
         };
 
         let mut wanted = runs;
@@ -2756,12 +2761,30 @@ fn round_a_closed_crossing(
     which_comes_first_round_a_crossing(pair, from, one, other)
 }
 
-/// What picks one curve of a crossing out of the others.
+/// What picks one curve of a crossing out of the others, empty when the pair
+/// names one curve and there is nothing to pick.
+///
+/// # Panics
+///
+/// If the run is a kind this crate has not been taught. Empty is what says "the
+/// pair names one curve", and answering it for a kind that carries pickers picks
+/// the wrong curve of two rather than refusing — [`EdgeRun`] is
+/// `#[non_exhaustive]` and lives in another crate, so a new kind arrives with no
+/// compile error and this assert is what notices. A wrong curve is a wrong
+/// answer; a crash is not.
 fn pickers_of(run: &NamedRun) -> &[Picker] {
-    match run.run() {
-        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross | _ => &[],
+    if let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() {
+        return picked_by;
     }
+    assert!(
+        matches!(
+            run.run(),
+            EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross
+        ),
+        "a run nothing here can say what picks out: {:?}",
+        run.run()
+    );
+    &[]
 }
 
 /// Whether nothing among `picked_by` rules `at` out.
