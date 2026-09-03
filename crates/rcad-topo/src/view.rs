@@ -477,6 +477,19 @@ impl<'m> FaceView<'m> {
         self.data().surface.transformed(&self.loc)
     }
 
+    /// The surface in the frame this face is **stored** in, with this view's
+    /// location left off.
+    ///
+    /// Not public, for [`EdgeView::stored_run`]'s reason: it is the raw arena
+    /// payload and un-located geometry is what the views exist to stop being
+    /// handed out. The mesher wants it because the frame it meshes a placed face
+    /// in *is* the frame the face is stored in, so moving the placed surface
+    /// there is a movement composed with its own inverse — the same surface,
+    /// rounded twice for nothing.
+    pub(crate) fn stored_surface(self) -> Surface {
+        self.data().surface
+    }
+
     /// The plane this face sits on, already moved into place.
     ///
     /// # Panics
