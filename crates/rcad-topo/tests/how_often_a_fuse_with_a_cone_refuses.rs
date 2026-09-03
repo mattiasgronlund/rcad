@@ -277,7 +277,7 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// instead of moving a `println!` nobody reads. **It broke**, and what it says
 /// having broken is worth more than the pin was:
 ///
-/// - **6 of 96 answered**, so a block can now take a piece out of a frustum.
+/// - **6 of 96 answered.**
 /// - The other **90 refusals all moved**, from `where_a_plane_and_a_cone_cross`
 ///   refusing to name the curve, to *"nothing can put points in order along this
 ///   curve"*. Naming and drawing a hyperbola were the whole of the geometry's
@@ -287,6 +287,24 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// So the assertion is now a **floor at what has been measured**, in the shape
 /// §19.1 asks for: this family may not answer fewer than it does today. Re-derive
 /// it when it moves; do not relax it.
+///
+/// # The six are not six cuts, and a count could not say so
+///
+/// `answered` counts fuses that came back `Ok`. It says nothing about what is in
+/// them, and here the difference matters: **all six answers are one draw of the
+/// sixteen, the one whose block misses the frustum altogether.** The block starts
+/// at `x = 1` and the frustum is never wider than `slope · far`, so they are
+/// disjoint exactly when `slope · far < 1`, and one row of this grid lands there.
+///
+/// No block in this family has ever taken a piece out of a frustum. What the six
+/// are is the six ways of asking about two solids that do not meet, and every one
+/// of them hands an input straight back.
+///
+/// `what_the_six_answered_block_fuses_actually_say.rs` is that finding turned
+/// into assertions: which six, that each is a sound model, that each is the right
+/// size against a closed form and `measure`'s own bound, that each holds the same
+/// grid of points as the input it must return, and that union and intersection
+/// give the same answer whichever way round they are asked.
 ///
 /// **And the corner-up rate is not the cone's rate.** A round bar of the same
 /// size in the same place, against the same cubes, answers exactly as often —
