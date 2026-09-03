@@ -40,13 +40,40 @@
 //! bare `bool` again.
 //!
 //! The refusals themselves were measured on a clone of this tree carrying a
-//! fourth `EdgeRun` variant, with the round bar's two cap circles built out of
-//! it. A new closed kind has to be named in `the_ends_are_the_whole_of_it`
-//! before anything can be built out of it at all — one word, at the door the
-//! earlier lanes closed — so that word was written in the clone too, and what is
-//! left is exactly these six sites. `cargo check --workspace` on that clone
-//! produces **zero errors**, which is what "arrives in silence" means, and the
-//! measured fates of that bar are in the lane's report.
+//! fourth `EdgeRun` variant, with `Model::add_closed_edge` writing it on every
+//! closed edge — so a plain round bar's two cap circles carry it. `cargo check
+//! --workspace` on that clone produces **zero errors**, which is what "arrives
+//! in silence" means.
+//!
+//! A closed kind has to be named at three doors before anything can be built out
+//! of it at all: `the_ends_are_the_whole_of_it`, `Model::wire_closes_on_one_edge`
+//! and `SolidBuilder::closes_on_one_edge`. Unnamed, the bar is refused at the
+//! last two as `ADraftWireIsTooShort` — a wire of one edge that does not close is
+//! no wire. **Those last two are bare `==` on the same list**, one in `model.rs`
+//! and one in `builder.rs`, and they are the next two copies of it to pull in;
+//! they fail safe today, which is why this lane left them. Those three words were
+//! written in the clone, which is what the day this happens for real looks like,
+//! and then:
+//!
+//! | the bar's fate | `is_closed` as `==` | `is_closed` as this list |
+//! | --- | --- | --- |
+//! | `Model::fuse` with a second bar | **`Ok(fused)`** | `Err(ACrossingThisCannotBeOrderedAlong)` |
+//! | `rcad_step::write` | `Err(ACurveTheFacesEitherSideOfItDoNotName { first: "plane", second: "pipe", closed: false })` | `Err(ARunKindThisWriterHasNoCurveFor)` |
+//! | `SolidView::mesh` | `Err(AWireWillNotLieFlatOnItsFace { face })` | `Err(ACrossingThisCannotBeOrderedAlong)` |
+//! | `Model::validate` | `Err(ACrossingThisCannotBeOrderedAlong)` | unchanged |
+//!
+//! **The first row is the whole lane in one line**: a fuse of two solids whose
+//! edges run along a curve nothing here can name came back with an answer, and
+//! committed it. Putting `unwrap_or(false)` back at that one site — and nowhere
+//! else — turns the refusal back into `Ok(fused)`, so it is that site and not
+//! another.
+//!
+//! The middle two rows are the same fate under a better name: both refused
+//! before, one of them while saying a plane and a pipe do not name their
+//! crossing, which they do. The last row does not move at all, because
+//! `check_closed_edges_are_walked_the_way_their_surfaces_wind` refuses the same
+//! arrival earlier in the sweep; `check_dynamic_range` asking properly is depth
+//! behind that check rather than a fate this changes.
 
 use rcad_geom::{EdgeRun, Isometry, Scale};
 use rcad_predicates::{Policy, ProvenanceLog};
