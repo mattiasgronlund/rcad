@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, Orientation, Plane,
-    Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS, Surface,
-    Vector,
+    Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun, Orientation,
+    Plane, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS,
+    Surface, Vector,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -47,7 +47,9 @@ impl Model {
     ///   edges that are not both straight,
     /// - every face sits on a plane, with its corners on that plane, its outer
     ///   wire winding with the face normal and its holes winding against it,
-    ///   so the material is on one consistent side,
+    ///   so the material is on one consistent side — over the boundary the wire
+    ///   traces, arcs walked and all, and not over its corners alone
+    ///   ([`winding_of`]),
     /// - nothing is orphaned and nothing is used twice where it may only be
     ///   used once,
     /// - every solid encloses a positive amount of space, which is what says
@@ -86,7 +88,7 @@ impl Model {
         self.check_edges()?;
         self.check_coedges()?;
         self.check_wires()?;
-        self.check_faces()?;
+        self.check_faces(policy, log)?;
         self.check_which_side_of_its_trimming_each_curved_face_lies_on()?;
         self.check_closed_edges_are_walked_the_way_their_surfaces_wind()?;
         self.check_shells_and_solids(policy, log)?;
@@ -404,7 +406,15 @@ impl Model {
         Ok(())
     }
 
-    fn check_faces(&self) -> Result<()> {
+    /// Every face on the surface it says it is on, wound the way its wires say,
+    /// and used by exactly one shell.
+    ///
+    /// **The `policy` is here for the winding, and only for the winding.** A
+    /// flat face whose boundary bends has to have that boundary walked before
+    /// it can be wound ([`check_flat_face`]), and walking a crossing is the one
+    /// thing in this sweep that asks how hard to try. Nothing else here has
+    /// grown an opinion about strictness.
+    fn check_faces(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         let mut used: SecondaryMap<FaceSlot, usize> = SecondaryMap::new();
         for shell in self.data().shells.values() {
             for face in &shell.faces {
@@ -422,7 +432,7 @@ impl Model {
 
             let view = FaceView::new(self, slot, Isometry::identity(), Orientation::Forward);
             if let Surface::Plane(plane) = &face.surface {
-                check_flat_face(view, plane, allowed_wobble)?;
+                check_flat_face(self, view, plane, allowed_wobble, policy, log)?;
             } else {
                 check_curved_face(view, &face.surface, writing_a_point_down)?;
             }
@@ -1040,7 +1050,14 @@ const MEASURING_SLACK: f64 = 16.0;
 
 /// Every corner on the plane, the outer wire winding with the normal and the
 /// holes against it, so the material is on one consistent side.
-fn check_flat_face(view: FaceView<'_>, plane: &Plane, allowed_wobble: f64) -> Result<()> {
+fn check_flat_face(
+    model: &Model,
+    view: FaceView<'_>,
+    plane: &Plane,
+    allowed_wobble: f64,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<()> {
     for wire in view.wires() {
         for point in wire.points() {
             let distance = plane.signed_distance_to(point).abs();
@@ -1063,7 +1080,7 @@ fn check_flat_face(view: FaceView<'_>, plane: &Plane, allowed_wobble: f64) -> Re
         if wire.points().take(3).count() < 3 {
             continue;
         }
-        let winding = winding_of(wire, plane.normal())?;
+        let winding = winding_of(model, view, wire, plane.normal(), policy, log)?;
         if position == 0 && winding != Decision::Pos {
             return Err(Invalid::OuterWireWindsAgainstTheNormal.into());
         }
@@ -1475,43 +1492,90 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
         .is_some_and(|flat| flat.signed_distance_to(point).abs() <= rounding)
 }
 
-/// Which way `wire` winds round `normal`.
+/// Which way `wire` winds round `normal`, over the boundary it actually traces.
 ///
 /// [`Decision::Pos`] with it, [`Decision::Neg`] against it, [`Decision::Zero`]
-/// when the corners sweep out no area at all.
+/// when the boundary encloses no area at all.
 ///
-/// **Zero does not mean the face is unsound**, and this is the half of §44.11
-/// item 3's winding question that stayed open. It means the *corners* enclose
-/// nothing, which a boundary that bends between them can do while enclosing
-/// plenty: a face bounded by an arc and its chord has two corners and sweeps
-/// exactly zero, and so does any face whose corners land on one line —
-/// **however many of them there are**. [`check_flat_face`] keeps the first out
-/// of here by not asking about a boundary with fewer than three corners.
-/// Collinear corners it still asks and still refuses. That is a **gap and not a
-/// limit**: the answer exists and is written down — each arc's
-/// [`EdgeRun`](rcad_geom::EdgeRun) carries the half-spaces that say which way it
-/// bulges — and nothing that asks a wire which way it goes reads a run today.
-/// Closing it means winding something other than the stored corners.
+/// # The corner polygon was the wrong thing to wind, and this is the fix
 ///
-/// **The consumer is now named, and it is the importer.** This used to say "no
-/// file in the corpus is refused for it, so it waits for one that is", and the
-/// corpus still does not refuse a file for a winding — the KiCad and NIST files
-/// stop earlier, on B-splines and on corners off their curved faces. What names
-/// it instead is a file written by hand:
-/// `rcad-step`'s `a_file_bounded_by_two_half_circles.rs` reads a whole AP203
+/// This used to wind the wire's stored corners and nothing else, and file a
+/// face whose corners land on one line as winding against its normal —
+/// **however many of them there are**. That was §44.11 item 3's open half, kept
+/// open for want of a consumer. The consumer arrived: `rcad-step`'s
+/// `a_file_bounded_by_two_half_circles.rs` reads a whole AP203
 /// `manifold_solid_brep` for a half-round plate with a half-round rib under it,
 /// whose flat top and bottom are each bounded by two half-circles closed by two
-/// straights, so their four corners are four points on the `x` axis. The STEP
-/// mapping takes every part of that file — its own `Walk::area_swept_by` adds
-/// each arc's bulge past its chord for exactly this shape — and this rule
-/// refuses it through `SolidBuilder::build`. Two windings in one pipeline, one
-/// face, two answers. `a_face_bounded_by_two_half_circles.rs` is the same solid
-/// built face by face, and its tests are `#[ignore]`d on this refusal.
+/// straights, so their four corners are four points on the `x` axis and the
+/// polygon through them sweeps exactly zero. The mapping took every part of
+/// that file and `SolidBuilder::build` then refused it for a winding the shape
+/// does not have. `a_face_bounded_by_two_half_circles.rs` is the same solid
+/// built face by face.
 ///
-/// The old sentence also named the wrong shape: a boundary of two half-circles
-/// has **two** corners, not three, so it never reached this at all.
+/// **What is wound now is the wire's corners plus the points
+/// [`rcad_geom::walk`] puts along every curved step**, which is the same
+/// boundary the mesher draws — one authority on where an edge is (§27.5). A
+/// wire whose every step is straight is its own corner polygon and is wound
+/// without walking anything, so a polyhedron pays nothing for this.
 ///
-/// The quantity decided is the wire's vector area dotted with the normal. That
+/// # Why the answer does not depend on how finely it is walked
+///
+/// It would, if a deflection were simply picked. A polygon inscribed in a
+/// bigger arc can enclose *less* than one inscribed in a slightly smaller arc
+/// walked one step finer: a half-circle of radius `r` walked into `k` inside
+/// points spans `r²(k + 1)·sin(π/(k + 1))/2`, which is `1.000` for `r = 1` at
+/// one point and `1.273` for `r = 0.99` at two. The two arcs of a half-pipe's
+/// cap are that pair, and the cap between them would come out wound backwards.
+/// So a rule that read the sign off whatever points came back would be a guess
+/// with a test, and would move when somebody changed how coarse a walk may be.
+///
+/// So the sign is only taken when the sampled area **outweighs what the
+/// sampling could have hidden**. Between one sample point and the next the true
+/// boundary strays from the straight piece by at most the deflection asked for,
+/// plus however far off the crossing the points themselves may sit
+/// ([`PointsAlongACrossing::deviation`](rcad_geom::PointsAlongACrossing::deviation)),
+/// and the area of the sliver between a straight piece and a curve that strays
+/// by `e` is at most its length times `e`. Summed round the ring that is
+/// `perimeter · e`, against which the sampled area is compared before its sign
+/// is believed. Fail that and the walk is halved and asked again, starting from
+/// the ring's own width — which is [`how_much_space_a_curved_solid_encloses`]'s
+/// loop and terminates for the same reason: halving a finite length reaches
+/// zero and [`Deflection::of`] refuses a length that is not positive.
+///
+/// The walk's own coarseness therefore only decides **which pass answers**,
+/// never what the answer is.
+///
+/// # What it costs the sweep
+///
+/// Nothing at all for a wire whose every step is straight, which is every wire
+/// of a polyhedron and both end faces of the plate below. For a wire with an arc
+/// in it, one walk per pass and a polygon sum over what came back.
+///
+/// Measured on `a_face_bounded_by_two_half_circles.rs`'s plate, whose two caps
+/// are the only walked wires in it: the whole of [`Model::validate`] goes from
+/// 64.0 µs to 86.4 µs, so about 11 µs a walked wire. Each cap answers on the
+/// fifth pass, at a deflection of 0.375 on a plate 6 across, over a ring of
+/// eight points.
+///
+/// **It stays linear in the model.** The passes are a property of one wire's own
+/// shape — how thin it is against how far round it goes — and not of how many
+/// entities there are, so this is one more per-face cost in a sweep that was
+/// already a pass over every face (§4.3).
+///
+/// Reversing a face reverses this ring and negates every term of the sum
+/// exactly, so a face put on back to front is caught exactly as it was before.
+///
+/// # What is still wound over corners alone
+///
+/// [`check_flat_face`] does not ask about a boundary with fewer than three
+/// corners at all, and that is unchanged. A round cap's boundary is one closed
+/// edge and one corner; a face bounded by an arc and its chord has two. Which
+/// way those point is asked over the mesh, by
+/// [`every_side_of_the_skin_is_used_both_ways`].
+///
+/// # The sign itself still goes through the cascade
+///
+/// The quantity decided is the ring's vector area dotted with the normal. That
 /// sum cancels — a wire far from the origin adds and subtracts numbers far
 /// larger than the area they are measuring — so reading the sign off an `f64`
 /// total is a coin toss near the point where the sign turns over. A sweep that
@@ -1521,19 +1585,227 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] when the cascade cannot settle the sign. For the
-/// exact `f64` coordinates a model stores that only happens when a coordinate
-/// product overflows or falls into the subnormals.
+/// [`Error::Undecidable`] when the cascade cannot settle the sign, and when no
+/// walk fine enough to outweigh what it hides can be had — a face that encloses
+/// nothing at all is the shape that runs the loop out.
 ///
-/// This used to add "which is what the dynamic-range check exists to reject",
-/// and that check does not reject it: it is a **ratio** test and is blind to
+/// For the exact `f64` coordinates a model stores the cascade itself only gives
+/// up when a coordinate product overflows or falls into the subnormals. This
+/// used to add "which is what the dynamic-range check exists to reject", and
+/// that check does not reject it: it is a **ratio** test and is blind to
 /// absolute magnitude, so a uniformly tiny model passes with a ratio of one.
 /// This matters more here than elsewhere, because `Model` is `Deserialize` and
 /// `validate` is the untrusted-import boundary — which is exactly where such
 /// coordinates arrive. `docs/decisions.md` §16.11.
-fn winding_of(wire: WireView<'_>, normal: Vector) -> Result<Decision> {
+fn winding_of(
+    model: &Model,
+    face: FaceView<'_>,
+    wire: WireView<'_>,
+    normal: Vector,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Decision> {
     let corners: Vec<[f64; 3]> = wire.points().map(|corner| corner.coordinates()).collect();
-    winding_round(&corners, normal.components())
+    if wire
+        .coedges()
+        .all(|coedge| *coedge.edge().stored_run() == EdgeRun::Straight)
+    {
+        return winding_round(&corners, normal.components());
+    }
+
+    let mut room = how_far_across_the_ring(&corners);
+    while let Ok(finer) = Deflection::of(room) {
+        // A walk that refuses is the stopping condition and not a failure, for
+        // the reason `how_much_space_a_curved_solid_encloses` gives: what is
+        // being looked for is a boundary this solid's own numbers can draw, and
+        // handing on a refusal about a deflection nobody asked for would
+        // replace an answer about the shape with an answer about the walk.
+        let Ok(ring) = the_ring_a_wire_traces(model, face, wire, finer, policy, log) else {
+            break;
+        };
+        if let Some(settled) = ring.winding_it_can_answer_for(normal.components(), finer)? {
+            return Ok(settled);
+        }
+        room /= 2.0;
+    }
+    Err(Error::Undecidable {
+        records: a_boundary_that_encloses_too_little_to_wind(&corners),
+    })
+}
+
+/// The longest side of the box a ring of points sits in.
+fn how_far_across_the_ring(ring: &[[f64; 3]]) -> f64 {
+    let mut lowest = [f64::MAX; 3];
+    let mut highest = [f64::MIN; 3];
+    for point in ring {
+        for (axis, coordinate) in point.iter().enumerate() {
+            lowest[axis] = lowest[axis].min(*coordinate);
+            highest[axis] = highest[axis].max(*coordinate);
+        }
+    }
+    (0..3).fold(0.0, |widest: f64, axis| {
+        widest.max(highest[axis] - lowest[axis])
+    })
+}
+
+/// The boundary a wire traces, drawn as points, and how far off the real thing
+/// they may be.
+struct RingAWireTraces {
+    points: Vec<[f64; 3]>,
+    /// The worst [`PointsAlongACrossing::deviation`](rcad_geom::PointsAlongACrossing::deviation)
+    /// any of the walks reported — one number for the whole ring, the way §24.13
+    /// asks for one per run rather than one per point.
+    deviation: f64,
+}
+
+/// The wire's corners with the points a walk puts along every curved step in
+/// between, in the order the wire is being used.
+///
+/// **The same points the mesher draws**, from the same call, so the sweep and
+/// the mesh cannot disagree about where a boundary is (§23.8). The walk hands
+/// its points back in the direction the edge is *stored* running, so a step
+/// walked the other way has them turned round here.
+///
+/// # Errors
+///
+/// Whatever [`rcad_geom::walk`] refuses, and whatever [`NamedRun::new`] makes of
+/// a run whose ends do not match it.
+fn the_ring_a_wire_traces(
+    model: &Model,
+    face: FaceView<'_>,
+    wire: WireView<'_>,
+    deflection: Deflection,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<RingAWireTraces> {
+    let mut points: Vec<[f64; 3]> = Vec::new();
+    let mut deviation = 0.0f64;
+    for coedge in wire.coedges() {
+        let edge = coedge.edge();
+        points.push(edge.start().point().coordinates());
+        if *edge.stored_run() == EdgeRun::Straight {
+            continue;
+        }
+        let (from, to) = if edge.orientation().is_reversed() {
+            (edge.end(), edge.start())
+        } else {
+            (edge.start(), edge.end())
+        };
+        let run = NamedRun::new(
+            edge.stored_run().clone(),
+            [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
+        )?;
+        let along = the_two_surfaces_along_this_edge(model, face, edge);
+        let walked = rcad_geom::walk(&run, [&along[0], &along[1]], deflection, policy, log)?;
+        deviation = deviation.max(walked.deviation().magnitude());
+        let mut between: Vec<[f64; 3]> = walked
+            .points()
+            .iter()
+            .map(|point| point.coordinates())
+            .collect();
+        if edge.orientation().is_reversed() {
+            between.reverse();
+        }
+        points.extend(between);
+    }
+    Ok(RingAWireTraces { points, deviation })
+}
+
+/// The surfaces of the two faces along `edge`, in the model's own frame.
+///
+/// The sibling of `mesh.rs`'s `the_two_surfaces_either_side`, which is private
+/// there and asks the question from a mesh's half-built tables. A seam has this
+/// same face on both sides and is listed twice, which is what tells
+/// [`rcad_geom::walk`] to read the second surface off the run itself.
+///
+/// **No refusal for an edge with three faces along it**, where the mesher has
+/// one: [`Model::check_edges`](Model::validate) has already refused an edge that
+/// is not walked by exactly two coedges by the time this runs, and two coedges
+/// name at most two faces.
+fn the_two_surfaces_along_this_edge(
+    model: &Model,
+    face: FaceView<'_>,
+    edge: EdgeView<'_>,
+) -> [Surface; 2] {
+    let mine = face.surface();
+    let across = edge
+        .neighbouring_faces()
+        .find(|&other| other != face.key())
+        .map_or(mine, |other| model.face(other).surface());
+    [mine, across]
+}
+
+impl RingAWireTraces {
+    /// Which way this ring winds round `normal`, when its own area outweighs
+    /// what walking it at `deflection` could have hidden — and `None` when it
+    /// does not.
+    ///
+    /// The margin is `perimeter · (deflection + deviation)`, doubled because
+    /// the sum the predicate decides is *twice* the area. The perimeter is
+    /// added up as `|dx| + |dy| + |dz|` per side, which over-estimates the
+    /// length of each side by up to `√3` — room enough over the true chord to
+    /// swallow the rounding in adding a few thousand of them, and the
+    /// over-estimate is on the safe side of the comparison.
+    ///
+    /// The sampled area is read off the cascade's **interval** level, which is
+    /// rigorous by construction, so what is compared is a bound the arithmetic
+    /// earned rather than an `f64` total. The sign, once the margin is met, is
+    /// still taken from the whole cascade.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`winding_round`] refuses.
+    fn winding_it_can_answer_for(
+        &self,
+        normal: [f64; 3],
+        deflection: Deflection,
+    ) -> Result<Option<Decision>> {
+        let swept = AreaSweptRoundTheNormal {
+            corners: self.points.clone(),
+            normal,
+        };
+        let enclosed = swept.on_intervals();
+        let hidden = 2.0 * self.how_far_round_it_is() * (deflection.length() + self.deviation);
+        let certainly_enclosed = enclosed.lo().abs().min(enclosed.hi().abs());
+        if !enclosed.contains_zero() && certainly_enclosed > hidden {
+            return winding_round(&self.points, normal).map(Some);
+        }
+        Ok(None)
+    }
+
+    fn how_far_round_it_is(&self) -> f64 {
+        let count = self.points.len();
+        (0..count)
+            .map(|index| {
+                let from = self.points[index];
+                let to = self.points[(index + 1) % count];
+                (0..3)
+                    .map(|axis| (to[axis] - from[axis]).abs())
+                    .sum::<f64>()
+            })
+            .sum()
+    }
+}
+
+/// What to say about a boundary no walk could find enough area in to wind.
+///
+/// The corners are the part of it a reader can find in the model; the points a
+/// walk put between them belong to a deflection that is not one the caller
+/// asked for, and §5 records a decision rather than a coordinate.
+fn a_boundary_that_encloses_too_little_to_wind(corners: &[[f64; 3]]) -> ProvenanceLog {
+    let at: Vec<PredicatePoint> = corners
+        .iter()
+        .map(|&corner| PredicatePoint::from(corner))
+        .collect();
+    let mut records = ProvenanceLog::new();
+    records.push(Record::new(
+        SWEPT_AREA,
+        &at,
+        Level::Interval,
+        NOTHING_IS_KNOWN,
+        Measures::Area,
+    ));
+    records
 }
 
 /// The same question asked of a ring of corners that is not in the model yet.
@@ -2778,7 +3050,15 @@ mod tests {
             "the f64 fan has to lose this sign for the test to mean anything"
         );
         assert_eq!(
-            winding_of(view.outer_wire(), the_ground().normal()).expect("the cascade settles this"),
+            winding_of(
+                &model,
+                view,
+                view.outer_wire(),
+                the_ground().normal(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the cascade settles this"),
             Decision::Pos,
             "the exact sign is there to be had, and a zero would have the sweep \
              refuse this face for winding the wrong way"
@@ -2796,12 +3076,16 @@ mod tests {
         let hole = wires.next().expect("and the hole");
         let normal = cap.plane().normal();
 
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
         assert_eq!(
-            winding_of(outline, normal).expect("the cascade settles this"),
+            winding_of(&model, cap, outline, normal, &policy, &mut log)
+                .expect("the cascade settles this"),
             Decision::Pos
         );
         assert_eq!(
-            winding_of(hole, normal).expect("the cascade settles this"),
+            winding_of(&model, cap, hole, normal, &policy, &mut log)
+                .expect("the cascade settles this"),
             Decision::Neg
         );
     }
