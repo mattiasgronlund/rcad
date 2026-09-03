@@ -40,8 +40,23 @@ fn a_model() -> Model {
 /// A cone that ends in a point, built and measured naming only `rcad`.
 ///
 /// Two faces, one edge, one vertex and no seam: the apex is where the cone's
-/// own second coordinate runs out rather than a corner of the model. Volume
-/// `πr²h/3`, checked against the kernel's own published bound.
+/// own second coordinate runs out rather than a corner of the model.
+///
+/// # A pointed cone has no finite published bound, and this pins that
+///
+/// The bound the kernel publishes for a curved face is an offset-surface
+/// argument: the mesh sits between the surface and the same surface a deviation
+/// inside the material. A cone has no such inner surface within a deviation of
+/// its apex, so the smallest radius of curvature over the face is zero and
+/// `volume_error()` comes back infinite —
+/// `crates/rcad-topo/tests/a_solid_with_a_cone_face.rs` carries the derivation
+/// and asserts the same thing from the inside.
+///
+/// That matters out here because `x <= infinity` holds for every finite `x`:
+/// comparing the volume against this bound would be an assertion that cannot
+/// fail. So the bound is asserted to be infinite, which is a real fact about
+/// this kernel and worth a caller knowing, and `πr²h/3` is checked against a
+/// **stated share of the deflection** instead.
 #[test]
 fn a_pointed_cone_is_described_measured_and_named_from_the_front_door() {
     let mut model = a_model();
@@ -63,18 +78,39 @@ fn a_pointed_cone_is_described_measured_and_named_from_the_front_door() {
         SLOPE * HOW_FAR_UP_THE_RIM_SITS
     );
 
-    let how_fine = Deflection::of(0.002).expect("a positive length");
+    let deflection = 0.002;
+    let how_fine = Deflection::of(deflection).expect("a positive length");
     let measured = model
         .solid(solid)
         .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a pointed cone measures");
-    let radius = SLOPE * HOW_FAR_UP_THE_RIM_SITS;
-    let volume = core::f64::consts::PI * radius * radius * HOW_FAR_UP_THE_RIM_SITS / 3.0;
     assert!(
-        (measured.volume() - volume).abs() <= measured.volume_error(),
-        "the mesh holds {} and πr²h/3 is {volume}, further apart than the bound {}",
-        measured.volume(),
+        !measured.volume_error().is_finite(),
+        "a face reaching its apex has no offset surface within a deviation of it, and the \
+         published bound says so rather than pretending: it came back {}",
         measured.volume_error()
+    );
+
+    let radius = SLOPE * HOW_FAR_UP_THE_RIM_SITS;
+    let height = HOW_FAR_UP_THE_RIM_SITS;
+    let volume = core::f64::consts::PI * radius * radius * height / 3.0;
+    let area = core::f64::consts::PI
+        * (radius * (radius * radius + height * height).sqrt() + radius * radius);
+    // A statement about *this test* and not a published bound — see the doc
+    // above. The mesh is inscribed in a convex solid, so its volume is below the
+    // true one and short of it by no more than the deflection times the skin.
+    let room = deflection * area;
+    println!(
+        "a pointed cone at a deflection of {deflection}: volume {} against πr²h/3 = {volume}, \
+         short by {}, with {room} of room and a published bound of {}",
+        measured.volume(),
+        volume - measured.volume(),
+        measured.volume_error(),
+    );
+    assert!(
+        measured.volume() <= volume && volume - measured.volume() < room,
+        "the mesh holds {} and πr²h/3 is {volume}, which is not short of it by less than {room}",
+        measured.volume()
     );
 }
 
@@ -108,6 +144,22 @@ fn a_quarter_bend_is_described_measured_and_named_from_the_front_door() {
         .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a quarter bend measures");
     let volume = 2.0 * core::f64::consts::PI * core::f64::consts::PI * RING * TUBE * TUBE / 4.0;
+    // The bound is what this compares against, so it has to be a number. A
+    // pointed cone's is infinity — see the test above — and against infinity the
+    // line below would hold whatever the mesh had measured.
+    assert!(
+        measured.volume_error().is_finite(),
+        "a torus stands a whole tube radius off its own axis, so it has an offset surface \
+         everywhere and a bound to go with it, and this one came back {}",
+        measured.volume_error()
+    );
+    println!(
+        "a quarter bend: volume {} against 2π²Rr²/4 = {volume}, apart by {}, with a published \
+         bound of {}",
+        measured.volume(),
+        (measured.volume() - volume).abs(),
+        measured.volume_error(),
+    );
     assert!(
         (measured.volume() - volume).abs() <= measured.volume_error(),
         "the mesh holds {} and 2π²Rr²/4 is {volume}, further apart than the bound {}",
