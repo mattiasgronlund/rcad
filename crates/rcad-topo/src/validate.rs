@@ -42,7 +42,9 @@ impl Model {
     ///   refusing (`ModelData::check_keys_resolve`),
     /// - no coordinate is infinite and no edge has zero length,
     /// - every edge is used by exactly two coedges running opposite ways,
-    /// - every wire has at least three coedges and closes back on itself,
+    /// - every wire closes back on itself and has enough steps to bound
+    ///   something: three, or one edge that closes already, or two different
+    ///   edges that are not both straight,
     /// - every face sits on a plane, with its corners on that plane, its outer
     ///   wire winding with the face normal and its holes winding against it,
     ///   so the material is on one consistent side,
@@ -331,6 +333,11 @@ impl Model {
     /// A wire long enough to bound something, whose steps chain end to start
     /// and come back to where they set off.
     ///
+    /// Three steps, or one edge that closes already, or two different edges
+    /// that are not both straight —
+    /// [`Model::wire_of_two_steps_bounds_a_face`] says why those two shapes and
+    /// no others.
+    ///
     /// Also the check [`Model::check_touched_wire`] makes after a mutation, and
     /// that is on purpose: one of the two audiences wants a refusal and the
     /// other wants a crash, and there being two of them is no reason for two
@@ -340,7 +347,10 @@ impl Model {
     ///
     /// [`Invalid::WireTooShort`] or [`Invalid::WireDoesNotClose`].
     pub(crate) fn check_wire_closes(&self, wire: &WireData) -> Result<()> {
-        if wire.steps.len() < 3 && !self.wire_closes_on_one_edge(wire) {
+        if wire.steps.len() < 3
+            && !self.wire_closes_on_one_edge(wire)
+            && !self.wire_of_two_steps_bounds_a_face(wire)
+        {
             return Err(Invalid::WireTooShort {
                 count: wire.steps.len(),
             }
@@ -1041,14 +1051,17 @@ fn check_flat_face(view: FaceView<'_>, plane: &Plane, allowed_wobble: f64) -> Re
         }
     }
     for (position, wire) in view.wires().enumerate() {
-        // A round cap's boundary is one closed edge and one corner, so there is
-        // no polygon to wind. Which way it goes is a fact about the circle and
-        // not about the corners, and the corners are all this can see.
+        // Fewer than three corners is not a polygon, so there is nothing here
+        // to wind. A round cap's boundary is one closed edge and one corner; a
+        // face bounded by an arc and its chord has two, and two corners sweep
+        // `(p × q) · n + (q × p) · n`, which cancels to exactly zero whichever
+        // way round the face is. Which way such a boundary goes is a fact about
+        // the curve, and the corners are all this can see.
         //
-        // Which way such a cap faces is asked over the mesh instead, by
-        // `every_side_of_the_skin_is_used_both_ways` — where the cap does have a
-        // polygon and its neighbour to disagree with.
-        if wire.closes_on_one_edge() {
+        // Which way such a face points is asked over the mesh instead, by
+        // `every_side_of_the_skin_is_used_both_ways` — where it does have a
+        // polygon and a neighbour to disagree with.
+        if wire.points().take(3).count() < 3 {
             continue;
         }
         let winding = winding_of(wire, plane.normal())?;
@@ -1466,7 +1479,17 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
 /// Which way `wire` winds round `normal`.
 ///
 /// [`Decision::Pos`] with it, [`Decision::Neg`] against it, [`Decision::Zero`]
-/// when the wire sweeps out no area at all, which no sound face has.
+/// when the corners sweep out no area at all.
+///
+/// **Zero does not mean the face is unsound**, and this is the half of §44.11
+/// item 3's winding question that stayed open. It means the *corners* enclose
+/// nothing, which a boundary that bends between them can do while enclosing
+/// plenty: a face bounded by an arc and its chord has two corners and sweeps
+/// exactly zero, and so does one bounded by two half-circles, whose three
+/// corners are collinear. [`check_flat_face`] keeps the first out of here by
+/// not asking about a boundary with fewer than three corners. The second it
+/// still asks and still refuses, because telling that face from a hole needs a
+/// point on the curve and every corner it has is on the chord.
 ///
 /// The quantity decided is the wire's vector area dotted with the normal. That
 /// sum cancels — a wire far from the origin adds and subtracts numbers far
@@ -2550,8 +2573,15 @@ mod tests {
         }
     }
 
+    /// Two steps that go out and come back along the *same* edge retrace the
+    /// same curve, so they bound nothing whatever that curve is.
+    ///
+    /// §44.11 item 3 let two-step wires in, and this is one of the two shapes
+    /// it did not let in. `a_face_bounded_by_two_steps.rs` asks the builder the
+    /// same question; this is the sweep's own copy of the rule, which a model
+    /// off the wire meets instead.
     #[test]
-    fn a_wire_of_only_two_coedges_is_caught() {
+    fn a_wire_of_two_coedges_out_and_back_along_one_edge_is_caught() {
         let mut model = an_empty_model();
         let start = model.add_vertex(Point::new(0.0, 0.0, 0.0));
         let end = model.add_vertex(Point::new(1.0, 0.0, 0.0));
@@ -2562,6 +2592,70 @@ mod tests {
         model.add_face(Surface::Plane(the_ground()), SmallVec::from_buf([wire]));
 
         assert_eq!(refusal(&model), Invalid::WireTooShort { count: 2 });
+    }
+
+    /// The other shape §44.11 item 3 did not let in: two *different* straight
+    /// edges between the same two corners, which are the same segment written
+    /// twice.
+    #[test]
+    fn a_wire_of_two_straight_coedges_between_the_same_corners_is_caught() {
+        let mut model = an_empty_model();
+        let start = model.add_vertex(Point::new(0.0, 0.0, 0.0));
+        let end = model.add_vertex(Point::new(1.0, 0.0, 0.0));
+        let one = model.add_edge(start, end);
+        let other = model.add_edge(start, end);
+        a_wire_and_its_mirror(&mut model, one, other);
+
+        assert_eq!(refusal(&model), Invalid::WireTooShort { count: 2 });
+    }
+
+    /// And the shape it did: two different edges, one of them an arc.
+    ///
+    /// The sweep goes on to refuse this scrap for what it really is — a face in
+    /// no shell — and the point is that the *length* rule is no longer what
+    /// stops it. `a_face_bounded_by_two_steps.rs` builds the whole solid.
+    #[test]
+    fn a_wire_of_an_arc_and_its_chord_is_long_enough_for_the_sweep() {
+        let mut model = an_empty_model();
+        let start = model.add_vertex(Point::new(1.0, 0.0, 0.0));
+        let end = model.add_vertex(Point::new(-1.0, 0.0, 0.0));
+        let arc = model.add_edge_running(
+            start,
+            end,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(the_ground()),
+                picked_by: SmallVec::from_buf([rcad_geom::Picker::from(
+                    rcad_geom::HalfSpace::through_a_point_facing(
+                        Point::origin(),
+                        Vector::new(0.0, 1.0, 0.0),
+                    )
+                    .expect("the y axis has length"),
+                )]),
+            },
+        );
+        let chord = model.add_edge(start, end);
+        a_wire_and_its_mirror(&mut model, arc, chord);
+
+        assert_eq!(refusal(&model), Invalid::Orphan { entity: "face" });
+    }
+
+    /// Two edges as a two-step wire and the same two run the other way round,
+    /// on one face.
+    ///
+    /// The mirror is what gives each edge the two coedges running opposite ways
+    /// the sweep insists on, so a two-step wire reaches the length rule instead
+    /// of stopping at [`Invalid::EdgeCoedgeCount`] before it.
+    fn a_wire_and_its_mirror(model: &mut Model, one: EdgeSlot, other: EdgeSlot) {
+        let there = model.add_coedge(one, Orientation::Forward);
+        let back = model.add_coedge(other, Orientation::Reversed);
+        let outer = model.add_wire([there, back].into_iter().collect());
+        let there = model.add_coedge(other, Orientation::Forward);
+        let back = model.add_coedge(one, Orientation::Reversed);
+        let hole = model.add_wire([there, back].into_iter().collect());
+        model.add_face(
+            Surface::Plane(the_ground()),
+            [outer, hole].into_iter().collect(),
+        );
     }
 
     #[test]

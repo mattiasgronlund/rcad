@@ -611,11 +611,16 @@ pub enum Error {
 
     /// A wire was described with too few steps to close round anything.
     ///
-    /// Three is the floor, and the one exception is a wire that is a single
-    /// coedge on an edge running right round a closed curve — a round cap's
-    /// boundary, which is one whole circle.
+    /// Three is the floor, and there are two exceptions. One step is enough
+    /// when that step runs right round a closed curve — a round cap's boundary,
+    /// which is one whole circle. Two are enough when they are two *different*
+    /// edges and at least one of them bends: an arc and the chord that closes
+    /// it bound a real face. Two steps on one edge run out and back along the
+    /// same curve, and two straight edges between the same two corners are the
+    /// same segment written twice; both sweep no area at all.
     #[error(
-        "a wire needs at least three steps unless its one edge closes already, this one has {steps}"
+        "a wire of {steps} steps closes round nothing: it needs three, or one edge that closes \
+         already, or two different edges that are not both straight"
     )]
     ADraftWireIsTooShort {
         /// How many steps the wire was given.
@@ -867,10 +872,17 @@ pub enum Invalid {
     #[error("a face walks a closed edge against the way its surface winds")]
     AClosedEdgeIsWalkedAgainstItsSurface,
 
-    /// A wire has fewer than three coedges.
-    #[error("a wire has {count} coedges; a closed wire needs at least three")]
+    /// A wire has too few steps to close round anything.
+    ///
+    /// The same rule [`Error::ADraftWireIsTooShort`] states for a description,
+    /// asked of a model that already exists: three steps, or one edge that
+    /// closes already, or two different edges that are not both straight.
+    #[error(
+        "a wire of {count} steps closes round nothing: it needs three, or one edge that closes \
+         already, or two different edges that are not both straight"
+    )]
     WireTooShort {
-        /// How many coedges the wire has.
+        /// How many steps the wire has, poles counted.
         count: usize,
     },
 
