@@ -2925,6 +2925,35 @@ fn how_a_crossing_runs(
             forward_climbs_the_axis,
         });
     }
+    // **A plane resting *on* a pipe hands the zero vector to the line below, and
+    // that is an open gap.** A wall on `y = -2` against a bar of radius two is
+    // tangent along the ruling `(0, -2, z)`, where the plane's normal `(0,-1,0)`
+    // and the pipe's gradient `(0,-2,0)` are parallel, so `∇S × ∇Q` — the only
+    // form this kernel has for the *direction* of a crossing, here, in
+    // `dominant_axis` and in `Arrangement::way_out_of` alike — is exactly
+    // nothing.
+    // The direction *exists*: it is the pipe's own axis. Four families of fix,
+    // and why none of them is a small change:
+    //
+    // 1. Read the pipe's axis here instead of the cross product. Closes this
+    //    line and nothing else: `Arrangement::way_out_of` is the same cross
+    //    product and is still nothing, so the wall face has no directions to
+    //    sort.
+    // 2. Recover the sign by hand. There is none to recover. The two rulings of
+    //    a plane that really cuts a pipe get *opposite* orientations from this
+    //    very cross product, so a rule handing back the axis uniformly would
+    //    turn one of them round and change answers that are right today.
+    // 3. Store one direction on `Crossing` and read it everywhere. This is the
+    //    one that works, and it is necessary but **not sufficient**:
+    //    `Arrangement::turns_anticlockwise` is `det(∇S, ∇Q₁, ∇Q₂)`, which is
+    //    identically nothing against *every* other crossing once `∇Q₁` is along
+    //    `∇S`, and `Arrangement::which_way_two_tangent_curves_bend` dies with it
+    //    because its `B` works out to `−c|∇S × ∇Q|²`. Both derivatives taken
+    //    here are blind there, so the turn predicate needs a second form too.
+    // 4. Leave the crossing undrawn — it touches the wall and cuts nothing off
+    //    it. `cuts.rs`'s own module comment turns down the same shape of skip
+    //    for the same reason: leave a pair out and only one side of a shared
+    //    edge gets split, and the answer is not a manifold (§17.4).
     if a_plane_along_a_pipes_axis(surface, partner) {
         let (axis, forward_climbs_the_axis) = dominant_axis_of_a_direction(
             cross_of(gradient_at(surface, at), gradient_at(partner, at)),

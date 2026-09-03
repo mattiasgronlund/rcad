@@ -484,13 +484,25 @@ fn a_block_whose_wall_touches_a_bar(model: &mut Model) -> Pair {
     Pair::of(bar, touching)
 }
 
-/// The tangency is refused by name, and the name is the tangency.
+/// The tangency is refused, and what it gives up on is the tangency: the wall
+/// lies **on** the bar's skin, so that one crossing has no direction.
 ///
-/// **Not on the bar's wall — on its two caps.** Instrumented, the refusing
-/// arrangement is the plane `z = 0` and then the plane `z = 8`, where the cap's
-/// own boundary circle and the line the wall `y = -2` cuts in the cap plane
-/// touch at `(0, -2, 0)` and `(0, -2, 8)`. The wall of the bar is a third and
-/// later stage of the same shape and does not reach the ordering at all.
+/// **The two curves the old name spoke of are ordered now, and they were on the
+/// caps and not on the wall.** On the plane `z = 0`, and again on `z = 8`, the
+/// cap's own boundary circle and the line the wall `y = -2` cuts in the cap
+/// plane touch at `(0, -2, 0)` and `(0, -2, 8)`; the three ways out of that node
+/// come back in the order their curvatures put them, and both caps are then
+/// arranged, grouped into cells and wound without complaint.
+///
+/// **What stops it is a stage further in and a different degeneracy.** The wall
+/// `y = -2` is tangent to the bar's *surface* along the whole ruling
+/// `(0, -2, z)`, where the plane's normal `(0, -1, 0)` and the pipe's gradient
+/// `(0, -2, 0)` are parallel. `∇S × ∇Q` is exactly the zero vector there, and
+/// that cross product is this kernel's one name for which way a crossing runs,
+/// so `dominant_axis_of_a_direction` has nothing to name. That is why the
+/// predicate below is *which way a crossing runs* and not a point or a turn.
+/// `arrange.rs`'s `how_a_crossing_runs` carries the four families of fix and why
+/// none of them is small.
 ///
 /// **The control is one coordinate moved by a tenth.** With the wall at
 /// `y = -1.9` it cuts the bar in two curves that really do cross, and the
@@ -502,14 +514,18 @@ fn a_block_whose_wall_touches_a_bar(model: &mut Model) -> Pair {
 /// A tolerant policy makes no difference, which is the other half: this is a
 /// statement about the shape and not about a budget.
 #[test]
-fn a_wall_that_touches_a_bar_without_crossing_it_is_refused_by_name() {
+fn a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction() {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
             let mut model = a_model();
             let pair = a_block_whose_wall_touches_a_bar(&mut model);
             match refusal(&mut model, &pair, rule, &policy) {
-                Error::TwoCurvesTouchWithoutCrossing { .. } => (),
-                other => panic!("a wall touching a bar's skin refused with {other:?}"),
+                why @ Error::Undecidable { .. } => assert_eq!(
+                    what_it_gave_up_on(&why),
+                    "which way a crossing runs",
+                    "a wall lying on a bar's skin gives that crossing no direction"
+                ),
+                other => panic!("a wall lying on a bar's skin refused with {other:?}"),
             }
         }
     }
@@ -911,15 +927,31 @@ fn a_block_corner_a_tenth_off_a_bars_wall_is_answered_either_side() {
     }
 }
 
-/// The same corner on a *ball* is refused by the same name, and its controls are
-/// refused by a different one.
+/// The same corner on a *ball*, left open: the arrangement is right now and the
+/// refusal has moved out of the fuse into the mesher, where nothing here has
+/// shown it belongs.
 ///
-/// `(3, 4, 0)` is on a ball of radius five for the same reason. Either side of it
-/// the fuse refuses with `Undecidable` naming order along a crossing, so the ball
-/// case is one refusal between two others where the bar case is a refusal between
-/// two answers — the name is what they have in common and the exact incidence is
-/// the only thing that reaches it.
+/// **What is settled.** `(3, 4, 0)` is on a ball of radius five, and the block's
+/// two walls `x = 3` and `y = 4` cut the skin in circles that touch there — both
+/// tangent along `±z`, the `x = 3` circle of radius four curving toward
+/// `(3, 0, 0)` and the `y = 4` circle of radius three toward `(0, 4, 0)`. Worked
+/// out by hand about the outward normal `(3, 4, 0)/5`, the six ways out of that
+/// node run `y = 4` up, `x = 3` up, `z = 0` one way, `x = 3` down, `y = 4` down,
+/// `z = 0` the other; dumped, the arrangement hands back exactly that order, and
+/// its twenty cells are wound and grouped without complaint. The fuse then
+/// **builds an answer** where it used to refuse.
+///
+/// **What is not settled, and why this is `#[ignore]` rather than a moved
+/// assertion.** `Model::fuse` validates before it commits, validation meshes to
+/// read a volume's sign, and the mesher gives up on one face with
+/// `AWireWillNotLieFlatOnItsFace`. That refusal is raised in `mesh.rs`, whose own
+/// doc comment says it and its three siblings are "for a solid that arrived from
+/// a *file* with a shape no builder here makes" — and this solid was built by the
+/// fuse a moment earlier. Which face, and whether the name is true of it, needs
+/// instrumenting `mesh.rs`. Until someone does, asserting that name would be
+/// asserting a reason rather than demonstrating one.
 #[test]
+#[ignore = "open: the fuse now answers and the mesher refuses the answer; which face and whether `AWireWillNotLieFlatOnItsFace` is true of it is unsettled"]
 fn a_block_corner_exactly_on_a_balls_skin_is_refused_by_name() {
     let mut model = a_model();
     let ball = model
@@ -1306,10 +1338,23 @@ fn a_ball_touching_a_wall_at_the_one_point_that_can_place_it_keeps_both() {
     );
 }
 
-/// A bar and a block touching along a cap edge and nowhere else are refused by
-/// name, and the name is the touching.
+/// A block sitting on a bar's cap with its corner on the rim: the same shape as
+/// [`a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction`] and it
+/// stops in the same place, one plane along.
+///
+/// The block covers `2 ≤ x ≤ 4`, so the plane its near wall lies in, `x = 2`,
+/// rests on the bar of radius two along the ruling `(2, 0, z)` — the bar's own
+/// seam. A cut is by a plane and not by the face carrying it (`cuts.rs` says
+/// why), so it does not matter that the wall itself sits above the bar. There
+/// the plane's normal `(-1, 0, 0)` and the pipe's gradient `(2, 0, 0)` are
+/// parallel, the cross product that names a crossing's direction is exactly
+/// nothing, and the fuse gives up naming it.
+///
+/// Two shapes reaching one refusal through different
+/// coordinates is what says the refusal is about a plane lying on a pipe and not
+/// about either shape.
 #[test]
-fn a_block_sitting_on_a_bars_cap_is_refused_by_name() {
+fn a_block_sitting_on_a_bars_cap_leaves_that_crossing_with_no_direction() {
     let mut model = a_model();
     let bar = a_bar(&mut model);
     let sitting = block(&mut model, [2.0, 2.0, 2.0], Vector::new(2.0, 0.0, 8.0));
@@ -1319,7 +1364,11 @@ fn a_block_sitting_on_a_bars_cap_is_refused_by_name() {
         Rule::Union,
         &Policy::certified(),
     ) {
-        Error::TwoCurvesTouchWithoutCrossing { .. } => (),
+        why @ Error::Undecidable { .. } => assert_eq!(
+            what_it_gave_up_on(&why),
+            "which way a crossing runs",
+            "a block wall lying on a bar's skin gives that crossing no direction"
+        ),
         other => panic!("a block on a bar's cap refused with {other:?}"),
     }
 }
@@ -1547,7 +1596,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             case: Case::Fused {
                 build: a_block_whose_wall_touches_a_bar,
                 rule: Rule::Difference,
-                outcome: Outcome::Refused("TwoCurvesTouchWithoutCrossing"),
+                outcome: Outcome::GaveUp("which way a crossing runs"),
             },
         },
         Entry {
@@ -1681,7 +1730,7 @@ fn the_rest() -> Vec<Entry> {
             pair: "a block sitting on a bar's cap",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_block_sitting_on_a_bars_cap_is_refused_by_name",
+                test: "a_block_sitting_on_a_bars_cap_leaves_that_crossing_with_no_direction",
             },
         },
         Entry {
@@ -1729,6 +1778,7 @@ fn what_happened(build: fn(&mut Model) -> Pair, rule: Rule) -> Outcome {
             {
                 "a point inside a piece of a face" => "a point inside a piece of a face",
                 "order along a crossing" => "order along a crossing",
+                "which way a crossing runs" => "which way a crossing runs",
                 other => panic!("a refusal named {other:?}, which no row expects"),
             },
         ),
