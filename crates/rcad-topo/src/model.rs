@@ -842,6 +842,60 @@ impl ModelData {
         Ok(())
     }
 
+    /// No entity is claimed by two owners: one wire belongs to one face, one
+    /// coedge to one wire, one face to one shell, one shell to one solid.
+    ///
+    /// **A check the rule in `Model::check_shape_is_possible` reaches**
+    /// (`docs/decisions.md` §44.5) — no [`Policy`](rcad_predicates::Policy), no
+    /// arithmetic on any coordinate, and no sweep over pairs. It asks nothing
+    /// of any *pair* of entities: one pass over the containers that name
+    /// entities adds one to a counter, a second pass over those counters looks
+    /// for a two, and the whole of it is one `SecondaryMap<K, usize>` per
+    /// level.
+    ///
+    /// **It is asked here, on the data, rather than in
+    /// `Model::check_shape_is_possible`, because [`Index::rebuilt_from`] is what
+    /// it protects and the index is built first.** A wire named by two faces
+    /// reaches `face_of_wire.insert` twice, and the second `insert` used to win
+    /// silently: the model that came out of the door said six faces with one
+    /// wire each while its index gave one of those wires to the wrong face, and
+    /// nothing asked it a question until something downstream believed the
+    /// index. So the count runs before the index exists, and `rebuilt_from`
+    /// asserts what this has already refused.
+    ///
+    /// [`Model::validate`] counts the same four again, and that is not a
+    /// duplicate: a model can be mutated after it comes through the door, and
+    /// the sweep is what catches that.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::UsedMoreThanOnce`] naming the first level where some entity
+    /// has more than one owner.
+    pub(crate) fn check_nothing_is_used_more_than_once(&self) -> Result<()> {
+        no_owner_claims_the_same_entity_twice(
+            "coedge",
+            self.wires.values().flat_map(WireData::coedges),
+        )?;
+        no_owner_claims_the_same_entity_twice(
+            "wire",
+            self.faces
+                .values()
+                .flat_map(|face| face.wires.iter().copied()),
+        )?;
+        no_owner_claims_the_same_entity_twice(
+            "face",
+            self.shells
+                .values()
+                .flat_map(|shell| shell.faces.iter().map(|used| used.face)),
+        )?;
+        no_owner_claims_the_same_entity_twice(
+            "shell",
+            self.solids
+                .values()
+                .flat_map(|solid| solid.shells.iter().map(|used| used.shell)),
+        )
+    }
+
     fn worst_approximation(&self) -> f64 {
         let vertices = self
             .vertices
@@ -857,6 +911,26 @@ impl ModelData {
             .map(|entity| magnitude_of(entity.approximation));
         vertices.chain(edges).chain(faces).fold(0.0, f64::max)
     }
+}
+
+/// One pass to count how many times each entity is named, one pass to find the
+/// first named twice.
+fn no_owner_claims_the_same_entity_twice<K: slotmap::Key>(
+    entity: &'static str,
+    named: impl Iterator<Item = K>,
+) -> Result<()> {
+    let mut used: SecondaryMap<K, usize> = SecondaryMap::new();
+    for slot in named {
+        if let Some(entry) = used.entry(slot) {
+            *entry.or_insert(0) += 1;
+        }
+    }
+    for (_, &count) in &used {
+        if count > 1 {
+            return Err(Invalid::UsedMoreThanOnce { entity, count }.into());
+        }
+    }
+    Ok(())
 }
 
 /// The upward links, derived from the downward ones.
@@ -890,6 +964,24 @@ impl Index {
         self.face_of_wire.get(wire).copied()
     }
 
+    /// The upward links read back off the downward ones.
+    ///
+    /// **The two single-valued links assert rather than overwrite, and the
+    /// assert is unconditional.** A wire named by two faces has two candidate
+    /// owners and `insert` would keep whichever face was written last, leaving
+    /// an index that disagrees with the data it was derived from — a model that
+    /// contradicts itself before anything asks it a question. That is a broken
+    /// internal invariant and not bad caller input: the only route here is
+    /// [`Model::from_parts`], which is `pub(crate)`, and the one route to it
+    /// from outside the crate is `Deserialize` — which has already run
+    /// [`ModelData::check_nothing_is_used_more_than_once`] and turned a second
+    /// claimant into an `Err`. CLAUDE.md says panic on the first and return
+    /// `Err` on the second, and both halves are here in that order.
+    ///
+    /// `debug_assert!` would be the wrong half of that rule. The build a user
+    /// reads a stranger's file in is the release build, and a check that is
+    /// absent exactly there is not a check. The cost is one `Option::is_none`
+    /// per wire and per coedge, beside an insert that already writes a word.
     fn rebuilt_from(data: &ModelData) -> Self {
         let mut index = Self::default();
         for vertex in data.vertices.keys() {
@@ -912,12 +1004,20 @@ impl Index {
         }
         for (slot, wire) in &data.wires {
             for coedge in wire.coedges() {
-                index.wire_of_coedge.insert(coedge, slot);
+                let already = index.wire_of_coedge.insert(coedge, slot);
+                assert!(
+                    already.is_none(),
+                    "one coedge is walked by two wires, {already:?} and {slot:?}"
+                );
             }
         }
         for (slot, face) in &data.faces {
             for &wire in &face.wires {
-                index.face_of_wire.insert(wire, slot);
+                let already = index.face_of_wire.insert(wire, slot);
+                assert!(
+                    already.is_none(),
+                    "one wire bounds two faces, {already:?} and {slot:?}"
+                );
             }
         }
         index
