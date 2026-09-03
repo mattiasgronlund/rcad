@@ -18,12 +18,14 @@
 //! writer owes an `Err` either way, never a crash.
 //!
 //! **A model that does come out is checked against what the door promised**,
-//! not just handed on. `Deserialize` refuses a corner that is at no point and
-//! a slop that is not a length (`docs/decisions.md` §44.5), and a fuzzer
-//! reaching the writer is the one thing in the tree that tries every byte
-//! string there is against that promise. Walking past a model whose corner is
-//! `NaN` would leave the door untested by the only target that knocks on it a
-//! billion times.
+//! not just handed on. `Deserialize` refuses a corner that is at no point and a
+//! slop that is not a length (`docs/decisions.md` §44.5), and this target
+//! reaches that door with more byte strings in a minute than the suite has in
+//! total. Walking past a model whose corner is `NaN` would leave the promise
+//! untested by the thing best placed to break it. The suite asks the same
+//! question on the pinned stable toolchain, where `cargo fuzz` cannot run at
+//! all, in
+//! `no_mutation_of_a_model_that_still_reads_back_carries_a_number_that_is_not_real`.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

@@ -9,19 +9,23 @@ use crate::{Decision, Error, Level, Measures, Point};
 /// dangle the moment the model is serialized on its own (decisions.md §5).
 ///
 /// **Read back through [`Approximation::new`]'s condition**, the way
-/// `rcad-geom`'s `Scale` and every surface is, because a plain derive would
-/// let a file set a
-/// magnitude that no constructor can produce. An infinite one is not a wider
-/// allowance but the certified check switched off: `rcad-topo`'s
+/// `rcad-geom`'s `Scale` and every surface is, because a plain derive would let
+/// a file set a magnitude that no constructor can produce. An infinite one is
+/// not a wider allowance but the certified check switched off: `rcad-topo`'s
 /// `not_provably_off` keeps any magnitude above zero and widens the corner it
 /// is asked about into an interval that reaches every surface, so a model whose
 /// corners are nowhere near their faces reads back and validates
 /// (`docs/decisions.md` §44.5).
 ///
-/// A two-field struct and a two-element tuple are the same bytes in `postcard`,
-/// so the door cost the format nothing —
+/// **In `postcard` the door cost the format nothing**, because a two-field
+/// struct and a two-element tuple are the same bytes there —
 /// `a_guarded_approximation_is_still_the_same_bytes_it_always_was` is that,
-/// checked rather than argued.
+/// checked rather than argued, and it is why `FORMAT_VERSION` did not move. A
+/// *self-describing* format is a different answer: this now writes a
+/// two-element sequence where it used to write a two-field map, so a JSON model
+/// written before this does not read after it. Nothing in the tree writes one —
+/// `postcard` is what the suite, the fuzz corpus and every doc example use —
+/// and `docs/decisions.md` §6 says the format is unstable in any case.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "(f64, Cause)", into = "(f64, Cause)")]
 pub struct Approximation {

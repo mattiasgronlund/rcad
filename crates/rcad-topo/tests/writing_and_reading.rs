@@ -413,9 +413,11 @@ fn a_guarded_approximation_is_still_the_same_bytes_it_always_was() {
 /// - **one byte, any value.** Walks the shape of the format: lengths, slot
 ///   versions, enum tags. Almost never writes a whole `f64`.
 /// - **eight bytes, a number chosen to be hostile.** Infinity, `NaN` and a
-///   negative amount are what a corner and a slop are refused for, and a byte
-///   at a time practically never lands on one — a mutation that only flips
-///   bytes could run for ever without ever writing `inf` into a magnitude.
+///   negative amount are what a corner and a slop are refused for, and the
+///   first family reaches none of them from the numbers this model holds:
+///   infinity and `NaN` need all eleven exponent bits set, those bits straddle
+///   two bytes, and none of 0, 1, 2, 100 or the slop already has the four in
+///   the lower of the two — so no one-byte change to any of them is infinite.
 ///
 /// Each family counts how many of its mutants really became a `Model`, because
 /// a mutation that is refused proves nothing here: a run where everything was

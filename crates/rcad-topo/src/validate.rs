@@ -132,6 +132,16 @@ impl Model {
     /// coordinate that is not a number. `check_vertices` has always caught it,
     /// and `check_vertices` is in the sweep a file's own read never runs.
     ///
+    /// **The rule reaches further than this list does, and the next one it
+    /// reaches is [`Invalid::UsedMoreThanOnce`].** Counting how many shells
+    /// name a face is one pass and an integer per face — no policy, no
+    /// arithmetic, and nothing that looks at a pair — so by the rule it belongs
+    /// here, and it is not here yet. What it costs while it is missing is not
+    /// only that `Model::validate` refuses later: `Index::rebuilt_from` resolves
+    /// a wire named by two faces with `insert`, so the index that comes out of
+    /// the door says the wire belongs to whichever face was written last, and
+    /// the model disagrees with itself before anything asks it a question.
+    ///
     /// # Errors
     ///
     /// [`Invalid::VertexNotFinite`], [`Invalid::FaceHasNoWires`],
@@ -591,13 +601,15 @@ impl Model {
     /// [`not_provably_off`] keeps any magnitude above zero and widens the corner
     /// into an interval that straddles every surface there is.
     ///
-    /// Nothing in this workspace can build such a tag —
-    /// [`Approximation::new`](rcad_predicates::Approximation::new) asserts, and
-    /// a file goes through the same condition on the way in
+    /// **There are two ways an [`Approximation`] gets into a model and both
+    /// refuse one**: [`Approximation::new`](rcad_predicates::Approximation::new)
+    /// is the only constructor and it asserts, and `serde` is the only other
+    /// route in and it errors
     /// (`a_file_saying_a_corner_is_infinitely_out_of_place_never_becomes_a_model`).
-    /// This is the sweep saying so out loud rather than depending on it
-    /// silently, which is the standing this file already gives
-    /// `check_keys_resolve`.
+    /// So this arm cannot be reached today. It is here for the same reason
+    /// `check_keys_resolve` is at the head of [`Model::validate`] when
+    /// `Deserialize` has already run it: the sweep says what it depends on out
+    /// loud rather than depending on it silently.
     fn check_approximation_ordering(&self) -> Result<()> {
         for (entity, magnitude) in self.every_amount_of_slop_claimed() {
             if !(magnitude.is_finite() && magnitude >= 0.0) {
