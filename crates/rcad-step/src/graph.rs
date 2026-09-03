@@ -36,7 +36,11 @@ impl StepFile {
     }
 
     /// Every instance, in the order the file wrote them.
-    pub fn instances(&self) -> impl ExactSizeIterator<Item = &Instance> {
+    ///
+    /// A plain [`std::slice::Iter`], not `impl Iterator` — the standard
+    /// library's own type, so a caller can write it down: hold it in a
+    /// struct field, pass it on, or return it from a function of their own.
+    pub fn instances(&self) -> std::slice::Iter<'_, Instance> {
         self.instances.iter()
     }
 
@@ -51,11 +55,14 @@ impl StepFile {
     /// Every instance the file wrote under a given type name.
     ///
     /// Each matching instance is yielded once, including a complex one that
-    /// wears the name among several others.
-    pub fn instances_named<'a>(&'a self, keyword: &'a str) -> impl Iterator<Item = &'a Instance> {
-        self.instances
-            .iter()
-            .filter(move |instance| instance.part(keyword).is_some())
+    /// wears the name among several others. [`InstancesNamed`]'s own doc
+    /// says why it is a struct and not one of two cheaper-looking
+    /// alternatives.
+    pub fn instances_named<'a>(&'a self, keyword: &'a str) -> InstancesNamed<'a> {
+        InstancesNamed {
+            keyword,
+            remaining: self.instances.iter(),
+        }
     }
 
     /// How many instances the file holds under each type name.
@@ -98,6 +105,41 @@ impl StepFile {
                 column: broken.column,
             }),
         }
+    }
+}
+
+/// Every instance the file wrote under one type name, built by
+/// [`StepFile::instances_named`].
+///
+/// A named struct rather than `impl Iterator`, so a caller can write this
+/// type down. [`std::iter::Filter`] is itself a named type, but only when
+/// what it wraps a closure in is too — a closure's own type has no name at
+/// all, so `Filter<std::slice::Iter<'a, Instance>, /* what goes here? */>`
+/// is not writable either. Three ways to make the whole thing nameable, and
+/// what each costs against what this struct does not:
+///
+/// - `Box<dyn Iterator<Item = &'a Instance> + 'a>` — one heap allocation to
+///   build it, one virtual call per [`Iterator::next`].
+/// - A collected [`Vec<&'a Instance>`](Vec) — every matching instance found
+///   up front, whether the caller wants one of them or all. `Import::read`
+///   asks for `"BREP_WITH_VOIDS"` only to call [`Iterator::next`] once, and a
+///   `Vec` would have walked the rest of the file to build the entries that
+///   call throws away.
+/// - This: one reference and one borrowed `&str`, nothing allocated, and the
+///   same lazy walk stopping at the first match a plain `.filter()` already
+///   did before this struct existed.
+#[derive(Debug, Clone)]
+pub struct InstancesNamed<'a> {
+    keyword: &'a str,
+    remaining: std::slice::Iter<'a, Instance>,
+}
+
+impl<'a> Iterator for InstancesNamed<'a> {
+    type Item = &'a Instance;
+
+    fn next(&mut self) -> Option<&'a Instance> {
+        self.remaining
+            .find(|instance| instance.part(self.keyword).is_some())
     }
 }
 
