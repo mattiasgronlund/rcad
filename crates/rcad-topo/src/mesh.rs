@@ -1632,11 +1632,15 @@ fn poles_of(wire: WireView<'_>) -> HashSet<VertexKey> {
 /// Whether the surface pinches to a point at this latitude, so that a corner
 /// sitting there has no longitude of its own.
 ///
-/// **An exact test and not a near one.** A sphere reads latitude as
-/// `z.atan2(x.hypot(y))`, which is `±π/2` exactly when `x` and `y` are both
-/// zero and never otherwise; that is also exactly when the longitude it reads is
-/// `atan2(0, 0)`. A corner a hair off the pole has a longitude, and a tolerance
-/// here would throw away a real one.
+/// **Equality and no budget of its own**, which is not the same as saying it
+/// answers only at the pole. A sphere reads latitude as `z.atan2(x.hypot(y))`,
+/// and `atan2` rounds: at radius five that comes back exactly `π/2` for any
+/// corner within about `5.5e-16` of the axis, not only for the one on it. So the
+/// test catches the pole and the width of one rounding either side of it, and
+/// that is the right width — a corner that close to the axis is that close to
+/// the pole in space too, and the pole side written for it spans no area worth
+/// the name. Widening it past what `atan2` already rounds away would start
+/// throwing out longitudes that mean something.
 fn the_surface_pinches_at(surface: &Surface, latitude: f64) -> bool {
     where_this_surface_pinches(surface).is_some_and(|pinch| latitude.abs() == pinch)
 }
