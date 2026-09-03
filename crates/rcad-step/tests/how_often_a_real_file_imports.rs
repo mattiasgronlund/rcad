@@ -116,7 +116,7 @@ fn every_file_this_kernel_wrote_itself_imports() {
 fn a_real_file_measures_what_its_own_name_says() {
     let root = corpus();
     let mut checked = 0;
-    let mut dip_switches: Vec<(u32, f64)> = Vec::new();
+    let mut dip_switches: Vec<(String, u32, f64)> = Vec::new();
     for path in files_under(&root.join("kicad")) {
         let claims = what_the_name_says(&name_of(&path));
         let switches = how_many_dip_switches(&name_of(&path));
@@ -131,7 +131,9 @@ fn a_real_file_measures_what_its_own_name_says() {
         };
         let across = how_big_it_is(&import);
         if let Some(switches) = switches {
-            dip_switches.push((switches, across[0]));
+            let family = which_dip_switch_family(&name_of(&path))
+                .expect("a name the switch count was read out of has a family too");
+            dip_switches.push((family, switches, across[0]));
         }
         for (axis, expected) in claims {
             assert!(
@@ -147,21 +149,41 @@ fn a_real_file_measures_what_its_own_name_says() {
     // at, and says nothing about how much housing there is either side. So what
     // its family checks is the **difference**: one more switch is one more
     // 2.54 mm, whatever the ends are worth.
-    dip_switches.sort_by_key(|&(switches, _)| switches);
+    //
+    // Within **one family**, and that is the fix rather than the design. Sorting
+    // by count alone put two *different* housings with the same count next to
+    // each other and demanded they be the same length, which is the one thing
+    // the paragraph above says a name does not promise. It went unnoticed while
+    // only one housing per count imported.
+    dip_switches.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
+    let mut switch_steps = 0;
     for pair in dip_switches.windows(2) {
-        let [(fewer, shorter), (more, longer)] = pair else {
+        let [(family, fewer, shorter), (next_family, more, longer)] = pair else {
             unreachable!("windows(2) hands back two");
         };
+        if family != next_family {
+            continue;
+        }
         let expected = f64::from(more - fewer) * 2.54;
         assert!(
             (longer - shorter - expected).abs() < 1e-9,
-            "{more} switches against {fewer} should be {expected} mm longer and is {}",
+            "a {family} with {more} switches against one with {fewer} should be \
+             {expected} mm longer and is {}",
             longer - shorter
         );
+        switch_steps += 1;
         checked += 1;
     }
 
-    println!("{checked} dimensions checked against the names the library wrote");
+    println!(
+        "{checked} dimensions checked against the names the library wrote, \
+         {switch_steps} of them steps between DIP switches of one family"
+    );
+    assert!(
+        switch_steps >= 15,
+        "only {switch_steps} DIP steps were compared, so the family grouping has \
+         thrown away the half of this test that measures a pitch"
+    );
     assert!(
         checked >= 24,
         "only {checked} dimensions were checked, which is too few for this to be \
@@ -174,6 +196,27 @@ fn how_many_dip_switches(name: &str) -> Option<u32> {
     let rest = name.strip_prefix("SW_DIP_SPSTx")?;
     name.contains("_P2.54mm").then_some(())?;
     rest.split_once('_')?.0.parse().ok()
+}
+
+/// Which DIP switch housing a file's name puts it in.
+///
+/// Only two files from the same housing may be compared, because a name says
+/// how many switches and at what pitch and nothing about the ends. The corpus
+/// holds four: a piano-key body carrying its own size, the CTS piano-key
+/// series, a low-profile slide and a full-height slide. What tells them apart
+/// is the style word after the count and the two markers that may follow —
+/// everything else in the name grows with the count and cannot be part of the
+/// key.
+fn which_dip_switch_family(name: &str) -> Option<String> {
+    let after_count = name.strip_prefix("SW_DIP_SPSTx")?.split_once('_')?.1;
+    let style = after_count.split('_').next()?;
+    let series = if name.contains("_CTS_") { " CTS" } else { "" };
+    let profile = if name.contains("_LowProfile") {
+        " low profile"
+    } else {
+        ""
+    };
+    Some(format!("{style}{series}{profile}"))
 }
 
 /// How far a whole import reaches along each axis.
@@ -433,18 +476,38 @@ fn how_often_a_real_file_imports() {
     assert_pinned_kicad_imports(&kicad_imports);
 }
 
-/// The 46 KiCad files that import today, out of 323, at `d23c700`.
+/// The 96 KiCad files that import today, out of 323.
 ///
 /// **Pinned by name, not by rate** (§44.10): a rate cannot tell a reader which
 /// file moved. This list moves only by an edit to this constant, made by
-/// whoever's change moved it — most likely the curved-rounding lane, which
-/// closes the curved-face gap this same corpus run measures at 88 of the 161
-/// KiCad-and-NIST files with a corner off a curved face (§44.6). Regenerate it
-/// with `RCAD_STEP_CORPUS=<path> mise exec -- cargo test -p rcad-step \
-/// --release --test how_often_a_real_file_imports -- --nocapture`, which
-/// prints the failing assertion's "now imports" and "stopped importing" sets
-/// when this list is stale.
+/// whoever's change moved it. Regenerate it with
+/// `RCAD_STEP_CORPUS=<path> mise exec -- cargo test -p rcad-step --release \
+/// --test how_often_a_real_file_imports -- --nocapture`, which prints the
+/// failing assertion's "now imports" and "stopped importing" sets when this
+/// list is stale.
+///
+/// **It was 46 at `d23c700` and the curved-rounding lane moved it by fifty**,
+/// with nothing dropping out and no file that already imported changing the
+/// size it measures. The fifty are the ones a corner off a curved face was
+/// stopping first, now that a corner within `NEAREST_F64_POINT_ROUNDOFF` of its
+/// surface is read as one no writer could have improved on rather than one that
+/// is off: every `Fuse_*`, both `LED_D2.0mm_*_FlatTop`, the `_Horizontal` and
+/// `_Vertical_SMD` pin headers, four more relays, and the twelve
+/// `SW_DIP_SPSTx*_Piano_10.8x*`.
+///
+/// **Fifty is not the 88 §44.6 named, and the difference is not measured
+/// here.** §43.5's 88 counts files with a corner off a curved face, not files
+/// that corner stopped *first*, so a file freed of it may meet a second blocker
+/// — 29 `B_SPLINE_CURVE_WITH_KNOTS` and 13 `B_SPLINE_SURFACE_WITH_KNOTS` are
+/// waiting in this same corpus.
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
+    "Fuse_0402_1005Metric.step",
+    "Fuse_0603_1608Metric.step",
+    "Fuse_0805_2012Metric.step",
+    "Fuse_1206_3216Metric.step",
+    "Fuse_1210_3225Metric.step",
+    "LED_D2.0mm_W4.0mm_H2.8mm_FlatTop.step",
+    "LED_D2.0mm_W4.8mm_H2.5mm_FlatTop.step",
     "LED_Rectangular_W3.0mm_H2.0mm.step",
     "LED_Rectangular_W3.9mm_H1.8mm.step",
     "LED_Rectangular_W3.9mm_H1.9mm.step",
@@ -459,37 +522,80 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z3.0mm.step",
     "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z5.0mm.step",
     "LED_Rectangular_W5.0mm_H5.0mm.step",
+    "PinHeader_1x03_P2.54mm_Horizontal.step",
     "PinHeader_1x04_P2.54mm_Vertical.step",
+    "PinHeader_1x06_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x08_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x10_P2.54mm_Horizontal.step",
     "PinHeader_1x11_P2.54mm_Vertical.step",
+    "PinHeader_1x13_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x15_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x17_P2.54mm_Horizontal.step",
     "PinHeader_1x18_P2.54mm_Vertical.step",
+    "PinHeader_1x20_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x22_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x24_P2.54mm_Horizontal.step",
     "PinHeader_1x25_P2.54mm_Vertical.step",
+    "PinHeader_1x27_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x29_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x31_P2.54mm_Horizontal.step",
     "PinHeader_1x32_P2.54mm_Vertical.step",
+    "PinHeader_1x34_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x36_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x38_P2.54mm_Horizontal.step",
     "PinHeader_1x39_P2.54mm_Vertical.step",
     "PinHeader_2x01_P2.54mm_Vertical.step",
+    "PinHeader_2x04_P2.54mm_Horizontal.step",
+    "PinHeader_2x06_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x08_P2.54mm_Vertical.step",
+    "PinHeader_2x11_P2.54mm_Horizontal.step",
+    "PinHeader_2x13_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x15_P2.54mm_Vertical.step",
+    "PinHeader_2x18_P2.54mm_Horizontal.step",
+    "PinHeader_2x20_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x22_P2.54mm_Vertical.step",
+    "PinHeader_2x25_P2.54mm_Horizontal.step",
+    "PinHeader_2x27_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x29_P2.54mm_Vertical.step",
+    "PinHeader_2x32_P2.54mm_Horizontal.step",
+    "PinHeader_2x34_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x36_P2.54mm_Vertical.step",
+    "PinHeader_2x39_P2.54mm_Horizontal.step",
     "Relay_DPDT_Finder_30.22.step",
     "Relay_DPDT_Omron_G5V-2.step",
+    "Relay_DPDT_Omron_G6H-2.step",
+    "Relay_DPDT_Panasonic_JW2.step",
     "Relay_SPDT_HJR-4102.step",
     "Relay_SPDT_Omron_G6E.step",
     "Relay_SPDT_Omron_G6EK.step",
     "Relay_SPDT_StandexMeder_SIL_Form1C.step",
     "Relay_SPST_StandexMeder_SIL_Form1A.step",
     "Relay_SPST_StandexMeder_SIL_Form1B.step",
+    "Relay_StandexMeder_DIP_HighProfile.step",
+    "Relay_StandexMeder_DIP_LowProfile.step",
     "Relay_StandexMeder_UMS.step",
+    "SW_DIP_SPSTx01_Piano_10.8x4.1mm_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx02_Piano_10.8x6.64mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx02_Piano_CTS_Series194-2MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx03_Piano_10.8x9.18mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx03_Piano_CTS_Series194-3MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx04_Piano_10.8x11.72mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx04_Piano_CTS_Series194-4MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx05_Piano_10.8x14.26mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx05_Piano_CTS_Series194-5MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx06_Piano_10.8x16.8mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx06_Piano_CTS_Series194-6MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx07_Piano_10.8x19.34mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx07_Piano_CTS_Series194-7MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx08_Piano_10.8x21.88mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx08_Piano_CTS_Series194-8MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx09_Piano_10.8x24.42mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx09_Piano_CTS_Series194-9MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx10_Piano_10.8x26.96mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx10_Piano_CTS_Series194-10MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx11_Piano_10.8x29.5mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx11_Piano_CTS_Series194-11MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx12_Piano_10.8x32.04mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx12_Piano_CTS_Series194-12MSTN_W7.62mm_P2.54mm.step",
 ];
 
