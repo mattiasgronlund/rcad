@@ -29,18 +29,41 @@
 //! for every family below, how many of the tool's planes fall in each of the
 //! three rows.
 //!
-//! # One refusal answers for all five, and it is not the one this lane built
+//! # Two refusals answer for all five, and both of them are true
 //!
-//! Every bend family below comes back
-//! `WhereALineMeetsATorusIsAQuartic` and never
-//! `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`. That is the arrangement's
-//! order and not an accident: a fuse asks **where three surfaces meet** before
-//! it asks what two of them cross in, and a line meets a torus four times
-//! whatever the pair is. So the crossing refusals this lane named are correct
-//! and are reachable from `intersect`, and *no fuse reaches them* — which means
-//! naming the plane-and-torus quartic buys a fuse nothing until the
-//! three-surface quartic is solved too, and that is worth knowing before
-//! somebody spends a lane on the first alone.
+//! This paragraph has said three different things across three lanes, and the
+//! rate under it has been 0 of 96 for every one of them. What changed each time
+//! is *which* refusal fires, and only the last of the three is a reason that
+//! survives reading:
+//!
+//! 1. `WhereALineMeetsATorusIsAQuartic` — refused on surface **type**, before a
+//!    root was worked out. Gone: where a straight line meets a torus is answered
+//!    now, in nought, one, two, three or four places.
+//! 2. `ACrossingThisCannotBeOrderedAlong` — and this one was **false**. Every
+//!    crossing a bend has is a circle, and every one of them can be ordered; the
+//!    arrangement's list of orderable surface pairs simply had no plane-and-torus
+//!    row in it.
+//! 3. What is left, which is the theorem at the top of this file arriving as a
+//!    measurement:
+//!
+//! | tool | the refusal | why it is true |
+//! |---|---|---|
+//! | a slab square to the axis | `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` | the slab's four sides run parallel to the axis and off it, and such a plane cuts Cassini ovals |
+//! | a wedge through the axis | the same | two of its planes hold the axis; the one that closes it radially does neither |
+//! | a bar through the hole | `ACrossingBetweenATorusAndAnotherCurvedSurface` | a torus and a pipe cross in a space curve of degree eight |
+//! | a ball in the bend | the same | a torus and a ball, likewise |
+//! | a second bend | the same | two tori, likewise |
+//!
+//! Both are `intersect`'s, both are raised before the arrangement is reached,
+//! and both are **gaps** in `rcad-geom` rather than anything topology can close:
+//! the curves are all there and none of them can be named with the runs this
+//! kernel has. So the first two rows are the theorem above, and the last three
+//! are §36.20's quartic-and-worse, still weighed and still left.
+//!
+//! The rate has not moved through any of this — 0 of 96, three times over. That
+//! is the finding rather than a disappointment: a refusal walking down the
+//! pipeline one stage per lane is what it looks like when several true blockers
+//! are stacked, and only the last of them tells you where a bend really stops.
 //!
 //! # The control is the whole reason these numbers mean anything
 //!
@@ -68,7 +91,7 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Error as GeomError, Isometry, Point, Scale, Vector};
+use rcad_geom::{Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -411,14 +434,19 @@ fn no_box_of_planes_can_close_round_a_torus_axis_without_a_quartic() {
 /// because every corner the arrangement would need to find is one the two
 /// solids already agree on exactly.
 ///
-/// It refuses anyway, under all three rules, and always with the same
-/// complaint: `fuse/arrange.rs` asks where three surfaces meet **before** it
-/// asks what two of them cross in, and a straight line meets a torus in a
-/// quartic whatever the pair behind it is — the same reason
-/// `WhereALineMeetsATorusIsAQuartic` answers for every family in
-/// `how_often_a_certified_fuse_with_a_torus_in_it_refuses`. So this is not
-/// four more measurements of the same thing; it is the demonstration that
-/// there is no tool, drawn or undrawn, this kernel fuses a bend with today.
+/// It refuses anyway, under all three rules, and it gets **further** than any
+/// drawn tool does. The two bends share every surface, so `intersect` answers
+/// `SameSurface` where it would otherwise refuse a torus against a torus, and
+/// every plane-and-torus crossing either bend has is one of the two circle
+/// families. So the arrangement runs: it finds the corners, puts them in order
+/// round the circles they sit on, and stops at
+/// `TwoCurvesTouchWithoutCrossing` — two curves on one face meeting without
+/// crossing, which is exactly what two coincident solids give you and is a
+/// **gap** §38.2 already names and §39.4 already files.
+///
+/// That makes this the one place in the file where the arrangement is reached
+/// at all, and so the one that says the ordering added for a bend is real code
+/// and not a gate nothing walks through.
 #[test]
 fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
     let policy = Policy::certified();
@@ -430,12 +458,9 @@ fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
         let mut log = ProvenanceLog::new();
         let refused = model.fuse(&[first], &[second], rule, &policy, &mut log);
         assert!(
-            matches!(
-                refused,
-                Err(Error::Geometry(GeomError::WhereALineMeetsATorusIsAQuartic))
-            ),
-            "{rule:?} of a bend and a bit-for-bit copy of itself: expected the three-surface \
-             quartic to refuse it, got {refused:?}"
+            matches!(refused, Err(Error::TwoCurvesTouchWithoutCrossing { .. })),
+            "{rule:?} of a bend and a bit-for-bit copy of itself: expected the arrangement to \
+             reach the two coincident curves and refuse there, got {refused:?}"
         );
     }
 }

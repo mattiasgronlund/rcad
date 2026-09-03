@@ -2708,18 +2708,47 @@ fn how_a_crossing_runs(
 
 /// Whether the pair crosses in one closed curve lying in a plane.
 ///
-/// The same four arms [`which_comes_first_round_a_crossing`] can answer about,
-/// asked before anything is built rather than after (§34.10's last two rows).
+/// The same arms [`which_comes_first_round_a_crossing`] can answer about, asked
+/// before anything is built rather than after (§34.10's last two rows).
+///
+/// # A plane and a torus is a row, and it does not read the placement
+///
+/// Only two families of plane cut a torus in circles — square to the axis, and
+/// through it — and every other plane cuts it in a quartic. That is a fact about
+/// where the plane sits and not about the two kinds, so this cannot decide it.
+/// It does not have to: [`intersect`](rcad_geom::intersect) names a plane-and-
+/// torus crossing **only** in those two families and refuses the rest by name,
+/// so a run of that pair reaching here is a circle, and the pair is asked the
+/// same three signs again by [`which_comes_first_round_a_crossing`] when a
+/// point is actually ordered. Where the two disagree — `intersect` asks under a
+/// policy and the ordering asks exactly — the ordering **refuses**, and a
+/// refusal is what this function returning `true` too often costs. Returning it
+/// too *rarely* costs a bend every fuse it has, which is what it used to.
+///
+/// # This is still a hand-kept list, and it is still the fifth of its kind
+///
+/// Seven `|`-ed pairs out of twenty-five, so a cone and a torus landed this
+/// milestone and fell out of it in silence — the same shape as `walk`'s three
+/// hand-kept lists (§24.5) and the fifth time this milestone that a list of
+/// surface pairs did not learn about a new surface kind. What would stop the
+/// sixth is naming all twenty-five and letting the `_` cover only a kind that
+/// does not exist, which is what [`a_plane_along_a_pipes_axis`] below does. It
+/// is not done here because that arm costs one wildcard and `check-wildcards`'
+/// budget lives in the `justfile`, outside this crate.
 fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
     matches!(
         (one, other),
-        (Surface::Plane(_), Surface::Sphere(_))
-            | (Surface::Sphere(_), Surface::Plane(_))
-            | (Surface::Plane(_), Surface::Cylinder(_))
-            | (Surface::Cylinder(_), Surface::Plane(_))
+        // A plane cuts a ball, a pipe and a cone in a conic lying in the plane.
+        // A plane along a pipe's axis cuts straight lines instead, and never
+        // reaches here: `a_plane_along_a_pipes_axis` answers it one step up.
+        (Surface::Plane(_), Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_))
+            | (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_), Surface::Plane(_))
+            // Two balls cross in the circle their radical plane cuts.
             | (Surface::Sphere(_), Surface::Sphere(_))
-            | (Surface::Plane(_), Surface::Cone(_))
-            | (Surface::Cone(_), Surface::Plane(_))
+            // A plane and a torus: circles in the two families `intersect`
+            // names, and no run of any other family exists to be asked.
+            | (Surface::Plane(_), Surface::Torus(_))
+            | (Surface::Torus(_), Surface::Plane(_))
     )
 }
 
@@ -3694,12 +3723,14 @@ mod curved {
 
 #[cfg(test)]
 mod what_the_curved_arrangement_reaches {
-    use rcad_geom::{Axis, Isometry, Point, Scale, Surface, Vector};
-    use rcad_predicates::{Policy, ProvenanceLog};
+    use rcad_geom::{
+        Axis, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus, Vector, intersect,
+    };
+    use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 
     use super::super::bake::bake;
     use super::super::cuts;
-    use super::split_a_face;
+    use super::{HowItRuns, how_a_crossing_runs, round_a_closed_crossing, split_a_face};
     use crate::{Error, Model, SolidKey};
 
     /// What every face of a pair comes apart into, as one word per face: the
@@ -3955,6 +3986,84 @@ mod what_the_curved_arrangement_reaches {
             said.iter().any(|row| row.starts_with("pipe refused")),
             "and the wall of the bar with it, got {said:?}"
         );
+    }
+
+    /// The three plane-and-torus crossings a capped bend of pipe has, ordered
+    /// rather than refused.
+    ///
+    /// A bend carries exactly these: its two caps are planes **through** the
+    /// ring's axis, and a slab laid across it cuts the ring in the **two
+    /// circles round the axis** — the outer one and the inner one the bend's
+    /// seam runs along. `a_pair_that_crosses_in_a_conic` listed seven ordered
+    /// pairs and plane-and-torus was not one, so every one of these came back
+    /// `ACrossingThisCannotBeOrderedAlong` and a bend could not be fused with
+    /// anything at all, itself included.
+    ///
+    /// The second half is what says the first is not vacuous. Reaching
+    /// [`HowItRuns::RoundAClosedCurve`] only means the gate opened; what says
+    /// the ordering *works* is that two points on the curve come back decided
+    /// both ways round, and that the two circles round the axis come back
+    /// **opposite** — the inner one winds about the plane's negated normal, and
+    /// a row that answered `CannotTell` or handed back `+n` for both would
+    /// order a bend's seam backwards instead of refusing.
+    #[test]
+    fn the_three_plane_and_torus_crossings_a_bend_has_are_ordered_rather_than_refused() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let ring = Surface::Torus(
+            Torus::new(Axis::z(), 4.0, 1.0).expect("a ring of radius four with a tube of one"),
+        );
+
+        let cap = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("a cap plane holding the ring's axis"),
+        );
+        let across = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("a slab face square to the ring's axis"),
+        );
+
+        // The meridian circles are centred at `(±4, 0, 0)` with radius one; the
+        // circles round the axis have radius `4 ± 1` in the plane `z = 0`.
+        for (named, flat, on_the_curve) in [
+            ("a cap through the axis", &cap, [4.0, 0.0, 1.0]),
+            ("a slab square to the axis", &across, [5.0, 0.0, 0.0]),
+        ] {
+            let SurfaceMeet::Curves(runs) = intersect(flat, &ring, &policy, &mut log)
+                .unwrap_or_else(|why| panic!("{named} cuts the ring in circles: {why:?}"))
+            else {
+                panic!("{named} cuts the ring in two curves and nothing else");
+            };
+            assert_eq!(runs.len(), 2, "{named} cuts the ring in two circles");
+            for run in &runs {
+                let at = PredicatePoint::from(on_the_curve);
+                let ran = how_a_crossing_runs(flat, &ring, run, at, &mut log)
+                    .unwrap_or_else(|why| panic!("{named} could not be ordered: {why:?}"));
+                assert!(
+                    matches!(ran, HowItRuns::RoundAClosedCurve { .. }),
+                    "{named} runs round a closed curve, not along an axis"
+                );
+            }
+        }
+
+        // Both circles round the axis, ordered from the same angle round the
+        // same axis: quarter of a turn on, then half a turn on.
+        let ordered_round_the_axis = |radius: f64| {
+            let point = |angle: f64| {
+                PredicatePoint::from([radius * angle.cos(), radius * angle.sin(), 0.0])
+            };
+            round_a_closed_crossing(
+                [&across, &ring],
+                point(0.0),
+                point(core::f64::consts::FRAC_PI_2),
+                point(core::f64::consts::PI),
+            )
+            .expect("a circle round the axis is ordered")
+        };
+        let outer = ordered_round_the_axis(5.0);
+        let inner = ordered_round_the_axis(3.0);
+        assert_eq!(outer, Decision::Pos, "the outer circle winds about `+n`");
+        assert_eq!(inner, Decision::Neg, "and the inner one about `-n`");
     }
 }
 
