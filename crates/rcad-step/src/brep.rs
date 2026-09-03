@@ -12,7 +12,8 @@ use std::collections::BTreeMap;
 use rcad_geom::{EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{
-    DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex, Model, SolidBuilder, SolidKey,
+    DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex, Invalid, Model, SolidBuilder,
+    SolidKey,
 };
 use smallvec::smallvec;
 
@@ -604,35 +605,72 @@ impl Walk {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<SolidKey, Refusal> {
-        let brep = self.brep;
         let builder = self.builder.clone();
         match builder.build(model, policy, log) {
             Ok(solid) => Ok(solid),
-            Err(why) => Err(match self.a_corner_provably_off_a_curved_face(reading) {
-                Some(off) => off,
-                None => match self.which_entity_the_builder_meant(&why) {
-                    Some(entity) => Refusal::ThisEntityOfTheSolidWasRefused {
-                        solid: brep,
-                        entity,
-                        why: Box::new(why),
-                    },
-                    None => Refusal::TheSolidTheFileDescribesIsNotOne {
-                        solid: brep,
-                        why: Box::new(why),
-                    },
-                },
-            }),
+            Err(why) => Err(self.what_stopped_the_build(reading, why)),
+        }
+    }
+
+    /// The refusal to publish for a build that was stopped, which is **the
+    /// reason that came back and never a search for a different one**.
+    ///
+    /// Only one reason gets looked into further, and only because it is the one
+    /// reason that arrives with no number attached:
+    /// [`Invalid::VertexOffItsFaceSurface`] says a corner is certified off a
+    /// surface and says nothing about *which* corner or by *how much*. Both
+    /// scans below answer exactly that question about exactly that reason.
+    ///
+    /// **Every other reason is published as it stands.** Before `arms0`, the
+    /// curved-face scan ran on every refusal whatever it said, so a file the
+    /// builder stopped for a wire that does not close could be published as a
+    /// corner off a curved face — a corner that had nothing to do with why the
+    /// build failed, and whose miss the corpus report then printed as if it
+    /// measured the refusal.
+    ///
+    /// **Which of the two scans answers first is still a guess, and it is a
+    /// measured one.** `Model::validate` reaches this reason from two places —
+    /// `check_edges`, on the plane an arc is *named* by, and then
+    /// `check_curved_face`, on the surface a face sits on — and the reason it
+    /// hands back does not say which. Asking `check_edges`' scan first because
+    /// `check_edges` runs first is wrong in practice: `check_edges` spends
+    /// `Model::what_writing_a_plane_down_costs` of room, which is 64 coordinate
+    /// spacings, and the arc misses this scan finds in the KiCad corpus have a
+    /// median of 0.64 of one. So the corners it would name are corners the
+    /// sweep let straight through, and the face is what stopped the build. The
+    /// face is asked first for that reason and not for the order of the checks.
+    ///
+    /// Closing that properly wants the sweep's own two allowances, and neither
+    /// `Model::what_writing_a_plane_down_costs` nor
+    /// `Model::what_writing_a_point_down_costs` is reachable from this crate.
+    fn what_stopped_the_build(self, reading: &Reading<'_>, why: rcad_topo::Error) -> Refusal {
+        if matches!(
+            why,
+            rcad_topo::Error::Invalid(Invalid::VertexOffItsFaceSurface)
+        ) && let Some(off) = self
+            .a_corner_provably_off_a_curved_face(reading)
+            .or_else(|| self.a_corner_provably_off_the_plane_of_its_own_arc(reading))
+        {
+            return off;
+        }
+        match self.which_entity_the_builder_meant(&why) {
+            Some(entity) => Refusal::ThisEntityOfTheSolidWasRefused {
+                solid: self.brep,
+                entity,
+                why: Box::new(why),
+            },
+            None => Refusal::TheSolidTheFileDescribesIsNotOne {
+                solid: self.brep,
+                why: Box::new(why),
+            },
         }
     }
 
     /// The worst corner this description puts on a curved face it is provably
     /// not on, with how far off it is.
     ///
-    /// **Asked only after a build has already been refused**, so nothing is
-    /// loosened and no import that succeeded went through here. What it adds is
-    /// the number: `Model::validate` says a corner of a curved face is off its
-    /// surface and says nothing about *which* corner or by *how much*, and both
-    /// are what somebody deciding what the next milestone builds needs.
+    /// **Asked only of a build the sweep stopped for exactly this**, so nothing
+    /// is loosened and no import that succeeded went through here.
     ///
     /// The sign comes from the same certified predicate the sweep asked —
     /// `Decision::Pos` or `Decision::Neg` and nothing else counts, so a corner
@@ -668,33 +706,28 @@ impl Walk {
                 }
             }
         }
-        if let Some(off) = worst {
-            return Some(off);
-        }
-        self.a_corner_provably_off_the_plane_of_its_own_arc(reading)
+        worst
     }
 
     /// The worst corner this description puts at the end of an arc whose own
     /// plane it is provably not on.
     ///
-    /// **This one is the vocabulary's and not the file's.** An arc is named by
-    /// the surfaces either side of it *and a second surface*, because two ends
-    /// on a closed curve name two arcs — and `Model::validate` asks the corners
-    /// of a named arc to be exactly on that second surface. The second surface
-    /// is the plane the circle lies in, and a [`Plane`] scales its normal to
-    /// length one and rounds its offset, so a corner is exactly on it only where
-    /// the numbers cancel: an axis-aligned circle whose ends share the centre's
-    /// coordinate along the axis. Every other arc in the world is refused for a
-    /// rounding in a name rather than for anything about the shape.
+    /// **Asked only of a build the sweep stopped for a corner off a surface**,
+    /// the same as its curved-face twin above, and asked only when that one
+    /// found nothing.
     ///
-    /// **A gap, and what closes it is one crate away.** The corner really is on
-    /// the curve; what it is off is the *stored* plane, by the rounding of one
-    /// division and one dot product. `check_flat_face` already allows a corner
-    /// that much slack against the plane its face sits on
-    /// (`Model::allowed_wobble`) and `check_edges` allows none against the plane
-    /// an edge is *named* by, which is the weaker claim of the two. Reported
-    /// here rather than worked around, because `rcad-topo` is not this lane's
-    /// crate (§15.9).
+    /// An arc is named by the surfaces either side of it *and a second
+    /// surface*, because two ends on a closed curve name two arcs — and
+    /// `check_edges` asks the corners of a named arc to be on that second
+    /// surface. The second surface is the plane the circle lies in, and a
+    /// [`Plane`] scales its normal to length one and rounds its offset, so a
+    /// corner is exactly on it only where the numbers cancel.
+    ///
+    /// **This measures more corners than the sweep refuses**, because
+    /// `d343191` gave `check_edges` `Model::what_writing_a_plane_down_costs` of
+    /// room for exactly that rounding and this crate cannot read that number.
+    /// So the corner it names is the worst one off the plane and not
+    /// necessarily the one the sweep stopped at.
     fn a_corner_provably_off_the_plane_of_its_own_arc(
         &self,
         reading: &Reading<'_>,
