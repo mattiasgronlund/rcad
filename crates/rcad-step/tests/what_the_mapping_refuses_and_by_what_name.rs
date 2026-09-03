@@ -312,15 +312,17 @@ fn geometry_that_is_not_a_working_shape_is_refused_by_name() {
 /// through, four faces are built, and the refusal comes back from the sweep with
 /// the whole solid's name on it.
 ///
-/// **This test is green because of a defect, and here is the defect by name.**
+/// **The defect this test was written around is fixed, and this test is what
+/// says so.** It used to be green for a bad reason:
 /// [`a_plate_bounded_by_an_arc_and_its_chord`] writes a **quarter** arc, and
-/// `rcad_geom::walk` steps an arc a quarter turn at a time and never takes fewer
-/// than one step — so at `as_coarse_as_a_mesh_gets`, which is what the sweep
-/// meshes with, that arc gets no point between its ends and the flat face fans
-/// into two corners `rcad-mesh` will not take as a loop. The repro is the
-/// ignored `a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh`
-/// in `rcad-topo/tests/a_face_bounded_by_two_steps.rs`, and closing it — a floor
-/// on how coarsely a curved boundary may be walked — changes this test again.
+/// `rcad_geom::walk` never took fewer than one step — so at
+/// `as_coarse_as_a_mesh_gets`, which is what the sweep meshes with, that arc got
+/// no point between its ends and the flat face fanned into two corners
+/// `rcad-mesh` will not take as a loop. The old rustdoc here named its own
+/// undoing: *"closing it — a floor on how coarsely a curved boundary may be
+/// walked — changes this test again."* It was closed, the floor is two pieces
+/// because one piece shows **none** of a bend at any deflection, and the file
+/// imports.
 ///
 /// **Letting the loop through found a second thing, and it was in front rather
 /// than behind.** The file's chord face read
@@ -335,29 +337,18 @@ fn geometry_that_is_not_a_working_shape_is_refused_by_name() {
 /// `written_by_hand`, and this test's refusal moving from the winding to the
 /// mesh is the test of that fix.
 ///
-/// The half-turn version of this shape does hold up as a *solid*:
-/// `a_face_bounded_by_two_steps.rs` builds it face by face and sweeps it with
-/// nothing approximated. What is missing is that shape **as a file**, so
-/// something proves the rule from bytes. It is not one value: `a_pie` shares its
-/// far corner between both arms and the quarter-disc needs that corner where it
-/// is, so a half-turn arm wants its own corner, its own chord normal, and a row
-/// in this crate's control with `πr²h/2` to check.
+/// **So this is where the two-step rule is proved from bytes**, which is the
+/// thing the old note said nothing did. `a_face_bounded_by_two_steps.rs` builds
+/// the shape face by face and sweeps it with nothing approximated; this reads it
+/// out of a file, which is the path a real part takes.
 #[test]
-fn a_two_step_loop_is_no_longer_the_mappings_to_refuse() {
+fn a_two_step_loop_imports() {
     let segment = a_plate_bounded_by_an_arc_and_its_chord(2.0, 4.0, ".MILLI.");
-    let Refusal::TheSolidTheFileDescribesIsNotOne { solid, why } = refusal(&segment) else {
-        panic!("the loop is held now, so the refusal is the whole solid's");
-    };
-    assert_eq!(solid, EntityId(801));
-    let rcad_topo::Error::AWireDoesNotFanIntoALoopToMesh { why: fanned, .. } = &*why else {
-        panic!("the sweep should get as far as meshing the plate, and said {why:?}");
-    };
-    // `rcad-mesh` is not a dependency here, so the count is read off the text
-    // rather than off `NotALoop::TooFewCorners`.
+    let import = read(&segment).expect("a plate bounded by an arc and its chord imports");
     assert_eq!(
-        fanned.to_string(),
-        "a loop needs at least three corners, and this has 2",
-        "the quarter arc puts no corner between its two ends"
+        import.solids().len(),
+        1,
+        "a segment plate is one solid, and the two-step loop is now held all the way through"
     );
 }
 

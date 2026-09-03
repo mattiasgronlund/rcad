@@ -174,17 +174,14 @@ pub enum Error {
     /// triangulator can use — fewer than three distinct corners in the
     /// surface's own two coordinates, or one that is not a finite number.
     ///
-    /// **Two ways to reach it, and only one of them is bad input.** A face
-    /// bounded by an arc and its chord has two corners in space, and the arc
-    /// puts a third between them only if it turns over more than a quarter —
-    /// `rcad_geom::walk` steps an arc a quarter turn at a time and never takes
-    /// fewer than one step, so at the deflection [`Model::validate`] meshes
-    /// with, an arc of a quarter turn or less contributes nothing. That is a
-    /// **gap**: the face has area and the walk could not reach it, and
-    /// `a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh` is
-    /// the ignored repro. The family of fixes is a floor on how coarsely a
-    /// curved boundary may be walked, either in the step count or in what
-    /// deflection the sweep asks for.
+    /// **There used to be two ways to reach it. The first was a gap and it is
+    /// closed.** A face bounded by an arc and its chord has two corners in
+    /// space, and `rcad_geom::walk` never took fewer than one step — so at the
+    /// deflection [`Model::validate`] meshes with, an arc of a quarter turn or
+    /// less put nothing between its ends and the face fanned into two corners.
+    /// The walk now takes at least two pieces of any bend, because one piece
+    /// shows **none** of it at any deflection and hands back the chord, which
+    /// is what a straight run already is.
     ///
     /// The other way is bad input, and a panic is the wrong answer to it. A
     /// face's *stored surface* is data, not a fact this checks before walking

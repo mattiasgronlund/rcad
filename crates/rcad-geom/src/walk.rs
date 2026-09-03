@@ -825,6 +825,13 @@ fn walk_an_endless_bend(
 /// equality with `‖p″‖ = 2‖bend‖`. So the widest step is `√(room / that)`, and
 /// there is no turning limit to add: an endless bend never comes back round.
 ///
+/// **The floor is the same floor, and it was the same defect.** A tolerant
+/// caller with room to spare got one piece here too, and one piece of a
+/// parabola is the chord across the whole stretch — with the two extreme points
+/// kept, the walk handed back a straight line standing in for a bend. See
+/// [`FEWEST_STEPS_THAT_SHOW_A_BEND`], whose `1 − 1/n²` is an equality for this
+/// shape rather than a limit.
+///
 /// # Errors
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the count is not a number,
@@ -846,8 +853,38 @@ fn how_many_pieces_an_endless_bend_takes(
             most: MOST_POINTS_ALONG_ONE_CROSSING,
         });
     }
-    Ok(steps.max(1.0) as usize)
+    Ok(steps.max(FEWEST_STEPS_THAT_SHOW_A_BEND as f64) as usize)
 }
+
+/// The fewest pieces any curved run is walked into, whatever the deflection and
+/// however little the run bends.
+///
+/// **Two, and the reason is a cliff and not a taste.** Walk a curve into `n`
+/// equal pieces and the polyline stands off the run's own chord over a fraction
+/// of the area the curve stands off it by; for a parabola that fraction is
+/// exactly `1 − 1/n²`, since the area between a parabola and a chord over a span
+/// of `D` is `‖bend‖·D³/6` and `n` pieces leave `n` slivers of `‖bend‖(D/n)³/6`.
+/// For a circular arc turning by `θ` it is
+/// `(n·sin(θ/n) − sin θ) / (θ − sin θ)`, which is `1 − 1/n²` as the pieces get
+/// short and never below `0.63` while [`how_many_steps`] keeps a piece under a
+/// quarter turn.
+///
+/// So the sequence is `0`, about `3/4`, about `8/9`. **One piece shows none of
+/// the bend, for every `θ`, at every deflection** — the run comes back as its
+/// own chord, which is what [`EdgeRun::Straight`] already comes back as, and a
+/// caller cannot tell a curve from a straight line. Two is the first count that
+/// is not that, and it is where the floor goes because that is where the cliff
+/// is: nought to three quarters. Three quarters to eight ninths is *refinement*,
+/// and refinement is the question `room` already asks — charging every walk for
+/// it would be spending points on a bend nobody asked to see more of.
+///
+/// A quarter arc is what made this visible. `by_turning` allows a whole quarter
+/// in one step and `by_bending` asks for nothing at all when the caller has
+/// room to spare, so at
+/// `rcad-topo`'s `as_coarse_as_a_mesh_gets` a quarter arc came back with no
+/// point between its ends at all, and a flat face bounded by that arc and its
+/// chord fanned into two corners rather than a piece of disc.
+const FEWEST_STEPS_THAT_SHOW_A_BEND: usize = 2;
 
 /// A parabola: `vertex + across·s + bend·s²`, with `across` of length one and
 /// square to `bend`.
@@ -1103,12 +1140,15 @@ fn room_left_over(deflection: Deflection, deviation: f64, policy: &Policy) -> Re
 
 /// How many straight pieces this stretch of the conic has to be walked into.
 ///
-/// Two questions, and the answer is the larger. **How far it bends**: the arc
-/// from one corner to the next stands off its own chord by at most
-/// `reach · (1 − cos(step / 2))`, so that is what has to stay inside `room`.
-/// **How far it turns**: a step of more than half a turn cannot be told from one
-/// the other way, so none is allowed past a quarter — which is the same bound
-/// `rcad-topo`'s mesher already refuses to step past, for the same reason.
+/// Two questions, and the answer is the larger, held up to a floor.
+/// **How far it bends**: the arc from one corner to the next stands off its own
+/// chord by at most `reach · (1 − cos(step / 2))`, so that is what has to stay
+/// inside `room`. **How far it turns**: a step of more than half a turn cannot
+/// be told from one the other way, so none is allowed past a quarter — which is
+/// the same bound `rcad-topo`'s mesher already refuses to step past, for the
+/// same reason. Neither question has anything to say about a shallow arc a
+/// tolerant caller asked nothing of, and that is what
+/// [`FEWEST_STEPS_THAT_SHOW_A_BEND`] is for.
 ///
 /// # The floor goes on last, and it used to go on first
 ///
@@ -1141,7 +1181,7 @@ fn how_many_steps(conic: &Conic, turns_over: f64, room: f64) -> Result<usize> {
             most: MOST_POINTS_ALONG_ONE_CROSSING,
         });
     }
-    Ok(steps.max(1.0) as usize)
+    Ok(steps.max(FEWEST_STEPS_THAT_SHOW_A_BEND as f64) as usize)
 }
 
 /// A conic in a plane: a centre and two semi-axis vectors square to each other.

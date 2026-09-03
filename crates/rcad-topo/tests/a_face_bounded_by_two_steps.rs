@@ -164,26 +164,25 @@ fn a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh() {
     );
 }
 
-/// The gap this lane found behind its own and could not reach: the sweep's
-/// mesh, not the two length rules.
+/// The same plate on a quarter arc, which is the shape that found the floor.
 ///
-/// `rcad_geom::walk`'s `how_many_steps` takes the larger of two counts and then
-/// a floor of one step. How far the arc *bends* asks for more steps as the
-/// deflection tightens, so a fine mesh does put points on a quarter arc; how far
+/// `rcad_geom::walk`'s `how_many_steps` took the larger of two counts and then a
+/// floor of **one** step. How far the arc *bends* asks for more steps as the
+/// deflection tightens, so a fine mesh did put points on a quarter arc; how far
 /// it *turns* asks for one, and at the deflection `Model::validate` meshes with
-/// — `as_coarse_as_a_mesh_gets`, which is `f64::MAX` — the bending count is one
-/// as well. So the sweep's own mesh puts no point between the ends of an arc of
-/// a quarter turn or less. The flat face's boundary is then two corners, which
-/// is a chord and not a piece of disc, and `rcad-mesh` refuses it as a loop
-/// rather than triangulating a face that is not there. Refusing what it was
-/// handed is right; handing it that is the gap.
+/// — `as_coarse_as_a_mesh_gets`, which is `f64::MAX` — the bending count was one
+/// as well. So the sweep's own mesh put no point between the ends of an arc of a
+/// quarter turn or less, the flat face's boundary was two corners, and
+/// `rcad-mesh` refused it as a loop rather than triangulating a face that was
+/// not there. Refusing what it was handed was right; handing it that was the
+/// gap.
 ///
-/// The fix is a floor on how coarsely a *curved boundary* may be walked, in
-/// `rcad-geom`'s step count or in what deflection the sweep asks for. Neither
-/// file is this lane's.
+/// The floor is now `FEWEST_STEPS_THAT_SHOW_A_BEND`, which is two, because one
+/// piece shows none of the bend for any arc at any deflection and two shows
+/// three quarters of it. **This test is what fails when that floor goes back to
+/// one**, at the `TooFewCorners { count: 2 }` it used to fail with.
 #[test]
-#[ignore = "open: an arc of a quarter turn or less gets no point between its ends, so its face fans into two corners"]
-fn a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh() {
+fn a_plate_bounded_by_a_quarter_arc_and_its_chord_meshes_too() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
     let mut model = Model::new(a_working_size());
@@ -196,6 +195,10 @@ fn a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh() {
         Arc::AQuarterTurn,
     )
     .expect("a quarter arc and its chord bound a face too");
+
+    model
+        .validate(&policy, &mut log)
+        .expect("and the full sweep is happy with it");
 }
 
 #[test]
@@ -398,12 +401,13 @@ fn a_plane_at(height: f64, facing: Vector) -> Plane {
 ///
 /// **Which one is not a taste, it is a finding.** At the deflection the sweep
 /// meshes with — as coarse as a mesh gets — `rcad_geom::walk` steps an arc a
-/// quarter turn at a time and puts no point between the ends of anything
-/// shorter. So a half-turn arc gets one point on it and fans into a triangle,
-/// and a quarter-turn arc gets none and fans into two corners `rcad-mesh` will
-/// not take as a loop. That is a second gap behind this lane's, and
-/// `a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh` is its
-/// repro.
+/// quarter turn at a time, so a half-turn arc gets one point on it and fans into
+/// a triangle. A quarter-turn arc used to get none and fan into two corners
+/// `rcad-mesh` would not take as a loop; the walk now holds every curved run to
+/// `FEWEST_STEPS_THAT_SHOW_A_BEND` pieces, so it gets one point too. Both are
+/// built here because the two counts come from different halves of the step
+/// rule — the half turn from how far it turns, the quarter from the floor — and
+/// a change to either shows up in exactly one of them.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Arc {
     HalfATurn,
