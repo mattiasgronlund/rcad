@@ -17,7 +17,8 @@
 //! Neither is in this repository: hundreds of megabytes of somebody else's
 //! files do not belong in the tree, and the KiCad set is share-alike. Point
 //! `RCAD_STEP_CORPUS` at a directory holding `nist/` and `kicad/` and this runs;
-//! without it, it skips and says so.
+//! without it, this test **fails** rather than skips — green has to mean the
+//! corpus ran (decisions.md §44.10).
 //!
 //! It is not a tautology: it counts the files it found, prints the count with
 //! its denominator, and fails if either source came back empty — a corpus that
@@ -33,9 +34,7 @@ use rcad_step::{StepFile, Value};
 
 #[test]
 fn every_file_in_both_corpora_reads_and_the_rate_is_reported_per_source() {
-    let Some(root) = corpus() else {
-        return;
-    };
+    let root = corpus();
 
     let mut census: BTreeMap<String, usize> = BTreeMap::new();
     let mut deepest = 0;
@@ -146,18 +145,20 @@ fn how_deep(value: &Value, depth: usize) -> usize {
     }
 }
 
-fn corpus() -> Option<PathBuf> {
-    let Some(root) = env::var_os("RCAD_STEP_CORPUS") else {
-        println!("RCAD_STEP_CORPUS is not set, so there is no corpus to read; skipping");
-        return None;
-    };
+fn corpus() -> PathBuf {
+    let root = env::var_os("RCAD_STEP_CORPUS").unwrap_or_else(|| {
+        panic!(
+            "RCAD_STEP_CORPUS is not set. Point it at a directory holding nist/ and kicad/ (see \
+             this file's header) — this test does not skip on a missing corpus."
+        )
+    });
     let root = PathBuf::from(root);
     assert!(
         root.is_dir(),
         "RCAD_STEP_CORPUS points at {}, which is not a directory",
         root.display()
     );
-    Some(root)
+    root
 }
 
 fn files_under(directory: &Path) -> Vec<PathBuf> {

@@ -6,7 +6,8 @@
 //! against solids **this kernel built**. This is a stronger check: a solid
 //! that came out of a stranger's file, with a stranger's idea of how to name a
 //! cylinder or where to put a seam. Point `RCAD_STEP_CORPUS` at a directory
-//! holding `kicad/` and this runs; without it, it skips cleanly and says so.
+//! holding `kicad/` and this runs; without it, this test **fails** rather than
+//! skips — green has to mean the corpus ran (decisions.md §44.10).
 //!
 //! **A failure here is the point of the exercise, not a setback.** Nothing
 //! panics on a corpus file's account: every disagreement is caught, grouped by
@@ -41,9 +42,7 @@ enum Outcome {
 
 #[test]
 fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
-    let Some(root) = corpus() else {
-        return;
-    };
+    let root = corpus();
     let files = files_under(&root.join("kicad"));
     assert!(
         !files.is_empty(),
@@ -429,18 +428,20 @@ fn canonical(text: &str) -> String {
     out
 }
 
-fn corpus() -> Option<PathBuf> {
-    let Some(root) = env::var_os("RCAD_STEP_CORPUS") else {
-        println!("RCAD_STEP_CORPUS is not set, so there is no corpus to round-trip; skipping");
-        return None;
-    };
+fn corpus() -> PathBuf {
+    let root = env::var_os("RCAD_STEP_CORPUS").unwrap_or_else(|| {
+        panic!(
+            "RCAD_STEP_CORPUS is not set. Point it at a directory holding kicad/ (see this \
+             file's header) — this test does not skip on a missing corpus."
+        )
+    });
     let root = PathBuf::from(root);
     assert!(
         root.is_dir(),
         "RCAD_STEP_CORPUS points at {}, which is not a directory",
         root.display()
     );
-    Some(root)
+    root
 }
 
 fn files_under(directory: &Path) -> Vec<PathBuf> {
