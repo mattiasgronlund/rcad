@@ -136,13 +136,14 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 /// the solid is sound and the kernel simply has no `SURFACE_CURVE` to write for
 /// the circle where a flat face meets a round one.
 ///
-/// **That gap is older than this list and the curved rounding did not widen
-/// it.** At `d23c700` this run said 45 of 46 with one such refusal, and it now
-/// says 45 of 96 with 51 — so **this list is exactly the old 46 less
-/// `Relay_DPDT_Finder_30.22.step`, which already failed**, and every one of the
-/// fifty files the curved rounding brought in has an edge between a plane and a
-/// pipe. Closing that is a writer lane and not this list's business. What this
-/// list is for is that the 45 which do round trip cannot quietly become 44.
+/// **That gap is older than this list and the curved rounding did not create
+/// it.** At `d23c700` this run said 45 of 46 with one such refusal; it now says
+/// 45 of 96 with 51. So **this list is exactly the old 46 less
+/// `Relay_DPDT_Finder_30.22.step`, which already failed**, nothing that used to
+/// round trip stopped, and all fifty files the curved rounding brought in run
+/// into the same writer. Closing that is a writer lane and not this list's
+/// business. What this list is for is that the 45 which do round trip cannot
+/// quietly become 44.
 const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "LED_Rectangular_W3.0mm_H2.0mm.step",
     "LED_Rectangular_W3.9mm_H1.8mm.step",

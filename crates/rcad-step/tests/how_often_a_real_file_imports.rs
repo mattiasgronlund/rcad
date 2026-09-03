@@ -204,9 +204,10 @@ fn how_many_dip_switches(name: &str) -> Option<u32> {
 /// how many switches and at what pitch and nothing about the ends. The corpus
 /// holds four: a piano-key body carrying its own size, the CTS piano-key
 /// series, a low-profile slide and a full-height slide. What tells them apart
-/// is the style word after the count and the two markers that may follow —
-/// everything else in the name grows with the count and cannot be part of the
-/// key.
+/// is the style word after the count and the two markers that may follow. The
+/// size a name carries cannot be part of the key, because that is the thing
+/// that grows with the count; the pitch and the row spacing are the same in all
+/// four and would tell nobody anything.
 fn which_dip_switch_family(name: &str) -> Option<String> {
     let after_count = name.strip_prefix("SW_DIP_SPSTx")?.split_once('_')?.1;
     let style = after_count.split('_').next()?;
