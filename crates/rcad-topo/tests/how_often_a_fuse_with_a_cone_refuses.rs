@@ -267,14 +267,26 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// being reported; a floor on the refusals too, because a family measured at
 /// none refused would be a rate to re-derive rather than one to relax (§19.1).
 ///
-/// The middle family, a frustum against an ordinary upright block, is asserted
-/// at **nothing answered**: what it measures is what the hyperbola row costs a
-/// real fuse, and every one of its fuses pays it today. It is pinned rather than
-/// printed because the number that says a cone can be cut is this one, and a
-/// number that only ever moves inside a `println!` is a number CI cannot tell
-/// you about. **The assertion is meant to be broken**, by the lane that teaches
-/// `where_a_plane_and_a_cone_cross` the hyperbola — and breaking it is the
-/// evidence that lane landed.
+/// The middle family, a frustum against an ordinary upright block, is the one
+/// the cone work is measured on, and its history is the argument for pinning a
+/// number rather than printing it.
+///
+/// It was pinned at **nothing answered, 96 of 96 refused, every one of them "a
+/// plane cuts this cone in a hyperbola"** — written down before any of that work
+/// was briefed, precisely so that an improvement would have to break a test
+/// instead of moving a `println!` nobody reads. **It broke**, and what it says
+/// having broken is worth more than the pin was:
+///
+/// - **6 of 96 answered**, so a block can now take a piece out of a frustum.
+/// - The other **90 refusals all moved**, from `where_a_plane_and_a_cone_cross`
+///   refusing to name the curve, to *"nothing can put points in order along this
+///   curve"*. Naming and drawing a hyperbola were the whole of the geometry's
+///   part; **ordering points along one is the arrangement's**, and it is the next
+///   piece of work this family is waiting on.
+///
+/// So the assertion is now a **floor at what has been measured**, in the shape
+/// §19.1 asks for: this family may not answer fewer than it does today. Re-derive
+/// it when it moves; do not relax it.
 ///
 /// **And the corner-up rate is not the cone's rate.** A round bar of the same
 /// size in the same place, against the same cubes, answers exactly as often —
@@ -325,13 +337,12 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                  here can name, and this answered {answered} of {fuses}",
                 family.named()
             ),
-            Family::AFrustumAgainstABlock => assert_eq!(
-                answered,
-                0,
-                "{}: every plane of an upright block that cuts this frustum at all cuts it in a \
-                 hyperbola, which `where_a_plane_and_a_cone_cross` refuses, so none of {fuses} \
-                 can come through — and {answered} did. If a lane just taught it the hyperbola, \
-                 this is the test that says so: re-derive the row here rather than delete it",
+            Family::AFrustumAgainstABlock => assert!(
+                answered >= 6,
+                "{}: this family was measured at 6 answered of 96 the day the hyperbola landed, \
+                 and it answered {answered} of {fuses} here. A cone that could be cut yesterday \
+                 and cannot today is a regression, not a rate: re-derive this number rather than \
+                 relax it (§19.1)",
                 family.named()
             ),
         }
