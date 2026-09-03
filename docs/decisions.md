@@ -14738,3 +14738,165 @@ this unit's own precautions and was caught only by re-running at the final tree.
 The second guess is that `brep.rs` turns out to have been distorting the
 refusal tables for longer than this unit, and that some earlier published rate
 moves when it is fixed.
+
+---
+
+## 46. The cut — the unit after the door, recorded 2026-09-03
+
+*Written before any lane was dispatched, in §44's shape and not §42's. Every file
+and line it cites was checked against the tree at `ef2b096`. It puts the
+corrections first, because a lane that reads a stale price scopes itself wrong on
+its first day.*
+
+### 46.1 The name, and what the unit is
+
+Called **the cut**. Roadmap §12 keeps M6 for local operations, per §44.1's
+precedent and principle 6.
+
+The name comes from §43.10's verdict on the kernel: *"a kernel that can build a
+shape and cannot cut it is a modeller you can put things into and not take things
+out of."* Cone and torus faces can be built, validated, measured, meshed and
+classified. They cannot be fused with much, and the suite pins that as expected
+behaviour — `how_often_a_fuse_with_a_cone_refuses.rs:316` asserts
+`AFrustumAgainstABar` at nothing answered, and
+`how_often_a_fuse_with_a_torus_refuses.rs:286` asserts *every* bend family there.
+
+**The sentence the unit earns:**
+
+> **A plane cuts a cone in a parabola, a hyperbola and a ruling, and the kernel
+> can draw all three.**
+
+The fuse clause — *and a frustum can be cut by a block* — is added **only if the
+fuse lane lands**. "96 of 96" is a downstream count nobody has measured against a
+fix, and §45.2 scored two numbers of exactly that shape at 88 → 50 and 75 → 1.
+
+### 46.2 Planning re-priced the headline twice, both times downward
+
+It looked like roadmap §13 row 1, the named schedule risk. It is not.
+
+1. **It is not missing cone×cone SSI.** `intersect` already computes plane×cone
+   and refuses two of the conic kinds that pair can produce.
+2. **§43.6 had already written the consumer down** — `ACrossingThatIsAParabola` /
+   `ACrossingThatIsAHyperbola`, *"consumer: a frustum against an upright block,
+   96 of 96 refusals"*.
+
+So the headline is a conic-classification gap inside a working function.
+
+**The refusal is decided twice, independently, by the same polynomial.**
+`E = (n·w)² − slope²·‖n×w‖²` is computed in `intersect.rs:1680-1704` for naming
+and again through `Exact` in `walk.rs:1115-1122` for drawing. One
+`match (apex_is_on_the_plane, leaning)` at `intersect.rs:1700-1712` has four arms
+and answers one:
+
+| arm | today |
+|---|---|
+| `(false, Pos)` | the ellipse — `NamedRun::the_whole_of(RightRoundWhereItsFacesCross)` |
+| `(false, Zero)` | `Err(ACrossingThatIsAParabola)` — `intersect.rs:1706` |
+| `(false, Neg)` | `Err(ACrossingThatIsAHyperbola)` — `intersect.rs:1707` |
+| `(true, Zero)` | `Err(APlaneTouchingAConeAlongOneOfItsRulings)` — `intersect.rs:1711` |
+
+**Naming needs no new `EdgeRun` variant.** `PartOfWhereItCrosses { and, picked_by }`
+carries a parabola — it lies wholly in one nappe, so the half-space through the
+apex square to the axis picks it — and each hyperbola branch, one per nappe. This
+is fix (b) of the three `error.rs:335-348` already enumerates, and the one it
+names shortest. It is also the only one that avoids adding a variant to a
+`#[non_exhaustive]` enum that is `Serialize`/`Deserialize` and matched across two
+crates.
+
+**Drawing is the blocker, not naming.** `walk.rs`'s `Conic { centre, across, and,
+size }` evaluates as `centre + across·cos θ + and·sin θ` (`walk.rs:787-801`). A
+parabola has no centre and no semi-axes, so `where_a_plane_cuts_a_cone` cannot
+return one and `walk` has no arm that consumes anything else. **The lane's real
+cost is a second curve representation beside `Conic` and the walker arms that read
+it** — and the lane demonstrates that choice rather than citing §43.6, for the
+reason in §46.3.
+
+### 46.3 Three corrections, before any lane reads them
+
+**1. §43.6 and `error.rs:392-395` price the ruling wrongly.** Both say removing
+`APlaneTouchingAConeAlongOneOfItsRulings` is *"one signature change in
+`how_a_crossing_runs`"*. It is not one, and it is not a signature change.
+`how_a_crossing_runs` (`arrange.rs:2914`) **already takes `run: &NamedRun`**. The
+write sites are four, in three files: `intersect.rs:1711`, `walk.rs:1119`, the
+cone arms of `a_plane_along_a_pipes_axis` (`arrange.rs:3057`, `Cylinder`-only and
+`false` for every `Cone` pair) and `a_pair_that_crosses_in_a_conic`
+(`arrange.rs:3023`) — and `assemble.rs:1967-1990`, whose doc says *"a cone never
+reaches here running straight"* and which answering the ruling falsifies.
+
+This is a price asserted and never checked, which is the failure mode CLAUDE.md's
+rule about claims exists for. It matters because §43.6's endorsement of fix (b) in
+§46.2 sits two lines from the claim that just failed, so it is not evidence.
+
+**2. §45.10 understates the writer.** It says the writer has no `SURFACE_CURVE`,
+so 52 of 97 importing files do not round-trip. The writer emits three things
+(`write.rs:400-460`): a `LINE` for an open plane×plane edge, a `CIRCLE` for a
+closed plane×cylinder edge whose plane is exactly square to the axis, and a `LINE`
+for a cylinder seam. **Every other pair — plane×sphere, plane×cone, plane×torus,
+cylinder×sphere, sphere×sphere — is `Err(ACurveTheFacesEitherSideOfItDoNotName)`.**
+A ball that imports cleanly cannot be written out at all. Still deferred; now
+described correctly.
+
+**3. Two of the five surfaces are unreachable through the front door.**
+`crates/rcad/src/lib.rs` re-exports `Plane`, `Sphere`, `Cylinder`, `Surface`,
+`BSplineCurve` and `BSplineSurface` — but **not `Cone`, not `Torus`**, and not
+`SIDE_OF_CONE`/`SIDE_OF_TORUS`. A facade caller can match `Surface::Cone(c)` and
+cannot name `c`'s type, construct one, or build a cone face. This is on no
+previous list — not §45.10, not §43.8, not §41.11 — and three closing gates
+passed over it.
+
+### 46.4 How the unit is scored
+
+§44.2's change is kept: no a-priori criteria list, one closing gate, and a
+verification list in which every line names something in the tree that changes
+state.
+
+Two rules the unit adopts from §45's findings:
+
+- **The rate is reported and never targeted, and no file-count projection is
+  published.** §45.2 demonstrated twice that a count of files a blocker stops
+  *first* is an upper bound, not a projection. The 68 B-spline files are not
+  priced here.
+- **The gate's budget is reserved before the first lane starts.** §45.7 showed a
+  lane's number can be true when taken and false when merged; §45.8 predicts that
+  is how this unit loses too. A unit that spends its budget on lanes and gates on
+  fumes gets exactly that.
+
+**One verification line is worth naming here**, because it is the one that decides
+whether the headline was right. `how_often_a_fuse_with_a_cone_refuses.rs:310`
+asserts `refused > 0` for `AFrustumAgainstACornerUpCube |
+APointedConeAgainstACornerUpCube`, and its own comment says *"re-derive the number
+rather than relax it"*. Closing the hyperbola could take those families to none
+refused and break it. **If it does not break, that is the finding**: the hyperbola
+was not what refused them, and the fuse lane's price is wrong.
+
+### 46.5 What the unit carries in, and what stays out
+
+From §45.10, as opening lanes: the first-refusal count `brep.rs` has not
+overwritten; `Invalid::Orphan` at the door; and the fuse's 30 production
+`expect`s — unjudged for a third unit, and taken **before** the geometry lanes
+because the cut has to touch `arrange.rs` and `assemble.rs`, which is where 29 of
+the 30 live.
+
+| out | why |
+|---|---|
+| **fillets** | §44.7's re-pricing is accepted — criterion 8 exists now, so it is one lane's machinery and not two — but a blend built on an operation that refuses its own primitives is built on sand |
+| **another import-rate push** | cannot be honestly scored until the first-refusal count lands (§45.3) |
+| **the writer** | §46.3 item 2. Deferred, described correctly |
+| **option C, healing the 76** | one decision — *what is an imported corner's slop?* — but §45.3 means we cannot currently say which files are really in that bucket. Answered at the next gate, against the corrected table |
+| **torus×curved, three-surface meets** | roadmap §13 row 1. Taking it in the same unit is how it eats the schedule |
+| **`CannotWorkOutHowBigACrossingIs` at radius `1e-200`** | §43.8 item 4. A dynamic-range question; it belongs with the scaling work |
+
+### 46.6 The decision rule for the first-refusal count, committed before the number is read
+
+§45.2 and §45.4 both record numbers read after the fact and used three ways. The
+rule is written first so there is nothing to read motivatedly:
+
+- The curved-corner bucket **shrinks by more than half** once `brep.rs` stops
+  overwriting → the published refusal tables were distorted, §45's second
+  prediction scores as right, and option C is answered at the next gate against
+  the corrected bucket.
+- It **barely moves** → §45.3's relabelling was noise, and option D's trigger is
+  scored on the spot: it fires or it does not, on the published number.
+- **Either way**, no projection is published.
+
+Both branches are survivable, which is the point.
