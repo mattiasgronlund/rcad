@@ -49,7 +49,12 @@ use serde::de::value::{Error, StrDeserializer};
 /// in `fuse/arrange.rs` and `the_crossing_of_these_runs_straight` in
 /// `fuse/assemble.rs` each name all twenty-five ordered pairs of these five and
 /// send everything else to a `_`. A sixth kind falls into those wildcards and
-/// gets whatever the wildcard says, which for all three is `false`.
+/// gets whatever the wildcard says. For the two in `fuse/arrange.rs` that is
+/// still `false`. For `the_crossing_of_these_runs_straight` it is no longer an
+/// answer at all: it returns `None`, which the caller turns into
+/// `ACrossingThisCannotBeOrderedAlong`. It used to return `false`, and `false`
+/// there is the two-arc branch — two arcs where a ruling has one, which is the
+/// wrong answer the whole cone row was given for three units.
 ///
 /// The middle one was called `a_plane_along_a_pipes_axis` while a plane along a
 /// pipe's axis was the one pair it knew. A plane through a cone's apex cuts
