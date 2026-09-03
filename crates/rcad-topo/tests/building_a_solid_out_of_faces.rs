@@ -345,17 +345,23 @@ fn five_copies_of_one_shape_cost_five_times_the_entities() {
         .expect("five cubes side by side are a sound model");
 }
 
-/// `Model::validate` sees nothing that takes two solids to see, and this lane
-/// does not change that.
+/// `Model::validate` still sees nothing that takes two solids to see, and the
+/// pass that does see it is a call of its own.
 ///
-/// §42.6 demonstrated it on solids the kernel built itself. Here it is through
-/// the new door: two descriptions of the very same cube, both accepted, both
-/// written, and the sweep calls the pair sound. **A refusal you cannot detect
-/// is not a refusal**, so this is recorded as a test rather than as a sentence
-/// — §42.12 criterion 8 is the work that closes it, and it is a pass of its
-/// own, not a check inside the sweep.
+/// §42.6 demonstrated the gap on solids the kernel built itself. Here it is
+/// through the new door: two descriptions of the very same cube, both accepted,
+/// both written, and the sweep calls the pair sound. **A refusal you cannot
+/// detect is not a refusal**, so it was recorded as a test rather than as a
+/// sentence — and §42.12 criterion 8 has now closed it.
+///
+/// What changed is the second half of the test. The sweep's `Ok` is still
+/// asserted, because criterion 8 landed as a pass of its own and not as a check
+/// inside the sweep, and the same two cubes are now refused by
+/// `Model::check_no_two_solids_share_space`. Both halves are here together so
+/// that moving the check into the sweep breaks this test rather than passing it
+/// quietly.
 #[test]
-fn two_solids_described_at_the_same_place_are_still_called_a_valid_model() {
+fn the_sweep_passes_two_cubes_at_one_place_and_the_pass_of_its_own_refuses_them() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
     let mut model = Model::new(a_working_size());
@@ -372,6 +378,12 @@ fn two_solids_described_at_the_same_place_are_still_called_a_valid_model() {
     model
         .validate(&policy, &mut log)
         .expect("nothing in the sweep compares one solid against another");
+
+    let refused = model.check_no_two_solids_share_space(&policy, &mut log);
+    assert!(
+        matches!(refused, Err(Error::TwoSolidsShareSpace { .. })),
+        "expected the pass of its own to refuse the pair, got {refused:?}"
+    );
 }
 
 /// A face turned round in the shell is a solid whose skin points inwards, and
