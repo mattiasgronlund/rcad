@@ -385,30 +385,66 @@ impl SolidBuilder {
     /// wire is described before the face it trims, so the pair is not known
     /// here at all. Two edges that really do name the same curve are refused by
     /// the sweep's mesh instead, as `CornersCoincide`; that is not new to two
-    /// steps, and a three-step wire holding such a pair is refused there too.
+    /// steps, and a three-step wire holding such a pair is refused there too —
+    /// **but only where the mesh runs at all**, which is not a solid whose every
+    /// face is flat. The section on that below is where the hole is written out.
     ///
     /// **A run this crate does not know reads as one that bends, and that is the
     /// right way round here** — the opposite of what
-    /// [`the_ends_are_the_whole_of_it`] does with the same unknown, and the
-    /// difference is what stands behind each.
+    /// [`the_ends_are_the_whole_of_it`] does with the same unknown. What follows
+    /// is why each is right; neither rests on the other one having no backstop.
     ///
-    /// There, the length rule is the *only* thing that asks, so a run read
-    /// generously is a zero-length edge nobody looks at again: measured on a
-    /// clone of this tree carrying a fourth [`EdgeRun`], `check_edges` handed
-    /// back `Ok(())` for a cube with one edge pointed at the corner it left.
+    /// # What stands behind the length rule, and it is not nothing
+    ///
+    /// This used to say the length rule was the *only* thing that asks, so a run
+    /// read generously there was a zero-length edge nobody looks at again. **That
+    /// was measured by calling `check_edges` on its own and reading its
+    /// `Ok(())`, and it is false of the model.** `check_dynamic_range` measures
+    /// every edge that is not [`EdgeRun::RightRoundWhereItsFacesCross`] end to
+    /// end, so an edge kept by the length rule with both ends in one place has a
+    /// chord of nothing and the sweep hands back
+    /// `Error::Geometry(FeatureSizeNotPositive { size: 0.0 })`.
+    /// `tests/what_the_whole_sweep_says_about_a_two_step_wire.rs`'s
+    /// `a_zero_length_edge_the_length_rule_keeps_is_still_refused_by_the_whole_sweep`
+    /// is that model going through `SolidBuilder::build`, which is the whole
+    /// sweep and not one function. Where the collapse also breaks the chain
+    /// round a wire, [`SolidBuilder::check_the_steps_close`] and the sweep's
+    /// `check_wire_closes` refuse it before that.
+    ///
+    /// So the strict reading over there is not the difference between caught and
+    /// uncaught. It is the difference between
+    /// [`Error::ADraftEdgeHasNoLength`], which names the edge and lets an
+    /// importer point at the line that described it, and a refusal about a
+    /// feature size, which names a number and no entity at all. §44.11's rule
+    /// that both doors read one list is the other half, and it is enough on its
+    /// own.
+    ///
+    /// # What stands behind a two-step wire, and on a flat solid it is nothing
     ///
     /// Here nothing is being decided about the shape. All this says is whether a
-    /// two-step wire may skip the floor of three steps, and every other check
-    /// still runs over it — a wire that really does bound nothing is refused by
-    /// the mesh, by name, and
-    /// `tests/a_face_bounded_by_two_steps.rs`'s
+    /// two-step wire may skip the floor of three steps.
+    ///
+    /// This used to say every other check still runs over it. **It does not.**
+    /// The winding a flat face is judged by skips a wire of under three steps by
+    /// construction, because a two-corner polygon sweeps exactly nothing
+    /// whichever way it is walked; and the named backstop, the sweep's mesh, is
+    /// gated off for a solid whose every face is flat. The test that was cited,
     /// `a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh`
-    /// is the test that says so rather than this paragraph. Reading the unknown
-    /// strictly would buy nothing and cost a real refusal: a new run kind names
-    /// a curve, which is exactly the thing two steps *can* bound a face with, and
-    /// the refusal it would get is [`Error::ADraftWireIsTooShort`] — a complaint
-    /// about how many steps there are, when the number of steps was never the
-    /// problem.
+    /// in `tests/a_face_bounded_by_two_steps.rs`, is a plate with a **cylinder**
+    /// wall — the one case where that gate is open — and a two-step wire is
+    /// reachable without one, because `check_edges` asks only that an edge's
+    /// corners lie on the surface its run names and a plane through both corners
+    /// answers that.
+    /// `a_flat_two_step_face_that_bounds_nothing_is_not_caught_by_anything`
+    /// builds exactly that solid and it validates.
+    ///
+    /// **That gap is the mesh gate's and not this rule's**, and reading the
+    /// unknown strictly would not close it: a wire of two *straight* steps is
+    /// already refused here, so the shapes that get through are the ones naming
+    /// a curve, which is exactly what two steps *can* bound a face with. What
+    /// strictness would buy is a real face refused as
+    /// [`Error::ADraftWireIsTooShort`] — a complaint about how many steps there
+    /// are, when the number of steps was never the problem.
     ///
     /// `docs/decisions.md` §44.11 item 3. This and
     /// [`Model::wire_of_two_steps_bounds_a_face`](crate::Model) are the same
@@ -570,8 +606,16 @@ impl SolidBuilder {
 /// arrives here with no compile error at all — a clone of this tree carrying one
 /// checks clean — and reading it as "not straight" would walk an edge with its
 /// two ends in one place through a public door. Refusing it names the edge and is
-/// one word here to undo; letting it in is a zero-length edge inside a model
-/// somebody will go on to mesh.
+/// one word here to undo.
+///
+/// **That edge does not then go unnoticed**, and saying so was a claim measured
+/// on `check_edges` alone. `check_dynamic_range` measures every edge that is not
+/// [`EdgeRun::RightRoundWhereItsFacesCross`] end to end and refuses a chord of
+/// nothing, which
+/// `tests/what_the_whole_sweep_says_about_a_two_step_wire.rs` puts to the whole
+/// sweep. What refusing here buys is the *name*: `ADraftEdgeHasNoLength { edge }`
+/// points an importer at the line that described the edge, where
+/// `FeatureSizeNotPositive { size: 0.0 }` names a number and no entity.
 ///
 /// **This is the one list, and both of the kernel's doors read it.**
 /// [`SolidBuilder::add_edge`] asks it of a description, and `check_edges` in

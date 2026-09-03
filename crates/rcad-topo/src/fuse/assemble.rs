@@ -1865,19 +1865,24 @@ impl Edges {
         let at = middle_of(meet.ends[0].point());
         let named = which_curve_it_is(from, to, carried_by);
         let key = ([from.min(to), from.max(to)], named);
-        let edge = *self.between.entry(key).or_insert_with(|| {
-            self.made.push(Edge {
-                ends: [from.min(to), from.max(to)],
-                carried_by,
-                arc: if from == to {
+        let edge = match self.between.get(&key) {
+            Some(&already) => already,
+            None => {
+                let arc = if from == to {
                     WhichArc::TheOnlyOne
                 } else {
-                    which_arc_this_is(meet, from, at)
-                },
-                from: along.to_vec(),
-            });
-            self.made.len() - 1
-        });
+                    which_arc_this_is(meet, from, at)?
+                };
+                self.made.push(Edge {
+                    ends: [from.min(to), from.max(to)],
+                    carried_by,
+                    arc,
+                    from: along.to_vec(),
+                });
+                self.between.insert(key, self.made.len() - 1);
+                self.made.len() - 1
+            }
+        };
         let forward = if from == to {
             which_way_a_closed_edge_is_walked(meet, at)
                 .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?
@@ -1934,25 +1939,37 @@ fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Option<bool>
 /// that direction exactly when its material is inside the partner — which
 /// [`FaceMeet::material_side`] already holds. **No point on the arc is built.**
 ///
+/// # Errors
+///
+/// [`Error::ACrossingThisCannotBeOrderedAlong`] when
+/// [`the_crossing_of_these_runs_straight`] has no row for the pair, which takes
+/// a sixth kind of [`Surface`]. **One arc and two arcs are both answers, so
+/// neither is the safe reading of a pair nobody has decided.** Guessing *two*
+/// is the wrong answer commit `4b62fd0` records the whole cone row getting for
+/// three units: an arc where the surfaces cross in a ruling comes out as two
+/// arcs, and nothing downstream asks again.
+///
 /// # Panics
 ///
 /// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`].
 /// [`FaceMeet::material_side`] is written from which way round the arrangement
 /// walked the arc and costs no arithmetic, so anything else is a bug here.
-fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> WhichArc {
-    if the_crossing_of_these_runs_straight(&meet.carried_by) {
-        return WhichArc::TheOnlyOne;
+fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> Result<WhichArc> {
+    match the_crossing_of_these_runs_straight(&meet.carried_by) {
+        Some(true) => return Ok(WhichArc::TheOnlyOne),
+        Some(false) => {}
+        None => return Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
     let [mine, partner] = meet.carried_by;
     let along_the_crossing = gradient_of(&mine, from).cross(gradient_of(&partner, from));
-    WhichArc::LeavingACorner {
+    Ok(WhichArc::LeavingACorner {
         corner: starts_at,
         towards: match meet.material_side {
             Decision::Neg => along_the_crossing,
             Decision::Pos => along_the_crossing * -1.0,
             other => panic!("a side of a face was walked with no material side: {other:?}"),
         },
-    }
+    })
 }
 
 /// Whether these two surfaces cross in straight lines, so that two corners on
@@ -1964,20 +1981,29 @@ fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> WhichArc
 /// never off the chord**: a short enough arc has a chord that rounds to its own
 /// tangent, and this question has to stay one about the pair.
 ///
-/// Every pair of the five surfaces there are is named below. The `_` left at the
-/// bottom is for a sixth [`Surface`] and nothing else, which is what §40 asks
-/// for — but a sixth kind arriving lands in it as a silent `false` rather than
-/// as a compile error, because [`Surface`] is `#[non_exhaustive]` and belongs to
-/// another crate. `tests/a_sixth_kind_of_surface.rs` is what notices instead.
-fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
+/// Every pair of the five surfaces there are is named below, and each of them
+/// gets a `Some`. The `_` left at the bottom is for a sixth [`Surface`] and
+/// nothing else, which is what §40 asks for — and because [`Surface`] is
+/// `#[non_exhaustive]` and belongs to another crate, a sixth kind lands in it
+/// without a compile error here. **So it answers `None`, which is not an
+/// answer.** It used to answer `false`, and `false` is not the safe side of
+/// anything: it is the two-arc branch of [`which_arc_this_is`], which puts two
+/// arcs where a straight run has one. That exact wrong answer is what commit
+/// `4b62fd0` records having gone out for the whole cone row for three units,
+/// under the same blanket verdict.
+///
+/// `tests/a_sixth_kind_of_surface.rs` is what notices the day a sixth kind
+/// arrives; `every_pair_of_the_five_kinds_there_are_is_answered` below is what
+/// says the `None` covers nothing that exists today.
+fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool> {
     match carried_by {
-        [Surface::Plane(_), Surface::Plane(_)] => true,
+        [Surface::Plane(_), Surface::Plane(_)] => Some(true),
         [Surface::Plane(flat), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Plane(flat)] => {
-            flat.normal().dot(pipe.axis().direction()) == 0.0
+            Some(flat.normal().dot(pipe.axis().direction()) == 0.0)
         }
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
-            one.axis().direction().cross(other.axis().direction()) == Vector::zero()
+            Some(one.axis().direction().cross(other.axis().direction()) == Vector::zero())
         }
         // A plane and a cone cross in rulings when the plane goes through the
         // apex and leans no shallower than the cone's own side: one ruling the
@@ -1991,14 +2017,16 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
         // pair is built by the ordinary path and the old claim would put two
         // arcs where a ruling has one.
         [Surface::Plane(flat), Surface::Cone(cone)]
-        | [Surface::Cone(cone), Surface::Plane(flat)] => a_plane_cuts_a_cone_in_rulings(flat, cone),
+        | [Surface::Cone(cone), Surface::Plane(flat)] => {
+            Some(a_plane_cuts_a_cone_in_rulings(flat, cone))
+        }
         // A cone against a ball, a pipe or another cone crosses in a degree-four
         // space curve, which holds no line; the ring row below covers the fourth.
         [
             Surface::Cone(_),
             Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
         ]
-        | [Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)] => false,
+        | [Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)] => Some(false),
         // **A ball's skin and a ring's skin are bounded, and a straight line is
         // not, so no line lies on either** — which settles every remaining pair
         // at once and without a case analysis. Whatever the partner is, the
@@ -2017,7 +2045,7 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
             Surface::Sphere(_),
             Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_),
         ]
-        | [Surface::Plane(_) | Surface::Cylinder(_), Surface::Sphere(_)] => false,
+        | [Surface::Plane(_) | Surface::Cylinder(_), Surface::Sphere(_)] => Some(false),
         [
             Surface::Torus(_),
             Surface::Plane(_)
@@ -2029,8 +2057,8 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
         | [
             Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
             Surface::Torus(_),
-        ] => false,
-        _ => false,
+        ] => Some(false),
+        _ => None,
     }
 }
 
@@ -2202,8 +2230,9 @@ mod tests {
                     "three points of this crossing lie on a line"
                 );
                 for [one, other] in [pair, [pair[1], pair[0]]] {
-                    assert!(
-                        !the_crossing_of_these_runs_straight(&[one, other]),
+                    assert_eq!(
+                        the_crossing_of_these_runs_straight(&[one, other]),
+                        Some(false),
                         "a crossing with three points off a line was called straight"
                     );
                 }
@@ -2300,7 +2329,7 @@ mod tests {
             ] {
                 assert_eq!(
                     the_crossing_of_these_runs_straight(&pair),
-                    runs_straight,
+                    Some(runs_straight),
                     "{named} was read the wrong way round {pair:?}"
                 );
             }
@@ -2328,6 +2357,49 @@ mod tests {
                 intersect_says_lines, runs_straight,
                 "{named} came back from `intersect` as {met:?}"
             );
+        }
+    }
+
+    /// No pair of the five surface kinds there are falls into the `_`, so what
+    /// the `_` now refuses is nothing that exists.
+    ///
+    /// That is the half of this claim a test in this tree can reach. The other
+    /// half — that a pair with no row **refuses** instead of being read as
+    /// bending — is a change of return type, and it is the type that carries it:
+    /// this test does not compile against a
+    /// [`the_crossing_of_these_runs_straight`] that hands back a bare `bool`,
+    /// because a bare `bool` has already chosen an answer for the pair it has
+    /// never seen. Which answer it chose was `false`, and `false` is the
+    /// two-arc branch of `which_arc_this_is`: two arcs where a ruling has one.
+    /// Commit `4b62fd0` is that answer having gone out for three units over the
+    /// whole cone row.
+    ///
+    /// Forging a sixth [`Surface`] to drive the refusal itself cannot be done
+    /// from this crate — [`Surface`] is `#[non_exhaustive]` and lives in
+    /// `rcad-geom` — and `tests/a_sixth_kind_of_surface.rs` says why at length.
+    #[test]
+    fn every_pair_of_the_five_kinds_there_are_is_answered() {
+        let up = Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+            .expect("a direction with length");
+        let five = [
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                    .expect("a normal with length"),
+            ),
+            Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a ball of radius five")),
+            Surface::Cylinder(Cylinder::new(up, 3.0).expect("a pipe of radius three")),
+            Surface::Cone(Cone::new(up, 0.5).expect("a cone leaning a half")),
+            Surface::Torus(Torus::new(up, 2.0, 1.0).expect("a ring round a tube of one")),
+        ];
+
+        for one in five {
+            for other in five {
+                assert!(
+                    the_crossing_of_these_runs_straight(&[one, other]).is_some(),
+                    "{one:?} against {other:?} has no row here, so a fuse over the \
+                     two would be refused rather than built"
+                );
+            }
         }
     }
 
