@@ -513,16 +513,6 @@ struct Direction {
     forward: bool,
 }
 
-impl Direction {
-    /// The way back down the same crossing.
-    fn the_other_way(self) -> Self {
-        Direction {
-            crossing: self.crossing,
-            forward: !self.forward,
-        }
-    }
-}
-
 impl<'f> Arrangement<'f> {
     fn of(
         face: &'f BakedFace,
@@ -1576,24 +1566,20 @@ impl<'f> Arrangement<'f> {
                     Ordering::Less => true,
                     Ordering::Greater => false,
                     Ordering::Equal => {
-                        let turn = self.turns_anticlockwise(
+                        let turn = self.turns_anticlockwise_or_bends(
                             node,
                             self.direction(half_edge),
                             self.direction(placed),
                             policy,
                             log,
                         )?;
-                        // **The same refusal [`Arrangement::half_of_the_turn`]
-                        // gives, at the second place the same question is
-                        // asked** (§38.2). Two arcs leaving one node with no
-                        // turn between them are two curves tangent there, and
-                        // that used to be an assert here on the grounds that
-                        // the reference had already ruled it out. It had not: a
-                        // pair both anticlockwise of the reference is never
-                        // compared against it, and a `3 × 4` block corner on a
-                        // bar of radius five reaches exactly that — the block's
-                        // two walls cut the bar's along the one ruling
-                        // `(3, 4, z)`, so the two arcs are the same line.
+                        // Two curves that share their whole tangent *and* bend
+                        // the same way. Telling them apart takes a derivative
+                        // above the ones taken here. A `3 × 4` block corner on a
+                        // bar of radius five reaches it: the block's two walls
+                        // cut the bar's along the one ruling `(3, 4, z)`, so the
+                        // two arcs are the same line and no derivative ever
+                        // parts them (§38.2).
                         if turn == Decision::Zero {
                             return Err(Error::TwoCurvesTouchWithoutCrossing {
                                 face: self.face.keys[0],
@@ -1614,6 +1600,15 @@ impl<'f> Arrangement<'f> {
 
     /// Which half of the turn starting at `reference` a direction is in: `0` for
     /// the half that starts at `reference` itself, `1` for the other.
+    ///
+    /// **This splits on the tangent alone and never on how a curve bends.** The
+    /// halves are `[0, π)` and `[π, 2π)` of *tangent* angle, so a way out
+    /// running along the reference is in half zero however it curves, and one
+    /// running against it is in half one. Splitting them by how they bend
+    /// instead puts two directions half a turn apart into one half, and
+    /// [`Arrangement::turns_anticlockwise_or_bends`] answers `Zero` for such a
+    /// pair — so the sort refuses two ways out it could have ordered. The
+    /// tangent line a wall lays along a bar's cap circle is what found that.
     fn half_of_the_turn(
         &self,
         node: usize,
@@ -1636,12 +1631,11 @@ impl<'f> Arrangement<'f> {
             Decision::Zero if direction.crossing == reference.crossing => {
                 Ok(u8::from(direction.forward != reference.forward))
             }
-            // Two different curves that agree along their whole tangent *and*
-            // bend the same way. Telling them apart takes a third derivative,
-            // which nothing here has.
-            Decision::Zero => Err(Error::TwoCurvesTouchWithoutCrossing {
-                face: self.face.keys[0],
-            }),
+            // Two different crossings on one line. Along the reference is half
+            // zero, against it is half one.
+            Decision::Zero => Ok(u8::from(
+                !self.leaves_the_node_the_same_way(node, reference, direction, policy, log)?,
+            )),
             other => panic!("a turn came back with a decision nothing here knows: {other:?}"),
         }
     }
@@ -1663,13 +1657,13 @@ impl<'f> Arrangement<'f> {
     ///
     /// A determinant of nothing at all means the three gradients lie in one
     /// plane, so both cross products point along that plane's normal and the two
-    /// curves leave the node along **one line** — unless a cross product is the
-    /// zero vector, which is a cut surface tangent to the face's own and is
-    /// caught below. That is not one answer but two:
-    /// the same way along it, or opposite ways. Opposite ways is half a turn and
-    /// stays `Zero`, which is what a comparator for "less than half a turn"
-    /// should say about it. The same way is a tangency, and
-    /// [`Arrangement::which_way_two_tangent_curves_bend`] answers it.
+    /// ways out lie on **one line** — the same way along it, or opposite ways.
+    /// Neither is anticlockwise of the other by less than half a turn, so `Zero`
+    /// is the honest answer to the question this asks, and the two callers want
+    /// different things done about it:
+    /// [`Arrangement::half_of_the_turn`] wants which way along the line, and
+    /// [`Arrangement::turns_anticlockwise_or_bends`] wants how the two curves
+    /// bend.
     fn turns_anticlockwise(
         &self,
         node: usize,
@@ -1699,25 +1693,45 @@ impl<'f> Arrangement<'f> {
             policy,
             log,
         )?;
-        if decision == Decision::Zero {
-            // Against `first`'s own way back when the two go opposite ways: that
-            // is the one direction at exactly half a turn, so the turn asked for
-            // here is half a turn and whatever the bend adds, and the sign of
-            // what the bend adds is the sign asked for turned round.
-            let same_way = self.leaves_the_node_the_same_way(node, first, second, policy, log)?;
-            let from = if same_way {
-                first
-            } else {
-                first.the_other_way()
-            };
-            let bend = self.which_way_two_tangent_curves_bend(node, from, second, policy, log)?;
-            return Ok(if same_way { bend } else { the_other_way(bend) });
-        }
         Ok(if first.forward == second.forward {
             decision
         } else {
             the_other_way(decision)
         })
+    }
+
+    /// [`Arrangement::turns_anticlockwise`], and where that says the two lie on
+    /// one line, how the two curves bend instead.
+    ///
+    /// Only for two ways out that [`Arrangement::half_of_the_turn`] has already
+    /// put in one half. **That is what makes the fall-through sound**: a half is
+    /// half a turn of tangent angle wide and is closed at its start and open at
+    /// its end, so no two directions in one half are opposite. The two are
+    /// tangent, and the order of two tangent curves is settled one derivative
+    /// up.
+    ///
+    /// `Zero` comes back when the bend ties too, and no derivative taken here
+    /// parts two curves that agree on both. It also comes back if the two are
+    /// opposite after all, which the paragraph above says cannot happen: that is
+    /// a refusal standing in for an assert, because a caller with a policy loose
+    /// enough to settle the halves inconsistently should lose its answer rather
+    /// than the process.
+    fn turns_anticlockwise_or_bends(
+        &self,
+        node: usize,
+        first: Direction,
+        second: Direction,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Decision> {
+        let turn = self.turns_anticlockwise(node, first, second, policy, log)?;
+        if turn != Decision::Zero {
+            return Ok(turn);
+        }
+        if !self.leaves_the_node_the_same_way(node, first, second, policy, log)? {
+            return Ok(Decision::Zero);
+        }
+        self.which_way_two_tangent_curves_bend(node, first, second, policy, log)
     }
 
     /// Whether two ways out of a node that lie on one line go the same way along

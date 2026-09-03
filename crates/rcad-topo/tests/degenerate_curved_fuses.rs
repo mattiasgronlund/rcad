@@ -484,8 +484,13 @@ fn a_block_whose_wall_touches_a_bar(model: &mut Model) -> Pair {
     Pair::of(bar, touching)
 }
 
-/// The tangency is refused by name, and the name is the tangency: two curves on
-/// the bar's wall that touch and do not cross.
+/// The tangency is refused by name, and the name is the tangency.
+///
+/// **Not on the bar's wall — on its two caps.** Instrumented, the refusing
+/// arrangement is the plane `z = 0` and then the plane `z = 8`, where the cap's
+/// own boundary circle and the line the wall `y = -2` cuts in the cap plane
+/// touch at `(0, -2, 0)` and `(0, -2, 8)`. The wall of the bar is a third and
+/// later stage of the same shape and does not reach the ordering at all.
 ///
 /// **The control is one coordinate moved by a tenth.** With the wall at
 /// `y = -1.9` it cuts the bar in two curves that really do cross, and the
