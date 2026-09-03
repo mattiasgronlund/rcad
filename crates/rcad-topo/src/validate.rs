@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Deflection, DynamicRange, EdgeRun, Isometry, Orientation, Plane, Point, SIDE_OF_CONE,
-    SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS, Surface, Vector,
+    Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, Orientation, Plane,
+    Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS, Surface,
+    Vector,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -182,6 +183,7 @@ impl Model {
 
     fn check_edges(&self) -> Result<()> {
         let rounding = self.what_writing_a_plane_down_costs();
+        let writing_a_point_down = self.what_writing_a_point_down_costs();
         for (slot, edge) in &self.data().edges {
             let (Some(start), Some(end)) = (
                 self.data().vertices.get(edge.start),
@@ -220,7 +222,12 @@ impl Model {
                         // surfaces meet is a box divided down to a point, so it
                         // lands *near* each of them and exactly on one only when
                         // the arithmetic happened to be exact.
-                        _ if not_provably_off(and, corner.point, corner.approximation) => {}
+                        _ if not_provably_off(
+                            and,
+                            corner.point,
+                            corner.approximation,
+                            writing_a_point_down,
+                        ) => {}
                         _ if off_a_plane_by_no_more_than_writing_it_down_cost(
                             and,
                             corner.point,
@@ -398,6 +405,7 @@ impl Model {
             }
         }
         let allowed_wobble = self.allowed_wobble();
+        let writing_a_point_down = self.what_writing_a_point_down_costs();
         for (slot, face) in &self.data().faces {
             if face.wires.is_empty() {
                 return Err(Invalid::FaceHasNoWires.into());
@@ -407,7 +415,7 @@ impl Model {
             if let Surface::Plane(plane) = &face.surface {
                 check_flat_face(view, plane, allowed_wobble)?;
             } else {
-                check_curved_face(view, &face.surface)?;
+                check_curved_face(view, &face.surface, writing_a_point_down)?;
             }
 
             match used.get(slot).copied().unwrap_or(0) {
@@ -802,13 +810,44 @@ impl Model {
     /// could have written any nearer, and a corner outside it is off a plane
     /// somebody chose rather than off a plane that rounded.
     fn what_writing_a_plane_down_costs(&self) -> f64 {
-        let largest = self
-            .data()
+        MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * self.largest_coordinate()
+    }
+
+    /// How far off a curved surface a corner exactly on it can land, purely
+    /// because the corner had to be written down in `f64`.
+    ///
+    /// **The curved twin of [`Model::what_writing_a_plane_down_costs`], and a
+    /// length rather than a value** — a ball, a pipe, a cone and a ring answer
+    /// with a sign and hand no distance out, so what is budgeted here is where
+    /// the corner is and [`not_provably_off`] turns it into an answer.
+    /// [`NEAREST_F64_POINT_ROUNDOFF`] says a point on a surface, written as
+    /// three `f64`, lands within that times the largest coordinate and no
+    /// writer could have done better; [`MEASURING_SLACK`] is this check's own
+    /// room on top, for the surface's numbers having rounded as well.
+    ///
+    /// **It is not a modelling tolerance and nothing here may turn it into
+    /// one.** [`Model::allowed_wobble`] deliberately does *not* appear: a flat
+    /// face may sit a `default_linear_tolerance` off its plane, and a corner of
+    /// a curved face may sit off its surface only by the width of the number.
+    ///
+    /// The size it is measured against is the largest coordinate any corner of
+    /// the model holds, which is the same size the flat check uses so that the
+    /// two have one standard. It does **not** grow with a surface's own numbers,
+    /// so a pipe of radius `1e9` carrying a face at the origin gets a budget
+    /// smaller than its own radius rounds by. That is the safe direction and it
+    /// is untested here: too small a budget refuses a sound corner, where too
+    /// large a one accepts a corner nobody placed.
+    fn what_writing_a_point_down_costs(&self) -> f64 {
+        MEASURING_SLACK * NEAREST_F64_POINT_ROUNDOFF * self.largest_coordinate()
+    }
+
+    /// The largest coordinate magnitude any corner of the model holds.
+    fn largest_coordinate(&self) -> f64 {
+        self.data()
             .vertices
             .values()
             .map(|vertex| vertex.point.largest_coordinate_magnitude())
-            .fold(0.0, f64::max);
-        MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * largest
+            .fold(0.0, f64::max)
     }
 }
 
@@ -1297,7 +1336,7 @@ pub(crate) fn name_of_surface(surface: &Surface) -> &'static str {
     }
 }
 
-fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
+fn check_curved_face(view: FaceView<'_>, surface: &Surface, writing_it_down: f64) -> Result<()> {
     let named = name_of_surface(surface);
 
     for wire in view.wires() {
@@ -1305,7 +1344,12 @@ fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
             let point = PredicatePoint::from(corner.point().coordinates());
             let decision = side_of_surface(surface, point);
             if decision != Decision::Zero
-                && not_provably_off(surface, corner.point(), corner.approximation())
+                && not_provably_off(
+                    surface,
+                    corner.point(),
+                    corner.approximation(),
+                    writing_it_down,
+                )
             {
                 continue;
             }
@@ -1347,8 +1391,16 @@ fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
 /// honest question, and a box that does is a corner nobody has shown to be off.
 ///
 /// Asked only after the exact point has failed, so **an exactly placed corner is
-/// asked exactly what it always was** and nothing is loosened for one. A corner
-/// with no slop recorded on it never reaches here either.
+/// asked exactly what it always was** and nothing is loosened for one.
+///
+/// **A corner that came in off the wire carries no slop at all, and that is the
+/// second width.** A file that names a curved face writes its corners as
+/// decimal text, the reader turns each into the nearest `f64`, and the nearest
+/// `f64` to a point on a ball or a pipe is not on it — `x² + y² − r²` worked out
+/// exactly is not zero at any `f64` near a circle. So `writing_it_down` is
+/// [`Model::what_writing_a_point_down_costs`], and it is the wider of the two
+/// that is spent: the recorded slop is the box a fuse solved the corner as, and
+/// a solve that landed inside one rounding is no more certain than one rounding.
 ///
 /// Asked about a face's own surface by [`check_curved_face`] and about an edge's
 /// partner surface by `check_edges`. The second was an exact `Decision::Zero`
@@ -1356,13 +1408,20 @@ fn check_curved_face(view: FaceView<'_>, surface: &Surface) -> Result<()> {
 /// plane it was solved from. It is not: the corner is `through + t·direction`
 /// over a divisor and it rounds, so a block turned relative to a bar left the
 /// fuse writing a solid its own sweep called broken.
-fn not_provably_off(surface: &Surface, point: Point, slop: Option<Approximation>) -> bool {
-    let Some(reach) = slop.map(Approximation::magnitude).filter(|by| *by > 0.0) else {
+fn not_provably_off(
+    surface: &Surface,
+    point: Point,
+    slop: Option<Approximation>,
+    writing_it_down: f64,
+) -> bool {
+    let recorded = slop.map_or(0.0, Approximation::magnitude);
+    let reach = recorded.max(writing_it_down);
+    if !(reach > 0.0 && reach.is_finite()) {
         return false;
-    };
+    }
     let within = PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
         Interval::new(coordinate - reach, coordinate + reach)
-            .expect("a recorded slop is a positive length")
+            .expect("a positive finite reach makes a box round a finite corner")
     }));
     matches!(
         side_of_surface(surface, within),
@@ -1387,10 +1446,13 @@ fn not_provably_off(surface: &Surface, point: Point, slop: Option<Approximation>
 /// `a_plane_through_a_point_does_not_put_that_point_exactly_on_itself` is that
 /// rounding, demonstrated on one plane and one point rather than argued.
 ///
-/// **A plane and nothing else.** A sphere, a pipe, a cone and a ring have a
-/// value rather than a signed length, so there is no distance here to compare;
-/// a corner named by one of those is still asked exactly, and the width it
-/// carries on itself is [`not_provably_off`]'s question.
+/// **A plane and nothing else, because a plane is the only one with a distance
+/// to compare.** A sphere, a pipe, a cone and a ring answer with a sign and
+/// hand no signed length out, so the same allowance reaches them the other way
+/// round: [`not_provably_off`] widens the corner into a box of
+/// [`Model::what_writing_a_point_down_costs`] and asks which side the box is on.
+/// Both budgets are the width of the number and neither is a tolerance; they
+/// differ only in which end of the question they are spent at.
 fn off_a_plane_by_no_more_than_writing_it_down_cost(
     surface: &Surface,
     point: Point,
@@ -1986,6 +2048,58 @@ mod tests {
         nudge_the_seam_plane(&mut model, rounding * 2.0);
 
         assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// The curved twin of the two above, and the reason 90 corpus files were
+    /// refused.
+    ///
+    /// A file that says a corner is on a ball writes three decimal numbers and
+    /// the reader takes the nearest `f64` to each. The nearest `f64` to a point
+    /// on a ball is not on it — `x² + y² + z² − r²` worked out exactly is not
+    /// zero there — so the corner is provably off a surface no writer could
+    /// have put it nearer to. Sliding a pole along the axis it sits on is that
+    /// miss, and it leaves the seam plane and every count alone.
+    #[test]
+    fn a_corner_off_its_curved_face_by_no_more_than_writing_it_down_cost_is_let_through() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+        let rounding = model.what_writing_a_point_down_costs();
+
+        nudge_a_pole_off_the_ball(&mut model, rounding / 2.0);
+
+        a_clean_sweep(&model);
+    }
+
+    /// And the half that keeps the allowance from being a tolerance.
+    ///
+    /// Twice the width of the number is a corner somebody chose, and it is
+    /// still refused.
+    #[test]
+    fn a_corner_further_off_its_curved_face_than_that_is_caught() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+        let rounding = model.what_writing_a_point_down_costs();
+
+        nudge_a_pole_off_the_ball(&mut model, rounding * 2.0);
+
+        assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// Slide a ball's north pole out along the axis it sits on.
+    fn nudge_a_pole_off_the_ball(model: &mut Model, by: f64) {
+        let pole = model
+            .data()
+            .vertices
+            .iter()
+            .find(|(_, vertex)| vertex.point.coordinates()[2] > 0.0)
+            .map(|(slot, _)| slot)
+            .expect("a ball has a north pole");
+        let was = model.data().vertices[pole].point.coordinates();
+        model.data_mut().vertices[pole].point = Point::new(was[0], was[1], was[2] + by);
     }
 
     /// Slide the plane a ball's seam is named by along its own normal.

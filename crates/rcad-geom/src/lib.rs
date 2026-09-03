@@ -125,3 +125,72 @@ pub use crate::walk::{
     MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing, walk,
     where_a_closed_crossing_starts,
 };
+
+/// How far the nearest `f64` triple to a point sits from that point, per unit
+/// of the point's largest coordinate.
+///
+/// Rounding a coordinate `x` to the nearest `f64` moves it by at most half the
+/// gap between neighbouring `f64` there, and that half-gap is at most
+/// `|x| · f64::EPSILON / 2`. Three coordinates each moved that far move the
+/// point by at most `√3 · f64::EPSILON / 2 ≈ 0.87 · f64::EPSILON` times the
+/// largest of them, which is under one.
+///
+/// That is a *relative* argument like every other bound here, so it holds only
+/// while the coordinates are normal numbers. A subnormal coordinate is rounded
+/// by an absolute amount — up to `2⁻¹⁰⁷⁵`, which can be the whole of it — and
+/// no multiple of the coordinate bounds that.
+///
+/// So a point that truly lies on a curved surface, written down as three `f64`,
+/// lands within `NEAREST_F64_POINT_ROUNDOFF · L` of that surface and nowhere
+/// nearer is available. **This is the width of the number and not a modelling
+/// tolerance:** a corner inside it is one no `f64` could have written any
+/// nearer, and a corner outside it is off a surface somebody chose rather than
+/// off a surface that rounded.
+///
+/// # Why a length, when a curved surface answers with a sign
+///
+/// [`Plane`] has [`Plane::SIGNED_DISTANCE_ROUNDOFF`] because reading a distance
+/// off a plane is `f64` arithmetic that rounds. A ball, a pipe, a cone and a
+/// ring have no distance to read: they answer
+/// [`SideOfSurface::side_of`](rcad_predicates::SideOfSurface::side_of), which is
+/// a [`Decision`](rcad_predicates::Decision) and carries no length out. Each of
+/// the four does carry a private forward error bound for level 1 of the
+/// cascade, but that bounds the *float filter's* own arithmetic as a fraction of
+/// its permanent — a squared length for a ball, a pipe and a cone, a quartic for
+/// a ring. It is what settles a corner well clear of its surface, and it is not
+/// what settles one a rounding off it: that one falls past level 1, which is
+/// what a filter bound is for.
+///
+/// A budget in the predicate's units would therefore have to be a new question
+/// of the form "is the value smaller than this", which is `|f(p)| < tol` — the
+/// wrong question §2.5 names and
+/// `a_point_exactly_on_a_circle_is_never_certified_off_it.rs` is built to keep
+/// out. It would also not be one number. Moving a point by `d` moves the value
+/// by about `|∇f|·d`, and `|∇f|` is a fact about *where* on the surface the
+/// corner sits rather than a constant: `2r` on a ball and on a pipe, but on a
+/// cone it is set by how far from the axis the corner is and grows without
+/// bound along the axis, and a ring's value is a quartic whose slope depends on
+/// both radii and on where round the tube the corner is.
+///
+/// The length is spendable as it stands. Widening a corner into a box of this
+/// half-width and asking the surface which side the *box* is on is what
+/// `rcad-topo`'s `not_provably_off` does, with
+/// `Model::what_writing_a_point_down_costs` as the caller's own slack factor on
+/// top (`docs/decisions.md` §15.6). What comes back is the cascade's ordinary
+/// **conservative** answer about a box and not an exact one — a box has no exact
+/// level to reach, and the interval arithmetic left over-estimates. On a pipe, a
+/// cone and a ring that over-estimate is already worth about a coordinate
+/// spacing at ordinary sizes, so for those three this bound is a floor under the
+/// reach rather than what decides. The search prints both figures.
+///
+/// # What this bounds, and what it does not
+///
+/// The corner's own three numbers. It says nothing about the surface's numbers —
+/// a centre, a radius, an axis direction scaled to length one — each of which
+/// rounds too, so the surface the numbers *are* is a few roundings from the
+/// surface the numbers *mean*. A caller allowing for that wants this times a
+/// slack factor of its own.
+///
+/// `how_far_off_a_curved_surface_the_nearest_f64_can_sit.rs` is the search that
+/// would catch this number being too small (§15.6).
+pub const NEAREST_F64_POINT_ROUNDOFF: f64 = f64::EPSILON;
