@@ -1780,9 +1780,8 @@ fn two_lines_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<SurfaceMe
     let down_the_plane = along * normal.dot(normal) - normal * up;
     let across_the_plane = normal.cross(along);
     let spread = (-leaning * squared_axis).max(0.0).sqrt();
-    let rulings = [1.0, -1.0].map(|side| {
-        down_the_plane * squared_axis + across_the_plane * (spread * side)
-    });
+    let rulings =
+        [1.0, -1.0].map(|side| down_the_plane * squared_axis + across_the_plane * (spread * side));
 
     let mut runs = Vec::new();
     for [this, other] in [[rulings[0], rulings[1]], [rulings[1], rulings[0]]] {

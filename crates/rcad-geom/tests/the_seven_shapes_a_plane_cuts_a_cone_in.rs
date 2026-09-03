@@ -228,7 +228,11 @@ fn a_plane_through_the_apex_and_down_it_cuts_two_straight_lines_told_apart_by_pi
     for sideways in [1.0, -1.0] {
         for point in far_along_each_line(sideways) {
             assert_eq!(cone.side_of(point), Decision::Zero, "{point:?}");
-            assert_eq!(down_the_axis.side_of_point(point), Decision::Zero, "{point:?}");
+            assert_eq!(
+                down_the_axis.side_of_point(point),
+                Decision::Zero,
+                "{point:?}"
+            );
         }
     }
 
@@ -377,14 +381,12 @@ fn a_run_along_a_cones_ruling_is_walked_as_a_straight_line_from_both_public_door
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
-        .expect("a plane through the apex cuts straight lines")
-        else {
+        .expect("a plane through the apex cuts straight lines") else {
             panic!("a plane through the apex cuts the cone in one line or two: {flat:?}");
         };
 
-        for stated in runs
-            .into_iter()
-            .chain([
+        for stated in
+            runs.into_iter().chain([
                 NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
                     .expect("a closed curve is never a piece with nothing picking it"),
             ])
