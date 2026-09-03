@@ -384,10 +384,21 @@ pub use rcad_geom::{
 };
 
 pub use rcad_geom::{
-    Axis, BSplineCurve, BSplineSurface, Cylinder, Deflection, EVALUATION_ROUNDOFF, Isometry,
+    Axis, BSplineCurve, BSplineSurface, Cone, Cylinder, Deflection, EVALUATION_ROUNDOFF, Isometry,
     KnotVector, MAX_DEGREE, Orientation, Plane, PlaneAgreement, Point, REFINEMENT_ROUNDOFF, Scale,
-    Segment, Sphere, Surface, Unit, Vector,
+    Segment, Sphere, Surface, Torus, Unit, Vector,
 };
+
+/// The name each surface's sign predicate goes by in a provenance record.
+///
+/// [`Record::predicate`] hands back one of these, and until all six were out
+/// here a caller reading its own log could compare it against a string literal
+/// and nothing else — the one bound of the six the facade did export
+/// ([`SIDE_OF_A_HALF_SPACE`]) is for a picker rather than for a surface, so
+/// every surface the kernel supports was a literal. These are published bounds
+/// on results the caller was handed, and a caller cannot name what its own
+/// results were certified against if the name is not exported (§15.6).
+pub use rcad_geom::{SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS};
 pub use rcad_predicates::{
     Approximation, Cause, Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D,
     Point as PredicatePoint, Policy, ProvenanceLog, Record, Severity, SideOfSurface, Strictness,

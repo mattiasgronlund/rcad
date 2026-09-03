@@ -1,4 +1,4 @@
-default: check check-enums check-wildcards check-wildcards-selftest lint test deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored lint test deny
 
 check:
     cargo check --workspace --all-targets
@@ -174,6 +174,53 @@ check-wildcards-selftest:
         echo "--- want ---"; echo "$want"
         exit 1
     fi
+
+# How many tests are marked `#[ignore]` today. Move it with the commit that
+# moves the tree, the same way `wildcard_arms` above works.
+#
+# Zero is a legitimate answer, and it is where this should end up: it says the
+# last gap somebody parked behind an `#[ignore]` has been closed, and
+# `test-ignored` then has nothing to run and says so.
+ignored_tests := "1"
+
+# An `#[ignore]`d test is a gap somebody parked, and this is what stops it being
+# forgotten.
+#
+# Nothing ran the ignored tests at all before this: `cargo nextest run
+# --workspace` skips them silently, so the one `#[ignore]` in the tree could be
+# fixed and un-ignored, or a second one added, and no recipe here would say a
+# word either way.
+#
+# **The count is pinned rather than the run being left to speak for itself**,
+# because a run that selects nothing is the failure this recipe exists to
+# prevent and an empty selection is exactly what a passing run looks like. A
+# typo in the filter, a flag this nextest does not have, a crate that did not
+# build — each of those selects nothing, and `cargo nextest run --run-ignored
+# ignored-only` printing "0 tests run" would be read as good news. A number that
+# has to match says which of the two happened.
+#
+# `test-ignored` below is what actually runs them, and it is not part of
+# `default`: today's one ignored test **fails**, which is why it is ignored, so
+# a `default` that ran it would be red on purpose.
+check-ignored:
+    @out=$(cargo nextest list --workspace --run-ignored ignored-only 2>/dev/null) \
+        || { echo "nextest could not list the ignored tests, so this counted nothing"; exit 1; }; \
+    listed=$(echo "$out" | grep -c .); \
+    if [ "$listed" != "{{ignored_tests}}" ]; then \
+        echo "$out"; \
+        echo "^ tests marked #[ignore]: $listed, expected {{ignored_tests}}"; \
+        echo "a new one raises this number; one fixed and un-ignored lowers it"; \
+        exit 1; \
+    fi
+
+# Run them. Fails loudly if the selection is empty rather than reporting a run
+# of no tests as a pass.
+test-ignored:
+    @if [ "{{ignored_tests}}" = "0" ]; then \
+        echo "no test is marked #[ignore], so there is nothing here to run"; \
+        exit 0; \
+    fi; \
+    cargo nextest run --workspace --run-ignored ignored-only --no-tests fail
 
 check-enums:
     @! awk '/^$/ {ok = 0} \
