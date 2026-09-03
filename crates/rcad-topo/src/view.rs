@@ -972,9 +972,12 @@ impl<'m> EdgeView<'m> {
     /// exactly zero while the edge itself is a whole circle — and a caller that
     /// read the zero as a length would conclude the circle was not there.
     /// [`EdgeView::is_closed`] is how to tell.
+    ///
+    /// Zero here therefore means the two ends are the *same corner*, and never
+    /// that they were too close together to tell apart — see [`how_far_apart`].
     #[must_use]
     pub fn distance_between_its_ends(self) -> f64 {
-        self.start().point().distance_to(self.end().point())
+        how_far_apart(self.start().point(), self.end().point())
     }
 
     /// What this edge runs along between its two ends, already moved into
@@ -1049,6 +1052,25 @@ impl<'m> EdgeView<'m> {
     fn data(self) -> &'m EdgeData {
         &self.model.data().edges[self.slot]
     }
+}
+
+/// How far apart two points are, with no square in the middle of it.
+///
+/// [`Point::distance_to`](rcad_geom::Point::distance_to) adds up the squares of
+/// the three differences and takes the root, and a difference below about
+/// `1.5e-162` squares to zero: the root of zero is zero, so a real separation
+/// comes back as no separation at all. That is a **gap** and not a limit — the
+/// answer is an ordinary `f64` and the arithmetic threw it away — and the two
+/// callers here are the two that have to tell a very short edge from no edge:
+/// [`EdgeView::distance_between_its_ends`], which is what
+/// `Model::check_dynamic_range` measures the smallest feature of a model with,
+/// and the fuse's own check on the answer it is about to write.
+///
+/// `f64::hypot` is the same distance computed without the intermediate square,
+/// so the whole subnormal range comes back as itself.
+pub(crate) fn how_far_apart(one: Point, other: Point) -> f64 {
+    let apart = other - one;
+    apart.x().hypot(apart.y()).hypot(apart.z())
 }
 
 /// A vertex, with the location it is being looked at through.

@@ -73,7 +73,7 @@
 //! the selection table, the image maps history is derived from, and
 //! `Model::fuse` itself.
 
-use rcad_geom::{Point, Surface};
+use rcad_geom::{DynamicRange, Point, Surface};
 use rcad_predicates::{
     Approximation, Decision, Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     Record, resolve_under_policy,
@@ -133,8 +133,11 @@ impl Model {
     /// through itself. [`Error::ResultIsNotManifold`] when the answer would have
     /// an edge with other than two faces along it — two cubes meeting along one
     /// edge united, say. [`Error::Invalid`] when an input's corners and its own
-    /// planes disagree by more than the corners' boxes, or when a shell of the
-    /// answer encloses no space.
+    /// planes disagree by more than the corners' boxes, when a shell of the
+    /// answer encloses no space, or when the answer's own shortest edge is too
+    /// small to resolve beside its own coordinates — which is
+    /// [`Invalid::DynamicRangeTooWide`] about a feature the inputs did not have
+    /// and the fuse built (see `Assembly::check_dynamic_range`).
     ///
     /// # Panics
     ///
@@ -183,10 +186,66 @@ impl Model {
             });
         }
 
+        // The last question the answer itself can be asked, and the only one
+        // neither input could have been asked instead: a fuse invents features
+        // — the sliver where two nearly-flush faces meet — and a sliver has no
+        // lower size short of zero. `Assembly::commit` writes and then asserts
+        // the model is still valid, so an answer `Model::validate` would reject
+        // has to be refused here or it is a crash.
+        if the_inputs_fit_in_f64(self, arguments, tools) {
+            assembly.check_dynamic_range(policy, log)?;
+        }
+
         let inherited = worst_tag_of_the_inputs(self, arguments, tools);
         let written = assembly.commit(self, inherited, policy);
         Ok(history_of(self, &scratch, &assembly, &written))
     }
+}
+
+/// Whether the inputs' own coordinates and their shortest edge fit in `f64`
+/// together.
+///
+/// **A fuse is answerable for what it builds, not for what it was handed.** A
+/// frame placed at `2^40` with millimetre walls is already outside
+/// [`DynamicRange::LARGEST_SUPPORTED_RATIO`] before anything is fused, and
+/// `Model::validate` already says so; uniting it with a copy of itself is a
+/// perfectly good answer and refusing it here would report somebody else's
+/// dynamic range as this fuse's bug. That is the same guard
+/// [`Assembly::commit`] puts on its own after-the-write check, taken over the
+/// input solids instead of the whole model so that it stays local to the
+/// entities this operation touched (§4.3).
+///
+/// Chords only, on both sides, where `Model::validate` also takes the radii of
+/// curved faces. A face of the answer keeps its ancestor's surface bit for bit
+/// (§17.1), so the smallest radius in the answer is the smallest radius in the
+/// inputs: were it the smallest thing about either, both measures would come
+/// out the same and this would report the inputs as not fitting, which only
+/// ever makes the check below stand down. Leaving the radii out is therefore
+/// the stricter of the two, not a hole — and a model whose radius is what puts
+/// it out of range fails `Model::validate` going in, which is what already
+/// stops [`Assembly::commit`] asserting on it.
+fn the_inputs_fit_in_f64(model: &Model, arguments: &[SolidKey], tools: &[SolidKey]) -> bool {
+    let mut largest = 0.0_f64;
+    let mut shortest = f64::INFINITY;
+    for &solid in arguments.iter().chain(tools) {
+        for face in model.solid(solid).faces() {
+            for wire in face.wires() {
+                for corner in wire.points() {
+                    largest = largest.max(corner.largest_coordinate_magnitude());
+                }
+                for coedge in wire.coedges() {
+                    let edge = coedge.edge();
+                    if !edge.is_closed() {
+                        shortest = shortest.min(edge.distance_between_its_ends());
+                    }
+                }
+            }
+        }
+    }
+    if !shortest.is_finite() || largest == 0.0 {
+        return true;
+    }
+    DynamicRange::measure(largest, shortest).is_ok_and(|range| range.is_within_supported_range())
 }
 
 /// The worst slop any entity of any input carries, if any of them carries one.
