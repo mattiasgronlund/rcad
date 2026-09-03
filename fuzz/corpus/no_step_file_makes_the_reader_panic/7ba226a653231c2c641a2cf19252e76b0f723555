@@ -1,0 +1,12 @@
+ISO-10303-21;
+HEADER;FILE_DESCRIPTION((''),'','',(''),(''),'','','');
+FILE_NAME('','2=(NA
+#2');
+FILE_SCHEMA(('AUTOMT'));
+ENDSEC;
+DATA;#0=DA(('GN'));
+ENDSEC;
+DATA;#1=CARTOINT('',(#3),#1,.T.);
+#4=MEASUE('','',(''),(''),'','',*,#3);
+ENDSEC;
+END-ISO-10303-21;

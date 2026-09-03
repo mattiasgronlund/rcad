@@ -1,10 +1,10 @@
 //! A tolerant B-Rep CAD kernel.
 //!
-//! This crate is the front door. It re-exports the whole M0 public surface and
-//! nothing else: the three crates underneath it — `rcad-predicates`,
-//! `rcad-geom` and `rcad-topo` — are an implementation detail of how the kernel
-//! is built, not something a caller should have to name
-//! (`docs/decisions.md` §3.6, §7.2).
+//! This crate is the front door. It re-exports the whole public surface and
+//! nothing else: `rcad-predicates`, `rcad-geom`, `rcad-mesh`, `rcad-topo` and
+//! `rcad-step` are implementation details of how the kernel is built and how
+//! it reads and writes a STEP file — not crates a caller should have to name
+//! directly (`docs/decisions.md` §3.6, §7.2).
 //!
 //! # The one thing to understand first
 //!
@@ -281,6 +281,42 @@
 //! `&Model` is `Sync`, with no interior mutability and no lazy cache, so all of
 //! the reading above parallelizes behind a shared reference with no cooperation
 //! from inside the crate (roadmap §10).
+//!
+//! # Reading and writing a STEP file
+//!
+//! [`StepFile::read`] turns the bytes of an ISO 10303-21 ("STEP", "Part 21")
+//! file into an entity graph, and [`Import::read`] walks that graph's solids
+//! into a [`Model`], or refuses by a [`Refusal`] that names the entity that
+//! stopped it and why. [`write`] goes back the other way. `rcad-step` is a real
+//! dependency of this crate, not a second one a caller has to add and match a
+//! second error type against: [`StepSyntaxError`], [`Refusal`] and
+//! [`CannotWrite`] all convert into [`Error`], through [`Error::StepSyntax`],
+//! [`Error::StepImport`] and [`Error::StepWrite`].
+//!
+//! ```
+//! use rcad::{Deflection, Import, Model, Policy, ProvenanceLog, Scale, StepFile, write};
+//!
+//! let scale = Scale::millimetres(10.0)?;
+//! let mut model = Model::new(scale);
+//! let mut log = ProvenanceLog::new();
+//! model.add_cube(10.0, &Policy::certified(), &mut log)?;
+//!
+//! // Out to a Part 21 file and back, naming nothing but `rcad`.
+//! let text = write(&model, "a cube round-tripped through rcad alone")?;
+//! let file = StepFile::read(text.as_bytes())?;
+//! let import = Import::read(&file, &Policy::certified(), &mut log)?;
+//!
+//! let [(_, key)] = import.solids() else {
+//!     panic!("one solid written is one solid read back")
+//! };
+//! let measured = import.model().solid(*key).measure(
+//!     Deflection::for_scale(scale),
+//!     &Policy::certified(),
+//!     &mut log,
+//! )?;
+//! assert_eq!(measured.volume(), 1000.0);
+//! # Ok::<(), rcad::Error>(())
+//! ```
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -358,8 +394,32 @@ pub use rcad_predicates::{
     orient2d, orient2d_tolerantly, orient3d, orient3d_of_points, orient3d_tolerantly,
 };
 pub use rcad_topo::{
-    CoedgeKey, CoedgeView, Containment, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef,
-    FaceView, Fused, Invalid, Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile,
-    ProfileBuilder, Rule, ShellKey, ShellView, SolidKey, SolidView, VertexKey, VertexView, WireKey,
+    CoedgeKey, CoedgeView, Containment, DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex,
+    DraftWire, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef, FaceView, Fused, Invalid,
+    Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile, ProfileBuilder, Rule, ShellKey,
+    ShellView, SolidBuilder, SolidKey, SolidView, VertexKey, VertexView, WireKey, WireStepView,
     WireView,
+};
+
+/// Reading and writing an ISO 10303-21 ("STEP", "Part 21") file.
+///
+/// Out here so a caller who wants to read or write one names only `rcad`: see
+/// *Reading and writing a STEP file* above. [`Error`]'s own rustdoc says how
+/// [`StepSyntaxError`], [`Refusal`] and [`CannotWrite`] land in it.
+///
+/// [`rcad_step::Error`] is renamed [`StepSyntaxError`] on the way out — it is
+/// what [`StepFile::read`] returns, and the bare name `Error` is already this
+/// crate's own. [`Refusal`], [`Problem`] and [`CannotWrite`] need no such
+/// rename: none of those three names was taken.
+///
+/// [`EntityId`] and [`Problem`] are out here too, and for the same reason
+/// [`Invalid`] already is: [`Refusal`] names its entity by one and
+/// [`StepSyntaxError`] names its problem by the other, so a caller matching
+/// either down to a variant needs both in scope. What is *not* out here is the
+/// entity graph itself — [`StepFile::instances`](rcad_step::StepFile::instances)
+/// and its `Header`, `Instance`, `Record` and `Value` — because reading a file
+/// into a `Model` is the consumer this facade has; walking the raw graph by
+/// hand is `rcad-step`'s own, more advanced, surface.
+pub use rcad_step::{
+    CannotWrite, EntityId, Error as StepSyntaxError, Import, Problem, Refusal, StepFile, write,
 };

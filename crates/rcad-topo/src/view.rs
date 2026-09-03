@@ -214,7 +214,7 @@ impl<'m> SolidView<'m> {
         }
         for coedge in face.wires().flat_map(WireView::coedges) {
             let edge = coedge.edge();
-            if *edge.run() == EdgeRun::Straight {
+            if *edge.stored_run() == EdgeRun::Straight {
                 continue;
             }
             let Some(across) = edge
@@ -274,6 +274,24 @@ fn box_the_surface_bounds(face: FaceView<'_>) -> Option<(Point, Point)> {
                 open_out(shadow.coordinates(), pipe.radius());
             }
         }
+        Surface::Cone(cone) => {
+            let (apex, along) = (cone.apex(), cone.axis().direction());
+            for corner in face.wires().flat_map(WireView::points) {
+                let up = along.dot(corner - apex);
+                open_out((apex + along * up).coordinates(), cone.radius_at(up));
+            }
+        }
+        // **The whole torus and not the corners' own reach**, unlike a pipe's
+        // arm above. A pipe's face cannot leave the tube of its own radius round
+        // the stretch of axis its corners span, so the shadows bound it. A torus
+        // has *two* ways round and a face that goes right round either of them
+        // reaches places no corner of it shadows — so what is bounded here is
+        // the surface, which is inside `ring + tube` of its centre whichever way
+        // the face wraps.
+        Surface::Torus(ring) => open_out(
+            ring.centre().coordinates(),
+            ring.ring_radius() + ring.tube_radius(),
+        ),
         other => panic!("this crate cannot say how far {other:?} reaches"),
     }
     seen.then(|| (Point::from(low), Point::from(high)))
@@ -525,7 +543,23 @@ impl<'m> FaceView<'m> {
     ///
     /// # Panics
     ///
-    /// If the face has no wires at all.
+    /// If the face has no wires at all, which is a bug in this crate rather
+    /// than something a caller can hand in.
+    ///
+    /// **That was not true until the shape check went on the door.** An empty
+    /// wire list holds no bad keys, so a file carrying one used to read back
+    /// cleanly and panic here, and nothing forces a caller through
+    /// [`Model::validate`](crate::Model::validate) first. Now
+    /// `Model::check_shape_is_possible` refuses those bytes —
+    /// `a_file_whose_shape_is_impossible_never_becomes_a_model` is the
+    /// demonstration — and the only other routes into the arenas are
+    /// `Model::from_parts`, which is `pub(crate)` and only reached through that
+    /// same check, `data_mut`, which is `#[cfg(test)]`, and the builders, which
+    /// end in `Model::check_touched_solid` and refuse a face with no wires
+    /// themselves.
+    ///
+    /// So handing back an `Option` would say a face with no wires is a state
+    /// worth carrying, at every call site, for ever. It is not one.
     #[must_use]
     pub fn outer_wire(self) -> WireView<'m> {
         self.wires().next().expect("a face has at least one wire")
@@ -683,11 +717,17 @@ impl<'m> WireView<'m> {
     /// and all.
     ///
     /// [`WireView::coedges`] is the same walk with the poles left out, and that
-    /// is what almost everything wants. This is for the one caller that has to
+    /// is what almost everything wants. This is for the callers that have to
     /// see where the boundary stands still: a mesher, which needs the pole to
     /// know that the side of the patch it is standing on is a whole turn wide
-    /// (`docs/decisions.md` §25.6).
-    pub(crate) fn steps(self) -> impl Iterator<Item = WireStepView<'m>> {
+    /// (`docs/decisions.md` §25.6), and anything taking a solid apart to
+    /// describe it again through a [`SolidBuilder`](crate::SolidBuilder) — a
+    /// ball's one wire is four steps and two coedges, and reading it as two
+    /// describes a shape that is not there.
+    ///
+    /// Nothing un-located comes out: both arms carry a view, and a view's
+    /// geometry has already been moved into place.
+    pub fn steps(self) -> impl Iterator<Item = WireStepView<'m>> {
         let (model, loc, orient) = (self.model, self.loc, self.orient);
         let steps: SmallVec<[WireStep; 4]> = self.data().steps.clone();
         let count = steps.len();
@@ -740,8 +780,9 @@ impl<'m> WireView<'m> {
 /// arrived. What a ball adds is the pole: the surface pinches to a point, the
 /// boundary has to go somewhere between arriving there and leaving, and where
 /// it goes is nowhere at all.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum WireStepView<'m> {
+pub enum WireStepView<'m> {
     /// Along one use of an edge.
     Along(CoedgeView<'m>),
     /// Standing still at a pole.
@@ -931,18 +972,53 @@ impl<'m> EdgeView<'m> {
     /// exactly zero while the edge itself is a whole circle — and a caller that
     /// read the zero as a length would conclude the circle was not there.
     /// [`EdgeView::is_closed`] is how to tell.
+    ///
+    /// Zero here therefore means the two ends are the *same corner*, and never
+    /// that they were too close together to tell apart — see [`how_far_apart`].
     #[must_use]
     pub fn distance_between_its_ends(self) -> f64 {
-        self.start().point().distance_to(self.end().point())
+        how_far_apart(self.start().point(), self.end().point())
     }
 
-    /// What this edge runs along between its two ends.
+    /// What this edge runs along between its two ends, already moved into
+    /// place.
     ///
-    /// Not public. What an edge runs along is how the *model* names it, and
-    /// there is no consumer outside this crate — a caller that wants the shape
-    /// of a crossing asks the intersector, which hands back its own
-    /// [`NamedRun`](rcad_geom::NamedRun).
-    pub(crate) fn run(self) -> &'m EdgeRun {
+    /// By value, because a located run is built here rather than stored
+    /// anywhere — the same shape as [`FaceView::surface`] and for the same
+    /// reason. A stored run carries a [`Surface`] and
+    /// [`Picker`](rcad_geom::Picker)s written in the frame the face is stored
+    /// in, and this view has a location composed onto it, so handing the stored
+    /// one out is what CLAUDE.md's rule about views forbids.
+    ///
+    /// This is what anything taking a solid apart to describe it again reads:
+    /// an importer or a writer has to hand an [`EdgeRun`] back, and for an arc
+    /// it cannot work one out from [`EdgeView::is_closed`] alone. Working in
+    /// the frame the face is stored in instead wants
+    /// [`EdgeView::stored_run`].
+    ///
+    /// **What this cannot promise is the exact squareness of a picker on a
+    /// piece that runs on for ever.** A movement with no turn keeps every
+    /// picking normal bit for bit, so a placed-but-unturned solid's runs are
+    /// the stored ones shifted; a turn takes that squareness away, and
+    /// [`EdgeRun::transformed`](rcad_geom::EdgeRun::transformed) names the
+    /// three families of fix that were weighed and which one is left open.
+    #[must_use]
+    pub fn run(self) -> EdgeRun {
+        self.data().run.transformed(&self.loc)
+    }
+
+    /// This edge's run in the frame its face is stored in, with this view's
+    /// location left off.
+    ///
+    /// Not public: it is the raw arena payload, and handing that out is exactly
+    /// what [`EdgeView::run`] exists to stop. Two kinds of caller in here want
+    /// it anyway. The mesher shifts a face's run into the frame it meshes that
+    /// face in, and §41.2's shift is worked out for a face at no placement at
+    /// all, so a located run would land somewhere else. And every comparison
+    /// against [`EdgeRun::Straight`] or
+    /// [`EdgeRun::RightRoundWhereItsFacesCross`] takes either, since neither
+    /// carries geometry — reading this one saves building a run to throw away.
+    pub(crate) fn stored_run(self) -> &'m EdgeRun {
         &self.data().run
     }
 
@@ -976,6 +1052,25 @@ impl<'m> EdgeView<'m> {
     fn data(self) -> &'m EdgeData {
         &self.model.data().edges[self.slot]
     }
+}
+
+/// How far apart two points are, with no square in the middle of it.
+///
+/// [`Point::distance_to`](rcad_geom::Point::distance_to) adds up the squares of
+/// the three differences and takes the root, and a difference below about
+/// `1.5e-162` squares to zero: the root of zero is zero, so a real separation
+/// comes back as no separation at all. That is a **gap** and not a limit — the
+/// answer is an ordinary `f64` and the arithmetic threw it away — and the two
+/// callers here are the two that have to tell a very short edge from no edge:
+/// [`EdgeView::distance_between_its_ends`], which is what
+/// `Model::check_dynamic_range` measures the smallest feature of a model with,
+/// and the fuse's own check on the answer it is about to write.
+///
+/// `f64::hypot` is the same distance computed without the intermediate square,
+/// so the whole subnormal range comes back as itself.
+pub(crate) fn how_far_apart(one: Point, other: Point) -> f64 {
+    let apart = other - one;
+    apart.x().hypot(apart.y()).hypot(apart.z())
 }
 
 /// A vertex, with the location it is being looked at through.

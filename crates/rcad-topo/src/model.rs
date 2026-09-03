@@ -121,8 +121,18 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model. Debug builds say so by name; a
+    /// release build cannot, because the model id is a zero-sized type there
+    /// (decisions.md §1.3), so all the panic can report is that no solid of
+    /// that name is here.
+    ///
+    /// **A key this model handed out always names something**, which is what
+    /// makes that an internal invariant and not a bad-input case. Nothing in
+    /// the crate removes an entity from an arena outside a test, and a file
+    /// whose stored slots resolve to nothing never becomes a `Model` at all —
+    /// `Deserialize` refuses it before the index is built, demonstrated by
+    /// `a_file_naming_a_corner_that_is_not_there_never_becomes_a_model` in
+    /// [`serialize`](crate::serialize).
     #[must_use]
     pub fn solid(&self, key: SolidKey) -> SolidView<'_> {
         let slot = key.slot_in(self.id);
@@ -134,8 +144,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn shell(&self, key: ShellKey) -> ShellView<'_> {
         let slot = key.slot_in(self.id);
@@ -151,8 +161,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn face(&self, key: FaceKey) -> FaceView<'_> {
         let slot = key.slot_in(self.id);
@@ -164,8 +174,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn wire(&self, key: WireKey) -> WireView<'_> {
         let slot = key.slot_in(self.id);
@@ -177,8 +187,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn coedge(&self, key: CoedgeKey) -> CoedgeView<'_> {
         let slot = key.slot_in(self.id);
@@ -190,8 +200,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn edge(&self, key: EdgeKey) -> EdgeView<'_> {
         let slot = key.slot_in(self.id);
@@ -203,8 +213,8 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model (debug builds), or names an entity
-    /// that is not there.
+    /// If the key came from another model, the same way and with the same
+    /// demonstration as [`Model::solid`].
     #[must_use]
     pub fn vertex(&self, key: VertexKey) -> VertexView<'_> {
         let slot = key.slot_in(self.id);
@@ -505,6 +515,16 @@ impl Model {
     /// operations cost O(n²) and the suite stops being runnable long before the
     /// milestone that needs it (decisions.md §4.3).
     ///
+    /// **These run in debug builds only, and that is now a choice about cost
+    /// rather than a difference in what a caller sees.** It was the second
+    /// thing until [`Model::check_shape_is_possible`] closed the door: a file
+    /// holding a wire that does not close read back cleanly, and
+    /// [`Model::place_solid`] on it crashed a debug-built caller and said
+    /// nothing to a release-built one — the same bytes, two answers, decided by
+    /// how the caller happened to be compiled. A shape these can refuse cannot
+    /// be deserialized any more, so what is left for them to catch is a bug in
+    /// this crate, which is what a debug assertion is for.
+    ///
     /// # Panics
     ///
     /// If any of them fail. Breaking one of these is a bug in this crate, and a
@@ -542,30 +562,13 @@ impl Model {
             return;
         }
         let wire = self.data.wires.get(slot).expect("touched wire is gone");
-        assert!(
-            wire.steps.len() >= 3 || self.wire_closes_on_one_edge(wire),
-            "a closed wire needs at least three steps unless its one edge is \
-             closed already, this one has {}",
-            wire.steps.len()
-        );
-        let mut previous_end = None;
-        let mut first_start = None;
+        self.check_wire_closes(wire)
+            .unwrap_or_else(|broken| panic!("a touched wire is broken: {broken}"));
         for &step in &wire.steps {
-            let (start, end) = self.step_ends(step);
-            if let Some(previous) = previous_end {
-                assert!(start == previous, "a touched wire does not close");
-            } else {
-                first_start = Some(start);
-            }
-            previous_end = Some(end);
             if let WireStep::Along(coedge) = step {
                 self.check_touched_edge(self.data.coedges[coedge].edge);
             }
         }
-        assert!(
-            previous_end == first_start,
-            "a touched wire does not close back to where it started"
-        );
     }
 
     /// Where one step round a wire starts and where it leaves off.
@@ -598,16 +601,8 @@ impl Model {
                 && self.data.vertices.contains_key(edge.end),
             "a touched edge names a vertex that is gone"
         );
-        let coedges = self.index.coedges_of_edge(slot);
-        assert!(
-            coedges.len() == 2,
-            "a closed solid uses every edge exactly twice, this one {} times",
-            coedges.len()
-        );
-        assert!(
-            self.data.coedges[coedges[0]].orientation != self.data.coedges[coedges[1]].orientation,
-            "the two coedges of an edge must run opposite ways"
-        );
+        self.check_edge_is_walked_by_two_opposite_coedges(slot)
+            .unwrap_or_else(|broken| panic!("a touched edge is broken: {broken}"));
     }
 
     /// The check that runs in release builds too (decisions.md §4.3).
@@ -752,6 +747,76 @@ impl ModelData {
             shells: SlotMap::with_key(),
             solids: SlotMap::with_key(),
         }
+    }
+
+    /// Every slot stored in one entity names an entity the arenas hold.
+    ///
+    /// The seven arenas point at each other by slot and [`Model`] derives
+    /// `Deserialize`, so a file names whatever slots it likes: a solid can name
+    /// a shell that is not there, and so can every other level. Nothing
+    /// downstream survives one. A view built over a missing slot indexes its
+    /// arena, and that is a panic — which is how a stranger's bytes crashed the
+    /// STEP writer *and* [`Model::validate`], the check whose job was to say
+    /// the bytes were unsound.
+    ///
+    /// So this runs before anything walks the model: first in `validate`, and
+    /// on the way in from `Deserialize` before [`Model::from_parts`] builds the
+    /// index, because a slot index a file made up is unbounded and
+    /// `SecondaryMap::insert` grows to fit it.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::DanglingKey`] naming the kind of entity the first slot that
+    /// resolves to nothing was reaching for.
+    pub(crate) fn check_keys_resolve(&self) -> Result<()> {
+        for edge in self.edges.values() {
+            for end in [edge.start, edge.end] {
+                if !self.vertices.contains_key(end) {
+                    return Err(Invalid::DanglingKey { entity: "vertex" }.into());
+                }
+            }
+        }
+        for coedge in self.coedges.values() {
+            if !self.edges.contains_key(coedge.edge) {
+                return Err(Invalid::DanglingKey { entity: "edge" }.into());
+            }
+        }
+        for wire in self.wires.values() {
+            for coedge in wire.coedges() {
+                if !self.coedges.contains_key(coedge) {
+                    return Err(Invalid::DanglingKey { entity: "coedge" }.into());
+                }
+            }
+            for &step in &wire.steps {
+                if let WireStep::Pole(vertex) = step
+                    && !self.vertices.contains_key(vertex)
+                {
+                    return Err(Invalid::DanglingKey { entity: "vertex" }.into());
+                }
+            }
+        }
+        for face in self.faces.values() {
+            for &wire in &face.wires {
+                if !self.wires.contains_key(wire) {
+                    return Err(Invalid::DanglingKey { entity: "wire" }.into());
+                }
+            }
+        }
+        for shell in self.shells.values() {
+            for used in &shell.faces {
+                if !self.faces.contains_key(used.face) {
+                    return Err(Invalid::DanglingKey { entity: "face" }.into());
+                }
+            }
+        }
+        for solid in self.solids.values() {
+            for used in &solid.shells {
+                if !self.shells.contains_key(used.shell) {
+                    return Err(Invalid::DanglingKey { entity: "shell" }.into());
+                }
+            }
+        }
+        Ok(())
     }
 
     fn worst_approximation(&self) -> f64 {
@@ -1030,25 +1095,91 @@ mod tests {
         assert_eq!(model.solid(cube).signed_volume(), -volume);
     }
 
-    /// The half of `measure`'s old assert that is still an assert.
+    /// §20.1 settled that `measure` panics on a solid whose faces point
+    /// inwards, because the only way to get one was a bug in this crate.
+    /// `Model` is `Deserialize`, so there is a second way: these bytes read
+    /// back with nothing forged, and a caller's bytes may not panic.
     ///
-    /// That assert was doing two jobs: refusing an overflowed sum and refusing
-    /// a solid whose faces point inwards. Only the second is its own. Splitting
-    /// the first off into an `Err` must not take this one with it — a solid
-    /// enclosing negative space is corrupt, and a crash beats a corruption.
+    /// The number in the refusal is the one `validate` gives for the same
+    /// bytes, which is what makes the two answers comparable rather than
+    /// merely both being errors.
     #[test]
-    #[should_panic(expected = "a solid must enclose a positive amount of space")]
-    fn a_solid_whose_faces_point_inwards_still_panics_rather_than_measuring() {
-        let (mut model, cube) = a_cube();
+    fn measuring_a_solid_read_back_inside_out_is_refused_rather_than_crashing() {
+        let (mut model, _) = a_cube();
         for shell in model.data.shells.values_mut() {
             for used in &mut shell.faces {
                 used.orient = used.orient.reversed();
             }
         }
-        let _ = model.solid(cube).measure(
-            rcad_geom::Deflection::of(0.1).expect("a length a polyhedron ignores"),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+        let read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");
+
+        let refused = read_back
+            .solids()
+            .next()
+            .expect("the cube came back")
+            .measure(
+                rcad_geom::Deflection::of(0.1).expect("a length a polyhedron ignores"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a solid enclosing negative space has no measurement");
+
+        assert!(
+            matches!(
+                refused,
+                Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume == -8.0
+            ),
+            "measure gave {refused:?}"
+        );
+        let swept = read_back
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect_err("validate refuses the same bytes");
+        assert!(
+            matches!(
+                swept,
+                Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume == -8.0
+            ),
+            "validate gave {swept:?}"
+        );
+    }
+
+    /// The same for a solid with no fan, whose volume is summed over a mesh.
+    ///
+    /// A ball is the one shape the direction rule cannot catch — its only seam
+    /// runs pole to pole, so no closed edge is walked against its surface — and
+    /// the sum over its triangles is all that is left to notice it (§23.9).
+    #[test]
+    fn measuring_a_ball_read_back_inside_out_is_refused_rather_than_crashing() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(2.0, &rcad_geom::Isometry::identity())
+            .expect("a ball of radius two");
+        for shell in model.data.shells.values_mut() {
+            for used in &mut shell.faces {
+                used.orient = used.orient.reversed();
+            }
+        }
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+        let read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");
+
+        let refused = read_back
+            .solids()
+            .next()
+            .expect("the ball came back")
+            .measure(
+                rcad_geom::Deflection::of(0.1).expect("a length a ball can be meshed to"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a ball enclosing negative space has no measurement");
+
+        assert!(
+            matches!(
+                refused,
+                Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume < 0.0
+            ),
+            "measure gave {refused:?}"
         );
     }
 

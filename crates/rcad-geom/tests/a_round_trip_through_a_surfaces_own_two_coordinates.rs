@@ -65,6 +65,11 @@ fn the_largest_number_involved(surface: &Surface, point: Point) -> f64 {
             .origin()
             .largest_coordinate_magnitude()
             .max(pipe.radius()),
+        Surface::Cone(cone) => cone.apex().largest_coordinate_magnitude().max(cone.slope()),
+        Surface::Torus(ring) => ring
+            .centre()
+            .largest_coordinate_magnitude()
+            .max(ring.ring_radius() + ring.tube_radius()),
         other => panic!("this suite does not know how to size {other:?}"),
     };
     of_the_surface.max(point.largest_coordinate_magnitude())

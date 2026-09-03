@@ -42,6 +42,47 @@ pub enum Error {
         radius: f64,
     },
 
+    /// A cone was asked for with a spread that is not a spread.
+    #[error("a cone's slope must be greater than zero, but it was {slope}")]
+    SlopeNotPositive {
+        /// What the caller asked for.
+        slope: f64,
+    },
+
+    /// A cone was named by a half-angle that is not one.
+    ///
+    /// At zero a cone is a line and at a right angle it is a plane, so the open
+    /// range between them is the whole of what names a cone.
+    #[error("a cone's half-angle must be between zero and a right angle, but it was {half_angle}")]
+    HalfAngleIsNotACone {
+        /// What the caller asked for.
+        half_angle: f64,
+    },
+
+    /// A torus was asked for with a tube as wide as its ring, or wider.
+    ///
+    /// Such a surface runs through itself, and — the reason this is refused at
+    /// the door rather than noted in a doc comment — the quartic
+    /// [`Torus`](crate::Torus)'s sign predicate reads **stops meaning inside and
+    /// outside**. `a_tube_wider_than_its_ring_would_certify_the_wrong_side`
+    /// writes out the quartic by hand for a point plainly inside such a tube and
+    /// shows it come back positive, which every level of the cascade would
+    /// certify as outside. A confident wrong answer is what §4.1 ranks below a
+    /// crash.
+    ///
+    /// It is caller input rather than a broken invariant: two radii arrive from
+    /// a stranger's bytes through `Deserialize` as readily as from a call.
+    #[error(
+        "a torus's tube radius {tube_radius} must be less than its ring radius {ring_radius}, or \
+         the surface runs through itself"
+    )]
+    ATorusThatRunsThroughItself {
+        /// How far the middle of the tube runs from the axis.
+        ring_radius: f64,
+        /// How thick the tube is.
+        tube_radius: f64,
+    },
+
     /// A mesh was asked to stray a distance that is not a distance.
     #[error("a deflection must be greater than zero, but it was {length}")]
     DeflectionNotPositive {
@@ -280,6 +321,165 @@ pub enum Error {
     )]
     CannotNameWhichPieceOfACrossingThisIs,
 
+    /// A plane cuts a cone in a parabola.
+    ///
+    /// A **gap**, and the gap is in the vocabulary rather than in the
+    /// arithmetic. Which of the seven shapes a plane cuts a cone in is settled
+    /// exactly, here, by one sign — so nothing was undecided. What
+    /// [`EdgeRun`](crate::EdgeRun) has no arm for is **one curve that runs on
+    /// for ever and bends**: `Straight` says the two ends are the whole of it,
+    /// `RightRoundWhereItsFacesCross` says the curve closes, and
+    /// `PartOfWhereItCrosses` says which of several pieces this is. A parabola
+    /// is one piece, unbounded, and not straight.
+    ///
+    /// The family of fixes, so that this is a demonstration and not a paragraph:
+    /// (a) a fourth `EdgeRun` variant for an endless curve, which every match on
+    /// that enum then grows an arm for; (b) naming it as
+    /// `PartOfWhereItCrosses` picked by a half-space that holds the whole of it,
+    /// which is expressible today — a parabola lies wholly in one nappe, so the
+    /// half-space through the apex square to the axis holds it — but which
+    /// `walk` cannot then draw, because [`Conic`] is a centre and two semi-axes
+    /// and a parabola has neither; (c) a bounded stand-in cut at the two places
+    /// the face's own wire reaches, which is not this function's to know because
+    /// [`intersect`](crate::intersect) is handed two surfaces and no topology.
+    /// (b) plus a parabolic arm in the walker is the shortest, and its consumer
+    /// is a cone fused with a plane parallel to one of its rulings.
+    ///
+    /// [`Conic`]: crate::Surface
+    #[error("a plane cuts this cone in a parabola, which is one endless curve that bends")]
+    ACrossingThatIsAParabola,
+
+    /// A plane cuts a cone in a hyperbola.
+    ///
+    /// A **gap**, for the reason [`Error::ACrossingThatIsAParabola`] gives, and
+    /// twice over: a hyperbola is two endless curves that bend. The one extra
+    /// thing this case has is that the two branches *are* tellable apart with
+    /// what is already here — each lies wholly in one nappe of the cone, so the
+    /// half-space through the apex square to the axis holds one and rules out
+    /// the other. What is missing is the same missing thing: nothing can draw
+    /// an endless bending curve once it has been named.
+    #[error("a plane cuts this cone in a hyperbola, which is two endless curves that bend")]
+    ACrossingThatIsAHyperbola,
+
+    /// A plane through a cone's apex cuts it in two lines that meet there.
+    ///
+    /// A **limit**, and the same one
+    /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] names. Two
+    /// straight lines crossing at a point are one curve that runs through
+    /// itself: no half-space picks one of them, because both pass through the
+    /// apex and a half-space that holds one holds half of the other. Splitting
+    /// them at the apex would be four half-lines and would need a *point* to
+    /// split at, which is topology's and not a surface pair's (§24.3).
+    #[error(
+        "a plane through this cone's apex cuts two lines that meet there, which is one curve \
+         that runs through itself"
+    )]
+    TwoLinesThroughAConesApexAreOneCurveThroughItself,
+
+    /// A plane touches a cone along one whole ruling.
+    ///
+    /// A **gap**. The crossing is one endless straight line and
+    /// [`EdgeRun::Straight`](crate::EdgeRun::Straight) says exactly that — a
+    /// plane along a pipe's axis and tangent to it is named that way already.
+    /// What is missing is one step further on: `rcad-topo`'s arrangement has to
+    /// tell this pair from the pair that crosses in an ellipse *before* it asks
+    /// for a crossing, and the only thing that tells them apart is the sign of
+    /// `(n·w)² − slope²·|n × w|²`, which is a sign question with a policy and a
+    /// log and the arrangement's dispatch has neither. A pipe gets away with the
+    /// same dispatch because its version, `n·w == 0`, is one exact `f64`
+    /// comparison.
+    ///
+    /// The fix is to hand the arrangement the crossing it already asked for
+    /// instead of re-deriving the pair's shape from the surfaces, which is one
+    /// signature change in `how_a_crossing_runs`. Its consumer is a cone with a
+    /// plane resting against one of its sides.
+    #[error("this plane touches the cone along one whole ruling")]
+    APlaneTouchingAConeAlongOneOfItsRulings,
+
+    /// A cone against a ball, a pipe, or another cone.
+    ///
+    /// A **gap** and the same one two leaning pipes have (§29): the crossing is
+    /// a degree-four space curve, naming which of its shapes it takes is an
+    /// eighth-degree discriminant, and drawing it needs the marcher. None of
+    /// that is built for a cone.
+    ///
+    /// The family of fixes, shortest first. (a) The **coaxial** cases are
+    /// planar and are one sign question each: a ball centred on a cone's axis, a
+    /// pipe sharing it, and a second cone sharing it all cross in circles square
+    /// to that axis, exactly as `a_ball_centred_on_a_pipes_axis` already does
+    /// for its own row. That covers a countersink in a round bar, which is the
+    /// case a real file actually holds. (b) The general case wants the marcher
+    /// taught a cone and an eighth-degree discriminant derived, which is §29's
+    /// whole second stage over again.
+    #[error("a cone crossing another curved surface is a degree-four space curve")]
+    ACrossingBetweenAConeAndAnotherCurvedSurface,
+
+    /// A plane cuts a torus in a quartic that is not a pair of circles.
+    ///
+    /// A **gap**, and the largest one a torus leaves. Only two families of plane
+    /// cut a torus in circles: one **square to the axis**, which cuts two
+    /// circles round the axis, and one **through the axis**, which cuts the two
+    /// meridian circles. Both are built. Every other plane cuts a genuine
+    /// quartic — a Cassini oval, a figure of eight, a pair of Villarceau
+    /// circles on the two bitangent planes — and the vocabulary here has no name
+    /// for one: [`EdgeRun`](crate::EdgeRun) says straight, closed, or which
+    /// piece, and [`crate::PointsAlongACrossing`] draws a closed curve either
+    /// from a [`Conic`](crate::Surface) or from the marcher.
+    ///
+    /// The family of fixes, so that this is a demonstration and not a paragraph:
+    /// (a) **the marcher already draws degree-four space curves** and is the
+    /// short route — it wants a torus arm in `march.rs` (written: a torus
+    /// carries its own enclosing gradient there already) and a seed per loop,
+    /// which is the part that is missing, because where a plane's quartic falls
+    /// into one loop, two, or a figure of eight is an eighth-degree
+    /// discriminant in the plane's four numbers and nobody has derived it.
+    /// (b) a closed form for the quartic's branches, which is Ferrari's method
+    /// on interval coefficients and gives roots as boxes that a nearly-tangent
+    /// plane widens to nothing. (c) refusing the naming and letting the
+    /// arrangement cut the face some other way, which is not
+    /// [`intersect`](crate::intersect)'s to decide (§24.3).
+    /// **(a) is the shortest**, and its consumer is a torus fused with a block
+    /// that is not square to the ring.
+    #[error("a plane cuts this torus in a quartic that is not a pair of circles")]
+    ACrossingBetweenAPlaneAndATorusThatIsAQuartic,
+
+    /// A torus against a ball, a pipe, a cone, or another torus.
+    ///
+    /// A **gap** and the same one two leaning pipes have (§29), one degree
+    /// worse: the crossing is a space curve of degree up to eight, naming which
+    /// of its shapes it takes has no discriminant anybody has written down, and
+    /// the marcher has no seed to start from.
+    ///
+    /// The family of fixes, shortest first. (a) The **coaxial** cases are two
+    /// circles each and are one sign question apiece — a pipe sharing the
+    /// torus's axis crosses it in two circles square to that axis, and so does a
+    /// ball centred on it and a second torus about it. That covers a rod through
+    /// the middle of a ring, which is what a real file holds. (b) The general
+    /// case wants §29's whole second stage over again with a torus in it.
+    #[error("a torus crossing another curved surface is a space curve of degree up to eight")]
+    ACrossingBetweenATorusAndAnotherCurvedSurface,
+
+    /// A straight line meets a torus in a quartic, and nothing here solves one.
+    ///
+    /// **Nothing raises this any more, and it is kept because it is public.** A
+    /// straight line meeting a torus is solved: `real_roots` isolates the
+    /// quartic's real roots off its derivative and settles every sign exactly,
+    /// [`MeetOfThree::At`](crate::MeetOfThree::At) carries up to four places, and
+    /// `where_a_line_meets_a_torus.rs` walks nought, one, two, three and four of
+    /// them. Of the three fixes this doc used to weigh, none was taken: (a)
+    /// Ferrari on interval coefficients was not needed, (b) widening
+    /// `MeetOfThree` was, and (c) — isolating the roots — is what happened, and
+    /// it did not turn an exact question into a search: the search picks the
+    /// brackets and exact arithmetic decides every sign inside them.
+    ///
+    /// What is left of the gap is narrower and is
+    /// [`Error::Undecidable`](Error::Undecidable) rather than this: a line that
+    /// touches the tube at a place no `f64` names cannot be told from one that
+    /// all but touches it, because neither has a sign to change. `real_roots`'s
+    /// module doc names that family of fixes.
+    #[error("a straight line meets this torus in a quartic, and nothing here solves one")]
+    WhereALineMeetsATorusIsAQuartic,
+
     /// A point cannot be worked out as close to a crossing as was asked for.
     ///
     /// Two knobs meet here and they do different jobs: the deflection says how
@@ -441,6 +641,29 @@ pub enum Error {
          two of these are"
     )]
     WhereThreeSurfacesMeetNeedsTwoOfThemFlat,
+
+    /// A line that is only known as a box, asked where it meets a torus.
+    ///
+    /// Where a line meets a quadric is read off a discriminant, and a
+    /// discriminant that is a box still says which way it points whenever the
+    /// box stays clear of zero. A torus is a **quartic**, and its roots are not
+    /// read off anything: they are found by evaluating the quartic's sign at
+    /// places along the line and narrowing where the sign changes
+    /// ([`real_roots`](crate::real_roots)). A coefficient that is a box has no
+    /// sign to evaluate anywhere near a root, so the search has nothing to
+    /// bisect on.
+    ///
+    /// A **gap** and not a limit: the roots exist, and where the line's own six
+    /// numbers each name an `f64` — which is what a corner on the lattice comes
+    /// to — they are found. The family of fixes is (a) bisecting on interval
+    /// signs and handing back the stretches where the sign is undecided, which
+    /// is [`MeetsAt::MaybeATouch`](crate::MeetsAt::MaybeATouch)'s shape applied
+    /// to a whole bracket rather than to a turning point, and is a lane;
+    /// (b) exact rational line data, which wants an arithmetic this kernel does
+    /// not have; (c) narrowing the box first, which is not this question's to
+    /// do — the box is what the caller knows.
+    #[error("where a line meets a torus is found by exact signs, and this line is only a box")]
+    WhereALineMeetsARingNeedsTheLineExactly,
 
     /// A predicate refused the input it was handed — three planes with no
     /// single meeting point, for instance.

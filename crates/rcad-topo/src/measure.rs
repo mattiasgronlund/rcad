@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use rcad_geom::{Deflection, Point, Surface, Vector};
+use rcad_geom::{Cone, Deflection, Point, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::mesh::{Mesh, MeshTriangle};
 use crate::view::FaceView;
-use crate::{Error, FaceKey, Result, SolidView};
+use crate::{Error, FaceKey, Invalid, Result, SolidView};
 
 /// How much space a solid takes up, how much skin it has, where it balances,
 /// and how far each of those three could be out.
@@ -163,13 +163,22 @@ impl SolidView<'_> {
     /// [`Error::MoreMeshPointsThanASolidWillHold`], [`Error::CannotMeshAFace`]
     /// or [`Error::Undecidable`].
     ///
+    /// [`Invalid::VolumeIsNotPositive`] when the solid encloses a negative
+    /// amount of space, or none — the same refusal
+    /// [`Model::validate`](crate::Model::validate) gives for the same bytes,
+    /// with the same number in it.
+    ///
+    /// **This used to be an assert, and §20.1 settled it that way.** The
+    /// argument then was that the only route to an inside-out solid was a bug
+    /// in this crate, so a crash beat a corruption. `Model` is `Deserialize`,
+    /// which is a second route: a stranger's bytes can carry a solid whose
+    /// faces point inwards, `validate` already answers `Err` for them, and a
+    /// caller's bytes may not panic. `measuring_a_solid_read_back_inside_out_is_refused_rather_than_crashing`
+    /// is the demonstration.
+    ///
     /// # Panics
     ///
-    /// If the solid encloses a negative amount of space, or none. A closed
-    /// solid with its faces pointing outwards cannot, and
-    /// [`Model::validate`](crate::Model::validate) says so, which makes this a
-    /// broken model rather than bad input. For a curved solid, also everything
-    /// [`SolidView::mesh`] panics on, and for the same reason.
+    /// For a curved solid, everything [`SolidView::mesh`] panics on.
     pub fn measure(
         self,
         deflection: Deflection,
@@ -193,15 +202,12 @@ impl SolidView<'_> {
         let shifts = self.axis_shifts(hub);
         let (six_volumes, moment) = self.volume_and_moment(hub, shifts);
 
-        assert!(
-            six_volumes > 0.0,
-            "a solid must enclose a positive amount of space, this one gives {}",
-            six_volumes / 6.0
-        );
-
         let volume = shift(six_volumes / 6.0, shifts.iter().sum());
         if !volume.is_finite() {
             return Err(Error::VolumeTooLargeToMeasure);
+        }
+        if volume <= 0.0 {
+            return Err(Invalid::VolumeIsNotPositive { volume }.into());
         }
         let surface_area = self.surface_area();
         if !surface_area.is_finite() {
@@ -232,15 +238,12 @@ impl SolidView<'_> {
         let shifts = axis_shifts_over(mesh, hub);
         let (six_volumes, moment) = volume_and_moment_over(mesh, hub, shifts);
 
-        assert!(
-            six_volumes > 0.0,
-            "a solid must enclose a positive amount of space, this one gives {}",
-            six_volumes / 6.0
-        );
-
         let volume = shift(six_volumes / 6.0, shifts.iter().sum());
         if !volume.is_finite() {
             return Err(Error::VolumeTooLargeToMeasure);
+        }
+        if volume <= 0.0 {
+            return Err(Invalid::VolumeIsNotPositive { volume }.into());
         }
         let skin = self.skin_of(mesh);
         if !skin.area.is_finite() {
@@ -265,7 +268,7 @@ impl SolidView<'_> {
     /// One walk over the faces rather than three, because the two error terms
     /// are both a share of the very area being summed.
     fn skin_of(self, mesh: &Mesh) -> Skin {
-        let radii = radius_of_each_face(self);
+        let radii = radius_of_each_face(self, mesh);
         let deviation = mesh.deviation().magnitude();
         let mut skin = Skin {
             area: 0.0,
@@ -662,23 +665,102 @@ fn how_far_the_solid_reaches_from(mesh: &Mesh, centroid: Point) -> f64 {
 /// How far each face of this solid bends, or `None` where it does not bend at
 /// all.
 ///
+/// # How small a cone face's radius really gets, and why the corners cannot say
+///
+/// **Read over the mesh's own points and not over the face's corners**, and the
+/// case that forces it is a cone that ends in a point. Its cone face is bounded
+/// by one circle and nothing else; the apex is where the surface's own second
+/// coordinate runs out, not a vertex of the model, so **no corner of that face
+/// is anywhere near it**. Charged against its corners the face would publish the
+/// radius at its rim — four units on a cone of radius four — for a face that
+/// reaches a radius of nothing at all. That is a bound claimed and not earned,
+/// which is worse than no bound.
+///
+/// The mesh's points are the right domain anyway: what the two bounds above are
+/// about is how far *these triangles* can be from the surface, and the triangles
+/// are what the mesh holds.
+///
+/// **The offset-surface argument is what needs the smallest and not the
+/// largest.** [`how_much_more_surface_there_can_be`] projects the mesh onto the
+/// surface `deviation` inside the material and reads the area back out; for a
+/// cone that inner surface is *the same cone shifted along its own axis*, so the
+/// factor is the pipe's `R/(R − d)` with `R = slope·|v|·√(1 + slope²)` the radius
+/// of normal curvature — and the sphere's `(R/(R − d))²` bounds that, exactly as
+/// it bounds a pipe's. `R` varies over the face, so the smallest of it is the
+/// one that bounds the lot.
+///
+/// **A face that reaches its apex gets zero, and the bounds then come back
+/// infinite.** That is honest and it is a **gap**: within `deviation` of the
+/// apex there is no inner offset cone at all — its own apex has moved
+/// `deviation·√(1 + slope²)/slope` up the axis — so no argument of this shape
+/// covers the tip, and the number this hands back must not pretend otherwise.
+/// What closes it is splitting the face at `v = 2·deviation·√(1 + slope²)/slope`
+/// and charging the tip its **whole** size rather than a share of it: the cone
+/// above that split has `R ≥ 2·deviation`, and the tip below it holds at most
+/// `4π·deviation²(1 + slope²)^{3/2}/slope` of area and
+/// `(8π/3)·deviation³(1 + slope²)^{3/2}/slope` of volume, both of which are
+/// bounded outright. That wants a bound taking two numbers rather than one, and
+/// its consumer is a pointed cone somebody wants a measured volume for.
+///
 /// # Panics
 ///
 /// On a surface this has not been taught. [`Surface`] grows a variant at every
 /// milestone, and a surface measured by not being measured is worse than a stop.
-fn radius_of_each_face(solid: SolidView<'_>) -> HashMap<FaceKey, Option<f64>> {
-    solid
+fn radius_of_each_face(solid: SolidView<'_>, mesh: &Mesh) -> HashMap<FaceKey, Option<f64>> {
+    let mut cones: HashMap<FaceKey, Cone> = HashMap::new();
+    let mut radii: HashMap<FaceKey, Option<f64>> = solid
         .faces()
         .map(|face| {
             let radius = match face.surface() {
                 Surface::Plane(_) => None,
                 Surface::Sphere(ball) => Some(ball.radius()),
                 Surface::Cylinder(pipe) => Some(pipe.radius()),
+                // Worked out below, over the mesh's own points rather than over
+                // the face's corners. A face with no triangles keeps the
+                // infinity, and contributes no area either, so it is charged
+                // nothing — which is right, because there is nothing there.
+                Surface::Cone(cone) => {
+                    cones.insert(face.key(), cone);
+                    Some(f64::INFINITY)
+                }
+                // **The tube radius, and it needs no mesh to find.** The inner
+                // offset surface of a torus is the same torus with a thinner
+                // tube, which exists for every `d` below `r` — so unlike a
+                // cone, a torus never runs out of an inner surface to project
+                // onto, and unlike a ball its ratio is not one number. The area
+                // element is `(R + r·cos v)·r`, so the offset's is
+                // `(R + (r − d)cos v)(r − d)` and the ratio is
+                // `[r/(r − d)]·[(R + r·cos v)/(R + (r − d)cos v)]`. The second
+                // factor is largest at the outer equator, where it is
+                // `(R + r)/(R + r − d)` — smaller than `r/(r − d)` because
+                // `R + r` is bigger than `r` — so the whole ratio is under
+                // `(r/(r − d))²`, which is the sphere's factor with `r` in it.
+                Surface::Torus(ring) => Some(ring.tube_radius()),
                 other => panic!("this crate cannot say how far {other:?} bends"),
             };
             (face.key(), radius)
         })
-        .collect()
+        .collect();
+
+    for triangle in mesh.triangles() {
+        let Some(cone) = cones.get(&triangle.face()) else {
+            continue;
+        };
+        let along = cone.axis().direction();
+        let steepness = cone.slope().hypot(1.0);
+        for corner in triangle.corners() {
+            let at = mesh.points()[corner as usize];
+            let here = cone.radius_at(along.dot(at - cone.apex())) * steepness;
+            let slot = radii
+                .get_mut(&triangle.face())
+                .expect("every face of the solid is in the table");
+            *slot = Some(
+                slot.expect("a cone face was put in with a radius")
+                    .min(here),
+            );
+        }
+    }
+    radii
 }
 
 /// Where one mesh triangle's three corners are.

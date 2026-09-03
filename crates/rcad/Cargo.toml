@@ -12,6 +12,7 @@ repository.workspace = true
 rcad-geom.workspace = true
 rcad-mesh.workspace = true
 rcad-predicates.workspace = true
+rcad-step.workspace = true
 rcad-topo.workspace = true
 thiserror.workspace = true
 

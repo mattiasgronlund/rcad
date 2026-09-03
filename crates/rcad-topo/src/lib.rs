@@ -87,6 +87,7 @@
 #![deny(missing_docs)]
 
 mod build;
+mod builder;
 mod classify;
 mod cross;
 mod error;
@@ -101,6 +102,9 @@ mod validate;
 mod view;
 
 pub use build::{Profile, ProfileBuilder};
+pub use builder::{
+    DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex, DraftWire, SolidBuilder,
+};
 pub use classify::Containment;
 pub use error::{Error, Invalid, Result};
 pub use fuse::{Fused, Rule};
@@ -111,7 +115,8 @@ pub use mesh::{Mesh, MeshTriangle};
 pub use model::Model;
 pub use serialize::FORMAT_VERSION;
 pub use view::{
-    CoedgeView, EdgeView, FaceRef, FaceView, ShellView, SolidView, VertexView, WireView,
+    CoedgeView, EdgeView, FaceRef, FaceView, ShellView, SolidView, VertexView, WireStepView,
+    WireView,
 };
 
 /// `&Model` is `Sync`, and this is where that is proved rather than claimed.

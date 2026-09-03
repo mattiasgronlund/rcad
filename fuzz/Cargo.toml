@@ -14,12 +14,36 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
 rcad-geom = { path = "../crates/rcad-geom" }
 rcad-predicates = { path = "../crates/rcad-predicates" }
+rcad-step = { path = "../crates/rcad-step" }
+rcad-topo = { path = "../crates/rcad-topo" }
 
 [[bin]]
 name = "where_two_surfaces_cross"
 path = "fuzz_targets/where_two_surfaces_cross.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "no_step_file_makes_the_reader_panic"
+path = "fuzz_targets/no_step_file_makes_the_reader_panic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "no_model_makes_the_writer_panic"
+path = "fuzz_targets/no_model_makes_the_writer_panic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "two_solids_fused_by_a_stranger"
+path = "fuzz_targets/two_solids_fused_by_a_stranger.rs"
 test = false
 doc = false
 bench = false

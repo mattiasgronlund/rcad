@@ -254,8 +254,8 @@ fn canonical_cut_surfaces(face: &BakedFace) -> Vec<Surface> {
 /// triple sorted the other is two corners named as one. That is why the bits are
 /// flipped rather than taken raw — raw bits sort every negative number after
 /// every positive one, and `f64::total_cmp` does not.
-pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
-    let mut bits = [0u64; 8];
+pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 9] {
+    let mut bits = [0u64; 9];
     let mut fill = |kind: u64, numbers: &[f64]| {
         bits[0] = kind;
         for (slot, number) in numbers.iter().enumerate() {
@@ -284,6 +284,43 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
                 ],
             );
         }
+        Surface::Cone(cone) => {
+            let apex = cone.apex().coordinates();
+            let along = cone.axis().direction().components();
+            fill(
+                3,
+                &[
+                    apex[0],
+                    apex[1],
+                    apex[2],
+                    along[0],
+                    along[1],
+                    along[2],
+                    cone.slope(),
+                ],
+            );
+        }
+        // Eight numbers, one more than any other kind, and the row is nine long
+        // for it: two tori about one axis with the same ring radius and
+        // different tubes are two surfaces, and a key that left the tube out
+        // would call them one.
+        Surface::Torus(ring) => {
+            let centre = ring.centre().coordinates();
+            let along = ring.axis().direction().components();
+            fill(
+                4,
+                &[
+                    centre[0],
+                    centre[1],
+                    centre[2],
+                    along[0],
+                    along[1],
+                    along[2],
+                    ring.ring_radius(),
+                    ring.tube_radius(),
+                ],
+            );
+        }
         other => panic!("a surface nothing here can name: {other:?}"),
     }
     bits
@@ -307,7 +344,7 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 8] {
 /// leave the two spellings of one plane still telling apart. Every zero is
 /// turned back the right way up, and adding zero is what does it. A ball and a
 /// pipe have no reversed form at all and are their own key.
-pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 8] {
+pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 9] {
     let Surface::Plane(flat) = surface else {
         return name_of_surface_bits(surface);
     };
@@ -320,7 +357,7 @@ pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 8
         let turned = if backwards { -coefficient } else { coefficient };
         turned + 0.0
     });
-    let mut bits = [0u64; 8];
+    let mut bits = [0u64; 9];
     for (slot, number) in facing.iter().enumerate() {
         bits[slot + 1] = in_the_order_a_float_compares(*number);
     }
@@ -2569,6 +2606,50 @@ fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
                     .map(|axis| squared * step[axis] - shadow * Interval::exactly(along[axis])),
             )
         }
+        // `|w|²x − (1 + slope²)(x·w)w` for `x = at − apex`: the pipe's with the
+        // shadow term scaled by how far the cone leans.
+        Surface::Cone(cone) => {
+            let apex = cone.apex().coordinates();
+            let along = cone.axis().direction().components();
+            let box_of_it = at.enclosure();
+            let step = [0, 1, 2].map(|axis| box_of_it[axis] - Interval::exactly(apex[axis]));
+            let squared = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * Interval::exactly(along[axis]))
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let shadow = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * step[axis])
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let slope = Interval::exactly(cone.slope());
+            let steepness = Interval::exactly(1.0) + slope * slope;
+            PredicatePoint::Constructed([0, 1, 2].map(|axis| {
+                squared * step[axis] - steepness * shadow * Interval::exactly(along[axis])
+            }))
+        }
+        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre`,
+        // which is the quartic's own gradient divided by four. Unlike every arm
+        // above it depends on `x·x`, because a torus is not a quadric.
+        Surface::Torus(ring) => {
+            let centre = ring.centre().coordinates();
+            let along = ring.axis().direction().components();
+            let box_of_it = at.enclosure();
+            let step = [0, 1, 2].map(|axis| box_of_it[axis] - Interval::exactly(centre[axis]));
+            let squared = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * Interval::exactly(along[axis]))
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let shadow = (0..3)
+                .map(|axis| Interval::exactly(along[axis]) * step[axis])
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let out = (0..3)
+                .map(|axis| step[axis] * step[axis])
+                .fold(Interval::exactly(0.0), |so_far, term| so_far + term);
+            let big = Interval::exactly(ring.ring_radius());
+            let small = Interval::exactly(ring.tube_radius());
+            let bulge = out - big * big - small * small;
+            PredicatePoint::Constructed([0, 1, 2].map(|axis| {
+                squared * bulge * step[axis]
+                    + Interval::exactly(2.0) * big * big * shadow * Interval::exactly(along[axis])
+            }))
+        }
         other => panic!("a surface whose gradient nothing here knows: {other:?}"),
     }
 }
@@ -2627,26 +2708,92 @@ fn how_a_crossing_runs(
 
 /// Whether the pair crosses in one closed curve lying in a plane.
 ///
-/// The same four arms [`which_comes_first_round_a_crossing`] can answer about,
-/// asked before anything is built rather than after (§34.10's last two rows).
+/// The same arms [`which_comes_first_round_a_crossing`] can answer about, asked
+/// before anything is built rather than after (§34.10's last two rows).
+///
+/// # A plane and a torus is a row, and it does not read the placement
+///
+/// Only two families of plane cut a torus in circles — square to the axis, and
+/// through it — and every other plane cuts it in a quartic. That is a fact about
+/// where the plane sits and not about the two kinds, so this cannot decide it.
+/// It does not have to: [`intersect`](rcad_geom::intersect) names a plane-and-
+/// torus crossing **only** in those two families and refuses the rest by name,
+/// so a run of that pair reaching here is a circle, and the pair is asked the
+/// same three signs again by [`which_comes_first_round_a_crossing`] when a
+/// point is actually ordered. Where the two disagree — `intersect` asks under a
+/// policy and the ordering asks exactly — the ordering **refuses**, and a
+/// refusal is what this function returning `true` too often costs. Returning it
+/// too *rarely* costs a bend every fuse it has, which is what it used to.
+///
+/// # All twenty-five ordered pairs are named, and that is not the guard
+///
+/// This was seven `|`-ed pairs out of twenty-five under a `matches!`, and a cone
+/// and a torus landed this milestone and fell out of it in silence — the same
+/// shape as `walk`'s three hand-kept lists (§24.5), and the fifth time this
+/// milestone that a list of surface pairs did not learn about a new surface
+/// kind. Naming all twenty-five puts every pair in front of a reader and leaves
+/// the `_` covering only a kind that does not exist, which is §40's form.
+///
+/// **It does not make a sixth [`Surface`] a compile error, and nothing in this
+/// crate can.** [`Surface`] is `#[non_exhaustive]` and lives in `rcad-geom`, so
+/// a match over it here must carry a wildcard; a sixth kind adding zero errors
+/// to `cargo check -p rcad-topo` is measured in
+/// `tests/a_sixth_kind_of_surface.rs`, which is the guard that does fire.
 fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
-    matches!(
-        (one, other),
-        (Surface::Plane(_), Surface::Sphere(_))
-            | (Surface::Sphere(_), Surface::Plane(_))
-            | (Surface::Plane(_), Surface::Cylinder(_))
-            | (Surface::Cylinder(_), Surface::Plane(_))
-            | (Surface::Sphere(_), Surface::Sphere(_))
-    )
+    match (one, other) {
+        // A plane cuts a ball, a pipe and a cone in a conic lying in the plane.
+        // A plane along a pipe's axis cuts straight lines instead, and never
+        // reaches here: `a_plane_along_a_pipes_axis` answers it one step up.
+        (Surface::Plane(_), Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_))
+        | (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_), Surface::Plane(_))
+        // Two balls cross in the circle their radical plane cuts.
+        | (Surface::Sphere(_), Surface::Sphere(_))
+        // A plane and a torus: circles in the two families `intersect` names,
+        // and no run of any other family exists to be asked.
+        | (Surface::Plane(_), Surface::Torus(_))
+        | (Surface::Torus(_), Surface::Plane(_)) => true,
+        // Two planes cross in a straight line and are answered one step up, so
+        // this arm is about the shape of the crossing and not about reaching it.
+        (Surface::Plane(_), Surface::Plane(_))
+        // A ball against a pipe, a cone or a ring crosses in a quartic.
+        | (Surface::Sphere(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_))
+        | (Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_), Surface::Sphere(_))
+        // So does every pair among the pipe, the cone and the ring.
+        | (
+            Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+            Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        ) => false,
+        _ => false,
+    }
 }
 
 /// Whether the pair is a plane parallel to a pipe's axis, which crosses it in
 /// straight lines rather than in a closed curve.
+///
+/// The other twenty-three pairs are named rather than swept up, because `false`
+/// here is right for a reason that would not survive a sixth [`Surface`]: it is
+/// true of every pair that is *not one plane and one pipe*, which is a fact
+/// about the question and not about the shapes. The `_` at the bottom is for a
+/// sixth kind and nothing else (§40) — but a sixth kind falls into it silently
+/// rather than failing to compile, because [`Surface`] is `#[non_exhaustive]`
+/// and belongs to another crate. `tests/a_sixth_kind_of_surface.rs` is what
+/// notices, and says why the compiler cannot.
 fn a_plane_along_a_pipes_axis(one: &Surface, other: &Surface) -> bool {
     match (one, other) {
         (Surface::Plane(flat), Surface::Cylinder(pipe))
         | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
             flat.normal().dot(pipe.axis().direction()) == 0.0
+        }
+        (
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_),
+        )
+        | (
+            Surface::Cylinder(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        )
+        | (Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_), Surface::Cylinder(_)) => {
+            false
         }
         _ => false,
     }
@@ -3403,6 +3550,8 @@ mod curved {
             Surface::Plane(_) => "plane",
             Surface::Sphere(_) => "ball",
             Surface::Cylinder(_) => "pipe",
+            Surface::Cone(_) => "cone",
+            Surface::Torus(_) => "ring",
             other => panic!("no {other:?} here"),
         }
     }
@@ -3592,12 +3741,14 @@ mod curved {
 
 #[cfg(test)]
 mod what_the_curved_arrangement_reaches {
-    use rcad_geom::{Axis, Isometry, Point, Scale, Surface, Vector};
-    use rcad_predicates::{Policy, ProvenanceLog};
+    use rcad_geom::{
+        Axis, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus, Vector, intersect,
+    };
+    use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 
     use super::super::bake::bake;
     use super::super::cuts;
-    use super::split_a_face;
+    use super::{HowItRuns, how_a_crossing_runs, round_a_closed_crossing, split_a_face};
     use crate::{Error, Model, SolidKey};
 
     /// What every face of a pair comes apart into, as one word per face: the
@@ -3623,6 +3774,8 @@ mod what_the_curved_arrangement_reaches {
                     Surface::Plane(_) => "plane",
                     Surface::Sphere(_) => "ball",
                     Surface::Cylinder(_) => "pipe",
+                    Surface::Cone(_) => "cone",
+                    Surface::Torus(_) => "ring",
                     other => panic!("no {other:?} here"),
                 };
                 said.push(match split_a_face(face, &policy, &mut log) {
@@ -3851,6 +4004,84 @@ mod what_the_curved_arrangement_reaches {
             said.iter().any(|row| row.starts_with("pipe refused")),
             "and the wall of the bar with it, got {said:?}"
         );
+    }
+
+    /// The three plane-and-torus crossings a capped bend of pipe has, ordered
+    /// rather than refused.
+    ///
+    /// A bend carries exactly these: its two caps are planes **through** the
+    /// ring's axis, and a slab laid across it cuts the ring in the **two
+    /// circles round the axis** — the outer one and the inner one the bend's
+    /// seam runs along. `a_pair_that_crosses_in_a_conic` listed seven ordered
+    /// pairs and plane-and-torus was not one, so every one of these came back
+    /// `ACrossingThisCannotBeOrderedAlong` and a bend could not be fused with
+    /// anything at all, itself included.
+    ///
+    /// The second half is what says the first is not vacuous. Reaching
+    /// [`HowItRuns::RoundAClosedCurve`] only means the gate opened; what says
+    /// the ordering *works* is that two points on the curve come back decided
+    /// both ways round, and that the two circles round the axis come back
+    /// **opposite** — the inner one winds about the plane's negated normal, and
+    /// a row that answered `CannotTell` or handed back `+n` for both would
+    /// order a bend's seam backwards instead of refusing.
+    #[test]
+    fn the_three_plane_and_torus_crossings_a_bend_has_are_ordered_rather_than_refused() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let ring = Surface::Torus(
+            Torus::new(Axis::z(), 4.0, 1.0).expect("a ring of radius four with a tube of one"),
+        );
+
+        let cap = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("a cap plane holding the ring's axis"),
+        );
+        let across = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("a slab face square to the ring's axis"),
+        );
+
+        // The meridian circles are centred at `(±4, 0, 0)` with radius one; the
+        // circles round the axis have radius `4 ± 1` in the plane `z = 0`.
+        for (named, flat, on_the_curve) in [
+            ("a cap through the axis", &cap, [4.0, 0.0, 1.0]),
+            ("a slab square to the axis", &across, [5.0, 0.0, 0.0]),
+        ] {
+            let SurfaceMeet::Curves(runs) = intersect(flat, &ring, &policy, &mut log)
+                .unwrap_or_else(|why| panic!("{named} cuts the ring in circles: {why:?}"))
+            else {
+                panic!("{named} cuts the ring in two curves and nothing else");
+            };
+            assert_eq!(runs.len(), 2, "{named} cuts the ring in two circles");
+            for run in &runs {
+                let at = PredicatePoint::from(on_the_curve);
+                let ran = how_a_crossing_runs(flat, &ring, run, at, &mut log)
+                    .unwrap_or_else(|why| panic!("{named} could not be ordered: {why:?}"));
+                assert!(
+                    matches!(ran, HowItRuns::RoundAClosedCurve { .. }),
+                    "{named} runs round a closed curve, not along an axis"
+                );
+            }
+        }
+
+        // Both circles round the axis, ordered from the same angle round the
+        // same axis: quarter of a turn on, then half a turn on.
+        let ordered_round_the_axis = |radius: f64| {
+            let point = |angle: f64| {
+                PredicatePoint::from([radius * angle.cos(), radius * angle.sin(), 0.0])
+            };
+            round_a_closed_crossing(
+                [&across, &ring],
+                point(0.0),
+                point(core::f64::consts::FRAC_PI_2),
+                point(core::f64::consts::PI),
+            )
+            .expect("a circle round the axis is ordered")
+        };
+        let outer = ordered_round_the_axis(5.0);
+        let inner = ordered_round_the_axis(3.0);
+        assert_eq!(outer, Decision::Pos, "the outer circle winds about `+n`");
+        assert_eq!(inner, Decision::Neg, "and the inner one about `-n`");
     }
 }
 

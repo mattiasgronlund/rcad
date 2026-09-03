@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Deflection, DynamicRange, EdgeRun, Isometry, Orientation, Plane, Point, SIDE_OF_CYLINDER,
-    SIDE_OF_PLANE, SIDE_OF_SPHERE, Surface, Vector,
+    Deflection, DynamicRange, EdgeRun, Isometry, Orientation, Plane, Point, SIDE_OF_CONE,
+    SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS, Surface, Vector,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -16,9 +16,10 @@ use slotmap::SecondaryMap;
 
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on, what_trims_this_face};
-use crate::key::{CoedgeSlot, FaceSlot, ShellSlot, WireSlot};
+use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
+use crate::model::WireData;
 use crate::view::{CoedgeView, FaceView, SolidView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
 
@@ -34,7 +35,10 @@ impl Model {
     ///
     /// What it checks:
     ///
-    /// - every stored key names something that is still there,
+    /// - every stored key names something that is still there — asked first,
+    ///   for all seven arenas at once, because every check after it walks the
+    ///   model through views and a view over a missing slot panics rather than
+    ///   refusing (`ModelData::check_keys_resolve`),
     /// - no coordinate is infinite and no edge has zero length,
     /// - every edge is used by exactly two coedges running opposite ways,
     /// - every wire has at least three coedges and closes back on itself,
@@ -73,6 +77,7 @@ impl Model {
     /// why [`how_far_the_sweeps_mesh_may_stray`] asks for the coarsest mesh
     /// there is.
     pub fn validate(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+        self.data().check_keys_resolve()?;
         self.check_vertices()?;
         self.check_edges()?;
         self.check_coedges()?;
@@ -83,6 +88,53 @@ impl Model {
         self.check_shells_and_solids(policy, log)?;
         self.check_approximation_ordering()?;
         self.check_dynamic_range(policy, log)
+    }
+
+    /// The shape checks a public method is allowed to take for granted, asked
+    /// of every entity, with no arithmetic and no [`Policy`].
+    ///
+    /// **A key resolving is not the same as a shape being possible.** A file
+    /// naming an entity that is not there is refused before it becomes a
+    /// `Model` (`ModelData::check_keys_resolve`), and every key in a face's
+    /// wire list resolving says nothing about the list being empty. So a face
+    /// with no wires, a wire that does not close and an edge walked by three
+    /// coedges all read back cleanly — and then
+    /// [`FaceView::outer_wire`](crate::FaceView::outer_wire) has no wire to
+    /// hand back and [`Model::place_solid`]'s after-the-mutation checks assert
+    /// about a shape the mutation did not make.
+    ///
+    /// Which is why this is asked at the door rather than at each of those
+    /// sites. Making every accessor answer `Option` would hand the invalidity
+    /// to every caller for ever; refusing the bytes keeps one truth, and it is
+    /// the same truth [`Model::validate`] already tells — these three checks
+    /// **are** the ones `check_edges`, `check_wires` and `check_faces` make,
+    /// called from here as well.
+    ///
+    /// The rest of the sweep stays out: a corner off its face's plane, a wire
+    /// wound against its normal or a solid enclosing negative space all need
+    /// predicates, a `Policy` to say how hard to try, and for a curved solid a
+    /// mesh. Reading a file is not the place to spend that, and
+    /// [`Model::validate`] is right there.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::FaceHasNoWires`], [`Invalid::WireTooShort`],
+    /// [`Invalid::WireDoesNotClose`], [`Invalid::EdgeCoedgeCount`] or
+    /// [`Invalid::CoedgesRunTheSameWay`], naming the first one that does not
+    /// hold.
+    pub(crate) fn check_shape_is_possible(&self) -> Result<()> {
+        for face in self.data().faces.values() {
+            if face.wires.is_empty() {
+                return Err(Invalid::FaceHasNoWires.into());
+            }
+        }
+        for wire in self.data().wires.values() {
+            self.check_wire_closes(wire)?;
+        }
+        for slot in self.data().edges.keys() {
+            self.check_edge_is_walked_by_two_opposite_coedges(slot)?;
+        }
+        Ok(())
     }
 
     fn check_vertices(&self) -> Result<()> {
@@ -98,6 +150,7 @@ impl Model {
     }
 
     fn check_edges(&self) -> Result<()> {
+        let rounding = self.what_writing_a_plane_down_costs();
         for (slot, edge) in &self.data().edges {
             let (Some(start), Some(end)) = (
                 self.data().vertices.get(edge.start),
@@ -113,24 +166,19 @@ impl Model {
                 return Err(Invalid::EdgeHasNoLength.into());
             }
 
-            let coedges = self.index().coedges_of_edge(slot);
-            if coedges.len() != 2 {
-                return Err(Invalid::EdgeCoedgeCount {
-                    count: coedges.len(),
-                }
-                .into());
-            }
-            if self.data().coedges[coedges[0]].orientation
-                == self.data().coedges[coedges[1]].orientation
-            {
-                return Err(Invalid::CoedgesRunTheSameWay.into());
-            }
+            self.check_edge_is_walked_by_two_opposite_coedges(slot)?;
 
             // The other half of Q16's invariant, and the half that keeps an
             // edge's *name* honest. An edge named by a crossing has to be on
             // both surfaces of it, and inside every half-space that was used to
             // pick which piece it is. Otherwise the name describes a curve this
             // edge is not on, and nothing else in the kernel would notice.
+            //
+            // A plane is asked with `what_writing_a_plane_down_costs` of room,
+            // which is the same allowance `check_flat_face` gives a corner
+            // against the plane its face *sits* on. Asking a stored *name* more
+            // strictly than the surface a face is actually carried by had it
+            // backwards: it refused corners for the rounding in the name.
             if let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &edge.run {
                 for corner in [start, end] {
                     let at = PredicatePoint::from(corner.point.coordinates());
@@ -142,6 +190,11 @@ impl Model {
                         // lands *near* each of them and exactly on one only when
                         // the arithmetic happened to be exact.
                         _ if not_provably_off(and, corner.point, corner.approximation) => {}
+                        _ if off_a_plane_by_no_more_than_writing_it_down_cost(
+                            and,
+                            corner.point,
+                            rounding,
+                        ) => {}
                         Decision::Pos | Decision::Neg => {
                             return Err(Invalid::VertexOffItsFaceSurface.into());
                         }
@@ -194,10 +247,7 @@ impl Model {
                 }
             }
         }
-        for (slot, coedge) in &self.data().coedges {
-            if !self.data().edges.contains_key(coedge.edge) {
-                return Err(Invalid::DanglingKey { entity: "edge" }.into());
-            }
+        for slot in self.data().coedges.keys() {
             match used.get(slot).copied().unwrap_or(0) {
                 0 => return Err(Invalid::Orphan { entity: "coedge" }.into()),
                 1 => {}
@@ -223,42 +273,7 @@ impl Model {
             }
         }
         for (slot, wire) in &self.data().wires {
-            if wire.steps.len() < 3 && !self.wire_closes_on_one_edge(wire) {
-                return Err(Invalid::WireTooShort {
-                    count: wire.steps.len(),
-                }
-                .into());
-            }
-            for coedge in wire.coedges() {
-                if !self.data().coedges.contains_key(coedge) {
-                    return Err(Invalid::DanglingKey { entity: "coedge" }.into());
-                }
-            }
-            for &step in &wire.steps {
-                if let crate::model::WireStep::Pole(vertex) = step
-                    && !self.data().vertices.contains_key(vertex)
-                {
-                    return Err(Invalid::DanglingKey { entity: "vertex" }.into());
-                }
-            }
-
-            // A pole is walked like any other step and simply goes nowhere, so
-            // closure is one rule rather than two.
-            let mut previous_end = None;
-            for (position, &step) in wire.steps.iter().enumerate() {
-                let (start, end) = self.step_ends(step);
-                if previous_end.is_some_and(|previous| previous != start) {
-                    return Err(Invalid::WireDoesNotClose { position }.into());
-                }
-                previous_end = Some(end);
-            }
-            let first_start = self.step_ends(wire.steps[0]).0;
-            if previous_end != Some(first_start) {
-                return Err(Invalid::WireDoesNotClose {
-                    position: wire.steps.len(),
-                }
-                .into());
-            }
+            self.check_wire_closes(wire)?;
 
             match used.get(slot).copied().unwrap_or(0) {
                 0 => return Err(Invalid::Orphan { entity: "wire" }.into()),
@@ -271,6 +286,73 @@ impl Model {
                     .into());
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// A wire long enough to bound something, whose steps chain end to start
+    /// and come back to where they set off.
+    ///
+    /// Also the check [`Model::check_touched_wire`] makes after a mutation, and
+    /// that is on purpose: one of the two audiences wants a refusal and the
+    /// other wants a crash, and there being two of them is no reason for two
+    /// answers.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::WireTooShort`] or [`Invalid::WireDoesNotClose`].
+    pub(crate) fn check_wire_closes(&self, wire: &WireData) -> Result<()> {
+        if wire.steps.len() < 3 && !self.wire_closes_on_one_edge(wire) {
+            return Err(Invalid::WireTooShort {
+                count: wire.steps.len(),
+            }
+            .into());
+        }
+        // A pole is walked like any other step and simply goes nowhere, so
+        // closure is one rule rather than two.
+        let mut previous_end = None;
+        for (position, &step) in wire.steps.iter().enumerate() {
+            let (start, end) = self.step_ends(step);
+            if previous_end.is_some_and(|previous| previous != start) {
+                return Err(Invalid::WireDoesNotClose { position }.into());
+            }
+            previous_end = Some(end);
+        }
+        let first_start = self.step_ends(wire.steps[0]).0;
+        if previous_end != Some(first_start) {
+            return Err(Invalid::WireDoesNotClose {
+                position: wire.steps.len(),
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    /// An edge walked by exactly two coedges, running opposite ways — which is
+    /// what says the two faces meeting there agree which side the material is
+    /// on.
+    ///
+    /// Shared with [`Model::check_touched_edge`] for the reason
+    /// [`Model::check_wire_closes`] gives.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::EdgeCoedgeCount`] or [`Invalid::CoedgesRunTheSameWay`].
+    pub(crate) fn check_edge_is_walked_by_two_opposite_coedges(
+        &self,
+        slot: EdgeSlot,
+    ) -> Result<()> {
+        let coedges = self.index().coedges_of_edge(slot);
+        if coedges.len() != 2 {
+            return Err(Invalid::EdgeCoedgeCount {
+                count: coedges.len(),
+            }
+            .into());
+        }
+        if self.data().coedges[coedges[0]].orientation
+            == self.data().coedges[coedges[1]].orientation
+        {
+            return Err(Invalid::CoedgesRunTheSameWay.into());
         }
         Ok(())
     }
@@ -289,16 +371,12 @@ impl Model {
             if face.wires.is_empty() {
                 return Err(Invalid::FaceHasNoWires.into());
             }
-            for &wire in &face.wires {
-                if !self.data().wires.contains_key(wire) {
-                    return Err(Invalid::DanglingKey { entity: "wire" }.into());
-                }
-            }
 
             let view = FaceView::new(self, slot, Isometry::identity(), Orientation::Forward);
-            match &face.surface {
-                Surface::Plane(plane) => check_flat_face(view, plane, allowed_wobble)?,
-                curved => check_curved_face(view, curved)?,
+            if let Surface::Plane(plane) = &face.surface {
+                check_flat_face(view, plane, allowed_wobble)?;
+            } else {
+                check_curved_face(view, &face.surface)?;
             }
 
             match used.get(slot).copied().unwrap_or(0) {
@@ -404,7 +482,7 @@ impl Model {
             for face in solid.faces() {
                 for coedge in face.wires().flat_map(WireView::coedges) {
                     let edge = coedge.edge();
-                    if *edge.run() != EdgeRun::RightRoundWhereItsFacesCross {
+                    if *edge.stored_run() != EdgeRun::RightRoundWhereItsFacesCross {
                         continue;
                     }
                     let Some(across) = the_face_across(solid, face, edge)? else {
@@ -447,12 +525,7 @@ impl Model {
                 }
             }
         }
-        for (slot, shell) in &self.data().shells {
-            for face in &shell.faces {
-                if !self.data().faces.contains_key(face.face) {
-                    return Err(Invalid::DanglingKey { entity: "face" }.into());
-                }
-            }
+        for slot in self.data().shells.keys() {
             match used.get(slot).copied().unwrap_or(0) {
                 0 => return Err(Invalid::Orphan { entity: "shell" }.into()),
                 1 => {}
@@ -466,12 +539,7 @@ impl Model {
             }
         }
 
-        for (slot, solid) in &self.data().solids {
-            for shell in &solid.shells {
-                if !self.data().shells.contains_key(shell.shell) {
-                    return Err(Invalid::DanglingKey { entity: "shell" }.into());
-                }
-            }
+        for slot in self.data().solids.keys() {
             let view = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
             // A polyhedron's own fan *is* its volume, so nothing is meshed for
             // one. A curved solid has no fan — a round bar's caps fan into no
@@ -562,15 +630,45 @@ impl Model {
             .map(EdgeView::distance_between_its_ends)
             .fold(f64::INFINITY, f64::min);
         let smallest_radius = self
-            .data()
-            .faces
-            .values()
-            .filter_map(|face| match face.surface {
+            .solids()
+            .flat_map(|solid| solid.faces())
+            .filter_map(|face| match face.surface() {
                 Surface::Plane(_) => None,
                 Surface::Sphere(ball) => Some(ball.radius()),
                 Surface::Cylinder(pipe) => Some(pipe.radius()),
+                // **A cone's apex is a vertex and a vertex has no size**, the
+                // same way a cube's corner has none, so the radius *there* is
+                // not a feature this is asking about. What the radius stands in
+                // for is the closed edge a curved face carries, whose chord is
+                // zero and whose real size is the circle it runs round — and a
+                // closed edge on a cone never sits at the apex, because a circle
+                // of no radius is a point. So the corners at the apex are passed
+                // over and the smallest circle the face actually carries is what
+                // comes back.
+                Surface::Cone(cone) => {
+                    let along = cone.axis().direction();
+                    face.wires()
+                        .flat_map(WireView::points)
+                        .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
+                        .filter(|radius| *radius > 0.0)
+                        .fold(f64::INFINITY, f64::min)
+                        .into()
+                }
+                // **A torus has two radii and the smaller is not always the
+                // tube.** The closed curves a torus face carries are the circles
+                // round the tube, of radius `r`, and the circles round the axis,
+                // whose smallest is the inner equator at `R − r`. Either can be
+                // the smallest feature of the solid, so both go in.
+                Surface::Torus(ring) => {
+                    Some((ring.ring_radius() - ring.tube_radius()).min(ring.tube_radius()))
+                }
+                // Every variant there is has an arm above; this is only the
+                // one that does not exist yet, and a surface whose smallest
+                // feature nobody has worked out is safest counted as having
+                // none.
                 _ => None,
             })
+            .filter(|radius| radius.is_finite())
             .fold(f64::INFINITY, f64::min);
         let smallest_feature = smallest_chord.min(smallest_radius);
         if !smallest_feature.is_finite() || largest == 0.0 {
@@ -599,18 +697,36 @@ impl Model {
     /// itself is allowed to be — a face built here is exactly planar in the
     /// model's own frame, so this is only taking up the slack in fitting a
     /// plane through corners that arrived from somewhere else. The second is
-    /// how far off our own *measurement* of it could be: what the plane says
-    /// its own arithmetic costs, times the largest coordinate in the model,
-    /// times [`MEASURING_SLACK`].
+    /// [`Model::what_writing_a_plane_down_costs`].
+    ///
+    /// **Only the second half is allowed against a plane an edge is merely
+    /// *named* by** — see that function.
     fn allowed_wobble(&self) -> f64 {
+        self.scale().default_linear_tolerance() + self.what_writing_a_plane_down_costs()
+    }
+
+    /// How far off a plane a point exactly on it can read, purely because the
+    /// plane was written down in `f64`.
+    ///
+    /// [`Plane`] scales its normal to length one and rounds its offset, so the
+    /// plane the numbers *are* is a few ulps from the plane the numbers *mean*,
+    /// and a point exactly on the second reads a nonzero distance to the first.
+    /// That is what the plane says its own arithmetic costs
+    /// ([`Plane::SIGNED_DISTANCE_ROUNDOFF`]) times the largest coordinate in the
+    /// model, times [`MEASURING_SLACK`].
+    ///
+    /// **It is not a modelling tolerance and nothing here may turn it into
+    /// one.** It is the width of the number: a corner inside it is one no `f64`
+    /// could have written any nearer, and a corner outside it is off a plane
+    /// somebody chose rather than off a plane that rounded.
+    fn what_writing_a_plane_down_costs(&self) -> f64 {
         let largest = self
             .data()
             .vertices
             .values()
             .map(|vertex| vertex.point.largest_coordinate_magnitude())
             .fold(0.0, f64::max);
-        self.scale().default_linear_tolerance()
-            + MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * largest
+        MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * largest
     }
 }
 
@@ -868,6 +984,8 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
         Surface::Plane(flat) => flat.side_of_point(point),
         Surface::Sphere(ball) => ball.side_of(point),
         Surface::Cylinder(pipe) => pipe.side_of(point),
+        Surface::Cone(cone) => cone.side_of(point),
+        Surface::Torus(ring) => ring.side_of(point),
         other => panic!("a surface nothing here can ask about: {other:?}"),
     }
 }
@@ -932,7 +1050,7 @@ pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     let Some(curved) = the_curved_one_of(&[*pair[0], *pair[1]]) else {
         return Err(Invalid::ClosedEdgeBetweenTwoFlatFaces.into());
     };
-    let longitude = the_way_it_is_parametrised_about(&curved).cross(gradient_of(&curved, at));
+    let longitude = the_way_it_is_parametrised_about(&curved, at).cross(gradient_of(&curved, at));
     // **At a pole there is no longitude to compare against** (§38.3). Every
     // longitude runs through the one point there, so `ẑ × ∇C` is exactly the
     // zero vector and the sign of a dot with it is not a fact about the shape.
@@ -1003,20 +1121,42 @@ pub(crate) fn the_curved_one_of(carried_by: &[Surface; 2]) -> Option<Surface> {
     curved.first().copied()
 }
 
-/// The axis a surface's own two coordinates are wound about.
+/// The axis a surface's first coordinate is wound about, at `at`.
 ///
-/// A sphere is parametrised about the frame's own `z` — `Sphere::point_at` says
-/// so in its arithmetic — and a pipe about its stored axis direction. This is
-/// read only for the *sign* of a dot product, so nothing here is normalized.
+/// Crossed into the surface's own gradient it gives the way that coordinate
+/// runs, which is what a closed edge is walked by. A sphere is parametrised
+/// about the frame's own `z` — `Sphere::point_at` says so in its arithmetic —
+/// and a pipe and a cone about their stored axis direction. This is read only
+/// for the *sign* of a dot product, so nothing here is normalized.
+///
+/// # A torus's is not one direction, and that is why this takes a point
+///
+/// A torus's first coordinate runs round the **tube**, so the axis it is wound
+/// about is the tangent to the centre circle — which turns as you go round the
+/// ring. Handed the torus's own axis instead, the answer at a meridian circle's
+/// corner is square to that circle and the dot product below is **exactly
+/// zero**, so the rule reads a sign off nothing and a bend of pipe is refused
+/// whichever way round it is described. The tangent is `ê × w` with `ê` the way
+/// out from the axis at `at`, and crossed into the gradient it comes out as
+/// exactly the direction `Torus::point_at`'s first coordinate takes.
+///
+/// Every other surface here ignores `at` and gives what it always gave.
 ///
 /// # Panics
 ///
 /// On a flat surface, which has no longitude, and on a kind this has not been
 /// taught.
-pub(crate) fn the_way_it_is_parametrised_about(surface: &Surface) -> Vector {
+pub(crate) fn the_way_it_is_parametrised_about(surface: &Surface, at: Point) -> Vector {
     match surface {
         Surface::Sphere(_) => Vector::new(0.0, 0.0, 1.0),
         Surface::Cylinder(pipe) => pipe.axis().direction(),
+        Surface::Cone(cone) => cone.axis().direction(),
+        Surface::Torus(ring) => {
+            let along = ring.axis().direction();
+            let out = at - ring.centre();
+            (out - along * (out.dot(along) / along.dot(along))).cross(along)
+        }
+        Surface::Plane(_) => panic!("a plane has no longitude to be wound about"),
         other => panic!("this crate cannot say what {other:?} is wound about"),
     }
 }
@@ -1036,6 +1176,29 @@ pub(crate) fn gradient_of(surface: &Surface, at: Point) -> Vector {
             let out = at - origin;
             out * along.dot(along) - along * along.dot(out)
         }
+        // The gradient of `|x × w|² − slope²(x·w)²` at `x = at − apex`, halved:
+        // `|w|²x − (1 + slope²)(x·w)w`. It points out of whichever nappe the
+        // point is on, which is what the sign predicate's own evenness in `x·w`
+        // asks for.
+        Surface::Cone(cone) => {
+            let (apex, along) = (cone.apex(), cone.axis().direction());
+            let out = at - apex;
+            out * along.dot(along) - along * (along.dot(out) * (1.0 + cone.slope() * cone.slope()))
+        }
+        // The gradient of `(w·w)(x·x + R² − r²)² − 4R²‖x × w‖²` at
+        // `x = at − centre`, divided by four:
+        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w`. On the outer equator that
+        // comes to `(w·w)·2Rr·x`, pointing away from the axis; on the inner
+        // equator to `−(w·w)·2Rr·x`, pointing towards it — which is out of the
+        // tube both times, and is the whole of what a torus's normal has that no
+        // quadric's here does.
+        Surface::Torus(ring) => {
+            let (centre, along) = (ring.centre(), ring.axis().direction());
+            let out = at - centre;
+            let (big, small) = (ring.ring_radius(), ring.tube_radius());
+            let bulge = out.dot(out) + big * big - small * small - 2.0 * big * big;
+            out * (along.dot(along) * bulge) + along * (2.0 * big * big * along.dot(out))
+        }
         other => panic!("this crate cannot say which way {other:?} faces"),
     }
 }
@@ -1046,6 +1209,8 @@ pub(crate) fn name_of_surface(surface: &Surface) -> &'static str {
         Surface::Plane(_) => SIDE_OF_PLANE,
         Surface::Sphere(_) => SIDE_OF_SPHERE,
         Surface::Cylinder(_) => SIDE_OF_CYLINDER,
+        Surface::Cone(_) => SIDE_OF_CONE,
+        Surface::Torus(_) => SIDE_OF_TORUS,
         other => panic!("a surface nothing here can ask about: {other:?}"),
     }
 }
@@ -1121,6 +1286,37 @@ fn not_provably_off(surface: &Surface, point: Point, slop: Option<Approximation>
         side_of_surface(surface, within),
         Decision::Zero | Decision::Undecidable { .. }
     )
+}
+
+/// Whether the surface an edge is *named* by is a plane, and the corner is off
+/// it by no more than writing that plane down in `f64` cost.
+///
+/// **The two standards this kernel had, made one.** `check_flat_face` allows a
+/// corner one [`Model::allowed_wobble`] against the plane its face is *carried
+/// by*; `check_edges` allowed a corner nothing at all against the plane an arc
+/// is merely *named* by, which is the weaker claim of the two asked the harder
+/// way round. An arc's plane is exactly where the mismatch bites: a circle's
+/// plane is built through a point with a normal that gets scaled to length one,
+/// so a corner exactly on the circle reads a nonzero distance to the stored
+/// plane unless the numbers happen to cancel — which they do only for an
+/// axis-aligned circle whose ends share the centre's coordinate along the axis.
+/// Every other arc was refused for the rounding in its own name.
+///
+/// `a_plane_through_a_point_does_not_put_that_point_exactly_on_itself` is that
+/// rounding, demonstrated on one plane and one point rather than argued.
+///
+/// **A plane and nothing else.** A sphere, a pipe, a cone and a ring have a
+/// value rather than a signed length, so there is no distance here to compare;
+/// a corner named by one of those is still asked exactly, and the width it
+/// carries on itself is [`not_provably_off`]'s question.
+fn off_a_plane_by_no_more_than_writing_it_down_cost(
+    surface: &Surface,
+    point: Point,
+    rounding: f64,
+) -> bool {
+    surface
+        .as_plane()
+        .is_some_and(|flat| flat.signed_distance_to(point).abs() <= rounding)
 }
 
 /// Which way `wire` winds round `normal`.
@@ -1334,6 +1530,7 @@ mod tests {
     use super::{Decision, as_coarse_as_a_mesh_gets, winding_of, winding_round};
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
+    use crate::model::{ShellData, ShellUse, SolidData, VertexData, WireStep};
     use crate::{Error, FaceView, Invalid, Model, SolidView, WireView};
 
     fn an_empty_model() -> Model {
@@ -1407,6 +1604,118 @@ mod tests {
             .next()
             .expect("a cube has corners");
         model.data_mut().vertices.remove(corner);
+
+        assert_eq!(refusal(&model), Invalid::DanglingKey { entity: "vertex" });
+    }
+
+    /// **The sweep itself crashed on a stranger's model, which is the one
+    /// thing it exists not to do.**
+    ///
+    /// A fuzz target over `postcard::from_bytes::<Model>` built this shape
+    /// after 17,827,556 executions: two solids, and nothing at all in the
+    /// other six arenas. The sweep reached it at
+    /// `check_which_side_of_its_trimming_each_curved_face_lies_on`, which walks
+    /// every solid through views, and `ShellView::faces` indexed the shell
+    /// arena with a slot that was not in it — `invalid SlotMap key used`,
+    /// `view.rs:388`. The solid-names-a-shell check was already written; it
+    /// just ran two checks too late.
+    ///
+    /// Built by hand rather than read from the fuzzer's bytes, because
+    /// [the format is one we intend to break](crate::serialize) and a stored
+    /// corpus in it stops reproducing the day the version moves.
+    #[test]
+    fn a_solid_naming_a_shell_that_is_not_there_is_refused_rather_than_crashing_the_sweep() {
+        let mut model = an_empty_model();
+        let nowhere = model
+            .data_mut()
+            .shells
+            .insert(ShellData { faces: Vec::new() });
+        model.data_mut().shells.remove(nowhere);
+        model.data_mut().solids.insert(SolidData {
+            shells: SmallVec::from_buf([ShellUse {
+                shell: nowhere,
+                loc: Isometry::identity(),
+                orient: Orientation::Forward,
+            }]),
+        });
+
+        assert_eq!(refusal(&model), Invalid::DanglingKey { entity: "shell" });
+    }
+
+    /// **Every level, not just the two the earlier sweep reached.**
+    ///
+    /// The check was written five times, once inside the check for whichever
+    /// entity happened to store the key, and only the vertex and edge levels
+    /// ran early enough to work. Measured on the code before this change,
+    /// taking one entity of each kind out of a cube gave: vertex and edge
+    /// refused by name; **coedge panicked** `invalid SlotMap key used` at
+    /// `check_edges`, which reads the index's coedge list and indexes the
+    /// coedge arena with it; wire, face and shell refused for
+    /// [`Invalid::Orphan`] one level down, which is the symptom and not the
+    /// fact — the model's own words for what is wrong with it are that a key
+    /// names nothing.
+    ///
+    /// One entity of each kind is the whole family in one test.
+    #[test]
+    fn every_level_of_the_model_is_refused_for_naming_something_that_is_gone() {
+        let gone = |entity| Invalid::DanglingKey { entity };
+
+        let mut model = a_cube();
+        let vertex = model.data().vertices.keys().next().expect("a corner");
+        model.data_mut().vertices.remove(vertex);
+        assert_eq!(refusal(&model), gone("vertex"), "an edge's end");
+
+        let mut model = a_cube();
+        let edge = model.data().edges.keys().next().expect("an edge");
+        model.data_mut().edges.remove(edge);
+        assert_eq!(refusal(&model), gone("edge"), "a coedge's edge");
+
+        let mut model = a_cube();
+        let coedge = model.data().coedges.keys().next().expect("a coedge");
+        model.data_mut().coedges.remove(coedge);
+        assert_eq!(refusal(&model), gone("coedge"), "a step round a wire");
+
+        let mut model = a_cube();
+        let wire = model.data().wires.keys().next().expect("a wire");
+        model.data_mut().wires.remove(wire);
+        assert_eq!(refusal(&model), gone("wire"), "a face's boundary");
+
+        let mut model = a_cube();
+        let face = model.data().faces.keys().next().expect("a face");
+        model.data_mut().faces.remove(face);
+        assert_eq!(refusal(&model), gone("face"), "a face a shell is made of");
+
+        let mut model = a_cube();
+        let shell = model.data().shells.keys().next().expect("a shell");
+        model.data_mut().shells.remove(shell);
+        assert_eq!(refusal(&model), gone("shell"), "a solid's skin");
+    }
+
+    /// The one step round a wire that names a corner instead of an edge.
+    ///
+    /// A pole cannot be reached by taking a corner away, because a ball's poles
+    /// are its seam's two ends and the edge check names them first. So the slot
+    /// is made dangling on purpose: put a corner in, take it out again, and
+    /// point the pole at it.
+    #[test]
+    fn a_pole_standing_on_a_corner_that_is_gone_is_caught() {
+        let mut model = a_ball();
+        let nowhere = model.data_mut().vertices.insert(VertexData {
+            point: Point::origin(),
+            approximation: None,
+        });
+        model.data_mut().vertices.remove(nowhere);
+
+        let mut poles = 0;
+        for wire in model.data_mut().wires.values_mut() {
+            for step in &mut wire.steps {
+                if let WireStep::Pole(vertex) = step {
+                    *vertex = nowhere;
+                    poles += 1;
+                }
+            }
+        }
+        assert!(poles > 0, "a ball's boundary stands on its poles");
 
         assert_eq!(refusal(&model), Invalid::DanglingKey { entity: "vertex" });
     }
@@ -1528,6 +1837,86 @@ mod tests {
         *and = Surface::Plane(moved);
 
         assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// The rounding the allowance above exists for, on one plane and one point.
+    ///
+    /// `(0, −10, −8)` dotted with `(−9, −4, 5)` is `40 − 40` and the point is
+    /// exactly on the plane through the origin with that normal. The stored
+    /// plane is not that plane: the normal is divided by its largest component
+    /// and then scaled to length one, and neither division is exact, so the
+    /// point reads a fifth of a coordinate spacing off a plane it is on.
+    ///
+    /// **Nothing anywhere can make this number zero**, which is why the
+    /// allowance is not a tolerance. Every arc a real file names is one of
+    /// these: its plane is written down as a centre and an axis, and its
+    /// corners are other points.
+    #[test]
+    fn a_plane_through_a_point_does_not_put_that_point_exactly_on_itself() {
+        let named_by_an_axis =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, -10.0, -8.0))
+                .expect("a direction with length");
+        let on_it = Point::new(-9.0, -4.0, 5.0);
+
+        let off_by = named_by_an_axis.signed_distance_to(on_it).abs();
+        let spacing = on_it.largest_coordinate_magnitude() * f64::EPSILON;
+        assert!(
+            off_by > 0.0,
+            "the whole point is that writing the plane down rounds"
+        );
+        assert!(
+            off_by < spacing,
+            "{off_by} should be under one coordinate spacing {spacing}"
+        );
+    }
+
+    /// A corner off the plane its arc is *named* by, by no more than writing
+    /// that plane down cost, is let through.
+    ///
+    /// The same allowance `check_flat_face` gives a corner against the plane its
+    /// face is carried by, and it is here because a name is the *weaker* claim
+    /// of the two and was being asked the harder way round.
+    ///
+    /// The ball's seam plane is nudged along its own normal, which is what a
+    /// file that wrote the plane a few ulps off does, and the poles stay exactly
+    /// on the sphere so nothing else in the sweep has an opinion.
+    #[test]
+    fn a_corner_off_the_plane_of_its_arc_by_the_rounding_in_that_plane_is_let_through() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+        let rounding = model.what_writing_a_plane_down_costs();
+
+        nudge_the_seam_plane(&mut model, rounding / 2.0);
+
+        a_clean_sweep(&model);
+    }
+
+    #[test]
+    fn a_corner_further_off_the_plane_of_its_arc_than_that_is_caught() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+        let rounding = model.what_writing_a_plane_down_costs();
+
+        nudge_the_seam_plane(&mut model, rounding * 2.0);
+
+        assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// Slide the plane a ball's seam is named by along its own normal.
+    fn nudge_the_seam_plane(model: &mut Model, by: f64) {
+        let edge = model.data().edges.keys().next().expect("the seam");
+        let moved =
+            Plane::from_point_and_normal(Point::new(0.0, by, 0.0), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal");
+        let EdgeRun::PartOfWhereItCrosses { and, .. } = &mut model.data_mut().edges[edge].run
+        else {
+            panic!("a ball's seam is named by a crossing")
+        };
+        *and = Surface::Plane(moved);
     }
 
     /// And it has to be inside the half-spaces that picked which part it is.

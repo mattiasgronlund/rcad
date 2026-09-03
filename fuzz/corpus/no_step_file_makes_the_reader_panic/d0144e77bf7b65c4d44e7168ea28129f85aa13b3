@@ -1,0 +1,11 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');
+FILE_NAME('','''','');
+FILE_SCHEMA(('AGN'));
+ENDSEC;
+DATA;
+#0=EF('',(#6),#1,'',(#6),#1,.T.);
+#5=MEASURE(PSI(24),(0.,0.,4),$,*,#9);
+ENDSEC;
+END-ISO-10303-21;

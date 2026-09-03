@@ -23,6 +23,11 @@
 //! | seam-crossing intersections | walking a crossing that runs across a face's seam | 3D points, and the seam never comes into it |
 //! | two lines no `f64` half-space separates | **refused**, and it is a gap |
 //!
+//! The last two rows are not §7.4's. They are the pairs a file can state and
+//! this crate cannot name — a pipe into a bend, a pipe into a countersink — and
+//! they are here because the evaluator used to *panic* on them where the namer
+//! refused, so what they check is that both halves now say the same word.
+//!
 //! # Why tangency is an answer and not a band
 //!
 //! For two quadrics whose coefficients are exactly representable, "are they
@@ -34,7 +39,7 @@
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Sphere,
-    Surface, SurfaceMeet, Vector, intersect, walk,
+    Surface, SurfaceMeet, Torus, Vector, intersect, walk, where_a_closed_crossing_starts,
 };
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
 use smallvec::smallvec;
@@ -73,6 +78,8 @@ fn side_of(surface: &Surface, at: rcad_predicates::Point) -> Decision {
         Surface::Plane(flat) => flat.side_of_point(at),
         Surface::Sphere(ball) => ball.side_of(at),
         Surface::Cylinder(pipe) => pipe.side_of(at),
+        Surface::Cone(cone) => cone.side_of(at),
+        Surface::Torus(ring) => ring.side_of(at),
         other => panic!("nothing here can ask about {other:?}"),
     }
 }
@@ -481,4 +488,274 @@ fn two_lines_off_the_lattice_are_named_just_as_the_same_pair_on_it_is() {
         panic!("on the lattice this cuts two lines: {on_the_lattice:?}");
     };
     assert_eq!(runs.len(), 2);
+}
+
+/// A pipe and a bend, exactly as one KiCad file holds them, refused by name by
+/// **both halves** rather than named by one and panicked on by the other.
+///
+/// The naming half has always said `ACrossingBetweenATorusAndAnotherCurvedSurface`
+/// for this pair. The evaluator used to `panic!`, on the argument that no run of
+/// such a pair can exist because the namer never builds one — and that argument
+/// only ever covered the runs this crate builds itself. [`NamedRun`] is public,
+/// `Model` is `Deserialize`, and a STEP file is a stranger's bytes: a pipe face
+/// and a bend face sharing an edge is a shape a file states, and reading it
+/// reached this with no naming call in between.
+///
+/// The shapes are the ones the corpus panicked on, to the digit.
+#[test]
+fn a_pipe_running_into_a_bend_is_refused_by_name_rather_than_crashing_the_evaluator() {
+    let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 0.5);
+    let bend = Surface::Torus(
+        Torus::new(
+            Axis::new(Point::new(0.0, 0.0, 16.15), Vector::new(0.0, 0.0, -1.0))
+                .expect("a direction"),
+            0.4,
+            0.1,
+        )
+        .expect("a ring wider than its tube"),
+    );
+
+    assert_eq!(
+        intersect(
+            &pipe,
+            &bend,
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        ),
+        Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+        "the naming half has always refused this pair"
+    );
+
+    let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a closed curve is never a piece with nothing picking it");
+    for along in [[&pipe, &bend], [&bend, &pipe]] {
+        assert_eq!(
+            walk(
+                &whole,
+                along,
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .map(|walked| walked.points().len()),
+            Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+            "the evaluator refuses what the namer refuses, whichever face asks"
+        );
+        assert_eq!(
+            where_a_closed_crossing_starts(&whole, along, &mut ProvenanceLog::new()),
+            Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+            "and so does the one place a vertex could go on it"
+        );
+    }
+}
+
+/// The same for a cone, which the naming half refuses under its own name.
+///
+/// A countersink met by a pipe: two faces a file can state and this crate can
+/// never name a crossing for.
+#[test]
+fn a_countersink_meeting_a_pipe_is_refused_by_name_rather_than_crashing_the_evaluator() {
+    let countersink = Surface::Cone(rcad_geom::Cone::new(Axis::z(), 1.0).expect("a slope"));
+    let pipe = a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 2.0], 0.5);
+
+    assert_eq!(
+        intersect(
+            &countersink,
+            &pipe,
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        ),
+        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+    );
+
+    let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a closed curve is never a piece with nothing picking it");
+    for along in [[&countersink, &pipe], [&pipe, &countersink]] {
+        assert_eq!(
+            walk(
+                &whole,
+                along,
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .map(|walked| walked.points().len()),
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        );
+        assert_eq!(
+            where_a_closed_crossing_starts(&whole, along, &mut ProvenanceLog::new()),
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        );
+    }
+}
+
+/// A cone, for the sweep below.
+fn a_cone(along: [f64; 3], apex: [f64; 3], slope: f64) -> Surface {
+    Surface::Cone(
+        rcad_geom::Cone::new(
+            Axis::new(Point::from(apex), Vector::from(along)).expect("a direction"),
+            slope,
+        )
+        .expect("a slope"),
+    )
+}
+
+/// A bend of pipe, for the sweep below.
+fn a_bend(along: [f64; 3], centre: [f64; 3], ring: f64, tube: f64) -> Surface {
+    Surface::Torus(
+        Torus::new(
+            Axis::new(Point::from(centre), Vector::from(along)).expect("a direction"),
+            ring,
+            tube,
+        )
+        .expect("a ring wider than its tube"),
+    )
+}
+
+/// All twenty-five ordered pairs of the five kinds of surface, past the naming
+/// half and both halves of the evaluator.
+///
+/// Twelve of them — a cone or a torus against another curved surface — are
+/// refused on the **kind** of surface, before a shape or a placement is looked
+/// at. What this checks is that all three say so about the same twelve, and
+/// under the same name for each.
+///
+/// **A sweep and not a row per pair**, because what went wrong was the *list*.
+/// The two lists were kept in step by hand, a cone and a torus landed and were
+/// added to neither, and those twelve pairs crashed the evaluator where the
+/// namer refused them by name — reached from `Import::read` on a real KiCad file
+/// (§24.5). A list is only checked by walking all of it.
+///
+/// Three pairs cross in straight lines and are not on the twelve. They have
+/// their own row, `a_closed_run_a_caller_names_on_a_crossing_of_straight_lines_is_refused_by_name`,
+/// because they are not refused *on kind* — the same two kinds cross in a conic
+/// as often as in a line, and which one it is depends on the numbers.
+#[test]
+fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_of_kinds_under_the_same_name() {
+    let one = [
+        a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]),
+        a_ball([0.0, 0.0, 0.0], 3.0),
+        a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 1.0),
+        a_cone([0.0, 0.0, 1.0], [0.0, 0.0, -5.0], 1.0),
+        a_bend([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 3.0, 1.5),
+    ];
+    let other = [
+        a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 1.0]),
+        a_ball([1.0, 0.0, 0.0], 3.0),
+        a_pipe([1.0, 0.0, 1.0], [0.0, 0.0, 0.0], 0.7),
+        a_cone([0.0, 0.0, 1.0], [0.0, 0.0, 5.0], 1.0),
+        a_bend([0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 3.0, 1.5),
+    ];
+    let on_kind = [
+        Error::ACrossingBetweenAConeAndAnotherCurvedSurface,
+        Error::ACrossingBetweenATorusAndAnotherCurvedSurface,
+    ];
+
+    let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a closed curve is never a piece with nothing picking it");
+    let mut refused_on_kind = 0;
+    for first in &one {
+        for second in &other {
+            let named = intersect(
+                first,
+                second,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let walked = walk(
+                &whole,
+                [first, second],
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .map(|walked| walked.points().len());
+            let started =
+                where_a_closed_crossing_starts(&whole, [first, second], &mut ProvenanceLog::new());
+
+            match on_kind.iter().find(|name| named == Err((*name).clone())) {
+                Some(name) => {
+                    refused_on_kind += 1;
+                    assert_eq!(
+                        walked,
+                        Err(name.clone()),
+                        "the namer refuses {first:?} against {second:?} by name and walking it does not"
+                    );
+                    assert_eq!(
+                        started,
+                        Err(name.clone()),
+                        "the namer refuses {first:?} against {second:?} by name and starting it does not"
+                    );
+                }
+                None => {
+                    for name in &on_kind {
+                        assert_ne!(
+                            walked,
+                            Err(name.clone()),
+                            "walking {first:?} against {second:?} refuses on kind and the namer does not"
+                        );
+                        assert_ne!(
+                            started,
+                            Err(name.clone()),
+                            "starting {first:?} against {second:?} refuses on kind and the namer does not"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        refused_on_kind, 12,
+        "a cone or a torus against another curved surface is twelve of the twenty-five pairs"
+    );
+}
+
+/// The three pairs that cross in straight lines, walked as a closed run a caller
+/// named on them.
+///
+/// `where_a_plane_cuts_a_pipe` asserts that a plane never runs down a pipe's own
+/// axis, and the two-pipe conic builder is never asked for a pair pointing the
+/// same way. Both are true, and this is why: `what_a_run_between_these_two_lies_on`
+/// answers `StraightLine` for all three *before* it reaches either builder, on
+/// the same `f64` expression the assert reads. This walks the three pairs in
+/// through the two public doors so the guard is exercised rather than argued
+/// for — the same demand that turned four plane-and-cone panics into names.
+#[test]
+fn a_closed_run_a_caller_names_on_a_crossing_of_straight_lines_is_refused_by_name() {
+    let down_the_axis = a_plane([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]);
+    let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
+
+    for pair in [
+        [
+            a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]),
+            a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 4.0]),
+        ],
+        [down_the_axis, pipe],
+        [pipe, down_the_axis],
+        [pipe, a_pipe([0.0, 0.0, 1.0], [5.0, 0.0, 0.0], 2.0)],
+    ] {
+        let [first, second] = [&pair[0], &pair[1]];
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it");
+
+        assert_eq!(
+            where_a_closed_crossing_starts(&whole, [first, second], &mut ProvenanceLog::new()),
+            Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+            "{first:?} against {second:?}"
+        );
+        // Walking one is not a refusal: a straight run is its own two ends, and
+        // a whole-curve run between two of these has no ends to put down.
+        let walked = walk(
+            &whole,
+            [first, second],
+            Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a straight run is walked by its ends and never reaches a conic builder");
+        assert!(
+            walked.points().is_empty(),
+            "{first:?} against {second:?} put points on a crossing with no curve in it"
+        );
+    }
 }

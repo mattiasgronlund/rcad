@@ -1,0 +1,5 @@
+ISO-10303-21;
+DATA;
+#2=(NAMED_UNIT(*)LEIT(0.));
+#2=(N()_UNIT(.MI0.,0.));
+AMED

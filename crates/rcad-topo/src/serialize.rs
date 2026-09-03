@@ -43,6 +43,25 @@
 //! The keys a caller is holding do **not** survive the trip. The model that
 //! comes back is a different model with its own identity, and in debug builds
 //! using an old key against it panics.
+//!
+//! **A file that names an entity the arenas do not hold is refused here**, not
+//! left for [`Model::validate`] to find. Every level of the model points at the
+//! level below by slot, and reading those slots wholesale is what let a
+//! stranger's bytes build a solid naming a shell that was not there — a model
+//! the STEP writer and the sweep both crashed on rather than refused
+//! (`ModelData::check_keys_resolve`).
+//! It is the one thing about a model that costs no arithmetic to decide, so
+//! nothing downstream has to carry a `Policy` to ask it.
+//!
+//! **So is a file whose shape is impossible**, which is a different question
+//! and was open until the one above was closed. Every key in a face's wire
+//! list can resolve while the list is empty; a wire's steps can all name
+//! coedges that are there and still not chain up. Those files read back
+//! cleanly and then panicked whichever public method next assumed the shape,
+//! so `Model::check_shape_is_possible` asks the three questions that cost no
+//! arithmetic either — a face has a wire, a wire closes, an edge is walked
+//! twice the opposite ways round. Everything else the sweep asks needs a
+//! [`Policy`](rcad_predicates::Policy) and stays in [`Model::validate`].
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -92,7 +111,13 @@ impl<'de> Deserialize<'de> for Model {
                 expected: FORMAT_VERSION,
             }));
         }
-        Ok(Model::from_parts(payload.data))
+        payload
+            .data
+            .check_keys_resolve()
+            .map_err(D::Error::custom)?;
+        let model = Model::from_parts(payload.data);
+        model.check_shape_is_possible().map_err(D::Error::custom)?;
+        Ok(model)
     }
 }
 
@@ -113,7 +138,8 @@ struct Payload {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Picker, Plane, Point, Scale, Surface, Vector,
+        Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
+        Surface, Vector,
     };
     use rcad_predicates::{Policy, ProvenanceLog};
 
@@ -157,6 +183,95 @@ mod tests {
             panic!("a ball's seam is named by a crossing")
         };
         assert_eq!(picked_by.as_slice(), [picker]);
+    }
+
+    /// **A file naming an entity the arenas do not hold does not become a
+    /// `Model` at all.**
+    ///
+    /// This is what closes the family rather than patching one site of it.
+    /// Deserializing is the only route to a model whose stored slots resolve to
+    /// nothing — no builder can make one and nothing in the crate removes an
+    /// entity — so a refusal here is what lets every accessor downstream keep
+    /// its `assert!` and every walk of the model keep indexing its arena.
+    ///
+    /// A cube with one corner taken out, written out and read back: the bytes
+    /// are well formed and the version is right, and it is still refused.
+    #[test]
+    fn a_file_naming_a_corner_that_is_not_there_never_becomes_a_model() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube of side two");
+        let corner = model
+            .data()
+            .vertices
+            .keys()
+            .next()
+            .expect("a cube has corners");
+        model.data_mut().vertices.remove(corner);
+
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+
+        assert!(
+            postcard::from_bytes::<Model>(&bytes).is_err(),
+            "a file whose edges name a corner that is not there must not read back"
+        );
+    }
+
+    /// **A file whose keys all resolve and whose shape is still impossible does
+    /// not become a `Model` either.**
+    ///
+    /// The three shapes are the three a public method asserts about: a face
+    /// with no wires, which
+    /// [`FaceView::outer_wire`](crate::FaceView::outer_wire) has nothing to
+    /// hand back for; a wire whose steps do not chain up, and an edge walked by
+    /// a third coedge, which are what [`Model::place_solid`]'s
+    /// after-the-mutation checks assert and cannot have caused.
+    ///
+    /// Each is built by breaking a sound cube one way, so the bytes are well
+    /// formed, the version is right and every stored key names something that
+    /// is there — the previous door catches none of them.
+    #[test]
+    fn a_file_whose_shape_is_impossible_never_becomes_a_model() {
+        assert!(
+            a_cube_broken_by(|model| {
+                let face = model.data().faces.keys().next().expect("a cube has faces");
+                model.data_mut().faces[face].wires.clear();
+            })
+            .is_err(),
+            "a face with no wires read back, and FaceView::outer_wire has \
+             nothing to hand back for it"
+        );
+        assert!(
+            a_cube_broken_by(|model| {
+                let wire = model.data().wires.keys().next().expect("a cube has wires");
+                model.data_mut().wires[wire].steps.swap(0, 1);
+            })
+            .is_err(),
+            "a wire that does not close read back, and Model::place_solid \
+             asserts that it does"
+        );
+        assert!(
+            a_cube_broken_by(|model| {
+                let edge = model.data().edges.keys().next().expect("a cube has edges");
+                model.add_coedge(edge, Orientation::Forward);
+            })
+            .is_err(),
+            "an edge walked by three coedges read back, and Model::place_solid \
+             asserts there are two"
+        );
+    }
+
+    /// A sound cube, broken one way, written out and read back.
+    fn a_cube_broken_by(break_it: impl FnOnce(&mut Model)) -> postcard::Result<Model> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube of side two");
+        break_it(&mut model);
+
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+        postcard::from_bytes::<Model>(&bytes)
     }
 
     /// Every run a computed crossing actually hands back, written out and read

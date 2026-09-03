@@ -590,7 +590,7 @@ fn derive_a_corner(
                     Surface::Plane(flat) => Invalid::VertexOffItsFacePlane {
                         distance: flat.signed_distance_to(middle_of(point)).abs(),
                     },
-                    Surface::Sphere(_) | Surface::Cylinder(_) | _ => {
+                    Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | _ => {
                         Invalid::VertexOffItsFaceSurface
                     }
                 }
@@ -616,6 +616,8 @@ fn middle_of_the_places(around: &[Surface]) -> PredicatePoint {
         Surface::Plane(flat) => flat.origin().coordinates(),
         Surface::Sphere(ball) => ball.centre().coordinates(),
         Surface::Cylinder(pipe) => pipe.axis().origin().coordinates(),
+        Surface::Cone(cone) => cone.apex().coordinates(),
+        Surface::Torus(ring) => ring.centre().coordinates(),
         other => panic!("a surface nothing here can name: {other:?}"),
     })
 }

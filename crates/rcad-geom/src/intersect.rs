@@ -41,8 +41,8 @@ use crate::enclosure::{
 };
 use crate::exact::Exact;
 use crate::{
-    Cylinder, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result, Sphere, Surface,
-    SurfaceMeet, Vector,
+    Cone, Cylinder, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result, Sphere,
+    Surface, SurfaceMeet, Torus, Vector,
 };
 
 /// The name the two-plane crossing goes by in provenance records.
@@ -63,6 +63,12 @@ pub const WHERE_A_BALL_AND_A_PIPE_CROSS: &str = "where a ball and a pipe cross";
 /// The name the two-pipe crossing goes by in provenance records.
 pub const WHERE_TWO_PIPES_CROSS: &str = "where two pipes cross";
 
+/// The name the plane-and-cone crossing goes by in provenance records.
+pub const WHERE_A_PLANE_AND_A_CONE_CROSS: &str = "where a plane and a cone cross";
+
+/// The name the plane-and-torus crossing goes by in provenance records.
+pub const WHERE_A_PLANE_AND_A_TORUS_CROSS: &str = "where a plane and a torus cross";
+
 /// Where two surfaces cross, as an [`EdgeRun`] and nothing that had to be built.
 ///
 /// Both surfaces arrive with their locations **already composed**, and that is
@@ -79,7 +85,7 @@ pub const WHERE_TWO_PIPES_CROSS: &str = "where two pipes cross";
 ///
 /// # Which pairs are named here
 ///
-/// All six. The four whose crossing **lies in a plane** — plane–plane,
+/// Six of the ten. The four whose crossing **lies in a plane** — plane–plane,
 /// plane–ball, plane–pipe and ball–ball — are named by one sign question or two
 /// (§24.5). A ball crossing a pipe is a degree-four space curve and is named
 /// too: which of the five shapes it takes is settled exactly by an eighth-degree
@@ -92,6 +98,20 @@ pub const WHERE_TWO_PIPES_CROSS: &str = "where two pipes cross";
 /// that crossing takes compares a distance against a sum of two radii measured
 /// in two different metrics, and clearing the square roots out of that
 /// comparison costs eight degrees and runs past what `f64` can square.
+///
+/// **A torus against a plane is classified whole and named in four of its six
+/// shapes** — see [`where_a_plane_and_a_torus_cross`] for the table. A torus
+/// against a ball, a pipe, a cone or another torus is not named at all: the
+/// crossing runs to degree eight and none of the machinery for that exists. Two
+/// tori that hold the same numbers are the same surface and come back as one.
+///
+/// **A cone against a plane is classified whole and named in two of its seven
+/// shapes** — see [`where_a_plane_and_a_cone_cross`] for the table and for what
+/// each of the five refusals is and what would close it. **A cone against a
+/// ball, a pipe or another cone is not named at all**: the crossing is a
+/// degree-four space curve and none of the machinery §29 built for two pipes
+/// exists for a cone. Two cones that hold the same numbers are the same surface
+/// and come back as one.
 ///
 /// # Errors
 ///
@@ -108,6 +128,18 @@ pub const WHERE_TWO_PIPES_CROSS: &str = "where two pipes cross";
 /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] when the two
 /// surfaces are tangent along the curve rather than at a point, so what they
 /// cross in is one curve that runs through itself.
+///
+/// [`Error::ACrossingThatIsAParabola`], [`Error::ACrossingThatIsAHyperbola`],
+/// [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] and
+/// [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] for the four
+/// shapes of a plane against a cone that this vocabulary cannot say, and
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against
+/// anything curved.
+///
+/// [`Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic`] for every plane
+/// against a torus but the two families that cut circles, and
+/// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a torus against
+/// anything curved.
 ///
 /// **A partly undecidable answer refuses whole.** A caller handed one of two
 /// curves has no way to know a second existed, and a fuse classifying against
@@ -140,6 +172,29 @@ pub fn intersect(
         }
         (Surface::Cylinder(one), Surface::Cylinder(other)) => {
             where_two_pipes_cross(one, other, policy, log)
+        }
+        (Surface::Plane(flat), Surface::Cone(cone))
+        | (Surface::Cone(cone), Surface::Plane(flat)) => {
+            where_a_plane_and_a_cone_cross(flat, cone, policy, log)
+        }
+        (Surface::Cone(one), Surface::Cone(other)) if one == other => Ok(SurfaceMeet::SameSurface),
+        (Surface::Cone(_), Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_))
+        | (Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)) => {
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        }
+        (Surface::Plane(flat), Surface::Torus(ring))
+        | (Surface::Torus(ring), Surface::Plane(flat)) => {
+            where_a_plane_and_a_torus_cross(flat, ring, policy, log)
+        }
+        (Surface::Torus(one), Surface::Torus(other)) if one == other => {
+            Ok(SurfaceMeet::SameSurface)
+        }
+        (
+            Surface::Torus(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        )
+        | (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_), Surface::Torus(_)) => {
+            Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
         }
     }
 }
@@ -1548,6 +1603,318 @@ fn two_lines_told_apart(
                     picked_by: smallvec![Picker::from(half_space)],
                 })
                 .expect("picked_by always holds the one half-space just built")
+            })
+            .collect(),
+    ))
+}
+
+/// A plane and a cone: seven shapes, two of them named here and five refused by
+/// name.
+///
+/// # The two signs that settle all seven
+///
+/// **Where the apex stands**, `n·a − d`, and **how the plane leans against the
+/// cone's own half-angle**:
+///
+/// ```text
+/// E  =  (n·w)²  −  slope² · ‖n × w‖²
+/// ```
+///
+/// `E` is the textbook comparison "is the plane steeper than the cone" written
+/// so that nothing is normalized: `‖n × w‖² = (n·n)(w·w) − (n·w)²`, so this is
+/// `(1 + slope²)(n·w)² − slope²(n·n)(w·w)` with the two lengths carried, which
+/// is the rule the module note opens with. Above zero the plane cuts across the
+/// cone, at zero it is parallel to one ruling, below zero it is steeper than the
+/// cone and reaches both nappes.
+///
+/// | apex | `E` | the crossing | here |
+/// |---|---|---|---|
+/// | off the plane | `> 0` | an ellipse, a circle when the plane is square to the axis | **named** — one closed curve |
+/// | off the plane | `= 0` | a parabola | [`Error::ACrossingThatIsAParabola`] |
+/// | off the plane | `< 0` | a hyperbola | [`Error::ACrossingThatIsAHyperbola`] |
+/// | on the plane | `> 0` | the apex and nothing else | **named** — one touching point, exactly |
+/// | on the plane | `= 0` | one ruling, touched along its whole length | [`Error::APlaneTouchingAConeAlongOneOfItsRulings`] |
+/// | on the plane | `< 0` | two rulings crossing at the apex | [`Error::TwoLinesThroughAConesApexAreOneCurveThroughItself`] |
+///
+/// The seventh shape a plane and a quadric can make is *the same surface*, and a
+/// plane is never a cone.
+///
+/// **Every one of the five refusals is a refusal of the vocabulary and not of
+/// the arithmetic**, and each variant says which of a limit and a gap it is and
+/// what closing it would take. Both signs above are polynomials in stored `f64`
+/// and level 3 settles them; nothing here is ever undecided except when a
+/// product leaves `f64`'s range.
+///
+/// **The touching point is exact.** Where the plane passes through the apex and
+/// nothing else, the one point they share is the apex, which is a stored `f64`
+/// triple — not a box, unlike a plane resting on a ball, where the touching
+/// point is a division away.
+fn where_a_plane_and_a_cone_cross(
+    flat: &Plane,
+    cone: &Cone,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<SurfaceMeet> {
+    let normal = flat.normal().components();
+    let d = flat.offset();
+    let apex = cone.apex().coordinates();
+    let along = cone.axis().direction().components();
+    let slope = cone.slope();
+    let at = [
+        PredicatePoint::from(flat.origin().coordinates()),
+        PredicatePoint::from(apex),
+    ];
+
+    let stands_off = Question {
+        named: WHERE_A_PLANE_AND_A_CONE_CROSS,
+        enclosing: || dot_enclosing(exactly(normal), exactly(apex)) - Interval::exactly(d),
+        exactly: || Some(Exact::dot_of(normal, apex)?.minus(&Exact::of(d))),
+    };
+    let apex_is_on_the_plane = match ask(&stands_off, Measures::Length, &at, policy, log)? {
+        Decision::Zero => true,
+        Decision::Pos | Decision::Neg => false,
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    };
+
+    let leans = Question {
+        named: WHERE_A_PLANE_AND_A_CONE_CROSS,
+        enclosing: || {
+            let up = dot_enclosing(exactly(normal), exactly(along));
+            let across = squared_length_enclosing(cross_enclosing(exactly(normal), exactly(along)));
+            up * up - squared_enclosing(slope) * across
+        },
+        exactly: || {
+            let up = Exact::dot_of(normal, along)?;
+            let across =
+                Exact::squared_length_of(&Exact::cross_of(&Exact::of_each(normal), along)?)?;
+            Some(
+                up.times(&up)?
+                    .minus(&Exact::product_of(slope, slope)?.times(&across)?),
+            )
+        },
+    };
+    // Dimensionless: every number in it is a direction component or a slope.
+    // `Measures::Length` is the arm whose conversion is the identity, which is
+    // the right conversion for a value with no units, and §28 records that the
+    // *name* is wrong for the same reason the plane-and-pipe row does.
+    let leaning = ask(&leans, Measures::Length, &at, policy, log)?;
+
+    match (apex_is_on_the_plane, leaning) {
+        (false, Decision::Pos) => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )?])),
+        (false, Decision::Zero) => Err(Error::ACrossingThatIsAParabola),
+        (false, Decision::Neg) => Err(Error::ACrossingThatIsAHyperbola),
+        (true, Decision::Pos) => Ok(SurfaceMeet::TouchAtOnePoint {
+            at: PredicatePoint::from(apex),
+        }),
+        (true, Decision::Zero) => Err(Error::APlaneTouchingAConeAlongOneOfItsRulings),
+        (true, Decision::Neg) => Err(Error::TwoLinesThroughAConesApexAreOneCurveThroughItself),
+        (_, other) => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+}
+
+/// A plane and a torus: two circles, one circle, nothing, or a quartic nobody
+/// here can name.
+///
+/// **Only two families of plane cut a torus in circles**, and the two sign
+/// questions below are exactly the two that pick them out. Both are polynomials
+/// in the numbers as stored, so level 3 settles them and nothing here is ever
+/// undecided except when a product leaves `f64`'s range.
+///
+/// | the plane | the crossing | here |
+/// |---|---|---|
+/// | square to the axis, further off than the tube | nothing | **named** — [`SurfaceMeet::Nothing`] |
+/// | square to the axis, exactly the tube's reach | one circle, touched all the way round | **named** — one closed curve |
+/// | square to the axis, nearer than that | two circles round the axis, one inside the other | **named** — two closed curves, told apart by the pipe of the ring's own radius |
+/// | through the axis | the two meridian circles | **named** — two closed curves, told apart by a flat half-space |
+/// | parallel to the axis but off it | a Cassini oval, or two of them, or a figure of eight | [`Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic`] |
+/// | anything else, including the two bitangent planes whose crossing is a pair of Villarceau circles | a quartic | the same |
+///
+/// The seventh shape a plane and a surface can make is *the same surface*, and a
+/// plane is never a torus.
+///
+/// # The two circles round the axis need a picker that says *inside*
+///
+/// They are concentric and lie in one plane, so no flat half-space holds one
+/// without holding half of the other, and no *outside* holds the inner one at
+/// all. The pipe of the ring's own radius `R` about the torus's own axis is
+/// exactly between them — the two radii are `R ± √(r² − t²)` with the root
+/// strictly positive whenever this arm is reached — so
+/// [`Picker::OutsideAPipe`] names the outer and
+/// [`Picker::InsideAPipe`] names the inner. That second one is the only
+/// picker in the kernel that says inside, and this is what needed it.
+///
+/// **What that costs when the two circles are a rounding apart.** The picking
+/// pipe's certified radius is `R / ‖w‖` rather than `R`, so a pair whose gap
+/// `√(r² − t²)` is smaller than a rounding of `R` is not provably either side of
+/// it, and the sign question downstream comes back
+/// [`Decision::Zero`] or [`Decision::Undecidable`] and the caller refuses. The
+/// naming is still right; what is undecidable is a real knife edge.
+fn where_a_plane_and_a_torus_cross(
+    flat: &Plane,
+    ring: &Torus,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<SurfaceMeet> {
+    let normal = flat.normal().components();
+    let offset = flat.offset();
+    let centre = ring.centre().coordinates();
+    let along = ring.axis().direction().components();
+    let at = [
+        PredicatePoint::from(flat.origin().coordinates()),
+        PredicatePoint::from(centre),
+    ];
+
+    let leans_across = Question {
+        named: WHERE_A_PLANE_AND_A_TORUS_CROSS,
+        enclosing: || squared_length_enclosing(cross_enclosing(exactly(normal), exactly(along))),
+        exactly: || Exact::squared_length_of(&Exact::cross_of(&Exact::of_each(normal), along)?),
+    };
+    // Dimensionless — two directions crossed together. `Measures::Area` is what
+    // every other squared cross product here is filed as, and §28 records that
+    // the names are wrong for the same reason across the whole module.
+    match ask(&leans_across, Measures::Area, &at, policy, log)? {
+        Decision::Zero => {
+            return where_a_plane_square_to_the_axis_cuts_a_torus(flat, ring, policy, log);
+        }
+        Decision::Pos => (),
+        other => unreachable!("a sum of squares is never below zero: {other:?}"),
+    }
+
+    // Not square to the axis. The only other family that gives circles is a
+    // plane holding the axis, which takes both of the next two to be zero: the
+    // normal square to the axis direction, and the centre on the plane.
+    let runs_along = Question {
+        named: WHERE_A_PLANE_AND_A_TORUS_CROSS,
+        enclosing: || dot_enclosing(exactly(normal), exactly(along)),
+        exactly: || Exact::dot_of(normal, along),
+    };
+    if ask(&runs_along, Measures::Length, &at, policy, log)? != Decision::Zero {
+        return Err(Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic);
+    }
+    let holds_the_centre = Question {
+        named: WHERE_A_PLANE_AND_A_TORUS_CROSS,
+        enclosing: || dot_enclosing(exactly(normal), exactly(centre)) - Interval::exactly(offset),
+        exactly: || Some(Exact::dot_of(normal, centre)?.minus(&Exact::of(offset))),
+    };
+    if ask(&holds_the_centre, Measures::Length, &at, policy, log)? != Decision::Zero {
+        return Err(Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic);
+    }
+
+    two_meridian_circles(flat, ring)
+}
+
+/// The two circles a plane through a torus's axis cuts, told apart by the flat
+/// half-space square to both the axis and the plane's normal.
+///
+/// The picking normal is `w × n`, written with both stored triples and
+/// **normalized nowhere**, which is the whole reason a picker is a
+/// [`HalfSpace`] and not a [`Plane`]. The two circles have their centres `R`
+/// either side of that flat surface and a radius of `r`, so the margin is
+/// `(R − r)·‖w × n‖` and it is strictly positive because a torus's tube is
+/// strictly narrower than its ring.
+///
+/// # Errors
+///
+/// [`Error::ZeroLength`] never fires: this is only reached with `n × w` proved
+/// non-zero one function up. [`Error::NotFinite`] when the offset overflows,
+/// and [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the rounding in
+/// that offset is not provably smaller than the margin — which takes a torus
+/// whose two radii are within a rounding of each other, or a centre so far from
+/// the origin that the dot product loses the ring.
+fn two_meridian_circles(flat: &Plane, ring: &Torus) -> Result<SurfaceMeet> {
+    let across = ring.axis().direction().cross(flat.normal());
+    let between = HalfSpace::through_a_point_facing(ring.centre(), across)?;
+    let margin = Interval::exactly(ring.ring_radius() - ring.tube_radius())
+        - how_far_a_picking_half_space_sits_off_a_point(&between, ring.centre());
+    if margin.lo() <= 0.0 {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    }
+
+    let torus = Surface::Torus(*ring);
+    Ok(SurfaceMeet::Curves(
+        [between, between.reversed()]
+            .into_iter()
+            .map(|half_space| {
+                NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+                    and: torus,
+                    picked_by: smallvec![Picker::from(half_space)],
+                })
+                .expect("picked_by always holds the one half-space just built")
+            })
+            .collect(),
+    ))
+}
+
+/// A plane square to a torus's axis: nothing, one circle, or two.
+///
+/// The plane stands `|n·c − d| / ‖n‖` off the centre along the axis, so what
+/// decides which of the three it is is the sign of `(n·c − d)² − r²(n·n)` — a
+/// polynomial in stored numbers with the plane's own normal length carried, for
+/// the reason the module note opens with.
+fn where_a_plane_square_to_the_axis_cuts_a_torus(
+    flat: &Plane,
+    ring: &Torus,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<SurfaceMeet> {
+    let normal = flat.normal().components();
+    let offset = flat.offset();
+    let centre = ring.centre().coordinates();
+    let tube = ring.tube_radius();
+    let at = [
+        PredicatePoint::from(flat.origin().coordinates()),
+        PredicatePoint::from(centre),
+    ];
+
+    let reaches = Question {
+        named: WHERE_A_PLANE_AND_A_TORUS_CROSS,
+        enclosing: || {
+            let off = dot_enclosing(exactly(normal), exactly(centre)) - Interval::exactly(offset);
+            off * off - squared_enclosing(tube) * squared_length_enclosing(exactly(normal))
+        },
+        exactly: || {
+            let off = Exact::dot_of(normal, centre)?.minus(&Exact::of(offset));
+            Some(
+                off.times(&off)?
+                    .minus(&Exact::product_of(tube, tube)?.times(&Exact::dot_of(normal, normal)?)?),
+            )
+        },
+    };
+    match ask(&reaches, Measures::Area, &at, policy, log)? {
+        Decision::Pos => Ok(SurfaceMeet::Nothing),
+        // The plane rests on the top or the bottom of the tube and touches it
+        // all the way round, in one circle of the ring's own radius. Tangency
+        // along a whole closed curve, which `EdgeRun` says perfectly well — a
+        // plane resting along a pipe is named `Straight` for the same reason.
+        Decision::Zero => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )?])),
+        Decision::Neg => two_circles_round_the_axis(ring),
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+}
+
+/// The two circles a plane square to a torus's axis cuts, told apart by the pipe
+/// of the ring's own radius about the torus's own axis.
+///
+/// # Errors
+///
+/// [`Error::RadiusNotPositive`] and [`Error::NotFinite`] never fire: a torus's
+/// ring radius is positive and its axis is finite by construction.
+fn two_circles_round_the_axis(ring: &Torus) -> Result<SurfaceMeet> {
+    let between = Cylinder::new(ring.axis(), ring.ring_radius())?;
+    let torus = Surface::Torus(*ring);
+    Ok(SurfaceMeet::Curves(
+        [Picker::OutsideAPipe(between), Picker::InsideAPipe(between)]
+            .into_iter()
+            .map(|picker| {
+                NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+                    and: torus,
+                    picked_by: smallvec![picker],
+                })
+                .expect("picked_by always holds the one picker just built")
             })
             .collect(),
     ))

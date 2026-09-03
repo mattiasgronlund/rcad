@@ -1,0 +1,11 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'4;1');
+FILE_NAME('','','');
+FILE_SCHEMA(('AN'));
+ENDSEC;
+DATA;#0=URE(PURE(25.4),$,*,#9);
+
+
+#1=CNIT(.M.,$,*,#9$
+1

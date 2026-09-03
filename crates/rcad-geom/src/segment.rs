@@ -208,6 +208,18 @@ mod tests {
         assert_eq!(segment.parameter_range(), (0.0, 5.0));
     }
 
+    /// A caller of [`Vector::length`] that turned the underflow into a refusal:
+    /// two ends a hair apart are two ends, and the run between them is a real
+    /// run that was being turned away as having no length at all.
+    #[test]
+    fn a_segment_between_two_ends_a_hair_apart_has_a_length() {
+        let hair = 2.0f64.powi(-600);
+        let segment =
+            Segment::new(Point::origin(), Point::new(3.0 * hair, 4.0 * hair, 0.0)).unwrap();
+        assert_eq!(segment.length(), 5.0 * hair);
+        assert_eq!(segment.direction(), Vector::new(0.6, 0.8, 0.0));
+    }
+
     #[test]
     fn the_parameter_is_measured_in_the_same_length_as_the_points() {
         let segment = segment_along_x();

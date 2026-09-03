@@ -49,8 +49,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point, Surface,
-    Vector,
+    DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point,
+    Surface, Vector,
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -63,6 +63,7 @@ use crate::validate::{
     a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
     how_much_space_a_curved_solid_encloses, the_curved_one_of, winding_round,
 };
+use crate::view::how_far_apart;
 use crate::{
     Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
 };
@@ -186,6 +187,78 @@ impl Assembly {
     /// order [`Assembly::write_into`] writes them.
     pub(crate) fn corner_ancestors(&self) -> impl Iterator<Item = Option<VertexKey>> + '_ {
         self.corners.iter().map(|corner| corner.from)
+    }
+
+    /// Refuse an answer whose own shortest edge is too small to resolve beside
+    /// its own coordinates.
+    ///
+    /// **A fuse can build a feature neither input had.** Two blocks whose faces
+    /// nearly line up meet in a sliver as thin as the gap between the two
+    /// planes, and that gap is whatever the two placements make it — a number
+    /// with no lower bound short of zero. Both inputs pass
+    /// `Model::check_dynamic_range` and the answer does not, so this is the one
+    /// thing the fuse writes that its inputs said nothing about.
+    ///
+    /// It is a **limit** and not a gap. The ratio is a length over a length, so
+    /// scaling the whole answer by any power of two leaves it exactly where it
+    /// was: there is no scaled copy in which the sliver and the coordinates fit
+    /// in `f64` together, which is the family of fix §16.10 asks to be ruled out
+    /// by name. Nothing here can make the answer smaller, either — the sliver is
+    /// where the two inputs really are.
+    ///
+    /// Only the chords are measured, where `Model::check_dynamic_range` also
+    /// takes the radii of curved faces. A curved face of the answer sits on a
+    /// surface inherited from its ancestor bit for bit (§17.1), so every radius
+    /// in the answer is a radius an input already carried and was already
+    /// measured on.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::DynamicRangeTooWide`] when the answer's largest coordinate
+    /// over its shortest edge is more than `f64` carries, under a policy that
+    /// fails on that. [`Error::Geometry`] when two corners of the answer with
+    /// different names landed on the very same `f64` triple, which leaves an
+    /// edge of no length at all.
+    pub(crate) fn check_dynamic_range(
+        &self,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let largest = self
+            .corners
+            .iter()
+            .map(|corner| corner.point.largest_coordinate_magnitude())
+            .fold(0.0, f64::max);
+        // A closed edge has one corner and a chord of zero, and that is not how
+        // small it is — the same reasoning, and the same skip, as
+        // `Model::check_dynamic_range`.
+        let shortest = self
+            .edges
+            .iter()
+            .filter(|edge| edge.ends[0] != edge.ends[1])
+            .map(|edge| {
+                how_far_apart(
+                    self.corners[edge.ends[0]].point,
+                    self.corners[edge.ends[1]].point,
+                )
+            })
+            .fold(f64::INFINITY, f64::min);
+        if !shortest.is_finite() || largest == 0.0 {
+            return Ok(());
+        }
+
+        match DynamicRange::measure(largest, shortest)?.check_under_policy(policy, log) {
+            // The tag says how much slop an answer this wide carries. What a
+            // caller can act on is the record it pushed into `log`, the same as
+            // in the sweep.
+            Ok(_) => Ok(()),
+            // Both layers have a name for this. Keep reporting the topology one,
+            // since a fuse is what built it.
+            Err(rcad_geom::Error::DynamicRangeTooWide { ratio }) => {
+                Err(Invalid::DynamicRangeTooWide { ratio }.into())
+            }
+            Err(other) => Err(other.into()),
+        }
     }
 
     /// Write the result into the model, once.
@@ -1110,7 +1183,8 @@ impl Assembly {
                     // `docs/decisions.md` §35 records why that stops holding.
                     Containment::OnBoundary
                     | Containment::Undecidable { .. }
-                    | Containment::CannotFollowAFacesTrimming { .. } => (),
+                    | Containment::CannotFollowAFacesTrimming { .. }
+                    | Containment::CannotFireARayAtAFacesSurface { .. } => (),
                 }
             }
         }
@@ -1650,13 +1724,13 @@ enum CornerName {
     /// Three surfaces can meet at more than one point, so the three names do not
     /// pick a corner on their own; §31.3 is where that field comes from and it
     /// is what stops two different corners being joined into one.
-    Meet([[u64; 8]; 3], u8),
+    Meet([[u64; 9]; 3], u8),
     /// The one point on a closed crossing that nothing else cuts, named by the
     /// two surfaces it runs between.
-    RoundACurve([[u64; 8]; 2]),
+    RoundACurve([[u64; 9]; 2]),
     /// A pole of a closed surface, named by that surface and which of its two
     /// poles this is (§38.1).
-    Pole([u64; 8], bool),
+    Pole([u64; 9], bool),
 }
 
 impl Corners {
@@ -1739,7 +1813,7 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// What names one edge of the answer: the two corners it runs between, and —
 /// for an edge that closes, where those are one corner — the two surfaces
 /// either side of it. See [`which_curve_it_is`].
-type EdgeName = ([usize; 2], Option<[[u64; 8]; 2]>);
+type EdgeName = ([usize; 2], Option<[[u64; 9]; 2]>);
 
 /// The edges built so far, and how to find one again.
 #[derive(Default)]
@@ -1874,6 +1948,12 @@ fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> WhichArc
 /// to disagree about how many pieces there are. **Read off the surfaces and
 /// never off the chord**: a short enough arc has a chord that rounds to its own
 /// tangent, and this question has to stay one about the pair.
+///
+/// Every pair of the five surfaces there are is named below. The `_` left at the
+/// bottom is for a sixth [`Surface`] and nothing else, which is what §40 asks
+/// for — but a sixth kind arriving lands in it as a silent `false` rather than
+/// as a compile error, because [`Surface`] is `#[non_exhaustive]` and belongs to
+/// another crate. `tests/a_sixth_kind_of_surface.rs` is what notices instead.
 fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
     match carried_by {
         [Surface::Plane(_), Surface::Plane(_)] => true,
@@ -1884,6 +1964,65 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> bool {
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
             one.axis().direction().cross(other.axis().direction()) == Vector::zero()
         }
+        // **A cone never reaches *here* running straight, and that is a fact
+        // about this function's one caller rather than about the kernel.** The
+        // only crossing with a cone on it that `intersect` names is the ellipse
+        // a plane cuts across it; the two shapes that *are* straight — a tangent
+        // plane's one ruling, and two rulings meeting at the apex — come back
+        // `APlaneTouchingAConeAlongOneOfItsRulings` and
+        // `TwoLinesThroughAConesApexAreOneCurveThroughItself` from
+        // `where_a_plane_and_a_cone_cross`. So the fuse never builds a
+        // `FaceMeet` carrying such a pair, and `which_arc_this_is` is private
+        // and reached from nowhere else.
+        //
+        // This used to say "no run carrying either exists". That is false and
+        // the geom lane demonstrated it: `EdgeRun` is `Deserialize` and
+        // `rcad_geom::walk` is public, so a run carrying one of those shapes can
+        // be handed in with nothing forged. What does not exist is one arriving
+        // here.
+        //
+        // **And the answer below is right because of that caller, not on its
+        // own.** A pair that really did cross in one ruling would be told
+        // `false`, which is the two-arc path, and one ruling is one arc.
+        [
+            Surface::Cone(_),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+        ]
+        | [
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_),
+            Surface::Cone(_),
+        ] => false,
+        // **A ball's skin and a ring's skin are bounded, and a straight line is
+        // not, so no line lies on either** — which settles every remaining pair
+        // at once and without a case analysis. Whatever the partner is, the
+        // crossing lies on the ball or the ring, so it holds no line, so two
+        // corners on it leave two arcs and not one. `Torus::new` refuses a tube
+        // wider than its ring, so every ring here is a ring and not a pinched
+        // or self-crossing one, and that is what makes "bounded" true of the
+        // *stored* shape rather than only of the nice case.
+        //
+        // A plane and a ball is the pair that arrives: it reached
+        // `which_arc_this_is` twelve times in one run of this crate's suite,
+        // and was answered by the `_` arm that used to sit below here, unnamed
+        // and uncounted. `a_crossing_with_a_ball_or_a_ring_on_it_holds_no_line`
+        // is the demonstration rather than the paragraph.
+        [
+            Surface::Sphere(_),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_),
+        ]
+        | [Surface::Plane(_) | Surface::Cylinder(_), Surface::Sphere(_)] => false,
+        [
+            Surface::Torus(_),
+            Surface::Plane(_)
+            | Surface::Sphere(_)
+            | Surface::Cylinder(_)
+            | Surface::Cone(_)
+            | Surface::Torus(_),
+        ]
+        | [
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+            Surface::Torus(_),
+        ] => false,
         _ => false,
     }
 }
@@ -1958,7 +2097,7 @@ fn the_half_space_both_ends_are_on(facing: Vector, ends: [Point; 2]) -> Option<P
 /// split it in two and leave each half with one face along it. Measured: the
 /// skew family's not-a-solid share went from under three in a hundred to three
 /// and a half.
-fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option<[[u64; 8]; 2]> {
+fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option<[[u64; 9]; 2]> {
     if from != to {
         return None;
     }
@@ -2001,7 +2140,108 @@ fn sides_of(
 
 #[cfg(test)]
 mod tests {
-    use super::{Point, Vector, the_half_space_both_ends_are_on};
+    use rcad_geom::{Axis, Cylinder, Plane, Sphere, Surface, Torus};
+
+    use super::{
+        Point, Vector, the_crossing_of_these_runs_straight, the_half_space_both_ends_are_on,
+    };
+
+    /// Why every pair with a ball or a ring on it is answered `false`.
+    ///
+    /// Three points on the crossing, each checked onto **both** surfaces with
+    /// exact arithmetic — every number here is a whole one or a 3-4-5 side, so
+    /// the equalities are the real ones and not near ones — and then shown not
+    /// to be collinear. A crossing three of whose points miss a line is not a
+    /// line, so two corners on it leave two arcs, which is what `false` says.
+    ///
+    /// This replaces a `_` arm that answered the same `false` without being
+    /// counted or named. A plane and a ball is the pair that actually arrives.
+    #[test]
+    fn a_crossing_with_a_ball_or_a_ring_on_it_holds_no_line() {
+        let up = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a direction with length");
+        let ball = Sphere::new(Point::new(0.0, 0.0, 0.0), 5.0).expect("a ball of radius five");
+        let flat =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("the plane through the ball's middle");
+        let other_ball =
+            Sphere::new(Point::new(8.0, 0.0, 0.0), 5.0).expect("a ball eight away, of radius five");
+        let pipe = Cylinder::new(up, 3.0).expect("a pipe of radius three");
+        let ring = Torus::new(up, 2.0, 1.0).expect("a ring of radius two round a tube of one");
+
+        let on_the_ball = |p: Point| (p - Point::new(0.0, 0.0, 0.0)).length_squared() == 25.0;
+        let on_the_other_ball = |p: Point| (p - Point::new(8.0, 0.0, 0.0)).length_squared() == 25.0;
+        let on_the_flat = |p: Point| p.z() == 0.0;
+        let on_the_pipe = |p: Point| p.x() * p.x() + p.y() * p.y() == 9.0;
+        let on_the_ring = |p: Point| {
+            let from_the_axis = (p.x() * p.x() + p.y() * p.y()).sqrt() - 2.0;
+            from_the_axis * from_the_axis + p.z() * p.z() == 1.0
+        };
+
+        let three_points_off_a_line =
+            |pair: [Surface; 2],
+             points: [Point; 3],
+             on_one: &dyn Fn(Point) -> bool,
+             on_other: &dyn Fn(Point) -> bool| {
+                for point in points {
+                    assert!(on_one(point), "{point:?} is not on the first surface");
+                    assert!(on_other(point), "{point:?} is not on the second surface");
+                }
+                let [first, second, third] = points;
+                assert_ne!(
+                    (second - first).cross(third - first),
+                    Vector::zero(),
+                    "three points of this crossing lie on a line"
+                );
+                for [one, other] in [pair, [pair[1], pair[0]]] {
+                    assert!(
+                        !the_crossing_of_these_runs_straight(&[one, other]),
+                        "a crossing with three points off a line was called straight"
+                    );
+                }
+            };
+
+        three_points_off_a_line(
+            [Surface::Plane(flat), Surface::Sphere(ball)],
+            [
+                Point::new(5.0, 0.0, 0.0),
+                Point::new(0.0, 5.0, 0.0),
+                Point::new(-5.0, 0.0, 0.0),
+            ],
+            &on_the_flat,
+            &on_the_ball,
+        );
+        three_points_off_a_line(
+            [Surface::Sphere(ball), Surface::Sphere(other_ball)],
+            [
+                Point::new(4.0, 3.0, 0.0),
+                Point::new(4.0, 0.0, 3.0),
+                Point::new(4.0, -3.0, 0.0),
+            ],
+            &on_the_ball,
+            &on_the_other_ball,
+        );
+        three_points_off_a_line(
+            [Surface::Sphere(ball), Surface::Cylinder(pipe)],
+            [
+                Point::new(3.0, 0.0, 4.0),
+                Point::new(0.0, 3.0, 4.0),
+                Point::new(-3.0, 0.0, 4.0),
+            ],
+            &on_the_ball,
+            &on_the_pipe,
+        );
+        three_points_off_a_line(
+            [Surface::Torus(ring), Surface::Plane(flat)],
+            [
+                Point::new(3.0, 0.0, 0.0),
+                Point::new(0.0, 3.0, 0.0),
+                Point::new(-3.0, 0.0, 0.0),
+            ],
+            &on_the_ring,
+            &on_the_flat,
+        );
+    }
 
     /// The whole of what
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] is left refusing,

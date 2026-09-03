@@ -39,8 +39,8 @@ mod crossings;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point,
-    PointsAlongACrossing, Sphere, Surface, SurfaceMeet, Vector, intersect, walk,
+    Axis, Cone, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point,
+    PointsAlongACrossing, Sphere, Surface, SurfaceMeet, Torus, Vector, intersect, walk,
 };
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -482,6 +482,19 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
             ((point - pipe.axis().origin()).cross(along).length() - pipe.radius()).abs()
                 / along.length()
         }
+        Surface::Cone(cone) => {
+            let along = cone.axis().direction();
+            let out = point - cone.apex();
+            (out.cross(along).length() - cone.slope() * out.dot(along).abs()).abs()
+                / (along.length() * cone.slope().hypot(1.0))
+        }
+        Surface::Torus(ring) => {
+            let along = ring.axis().direction();
+            let out = point - ring.centre();
+            let across = out.cross(along).length() / along.length() - ring.ring_radius();
+            let axial = out.dot(along) / along.length();
+            (across.hypot(axial) - ring.tube_radius()).abs()
+        }
         other => panic!("nothing here can measure against {other:?}"),
     }
 }
@@ -510,6 +523,17 @@ fn clearly_somewhere_else(surface: &Surface) -> Surface {
         Surface::Cylinder(pipe) => Surface::Cylinder(
             Cylinder::new(pipe.axis(), pipe.radius() / 2.0).expect("half a radius is a radius"),
         ),
+        // Half the slope is a different cone through the same apex, so every
+        // point of the original but the apex itself is plainly off it.
+        Surface::Cone(cone) => Surface::Cone(
+            Cone::new(cone.axis(), cone.slope() / 2.0).expect("half a slope is a slope"),
+        ),
+        // Half the tube round the same centre circle is a different torus that
+        // shares no point at all with the first one.
+        Surface::Torus(ring) => Surface::Torus(
+            Torus::new(ring.axis(), ring.ring_radius(), ring.tube_radius() / 2.0)
+                .expect("a thinner tube is still a tube"),
+        ),
         other => panic!("nothing here can move {other:?}"),
     }
 }
@@ -519,6 +543,8 @@ fn side_of(surface: &Surface, point: PredicatePoint) -> Decision {
         Surface::Plane(flat) => flat.side_of_point(point),
         Surface::Sphere(ball) => ball.side_of(point),
         Surface::Cylinder(pipe) => pipe.side_of(point),
+        Surface::Cone(cone) => cone.side_of(point),
+        Surface::Torus(ring) => ring.side_of(point),
         other => panic!("nothing here can ask about {other:?}"),
     }
 }

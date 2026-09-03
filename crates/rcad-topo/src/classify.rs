@@ -41,7 +41,7 @@
 //! straddled. Under a tolerant policy the same query resolves instead, and the
 //! log picks up a record of what was accepted to get there.
 
-use rcad_geom::{Cylinder, EdgeRun, Point, Sphere, Surface};
+use rcad_geom::{Cone, Cylinder, EdgeRun, Point, Sphere, Surface};
 use rcad_predicates::expansion::{product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
@@ -89,6 +89,27 @@ pub enum Containment {
     /// hole through it are counted like any polyhedron now; what is left is a
     /// face trimmed by a *piece* of a curve rather than by whole ones (§35).
     CannotFollowAFacesTrimming {
+        /// Which face.
+        face: FaceKey,
+    },
+    /// One face of the solid sits on a surface no ray can be fired at, so no
+    /// ray was ever counted.
+    ///
+    /// **A torus, and nothing else.** Where a ray meets a plane, a ball, a pipe
+    /// or a cone is one equation in one unknown of degree at most two, and every
+    /// one of them is solved here. A torus is a quartic and there are up to four
+    /// meets rather than two.
+    ///
+    /// Deliberately its own answer and not
+    /// [`Containment::CannotFollowAFacesTrimming`], which says a *trimming*
+    /// could not be followed, and not [`Containment::Undecidable`], which says
+    /// every predicate was asked and none could prove an answer. Here the
+    /// question was never put, and no policy makes it go away
+    /// (`docs/decisions.md` §4.2).
+    ///
+    /// A **gap**, and `rcad_geom::Error::WhereALineMeetsATorusIsAQuartic` names
+    /// the same one from the other side and lists the family of fixes.
+    CannotFireARayAtAFacesSurface {
         /// Which face.
         face: FaceKey,
     },
@@ -196,7 +217,7 @@ impl SolidView<'_> {
         for target in ray_targets(low, high) {
             let pass = match self.count_crossings(point, target, policy, log) {
                 Ok(pass) => pass,
-                Err(face) => return Containment::CannotFollowAFacesTrimming { face },
+                Err(no_ray) => return no_ray,
             };
             if pass.on_boundary {
                 return Containment::OnBoundary;
@@ -225,7 +246,7 @@ impl SolidView<'_> {
         target: Point,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<Crossings, FaceKey> {
+    ) -> Result<Crossings, Containment> {
         let mut tally = Crossings::default();
         for face in self.faces() {
             if face.surface().as_plane().is_some() && every_side_of_it_is_straight(face) {
@@ -263,7 +284,7 @@ impl SolidView<'_> {
         target: Point,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<(), FaceKey> {
+    ) -> Result<(), Containment> {
         let mut on_the_plane = false;
         face.for_each_triangle(|corners| {
             match look_at_triangle(corners, point, target, policy, log) {
@@ -303,8 +324,15 @@ impl SolidView<'_> {
         target: Point,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<(), FaceKey> {
+    ) -> Result<(), Containment> {
         let surface = face.surface();
+        // **The whole face at once, before a single root is worked out.** A
+        // partly counted face is worse than an uncounted one: a ray that misses
+        // two of a torus's four meets comes back with a winding number that is
+        // confidently wrong.
+        if matches!(surface, Surface::Torus(_)) {
+            return Err(Containment::CannotFireARayAtAFacesSurface { face: face.key() });
+        }
         let from = point.enclosure();
         let along = gap_enclosing(from, target);
 
@@ -350,7 +378,9 @@ impl SolidView<'_> {
                     tally.grazed(0.0);
                     continue;
                 }
-                Err(_) => return Err(face.key()),
+                Err(_) => {
+                    return Err(Containment::CannotFollowAFacesTrimming { face: face.key() });
+                }
             }
             match dot_enclosing(along, gradient_at(&surface, at)).sign() {
                 Decision::Pos => tally.winding += outward,
@@ -373,7 +403,7 @@ impl SolidView<'_> {
         point: PredicatePoint,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<(), FaceKey> {
+    ) -> Result<(), Containment> {
         let held = self.what_this_face_holds(face, point, policy, log);
         tally.take_in(held, face.key())
     }
@@ -479,12 +509,12 @@ impl Crossings {
     /// because a face's boundary is part of the face. A sign nobody could settle
     /// is a graze and the next ray gets a go; a face whose trimming nothing can
     /// follow is not something another ray gets past, so it stops the walk.
-    fn take_in(&mut self, held: crate::Result<OnAFace>, face: FaceKey) -> Result<(), FaceKey> {
+    fn take_in(&mut self, held: crate::Result<OnAFace>, face: FaceKey) -> Result<(), Containment> {
         match held {
             Ok(OnAFace::Held | OnAFace::OnItsBoundary) => self.on_boundary = true,
             Ok(OnAFace::NotHeld) => (),
             Err(Error::Undecidable { .. }) => self.grazed(0.0),
-            Err(_) => return Err(face),
+            Err(_) => return Err(Containment::CannotFollowAFacesTrimming { face }),
         }
         Ok(())
     }
@@ -549,7 +579,7 @@ fn look_at_triangle(
 fn every_side_of_it_is_straight(face: FaceView<'_>) -> bool {
     face.wires().all(|wire| {
         wire.coedges()
-            .all(|coedge| coedge.edge().run() == &EdgeRun::Straight)
+            .all(|coedge| coedge.edge().stored_run() == &EdgeRun::Straight)
     })
 }
 
@@ -622,7 +652,13 @@ fn where_the_ray_meets(
     let (a, b, k) = match surface {
         Surface::Sphere(ball) => how_a_ray_meets_a_ball(ball, from, along),
         Surface::Cylinder(pipe) => how_a_ray_meets_a_pipe(pipe, from, along),
-        other => panic!("this crate cannot fire a ray at {other:?}"),
+        Surface::Cone(cone) => how_a_ray_meets_a_cone(cone, from, along),
+        // A torus is turned away a whole face earlier, in
+        // `count_where_the_ray_meets_it`, because a quartic has no `(a, b, k)`
+        // to hand back and a half-counted face is a wrong winding number.
+        other @ Surface::Torus(_) | other => {
+            panic!("this crate cannot fire a ray at {other:?}")
+        }
     };
 
     let twice_a = Interval::exactly(2.0) * a;
@@ -693,6 +729,38 @@ fn how_a_ray_meets_a_pipe(
     )
 }
 
+/// `a`, `b` and `k` of the quadratic a ray puts a cone to.
+///
+/// The pipe's three with the axial term put back: `‖x × w‖² − slope²(x·w)²`
+/// against the pipe's `‖x × w‖² − r²`, which is the same cross product read the
+/// same way, so the surface a root is worked out from is the one
+/// [`side_of_surface`] is later asked about.
+///
+/// **`a` can be below zero here and cannot for a ball or a pipe**, because
+/// `slope²(D·w)²` can beat `‖D × w‖²` — every ray pointing further into the cone
+/// than its own rulings do. The quadratic is solved the same way either way; the
+/// caller's comment says what changes.
+fn how_a_ray_meets_a_cone(
+    cone: &Cone,
+    from: [Interval; 3],
+    along: [Interval; 3],
+) -> (Interval, Interval, Interval) {
+    let direction = exactly(cone.axis().direction().components());
+    let out = negated(gap_enclosing(from, cone.apex()));
+    let across = cross_enclosing(along, direction);
+    let sideways = cross_enclosing(out, direction);
+    let slope = Interval::exactly(cone.slope());
+    let spread = slope * slope;
+    let up_the_ray = dot_enclosing(along, direction);
+    let up_the_gap = dot_enclosing(out, direction);
+    (
+        dot_enclosing(across, across) - spread * up_the_ray * up_the_ray,
+        Interval::exactly(2.0)
+            * (dot_enclosing(across, sideways) - spread * up_the_ray * up_the_gap),
+        dot_enclosing(sideways, sideways) - spread * up_the_gap * up_the_gap,
+    )
+}
+
 /// What a root at `t` along the ray comes to.
 ///
 /// A root at exactly zero is where the ray *starts*, which is the point sitting
@@ -735,6 +803,17 @@ fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
         // ray that crosses one curved face and one flat one, which is a ray
         // through a bar's wall and out of its cap (§36.13).
         Surface::Sphere(ball) => negated(gap_enclosing(at, ball.centre())),
+        // The gradient of `|x × w|² − slope²(x·w)²`, halved, read out of the
+        // middle rather than towards it for the reason the pipe's arm gives.
+        Surface::Cone(cone) => {
+            let direction = exactly(cone.axis().direction().components());
+            let out = negated(gap_enclosing(at, cone.apex()));
+            let up = dot_enclosing(out, direction);
+            let squared = dot_enclosing(direction, direction);
+            let slope = Interval::exactly(cone.slope());
+            let steepness = Interval::exactly(1.0) + slope * slope;
+            core::array::from_fn(|axis| squared * out[axis] - steepness * up * direction[axis])
+        }
         Surface::Cylinder(pipe) => {
             let direction = exactly(pipe.axis().direction().components());
             let out = negated(gap_enclosing(at, pipe.axis().origin()));
@@ -749,6 +828,24 @@ fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
             // written to avoid.
             let squared = dot_enclosing(direction, direction);
             core::array::from_fn(|axis| squared * out[axis] - up * direction[axis])
+        }
+        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre`: the
+        // quartic's own gradient, divided by four so nothing is normalized.
+        // Unreachable while a torus face turns the whole ray away, and written
+        // out rather than stubbed so that the day it is reachable the answer is
+        // right rather than absent.
+        Surface::Torus(ring) => {
+            let direction = exactly(ring.axis().direction().components());
+            let out = negated(gap_enclosing(at, ring.centre()));
+            let up = dot_enclosing(out, direction);
+            let squared = dot_enclosing(direction, direction);
+            let big = Interval::exactly(ring.ring_radius());
+            let small = Interval::exactly(ring.tube_radius());
+            let bulge = dot_enclosing(out, out) - big * big - small * small;
+            core::array::from_fn(|axis| {
+                squared * bulge * out[axis]
+                    + Interval::exactly(2.0) * big * big * up * direction[axis]
+            })
         }
         other => panic!("this crate cannot say which way {other:?} faces"),
     }

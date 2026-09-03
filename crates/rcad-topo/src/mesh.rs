@@ -362,7 +362,7 @@ impl BuildingAMesh {
         let back = the_frame_this_face_is_meshed_in(face);
         let (from, to) = ends_in_the_stored_order(edge);
         let run = NamedRun::new(
-            edge.run()
+            edge.stored_run()
                 .shifted(the_shift_this_face_is_meshed_with(face))?,
             [from, to]
                 .map(|end| PredicatePoint::from(back.apply_to_point(end.point()).coordinates())),
@@ -797,12 +797,7 @@ impl BuildingAMesh {
         arriving: [f64; 2],
         room: f64,
     ) -> Result<WalkedLoop> {
-        let steps = how_many_steps(
-            stored,
-            arriving[0] - leaving[0],
-            arriving[1] - leaving[1],
-            room,
-        );
+        let steps = how_many_steps(stored, leaving, arriving, room);
         if self.points.len() + steps > MOST_POINTS_A_MESH_WILL_HOLD {
             return Err(Error::MoreMeshPointsThanASolidWillHold {
                 most: MOST_POINTS_A_MESH_WILL_HOLD,
@@ -864,12 +859,7 @@ impl BuildingAMesh {
 
         let leaving = opened.corners[at[1]];
         let arriving = opened.corners[at[0]];
-        let steps = how_many_steps(
-            stored,
-            arriving[0] - leaving[0],
-            arriving[1] - leaving[1],
-            room,
-        );
+        let steps = how_many_steps(stored, leaving, arriving, room);
         if self.points.len() + steps > MOST_POINTS_A_MESH_WILL_HOLD {
             return Err(Error::MoreMeshPointsThanASolidWillHold {
                 most: MOST_POINTS_A_MESH_WILL_HOLD,
@@ -1136,6 +1126,22 @@ fn gradient_of(surface: &Surface, at: Point) -> Vector {
             let out = at - origin;
             out * along.dot(along) - along * along.dot(out)
         }
+        Surface::Cone(cone) => {
+            let (apex, along) = (cone.apex(), cone.axis().direction());
+            let out = at - apex;
+            out * along.dot(along) - along * (along.dot(out) * (1.0 + cone.slope() * cone.slope()))
+        }
+        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre`, the
+        // quartic's gradient divided by four. It is the only one here that
+        // depends on how far the point is from the surface's own placing point,
+        // because a torus is not a quadric.
+        Surface::Torus(ring) => {
+            let (centre, along) = (ring.centre(), ring.axis().direction());
+            let out = at - centre;
+            let (big, small) = (ring.ring_radius(), ring.tube_radius());
+            let bulge = out.dot(out) - big * big - small * small;
+            out * (along.dot(along) * bulge) + along * (2.0 * big * big * along.dot(out))
+        }
         other => panic!("this crate cannot say which way {other:?} faces"),
     }
 }
@@ -1145,7 +1151,19 @@ fn gradient_of(surface: &Surface, at: Point) -> Vector {
 fn where_this_surface_pinches(surface: &Surface) -> Option<f64> {
     match surface {
         Surface::Sphere(_) => Some(core::f64::consts::FRAC_PI_2),
-        Surface::Plane(_) | Surface::Cylinder(_) => None,
+        // **A cone pinches at zero and only there**, where a ball pinches at
+        // both `±π/2`. The caller tries `pole` and then `-pole`, and for a cone
+        // those are the same place — `Cone::point_at(·, 0)` is the apex whatever
+        // the angle — so the second try costs one predicate call and answers the
+        // same, which is right rather than merely harmless: there is one apex.
+        Surface::Cone(_) => Some(0.0),
+        // **A torus pinches nowhere, and that is the whole of what makes its
+        // chart different from a ball's.** A step of one radian round the ring
+        // carries `R + r·cos v`, which is never less than `R − r` and so is
+        // never nothing; a step round the tube carries `r` everywhere. Both
+        // coordinates run right round instead, which costs a torus **two**
+        // seams where a ball has one seam and two poles.
+        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) => None,
         other => panic!("this crate cannot say whether {other:?} pinches"),
     }
 }
@@ -1587,7 +1605,8 @@ fn the_two_surfaces_either_side(
 fn the_way_a_closed_edge_is_stored_running(along: &[Surface; 2], at: Point) -> Option<Vector> {
     let reference = the_curved_surface_that_names_a_closed_edge(along)?;
     let forward = gradient_of(&along[0], at).cross(gradient_of(&along[1], at));
-    let longitude = the_way_it_is_parametrised_about(&reference).cross(gradient_of(&reference, at));
+    let longitude =
+        the_way_it_is_parametrised_about(&reference, at).cross(gradient_of(&reference, at));
     let with_the_longitude = forward.dot(longitude);
     if with_the_longitude == 0.0 {
         return None;
@@ -1626,7 +1645,9 @@ fn the_curved_surface_that_names_a_closed_edge(along: &[Surface; 2]) -> Option<S
 fn how_far_the_longitude_wraps(surface: &Surface) -> Option<f64> {
     match surface {
         Surface::Plane(_) => None,
-        Surface::Sphere(_) | Surface::Cylinder(_) => Some(core::f64::consts::TAU),
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) => {
+            Some(core::f64::consts::TAU)
+        }
         other => panic!("this crate cannot say whether {other:?} wraps round"),
     }
 }
@@ -1655,20 +1676,62 @@ fn the_short_way_round(angle: f64, whole_turn: f64) -> f64 {
 /// with an honest-looking deviation on it. `a_ball_asked_for_a_rough_picture_
 /// gets_a_rough_ball_and_not_an_empty_mesh` is the test.
 ///
+/// **A cone is charged at the widest end of the step it is taking**, which is
+/// why this is handed the two corners and not the gap between them. A radian
+/// round a cone carries `slope · v`, so the same turn is a longer chord the
+/// further from the apex it is asked, and the chord has to be measured where the
+/// bound it is checked against was — `rcad-mesh`'s `chord_across_the_curve` says
+/// the same thing one crate down.
+///
 /// # Panics
 ///
 /// On a surface this has not been taught — see [`how_far_the_longitude_wraps`].
-fn how_many_steps(stored: &Surface, round: f64, up: f64, room: f64) -> usize {
-    let (radius, turns_over) = match stored {
+fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room: f64) -> usize {
+    let round = arriving[0] - leaving[0];
+    let up = arriving[1] - leaving[1];
+    let (radius, share, turns_over) = match stored {
         Surface::Plane(_) => return 1,
         // A ball bends both ways, so both count towards the turn as well.
-        Surface::Sphere(ball) => (ball.radius(), round.hypot(up)),
+        Surface::Sphere(ball) => (ball.radius(), 3.0, round.hypot(up)),
         // A pipe is flat along its axis, so a piece stretched up one bends by
         // nothing at all and only the turn counts.
-        Surface::Cylinder(pipe) => (pipe.radius(), round.abs()),
+        Surface::Cylinder(pipe) => (pipe.radius(), 3.0, round.abs()),
+        // A cone is flat along its rulings too. Its radius of normal curvature
+        // at the widest end of this step is `slope·v·√(1 + slope²)`, and the
+        // chord bound over it is `C²/(2R)` rather than `C²/(3R)` —
+        // `rcad-mesh`'s `how_far_a_flat_piece_strays` carries the derivation.
+        Surface::Cone(cone) => (
+            cone.radius_at(leaving[1].abs().max(arriving[1].abs())) * cone.slope().hypot(1.0),
+            2.0,
+            round.abs(),
+        ),
+        // **A torus bends both ways and by two different amounts**, which no
+        // other surface here does: `r` round the tube and up to `R + r` round
+        // the ring. `rcad-mesh`'s `how_far_a_flat_piece_strays` derives
+        // `C²·(1/(3r) + 1/(2S))` for `S = R + r`, which is `C²/ρ` for the one
+        // radius written below, so the share is one and the whole of the
+        // stretching is in `ρ`. `turns_over` is then the arc length divided by
+        // that radius, so that `radius · turns_over` is the arc length the way
+        // it is for every arm above.
+        Surface::Torus(ring) => {
+            let widest = ring.ring_radius() + ring.tube_radius();
+            let tube = ring.tube_radius();
+            let effective = 6.0 * tube * widest / (2.0 * widest + 3.0 * tube);
+            (
+                effective,
+                1.0,
+                (tube * round).hypot(widest * up) / effective,
+            )
+        }
         other => panic!("this crate cannot walk along {other:?}"),
     };
-    let longest_chord = (3.0 * radius * room * WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET).sqrt();
+    // A step that stays on a cone's apex covers no distance and bends by
+    // nothing, so it is one piece — `how_far_a_flat_piece_strays` in `rcad-mesh`
+    // makes the same allowance for the same shape and says why.
+    if radius == 0.0 {
+        return 1;
+    }
+    let longest_chord = (share * radius * room * WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET).sqrt();
     let by_bending = (radius * turns_over / longest_chord).ceil();
     let by_turning = (turns_over / (core::f64::consts::TAU / 4.0)).ceil();
     let steps = by_bending.max(by_turning).max(1.0);
@@ -1812,6 +1875,8 @@ fn a_shift_that_loses_nothing(face: FaceView<'_>) -> Option<Isometry> {
         Surface::Plane(_) => return None,
         Surface::Sphere(ball) => ball.centre(),
         Surface::Cylinder(pipe) => pipe.axis().origin(),
+        Surface::Cone(cone) => cone.apex(),
+        Surface::Torus(ring) => ring.centre(),
         // A surface kind this has not been taught is worked out where it is,
         // which is what every face did before there was a shift at all.
         _ => return None,
@@ -1929,6 +1994,20 @@ fn how_far_the_points_of_reach(face: FaceView<'_>, through: &Isometry) -> f64 {
         Surface::Plane(_) => return 0.0,
         Surface::Sphere(ball) => ball.radius(),
         Surface::Cylinder(pipe) => pipe.radius(),
+        // A cone has no radius of its own; how far it bulges past its corners is
+        // how far out it is where they are, and that is settled by the corners
+        // for the same reason a pipe's reach along its axis is.
+        Surface::Cone(cone) => {
+            let along = cone.axis().direction();
+            face.wires()
+                .flat_map(WireView::points)
+                .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
+                .fold(0.0, f64::max)
+        }
+        // A torus reaches `R + r` from its centre whichever way a face on it
+        // wraps, and a face on it can wrap **both** ways — so unlike a pipe's,
+        // its corners settle nothing and the whole surface is what is charged.
+        Surface::Torus(ring) => ring.ring_radius() + ring.tube_radius(),
         other => panic!("this crate cannot say how far {other:?} reaches"),
     };
     let corners = face
@@ -2307,7 +2386,7 @@ mod tests {
             let edge = EdgeView::new(&model, slot, Isometry::identity(), Orientation::Forward);
             let (from, to) = ends_in_the_stored_order(edge);
             let run = NamedRun::new(
-                edge.run().clone(),
+                edge.stored_run().clone(),
                 [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
             )
             .expect("every edge the kernel builds itself comes back to where it started");
@@ -2350,7 +2429,7 @@ mod tests {
             let edge = EdgeView::new(&model, slot, Isometry::identity(), Orientation::Forward);
             let (from, to) = ends_in_the_stored_order(edge);
             let run = NamedRun::new(
-                edge.run().clone(),
+                edge.stored_run().clone(),
                 [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
             )
             .expect("every edge the kernel builds itself comes back to where it started");

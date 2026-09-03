@@ -1,0 +1,4 @@
+ISO-10303-21;
+DATA;
+#1=T('',(0.,0.));
+#2=(IT(*)SI_UNNGTH_UNIT(*)T(*)SI_UNNGTH_UNIT(*)WSI_T(.MILL.))
