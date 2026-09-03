@@ -150,8 +150,11 @@ impl SolidView<'_> {
     /// [`Error::AWireWillNotLieFlatOnItsFace`],
     /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`],
     /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] and
-    /// [`Error::AWireDoesNotFanIntoALoopToMesh`] for a solid that arrived from
-    /// a file with a shape no builder here makes — a wall face storing a
+    /// [`Error::AWireDoesNotFanIntoALoopToMesh`] for a shape no builder here
+    /// makes, which is **usually** a solid that arrived from a file and was once
+    /// wrongly said to be only that: a fuse reached the first of the four with a
+    /// block corner on a ball's pole, and it was the mesher that was wrong (see
+    /// [`WalkingAWire::finish`]). A wall face storing a
     /// [`Plane`](rcad_geom::Plane) where its own
     /// [`Cylinder`](rcad_geom::Cylinder) belongs fans a four-step wire into
     /// one corner in the plane's own two coordinates. All four are refusals
@@ -977,6 +980,16 @@ impl BuildingAMesh {
     ///
     /// `None` when the walk does not come back to the longitude it set off
     /// from — see [`WalkingAWire::finish`].
+    ///
+    /// **The walk sets off from a corner that has a longitude of its own where
+    /// there is one.** A corner at a pole has none — `coordinates_of` answers
+    /// `atan2(0, 0)` there — and it is a whole *side* of the patch rather than a
+    /// point, running from the longitude the walk arrives at to the one it
+    /// leaves by. Starting on that side means the longitude it arrives at is not
+    /// known until the loop closes, so the walk is turned to start elsewhere
+    /// when the wire has anywhere else to start. A ball's own wire has not:
+    /// every one of its steps stands at a pole, and [`WalkingAWire::arrive`]'s
+    /// first-longitude rule is what carries that one.
     fn walk_a_wire_round(
         &mut self,
         wire: WireView<'_>,
@@ -985,22 +998,25 @@ impl BuildingAMesh {
     ) -> Option<WalkedLoop> {
         let back = the_frame_this_face_is_meshed_in(face);
         let poles = poles_of(wire);
+        let at_a_pole = |vertex: &VertexView<'_>| {
+            poles.contains(&vertex.key())
+                || the_surface_pinches_at(
+                    stored,
+                    stored.coordinates_of(back.apply_to_point(vertex.point())).1,
+                )
+        };
         let mut walk = WalkingAWire::new(
             how_far_the_longitude_wraps(stored),
             wire.closes_on_one_edge(),
         );
 
-        for step in wire.steps() {
+        for step in steps_from_somewhere_that_has_a_longitude(wire, &at_a_pole) {
             match step {
                 WireStepView::Along(coedge) => {
                     let start = coedge.start();
                     let at = self.remember_the_corner(start);
                     let where_it_is = back.apply_to_point(start.point());
-                    walk.arrive(
-                        at,
-                        stored.coordinates_of(where_it_is),
-                        poles.contains(&start.key()),
-                    );
+                    walk.arrive(at, stored.coordinates_of(where_it_is), at_a_pole(&start));
 
                     let edge = coedge.edge();
                     let walked = self
@@ -1396,6 +1412,11 @@ struct WalkingAWire {
     started: bool,
     will_not_lie_flat: bool,
     pole_side: f64,
+    /// The corner at a pole the walk has arrived at and not yet left: the entry
+    /// in the point table and the latitude, waiting for the longitude the walk
+    /// leaves by. A pole is a whole side of the patch, so it needs a corner at
+    /// each end of it, and only the first is known when the walk gets there.
+    still_at_a_pole: Option<(u32, f64)>,
     corners: Vec<[f64; 2]>,
     points: Vec<u32>,
 }
@@ -1409,6 +1430,7 @@ impl WalkingAWire {
             started: false,
             will_not_lie_flat: false,
             pole_side: 1.0,
+            still_at_a_pole: None,
             corners: Vec::new(),
             points: Vec::new(),
         }
@@ -1441,6 +1463,7 @@ impl WalkingAWire {
         if is_a_pole {
             self.corners.push([self.longitude, up]);
             self.points.push(at);
+            self.still_at_a_pole = Some((at, up));
             return;
         }
         let longitude = match self.wraps {
@@ -1460,6 +1483,28 @@ impl WalkingAWire {
         };
         self.started = true;
         self.longitude = longitude;
+        self.leave_the_pole_at(longitude);
+        self.corners.push([longitude, up]);
+        self.points.push(at);
+    }
+
+    /// Close the pole side, if the walk is standing on one: a second corner at
+    /// the same point, at the longitude the walk leaves by.
+    ///
+    /// Nothing to close when the two longitudes are the same number, which is
+    /// what a wire that arrives at a pole and leaves along the same meridian
+    /// does, and a side of no width is a corner written twice.
+    fn leave_the_pole_at(&mut self, longitude: f64) {
+        let Some((at, up)) = self.still_at_a_pole.take() else {
+            return;
+        };
+        if self
+            .corners
+            .last()
+            .is_some_and(|corner| corner[0] == longitude)
+        {
+            return;
+        }
         self.corners.push([longitude, up]);
         self.points.push(at);
     }
@@ -1479,6 +1524,10 @@ impl WalkingAWire {
             self.will_not_lie_flat = true;
             return;
         };
+        // The wire said where the boundary goes between arriving at the pole and
+        // leaving it, so the walk does not have to work it out: the step itself
+        // is the far end of the pole side and the corner after it lands there.
+        self.still_at_a_pole = None;
         self.longitude += self.pole_side * whole;
         self.pole_side = -self.pole_side;
     }
@@ -1487,14 +1536,36 @@ impl WalkingAWire {
     /// pole on a surface that does not pinch to one, or it came back to a
     /// different longitude from the one it set off at.
     ///
-    /// **A refusal and not an assert, and the difference is `Deserialize`.** A
-    /// wire of a face this kernel builds does neither: only a sphere here has a
-    /// pole, no step goes more than a quarter turn (see [`how_many_steps`]), and
-    /// a face's two pole sides are crossed opposite ways. A face that arrived
-    /// from a *file* has neither promise behind it.
-    fn finish(self) -> Option<WalkedLoop> {
+    /// **A refusal and not an assert, and the difference is `Deserialize`.**
+    /// `Model` derives it and [`SolidView::mesh`] is public, so a wire this
+    /// kernel never wrote can arrive here and a caller's bytes may not panic
+    /// (§16.11). `a_wire_that_will_not_lie_flat_is_refused_rather_than_asserted_against`
+    /// is what a ball missing one of its two pole steps does.
+    ///
+    /// **What it is not for is a face a fuse built, and saying so once cost a
+    /// correct answer.** The sentence that stood here said a wire of a face this
+    /// kernel builds cannot do either, because only a sphere has a pole and a
+    /// face's two pole sides are crossed opposite ways. Two of a block's walls
+    /// meeting a ball at its pole leave that pole an **ordinary corner of an
+    /// ordinary wire** — no step that goes nowhere, and neither promise behind
+    /// it. The walk read `atan2(0, 0)` there, one of the two faces round it came
+    /// back 5.64 radians from the 1.571 it set off at and was refused, and the
+    /// other was not refused and closed straight across the chart instead of
+    /// along the pole;
+    /// `a_pole_between_two_meridians_gets_a_corner_at_each_end_of_it` is the
+    /// side that was missing.
+    fn finish(mut self) -> Option<WalkedLoop> {
         if self.will_not_lie_flat {
             return None;
+        }
+        // A walk that ends at a pole leaves it by the way it set off, because
+        // that is where the loop closes, so the pole side is the last side of
+        // the patch and the longitude the walk ends at is the one it started at.
+        if let Some(first) = self.corners.first().copied()
+            && self.still_at_a_pole.is_some()
+        {
+            self.leave_the_pole_at(first[0]);
+            self.longitude = first[0];
         }
         // A wire made of one whole closed curve is *allowed* to come back a
         // whole turn on — a cap circle of a tube the fuse cut out of a bar's
@@ -1541,7 +1612,14 @@ fn ends_in_the_stored_order<'m>(edge: EdgeView<'m>) -> (VertexView<'m>, VertexVi
     }
 }
 
-/// The corners of `wire` where the surface pinches to a point.
+/// The corners `wire` itself calls poles, by taking a step that goes nowhere.
+///
+/// **Not every corner at a pole is one of these**, and that is the point of
+/// keeping the two apart. A [`WireStep::Pole`](crate::model::WireStep) is put in
+/// where a whole closed surface was cut open, and a fuse writes one only there.
+/// Two cuts that meet a ball at its pole leave that pole an ordinary corner of
+/// an ordinary wire, with an edge either side of it and no step that goes
+/// nowhere — [`the_surface_pinches_at`] is what finds those.
 fn poles_of(wire: WireView<'_>) -> HashSet<VertexKey> {
     wire.steps()
         .filter_map(|step| match step {
@@ -1549,6 +1627,39 @@ fn poles_of(wire: WireView<'_>) -> HashSet<VertexKey> {
             WireStepView::Along(_) => None,
         })
         .collect()
+}
+
+/// Whether the surface pinches to a point at this latitude, so that a corner
+/// sitting there has no longitude of its own.
+///
+/// **Equality and no budget of its own**, which is not the same as saying it
+/// answers only at the pole. A sphere reads latitude as `z.atan2(x.hypot(y))`,
+/// and `atan2` rounds: at radius five that comes back exactly `π/2` for any
+/// corner within about `5.5e-16` of the axis, not only for the one on it. So the
+/// test catches the pole and the width of one rounding either side of it, and
+/// that is the right width — a corner that close to the axis is that close to
+/// the pole in space too, and the pole side written for it spans no area worth
+/// the name. Widening it past what `atan2` already rounds away would start
+/// throwing out longitudes that mean something.
+fn the_surface_pinches_at(surface: &Surface, latitude: f64) -> bool {
+    where_this_surface_pinches(surface).is_some_and(|pinch| latitude.abs() == pinch)
+}
+
+/// The steps of `wire`, turned so the walk sets off from a corner that has a
+/// longitude, when the wire has one to set off from.
+fn steps_from_somewhere_that_has_a_longitude<'m>(
+    wire: WireView<'m>,
+    at_a_pole: &impl Fn(&VertexView<'m>) -> bool,
+) -> Vec<WireStepView<'m>> {
+    let mut steps: Vec<WireStepView<'m>> = wire.steps().collect();
+    let away = steps.iter().position(|step| match step {
+        WireStepView::Along(coedge) => !at_a_pole(&coedge.start()),
+        WireStepView::Pole(_) => false,
+    });
+    if let Some(away) = away {
+        steps.rotate_left(away);
+    }
+    steps
 }
 
 /// The surfaces of the two faces either side of `edge`, brought into the frame
@@ -2352,6 +2463,66 @@ mod tests {
                 .expect_err("the sweep meshes every curved solid"),
             Error::AWireWillNotLieFlatOnItsFace { .. }
         ));
+    }
+
+    /// A pole met between two different meridians is a whole side of the patch
+    /// and gets a corner at each end of it.
+    ///
+    /// Two cuts that meet a ball at its pole leave it an ordinary corner of an
+    /// ordinary wire, and the walk arrives along one meridian and leaves along
+    /// another. Putting one corner there instead of two leaves the loop running
+    /// diagonally across the chart from the longitude it came in on to the one
+    /// it goes out on, over a region the face does not cover.
+    #[test]
+    fn a_pole_between_two_meridians_gets_a_corner_at_each_end_of_it() {
+        let whole = 2.0 * core::f64::consts::PI;
+        let mut walk = WalkingAWire::new(Some(whole), false);
+        walk.arrive(0, (core::f64::consts::FRAC_PI_2, -0.5), false);
+        walk.arrive(1, (0.0, -core::f64::consts::FRAC_PI_2), true);
+        walk.arrive(2, (core::f64::consts::PI, 0.0), false);
+
+        let walked = walk.finish().expect("this wire lies flat");
+        assert_eq!(
+            walked.corners,
+            vec![
+                [core::f64::consts::FRAC_PI_2, -0.5],
+                [core::f64::consts::FRAC_PI_2, -core::f64::consts::FRAC_PI_2],
+                [core::f64::consts::PI, -core::f64::consts::FRAC_PI_2],
+                [core::f64::consts::PI, 0.0],
+            ]
+        );
+        assert_eq!(
+            walked.points,
+            vec![0, 1, 1, 2],
+            "the pole is one point twice"
+        );
+    }
+
+    /// A walk that ends at a pole leaves it by the longitude it set off from,
+    /// because that is where the loop closes.
+    #[test]
+    fn a_walk_that_ends_at_a_pole_closes_the_side_back_to_where_it_started() {
+        let whole = 2.0 * core::f64::consts::PI;
+        let mut walk = WalkingAWire::new(Some(whole), false);
+        walk.arrive(0, (core::f64::consts::FRAC_PI_2, -0.5), false);
+        walk.arrive(1, (0.0, -0.9), false);
+        walk.arrive(2, (0.0, -core::f64::consts::FRAC_PI_2), true);
+
+        let walked = walk.finish().expect("this wire lies flat");
+        assert_eq!(
+            walked.corners,
+            vec![
+                [core::f64::consts::FRAC_PI_2, -0.5],
+                [0.0, -0.9],
+                [0.0, -core::f64::consts::FRAC_PI_2],
+                [core::f64::consts::FRAC_PI_2, -core::f64::consts::FRAC_PI_2],
+            ]
+        );
+        assert_eq!(
+            walked.points,
+            vec![0, 1, 2, 2],
+            "the pole is one point twice"
+        );
     }
 
     /// A ball, with its seam moved to whichever half of whichever meridian.
