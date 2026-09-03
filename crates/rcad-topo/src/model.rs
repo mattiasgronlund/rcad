@@ -896,6 +896,62 @@ impl ModelData {
         )
     }
 
+    /// Everything the arenas hold is used by something above it: every coedge
+    /// walked by a wire, every wire bounding a face, every face in a shell,
+    /// every shell in a solid.
+    ///
+    /// The same four counters as
+    /// [`ModelData::check_nothing_is_used_more_than_once`], asked for a zero
+    /// instead of a two, and it passes the same rule (`docs/decisions.md`
+    /// §44.5): one pass per level, no [`Policy`](rcad_predicates::Policy) and no
+    /// arithmetic on any coordinate.
+    ///
+    /// A file can hold a face no shell names, and until this ran it read back
+    /// clean — the keys all resolve, nothing is claimed twice, and every shape
+    /// question `Model::check_shape_is_possible` asks has the right answer. The
+    /// model that came out then said one thing about itself and another to
+    /// anything that walked it from the solids down: the orphan is in
+    /// `Model::faces()` and in the bytes written back out, and in no solid's
+    /// skin. [`Model::validate`] has always refused one; `Deserialize` does not
+    /// call `validate`.
+    ///
+    /// A vertex used by no edge is the fifth orphan and is not asked here.
+    /// Answering it means the upward links, which is [`Index`] — built after
+    /// this — so `validate` keeps that one.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::Orphan`] naming the first level holding something nothing
+    /// uses.
+    pub(crate) fn check_everything_has_an_owner(&self) -> Result<()> {
+        everything_at_this_level_is_used(
+            "coedge",
+            self.coedges.keys(),
+            self.wires.values().flat_map(WireData::coedges),
+        )?;
+        everything_at_this_level_is_used(
+            "wire",
+            self.wires.keys(),
+            self.faces
+                .values()
+                .flat_map(|face| face.wires.iter().copied()),
+        )?;
+        everything_at_this_level_is_used(
+            "face",
+            self.faces.keys(),
+            self.shells
+                .values()
+                .flat_map(|shell| shell.faces.iter().map(|used| used.face)),
+        )?;
+        everything_at_this_level_is_used(
+            "shell",
+            self.shells.keys(),
+            self.solids
+                .values()
+                .flat_map(|solid| solid.shells.iter().map(|used| used.shell)),
+        )
+    }
+
     fn worst_approximation(&self) -> f64 {
         let vertices = self
             .vertices
@@ -928,6 +984,27 @@ fn no_owner_claims_the_same_entity_twice<K: slotmap::Key>(
     for (_, &count) in &used {
         if count > 1 {
             return Err(Invalid::UsedMoreThanOnce { entity, count }.into());
+        }
+    }
+    Ok(())
+}
+
+/// One pass to mark every entity an owner names, one pass over the arena to
+/// find the first that nothing marked.
+fn everything_at_this_level_is_used<K: slotmap::Key>(
+    entity: &'static str,
+    held: impl Iterator<Item = K>,
+    named: impl Iterator<Item = K>,
+) -> Result<()> {
+    let mut used: SecondaryMap<K, ()> = SecondaryMap::new();
+    for slot in named {
+        if let Some(entry) = used.entry(slot) {
+            entry.or_insert(());
+        }
+    }
+    for slot in held {
+        if !used.contains_key(slot) {
+            return Err(Invalid::Orphan { entity }.into());
         }
     }
     Ok(())

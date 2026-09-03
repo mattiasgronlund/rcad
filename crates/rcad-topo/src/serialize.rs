@@ -79,6 +79,16 @@
 //! `ModelData::check_nothing_is_used_more_than_once` runs beside
 //! `check_keys_resolve`, before there is a `Model` at all.
 //!
+//! **And so is a file holding something nothing above it uses**, which is the
+//! same four counters asked for a zero instead of a two. A face in no shell
+//! passed every check at the door: its keys resolve, nothing claims it twice,
+//! and its wires close. The model that came back then said two different things
+//! about itself — the face is in `Model::faces()` and in the bytes written back
+//! out, and in no solid's skin, so a walk down from the solids never reaches it
+//! and a walk over the arena does. [`Model::validate`] has always refused one,
+//! and `Deserialize` does not call `validate`
+//! (`ModelData::check_everything_has_an_owner`).
+//!
 //! **And a number a constructor would refuse is refused here too, by the type
 //! that holds it.** Every surface, [`Scale`](rcad_geom::Scale),
 //! [`Isometry`](rcad_geom::Isometry) and
@@ -146,6 +156,10 @@ impl<'de> Deserialize<'de> for Model {
         payload
             .data
             .check_nothing_is_used_more_than_once()
+            .map_err(D::Error::custom)?;
+        payload
+            .data
+            .check_everything_has_an_owner()
             .map_err(D::Error::custom)?;
         let model = Model::from_parts(payload.data);
         model.check_shape_is_possible().map_err(D::Error::custom)?;
@@ -377,6 +391,84 @@ mod tests {
             .is_err(),
             "a shell used twice by a solid read back"
         );
+    }
+
+    /// **A file holding something nothing above it uses never becomes a
+    /// `Model` either.**
+    ///
+    /// The other end of the count two tests up: a face in no shell, a shell in
+    /// no solid, a coedge in no wire and a wire on no face. Each of the four
+    /// read back entirely clean — every key resolves, nothing is claimed twice,
+    /// and every shape question at the door has the right answer — and the
+    /// model that came out disagreed with itself. Walk it from the solids down
+    /// and the orphan is not there; ask `Model::faces()`, or write it back out,
+    /// and it is.
+    ///
+    /// The two lower levels are built rather than broken, because taking a
+    /// coedge out of a wire stops the wire closing and taking a wire off a face
+    /// leaves the face with none — both of which the door already refuses, so
+    /// neither would prove anything about this check. Adding to the model
+    /// instead keeps every other answer right.
+    #[test]
+    fn a_file_holding_something_nothing_uses_never_becomes_a_model() {
+        assert!(
+            a_cube_broken_by(|model| {
+                let shell = model.data().shells.keys().next().expect("a cube's skin");
+                model.data_mut().shells[shell].faces.remove(0);
+            })
+            .is_err(),
+            "a face in no shell read back, and no solid's skin holds it"
+        );
+        assert!(
+            a_cube_broken_by(|model| {
+                let solid = model.data().solids.keys().next().expect("a cube");
+                model.data_mut().solids[solid].shells.clear();
+            })
+            .is_err(),
+            "a shell in no solid read back"
+        );
+        assert!(
+            a_cube_broken_by(|model| {
+                let mut corners = model.data().vertices.keys();
+                let start = corners.next().expect("a cube has corners");
+                let end = corners.next().expect("eight of them");
+                let edge = model.add_edge(start, end);
+                model.add_coedge(edge, Orientation::Forward);
+                model.add_coedge(edge, Orientation::Reversed);
+            })
+            .is_err(),
+            "two coedges in no wire read back, walking an edge no wire walks"
+        );
+        assert!(
+            a_cube_broken_by(add_a_triangle_no_face_bounds).is_err(),
+            "a wire on no face read back"
+        );
+    }
+
+    /// Three of a cube's corners joined by three new edges, walked one way
+    /// round by one wire and the other way round by another.
+    ///
+    /// Both wires close, each new edge is walked by exactly two coedges running
+    /// opposite ways, and every new coedge belongs to a wire. The only thing
+    /// wrong with the model is that no face names either wire.
+    fn add_a_triangle_no_face_bounds(model: &mut Model) {
+        let mut corners = model.data().vertices.keys();
+        let first = corners.next().expect("a cube has corners");
+        let second = corners.next().expect("eight of them");
+        let third = corners.next().expect("eight of them");
+
+        let edges = [
+            model.add_edge(first, second),
+            model.add_edge(second, third),
+            model.add_edge(third, first),
+        ];
+        let one_way = edges.map(|edge| model.add_coedge(edge, Orientation::Forward));
+        model.add_wire(one_way.into_iter().collect());
+        let mut the_other_way_round = edges;
+        the_other_way_round.reverse();
+        let other_way =
+            the_other_way_round.map(|edge| model.add_coedge(edge, Orientation::Reversed));
+        model.add_wire(other_way.into_iter().collect());
     }
 
     /// A sound cube, broken one way, written out and read back.
