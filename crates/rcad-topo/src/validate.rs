@@ -1484,15 +1484,32 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
 /// item 3's winding question that stayed open. It means the *corners* enclose
 /// nothing, which a boundary that bends between them can do while enclosing
 /// plenty: a face bounded by an arc and its chord has two corners and sweeps
-/// exactly zero, and so does one bounded by two half-circles, whose three
-/// corners are collinear. [`check_flat_face`] keeps the first out of here by
-/// not asking about a boundary with fewer than three corners. The second it
-/// still asks and still refuses. That is a **gap and not a limit**: the answer
-/// exists and is written down — each arc's [`EdgeRun`](rcad_geom::EdgeRun)
-/// carries the half-spaces that say which way it bulges — and nothing that asks
-/// a wire which way it goes reads a run today. Closing it means winding
-/// something other than the stored corners, and no file in the corpus is
-/// refused for it, so it waits for one that is.
+/// exactly zero, and so does any face whose corners land on one line —
+/// **however many of them there are**. [`check_flat_face`] keeps the first out
+/// of here by not asking about a boundary with fewer than three corners.
+/// Collinear corners it still asks and still refuses. That is a **gap and not a
+/// limit**: the answer exists and is written down — each arc's
+/// [`EdgeRun`](rcad_geom::EdgeRun) carries the half-spaces that say which way it
+/// bulges — and nothing that asks a wire which way it goes reads a run today.
+/// Closing it means winding something other than the stored corners.
+///
+/// **The consumer is now named, and it is the importer.** This used to say "no
+/// file in the corpus is refused for it, so it waits for one that is", and the
+/// corpus still does not refuse a file for a winding — the KiCad and NIST files
+/// stop earlier, on B-splines and on corners off their curved faces. What names
+/// it instead is a file written by hand:
+/// `rcad-step`'s `a_file_bounded_by_two_half_circles.rs` reads a whole AP203
+/// `manifold_solid_brep` for a half-round plate with a half-round rib under it,
+/// whose flat top and bottom are each bounded by two half-circles closed by two
+/// straights, so their four corners are four points on the `x` axis. The STEP
+/// mapping takes every part of that file — its own `Walk::area_swept_by` adds
+/// each arc's bulge past its chord for exactly this shape — and this rule
+/// refuses it through `SolidBuilder::build`. Two windings in one pipeline, one
+/// face, two answers. `a_face_bounded_by_two_half_circles.rs` is the same solid
+/// built face by face, and its tests are `#[ignore]`d on this refusal.
+///
+/// The old sentence also named the wrong shape: a boundary of two half-circles
+/// has **two** corners, not three, so it never reached this at all.
 ///
 /// The quantity decided is the wire's vector area dotted with the normal. That
 /// sum cancels — a wire far from the origin adds and subtracts numbers far
