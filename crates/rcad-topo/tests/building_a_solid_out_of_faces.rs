@@ -51,7 +51,10 @@ fn a_working_size() -> Scale {
 /// [`EdgeView::is_closed`] is public and is the whole of what these two shapes
 /// need: a cube has only straight edges and a round bar adds two cap circles.
 fn a_run_the_model_says(edge: EdgeView<'_>) -> EdgeRun {
-    if edge.is_closed() {
+    if edge
+        .is_closed()
+        .expect("a cube and a round bar run straight or right round")
+    {
         EdgeRun::RightRoundWhereItsFacesCross
     } else {
         EdgeRun::Straight
@@ -223,7 +226,10 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
 /// the model — exactly `rings::a_quarter_bend`'s own construction of it,
 /// which is what a reader reconstructing a `surface_curve` off a torus does.
 fn a_seam_of_a_bend_named_the_way_a_file_names_one(edge: EdgeView<'_>) -> EdgeRun {
-    if edge.is_closed() {
+    if edge
+        .is_closed()
+        .expect("a bend's edges are its seam and its two end circles")
+    {
         return EdgeRun::RightRoundWhereItsFacesCross;
     }
     let flat_through_the_middle =
@@ -297,7 +303,12 @@ fn a_block(model: &mut Model, [along_x, along_y, along_z]: [f64; 3], at: Vector)
 /// circle; the seam is the half of it with `x >= 0`. Both facts come from the
 /// shape, which is what an importer reads out of a `surface_curve`.
 fn a_seam_named_the_way_a_file_names_one(edge: EdgeView<'_>) -> EdgeRun {
-    assert!(!edge.is_closed(), "a ball's one edge is its seam");
+    assert!(
+        !edge
+            .is_closed()
+            .expect("a ball's one edge is part of a crossing"),
+        "a ball's one edge is its seam"
+    );
     let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
         .expect("the y axis is a unit normal");
     let facing_x = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))

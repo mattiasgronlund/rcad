@@ -480,6 +480,9 @@ fn grouped_write(why: &CannotWrite) -> String {
         CannotWrite::AnEdgeThatIsNotWalkedTwice { walks } => {
             format!("an edge is walked {walks} times")
         }
+        CannotWrite::ARunKindThisWriterHasNoCurveFor => {
+            "a run kind this writer has no curve for".to_owned()
+        }
         CannotWrite::ASurfaceThisWriterHasNoEntityFor => {
             "a surface kind this writer has no entity for".to_owned()
         }

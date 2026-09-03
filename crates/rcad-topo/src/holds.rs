@@ -256,8 +256,14 @@ fn what_a_round_wire_encloses(
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let coedge = wire.coedges().next().ok_or_else(cannot)?;
     let edge = coedge.edge();
-    if !edge.is_closed() {
-        return Err(cannot());
+    match edge.is_closed() {
+        Ok(true) => {}
+        // The only site of the six that keeps its own name for this. A run kind
+        // nothing here knows is not one whole closed crossing as far as this can
+        // tell, which is the very thing this refusal is for, and its refusal
+        // points at the *face* the caller has in its hand where
+        // `ACrossingThisCannotBeOrderedAlong` names no entity at all.
+        Ok(false) | Err(_) => return Err(cannot()),
     }
     let Some(partner) = the_face_across(solid, face, edge)? else {
         return Err(cannot());

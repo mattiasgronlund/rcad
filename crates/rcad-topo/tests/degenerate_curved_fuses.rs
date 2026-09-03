@@ -814,7 +814,12 @@ fn a_block_with_a_round_hole_through_it_is_bounded_by_whole_circles() {
         .faces()
         .flat_map(|face| face.wires())
         .flat_map(|wire| wire.coedges())
-        .filter(|coedge| coedge.edge().is_closed())
+        .filter(|coedge| {
+            coedge
+                .edge()
+                .is_closed()
+                .expect("a drilled block's edges are runs this kernel named")
+        })
         .count();
     assert!(
         closed > 0,

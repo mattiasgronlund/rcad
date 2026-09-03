@@ -82,7 +82,11 @@ fn the_edge_across_a_sliver_is_as_long_as_the_sliver_is() {
 
     let shortest = model
         .edges()
-        .filter(|edge| !edge.is_closed())
+        .filter(|edge| {
+            !edge
+                .is_closed()
+                .expect("a fuse of two boxes leaves straight edges")
+        })
         .map(|edge| edge.distance_between_its_ends())
         .fold(f64::INFINITY, f64::min);
     assert_eq!(

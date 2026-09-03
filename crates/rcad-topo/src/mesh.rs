@@ -410,7 +410,13 @@ impl BuildingAMesh {
         // the way round instead comes to nothing on a circle that encircles no
         // pole, and leaving the direction to the evaluator there is what
         // [`the_way_a_closed_edge_is_stored_running`] measures the cost of.
-        if edge.is_closed() {
+        // A kind of run this crate cannot read is refused rather than taken for
+        // an open edge, because the rule below is the only thing that says which
+        // way round a closed edge is walked: skipping it hands back the points
+        // in whichever order the walker produced them, and half the caps of a
+        // ball come out walked backwards — a mesh that is wrong rather than one
+        // that was refused.
+        if edge.is_closed()? {
             let corner = back.apply_to_point(from.point());
             if let Some(first) = points.first()
                 && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(&along, corner)

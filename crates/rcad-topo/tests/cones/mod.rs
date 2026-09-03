@@ -241,7 +241,7 @@ pub fn describe_again(model: &Model, solid: SolidKey) -> rcad_topo::Result<Solid
                         };
                         let start = corner(stored.start())?;
                         let end = corner(stored.end())?;
-                        let run = if stored.is_closed() {
+                        let run = if stored.is_closed()? {
                             EdgeRun::RightRoundWhereItsFacesCross
                         } else {
                             EdgeRun::Straight

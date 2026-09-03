@@ -241,7 +241,11 @@ fn the_balls_boundary_stands_still_at_each_pole() {
     assert_eq!(wire.coedge_count(), 2, "and only two of those are edges");
 
     assert!(
-        model.edges().all(|edge| !edge.is_closed()),
+        model.edges().all(|edge| {
+            !edge
+                .is_closed()
+                .expect("a ball's seam is part of a crossing")
+        }),
         "the seam is half a circle, not a whole one"
     );
     assert!(
