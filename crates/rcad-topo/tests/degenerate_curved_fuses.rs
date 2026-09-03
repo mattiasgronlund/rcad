@@ -927,46 +927,61 @@ fn a_block_corner_a_tenth_off_a_bars_wall_is_answered_either_side() {
     }
 }
 
-/// The same corner on a *ball*, left open: the arrangement is right now and the
-/// refusal has moved out of the fuse into the mesher, where nothing here has
-/// shown it belongs.
+/// The same corner on a *ball*, and it is answered.
 ///
-/// **What is settled.** `(3, 4, 0)` is on a ball of radius five, and the block's
-/// two walls `x = 3` and `y = 4` cut the skin in circles that touch there — both
-/// tangent along `±z`, the `x = 3` circle of radius four curving toward
-/// `(3, 0, 0)` and the `y = 4` circle of radius three toward `(0, 4, 0)`. Worked
-/// out by hand about the outward normal `(3, 4, 0)/5`, the six ways out of that
-/// node run `y = 4` up, `x = 3` up, `z = 0` one way, `x = 3` down, `y = 4` down,
-/// `z = 0` the other; dumped, the arrangement hands back exactly that order, and
-/// its twenty cells are wound and grouped without complaint. The fuse then
-/// **builds an answer** where it used to refuse.
+/// `(3, 4, 0)` is on a ball of radius five, and the block's two walls `x = 3`
+/// and `y = 4` cut the skin in circles that touch there — both tangent along
+/// `±z`, the `x = 3` circle of radius four curving toward `(3, 0, 0)` and the
+/// `y = 4` circle of radius three toward `(0, 4, 0)`. Worked out by hand about
+/// the outward normal `(3, 4, 0)/5`, the six ways out of that node run `y = 4`
+/// up, `x = 3` up, `z = 0` one way, `x = 3` down, `y = 4` down, `z = 0` the
+/// other, and the arrangement hands back exactly that order.
 ///
-/// **What is not settled, and why this is `#[ignore]` rather than a moved
-/// assertion.** `Model::fuse` validates before it commits, validation meshes to
-/// read a volume's sign, and the mesher gives up on one face with
-/// `AWireWillNotLieFlatOnItsFace`. That refusal is raised in `mesh.rs`, whose own
-/// doc comment says it and its three siblings are "for a solid that arrived from
-/// a *file* with a shape no builder here makes" — and this solid was built by the
-/// fuse a moment earlier. Which face, and whether the name is true of it, needs
-/// instrumenting `mesh.rs`. Until someone does, asserting that name would be
-/// asserting a reason rather than demonstrating one.
+/// **The mesher used to refuse the answer, and that refusal was a defect.** The
+/// block's walls `x = 0` and `y = 0` meet the ball at `(0, 0, -5)`, which is a
+/// pole of the sphere: a corner with no longitude of its own, and a whole *side*
+/// of the patch in the sphere's two coordinates. Nothing in a wire says so
+/// unless a whole closed surface was cut open, so the walk read `atan2(0, 0)`
+/// there; one of the two faces round that pole came back 5.64 radians from the
+/// 1.571 it set off at and was refused `AWireWillNotLieFlatOnItsFace`, and the
+/// other was not refused and closed straight across the chart instead of along
+/// the pole, which is worse.
+///
+/// # What the volume is checked against
+///
+/// A ball of radius five and a `3 × 4 × 4` block from the origin, so the union
+/// is `500π/3 + 48 − V`, where `V` is how much of the block is inside the ball.
+/// The block's base rectangle is exactly inscribed in the ball's equator, `3`
+/// and `4` and `5` being what they are, and that is what makes `V` come out in
+/// whole multiples of `π`.
+///
+/// Over the quarter disc of radius three the ball is at least four high, so that
+/// much of `V` is `4 · 9π/4 = 9π`. Over the whole rectangle the height
+/// `√(25 − r²)` integrates in polar coordinates to `125π/6 − (A(3) + A(4))/3`,
+/// and taking off the quarter disc's own `61π/6` leaves the rest. Each
+/// `A(c) = ∫₀^{arccos(c/5)} (25cos²θ − c²)^{3/2} sec³θ dθ` turns into
+/// `k⁴c ∫₀^{π/2} cos⁴u / (c² + k² sin²u) du` with `k² = 25 − c²`, under
+/// `t = tan θ` and then `t = (k/c) sin u`; `∫₀^{π/2} du / (p + q sin²u)` is
+/// `π / (2√(p(p + q)))`, and `p + q` is `25` both times, so both roots are whole
+/// numbers. They come to `A(3) = 13π` and `A(4) = 7π/2`, which leaves
+/// `V = 85π/6` and a union of `305π/2 + 48`.
+///
+/// A grid sum of `min(4, √(25 − x² − y²))` over the base rectangle agrees with
+/// `85π/6` to eight figures.
 #[test]
-#[ignore = "open: the fuse now answers and the mesher refuses the answer; which face and whether `AWireWillNotLieFlatOnItsFace` is true of it is unsettled"]
-fn a_block_corner_exactly_on_a_balls_skin_is_refused_by_name() {
+fn a_block_corner_exactly_on_a_balls_skin_is_answered() {
     let mut model = a_model();
     let ball = model
         .add_ball(5.0, &Isometry::identity())
         .expect("a ball of radius five");
     let standing = block(&mut model, [3.0, 4.0, 4.0], Vector::zero());
-    match refusal(
-        &mut model,
-        &Pair::of(ball, standing),
-        Rule::Union,
-        &Policy::certified(),
-    ) {
-        Error::TwoCurvesTouchWithoutCrossing { .. } => (),
-        other => panic!("a corner on a ball's skin refused with {other:?}"),
-    }
+    let united = fused(&mut model, &Pair::of(ball, standing), Rule::Union);
+    assert_eq!(united.solids().len(), 1);
+    measures(
+        volume_of(&model, united.solids()),
+        305.0 / 2.0 * PI + 48.0,
+        Side::Under,
+    );
 }
 
 /// The ball's controls, refusing by name a tenth either side.
