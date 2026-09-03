@@ -524,9 +524,6 @@ fn how_often_a_real_file_imports() {
                 Err(why) => {
                     let reason = grouped(&why);
                     *tally.refused.entry(reason.clone()).or_default() += 1;
-                    if got_as_far_as_the_solid_builder(&why) {
-                        tally.reached_the_solid_builder += 1;
-                    }
                     let mut corner_miss_in_spacings = None;
                     match &why {
                         Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn {
@@ -539,9 +536,21 @@ fn how_often_a_real_file_imports() {
                             coordinate_spacing,
                             ..
                         } => {
+                            tally.reached_the_solid_builder += 1;
                             let miss = off_by / coordinate_spacing;
                             tally.corner_misses_in_spacings.push(miss);
                             corner_miss_in_spacings = Some(miss);
+                        }
+                        // The other two refusals a whole described solid can
+                        // earn. `ThisEntityOfTheSolidWasRefused` is the loose
+                        // one: the mapping makes it both for a draft entity
+                        // `SolidBuilder` would not take and for a
+                        // `SolidBuilder::build` that came back with an index,
+                        // so a file counted here may have stopped one call
+                        // short of `build`.
+                        Refusal::ThisEntityOfTheSolidWasRefused { .. }
+                        | Refusal::TheSolidTheFileDescribesIsNotOne { .. } => {
+                            tally.reached_the_solid_builder += 1;
                         }
                         Refusal::ASurfaceThisKernelDoesNotHold { keyword, .. } => {
                             *tally.surfaces_wanted.entry(keyword.clone()).or_default() += 1;
@@ -878,31 +887,6 @@ fn report_the_corner_misses(misses: &[f64], reached_the_solid_builder: usize) {
          written — and {} are a modelling tolerance",
         sorted.len() - within_a_spacing
     );
-}
-
-/// Whether a refused file got a whole solid described and handed to
-/// `SolidBuilder`, or was stopped by the reader before that.
-///
-/// Four refusals are the builder's or the sweep's and every other one is the
-/// reader's, which is what makes this readable off the variant.
-///
-/// **`ThisEntityOfTheSolidWasRefused` is the loose one**: the mapping makes it
-/// both for a draft entity `SolidBuilder` would not take and for a
-/// `SolidBuilder::build` that came back with an index, so a file counted here
-/// may have stopped one call short of `build`. That is an over-count of at most
-/// however many rows carry it, and both corpora carry none today.
-fn got_as_far_as_the_solid_builder(why: &Refusal) -> bool {
-    match why {
-        Refusal::ThisEntityOfTheSolidWasRefused { .. }
-        | Refusal::TheSolidTheFileDescribesIsNotOne { .. }
-        | Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn { .. }
-        | Refusal::ACornerIsNotOnThePlaneOfTheArcItEndsOn { .. } => true,
-        // `Refusal` is `#[non_exhaustive]` and grows. Every other variant the
-        // reader makes before a solid is described — a surface or curve this
-        // kernel does not hold, a unit, a placement, a schema mismatch — and a
-        // new one is the reader's until somebody says otherwise here.
-        _ => false,
-    }
 }
 
 /// The name a refusal is counted under, which is the variant and never the
