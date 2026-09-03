@@ -1,6 +1,8 @@
 //! Every KiCad file that imports today is written back out, read back, and
 //! required to be the same solid — bit for bit, and, where the shapes fuse at
-//! all, the same fuse answer against a third solid.
+//! all, the same fuse answer against a third solid. Which files manage it is
+//! pinned by name in [`KICAD_FILES_THAT_ROUND_TRIP`], with the reason the rest
+//! do not.
 //!
 //! `a_solid_written_out_and_read_back_is_the_same_solid.rs` checks the writer
 //! against solids **this kernel built**. This is a stronger check: a solid
@@ -16,7 +18,7 @@
 //! corpus content could cause — a file this crate's own reader could not parse,
 //! or a solid whose bounding box does not have two corners.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,7 +52,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     );
 
     let mut denominator = 0;
-    let mut round_tripped = 0;
+    let mut round_tripped: BTreeSet<String> = BTreeSet::new();
     let mut pieces_compared = 0;
     let mut no_fuse_to_compare = 0;
     let mut scale_metadata_differed = 0;
@@ -72,7 +74,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
                 scale_metadata_differed: differed,
                 no_fuse,
             } => {
-                round_tripped += 1;
+                round_tripped.insert(name_of(path));
                 if pieces > 0 {
                     pieces_compared += pieces;
                 } else {
@@ -92,10 +94,11 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     }
 
     println!(
-        "corpus round trip: {round_tripped} / {denominator} imported KiCad files round-tripped \
+        "corpus round trip: {} / {denominator} imported KiCad files round-tripped \
          to the same solid, {pieces_compared} fused piece(s) compared, {no_fuse_to_compare} had \
          no fuse to compare, {scale_metadata_differed} matched as a solid despite \
-         Scale::nominal_size changing"
+         Scale::nominal_size changing",
+        round_tripped.len()
     );
     for (because, count) in &no_fuse_reasons {
         println!("    {count:>4}  no fuse to compare: {because}");
@@ -107,7 +110,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     }
 
     assert_eq!(
-        denominator, 46,
+        denominator, 96,
         "the count of KiCad files that import must not shift without somebody saying so"
     );
     assert_eq!(
@@ -115,9 +118,94 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
         "Scale::nominal_size is set from the file's vertices alone, so a round trip must not \
          move it even when a LINE's own point or a PLANE's placement origin rounds"
     );
+    assert_pinned_round_trips(&round_tripped);
+}
+
+/// The 45 imported KiCad files this kernel can write back out and read back as
+/// the same solid, out of the 96 that import.
+///
+/// **Pinned by name, not by rate**, for the reason `KICAD_FILES_THAT_IMPORT` is
+/// (§44.10): a rate cannot say which file moved. Regenerate it from the failing
+/// assertion, which prints what appeared and what disappeared.
+///
+/// # The 51 that are missing are the writer's gap and not the reader's
+///
+/// Every one of them fails as *writer refuses: an edge between a plane and a
+/// pipe names no curve* — 49 of those, and two more for a pipe against a pipe.
+/// A file only reaches here **after** importing and passing the full sweep, so
+/// the solid is sound and the kernel simply has no `SURFACE_CURVE` to write for
+/// the circle where a flat face meets a round one.
+///
+/// **That gap is older than this list and the curved rounding did not widen
+/// it.** At `d23c700` this run said 45 of 46 with one such refusal, and it now
+/// says 45 of 96 with 51 — so **this list is exactly the old 46 less
+/// `Relay_DPDT_Finder_30.22.step`, which already failed**, and every one of the
+/// fifty files the curved rounding brought in has an edge between a plane and a
+/// pipe. Closing that is a writer lane and not this list's business. What this
+/// list is for is that the 45 which do round trip cannot quietly become 44.
+const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
+    "LED_Rectangular_W3.0mm_H2.0mm.step",
+    "LED_Rectangular_W3.9mm_H1.8mm.step",
+    "LED_Rectangular_W3.9mm_H1.9mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O1.27mm_Z1.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O1.27mm_Z3.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O1.27mm_Z5.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O3.81mm_Z1.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O3.81mm_Z3.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O3.81mm_Z5.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z1.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z3.0mm.step",
+    "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z5.0mm.step",
+    "LED_Rectangular_W5.0mm_H5.0mm.step",
+    "PinHeader_1x04_P2.54mm_Vertical.step",
+    "PinHeader_1x11_P2.54mm_Vertical.step",
+    "PinHeader_1x18_P2.54mm_Vertical.step",
+    "PinHeader_1x25_P2.54mm_Vertical.step",
+    "PinHeader_1x32_P2.54mm_Vertical.step",
+    "PinHeader_1x39_P2.54mm_Vertical.step",
+    "PinHeader_2x01_P2.54mm_Vertical.step",
+    "PinHeader_2x08_P2.54mm_Vertical.step",
+    "PinHeader_2x15_P2.54mm_Vertical.step",
+    "PinHeader_2x22_P2.54mm_Vertical.step",
+    "PinHeader_2x29_P2.54mm_Vertical.step",
+    "PinHeader_2x36_P2.54mm_Vertical.step",
+    "Relay_DPDT_Omron_G5V-2.step",
+    "Relay_SPDT_HJR-4102.step",
+    "Relay_SPDT_Omron_G6E.step",
+    "Relay_SPDT_Omron_G6EK.step",
+    "Relay_SPDT_StandexMeder_SIL_Form1C.step",
+    "Relay_SPST_StandexMeder_SIL_Form1A.step",
+    "Relay_SPST_StandexMeder_SIL_Form1B.step",
+    "Relay_StandexMeder_UMS.step",
+    "SW_DIP_SPSTx02_Piano_CTS_Series194-2MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx03_Piano_CTS_Series194-3MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx04_Piano_CTS_Series194-4MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx05_Piano_CTS_Series194-5MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx06_Piano_CTS_Series194-6MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx07_Piano_CTS_Series194-7MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx08_Piano_CTS_Series194-8MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx09_Piano_CTS_Series194-9MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx10_Piano_CTS_Series194-10MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx11_Piano_CTS_Series194-11MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx12_Piano_CTS_Series194-12MSTN_W7.62mm_P2.54mm.step",
+];
+
+/// Every KiCad file that round-trips must be one of
+/// [`KICAD_FILES_THAT_ROUND_TRIP`], and every one of those must round trip —
+/// checked as a set so a failure names what appeared and what disappeared.
+fn assert_pinned_round_trips(round_tripped: &BTreeSet<String>) {
+    let pinned: BTreeSet<&str> = KICAD_FILES_THAT_ROUND_TRIP.iter().copied().collect();
+    let got: BTreeSet<&str> = round_tripped.iter().map(String::as_str).collect();
+    let newly_round_tripping: Vec<&str> = got.difference(&pinned).copied().collect();
+    let stopped_round_tripping: Vec<&str> = pinned.difference(&got).copied().collect();
     assert!(
-        round_tripped > 0,
-        "nothing round-tripped, so this test compared nothing"
+        newly_round_tripping.is_empty() && stopped_round_tripping.is_empty(),
+        "the kicad files that round trip moved (docs/decisions.md §44.10): \
+         {} file(s) now round trip and are not pinned: {newly_round_tripping:?}; \
+         {} pinned file(s) stopped: {stopped_round_tripping:?}",
+        newly_round_tripping.len(),
+        stopped_round_tripping.len()
     );
 }
 
