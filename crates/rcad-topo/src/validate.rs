@@ -1488,8 +1488,12 @@ fn off_a_plane_by_no_more_than_writing_it_down_cost(
 /// exactly zero, and so does one bounded by two half-circles, whose three
 /// corners are collinear. [`check_flat_face`] keeps the first out of here by
 /// not asking about a boundary with fewer than three corners. The second it
-/// still asks and still refuses, because telling that face from a hole needs a
-/// point on the curve and every corner it has is on the chord.
+/// still asks and still refuses. That is a **gap and not a limit**: the answer
+/// exists and is written down — each arc's [`EdgeRun`](rcad_geom::EdgeRun)
+/// carries the half-spaces that say which way it bulges — and nothing that asks
+/// a wire which way it goes reads a run today. Closing it means winding
+/// something other than the stored corners, and no file in the corpus is
+/// refused for it, so it waits for one that is.
 ///
 /// The quantity decided is the wire's vector area dotted with the normal. That
 /// sum cancels — a wire far from the origin adds and subtracts numbers far

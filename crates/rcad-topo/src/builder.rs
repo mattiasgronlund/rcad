@@ -368,14 +368,22 @@ impl SolidBuilder {
     /// way, which is a face — an arc and the chord that closes it, or two arcs
     /// bulging opposite ways.
     ///
-    /// Two of the three ways two steps can close bound nothing, and the rule is
-    /// about the edges rather than about the count. **One edge walked out and
-    /// back** retraces the same curve, whatever that curve is. **Two straight
-    /// edges between the same two corners** are the same segment written twice,
-    /// since a straight edge is the whole of what its two ends say (see
-    /// [`EdgeRun::Straight`]). Both sweep exactly no area. Anything left bends
-    /// somewhere between two corners it does not bend back over, and that
-    /// encloses something.
+    /// The rule is about the edges rather than about the count. **One edge
+    /// walked out and back** retraces the same curve, whatever that curve is.
+    /// **Two straight edges between the same two corners** are the same segment
+    /// written twice, since a straight edge is the whole of what its two ends
+    /// say (see [`EdgeRun::Straight`]). Both sweep exactly no area.
+    ///
+    /// **Those are the two this can see, and not every two-step wire that
+    /// bounds nothing.** Two *curved* edges can name the same curve as well,
+    /// and equal [`EdgeRun`]s do not say so: a run names a piece of where the
+    /// faces **either side** of the edge cross, so the same run between
+    /// different pairs of faces is a different curve — the segment plate's arc
+    /// and its chord carry equal runs and are a circle and a straight line. A
+    /// wire is described before the face it trims, so the pair is not known
+    /// here at all. Two edges that really do name the same curve are refused by
+    /// the sweep's mesh instead, as `CornersCoincide`; that is not new to two
+    /// steps, and a three-step wire holding such a pair is refused there too.
     ///
     /// `docs/decisions.md` §44.11 item 3. This and
     /// [`Model::wire_of_two_steps_bounds_a_face`](crate::Model) are the same

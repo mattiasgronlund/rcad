@@ -5,12 +5,15 @@
 //! judged by reads a wire's *corners*, which a two-corner boundary cannot tell
 //! apart from a hole.
 //!
-//! **Why these are not tautologies.** Two of them are refusals, and each is a
-//! two-step wire that a rule written carelessly would let through: the same
-//! edge walked out and back, and two straight edges between the same two
-//! corners. Both close, both have two steps, and neither bounds anything — they
-//! sweep no area at all. The accepting test is the one shape in the family that
-//! does: a plate cut down to the segment between an arc and its chord, the
+//! **Why these are not tautologies.** Four of them are refusals, and each is a
+//! two-step wire that bounds nothing. Two the length rule turns away by name:
+//! the same edge walked out and back, and two straight edges between the same
+//! two corners. Two more it cannot see and the sweep catches instead: a face
+//! whose two edges name the same curve, which needs the faces either side to
+//! tell, and a face put on back to front, which is the winding this lane stops
+//! asking a two-corner boundary about. The accepting test is the shape that
+//! does bound something: a plate cut down to the segment between an arc and its
+//! chord, the
 //! smallest solid with a two-step boundary, whose numbers are exact for any
 //! radius and height an `f64` holds. Its corners sit at `(±r, 0, z)`, so
 //! `x² + y² − r²` cancels to nothing and the sweep certifies every one of them
@@ -48,7 +51,7 @@ fn a_plate_bounded_by_an_arc_and_its_chord() {
         &mut model,
         &policy,
         &mut log,
-        TurnedRound::No,
+        Spoilt::Nothing,
         Arc::HalfATurn,
     )
     .expect("an arc and its chord bound a face");
@@ -75,7 +78,7 @@ fn the_plates_two_flat_faces_are_bounded_by_two_steps_each() {
         &mut model,
         &policy,
         &mut log,
-        TurnedRound::No,
+        Spoilt::Nothing,
         Arc::HalfATurn,
     )
     .expect("an arc and its chord bound a face");
@@ -111,7 +114,7 @@ fn a_two_step_face_turned_round_is_still_caught_by_the_mesh() {
         &mut model,
         &policy,
         &mut log,
-        TurnedRound::Yes,
+        Spoilt::TheBottomFaceIsTurnedRound,
         Arc::HalfATurn,
     );
 
@@ -124,20 +127,60 @@ fn a_two_step_face_turned_round_is_still_caught_by_the_mesh() {
     );
 }
 
+/// The two-step wire the length rule deliberately does **not** catch, and what
+/// does catch it.
+///
+/// An edge names a piece of where the faces **either side** of it cross, so two
+/// edges carrying equal [`EdgeRun`]s are the same curve only when they have the
+/// same two faces — the sound plate's arc and its chord carry equal runs and are
+/// a circle and a straight line. A wire is described before the face it trims,
+/// so `SolidBuilder::add_wire` cannot tell the two apart and does not try. Give
+/// the chord the pipe on its far side as well and it really is the arc again:
+/// the flat face is one curve out and back, with no area at all. The sweep's
+/// mesh is what says so, because both edges walk into the same points.
+#[test]
+fn a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(a_working_size());
+
+    let refused = a_segment_plate(
+        &mut model,
+        &policy,
+        &mut log,
+        Spoilt::TheChordIsTheArcAgain,
+        Arc::HalfATurn,
+    );
+
+    assert!(
+        matches!(
+            refused,
+            Err(Error::CannotMeshAFace {
+                why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
+                ..
+            })
+        ),
+        "got {refused:?}"
+    );
+}
+
 /// The gap this lane found behind its own and could not reach: the sweep's
 /// mesh, not the two length rules.
 ///
-/// `rcad_geom::walk`'s `how_many_steps` allows an arc a quarter turn per step
-/// and never fewer than one step, so an arc of a quarter turn or less gets no
-/// point between its two ends however coarse or fine the deflection — and
-/// `Model::validate` meshes a curved solid at `as_coarse_as_a_mesh_gets`. The
-/// flat face's boundary is then two corners, which is a chord and not a
-/// half-disc, and `rcad-mesh` refuses it as a loop rather than triangulating a
-/// face that is not there. Refusing is right; having nothing better to hand it
-/// is the gap.
+/// `rcad_geom::walk`'s `how_many_steps` takes the larger of two counts and then
+/// a floor of one step. How far the arc *bends* asks for more steps as the
+/// deflection tightens, so a fine mesh does put points on a quarter arc; how far
+/// it *turns* asks for one, and at the deflection `Model::validate` meshes with
+/// — `as_coarse_as_a_mesh_gets`, which is `f64::MAX` — the bending count is one
+/// as well. So the sweep's own mesh puts no point between the ends of an arc of
+/// a quarter turn or less. The flat face's boundary is then two corners, which
+/// is a chord and not a piece of disc, and `rcad-mesh` refuses it as a loop
+/// rather than triangulating a face that is not there. Refusing what it was
+/// handed is right; handing it that is the gap.
 ///
-/// The fix is in `rcad-geom`'s step count or in what deflection the sweep asks
-/// for, and neither file is this lane's.
+/// The fix is a floor on how coarsely a *curved boundary* may be walked, in
+/// `rcad-geom`'s step count or in what deflection the sweep asks for. Neither
+/// file is this lane's.
 #[test]
 #[ignore = "open: an arc of a quarter turn or less gets no point between its ends, so its face fans into two corners"]
 fn a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh() {
@@ -149,7 +192,7 @@ fn a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh() {
         &mut model,
         &policy,
         &mut log,
-        TurnedRound::No,
+        Spoilt::Nothing,
         Arc::AQuarterTurn,
     )
     .expect("a quarter arc and its chord bound a face too");
@@ -232,14 +275,18 @@ fn an_edge_walked(
         .expect("the edge is here")
 }
 
-/// Whether the bottom face is described facing out of the plate or into it.
+/// What is wrong with the plate this time, if anything.
 ///
-/// Turning it round is the only thing that changes between the two builds, so
-/// a refusal is that and nothing else.
+/// One thing changes between the sound build and each spoilt one, so a refusal
+/// is that thing and nothing else.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum TurnedRound {
-    No,
-    Yes,
+enum Spoilt {
+    Nothing,
+    /// The bottom face's plane faces into the plate rather than out of it.
+    TheBottomFaceIsTurnedRound,
+    /// The chord is a second copy of the arc: same two corners, same run, and
+    /// the face on its other side is the same pipe, so it names the same curve.
+    TheChordIsTheArcAgain,
 }
 
 /// A plate whose top and bottom are the piece of disc between an arc of
@@ -252,7 +299,7 @@ fn a_segment_plate(
     model: &mut Model,
     policy: &Policy,
     log: &mut ProvenanceLog,
-    turned: TurnedRound,
+    spoilt: Spoilt,
     arc: Arc,
 ) -> Result<SolidKey> {
     let mut builder = SolidBuilder::new();
@@ -264,10 +311,17 @@ fn a_segment_plate(
 
     let ground = a_plane_at(0.0, Vector::new(0.0, 0.0, -1.0));
     let lid = a_plane_at(HEIGHT, Vector::new(0.0, 0.0, 1.0));
+    let chord_runs = match spoilt {
+        Spoilt::TheChordIsTheArcAgain => [arc.running_in(&ground), arc.running_in(&lid)],
+        Spoilt::Nothing | Spoilt::TheBottomFaceIsTurnedRound => {
+            [EdgeRun::Straight, EdgeRun::Straight]
+        }
+    };
     let arc_below = builder.add_edge(along_x, along_y, arc.running_in(&ground))?;
     let arc_above = builder.add_edge(above_x, above_y, arc.running_in(&lid))?;
-    let chord_below = builder.add_edge(along_x, along_y, EdgeRun::Straight)?;
-    let chord_above = builder.add_edge(above_x, above_y, EdgeRun::Straight)?;
+    let [below_run, above_run] = chord_runs;
+    let chord_below = builder.add_edge(along_x, along_y, below_run)?;
+    let chord_above = builder.add_edge(above_x, above_y, above_run)?;
     let up_at_x = builder.add_edge(along_x, above_x, EdgeRun::Straight)?;
     let up_at_y = builder.add_edge(along_y, above_y, EdgeRun::Straight)?;
 
@@ -309,17 +363,21 @@ fn a_segment_plate(
         ],
     )?;
 
-    let facing = match turned {
-        TurnedRound::No => Vector::new(0.0, 0.0, -1.0),
-        TurnedRound::Yes => Vector::new(0.0, 0.0, 1.0),
+    let facing = match spoilt {
+        Spoilt::TheBottomFaceIsTurnedRound => Vector::new(0.0, 0.0, 1.0),
+        Spoilt::Nothing | Spoilt::TheChordIsTheArcAgain => Vector::new(0.0, 0.0, -1.0),
+    };
+    let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), RADIUS).expect("a positive radius"));
+    let along_the_chord = match spoilt {
+        Spoilt::TheChordIsTheArcAgain => pipe,
+        Spoilt::Nothing | Spoilt::TheBottomFaceIsTurnedRound => {
+            Surface::Plane(arc.the_chords_plane())
+        }
     };
     let below = builder.add_face(Surface::Plane(a_plane_at(0.0, facing)), &[below])?;
     let above = builder.add_face(Surface::Plane(lid), &[above])?;
-    let wall = builder.add_face(
-        Surface::Cylinder(Cylinder::new(Axis::z(), RADIUS).expect("a positive radius")),
-        &[wall],
-    )?;
-    let flat_side = builder.add_face(Surface::Plane(arc.the_chords_plane()), &[flat_side])?;
+    let wall = builder.add_face(pipe, &[wall])?;
+    let flat_side = builder.add_face(along_the_chord, &[flat_side])?;
 
     builder.add_shell(&[
         (below, Orientation::Forward),
@@ -338,12 +396,12 @@ fn a_plane_at(height: f64, facing: Vector) -> Plane {
 /// How far round the plate's arc goes: from `(r, 0)` to `(−r, 0)` the long way
 /// over `y`, or only to `(0, r)`.
 ///
-/// **Which one is not a taste, it is a finding.** `rcad_geom::walk` steps an arc
-/// at most a quarter turn at a time and puts no point between the two ends of
-/// anything shorter, and the sweep meshes as coarsely as a mesh gets — so a
-/// half-turn arc gets one point on it and fans into a triangle, and a
-/// quarter-turn arc gets none and fans into two corners `rcad-mesh` will not
-/// take as a loop. That is a second gap behind this lane's, and
+/// **Which one is not a taste, it is a finding.** At the deflection the sweep
+/// meshes with — as coarse as a mesh gets — `rcad_geom::walk` steps an arc a
+/// quarter turn at a time and puts no point between the ends of anything
+/// shorter. So a half-turn arc gets one point on it and fans into a triangle,
+/// and a quarter-turn arc gets none and fans into two corners `rcad-mesh` will
+/// not take as a loop. That is a second gap behind this lane's, and
 /// `a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh` is its
 /// repro.
 #[derive(Clone, Copy, PartialEq, Eq)]

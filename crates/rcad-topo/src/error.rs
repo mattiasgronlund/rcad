@@ -174,15 +174,25 @@ pub enum Error {
     /// triangulator can use — fewer than three distinct corners in the
     /// surface's own two coordinates, or one that is not a finite number.
     ///
-    /// A wire this crate builds itself always has at least three, because a
-    /// closed edge is walked several ways round no matter how coarse the
-    /// deflection and a straight one has three sides or more (§16.10's family
-    /// of fixes is empty for the geometry). But a face's *stored surface* is
-    /// data, not a fact this checks before walking it: a wall face carrying a
+    /// **Two ways to reach it, and only one of them is bad input.** A face
+    /// bounded by an arc and its chord has two corners in space, and the arc
+    /// puts a third between them only if it turns over more than a quarter —
+    /// `rcad_geom::walk` steps an arc a quarter turn at a time and never takes
+    /// fewer than one step, so at the deflection [`Model::validate`] meshes
+    /// with, an arc of a quarter turn or less contributes nothing. That is a
+    /// **gap**: the face has area and the walk could not reach it, and
+    /// `a_plate_bounded_by_a_quarter_arc_and_its_chord_still_will_not_mesh` is
+    /// the ignored repro. The family of fixes is a floor on how coarsely a
+    /// curved boundary may be walked, either in the step count or in what
+    /// deflection the sweep asks for.
+    ///
+    /// The other way is bad input, and a panic is the wrong answer to it. A
+    /// face's *stored surface* is data, not a fact this checks before walking
+    /// it: a wall face carrying a
     /// [`Plane`](rcad_geom::Plane) where its own [`Cylinder`](rcad_geom::Cylinder)
     /// belongs still has a four-step wire in space, and the same wire fans
-    /// into one corner in the plane's own two coordinates instead of four. A
-    /// panic is the wrong answer to a caller's bytes — `Model` derives
+    /// into one corner in the plane's own two coordinates instead of four.
+    /// `Model` derives
     /// `Deserialize` and nothing between a file and this call has agreed the
     /// surface matches the wire (CLAUDE.md's rule on panics vs. bad caller
     /// input, not §16.11, which is about the dynamic-range check being a
