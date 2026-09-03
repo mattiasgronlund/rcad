@@ -1625,15 +1625,20 @@ impl<'f> Arrangement<'f> {
         match self.turns_anticlockwise(node, reference, direction, policy, log)? {
             Decision::Pos => Ok(0),
             Decision::Neg => Ok(1),
-            // The reference's own crossing is the one pair the turn cannot be
-            // measured for — the determinant has the same gradient in two rows,
-            // and a gradient that is a box makes an interval evaluation of that
-            // straddle zero (§35.2) — so which half it is in is read off the two
-            // `forward` flags instead. Its own way starts half zero and its way
-            // back starts half one.
+            // The reference's own crossing is the one pair no arithmetic here
+            // can ever certify: the determinant has the same gradient in two
+            // rows, so it is nothing at all in the reals, while a gradient that
+            // is a box makes the interval straddle zero every time (§35.2). Any
+            // other pair either certifies or comes back `Undecidable`, so which
+            // half this one is in is read off the two `forward` flags instead —
+            // the reference's own way starts half zero and its way back starts
+            // half one.
             Decision::Zero if direction.crossing == reference.crossing => {
                 Ok(u8::from(direction.forward != reference.forward))
             }
+            // Two different curves that agree along their whole tangent *and*
+            // bend the same way. Telling them apart takes a third derivative,
+            // which nothing here has.
             Decision::Zero => Err(Error::TwoCurvesTouchWithoutCrossing {
                 face: self.face.keys[0],
             }),
@@ -1658,7 +1663,9 @@ impl<'f> Arrangement<'f> {
     ///
     /// A determinant of nothing at all means the three gradients lie in one
     /// plane, so both cross products point along that plane's normal and the two
-    /// curves leave the node along **one line**. That is not one answer but two:
+    /// curves leave the node along **one line** — unless a cross product is the
+    /// zero vector, which is a cut surface tangent to the face's own and is
+    /// caught below. That is not one answer but two:
     /// the same way along it, or opposite ways. Opposite ways is half a turn and
     /// stays `Zero`, which is what a comparator for "less than half a turn"
     /// should say about it. The same way is a tangency, and
@@ -1779,13 +1786,17 @@ impl<'f> Arrangement<'f> {
     /// **`t` is the same vector for both**, taken from `first`. A curvature
     /// vector does not care which way the curve is walked but `m` does, so
     /// asking each curve about its own tangent would compare two leans measured
-    /// against opposite sides. `|t|` cancels out of every term, so the unit
-    /// tangent is never formed.
+    /// against opposite sides. Each `A` carries `t` twice and each `B` once, so
+    /// the whole value carries `|t|⁵` as a positive factor and nothing but the
+    /// magnitude depends on it: the unit tangent is never formed.
     ///
-    /// `B` is nothing at all exactly when `∇Q` is along `∇S`, which is the two
-    /// *surfaces* tangent rather than the two curves. Then the whole value is
-    /// nothing at all and the caller refuses, which is right: this says nothing
-    /// about a crossing that has no direction to begin with.
+    /// Working `B` out, `∇Q·(∇S × t) = −c·|∇S × ∇Q|²` for a positive `c`, using
+    /// that `t` is along `∇S × ∇Q` for *both* curves here — which is the
+    /// tangency and holds only because of it. So `B` is nothing at all exactly
+    /// when `∇Q` is along `∇S`, which is the two *surfaces* tangent rather than
+    /// the two curves. Then the whole value is nothing at all and the caller
+    /// refuses, which is right: this says nothing about a crossing that has no
+    /// direction to begin with.
     ///
     /// **Eighteen lengths**, counting a gradient as one the way the determinant
     /// above does: `t` is two, `A` is six, `B` is four, and the value multiplies
