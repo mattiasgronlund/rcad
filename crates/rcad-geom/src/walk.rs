@@ -1280,11 +1280,20 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
 /// question, exactly as the pipe arm above asks `n·w == 0.0`. §39.7 item 6
 /// records that as a standing gap — two authorities on the same question, one
 /// exact in [`intersect`](crate::intersect) and one an `f64` comparison here —
-/// and this arm is a third instance of it rather than a new one. What saves it
-/// is that a cross product of two stored triples is zero in `f64` exactly when
-/// it is zero in exact arithmetic: every component is `a·d − b·c` with no sum to
-/// cancel, so nothing here rounds a non-zero to zero or the other way. The pipe
-/// arm's `n·w` has a three-term sum in it and does not have that property.
+/// and this arm is a third instance of it rather than a new one.
+///
+/// **What saves it is the gap between the two families, not the arithmetic.**
+/// `a·d − b·c` in `f64` rounds a non-zero to zero all the time, and it does so
+/// for exactly the triples these two are: `a_cross_product_of_unit_triples_can_round_to_zero`
+/// builds two unit vectors one `f64` apart whose cross product comes out zero
+/// with a true value near `1e-17`. So a test on the computed cross product would
+/// be worth nothing if the two families it separates ran up against each other.
+/// They do not. A run only reaches here in one of the two families
+/// [`intersect`](crate::intersect) certified **exactly**, and the family this
+/// arm sends away is the one holding the axis, where `n·w = 0` for two vectors
+/// of length one — so `‖n × w‖` is one there, and no rounding of anything walks
+/// a whole unit. The pipe arm's `n·w == 0.0` has a three-term sum in it and
+/// separates its own two families the same way.
 ///
 /// # Errors
 ///
@@ -1462,6 +1471,59 @@ mod tests {
                 .expect("the x axis has length"),
         );
         (ball, meridian, picker)
+    }
+
+    /// A cross product of two unit triples comes out zero in `f64` while its
+    /// true value is not zero, so `n × w == 0` is not an exact question.
+    ///
+    /// `where_a_plane_cuts_a_torus` used to say it was, on the grounds that
+    /// every component of a cross product is `a·d − b·c` with no sum to cancel.
+    /// That is true of the shape of the expression and says nothing about the
+    /// rounding: `a·d` and `b·c` each round on their own, and two roundings that
+    /// land on the same `f64` leave a difference of exactly zero. Below, two
+    /// unit normals one `f64` apart — both straight out of
+    /// [`Plane::from_point_and_normal`], so both are triples a model really
+    /// holds — cross to `(0, 0, 0)` in `f64` with a true first component near
+    /// `5.2e-17`.
+    ///
+    /// What that leaves standing is the argument in
+    /// `where_a_plane_cuts_a_torus`'s own doc: the two families it separates are
+    /// a whole unit apart, so a test that cannot see `1e-17` still tells them
+    /// apart. This pins the counterexample so the false reason cannot come back.
+    #[test]
+    fn a_cross_product_of_unit_triples_can_round_to_zero() {
+        let unit = |normal: Vector| {
+            Plane::from_point_and_normal(Point::origin(), normal)
+                .expect("a normal with length")
+                .normal()
+        };
+        let one = unit(Vector::new(1.0, 2.0, 6.0));
+        let other = unit(Vector::new(1.0, 2.0, 6.0f64.next_up()));
+
+        assert_ne!(one, other, "these are two different unit triples");
+        assert_eq!(
+            one.cross(other),
+            Vector::zero(),
+            "the f64 cross product of {one:?} and {other:?} is not zero after all"
+        );
+
+        let [p, q, r] = one.components();
+        let [u, v, w] = other.components();
+        let truly = [
+            Exact::product_of(q, w).and_then(|it| Some(it.minus(&Exact::product_of(r, v)?))),
+            Exact::product_of(r, u).and_then(|it| Some(it.minus(&Exact::product_of(p, w)?))),
+            Exact::product_of(p, v).and_then(|it| Some(it.minus(&Exact::product_of(q, u)?))),
+        ];
+        assert!(
+            truly.iter().any(|component| matches!(
+                component
+                    .as_ref()
+                    .expect("unit triples multiply in range")
+                    .sign(),
+                Decision::Pos | Decision::Neg
+            )),
+            "the true cross product is zero too, so this is not a counterexample"
+        );
     }
 
     /// An end that does not say where it is is refused, and does not take the
