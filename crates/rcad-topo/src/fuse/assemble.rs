@@ -49,8 +49,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point, Surface,
-    Vector,
+    DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point,
+    Surface, Vector,
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -63,6 +63,7 @@ use crate::validate::{
     a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
     how_much_space_a_curved_solid_encloses, the_curved_one_of, winding_round,
 };
+use crate::view::how_far_apart;
 use crate::{
     Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
 };
@@ -186,6 +187,78 @@ impl Assembly {
     /// order [`Assembly::write_into`] writes them.
     pub(crate) fn corner_ancestors(&self) -> impl Iterator<Item = Option<VertexKey>> + '_ {
         self.corners.iter().map(|corner| corner.from)
+    }
+
+    /// Refuse an answer whose own shortest edge is too small to resolve beside
+    /// its own coordinates.
+    ///
+    /// **A fuse can build a feature neither input had.** Two blocks whose faces
+    /// nearly line up meet in a sliver as thin as the gap between the two
+    /// planes, and that gap is whatever the two placements make it — a number
+    /// with no lower bound short of zero. Both inputs pass
+    /// `Model::check_dynamic_range` and the answer does not, so this is the one
+    /// thing the fuse writes that its inputs said nothing about.
+    ///
+    /// It is a **limit** and not a gap. The ratio is a length over a length, so
+    /// scaling the whole answer by any power of two leaves it exactly where it
+    /// was: there is no scaled copy in which the sliver and the coordinates fit
+    /// in `f64` together, which is the family of fix §16.10 asks to be ruled out
+    /// by name. Nothing here can make the answer smaller, either — the sliver is
+    /// where the two inputs really are.
+    ///
+    /// Only the chords are measured, where `Model::check_dynamic_range` also
+    /// takes the radii of curved faces. A curved face of the answer sits on a
+    /// surface inherited from its ancestor bit for bit (§17.1), so every radius
+    /// in the answer is a radius an input already carried and was already
+    /// measured on.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::DynamicRangeTooWide`] when the answer's largest coordinate
+    /// over its shortest edge is more than `f64` carries, under a policy that
+    /// fails on that. [`Error::Geometry`] when two corners of the answer with
+    /// different names landed on the very same `f64` triple, which leaves an
+    /// edge of no length at all.
+    pub(crate) fn check_dynamic_range(
+        &self,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let largest = self
+            .corners
+            .iter()
+            .map(|corner| corner.point.largest_coordinate_magnitude())
+            .fold(0.0, f64::max);
+        // A closed edge has one corner and a chord of zero, and that is not how
+        // small it is — the same reasoning, and the same skip, as
+        // `Model::check_dynamic_range`.
+        let shortest = self
+            .edges
+            .iter()
+            .filter(|edge| edge.ends[0] != edge.ends[1])
+            .map(|edge| {
+                how_far_apart(
+                    self.corners[edge.ends[0]].point,
+                    self.corners[edge.ends[1]].point,
+                )
+            })
+            .fold(f64::INFINITY, f64::min);
+        if !shortest.is_finite() || largest == 0.0 {
+            return Ok(());
+        }
+
+        match DynamicRange::measure(largest, shortest)?.check_under_policy(policy, log) {
+            // The tag says how much slop an answer this wide carries. What a
+            // caller can act on is the record it pushed into `log`, the same as
+            // in the sweep.
+            Ok(_) => Ok(()),
+            // Both layers have a name for this. Keep reporting the topology one,
+            // since a fuse is what built it.
+            Err(rcad_geom::Error::DynamicRangeTooWide { ratio }) => {
+                Err(Invalid::DynamicRangeTooWide { ratio }.into())
+            }
+            Err(other) => Err(other.into()),
+        }
     }
 
     /// Write the result into the model, once.
