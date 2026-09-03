@@ -51,7 +51,13 @@ check:
 # and not variants, so a fourth surface-pair list could drift out of step with
 # the other three and this number would never say so. It counts uncovered
 # variants now, and moves with a new one on the composite side too.
-wildcard_arms := "88"
+#
+# It falls when a refusal becomes an answer, which is the fourth reason and the
+# happiest one: a test that matched an `Error` it expected, with `other =>
+# panic!` for the rest, stops matching anything once the case it named is
+# answered. That is what took it from 88 to 87 — a block corner on a ball's
+# skin, which the mesher used to refuse.
+wildcard_arms := "87"
 
 check-wildcards:
     @find crates -name lib.rs -path '*/src/*' -exec touch {} +
