@@ -542,19 +542,28 @@ impl SolidBuilder {
 ///
 /// **A kind of run this crate does not know is not taken for one of those.**
 /// [`EdgeRun`] is `#[non_exhaustive]` and lives in `rcad-geom`, so a fourth kind
-/// arrives here with no compile error at all, and reading it as "not straight"
-/// would walk an edge with its two ends in one place through the public door —
+/// arrives here with no compile error at all — a clone of this tree carrying one
+/// checks clean — and reading it as "not straight" would walk an edge with its
+/// two ends in one place through the public door —
 /// where nothing downstream asks again, because
 /// [`Model::validate`](crate::Model::validate) reads the same list. Refusing it
 /// names the edge and is one word here to undo; letting it in is a zero-length
 /// edge inside a model somebody will go on to mesh.
 ///
+/// Written as a match with all three kinds named rather than as a `matches!`,
+/// because a wildcard that covers nothing today is what `just check-wildcards`
+/// starts counting the day it covers something: measured on that same clone,
+/// `cargo clippy -p rcad-topo --all-targets -- -W clippy::wildcard_enum_match_arm`
+/// says nothing about this line now and names it the moment there is a fourth
+/// kind. A `matches!` is invisible to the lint either way.
+///
 /// `tests/a_fourth_kind_of_run.rs` is what says a fourth kind arrived.
 fn the_ends_are_the_whole_of_it(run: &EdgeRun) -> bool {
-    !matches!(
-        run,
-        EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::PartOfWhereItCrosses { .. }
-    )
+    match run {
+        EdgeRun::Straight => true,
+        EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::PartOfWhereItCrosses { .. } => false,
+        _ => true,
+    }
 }
 
 impl Default for SolidBuilder {

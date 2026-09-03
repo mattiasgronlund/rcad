@@ -61,12 +61,18 @@
 //! not a substitute for the refusals — it is the notice that they now matter.
 //!
 //! [`SurfaceMeet`](rcad_geom::SurfaceMeet) has **no such derive**, so there is
-//! no list to ask it for and no guard of this shape to write. Nor does
-//! `just check-wildcards` move for it: a match over a `SurfaceMeet` out here
-//! cannot be exhaustive, the compiler makes every one carry a wildcard, and a
-//! wildcard already there is already counted — so a fifth shape moves no number.
-//! For the two sites in `fuse/cuts.rs` the refusal *is* the guard, which is why
-//! they were worth changing before anything could reach them.
+//! no list to ask it for and no test of this shape to write for it.
+//!
+//! `just check-wildcards` covers that half, and covers this one too. Clippy says
+//! nothing about a wildcard that covers no variant that exists, so a match
+//! naming every kind there is today, with the `_` §40 asks for underneath, is
+//! silent now and loud the day the enum grows. Measured on the same clone —
+//! `cargo clippy -p rcad-topo --all-targets -- -W clippy::wildcard_enum_match_arm`
+//! warns **56** times against this tree and **59** against the clone, and the
+//! three that arrive are `builder.rs` for the fourth run kind and `fuse/cuts.rs`
+//! and `fuse/arrange.rs` for the fifth crossing shape. Those are the three sites
+//! this file is about, and none of them would say a word if the lists were
+//! written as `matches!`, which the lint never looks inside.
 
 use rcad_geom::{EdgeRun, Plane, Point, Surface, Vector};
 use rcad_topo::{Error, SolidBuilder};
