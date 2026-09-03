@@ -192,6 +192,13 @@ impl PointsAlongACrossing {
     /// The ends are corners the model already holds, so whoever reads this puts
     /// them back at either side. An edge that needs no help at all — a straight
     /// one — gives an empty list.
+    ///
+    /// **The one exception is a run that names no end at all on a crossing that
+    /// runs on for ever** — a plane and a cone crossing in a parabola or a
+    /// hyperbola. There is no corner on that side for the model to put back and
+    /// nothing else knows where the walk was cut off, so the extreme point of
+    /// the stretch comes back with the rest. [`walk`] says which stretch and
+    /// why.
     #[must_use]
     pub fn points(&self) -> &[Point] {
         &self.points
