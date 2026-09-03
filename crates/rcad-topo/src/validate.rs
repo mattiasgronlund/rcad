@@ -2050,6 +2050,58 @@ mod tests {
         assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
     }
 
+    /// The curved twin of the two above, and the reason 90 corpus files were
+    /// refused.
+    ///
+    /// A file that says a corner is on a ball writes three decimal numbers and
+    /// the reader takes the nearest `f64` to each. The nearest `f64` to a point
+    /// on a ball is not on it — `x² + y² + z² − r²` worked out exactly is not
+    /// zero there — so the corner is provably off a surface no writer could
+    /// have put it nearer to. Sliding a pole along the axis it sits on is that
+    /// miss, and it leaves the seam plane and every count alone.
+    #[test]
+    fn a_corner_off_its_curved_face_by_no_more_than_writing_it_down_cost_is_let_through() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+        let rounding = model.what_writing_a_point_down_costs();
+
+        nudge_a_pole_off_the_ball(&mut model, rounding / 2.0);
+
+        a_clean_sweep(&model);
+    }
+
+    /// And the half that keeps the allowance from being a tolerance.
+    ///
+    /// Twice the width of the number is a corner somebody chose, and it is
+    /// still refused.
+    #[test]
+    fn a_corner_further_off_its_curved_face_than_that_is_caught() {
+        let mut model = an_empty_model();
+        model
+            .add_ball(2.0, &Isometry::identity())
+            .expect("a ball of radius two");
+        let rounding = model.what_writing_a_point_down_costs();
+
+        nudge_a_pole_off_the_ball(&mut model, rounding * 2.0);
+
+        assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// Slide a ball's north pole out along the axis it sits on.
+    fn nudge_a_pole_off_the_ball(model: &mut Model, by: f64) {
+        let pole = model
+            .data()
+            .vertices
+            .iter()
+            .find(|(_, vertex)| vertex.point.coordinates()[2] > 0.0)
+            .map(|(slot, _)| slot)
+            .expect("a ball has a north pole");
+        let was = model.data().vertices[pole].point.coordinates();
+        model.data_mut().vertices[pole].point = Point::new(was[0], was[1], was[2] + by);
+    }
+
     /// Slide the plane a ball's seam is named by along its own normal.
     fn nudge_the_seam_plane(model: &mut Model, by: f64) {
         let edge = model.data().edges.keys().next().expect("the seam");
