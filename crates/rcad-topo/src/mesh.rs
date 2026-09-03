@@ -178,16 +178,25 @@ impl SolidView<'_> {
         Ok(building.finish())
     }
 
-    /// The surfaces of the faces either side of each edge, already moved into
-    /// place.
+    /// The surfaces of the faces either side of each edge, as the arena holds
+    /// them and with the placement kept beside them rather than composed in.
+    ///
+    /// **Kept apart for [`the_surface_this_face_is_meshed_on`]'s reason.** An
+    /// edge is walked in the frame its face is meshed in, which for a placed
+    /// face is that placement's own inverse; composing the placement in here
+    /// would mean taking it straight back out again, and two movements of a
+    /// surface for nothing.
     ///
     /// One entry per *use*, so a seam — one face using one edge twice — comes
     /// back as that face's surface twice, which is exactly what
     /// [`rcad_geom::walk`] wants to be told about a seam.
-    fn surfaces_along_each_edge(self) -> HashMap<EdgeKey, SmallVec<[Surface; 2]>> {
-        let mut along: HashMap<EdgeKey, SmallVec<[Surface; 2]>> = HashMap::new();
+    fn surfaces_along_each_edge(self) -> HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>> {
+        let mut along: HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>> = HashMap::new();
         for face in self.faces() {
-            let surface = face.surface();
+            let surface = SurfaceAlongAnEdge {
+                stored: face.stored_surface(),
+                placed_at: face.location(),
+            };
             for wire in face.wires() {
                 for coedge in wire.coedges() {
                     along.entry(coedge.edge().key()).or_default().push(surface);
@@ -276,13 +285,13 @@ struct BuildingAMesh {
     along_edge: HashMap<EdgeKey, Vec<u32>>,
     triangles: Vec<MeshTriangle>,
     worst: f64,
-    along_each_edge: HashMap<EdgeKey, SmallVec<[Surface; 2]>>,
+    along_each_edge: HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
 }
 
 impl BuildingAMesh {
     fn new(
         deflection: Deflection,
-        along_each_edge: HashMap<EdgeKey, SmallVec<[Surface; 2]>>,
+        along_each_edge: HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
     ) -> Self {
         Self {
             deflection,
@@ -310,9 +319,7 @@ impl BuildingAMesh {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
-        let stored = face
-            .surface()
-            .transformed(&the_frame_this_face_is_meshed_in(face));
+        let stored = the_surface_this_face_is_meshed_on(face);
         if stored.as_plane().is_some() {
             return Ok(());
         }
@@ -425,9 +432,7 @@ impl BuildingAMesh {
 
     /// Cut one face into triangles and put them in the solid's own table.
     fn cut_up(&mut self, face: FaceView<'_>, log: &mut ProvenanceLog) -> Result<()> {
-        let stored = face
-            .surface()
-            .transformed(&the_frame_this_face_is_meshed_in(face));
+        let stored = the_surface_this_face_is_meshed_on(face);
         let room = self.deflection.length() - how_far_moving_this_face_rounds(face);
 
         let mut walked = Vec::with_capacity(face.wire_count());
@@ -668,14 +673,17 @@ impl BuildingAMesh {
     ) -> Option<f64> {
         let pole = where_this_surface_pinches(stored)?;
         let back = the_frame_this_face_is_meshed_in(face);
-        let mine = face.surface();
+        let mine = SurfaceAlongAnEdge {
+            stored: face.stored_surface(),
+            placed_at: face.location(),
+        };
         let coedge = face.wires().flat_map(WireView::coedges).next()?;
         let partner = self
             .along_each_edge
             .get(&coedge.edge().key())?
             .iter()
             .find(|surface| **surface != mine)?
-            .transformed(&back);
+            .in_the_frame(&back);
 
         let [first, second] = [0, 1].map(|step| cap.points.get(step).copied());
         let (first, second) = (first?, second?);
@@ -1561,7 +1569,7 @@ fn poles_of(wire: WireView<'_>) -> HashSet<VertexKey> {
 /// here first (§16.11, §16.10).
 fn the_two_surfaces_either_side(
     edge: EdgeView<'_>,
-    along_each_edge: &HashMap<EdgeKey, SmallVec<[Surface; 2]>>,
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
     back: &Isometry,
 ) -> Result<[Surface; 2]> {
     let sides = along_each_edge
@@ -1575,7 +1583,42 @@ fn the_two_surfaces_either_side(
             return Err(Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { edge: edge.key() });
         }
     };
-    Ok([first.transformed(back), second.transformed(back)])
+    Ok([first.in_the_frame(back), second.in_the_frame(back)])
+}
+
+/// A face's surface as the arena holds it, with where that face is placed kept
+/// beside it rather than composed in.
+#[derive(Clone, Copy, PartialEq)]
+struct SurfaceAlongAnEdge {
+    stored: Surface,
+    placed_at: Isometry,
+}
+
+impl SurfaceAlongAnEdge {
+    /// The surface seen from a frame, which for the frame a placed face is
+    /// meshed in is the stored surface itself.
+    ///
+    /// [`the_surface_this_face_is_meshed_on`] says what that branch is worth.
+    ///
+    /// **A face at no placement is moved by `back` alone and not by a
+    /// composition.** `back` is then [`a_shift_that_loses_nothing`], and
+    /// composing anything onto it — identity included — stops it being the
+    /// coordinate-at-a-time subtraction the shift's exactness rests on.
+    ///
+    /// The last line is for a face placed by something that is neither identity
+    /// nor the movement being undone, which is an edge with faces on two
+    /// differently placed shells along it. No builder makes one and
+    /// [`Model`](crate::Model) is `Deserialize`, so it is composed rather than
+    /// asserted against (§16.10).
+    fn in_the_frame(&self, back: &Isometry) -> Surface {
+        if self.placed_at == Isometry::identity() {
+            return self.stored.transformed(back);
+        }
+        if *back == self.placed_at.inverse() {
+            return self.stored;
+        }
+        self.stored.transformed(&back.compose(&self.placed_at))
+    }
 }
 
 /// Which way in space a closed edge is stored running, read at the corner it
@@ -1813,6 +1856,57 @@ fn how_far_a_mesh_point_of_this_face_rounds(face: FaceView<'_>) -> f64 {
 fn how_far_moving_this_face_rounds(face: FaceView<'_>) -> f64 {
     how_far_placing_this_face_rounds(face)
         + how_far_shifting_this_face_rounds(face, &the_frame_this_face_is_meshed_in(face))
+}
+
+/// This face's surface, in the frame the face is meshed in.
+///
+/// **Read out of the arena for a placed face, not moved there and back.** The
+/// frame a placed face is meshed in is its placement's own inverse, so moving
+/// [`FaceView::surface`] into it is that placement composed with its own
+/// inverse — the stored surface, rounded twice for nothing.
+///
+/// **The two roundings were not free and nothing charged for them.** A movement
+/// carries a surface by carrying the numbers that place it, and each of those
+/// strays:
+///
+/// - A ball is placed by its centre alone, and a centre is a point, so one
+///   movement strays [`Isometry::POINT_ROUNDOFF`] of the largest number
+///   involved and the round trip strays twice that — `36 · f64::EPSILON · L`.
+/// - A pipe, a cone and a ring are placed by a point **and a direction**. The
+///   direction is turned by the same rotation arithmetic with the shift left
+///   off, so it strays about as much of its own length, which is one; out at
+///   `reach` from the placing point that is a displacement of the same size
+///   again. So one movement strays up to `2 · Isometry::POINT_ROUNDOFF · L` and
+///   the round trip up to `4 · Isometry::POINT_ROUNDOFF · L` —
+///   `72 · f64::EPSILON · L`.
+///
+/// [`how_far_placing_this_face_rounds`] charges `Isometry::POINT_ROUNDOFF · L`
+/// for carrying a mesh *point* back out to where the solid sits, and that is the
+/// only placement term in the floor. The surface drifting under the point is a
+/// second error of the same kind and up to four times the size, and
+/// [`Mesh::deviation`] did not cover it. §41.8 item 1, §41.11 item 19.
+///
+/// **Neither the `256 · f64::EPSILON` of [`Surface::ROUND_TRIP_ROUNDOFF`] nor
+/// the `18 · f64::EPSILON` §41.8 wrote down is the cost of this.** That constant
+/// is for a round trip through a surface's *own two coordinates*, which has
+/// trigonometry in it and is what `fuse::select` charges; this one is two
+/// movements and nothing else.
+///
+/// The worst a search over four axes, fifteen angles and four distances can find
+/// is `4 · f64::EPSILON · L`, and 156 of its 480 faces were moved at all;
+/// `a_turned_curved_face_is_not_charged_for_a_round_trip_it_does_not_make`
+/// measures both and prints them. A quarter turn about `(1, 2, 3)` takes a bar's
+/// `(0, 0, 1)` axis to `(−1.1e−16, 0, 1 + 2ε)` — tilted, and no longer a unit
+/// direction.
+///
+/// A face at no placement at all is a different thing: there is nothing to undo,
+/// and the movement is [`a_shift_that_loses_nothing`], which is exact.
+fn the_surface_this_face_is_meshed_on(face: FaceView<'_>) -> Surface {
+    if face.location() != Isometry::identity() {
+        return face.stored_surface();
+    }
+    face.surface()
+        .transformed(&the_frame_this_face_is_meshed_in(face))
 }
 
 /// The frame this face's own geometry is worked out in.
@@ -2056,7 +2150,7 @@ fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceL
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{EdgeRun, Orientation, Plane, Scale, Vector};
+    use rcad_geom::{Axis, EdgeRun, Orientation, Plane, Scale, Vector};
     use rcad_predicates::{Decision, Interval};
 
     use super::*;
@@ -2601,6 +2695,155 @@ mod tests {
             refusal,
             Error::AWireWillNotLieFlatOnItsFace { .. }
         ));
+    }
+
+    /// A placed face is meshed on the surface the arena holds, read out of it
+    /// rather than moved out by the placement and straight back in again.
+    ///
+    /// **The round trip was a gap and not a limit.** [`FaceView::surface`] moves
+    /// the stored surface out by the face's placement, and
+    /// [`the_frame_this_face_is_meshed_in`] for a placed face is that placement's
+    /// inverse — so the mesher moved it straight back. Both movements round by
+    /// [`Isometry::POINT_ROUNDOFF`], and what came back was a surface a few ulps
+    /// off the one the arena holds. Every mesh point of that face was put on the
+    /// wrong one of the two.
+    ///
+    /// **Nothing charged for it.** The floor under a deflection charges
+    /// [`how_far_placing_this_face_rounds`] for carrying a mesh point back out to
+    /// where the solid sits, and that is one movement of a *point*, worth
+    /// `Isometry::POINT_ROUNDOFF · L`. The surface having moved under the point
+    /// is a second error of the same kind, worth up to twice that because it is
+    /// two movements, and no term covered it — so [`Mesh::deviation`] was
+    /// understating what a mesh point costs. §41.8 item 1, §41.11 item 19.
+    ///
+    /// Reading the stored surface makes that stray **exactly zero**, so the
+    /// claim here is an equality and not a bound: there is no constant to
+    /// publish.
+    ///
+    /// **Two roads that must differ.** An equality that holds because both sides
+    /// walked the same road proves nothing, so this also measures the road not
+    /// taken and fails if the round trip never moves a surface at all. And it
+    /// checks the stray against the ceiling the derivation gives it — two
+    /// movements of a point, `36 · f64::EPSILON · L` — because a stray past that
+    /// would mean the derivation is wrong about what a round trip costs, however
+    /// dead the code that makes one now is.
+    ///
+    /// **The stray is not measured by sampling** and
+    /// [`how_far_apart`](tests::how_far_apart) says why.
+    #[test]
+    fn a_turned_curved_face_is_not_charged_for_a_round_trip_it_does_not_make() {
+        let leaning = [
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, -1.0, 0.0),
+            Vector::new(7.0, 1.0, -3.0),
+        ]
+        .map(|way| Axis::new(Point::origin(), way).expect("a direction with length"));
+        let mut compared = 0_u32;
+        let mut moved = 0_u32;
+        let mut worst = 0.0_f64;
+
+        for axis in &leaning {
+            for sixteenths in 1..16 {
+                for away in [0.0, 1.0, 1000.0, 1e6] {
+                    let turn = Isometry::rotation(
+                        axis,
+                        f64::from(sixteenths) * core::f64::consts::TAU / 16.0,
+                    )
+                    .expect("an axis and an angle");
+                    let placement = Isometry::translation(Vector::new(away, -away, away))
+                        .expect("a finite offset")
+                        .compose(&turn);
+
+                    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+                    let ball = model.add_ball(2.0, &placement).expect("a ball");
+                    let bar = model.add_round_bar(3.0, 7.0, &placement).expect("a bar");
+
+                    for solid in [ball, bar] {
+                        for face in model.solid(solid).faces() {
+                            if face.surface().as_plane().is_some() {
+                                continue;
+                            }
+                            assert_ne!(
+                                face.location().rotation_quaternion(),
+                                Isometry::identity().rotation_quaternion(),
+                                "a placement that does not turn is not what this is about"
+                            );
+                            compared += 1;
+                            assert_eq!(
+                                the_surface_this_face_is_meshed_on(face),
+                                face.stored_surface(),
+                                "a face placed by {placement:?} is meshed on a surface \
+                             that is not the one the arena holds"
+                            );
+
+                            let round_tripped = face
+                                .surface()
+                                .transformed(&the_frame_this_face_is_meshed_in(face));
+                            let reach = how_far_the_points_of_reach(
+                                face,
+                                &the_frame_this_face_is_meshed_in(face),
+                            );
+                            let stray =
+                                how_far_apart(&face.stored_surface(), &round_tripped, reach);
+                            if stray > 0.0 {
+                                moved += 1;
+                            }
+                            worst = worst.max(stray / (f64::EPSILON * reach));
+                        }
+                    }
+                }
+            }
+        }
+
+        let charged = Isometry::POINT_ROUNDOFF / f64::EPSILON;
+        println!(
+            "{compared} placed curved faces, {moved} of them on a surface the \
+             round trip moved. Worst stray {worst} · f64::EPSILON · L, against \
+             {charged} · f64::EPSILON · L charged for placing a mesh point and \
+             a ceiling of {} for the stray",
+            4.0 * charged
+        );
+        assert!(compared >= 400, "only {compared} placed curved faces");
+        assert!(
+            moved > 0,
+            "the round trip moved no surface at all, so the equality above is \
+             comparing a road with itself and proves nothing"
+        );
+        assert!(
+            worst <= 4.0 * charged,
+            "the round trip strayed {worst} · f64::EPSILON · L, past the \
+             ceiling the derivation gives it"
+        );
+    }
+
+    /// How far apart two surfaces of the same kind sit in space, out to `reach`
+    /// from the point that places them.
+    ///
+    /// **Read off their own numbers and not sampled, and the first draft of this
+    /// was sampled and wrong.** A pipe picks the two directions across itself
+    /// from its axis, so a tilt of a tenth of an ulp can move where `u = 0`
+    /// sits by a lot; two points at the same `(u, v)` then lie far apart while
+    /// the two surfaces lie on top of each other. Sampled that way, a bar of
+    /// radius 3 came out **4.2** from itself. That is the parametrisation
+    /// moving, not the surface.
+    ///
+    /// Moving the placing point moves every point of the surface by as much.
+    /// Tilting the axis moves a point `reach` away by `reach` times the tilt,
+    /// and at these sizes the chord between the two directions is the tilt. A
+    /// radius that differs moves the skin by the difference.
+    fn how_far_apart(one: &Surface, other: &Surface, reach: f64) -> f64 {
+        match (one, other) {
+            (Surface::Sphere(here), Surface::Sphere(there)) => {
+                here.centre().distance_to(there.centre()) + (here.radius() - there.radius()).abs()
+            }
+            (Surface::Cylinder(here), Surface::Cylinder(there)) => {
+                here.axis().origin().distance_to(there.axis().origin())
+                    + reach * (here.axis().direction() - there.axis().direction()).length()
+                    + (here.radius() - there.radius()).abs()
+            }
+            (here, there) => panic!("nothing here compares {here:?} against {there:?}"),
+        }
     }
 
     /// §16.10 for [`how_far_one_coordinate_can_be_shifted_for_nothing`]: the

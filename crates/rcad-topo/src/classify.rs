@@ -41,8 +41,9 @@
 //! straddled. Under a tolerant policy the same query resolves instead, and the
 //! log picks up a record of what was accepted to get there.
 
-use rcad_geom::{Cone, Cylinder, EdgeRun, Point, Sphere, Surface};
-use rcad_predicates::expansion::{product_is_exact, two_product};
+use rcad_geom::{
+    EdgeRun, MeetsAt, Point, Surface, WhereALineMeetsIt, where_a_line_meets_a_surface,
+};
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
 };
@@ -96,19 +97,20 @@ pub enum Containment {
     /// ray was ever counted.
     ///
     /// **A torus, and nothing else.** Where a ray meets a plane, a ball, a pipe
-    /// or a cone is one equation in one unknown of degree at most two, and every
-    /// one of them is solved here. A torus is a quartic and there are up to four
-    /// meets rather than two.
+    /// or a cone is answered whatever the ray's own numbers are.
+    /// `rcad_geom::where_a_line_meets_a_surface` answers a torus too, but only
+    /// for a line whose coordinates are exact, and [`SolidView::classify_point`]
+    /// gives it one — "a corner on the lattice", in that function's own words —
+    /// only when the point being classified and the ray built from it both land
+    /// on numbers a line can be written out of exactly. Most rays do not, and
+    /// this is what they get instead.
     ///
     /// Deliberately its own answer and not
     /// [`Containment::CannotFollowAFacesTrimming`], which says a *trimming*
     /// could not be followed, and not [`Containment::Undecidable`], which says
     /// every predicate was asked and none could prove an answer. Here the
-    /// question was never put, and no policy makes it go away
+    /// question was never answered, and no policy makes it go away
     /// (`docs/decisions.md` §4.2).
-    ///
-    /// A **gap**, and `rcad_geom::Error::WhereALineMeetsATorusIsAQuartic` names
-    /// the same one from the other side and lists the family of fixes.
     CannotFireARayAtAFacesSurface {
         /// Which face.
         face: FaceKey,
@@ -326,13 +328,6 @@ impl SolidView<'_> {
         log: &mut ProvenanceLog,
     ) -> Result<(), Containment> {
         let surface = face.surface();
-        // **The whole face at once, before a single root is worked out.** A
-        // partly counted face is worse than an uncounted one: a ray that misses
-        // two of a torus's four meets comes back with a winding number that is
-        // confidently wrong.
-        if matches!(surface, Surface::Torus(_)) {
-            return Err(Containment::CannotFireARayAtAFacesSurface { face: face.key() });
-        }
         let from = point.enclosure();
         let along = gap_enclosing(from, target);
 
@@ -356,8 +351,49 @@ impl SolidView<'_> {
         } else {
             1
         };
-        for step in where_the_ray_meets(&surface, from, along) {
-            let at = match step {
+        let steps = match where_a_line_meets_a_surface(from, along, &surface, policy, log) {
+            Ok(WhereALineMeetsIt::Nowhere) => return Ok(()),
+            // The ray's line lies in the surface itself, so nothing here counts
+            // a crossing rather than a run alongside it — a graze, the same way
+            // a plane's own near-parallel ray already was.
+            Ok(WhereALineMeetsIt::MoreThanAPoint) => {
+                tally.grazed(0.0);
+                return Ok(());
+            }
+            Ok(WhereALineMeetsIt::At(steps)) => steps,
+            // `WhereALineMeetsIt` grows a variant at every milestone; whatever
+            // the new one says, nothing this ray found can be trusted with it.
+            Ok(_) => {
+                tally.grazed(0.0);
+                return Ok(());
+            }
+            // A torus needs its line exact (`Error::WhereALineMeetsARingNeedsTheLineExactly`)
+            // and refuses everywhere else too, which is what
+            // `Containment::CannotFireARayAtAFacesSurface` already means: no ray
+            // was ever put to this face's surface. A corner sitting exactly on
+            // the lattice gives an exact line, reaches `Ok` above, and is
+            // answered rather than refused.
+            Err(_) if matches!(surface, Surface::Torus(_)) => {
+                return Err(Containment::CannotFireARayAtAFacesSurface { face: face.key() });
+            }
+            // A plane, a ball, a pipe or a cone that could not tell is what
+            // `Meeting::CouldNotTell` already meant: nothing this ray says can be
+            // trusted, so it is grazed and the next of three targets gets a go.
+            Err(_) => {
+                tally.grazed(0.0);
+                return Ok(());
+            }
+        };
+        for step in steps {
+            let meeting = match step {
+                MeetsAt::Here(t) => where_it_lands(t, from, along),
+                // A touch no `f64` names is not a meeting and not a miss — it is
+                // grazed the same as a discriminant that straddled zero.
+                // `MeetsAt` grows a variant at every milestone too, and an
+                // unknown one gets the same treatment.
+                MeetsAt::MaybeATouch { .. } | _ => Meeting::CouldNotTell,
+            };
+            let at = match meeting {
                 Meeting::Ahead { at } => at,
                 Meeting::Behind => continue,
                 Meeting::CouldNotTell => {
@@ -583,11 +619,10 @@ fn every_side_of_it_is_straight(face: FaceView<'_>) -> bool {
     })
 }
 
-/// Where a ray meets one surface, at one of the two roots.
-///
-/// A plane has one root and fills its second place with [`Meeting::Behind`],
-/// which is what "there is nothing to count here" already means to every reader
-/// of the loop.
+/// Where a ray meets one surface, at one of the steps
+/// [`rcad_geom::where_a_line_meets_a_surface`] found along the line — turned
+/// from a step measured along the whole line into a fact about the *ray*, which
+/// only looks ahead of where it started.
 enum Meeting {
     /// Ahead of the point being classified, somewhere in this box.
     Ahead {
@@ -605,160 +640,6 @@ enum Meeting {
 fn gap_enclosing(from: [Interval; 3], there: Point) -> [Interval; 3] {
     let there = there.coordinates();
     core::array::from_fn(|axis| Interval::exactly(there[axis]) - from[axis])
-}
-
-/// Where the ray from `from` along `along` meets `surface`.
-///
-/// **One equation in one unknown, and nearly the same one three times** —
-/// §31.2's row 11. Put `x = from + t·along` into `normal · x − offset` for a
-/// plane, into `|x − centre|² − radius²` for a ball, or into
-/// `|(x − origin) × direction|² − radius²` for a pipe. The last two come out
-/// `a·t² + b·t + k`, the pipe being the ball with the axis crossed out of every
-/// vector first; the plane comes out with no square in it and so has one root
-/// rather than two. All three expressions are the ones [`side_of_surface`]
-/// already decides signs of, so the surface a root is worked out from and the
-/// surface it is later tested against are the same one written the same way.
-///
-/// **A plane reaches here and it is not a mistake.** A flat face whose every
-/// side is straight is counted by its triangles, but a bar's cap is a plane and
-/// a circle and has no triangles to count (§35.4), so it comes this way.
-///
-/// The roots are the only thing in the whole of classification that is *built*
-/// rather than read out of a model, and they are built as boxes and handed on as
-/// boxes. A ray that grazes the surface leaves a discriminant that straddles
-/// zero, and that is [`Meeting::CouldNotTell`] rather than a guess at a tangent.
-///
-/// # Panics
-///
-/// On a surface kind this has not been taught. [`Surface`] grows a variant at
-/// every milestone.
-fn where_the_ray_meets(
-    surface: &Surface,
-    from: [Interval; 3],
-    along: [Interval; 3],
-) -> [Meeting; 2] {
-    if let Surface::Plane(flat) = surface {
-        let normal = exactly(flat.normal().components());
-        let steepness = dot_enclosing(along, normal);
-        if steepness.contains_zero() {
-            return [Meeting::CouldNotTell, Meeting::Behind];
-        }
-        let height = dot_enclosing(from, normal) - Interval::exactly(flat.offset());
-        return [
-            where_it_lands(quotient(-height, steepness), from, along),
-            Meeting::Behind,
-        ];
-    }
-    let (a, b, k) = match surface {
-        Surface::Sphere(ball) => how_a_ray_meets_a_ball(ball, from, along),
-        Surface::Cylinder(pipe) => how_a_ray_meets_a_pipe(pipe, from, along),
-        Surface::Cone(cone) => how_a_ray_meets_a_cone(cone, from, along),
-        // A torus is turned away a whole face earlier, in
-        // `count_where_the_ray_meets_it`, because a quartic has no `(a, b, k)`
-        // to hand back and a half-counted face is a wrong winding number.
-        other @ Surface::Torus(_) | other => {
-            panic!("this crate cannot fire a ray at {other:?}")
-        }
-    };
-
-    let twice_a = Interval::exactly(2.0) * a;
-    if twice_a.contains_zero() {
-        return [Meeting::CouldNotTell, Meeting::CouldNotTell];
-    }
-    // **A point already on the surface is a root, and the quadratic formula
-    // loses it.** With `k` exactly zero the two roots are `0` and `−b/a`, and
-    // reading them off `(−b ± √(b²))/2a` instead costs the first one its
-    // exactness: `√` of an interval steps outwards, so the root that ought to be
-    // nothing at all comes back as a box straddling zero, and every point on a
-    // bar's wall grazes its own face. Factoring is not an optimisation here, it
-    // is the difference between an answer and a refusal.
-    if k.lo() == 0.0 && k.hi() == 0.0 {
-        return [
-            Meeting::Behind,
-            where_it_lands(quotient(-b, a), from, along),
-        ];
-    }
-    let discriminant = b * b - Interval::exactly(4.0) * a * k;
-    if discriminant.hi() < 0.0 {
-        return [Meeting::Behind, Meeting::Behind];
-    }
-    if discriminant.contains_zero() {
-        return [Meeting::CouldNotTell, Meeting::CouldNotTell];
-    }
-    let spread = root_enclosing(discriminant);
-    [-b - spread, -b + spread].map(|top| where_it_lands(quotient(top, twice_a), from, along))
-}
-
-/// `a`, `b` and `k` of the quadratic a ray puts a ball to.
-fn how_a_ray_meets_a_ball(
-    ball: &Sphere,
-    from: [Interval; 3],
-    along: [Interval; 3],
-) -> (Interval, Interval, Interval) {
-    let out = negated(gap_enclosing(from, ball.centre()));
-    let radius = Interval::exactly(ball.radius());
-    (
-        dot_enclosing(along, along),
-        Interval::exactly(2.0) * dot_enclosing(along, out),
-        dot_enclosing(out, out) - radius * radius,
-    )
-}
-
-/// `a`, `b` and `k` of the quadratic a ray puts a pipe to.
-///
-/// The same three as a ball's, with the axis direction crossed out of both
-/// vectors first — which is exactly how [`Cylinder`]'s own side predicate
-/// measures the distance from the axis, so the two agree by construction rather
-/// than by a rounding.
-fn how_a_ray_meets_a_pipe(
-    pipe: &Cylinder,
-    from: [Interval; 3],
-    along: [Interval; 3],
-) -> (Interval, Interval, Interval) {
-    let direction = exactly(pipe.axis().direction().components());
-    let out = cross_enclosing(
-        negated(gap_enclosing(from, pipe.axis().origin())),
-        direction,
-    );
-    let across = cross_enclosing(along, direction);
-    let radius = Interval::exactly(pipe.radius());
-    (
-        dot_enclosing(across, across),
-        Interval::exactly(2.0) * dot_enclosing(across, out),
-        dot_enclosing(out, out) - radius * radius,
-    )
-}
-
-/// `a`, `b` and `k` of the quadratic a ray puts a cone to.
-///
-/// The pipe's three with the axial term put back: `‖x × w‖² − slope²(x·w)²`
-/// against the pipe's `‖x × w‖² − r²`, which is the same cross product read the
-/// same way, so the surface a root is worked out from is the one
-/// [`side_of_surface`] is later asked about.
-///
-/// **`a` can be below zero here and cannot for a ball or a pipe**, because
-/// `slope²(D·w)²` can beat `‖D × w‖²` — every ray pointing further into the cone
-/// than its own rulings do. The quadratic is solved the same way either way; the
-/// caller's comment says what changes.
-fn how_a_ray_meets_a_cone(
-    cone: &Cone,
-    from: [Interval; 3],
-    along: [Interval; 3],
-) -> (Interval, Interval, Interval) {
-    let direction = exactly(cone.axis().direction().components());
-    let out = negated(gap_enclosing(from, cone.apex()));
-    let across = cross_enclosing(along, direction);
-    let sideways = cross_enclosing(out, direction);
-    let slope = Interval::exactly(cone.slope());
-    let spread = slope * slope;
-    let up_the_ray = dot_enclosing(along, direction);
-    let up_the_gap = dot_enclosing(out, direction);
-    (
-        dot_enclosing(across, across) - spread * up_the_ray * up_the_ray,
-        Interval::exactly(2.0)
-            * (dot_enclosing(across, sideways) - spread * up_the_ray * up_the_gap),
-        dot_enclosing(sideways, sideways) - spread * up_the_gap * up_the_gap,
-    )
 }
 
 /// What a root at `t` along the ray comes to.
@@ -788,15 +669,14 @@ fn where_it_lands(t: Interval, from: [Interval; 3], along: [Interval; 3]) -> Mee
 ///
 /// # Panics
 ///
-/// On a surface this has not been taught, for the reason
-/// [`where_the_ray_meets`] gives.
+/// On a surface [`Surface`] has not grown yet.
 fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
     match surface {
         Surface::Plane(flat) => exactly(flat.normal().components()),
         // **Out of the middle and not towards it.** `gap_enclosing(a, b)` is the
         // step *from* `a` *to* `b`, so the step from the centre to the point is
-        // the one turned round — the same way round `where_the_ray_meets` reads
-        // it a few lines up. Taken the other way this is the gradient of the
+        // the one turned round — the same way round `rcad_geom::where_a_line_meets_a_surface`
+        // reads it. Taken the other way this is the gradient of the
         // negated expression, and then a ray that enters a curved face counts as
         // leaving it. It cancels for a solid whose faces are *all* curved, which
         // is why a ball and a bar's own wall never showed it: what shows it is a
@@ -831,9 +711,9 @@ fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
         }
         // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre`: the
         // quartic's own gradient, divided by four so nothing is normalized.
-        // Unreachable while a torus face turns the whole ray away, and written
-        // out rather than stubbed so that the day it is reachable the answer is
-        // right rather than absent.
+        // Reached for a corner sitting exactly on the lattice, where
+        // `rcad_geom::where_a_line_meets_a_surface` can answer a torus rather
+        // than refuse it.
         Surface::Torus(ring) => {
             let direction = exactly(ring.axis().direction().components());
             let out = negated(gap_enclosing(at, ring.centre()));
@@ -866,107 +746,6 @@ fn dot_enclosing(u: [Interval; 3], v: [Interval; 3]) -> Interval {
     (0..3).fold(Interval::exactly(0.0), |so_far, axis| {
         so_far + u[axis] * v[axis]
     })
-}
-
-/// `u × v` as a box.
-fn cross_enclosing(u: [Interval; 3], v: [Interval; 3]) -> [Interval; 3] {
-    core::array::from_fn(|axis| {
-        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
-        u[next] * v[after] - u[after] * v[next]
-    })
-}
-
-/// `√value` as a box, for a value already shown to be above zero.
-///
-/// **A step outwards only where one is needed**, the same care `rcad-geom`'s own
-/// enclosure takes and for the same reason: widening every root costs the exact
-/// cases their exactness, and an exact case here is a ray that meets a surface at
-/// a place `f64` can write down. `f64::sqrt` is correctly rounded, so squaring
-/// what it hands back through [`two_product`] — which is exact — says which side
-/// of the true root it landed, and only then is a step taken.
-fn root_enclosing(value: Interval) -> Interval {
-    let lo = rounded_down(value.lo().max(0.0));
-    let hi = rounded_up(value.hi());
-    Interval::new(lo.max(0.0), hi).unwrap_or(Interval::ENTIRE)
-}
-
-/// The largest `f64` at or below `√value`.
-fn rounded_down(value: f64) -> f64 {
-    let root = value.sqrt();
-    if squared_is_at_most(root, value) {
-        root
-    } else {
-        root.next_down()
-    }
-}
-
-/// The smallest `f64` at or above `√value`.
-fn rounded_up(value: f64) -> f64 {
-    let root = value.sqrt();
-    if squared_is_at_most(root, value) && !squared_is_exactly(root, value) {
-        root.next_up()
-    } else {
-        root
-    }
-}
-
-/// Whether `root · root` is at or below `value`, exactly.
-fn squared_is_at_most(root: f64, value: f64) -> bool {
-    if !product_is_exact(root, root) {
-        return false;
-    }
-    let (high, low) = two_product(root, root);
-    high < value || (high == value && low <= 0.0)
-}
-
-/// Whether `root · root` is exactly `value`.
-fn squared_is_exactly(root: f64, value: f64) -> bool {
-    if !product_is_exact(root, root) {
-        return false;
-    }
-    let (high, low) = two_product(root, root);
-    high == value && low == 0.0
-}
-
-/// `over / under` as a box, for a divisor already shown to be clear of zero.
-///
-/// **A step outwards only where one is needed**, which is the same care
-/// `rcad-geom`'s own enclosure takes about roots and for the same reason: a ray
-/// that starts exactly on a plane divides a numerator of nothing, and a widened
-/// nothing is a box straddling zero, which reads as a ray that might be about to
-/// cross the very face it is standing on.
-fn quotient(over: Interval, under: Interval) -> Interval {
-    let ends = [
-        divided(over.lo(), under.lo()),
-        divided(over.lo(), under.hi()),
-        divided(over.hi(), under.lo()),
-        divided(over.hi(), under.hi()),
-    ];
-    let lo = ends.iter().map(|end| end.0).fold(f64::INFINITY, f64::min);
-    let hi = ends
-        .iter()
-        .map(|end| end.1)
-        .fold(f64::NEG_INFINITY, f64::max);
-    Interval::new(lo, hi).unwrap_or(Interval::ENTIRE)
-}
-
-/// `over / under` as the two ends of a box holding it.
-///
-/// The two ends are the same number when the division came out exact, and that
-/// is *proved* rather than assumed: the quotient is multiplied back out through
-/// [`two_product`], which is exact, and compared against what was divided.
-fn divided(over: f64, under: f64) -> (f64, f64) {
-    let quotient = over / under;
-    if !quotient.is_finite() {
-        return (f64::NEG_INFINITY, f64::INFINITY);
-    }
-    if product_is_exact(quotient, under) {
-        let (high, low) = two_product(quotient, under);
-        if high == over && low == 0.0 {
-            return (quotient, quotient);
-        }
-    }
-    (quotient.next_down(), quotient.next_up())
 }
 
 /// Which side of the plane through `a`, `b` and `c` the point `d` is on.
