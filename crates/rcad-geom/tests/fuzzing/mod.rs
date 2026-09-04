@@ -447,14 +447,12 @@ fn scaled(surface: &Surface, by: i32) -> Option<Surface> {
         )
         .ok()
         .map(Surface::Sphere),
-        Surface::Cylinder(pipe) => {
-            Cylinder::new(
-                scaled_axis(pipe.axis(), factor)?,
-                exactly_scaled(pipe.radius(), factor)?,
-            )
-            .ok()
-            .map(Surface::Cylinder)
-        }
+        Surface::Cylinder(pipe) => Cylinder::new(
+            scaled_axis(pipe.axis(), factor)?,
+            exactly_scaled(pipe.radius(), factor)?,
+        )
+        .ok()
+        .map(Surface::Cylinder),
         Surface::Cone(cone) => Cone::new(scaled_axis(cone.axis(), factor)?, cone.slope())
             .ok()
             .map(Surface::Cone),
