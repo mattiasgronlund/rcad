@@ -46,6 +46,7 @@
 //! solid each, and asked there. The real model sees the finished answer or
 //! nothing at all.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
@@ -1754,11 +1755,7 @@ impl Corners {
             MeetPoint::Existing { vertex, .. } => CornerName::Vertex(vertex.slot_in(model.id())),
             MeetPoint::OfThreeSurfaces {
                 surfaces, which, ..
-            } => {
-                let mut named = surfaces.map(|surface| name_of_surface_bits(&surface));
-                named.sort_unstable();
-                CornerName::Meet(named, *which)
-            }
+            } => CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
             MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => {
                 let mut named =
                     carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
@@ -1771,11 +1768,12 @@ impl Corners {
                 ..
             } => CornerName::Pole(name_of_surface_bits(surface), *at_the_top),
         };
-        if let Some(&already) = self.named.get(&name) {
-            return already;
-        }
         let point = end.point();
         let at = middle_of(point);
+        if let Some(&already) = self.named.get(&name) {
+            self.settle_on_the_lower_rounding(already, at, point.uncertainty());
+            return already;
+        }
         let was = match end {
             MeetPoint::Existing { vertex, .. } => Some(*vertex),
             MeetPoint::OfThreeSurfaces { .. }
@@ -1801,6 +1799,71 @@ impl Corners {
         self.named.insert(name, index);
         index
     }
+
+    /// Keep the lower of two roundings of one corner, so that which face asked
+    /// first does not decide where it is.
+    ///
+    /// Two spellings of one name solve for the same corner and Cramer's rule
+    /// rounds the two a bit apart — [`names_of_the_three_surfaces`] says how a
+    /// plane comes to be spelled two ways, and sorting the three planes puts a
+    /// reversed one in a different row, which permutes the solve. Both answers
+    /// are inside the box the meet handed back and neither is truer than the
+    /// other, so all that is wanted is that the same one wins every time. First
+    /// come does not do it: swapping the two sides of a fuse walks the faces in
+    /// the other order and the other rounding wins, and a `fuse(A, B)` whose
+    /// corner sits a bit off `fuse(B, A)`'s is exactly what §17.4 forbids.
+    ///
+    /// **This is not a coordinate deciding what is one corner.** The name has
+    /// already decided that. It picks between two roundings of a corner both
+    /// spellings agree on, and the wobble carries how far apart they were.
+    fn settle_on_the_lower_rounding(&mut self, corner: usize, at: Point, uncertainty: f64) {
+        let made = &mut self.made[corner];
+        made.wobble = made.wobble.max(uncertainty);
+        let lower = at
+            .coordinates()
+            .iter()
+            .zip(made.point.coordinates().iter())
+            .map(|(mine, theirs)| mine.total_cmp(theirs))
+            .find(|order| order.is_ne())
+            .is_some_and(Ordering::is_lt);
+        if lower {
+            made.point = at;
+            self.at.insert(exactly_at(at), corner);
+        }
+    }
+}
+
+/// The three names in a [`CornerName::Meet`], sorted so the three arrive the
+/// same way round whichever face asked.
+///
+/// **Three planes are named whichever way each of them faces** (§48, W5). Two
+/// solids flush against each other work the plane they share out separately and
+/// one of them names it reversed, so a corner on that plane is solved from
+/// `P, Q, R` by one face and from `−P, Q, R` by another. The two are one corner
+/// and Cramer's rule rounds them a bit or two apart, so the coordinates do not
+/// join them either: the answer got two corners, the edge between them split in
+/// two, and each half was left with one face along it. It is the hazard
+/// [`name_of_the_surface_either_way_round`] was written for, arriving at the
+/// corners instead of at the edges.
+///
+/// **A triple with a curved surface in it is named as each face spells it**, and
+/// that is not caution left in for its own sake. Three surfaces meet at up to
+/// four points; `which` numbers them along the line the two planes cross in; and
+/// reversing a plane reverses that line, so the same point is `which: 0` under
+/// one spelling and `which: 1` under the other. Folding the spellings together
+/// there would name two *different* corners alike, which is worse than leaving
+/// two names on one. Three planes have no such point to confuse: they meet at
+/// exactly one place ([`MeetOfThree::At`](rcad_geom::MeetOfThree) with a single
+/// entry), so `which` is always zero and the three names settle the corner on
+/// their own.
+fn names_of_the_three_surfaces(surfaces: &[Surface; 3]) -> [[u64; 9]; 3] {
+    let mut named = if surfaces.iter().all(|surface| surface.as_plane().is_some()) {
+        surfaces.map(|surface| name_of_the_surface_either_way_round(&surface))
+    } else {
+        surfaces.map(|surface| name_of_surface_bits(&surface))
+    };
+    named.sort_unstable();
+    named
 }
 
 /// A point as three bit patterns, for finding two corners that are the same
@@ -2186,7 +2249,8 @@ mod tests {
     use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::{
-        Point, Vector, the_crossing_of_these_runs_straight, the_half_space_both_ends_are_on,
+        Point, Vector, names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
+        the_half_space_both_ends_are_on,
     };
 
     /// Why every pair with a ball or a ring on it is answered `false`.
@@ -2434,5 +2498,65 @@ mod tests {
             "an arc this short has a chord along its own tangent"
         );
         assert!(the_half_space_both_ends_are_on(facing, [from, to]).is_none());
+    }
+
+    /// Two solids flush against each other name the plane they share opposite
+    /// ways round, and a corner on it must still be one corner.
+    ///
+    /// §48, W5. The corner is where `x = 3`, `y = 0` and `z = 0` meet; one face
+    /// arrives with `x = 3` facing towards `+x` and the other with it facing
+    /// towards `−x`, which is the same plane with all four coefficients negated.
+    /// Nothing about the corner has moved. This holds no coordinates at all —
+    /// the two faces solve for it separately and Cramer's rule rounds the two
+    /// answers a bit or two apart, which is exactly why the join is by name.
+    #[test]
+    fn one_of_three_planes_facing_the_other_way_names_the_same_corner() {
+        let at = |normal, through| {
+            Plane::from_point_and_normal(through, normal).expect("a normal with length")
+        };
+        let wall = at(Vector::new(1.0, 0.0, 0.0), Point::new(3.0, 0.0, 0.0));
+        let floor = at(Vector::new(0.0, 0.0, 1.0), Point::new(0.0, 0.0, 0.0));
+        let side = at(Vector::new(0.0, 1.0, 0.0), Point::new(0.0, 0.0, 0.0));
+
+        let one_way = [wall, floor, side].map(Surface::Plane);
+        let other_way = [wall.reversed(), floor, side].map(Surface::Plane);
+
+        assert_ne!(
+            wall.coefficients(),
+            wall.reversed().coefficients(),
+            "a plane turned round is different numbers, which is the whole difficulty"
+        );
+        assert_eq!(
+            names_of_the_three_surfaces(&one_way),
+            names_of_the_three_surfaces(&other_way)
+        );
+    }
+
+    /// A triple with a ball in it keeps each face's spelling, and that is on
+    /// purpose.
+    ///
+    /// Two planes and a ball meet at two points, `which` numbers them along the
+    /// line the planes cross in, and turning one of the planes round turns that
+    /// line round — so the same point is `which: 0` under one spelling and
+    /// `which: 1` under the other. Folding the two spellings together there
+    /// would name two different corners alike.
+    #[test]
+    fn a_ball_in_the_triple_is_named_as_each_face_spells_it() {
+        let at = |normal, through| {
+            Plane::from_point_and_normal(through, normal).expect("a normal with length")
+        };
+        let floor = at(Vector::new(0.0, 0.0, 1.0), Point::new(0.0, 0.0, 0.0));
+        let side = at(Vector::new(0.0, 1.0, 0.0), Point::new(0.0, 0.0, 0.0));
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(0.0, 0.0, 0.0), 5.0).expect("a ball of radius five"),
+        );
+
+        let one_way = [Surface::Plane(floor), Surface::Plane(side), ball];
+        let other_way = [Surface::Plane(floor.reversed()), Surface::Plane(side), ball];
+
+        assert_ne!(
+            names_of_the_three_surfaces(&one_way),
+            names_of_the_three_surfaces(&other_way)
+        );
     }
 }

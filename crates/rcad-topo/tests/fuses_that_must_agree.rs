@@ -604,12 +604,23 @@ fn swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit() {
 /// only thing between the two rows is that the rotation leaves nothing exactly
 /// representable.
 ///
-/// This is pinned rather than fixed. §48.4 gives the fuse to nobody this wave,
-/// and the lane that found it may only write this file — so what it can do is
-/// stop the suite lying about it, which is
-/// [`both_agree_about_whether_there_is_an_answer`], and say here exactly what
-/// today's kernel does. **The day it is fixed this test fails**, and what
-/// replaces it is deleting that check's exemption for this family.
+/// This is pinned rather than fixed, and what is left of it is now named.
+/// **Two** things split one corner of this pair in two, and only one of them is
+/// still here:
+///
+/// - The two solids are flush on a plane and name it opposite ways round, so a
+///   corner on it was solved from `P, Q, R` by one face and from `−P, Q, R` by
+///   another. That is gone: three planes are named whichever way each of them
+///   faces now (§48, W5, `assemble::names_of_the_three_surfaces`), which is what
+///   brings the second row below back to the two solids.
+/// - The two solids also have an input **vertex** each at one shared corner —
+///   `11v1` and `23v1` — and the rotation lands the two a last bit apart, so
+///   neither the names nor `assemble::exactly_at`'s coordinates join them. That
+///   one is roadmap §7.4's vertex-on-face entry, it needs no fuse to reach, and
+///   it is what the first row below is.
+///
+/// **The day that is fixed this test fails**, and what replaces it is deleting
+/// [`both_agree_about_whether_there_is_an_answer`]'s exemption for this family.
 #[test]
 fn turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first() {
     let frame = Placed {
@@ -659,25 +670,31 @@ fn turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first() {
     );
 }
 
-/// The same defect with **no rotation and no tilt at all**, and this is the
-/// sharp form of it.
+/// The same defect with **no rotation and no tilt at all**, fixed.
 ///
 /// A block two by one by two at the origin, and a frame three by three and one
 /// thick two behind it. Every corner of both solids is a small whole number,
 /// every wall is axis-aligned, and every meet of three of their planes is a
 /// Cramer solve with a determinant of ±1 — this is the family §17.7's control
-/// row asserts the kernel decides all of, and it does decide it. It still unites
-/// to one solid one way round and to [`Error::ResultIsNotManifold`] the other.
+/// row asserts the kernel decides all of, and it does decide it. It still united
+/// to one solid one way round and to [`Error::ResultIsNotManifold`] the other,
+/// so the order-dependence §48.2 item 5 predicted was **not** a story about
+/// rounding: nothing rounds here.
 ///
-/// So the order-dependence §48.2 item 5 predicted is **not** a story about
-/// rounding. Nothing rounds here. Two solids that meet along a whole edge put
-/// four faces along it and there is no answer a `Model` can hold; that is a fact
-/// about these two solids, and one of the two orders is not seeing it.
+/// What it was: the frame's own hole wall at `x = 1` cut the block's wall and
+/// nothing of the block sat on `x = 1`, so the frame's own wall was left whole,
+/// and where the answer took one side of that line from the frame's face and
+/// the other from the block's the two no longer met along one edge. Every face
+/// is cut by every plane of both solids now, its own included (§48, W1), so both
+/// sides of the line are diced alike. `tests/a_face_flush_against_another_solids_face.rs`
+/// checks the answer against arithmetic done by hand — volume 10, area 38, one
+/// shell — rather than against the other order, because agreeing with each other
+/// is what the two orders did wrong here.
 ///
-/// The turned row above is the same defect where a rotation could have been
-/// blamed for it. This one is where nothing can.
+/// This says only what this file can say: the two orders agree, and what they
+/// agree on is a solid.
 #[test]
-fn a_lattice_pair_unites_to_a_solid_one_way_round_and_to_nothing_holdable_the_other() {
+fn a_lattice_pair_unites_to_the_same_solid_whichever_way_round_it_is_handed_over() {
     let block = Placed {
         shape: Shape::Block { width: 2, depth: 1 },
         skew: Skew::none(),
@@ -697,16 +714,12 @@ fn a_lattice_pair_unites_to_a_solid_one_way_round_and_to_nothing_holdable_the_ot
     }
     .build();
 
-    assert_eq!(
-        what_a_fuse_came_back_with(&model, keys[0], keys[1], Rule::Union),
-        WhatCameBack::Solids(1),
-        "pinning what happens today, and it is wrong"
-    );
-    assert_eq!(
-        what_a_fuse_came_back_with(&model, keys[1], keys[0], Rule::Union),
-        WhatCameBack::NotASolid,
-        "the same two solids, handed over the other way round"
-    );
+    for (arguments, tools) in [(keys[0], keys[1]), (keys[1], keys[0])] {
+        assert_eq!(
+            what_a_fuse_came_back_with(&model, arguments, tools, Rule::Union),
+            WhatCameBack::Solids(1)
+        );
+    }
 }
 
 /// What one certified fuse of two solids came back with.
@@ -2631,10 +2644,11 @@ impl Fused {
 /// **It counts on every family and fails on the round one.** Turning it on found
 /// the disagreement immediately on the flat families — on the turned pairs, on
 /// the skew pairs, and, once the shape was shrunk, on the lattice pairs, where
-/// nothing rounds at all. Both ends of that are pinned by hand:
-/// [`turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first`]
-/// and
-/// [`a_lattice_pair_unites_to_a_solid_one_way_round_and_to_nothing_holdable_the_other`].
+/// nothing rounds at all. The lattice end of that is fixed and now says so
+/// ([`a_lattice_pair_unites_to_the_same_solid_whichever_way_round_it_is_handed_over`]);
+/// what is left on the turned end is pinned by hand in
+/// [`turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first`],
+/// which names the one cause still open.
 ///
 /// The fuse is not this lane's to fix (§48.4), and a property that is red for a
 /// reason already written down stops catching the reasons that are not. So what
