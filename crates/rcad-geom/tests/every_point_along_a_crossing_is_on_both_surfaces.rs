@@ -84,15 +84,36 @@ const HOW_FINE: f64 = 1e-3;
 /// The most of its own published bound a walked point was ever found to use.
 ///
 /// A share, printed by every row and asserted here. **One is the failure**: at
-/// one the bound is no longer a bound. Well under one is the ordinary gap
-/// between a worst case and a drawn one, because roundings mostly cancel — the
-/// same shape `Surface::ROUND_TRIP_ROUNDOFF` records, where a search across
-/// forty orders of magnitude finds `2.4·ε` against a published `256·ε`.
+/// one the bound is no longer a bound.
 ///
-/// Measured on the shipped corpus: 0.6% of the bound on the control, 0.8%
-/// leaning and 1.2% turned, over about thirty thousand points. So the worst a
-/// search finds is about `3·ε` of the shape's size against a published
-/// `256·ε` — the same order as its neighbour's.
+/// Every row measured, at the shipped corpus and at `RCAD_SOAK_FACTOR=2` and
+/// `8`:
+///
+/// | row | shipped | ×2 | ×8 |
+/// |---|---|---|---|
+/// | the control | 0.006 | 0.006 | 0.006 |
+/// | leaning | 0.008 | 0.008 | 0.010 |
+/// | turned | 0.012 | 0.012 | 0.013 |
+/// | the quartic control | 0.738 | 0.738 | 0.738 |
+/// | the quartic headline | 0.355 | 0.429 | 0.429 |
+/// | the band | 0.410 | 0.410 | 0.477 |
+///
+/// **The three planar rows and the three quartic ones are two different
+/// stories, and only the planar three turn into a multiple of `ε`.** Those
+/// three walk closed-form conics, whose bound is
+/// `POINT_ALONG_A_CROSSING_ROUNDOFF` — `256·ε` — times the size the curve was
+/// worked out from, so their worst share is between about `1.5·ε` and `3.3·ε`
+/// of the shape's size. That is the ordinary gap between a worst case and a
+/// drawn one, and the same shape `Surface::ROUND_TRIP_ROUNDOFF` records, where
+/// a search across forty orders of magnitude finds `2.4·ε` against a published
+/// `256·ε`. The other three rows walk marched curves too, and the marcher
+/// publishes a bound it measured for the run rather than a fixed multiple of
+/// anything, so a share there is a share of that and of nothing else.
+///
+/// **The quartic control's margin is thin and it does not shrink.** A search
+/// finds 0.738 of its own bound at every corpus width tried, and the band and
+/// the headline both climb as the corpus widens. The bound holds and one is
+/// still the failure, but nothing measured here says it holds by a wide margin.
 const NO_POINT_MAY_USE_ALL_OF_ITS_BOUND: f64 = 1.0;
 
 /// The control: whole numbers, planes square to an axis.
