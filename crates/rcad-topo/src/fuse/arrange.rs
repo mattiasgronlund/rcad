@@ -1200,6 +1200,12 @@ impl<'f> Arrangement<'f> {
     /// are the same point are both meets of curves through it. Overlapping
     /// enclosures are exactly the coincidence case (§17.4): the policy decides
     /// whether they merge or the operation gives up.
+    ///
+    /// A pair that comes back the *other* way round is neither, and it is not
+    /// the caller's numbers either: [`Arrangement::nodes_along`] proved this
+    /// very pair under this very policy a line above, and the answer to a proved
+    /// comparison does not change between two asks. So it is this file having
+    /// lost an order it had, which is the one thing here worth crashing over.
     fn merge_points_that_are_one_point(
         &mut self,
         policy: &Policy,
@@ -1213,9 +1219,17 @@ impl<'f> Arrangement<'f> {
                 }
                 let order = self.nodes_along(crossing, policy, log)?;
                 for pair in order.windows(2) {
-                    if self.order_along(crossing, pair[0], pair[1], policy, log)? == Decision::Zero
-                    {
-                        same.join(pair[0], pair[1]);
+                    match self.order_along(crossing, pair[0], pair[1], policy, log)? {
+                        Decision::Zero => same.join(pair[0], pair[1]),
+                        Decision::Pos => {}
+                        Decision::Neg => unreachable!(
+                            "nodes_along proved this pair the other way round: \
+                             {} then {} on crossing {crossing}",
+                            pair[0], pair[1]
+                        ),
+                        // `order_along` hands back an answer or an error, so
+                        // whatever this is, it is neither.
+                        other => panic!("a decision nothing here knows: {other:?}"),
                     }
                 }
             }
@@ -1284,12 +1298,26 @@ impl<'f> Arrangement<'f> {
 
     /// The nodes on one crossing, in the order they run along it.
     ///
-    /// Sorted on something that settles nothing on its own — the low end of each
-    /// enclosure along the dominant axis for a straight crossing, the low end of
-    /// how far along `n × w` it reaches for a bend, and the cyclic order from
-    /// the crossing's own start for a closed one. Every neighbouring pair is
-    /// then *proved* to be in that order or merged, and proved order between
-    /// neighbours is order all the way along.
+    /// A crossing that runs on for ever is sorted on a **hint** that settles
+    /// nothing on its own — the low end of each enclosure along the dominant
+    /// axis for a straight one, the low end of how far along `n × w` it reaches
+    /// for a bend. Both are rounded reads of an enclosure, so either can put a
+    /// pair the wrong way round, and [`prove_the_hinted_order`] walks what they
+    /// hand over and *proves* every pair it leaves next to each other. Proved
+    /// order between neighbours is order all the way along.
+    ///
+    /// A closed crossing gets no hint: a cyclic order is not a total one until
+    /// somewhere is called first, and its nodes are placed one at a time by the
+    /// same proved comparison, from the crossing's own start (§34.4).
+    ///
+    /// **The hint used to be the answer.** Every caller then read an order
+    /// nothing had proved: [`Arrangement::merge_points_that_are_one_point`]
+    /// asked each neighbouring pair and acted on [`Decision::Zero`] alone, so a
+    /// [`Decision::Neg`] — this pair is the wrong way round — was computed and
+    /// dropped, and [`Arrangement::cut_the_crossings_into_arcs`] cut arcs
+    /// straight off the hint. A hint wrong by one swap is measurable: it puts a
+    /// face cut by two crossing lines back together in the wrong pieces, and
+    /// nothing refuses.
     fn nodes_along(
         &self,
         crossing: usize,
@@ -1311,6 +1339,9 @@ impl<'f> Arrangement<'f> {
                 if !forward_climbs_the_axis {
                     order.reverse();
                 }
+                prove_the_hinted_order(&mut order, |one, other| {
+                    self.order_along(crossing, one, other, policy, log)
+                })?;
             }
             HowItRuns::AlongABend {
                 plane_normal,
@@ -1325,13 +1356,14 @@ impl<'f> Arrangement<'f> {
                 if !forward_runs_with_the_bend {
                     order.reverse();
                 }
+                prove_the_hinted_order(&mut order, |one, other| {
+                    self.order_along(crossing, one, other, policy, log)
+                })?;
             }
             HowItRuns::RoundAClosedCurve { .. } => {
-                // A cyclic order is not a total one until somewhere is called
-                // first, and the crossing's own start is that somewhere. Sorting
-                // by insertion keeps the number of comparisons finite and every
-                // one of them is asked of the same three points whichever face
-                // is asking.
+                // Every comparison is asked of the same three points whichever
+                // face is asking, so the order is the crossing's and not the
+                // asking face's.
                 let mut sorted: Vec<usize> = Vec::with_capacity(order.len());
                 for node in order {
                     let mut place = sorted.len();
@@ -2790,6 +2822,32 @@ impl<'f> Arrangement<'f> {
     }
 }
 
+/// Put a hinted order right wherever the hint was not the proved one.
+///
+/// `comes_first` is [`Arrangement::order_along`], which proves a pair or refuses
+/// it, and moving each entry back past every neighbour it is proved to come
+/// before leaves an order in which **no** neighbouring pair is the wrong way
+/// round. The comparison is a real number on each side — how far along the
+/// crossing a point sits — so it is transitive, and neighbours in order is the
+/// whole order.
+///
+/// The hint pays for itself in comparisons and not in correctness: one that is
+/// already right costs one proved comparison per entry, which is the same
+/// number the caller asks anyway when it looks for pairs that are one point.
+fn prove_the_hinted_order(
+    order: &mut [usize],
+    mut comes_first: impl FnMut(usize, usize) -> Result<Decision>,
+) -> Result<()> {
+    for at in 1..order.len() {
+        let mut here = at;
+        while here > 0 && comes_first(order[here], order[here - 1])? == Decision::Pos {
+            order.swap(here, here - 1);
+            here -= 1;
+        }
+    }
+    Ok(())
+}
+
 /// Where a ball's skin pinches to a point, as a box round it.
 ///
 /// A ball has no frame of its own — it is the same ball however it is turned —
@@ -4033,13 +4091,78 @@ fn relation_of_two_lines(
 }
 #[cfg(test)]
 mod tests {
+    use core::cmp::Ordering;
+
     use rcad_geom::{Isometry, Plane, Point, Scale, Surface, Vector};
     use rcad_predicates::{Decision, Policy, ProvenanceLog, orient3d};
 
-    use super::{Piece, split_a_face, the_other_way, where_the_crossing_starts};
+    use super::{
+        Piece, prove_the_hinted_order, split_a_face, the_other_way, where_the_crossing_starts,
+    };
     use crate::fuse::bake::{BakedFace, bake};
     use crate::fuse::{FaceMeet, MeetPoint};
     use crate::{Model, ProfileBuilder, SolidKey};
+
+    /// A hint that puts a pair the wrong way round comes back the right way
+    /// round, and one that is already right is not asked twice about anything.
+    ///
+    /// The hint `Arrangement::nodes_along` sorts on is the low end of an
+    /// enclosure, which is a rounded read and settles nothing: two nodes whose
+    /// boxes overlap can come out of it either way. Every caller then reads the
+    /// order as though it were the answer — arcs are cut straight off it — so
+    /// what walks out of here has to be the proved order and not the hint.
+    ///
+    /// Places are whole numbers, so which of two comes first is exactly true and
+    /// the expected order is known rather than approximated.
+    #[test]
+    fn a_hint_with_a_pair_the_wrong_way_round_comes_back_in_the_proved_order() {
+        let places: [f64; 5] = [30.0, 10.0, 20.0, 20.0, 0.0];
+        let proved = |hint: &[usize]| {
+            let mut order = hint.to_vec();
+            let mut asked = 0;
+            prove_the_hinted_order(&mut order, |one, other| {
+                asked += 1;
+                Ok(match places[one].total_cmp(&places[other]) {
+                    Ordering::Less => Decision::Pos,
+                    Ordering::Equal => Decision::Zero,
+                    Ordering::Greater => Decision::Neg,
+                })
+            })
+            .expect("a comparison of whole numbers refuses nothing");
+            (order, asked)
+        };
+
+        let (order, asked) = proved(&[4, 1, 2, 3, 0]);
+        assert_eq!(order, [4, 1, 2, 3, 0], "a hint already right is left alone");
+        assert_eq!(
+            asked, 4,
+            "and costs one comparison per node after the first, which is what the \
+             hint is for"
+        );
+
+        let (order, _) = proved(&[4, 1, 3, 0, 2]);
+        assert_eq!(
+            order,
+            [4, 1, 3, 2, 0],
+            "the pair the hint put the wrong way round is turned back"
+        );
+
+        let (order, _) = proved(&[0, 1, 2, 3, 4]);
+        assert_eq!(
+            order,
+            [4, 1, 2, 3, 0],
+            "and a hint that is wrong all the way along is sorted, not merely \
+             patched between neighbours"
+        );
+
+        let (order, _) = proved(&[3, 2, 4, 1, 0]);
+        assert_eq!(
+            order,
+            [4, 1, 3, 2, 0],
+            "two nodes at one place are left in the order the hint had them, \
+             because folding them together is the caller's job and not this one's"
+        );
+    }
 
     /// The identity the anticlockwise order of two lines round a corner rests
     /// on, checked against a determinant worked out by hand.
@@ -4796,7 +4919,7 @@ mod what_the_curved_arrangement_reaches {
         HowItRuns, a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
         a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
         gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
-        round_a_closed_crossing, split_a_face, two_pipes_run_along_one_line,
+        round_a_closed_crossing, side_of_surface, split_a_face, two_pipes_run_along_one_line,
         where_a_cones_apex_stands_against_a_plane,
     };
     use crate::{Error, Model, SolidKey};
@@ -5216,6 +5339,140 @@ mod what_the_curved_arrangement_reaches {
                 super::the_other_way(first),
                 "asking the other way round turns the answer round"
             );
+        }
+    }
+
+    /// A plane lying parallel to one of a cone's rulings cuts a **parabola**,
+    /// and it is put in order across the bend's own axis like the hyperbola
+    /// above.
+    ///
+    /// # A stored unit normal reaches `E = 0` exactly
+    ///
+    /// The parabola is the knife edge of
+    /// [`how_a_plane_leans_against_a_cone`]: `E = (n·w)² − slope²‖n × w‖²` has
+    /// to be *nothing*, and `n` is the normal
+    /// [`Plane::from_point_and_normal`] stored after dividing by its length,
+    /// which for a plane along a cone's side is an irrational number. That
+    /// division does not stand in the way, because **`E` is homogeneous of
+    /// degree two in `n`**: dividing `n` by `L` divides `E` by `L²` and moves
+    /// no sign. What is left is whether the *rounding* of that division keeps
+    /// the components in the ratio `E = 0` wants, and it does whenever the
+    /// ratio is a power of two — scaling an operand and its result by a power
+    /// of two commutes with correct rounding.
+    ///
+    /// So `slope = ½` with `n ∝ (−2, 0, 1)` lands on the edge from whole
+    /// numbers. The stored normal is `(−2u, 0, u)` for `u = fl(1/√5)`,
+    /// thoroughly irrational and still exactly twice one component of itself,
+    /// which makes `E = u² − ¼(2u)² = 0` bit for bit.
+    ///
+    /// # The shape it cuts
+    ///
+    /// The cone leans a half about `z`, so `x² + y² = z²/4`; the plane is
+    /// `z = 2x + 4`, which meets it in `y² = 4x + 4` — a parabola, in the top
+    /// nappe alone. Its points are whole numbers: `(−1, 0, 2)` at the vertex,
+    /// `(0, ±2, 4)` either side and `(3, ±4, 10)` further along, running down
+    /// `y` in that order. `n × w` is along `y`, so the order is the order of
+    /// `y`, and a vertex has to come **between** the points either side of it.
+    #[test]
+    fn the_parabola_a_plane_along_a_cones_side_cuts_is_ordered_across_its_own_axis() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let cone = Cone::new(Axis::z(), 0.5).expect("a cone leaning a half");
+        let flat =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(-1.0, 0.0, 0.5))
+                .expect("a plane parallel to one of the cone's rulings");
+
+        let stored = flat.normal().components();
+        assert_eq!(
+            stored[0],
+            -2.0 * stored[2],
+            "the stored normal is irrational and still in the ratio `E = 0` wants: {stored:?}"
+        );
+        assert_eq!(
+            where_a_cones_apex_stands_against_a_plane(&flat, &cone),
+            Decision::Neg,
+            "the apex is off the plane, so the crossing is a curve and not rulings"
+        );
+        assert_eq!(
+            how_a_plane_leans_against_a_cone(&flat, &cone),
+            Decision::Zero,
+            "and the plane leans exactly along the cone's side, which is the parabola row"
+        );
+
+        let (surface, partner) = (Surface::Plane(flat), Surface::Cone(cone));
+        let SurfaceMeet::Curves(runs) = intersect(&surface, &partner, &policy, &mut log)
+            .expect("a plane along a cone's side cuts a parabola")
+        else {
+            panic!("a plane along a cone's side cuts curves and nothing else");
+        };
+        assert_eq!(
+            runs.len(),
+            1,
+            "a parabola lies in one nappe, so it is one run"
+        );
+
+        // Every point the ordering is asked about is on both surfaces, or the
+        // run it claims to order is not the one being walked.
+        let along_the_parabola = [
+            [3.0, -4.0, 10.0],
+            [0.0, -2.0, 4.0],
+            [-1.0, 0.0, 2.0],
+            [0.0, 2.0, 4.0],
+            [3.0, 4.0, 10.0],
+        ];
+        for point in along_the_parabola {
+            for surface in [&surface, &partner] {
+                assert_eq!(
+                    side_of_surface(surface, PredicatePoint::from(point)),
+                    Decision::Zero,
+                    "{point:?} is on the crossing"
+                );
+            }
+        }
+
+        let vertex = PredicatePoint::from([-1.0, 0.0, 2.0]);
+        let HowItRuns::AlongABend {
+            plane_normal,
+            cone_axis,
+            forward_runs_with_the_bend,
+        } = how_a_crossing_runs(&surface, &partner, &runs[0], vertex, &mut log)
+            .expect("a parabola is ordered across the bend's own axis")
+        else {
+            panic!("a parabola neither closes nor runs straight");
+        };
+        assert_eq!(plane_normal, stored, "the plane's stored normal");
+        assert_eq!(cone_axis, [0.0, 0.0, 1.0], "the cone's stored axis");
+
+        let order = |first: [f64; 3], second: [f64; 3]| {
+            along_a_bend(
+                plane_normal,
+                cone_axis,
+                forward_runs_with_the_bend,
+                PredicatePoint::from(first),
+                PredicatePoint::from(second),
+            )
+        };
+        let first = order(along_the_parabola[0], along_the_parabola[1]);
+        assert_ne!(first, Decision::Zero, "two places on the run are two");
+        for (at, one) in along_the_parabola.iter().enumerate() {
+            assert_eq!(
+                order(*one, *one),
+                Decision::Zero,
+                "{one:?} is not before itself"
+            );
+            for other in &along_the_parabola[at + 1..] {
+                assert_eq!(
+                    order(*one, *other),
+                    first,
+                    "{one:?} comes before {other:?} the same way every earlier point does, \
+                     which is what a merely local comparison would miss"
+                );
+                assert_eq!(
+                    order(*other, *one),
+                    super::the_other_way(first),
+                    "and asking the other way round turns the answer round"
+                );
+            }
         }
     }
 
