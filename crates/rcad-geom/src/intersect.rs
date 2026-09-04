@@ -1714,50 +1714,31 @@ fn where_a_plane_and_a_cone_cross(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<SurfaceMeet> {
-    let normal = flat.normal().components();
-    let d = flat.offset();
-    let apex = cone.apex().coordinates();
-    let along = cone.axis().direction().components();
-    let slope = cone.slope();
     let at = [
         PredicatePoint::from(flat.origin().coordinates()),
-        PredicatePoint::from(apex),
+        PredicatePoint::from(cone.apex().coordinates()),
     ];
 
-    let stands_off = Question {
-        named: WHERE_A_PLANE_AND_A_CONE_CROSS,
-        enclosing: || dot_enclosing(exactly(normal), exactly(apex)) - Interval::exactly(d),
-        exactly: || Some(Exact::dot_of(normal, apex)?.minus(&Exact::of(d))),
-    };
-    let standing_off = ask(&stands_off, Measures::Length, &at, policy, log)?;
+    let standing_off = ask(
+        &where_the_apex_stands(flat, cone),
+        Measures::Length,
+        &at,
+        policy,
+        log,
+    )?;
     let apex_is_on_the_plane = match standing_off {
         Decision::Zero => true,
         Decision::Pos | Decision::Neg => false,
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     };
 
-    let leans = Question {
-        named: WHERE_A_PLANE_AND_A_CONE_CROSS,
-        enclosing: || {
-            let up = dot_enclosing(exactly(normal), exactly(along));
-            let across = squared_length_enclosing(cross_enclosing(exactly(normal), exactly(along)));
-            up * up - squared_enclosing(slope) * across
-        },
-        exactly: || {
-            let up = Exact::dot_of(normal, along)?;
-            let across =
-                Exact::squared_length_of(&Exact::cross_of(&Exact::of_each(normal), along)?)?;
-            Some(
-                up.times(&up)?
-                    .minus(&Exact::product_of(slope, slope)?.times(&across)?),
-            )
-        },
-    };
-    // Dimensionless: every number in it is a direction component or a slope.
-    // `Measures::Length` is the arm whose conversion is the identity, which is
-    // the right conversion for a value with no units, and §28 records that the
-    // *name* is wrong for the same reason the plane-and-pipe row does.
-    let leaning = ask(&leans, Measures::Length, &at, policy, log)?;
+    let leaning = ask(
+        &how_the_plane_leans(flat, cone),
+        Measures::Length,
+        &at,
+        policy,
+        log,
+    )?;
 
     match (apex_is_on_the_plane, leaning) {
         (false, Decision::Pos) => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
@@ -1768,13 +1749,122 @@ fn where_a_plane_and_a_cone_cross(
         }
         (false, Decision::Neg) => the_two_branches_of_a_hyperbola(flat, cone),
         (true, Decision::Pos) => Ok(SurfaceMeet::TouchAtOnePoint {
-            at: PredicatePoint::from(apex),
+            at: PredicatePoint::from(cone.apex().coordinates()),
         }),
         (true, Decision::Zero) => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
             EdgeRun::Straight,
         )?])),
         (true, Decision::Neg) => two_lines_through_a_cones_apex(flat, cone),
         (_, other) => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+}
+
+/// Where a cone's apex stands against a plane: the sign of `n·a − d`, **proved
+/// and never rounded**.
+///
+/// [`Decision::Zero`] and the apex is on the plane, which is the half of
+/// [`where_a_plane_and_a_cone_cross`]'s table every straight case needs.
+/// [`Decision::Undecidable`] when a product on the way leaves the range where
+/// this crate's expansion arithmetic is exact, and there is nothing else it can
+/// be: `n·a − d` is a polynomial in stored `f64`.
+///
+/// **No [`Policy`], on purpose** — see [`how_a_plane_leans_against_a_cone`],
+/// which says why for both of them.
+pub fn where_a_cones_apex_stands_against_a_plane(flat: &Plane, cone: &Cone) -> Decision {
+    decide(&where_the_apex_stands(flat, cone)).0
+}
+
+/// How a plane leans against a cone's own side: the sign of
+/// `E = (n·w)² − slope²‖n × w‖²`, **proved and never rounded**.
+///
+/// Above zero the plane cuts across the cone, at zero it is parallel to one
+/// ruling, below zero it is steeper than the cone and reaches both nappes —
+/// [`where_a_plane_and_a_cone_cross`]'s second sign, and the one its whole table
+/// turns on.
+///
+/// # Why neither of these two takes a [`Policy`]
+///
+/// [`where_a_plane_and_a_cone_cross`] asks these same two questions through the
+/// policy, which is handed every enclosure the cascade could not certify; a
+/// tolerant one may read such an enclosure as zero. **The two doors in
+/// `rcad-topo` that ask what shape a crossing is must not be tolerant about the
+/// shape**, because a `Zero` they have not earned is what says *rulings* about a
+/// closed ellipse, and then the ellipse is ordered along an axis
+/// (`docs/decisions.md` §49.2, §49.8). So the doors get the cascade and nothing
+/// after it: level 2 and level 3 both prove their signs, and neither can be
+/// softened by anything a caller passes.
+///
+/// The two therefore part company only under a tolerant policy, and only into a
+/// **refusal**: the door gives up where `intersect` would have been given an
+/// answer. That is the same trade `rcad-topo`'s `a_plane_lies_along_a_pipes_axis`
+/// states one row down, for the same reason.
+///
+/// # This used to be rounded, and it said a closed ellipse was an endless line
+///
+/// The doors wrote `flat.signed_distance_to(cone.apex()) != 0.0` and
+/// `up*up - slope*slope*sideways <= 0.0` in `f64`. It takes **both** of those
+/// being wrong at once to matter, and then the pair `intersect` names as one
+/// closed ellipse comes back as two rulings meeting at the apex. `rcad-topo`'s
+/// `a_rounded_apex_and_a_rounded_lean_together_call_a_closed_ellipse_two_rulings`
+/// writes one such plane and cone out, and
+/// `how_many_near_tangent_planes_a_rounded_cone_gate_gets_wrong` counts how
+/// common they are over 360 000 draws.
+pub fn how_a_plane_leans_against_a_cone(flat: &Plane, cone: &Cone) -> Decision {
+    decide(&how_the_plane_leans(flat, cone)).0
+}
+
+/// The sign of `n·a − d`, as a question rather than an answer, so that
+/// [`where_a_plane_and_a_cone_cross`] and
+/// [`where_a_cones_apex_stands_against_a_plane`] ask **one** expression written
+/// **once**.
+fn where_the_apex_stands(flat: &Plane, cone: &Cone) -> impl Predicate {
+    let normal = flat.normal().components();
+    let d = flat.offset();
+    let apex = cone.apex().coordinates();
+    Question {
+        named: WHERE_A_PLANE_AND_A_CONE_CROSS,
+        enclosing: move || dot_enclosing(exactly(normal), exactly(apex)) - Interval::exactly(d),
+        exactly: move || Some(Exact::dot_of(normal, apex)?.minus(&Exact::of(d))),
+    }
+}
+
+/// The sign of `E`, as a question rather than an answer, shared the same way.
+///
+/// **Degree six in the stored numbers, and every degree of it is carried.**
+/// Written as `(n·w)² − Σ(slope·(n_j w_k − n_k w_j))²`, which is
+/// `slope²‖n × w‖²` with the slope taken inside the squares — so the exact arm
+/// squares four short expansions and never multiplies two long ones together.
+/// Everything it multiplies stays that much further from the ends of the range
+/// where the expansion arithmetic stops being exact and the question has to be
+/// refused.
+///
+/// It is dimensionless: every number in it is a direction component or a slope.
+/// [`Measures::Length`] is the arm whose conversion is the identity, which is the
+/// right conversion for a value with no units, and §28 records that the *name* is
+/// wrong for the same reason the plane-and-pipe row does.
+fn how_the_plane_leans(flat: &Plane, cone: &Cone) -> impl Predicate {
+    let normal = flat.normal().components();
+    let along = cone.axis().direction().components();
+    let slope = cone.slope();
+    Question {
+        named: WHERE_A_PLANE_AND_A_CONE_CROSS,
+        enclosing: move || {
+            let up = dot_enclosing(exactly(normal), exactly(along));
+            let across = squared_length_enclosing(cross_enclosing(exactly(normal), exactly(along)));
+            up * up - squared_enclosing(slope) * across
+        },
+        exactly: move || {
+            let up = Exact::dot_of(normal, along)?;
+            let mut leaning = up.times(&up)?;
+            for axis in 0..3 {
+                let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+                let across = Exact::product_of(normal[next], along[after])?
+                    .minus(&Exact::product_of(normal[after], along[next])?);
+                let leaned = across.times(&Exact::of(slope))?;
+                leaning = leaning.minus(&leaned.times(&leaned)?);
+            }
+            Some(leaning)
+        },
     }
 }
 

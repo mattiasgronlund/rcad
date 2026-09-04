@@ -100,7 +100,8 @@ pub use crate::half_space::{HalfSpace, Picker, SIDE_OF_A_HALF_SPACE};
 pub use crate::intersect::{
     WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
     WHERE_A_PLANE_AND_A_TORUS_CROSS, WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS,
-    WHERE_TWO_PLANES_CROSS, intersect,
+    WHERE_TWO_PLANES_CROSS, how_a_plane_leans_against_a_cone, intersect,
+    where_a_cones_apex_stands_against_a_plane,
 };
 pub use crate::isometry::Isometry;
 pub use crate::knot_vector::{KnotVector, MAX_DEGREE};
