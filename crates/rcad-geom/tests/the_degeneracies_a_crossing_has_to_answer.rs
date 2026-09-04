@@ -615,10 +615,22 @@ fn a_bend(along: [f64; 3], centre: [f64; 3], ring: f64, tube: f64) -> Surface {
 /// All twenty-five ordered pairs of the five kinds of surface, past the naming
 /// half and both halves of the evaluator.
 ///
-/// Twelve of them — a cone or a torus against another curved surface — are
-/// refused on the **kind** of surface, before a shape or a placement is looked
-/// at. What this checks is that all three say so about the same twelve, and
-/// under the same name for each.
+/// Twelve of them are refused, and what this checks is that the namer, the
+/// walker and the starter all say so about the same twelve, and under the same
+/// name for each.
+///
+/// **Ten of the twelve are refused on the kind of surface**, before a number is
+/// looked at: a cone against a ball or another cone, and a torus against
+/// anything curved.
+///
+/// **The other two are a cone against a pipe, and those are refused on where the
+/// two stand.** A cone and a pipe that share an axis cross in two circles and
+/// `intersect` names them — `where_a_coaxial_cone_and_pipe_cross.rs` is that
+/// half — so the cone below is placed with its apex a whole unit off the pipe's
+/// axis, which is what makes it a refusal at all. Reading this row as "these
+/// kinds are refused" would state something the dispatch contradicts, and the
+/// pair that used to sit here was coaxial and stopped being refused underneath
+/// the sweep.
 ///
 /// **A sweep and not a row per pair**, because what went wrong was the *list*.
 /// The two lists were kept in step by hand, a cone and a torus landed and were
@@ -631,7 +643,7 @@ fn a_bend(along: [f64; 3], centre: [f64; 3], ring: f64, tube: f64) -> Surface {
 /// because they are not refused *on kind* — the same two kinds cross in a conic
 /// as often as in a line, and which one it is depends on the numbers.
 #[test]
-fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_of_kinds_under_the_same_name() {
+fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_under_the_same_name() {
     let one = [
         a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]),
         a_ball([0.0, 0.0, 0.0], 3.0),
@@ -643,17 +655,17 @@ fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_of_kinds_under_the_s
         a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 1.0]),
         a_ball([1.0, 0.0, 0.0], 3.0),
         a_pipe([1.0, 0.0, 1.0], [0.0, 0.0, 0.0], 0.7),
-        a_cone([0.0, 0.0, 1.0], [0.0, 0.0, 5.0], 1.0),
+        a_cone([0.0, 0.0, 1.0], [1.0, 0.0, 5.0], 1.0),
         a_bend([0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 3.0, 1.5),
     ];
-    let on_kind = [
+    let curved_refusals = [
         Error::ACrossingBetweenAConeAndAnotherCurvedSurface,
         Error::ACrossingBetweenATorusAndAnotherCurvedSurface,
     ];
 
     let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a closed curve is never a piece with nothing picking it");
-    let mut refused_on_kind = 0;
+    let mut refused = 0;
     for first in &one {
         for second in &other {
             let named = intersect(
@@ -673,9 +685,12 @@ fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_of_kinds_under_the_s
             let started =
                 where_a_closed_crossing_starts(&whole, [first, second], &mut ProvenanceLog::new());
 
-            match on_kind.iter().find(|name| named == Err((*name).clone())) {
+            match curved_refusals
+                .iter()
+                .find(|name| named == Err((*name).clone()))
+            {
                 Some(name) => {
-                    refused_on_kind += 1;
+                    refused += 1;
                     assert_eq!(
                         walked,
                         Err(name.clone()),
@@ -688,16 +703,16 @@ fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_of_kinds_under_the_s
                     );
                 }
                 None => {
-                    for name in &on_kind {
+                    for name in &curved_refusals {
                         assert_ne!(
                             walked,
                             Err(name.clone()),
-                            "walking {first:?} against {second:?} refuses on kind and the namer does not"
+                            "walking {first:?} against {second:?} refuses by name and the namer does not"
                         );
                         assert_ne!(
                             started,
                             Err(name.clone()),
-                            "starting {first:?} against {second:?} refuses on kind and the namer does not"
+                            "starting {first:?} against {second:?} refuses by name and the namer does not"
                         );
                     }
                 }
@@ -705,8 +720,9 @@ fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_of_kinds_under_the_s
         }
     }
     assert_eq!(
-        refused_on_kind, 12,
-        "a cone or a torus against another curved surface is twelve of the twenty-five pairs"
+        refused, 12,
+        "ten pairs refused on kind, plus the two cone-against-pipe pairs refused for standing off \
+         one another's axis, is twelve of the twenty-five"
     );
 }
 
