@@ -2388,17 +2388,32 @@ fn swapping_the_two_sides_of_a_block_and_a_frustum_changes_not_one_bit() {
 /// and only if the cone, carried up to the block's roof, is still narrower than
 /// the distance to the nearest side wall.**
 ///
-/// Every frustum this family draws is clear of every side wall by a whole unit
-/// and stops well below the roof, so its own *face* never comes near a wall. The
-/// boundary is about the cone **above its own top cap** — the surface the face
-/// sits on, carried on past where the face stops. Where that reaches a side wall
-/// inside the block, the fuse has a plane parallel to a cone's axis to arrange,
-/// which is a hyperbola, and §47.2's open bend is what refuses.
+/// Every frustum on this grid is clear of every side wall by a whole unit, so
+/// its own *face* never comes near one, and the wide cap is never more than two
+/// across while the nearest wall is never nearer than three. The boundary is
+/// about the cone **above its own top cap** — the surface the face sits on,
+/// carried on past where the face stops. Where that reaches a side wall inside
+/// the block, the fuse has a plane parallel to a cone's axis to arrange, which
+/// is a hyperbola, and §47.2's open bend is what refuses.
 ///
 /// **The one exception is a different degeneracy and is pinned with it**: where
 /// the top cap lands exactly in the roof plane the fuse comes back
 /// [`Error::Undecidable`] instead, which is a face flush against a plane and not
 /// an open bend at all.
+///
+/// # The grid, and how it differs from what the family draws
+///
+/// Eighty-four configurations: the three slopes, every block from six to twelve
+/// across, and the frustum's axis at every whole place that leaves the wide cap
+/// a unit clear of both walls. The narrow cap is fixed at one and the wide at
+/// two so that the only things varying are the ones the boundary is about.
+///
+/// It is **wider than [`a_frustum_and_a_block`] draws**, deliberately. That
+/// generator keeps the top cap at least a unit below the roof, so it can never
+/// draw the flush case, and it never pairs a slope of one eighth with a block
+/// under eight across. Both of those are on this grid, and the flush case is
+/// the one that says the boundary above has an exception rather than being the
+/// whole story.
 ///
 /// This is the shape §47.2 asks for. A count of how many answered would have
 /// been true and would not have said which, and *"which"* is the whole finding:
