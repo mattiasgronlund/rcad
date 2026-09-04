@@ -541,7 +541,7 @@ pub enum Error {
     /// quadrics is a degree-eight system.
     ///
     /// **"In general" is doing real work in that sentence**, and
-    /// [`three_surfaces`](crate::three_surfaces)'s module doc names the two
+    /// `three_surfaces.rs`'s module doc names the two
     /// families it excludes: two quadrics that square `p` the same way differ by
     /// something flat, and a plane that misses or barely touches one of the two
     /// settles the triple with a sign. Two pipes running the same way and a cap
