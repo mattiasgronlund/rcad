@@ -87,11 +87,16 @@ check:
 # three. The three direct points are all in `intersect.rs` and all belong to
 # naming the coaxial cone and pipe: two are the `other => unreachable!("a sum of
 # squares is never below zero")` arms `#[non_exhaustive]` forces at the two `ask`
-# call sites in `where_a_cone_and_a_pipe_cross`, which is what the other twenty-two
-# arms in that file already are; the third is `leaning => leaning` in
-# `whether_a_cone_and_a_pipe_share_an_axis`, a pass-through that hands any answer
-# but `Zero` straight back, and its precedent is `same => same` in
-# `Picker::side_of_point` (`half_space.rs:441`).
+# call sites in `where_a_cone_and_a_pipe_cross`, which is what twenty-three of the
+# other twenty-four direct arms in that file already are — the scan counts 26 in
+# `intersect.rs`, 25 of them `unreachable!` or `panic!`; the third is
+# `leaning => leaning` in `whether_a_cone_and_a_pipe_share_an_axis`, a
+# pass-through that hands any answer but `Zero` straight back. It is safe by its
+# caller's shape and not by the enum's: `walk`'s cone-and-pipe cut asks
+# `!= Decision::Zero` and refuses, so a variant `Decision` grows later lands on
+# the refusing side. `same => same` in `Picker::side_of_point`
+# (`half_space.rs:441`) is **not** the precedent for it — there `Zero` and
+# `Undecidable` both genuinely mean "not on a side", and here they do not.
 wildcard_arms := "89"
 
 check-wildcards:
