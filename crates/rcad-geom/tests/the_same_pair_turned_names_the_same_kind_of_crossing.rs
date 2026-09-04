@@ -66,6 +66,20 @@ use crossings::{Crossing, Elsewhere, Piece, Turn, a_lattice_crossing, a_quartic_
 /// multiplies and `soak::seeded` reseeds.
 const CASES: u32 = 2048;
 
+/// How many pairs the runner may throw away per pair it keeps.
+///
+/// A pair neither side could name is rejected and redrawn, and proptest's own
+/// ceiling on that is a flat 1024 however many cases are asked for — four per
+/// case at its default corpus, and one per two cases at this file's. So a soak
+/// at any real factor runs out of them and aborts on *"Too many global
+/// rejects"*, which is a red run about the runner's bookkeeping rather than
+/// about geometry. Four per case is proptest's own ratio, kept as the corpus
+/// grows.
+///
+/// **It is not the vacuity guard.** That is the two floors below, which count
+/// what was compared rather than what was thrown away.
+const REJECTS_ALLOWED_PER_CASE: u32 = 4;
+
 /// How many of the planar pairs have to survive the knife-edge skip.
 ///
 /// Three fifths. Without a floor the property would pass just as green if every
@@ -186,6 +200,7 @@ fn the_same_kind_before_and_after(family: BoxedStrategy<Crossing>, floor: f64) {
     let mut runner = TestRunner::new_with_rng(
         Config {
             cases,
+            max_global_rejects: cases.saturating_mul(REJECTS_ALLOWED_PER_CASE),
             source_file: Some(file!()),
             failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
                 "proptest-regressions",
