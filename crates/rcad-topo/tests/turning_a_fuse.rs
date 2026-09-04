@@ -311,9 +311,11 @@ fn united(configuration: &Configuration) -> Totals {
 ///
 /// # Panics
 ///
-/// If the variable is set to something that is not a whole number above zero. A
-/// soak that silently ran the default corpus would be worse than one that
-/// stopped.
+/// If the variable is set to something that is not a whole number above zero, or
+/// to one whose product is more than a run can count. A soak that silently ran
+/// the default corpus would be worse than one that stopped, and a product that
+/// wrapped runs **fewer** cases than the shipped corpus while the operator reads
+/// the number as the wide one (§48.2, §50.9).
 fn how_many_cases() -> u32 {
     let Ok(factor) = std::env::var(SOAK_FACTOR) else {
         return CASES;
@@ -322,7 +324,9 @@ fn how_many_cases() -> u32 {
         .parse()
         .unwrap_or_else(|_| panic!("{SOAK_FACTOR} has to be a whole number, not {factor:?}"));
     assert!(factor > 0, "{SOAK_FACTOR} has to be at least one");
-    CASES * factor
+    CASES
+        .checked_mul(factor)
+        .unwrap_or_else(|| panic!("{CASES} cases times {factor} is more than one run can count"))
 }
 
 /// The fixed seed, or the one [`SOAK_SEED`] names.

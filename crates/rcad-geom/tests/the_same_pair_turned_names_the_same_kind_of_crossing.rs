@@ -20,8 +20,9 @@
 //! printed. They are exactly the two configurations a rounding of the inputs can
 //! move across:
 //!
-//! - **a tangency** — a plane resting on a ball, or two balls resting on each
-//!   other — where the discriminant is exactly zero; and
+//! - **a tangency** — a plane resting on a ball, two balls resting on each
+//!   other, or a ball resting all the way round the inside of a pipe — where the
+//!   discriminant is exactly zero; and
 //! - **two directions exactly square or exactly parallel**: a plane along a
 //!   pipe's axis, or two parallel planes. The pipe one is the surprise. A plane
 //!   *not* parallel to an endless pipe always cuts it in an ellipse, however far
@@ -44,24 +45,40 @@
 //! ranges over rather than by reading the property — which is the whole of
 //! §16.10's method (§30).
 //!
-//! Measured: **1485 of 2048 planar pairs compared and 564 skipped, 1594 of 2048
-//! quartic pairs compared and 455 skipped.**
+//! Measured: **1485 of 2048 planar pairs compared and 564 skipped, 1619 of 2048
+//! quartic pairs compared and 430 skipped.**
 
 #![forbid(unsafe_code)]
 
 mod crossings;
+mod soak;
 
 use std::cell::Cell;
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
+use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
 use rcad_geom::{Error, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
 
-use crossings::{Crossing, Turn, a_lattice_crossing, a_quartic_lattice_crossing};
+use crossings::{Crossing, Elsewhere, Piece, Turn, a_lattice_crossing, a_quartic_lattice_crossing};
 
-/// How many pairs this turns.
+/// How many pairs this turns on the shipped corpus, which `soak::cases`
+/// multiplies and `soak::seeded` reseeds.
 const CASES: u32 = 2048;
+
+/// How many pairs the runner may throw away per pair it keeps.
+///
+/// A pair neither side could name is rejected and redrawn, and proptest's own
+/// ceiling on that is a flat 1024 however many cases are asked for — four per
+/// case at its default corpus, and one per two cases at this file's. So a soak
+/// at any real factor runs out of them and aborts on *"Too many global
+/// rejects"*, which is a red run about the runner's bookkeeping rather than
+/// about geometry. Four per case is proptest's own ratio, kept as the corpus
+/// grows.
+///
+/// **It is not the vacuity guard.** That is the two floors below, which count
+/// what was compared rather than what was thrown away.
+const REJECTS_ALLOWED_PER_CASE: u32 = 4;
 
 /// How many of the planar pairs have to survive the knife-edge skip.
 ///
@@ -79,8 +96,8 @@ const MOST_PLANAR_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
 /// Half. The generator draws radii up to five and places them up to six apart in
 /// whole numbers, so a lattice pipe pair is exactly tangent surprisingly often —
 /// five apart with radii of two and three is one — and every one of those is a
-/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1594 of
-/// 2048 compared, 455 skipped.
+/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1619 of
+/// 2048 compared, 430 skipped.
 const MOST_QUARTIC_PAIRS_MUST_BE_COMPARED: f64 = 0.5;
 
 /// The four pairs whose crossing lies in a plane.
@@ -115,17 +132,82 @@ fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
     );
 }
 
+/// The knife edge a ball and a pipe have, which [`is_on_a_knife_edge`] had no
+/// arm for until this case was written.
+///
+/// A ball of radius one whose middle sits on the axis of a pipe of radius one
+/// rests against the pipe all the way round a single circle. That circle is
+/// where `r² − ρ²` is exactly zero, so it is the same kind of edge as a plane
+/// resting on a ball: turning the pair rounds both radii, and whichever way the
+/// last bits fall the answer changes. A sixty-fourth of a turn about `(1, 1, 1)`
+/// makes the ball miss the pipe altogether; twenty sixty-fourths makes it cut
+/// two circles.
+///
+/// **Both turned answers are honest**, which is why the pair has to be skipped
+/// rather than fixed: the turned surfaces genuinely no longer rest on each
+/// other. Without the arm, the property above draws this pair — the generator
+/// places a ball anywhere and gives both it and a pipe a radius from one to
+/// five — compares it, and fails.
+#[test]
+fn a_ball_resting_along_a_whole_circle_inside_a_pipe_is_a_knife_edge() {
+    let resting = Crossing {
+        first: Piece::Ball {
+            centre: [0, 0, 0],
+            radius: 1,
+        },
+        second: Piece::Pipe {
+            along: [0, 0, 1],
+            through: [0, 0, 0],
+            radius: 1,
+        },
+        turn: None,
+        elsewhere: Elsewhere::here(),
+        hair: None,
+    };
+    let turned_by = |steps| Crossing {
+        turn: Some(Turn {
+            direction: [1, 1, 1],
+            steps,
+        }),
+        ..resting
+    };
+
+    assert_eq!(
+        kind_of(&named(&resting.surfaces()).expect("a ball resting inside a pipe is named")),
+        ("curves", 1),
+        "the ball touches the pipe along one whole circle"
+    );
+    assert_eq!(
+        kind_of(&named(&turned_by(1).surfaces()).expect("the turned pair is named")),
+        ("nothing", 0),
+        "a sixty-fourth of a turn rounds the ball just clear of the pipe"
+    );
+    assert_eq!(
+        kind_of(&named(&turned_by(20).surfaces()).expect("the turned pair is named")),
+        ("curves", 2),
+        "twenty sixty-fourths rounds it the other way and the circle splits in two"
+    );
+
+    assert!(
+        is_on_a_knife_edge(&resting.surfaces()),
+        "a pair whose kind two different turns change in two different directions is a knife \
+         edge, and the property above compares it unless this says so"
+    );
+}
+
 fn the_same_kind_before_and_after(family: BoxedStrategy<Crossing>, floor: f64) {
+    let cases = soak::cases(CASES);
     let mut runner = TestRunner::new_with_rng(
         Config {
-            cases: CASES,
+            cases,
+            max_global_rejects: cases.saturating_mul(REJECTS_ALLOWED_PER_CASE),
             source_file: Some(file!()),
             failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
                 "proptest-regressions",
             ))),
             ..Config::default()
         },
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+        soak::seeded(),
     );
 
     let compared = Cell::new(0usize);
@@ -159,13 +241,13 @@ fn the_same_kind_before_and_after(family: BoxedStrategy<Crossing>, floor: f64) {
     }
 
     println!(
-        "{} of {CASES} pairs compared, {} skipped for sitting on a knife edge",
+        "{} of {cases} pairs compared, {} skipped for sitting on a knife edge",
         compared.get(),
         on_a_knife_edge.get()
     );
     assert!(
-        compared.get() as f64 >= floor * f64::from(CASES),
-        "only {} of {CASES} pairs were off a knife edge, so this property is barely asserting \
+        compared.get() as f64 >= floor * f64::from(cases),
+        "only {} of {cases} pairs were off a knife edge, so this property is barely asserting \
          anything",
         compared.get()
     );
@@ -217,6 +299,20 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
         }
         [Surface::Plane(one), Surface::Plane(other)] => {
             one.normal().cross(other.normal()).length_squared() == 0.0
+        }
+        // A ball whose middle is on a pipe's axis and whose radius is the pipe's
+        // rests against the pipe along a whole circle. `r² − ρ²` is exactly zero
+        // there, so a rounding of either radius either lifts the ball clear or
+        // splits the circle in two —
+        // `a_ball_resting_along_a_whole_circle_inside_a_pipe_is_a_knife_edge`
+        // shows one turn doing each.
+        [Surface::Sphere(ball), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
+            ball.radius() == pipe.radius()
+                && (ball.centre() - pipe.axis().origin())
+                    .cross(pipe.axis().direction())
+                    .length_squared()
+                    == 0.0
         }
         // Two pipes down one direction cross in straight lines and a lean turns
         // that into two closed loops, so this is the quartic family's version of

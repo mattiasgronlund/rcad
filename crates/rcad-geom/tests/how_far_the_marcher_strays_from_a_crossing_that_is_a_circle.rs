@@ -37,14 +37,17 @@
 
 #![forbid(unsafe_code)]
 
+mod soak;
+
 use proptest::prelude::*;
-use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
+use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
 use rcad_geom::{
     Axis, Cylinder, Deflection, Plane, Point, Sphere, Surface, SurfaceMeet, Vector, intersect, walk,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 
-/// How many threaded balls each row walks.
+/// How many threaded balls each row walks on the shipped corpus, which
+/// `soak::cases` multiplies and `soak::seeded` reseeds.
 ///
 /// Ninety-six, and that is already fifty thousand marched points: a marcher
 /// settles two points onto both surfaces per step and works out a certified
@@ -210,10 +213,7 @@ fn a_marched_circle_written_anywhere_in_f64_stays_inside_the_same_share_of_its_b
 /// file prints can be read next to each other.
 #[test]
 fn the_same_circle_named_as_a_plane_cutting_a_ball_is_parametrized_and_not_marched() {
-    let mut runner = TestRunner::new_with_rng(
-        configured(),
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-    );
+    let mut runner = TestRunner::new_with_rng(configured(), soak::seeded());
     let worst = std::cell::Cell::new(0.0f64);
     let walked = std::cell::Cell::new(0usize);
 
@@ -280,10 +280,7 @@ fn the_same_circle_named_as_a_plane_cutting_a_ball_is_parametrized_and_not_march
 /// March every threaded ball a strategy draws, and hand back the worst share of
 /// its own published bound any point was found to stray from the circle.
 fn march_them_all(strategy: impl Strategy<Value = Threaded>, what: &str) -> f64 {
-    let mut runner = TestRunner::new_with_rng(
-        configured(),
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-    );
+    let mut runner = TestRunner::new_with_rng(configured(), soak::seeded());
     let worst = std::cell::Cell::new(0.0f64);
     let marched = std::cell::Cell::new(0usize);
     let runs = std::cell::Cell::new(0usize);
@@ -344,7 +341,7 @@ fn march_them_all(strategy: impl Strategy<Value = Threaded>, what: &str) -> f64 
 
 fn configured() -> Config {
     Config {
-        cases: CASES,
+        cases: soak::cases(CASES),
         source_file: Some(file!()),
         failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
             "proptest-regressions",
