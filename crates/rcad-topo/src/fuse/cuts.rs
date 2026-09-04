@@ -8,14 +8,15 @@
 //! lies on two planes. That is the only place the coplanar case is special: the
 //! arrangement sees one uniform kind of input.
 //!
-//! Lines are gathered between **every pair of distinct input solids**, whether
-//! the two are in the same group or not. `A` is the union of the arguments and
-//! `B` the union of the tools (§17.4), and a union is only real if the solids
-//! making it up have been cut against each other: otherwise two overlapping
-//! arguments keep the halves of each other's faces that are buried inside the
-//! other one, and the answer is a self-overlapping shell rather than a union.
+//! Lines are gathered between **every pair of input faces**, whether the two
+//! belong to different solids or to one, and whether the two solids are in the
+//! same group or not. `A` is the union of the arguments and `B` the union of
+//! the tools (§17.4), and a union is only real if the solids making it up have
+//! been cut against each other: otherwise two overlapping arguments keep the
+//! halves of each other's faces that are buried inside the other one, and the
+//! answer is a self-overlapping shell rather than a union.
 //!
-//! # Every face of a solid is cut by every plane of the other
+//! # Every face is cut by every plane, its own solid's included
 //!
 //! Two solids whose boxes miss each other are skipped whole, and that changes
 //! no answer: solids that cannot touch leave every face of both alone. Inside a
@@ -31,6 +32,30 @@
 //! throws the BVH out because a broad phase "changes no answer"; a face-level
 //! box test here does change one, which is the same argument arriving from the
 //! other side.
+//!
+//! **A solid's own planes cut its own faces for that same reason** (§48, W1).
+//! Cutting a face only by the *other* solid's planes keeps the two sides of an
+//! edge in step for as long as both sides come from one solid, and the answer
+//! is under no obligation to do that. Where the two solids are flush a region
+//! has a face over it in both, the rule keeps one copy, and which copy it keeps
+//! is not the same everywhere on the plane — so a piece of `A`'s face ends up
+//! along an edge from a piece of `B`'s. `A`'s piece is split where `B`'s planes
+//! cross that edge and `B`'s piece where `A`'s do, and those are two different
+//! sets of points.
+//!
+//! A block two wide against a frame with a one-wide hole is that pair, on
+//! whole numbers, with nothing rounded anywhere: the frame's hole wall cuts the
+//! block's wall at `x = 1`, nothing of the block sits on `x = 1`, and the
+//! frame's own wall is left whole. United one way round it was a solid and the
+//! other way round an edge with one face along it. Cutting every face by every
+//! plane of both solids is the closure of the argument above: every face on
+//! either side of any edge of the answer is then diced by the one set, so the
+//! two sides agree about where the corners are wherever they come from.
+//! [`join_up_what_is_one_face`] folds the extra pieces back into one face and
+//! drops the corners that stopped being corners, so nothing of the split
+//! reaches the answer.
+//!
+//! [`join_up_what_is_one_face`]: super::assemble
 //!
 //! # Two gaps, left open on purpose
 //!
@@ -57,8 +82,9 @@ use super::bake::{BakedFace, BakedSolid};
 
 /// Work out every cut line, and hang each on the face it cuts.
 ///
-/// Every pair of distinct solids is cut against every other, whichever group
-/// each came from.
+/// Every face is cut against every other face, in its own solid and in every
+/// other, whichever group each came from. The header says why the solid's own
+/// planes are in there.
 ///
 /// # Errors
 ///
@@ -78,12 +104,13 @@ pub(crate) fn gather(
 
     let mut found: Vec<(usize, usize, Surface)> = Vec::new();
     for one in 0..solids.len() {
-        for other in (one + 1)..solids.len() {
+        for other in one..solids.len() {
             if !solids[one].bounds.overlap(solids[other].bounds) {
                 continue;
             }
             for mine in 0..solids[one].faces.len() {
-                for theirs in 0..solids[other].faces.len() {
+                let from = if one == other { mine + 1 } else { 0 };
+                for theirs in from..solids[other].faces.len() {
                     let face = &solids[one].faces[mine];
                     let against = &solids[other].faces[theirs];
                     let (onto_face, onto_against) = cuts_between(face, against, policy, log)?;
@@ -296,18 +323,20 @@ mod tests {
         gathered(&mut solids);
 
         let up = facing(&solids[0], Vector::new(0.0, 0.0, 1.0));
-        let mut cutting: Vec<[f64; 4]> = up.cuts.iter().map(coefficients_of).collect();
-        cutting.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
         assert_eq!(
-            cutting,
+            distinct_cuts(up),
             [
+                [-1.0, 0.0, 0.0, -0.0],
                 [-1.0, 0.0, 0.0, 1.0],
+                [0.0, -1.0, 0.0, -0.0],
                 [0.0, -1.0, 0.0, 1.0],
                 [0.0, 1.0, 0.0, -3.0],
-                [1.0, 0.0, 0.0, -3.0]
+                [0.0, 1.0, 0.0, -2.0],
+                [1.0, 0.0, 0.0, -3.0],
+                [1.0, 0.0, 0.0, -2.0]
             ],
-            "all four walls of the upper cube, the two far ones included: a cut is by a plane, \
-             and a plane reaches past the face carrying it"
+            "all four walls of the upper cube, the two far ones included, and its own four \
+             beside them: a cut is by a plane, and a plane reaches past the face carrying it"
         );
     }
 
@@ -322,12 +351,11 @@ mod tests {
         gathered(&mut solids);
 
         let down = facing(&solids[0], Vector::new(0.0, 0.0, -1.0));
-        let mut cutting: Vec<[f64; 4]> = down.cuts.iter().map(coefficients_of).collect();
-        cutting.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
         assert_eq!(
-            cutting.len(),
-            4,
-            "the four walls of the upper cube, none of which reaches down here"
+            distinct_cuts(down).len(),
+            8,
+            "the four walls of the upper cube, none of which reaches down here, and the four \
+             of its own cube"
         );
     }
 
@@ -335,9 +363,9 @@ mod tests {
     /// with a plane that is the same plane.
     ///
     /// The upper cube's four walls also reach down to the face they share and
-    /// cut it directly, and they lie on the very same four planes — so eight cut
-    /// lines arrive and four distinct planes carry them. Without the coplanar
-    /// branch only the four direct ones would.
+    /// cut it directly, and its own four lie on those very same planes — so
+    /// twelve cut lines arrive and four distinct planes carry them. Without the
+    /// coplanar branch only eight would.
     #[test]
     fn one_cube_sitting_on_another_is_cut_once_per_edge_of_the_face_they_share() {
         let mut solids = two_cubes(Vector::new(0.0, 0.0, 2.0));
@@ -346,23 +374,30 @@ mod tests {
 
         for (solid, way) in [(0, 1.0), (1, -1.0)] {
             let shared = facing(&solids[solid], Vector::new(0.0, 0.0, way));
-            assert_eq!(shared.cuts.len(), 8);
-            let mut distinct: Vec<[f64; 4]> = shared.cuts.iter().map(coefficients_of).collect();
-            distinct.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
-            distinct.dedup();
-            assert_eq!(distinct.len(), 4);
+            assert_eq!(shared.cuts.len(), 12);
+            assert_eq!(distinct_cuts(shared).len(), 4);
         }
     }
 
+    /// Two cubes ten apart leave each other's faces alone. Each is still cut by
+    /// its own four walls, which is what the header asks for and says nothing
+    /// about the other cube.
     #[test]
-    fn two_cubes_that_are_nowhere_near_each_other_cut_nothing() {
+    fn two_cubes_that_are_nowhere_near_each_other_cut_nothing_of_each_other() {
         let mut solids = two_cubes(Vector::new(10.0, 0.0, 0.0));
 
         gathered(&mut solids);
 
         for solid in &solids {
+            let mine = walls_of(solid);
             for face in &solid.faces {
-                assert!(face.cuts.is_empty());
+                for cut in distinct_cuts(face) {
+                    assert!(
+                        mine.contains(&cut),
+                        "{cut:?} cuts a face of a cube that does not carry it, so it came \
+                         from ten away"
+                    );
+                }
             }
         }
     }
@@ -412,11 +447,35 @@ mod tests {
         gathered(&mut solids);
 
         let up = facing(&solids[0], Vector::new(0.0, 0.0, 1.0));
-        assert_eq!(
-            up.cuts.len(),
-            4,
-            "the top of the lower cube is cut by the four walls of the upper one"
-        );
+        let cutting = distinct_cuts(up);
+        for wall in walls_of(&solids[1]) {
+            if wall[2] != 0.0 {
+                continue;
+            }
+            assert!(
+                cutting.contains(&wall),
+                "the top of the lower cube is cut by {wall:?}, a wall of the upper one"
+            );
+        }
+    }
+
+    /// The planes cutting one face, sorted and with the repeats dropped, the way
+    /// [`canonical_cut_surfaces`](super::super::arrange::name_of_surface_bits)
+    /// takes them.
+    fn distinct_cuts(face: &BakedFace) -> Vec<[f64; 4]> {
+        let mut distinct: Vec<[f64; 4]> = face.cuts.iter().map(coefficients_of).collect();
+        distinct.sort_by(|one, other| one.partial_cmp(other).expect("no nans here"));
+        distinct.dedup();
+        distinct
+    }
+
+    /// The plane of every face of one cube.
+    fn walls_of(solid: &BakedSolid) -> Vec<[f64; 4]> {
+        solid
+            .faces
+            .iter()
+            .map(|face| coefficients_of(&face.surface))
+            .collect()
     }
 
     fn coefficients_of(surface: &Surface) -> [f64; 4] {
