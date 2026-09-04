@@ -1978,12 +1978,16 @@ fn the_two_meridian_circles(flat: &Plane, ring: &Torus) -> Vec<Conic> {
 ///
 /// # Errors
 ///
-/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two do not
-/// share an axis, which is the same refusal
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two are not
+/// **proved** to share an axis, which is the same refusal
 /// [`intersect`](crate::intersect) gives that pair and for the same reason. The
 /// question is asked here rather than assumed from the caller: [`walk`] is
 /// public, and a file read in states a cone against a pipe whenever it holds a
 /// countersink met by a bore.
+///
+/// Anything but [`Decision::Zero`] refuses, including an undecided answer, and
+/// that is the invariant `whether_a_cone_and_a_pipe_share_an_axis`'s
+/// pass-through arm rests on: only a proof of one shared axis may draw circles.
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the circles' own numbers do
 /// not come out finite, and
