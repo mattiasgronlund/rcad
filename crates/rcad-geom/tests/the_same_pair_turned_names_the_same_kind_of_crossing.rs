@@ -51,17 +51,19 @@
 #![forbid(unsafe_code)]
 
 mod crossings;
+mod soak;
 
 use std::cell::Cell;
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
+use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
 use rcad_geom::{Error, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crossings::{Crossing, Elsewhere, Piece, Turn, a_lattice_crossing, a_quartic_lattice_crossing};
 
-/// How many pairs this turns.
+/// How many pairs this turns on the shipped corpus, which `soak::cases`
+/// multiplies and `soak::seeded` reseeds.
 const CASES: u32 = 2048;
 
 /// How many of the planar pairs have to survive the knife-edge skip.
@@ -180,16 +182,17 @@ fn a_ball_resting_along_a_whole_circle_inside_a_pipe_is_a_knife_edge() {
 }
 
 fn the_same_kind_before_and_after(family: BoxedStrategy<Crossing>, floor: f64) {
+    let cases = soak::cases(CASES);
     let mut runner = TestRunner::new_with_rng(
         Config {
-            cases: CASES,
+            cases,
             source_file: Some(file!()),
             failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
                 "proptest-regressions",
             ))),
             ..Config::default()
         },
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+        soak::seeded(),
     );
 
     let compared = Cell::new(0usize);
@@ -223,13 +226,13 @@ fn the_same_kind_before_and_after(family: BoxedStrategy<Crossing>, floor: f64) {
     }
 
     println!(
-        "{} of {CASES} pairs compared, {} skipped for sitting on a knife edge",
+        "{} of {cases} pairs compared, {} skipped for sitting on a knife edge",
         compared.get(),
         on_a_knife_edge.get()
     );
     assert!(
-        compared.get() as f64 >= floor * f64::from(CASES),
-        "only {} of {CASES} pairs were off a knife edge, so this property is barely asserting \
+        compared.get() as f64 >= floor * f64::from(cases),
+        "only {} of {cases} pairs were off a knife edge, so this property is barely asserting \
          anything",
         compared.get()
     );

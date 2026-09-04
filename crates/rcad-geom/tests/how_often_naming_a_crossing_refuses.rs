@@ -35,12 +35,13 @@
 #![forbid(unsafe_code)]
 
 mod crossings;
+mod soak;
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
+use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
 use rcad_geom::{Error, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
 
@@ -64,20 +65,6 @@ const MEASURED_CASES: u32 = 2048;
 /// is about a refusal that used to be 4.64% of its family and is now 0.03% of
 /// it, so the draws had to go up by about the same factor to keep reaching one.
 const DRAWS_A_KNIFE_EDGE_NOW_TAKES: u32 = 20;
-
-/// The environment variable that multiplies [`MEASURED_CASES`] for a soak.
-///
-/// ```text
-/// RCAD_SOAK_FACTOR=200 cargo nextest run -p rcad-geom --no-capture \
-///     how_often_a_certified_naming_of_a_turned_crossing_refuses
-/// ```
-const SOAK_FACTOR: &str = "RCAD_SOAK_FACTOR";
-
-/// The environment variable that reseeds the measured rows.
-///
-/// Unset — which is how the suite always runs it — the seed is fixed and the
-/// number reproduces.
-const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 
 /// **§24.18 criterion 6's threshold, and it is zero.**
 ///
@@ -307,11 +294,11 @@ fn how_often_a_certified_naming_of_a_turned_quartic_crossing_refuses() {
 fn every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn() {
     let mut runner = TestRunner::new_with_rng(
         configured(
-            measured_cases()
+            soak::cases(MEASURED_CASES)
                 .checked_mul(DRAWS_A_KNIFE_EDGE_NOW_TAKES)
                 .expect("that many draws is more than one run can count"),
         ),
-        fresh_seeded_soak(),
+        soak::seeded(),
     );
     let refused = Cell::new(0usize);
     let steady = Cell::new(0usize);
@@ -404,7 +391,8 @@ fn how_often_a_certified_naming_of_a_crossing_somewhere_else_refuses() {
 /// every rate above went to zero.
 #[test]
 fn every_crossing_a_scaling_refuses_is_one_the_same_shapes_on_the_lattice_can_name() {
-    let mut runner = TestRunner::new_with_rng(configured(measured_cases()), fresh_seeded_soak());
+    let mut runner =
+        TestRunner::new_with_rng(configured(soak::cases(MEASURED_CASES)), soak::seeded());
     let refused = Cell::new(0usize);
     let rescued = Cell::new(0usize);
 
@@ -589,7 +577,8 @@ impl Tally {
 /// Cross every pair a strategy draws, from a fixed seed, and hand back what
 /// happened.
 fn measured(strategy: impl Strategy<Value = Crossing>) -> Tally {
-    let mut runner = TestRunner::new_with_rng(configured(measured_cases()), fresh_seeded_soak());
+    let mut runner =
+        TestRunner::new_with_rng(configured(soak::cases(MEASURED_CASES)), soak::seeded());
     let tally = Tally::default();
     let outcome = runner.run(&strategy, |crossing| {
         let [first, second] = crossing.surfaces();
@@ -605,44 +594,6 @@ fn measured(strategy: impl Strategy<Value = Crossing>) -> Tally {
         panic!("{why}");
     }
     tally
-}
-
-/// [`MEASURED_CASES`], multiplied by whatever [`SOAK_FACTOR`] says.
-///
-/// # Panics
-///
-/// If the variable is set to something that is not a whole number above zero, or
-/// to one whose product is more than a run can count. A product that wrapped
-/// would run **fewer** cases than the shipped corpus while the operator read the
-/// number as the wide one, which is a green run that says nothing (§48.2, §50.9).
-fn measured_cases() -> u32 {
-    let Ok(factor) = std::env::var(SOAK_FACTOR) else {
-        return MEASURED_CASES;
-    };
-    let factor: u32 = factor
-        .parse()
-        .unwrap_or_else(|_| panic!("{SOAK_FACTOR} has to be a whole number, not {factor:?}"));
-    assert!(factor > 0, "{SOAK_FACTOR} has to be at least one");
-    MEASURED_CASES.checked_mul(factor).unwrap_or_else(|| {
-        panic!("{MEASURED_CASES} cases times {factor} is more than one run can count")
-    })
-}
-
-/// The fixed seed, or the one [`SOAK_SEED`] names.
-///
-/// # Panics
-///
-/// If the variable is set to something that is not a whole number.
-fn fresh_seeded_soak() -> TestRng {
-    let Ok(seed) = std::env::var(SOAK_SEED) else {
-        return TestRng::deterministic_rng(RngAlgorithm::ChaCha);
-    };
-    let seed: u64 = seed
-        .parse()
-        .unwrap_or_else(|_| panic!("{SOAK_SEED} has to be a whole number, not {seed:?}"));
-    let mut bytes = [0u8; 32];
-    bytes[..8].copy_from_slice(&seed.to_le_bytes());
-    TestRng::from_seed(RngAlgorithm::ChaCha, &bytes)
 }
 
 fn configured(cases: u32) -> Config {

@@ -35,9 +35,10 @@
 #![forbid(unsafe_code)]
 
 mod crossings;
+mod soak;
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
+use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point,
     PointsAlongACrossing, Sphere, Surface, SurfaceMeet, Torus, Vector, intersect, walk,
@@ -52,7 +53,8 @@ use crossings::{
     a_quartic_lattice_crossing, a_quartic_turned_crossing, a_turned_crossing,
 };
 
-/// How many crossings each measured row walks.
+/// How many crossings each measured row walks on the shipped corpus, which
+/// `soak::cases` multiplies and `soak::seeded` reseeds.
 const CASES: u32 = 512;
 
 /// How many the band walks.
@@ -363,14 +365,14 @@ fn walk_them_all(
 ) -> f64 {
     let mut runner = TestRunner::new_with_rng(
         Config {
-            cases,
+            cases: soak::cases(cases),
             source_file: Some(file!()),
             failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
                 "proptest-regressions",
             ))),
             ..Config::default()
         },
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+        soak::seeded(),
     );
 
     let worst = std::cell::Cell::new(0.0f64);
