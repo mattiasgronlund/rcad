@@ -33,8 +33,8 @@
 #![allow(dead_code)]
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Sphere, Surface,
-    SurfaceMeet, Vector, intersect, walk,
+    Axis, Cone, Cylinder, Deflection, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Result,
+    Sphere, Surface, SurfaceMeet, Torus, Vector, intersect, walk,
 };
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -142,6 +142,64 @@ fn a_number(reading: &mut impl Iterator<Item = u8>) -> Option<f64> {
 /// How many powers of two one step of the exponent byte is worth.
 const FIVES_PER_STEP: i32 = 5;
 
+/// What one pair was actually asked.
+///
+/// Every field counts comparisons *reached*, never draws seen. A pair that
+/// refuses is not a failure here — giving up is an answer a caller can read —
+/// so without these a harness could not tell an oracle that held from one that
+/// skipped every draw it was given.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Asked {
+    /// Walked points checked against both the surfaces that named them.
+    pub points: usize,
+    /// Pairs named both ways round where at least one order named something.
+    pub orders: usize,
+    /// Pairs named at two scales where both scales were decided.
+    pub scalings: usize,
+}
+
+impl Asked {
+    /// What two pairs were asked between them.
+    #[must_use]
+    pub fn and(self, other: Self) -> Self {
+        Self {
+            points: self.points + other.points,
+            orders: self.orders + other.orders,
+            scalings: self.scalings + other.scalings,
+        }
+    }
+}
+
+/// **Every oracle this harness has, asked of one pair of surfaces.**
+///
+/// The fuzz target and the suite's replay both call this and nothing narrower,
+/// so a property added here is explored by `cargo fuzz` and replayed in CI
+/// without either being edited. That is the file header's one-authority rule
+/// applied to the oracles and not only to the decoder.
+///
+/// # Why turning is not among them
+///
+/// A pair turned by a rotation was the obvious third oracle and it is
+/// deliberately absent. Turning changes what an exactly tangent pair crosses
+/// in — legitimately, because the turned coordinates are a rounding away and
+/// the surfaces really do come apart — so the property is only true away from a
+/// knife edge. `the_same_pair_turned_names_the_same_kind_of_crossing.rs` has the
+/// filter for that, and §50.9 records that the filter is known to miss a ball
+/// tangent along a whole circle inside a pipe. Adding a turning oracle on top of
+/// a guard that is known to miss cases would report that one miss on every
+/// degenerate draw the corpus holds, and bury whatever else it found.
+///
+/// # Panics
+///
+/// If any oracle below fails.
+pub fn every_oracle_holds_of(pair: [Surface; 2]) -> Asked {
+    Asked {
+        points: every_point_of_every_crossing_is_on_both_surfaces(pair),
+        orders: naming_a_pair_does_not_depend_on_which_way_round_it_is_asked(&pair),
+        scalings: writing_a_pair_at_another_power_of_two_does_not_change_it(&pair),
+    }
+}
+
 /// **Criterion 3, asked of one pair of surfaces.**
 ///
 /// Name where they cross; where that is a curve, walk it; and of every point
@@ -234,6 +292,204 @@ fn side_of(surface: &Surface, point: PredicatePoint) -> Decision {
         Surface::Torus(ring) => ring.side_of(point),
         other => panic!("nothing here can ask about {other:?}"),
     }
+}
+
+/// **Which way round the pair is asked does not change the answer.**
+///
+/// `intersect(a, b)` and `intersect(b, a)` are one question, and the pair table
+/// sends them down different rows to answer it.
+///
+/// What is compared is the *kind* of answer and not its geometry. Two correct
+/// runs may describe one curve from either surface's point of view, and
+/// insisting on the same bits would assert a choice rather than a fact. Every
+/// refusal compares equal to every other for the same reason: which one a path
+/// reaches is a property of the path.
+///
+/// **The sharp half is one order answering where the other gives up.** That says
+/// the answer exists and the arithmetic did not reach it from one side, which is
+/// §16.10's gap rather than a limit — and no amount of walking points can see
+/// it, because the refusing order never produces a point to check. That is the
+/// hole §50.9 sent this oracle to close.
+///
+/// # Panics
+///
+/// If the two orders disagree about what the pair crosses in.
+fn naming_a_pair_does_not_depend_on_which_way_round_it_is_asked(pair: &[Surface; 2]) -> usize {
+    let one_way = intersect(
+        &pair[0],
+        &pair[1],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let other_way = intersect(
+        &pair[1],
+        &pair[0],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert_eq!(
+        answer_of(&one_way),
+        answer_of(&other_way),
+        "asking this pair the other way round changed the answer.\n  first {:?}\n  second {:?}\n  pair {pair:?}",
+        one_way.as_ref().err(),
+        other_way.as_ref().err(),
+    );
+    usize::from(one_way.is_ok() || other_way.is_ok())
+}
+
+/// What a pair crosses in, or that it was refused.
+///
+/// Every refusal reads the same, because which one a path reaches is a property
+/// of the path and not of the pair.
+fn answer_of(met: &Result<SurfaceMeet>) -> (&'static str, usize) {
+    match met {
+        Ok(named) => kind_of(named),
+        Err(_) => ("refused", 0),
+    }
+}
+
+/// What a pair crosses in, at the coarseness the two relation oracles compare.
+///
+/// [`SurfaceMeet`] is `#[non_exhaustive]` and this is another crate, so the
+/// wildcard is forced. Every arm that exists is named above it, and the
+/// wildcard panics rather than folding a new arm into an old one — a new kind of
+/// crossing silently compared equal to `Nothing` is exactly how these oracles
+/// would go quiet.
+fn kind_of(met: &SurfaceMeet) -> (&'static str, usize) {
+    match met {
+        SurfaceMeet::Nothing => ("nothing", 0),
+        SurfaceMeet::TouchAtOnePoint { .. } => ("one point", 0),
+        SurfaceMeet::Curves(runs) => ("curves", runs.len()),
+        SurfaceMeet::SameSurface => ("the same surface", 0),
+        other => panic!("unhandled crossing: {other:?}"),
+    }
+}
+
+/// **The same pair written at another power of two crosses in the same kind of
+/// thing.**
+///
+/// Multiplying every coordinate by `2^k` is exact until a number leaves the
+/// range, and it carries the crossing to the scaled crossing, so the kind of
+/// answer has to survive it. [`exactly_scaled`] divides back and compares, which
+/// refuses the scaling outright wherever it would have overflowed or rounded in
+/// the subnormals — so the two runs really are the same geometry rather than a
+/// near copy of it, which is the argument
+/// `scaling_a_surface_must_not_change_its_answer.rs` makes for its own samples.
+///
+/// **A pair that refuses at either scale is skipped, and that is not a
+/// weakening.** §30.5's first row is a known gap: a product leaves `f64`'s range
+/// while naming, and the same shapes written back on the lattice are named.
+/// Asserting across a refusal would re-report that one gap on every draw and
+/// drown out whatever else is here. What is left is the sharp case — both scales
+/// decided, and disagreeing.
+///
+/// # Panics
+///
+/// If the two scales disagree about what the pair crosses in.
+fn writing_a_pair_at_another_power_of_two_does_not_change_it(pair: &[Surface; 2]) -> usize {
+    let Ok(here) = intersect(
+        &pair[0],
+        &pair[1],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) else {
+        return 0;
+    };
+
+    let mut compared = 0;
+    for by in [-1, 1] {
+        let (Some(first), Some(second)) = (scaled(&pair[0], by), scaled(&pair[1], by)) else {
+            continue;
+        };
+        let Ok(there) = intersect(
+            &first,
+            &second,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) else {
+            continue;
+        };
+        compared += 1;
+        assert_eq!(
+            kind_of(&here),
+            kind_of(&there),
+            "writing this pair at 2^{by} changed what it crosses in.\n  pair {pair:?}"
+        );
+    }
+    compared
+}
+
+/// The same surface with every length multiplied by `2^by`, or `None` where that
+/// is not exact.
+///
+/// **A cone's slope and a plane's normal do not scale, and every other number
+/// here does.** A slope is a ratio of two lengths and a normal is a direction;
+/// scaling either would tilt the surface rather than resize it, and the oracle
+/// above would then be comparing two different shapes and calling their
+/// agreement a property.
+///
+/// `Surface` is `#[non_exhaustive]` and this is another crate, so the wildcard
+/// is forced. All five arms that exist are named above it, and the wildcard
+/// panics: a sixth kind of surface must be scaled on purpose here, not skipped
+/// quietly into a green run over a family that stopped growing (§48.2).
+fn scaled(surface: &Surface, by: i32) -> Option<Surface> {
+    let factor = 2f64.powi(by);
+    match surface {
+        Surface::Plane(flat) => {
+            let [a, b, c, d] = flat.coefficients();
+            Plane::from_coefficients([a, b, c, exactly_scaled(d, factor)?])
+                .ok()
+                .map(Surface::Plane)
+        }
+        Surface::Sphere(ball) => Sphere::new(
+            scaled_place(ball.centre(), factor)?,
+            exactly_scaled(ball.radius(), factor)?,
+        )
+        .ok()
+        .map(Surface::Sphere),
+        Surface::Cylinder(pipe) => {
+            Cylinder::new(
+                scaled_axis(pipe.axis(), factor)?,
+                exactly_scaled(pipe.radius(), factor)?,
+            )
+            .ok()
+            .map(Surface::Cylinder)
+        }
+        Surface::Cone(cone) => Cone::new(scaled_axis(cone.axis(), factor)?, cone.slope())
+            .ok()
+            .map(Surface::Cone),
+        Surface::Torus(ring) => Torus::new(
+            scaled_axis(ring.axis(), factor)?,
+            exactly_scaled(ring.ring_radius(), factor)?,
+            exactly_scaled(ring.tube_radius(), factor)?,
+        )
+        .ok()
+        .map(Surface::Torus),
+        other => panic!("nothing here can scale {other:?}"),
+    }
+}
+
+/// The same axis moved to where scaling puts it, pointing the same way.
+fn scaled_axis(axis: Axis, factor: f64) -> Option<Axis> {
+    Axis::new(scaled_place(axis.origin(), factor)?, axis.direction()).ok()
+}
+
+fn scaled_place(point: Point, factor: f64) -> Option<Point> {
+    let mut moved = [0.0; 3];
+    for (out, coordinate) in moved.iter_mut().zip(point.coordinates()) {
+        *out = exactly_scaled(coordinate, factor)?;
+    }
+    Some(Point::from(moved))
+}
+
+/// `value · factor`, or `None` where that product is not exact.
+///
+/// `factor` is a power of two, so dividing it back out is exact too and the
+/// comparison catches every way the multiplication can lose something:
+/// overflow to infinity, underflow to zero, and rounding in the subnormals.
+fn exactly_scaled(value: f64, factor: f64) -> Option<f64> {
+    let scaled = value * factor;
+    (scaled.is_finite() && scaled / factor == value).then_some(scaled)
 }
 
 /// The bytes a pair of surfaces would be decoded from, for writing a corpus out.

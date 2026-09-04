@@ -16,10 +16,10 @@ use libfuzzer_sys::fuzz_target;
 #[path = "../../crates/rcad-geom/tests/fuzzing/mod.rs"]
 mod fuzzing;
 
-use fuzzing::{every_point_of_every_crossing_is_on_both_surfaces, two_surfaces_from};
+use fuzzing::{every_oracle_holds_of, two_surfaces_from};
 
 fuzz_target!(|bytes: &[u8]| {
     if let Some(pair) = two_surfaces_from(bytes) {
-        let _ = every_point_of_every_crossing_is_on_both_surfaces(pair);
+        let _ = every_oracle_holds_of(pair);
     }
 });
