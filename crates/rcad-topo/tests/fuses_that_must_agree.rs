@@ -304,13 +304,11 @@ const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
 
 /// The same for the one family that sits under [`SOME_COMPARISONS_MUST_HAPPEN`].
 ///
-/// A frustum standing up through a block answers when the cone above its own top
-/// cap stays clear of the block's side walls and refuses when it does not —
-/// [`what_stops_a_block_cutting_a_frustum_is_the_cone_above_its_own_top_cap`]
-/// pins that boundary exactly. Which side of it a drawn case lands on is decided
-/// almost entirely by the one slope the case draws, so the share that answers
-/// swings with 48 draws of a three-valued number rather than with 126
-/// comparisons, and it swings widely.
+/// A frustum standing up through a block used to answer exactly when the cone
+/// above its own top cap stayed clear of the block's side walls. Which side of
+/// that boundary a drawn case landed on was decided almost entirely by the one
+/// slope the case drew, so the share that answers swung with 48 draws of a
+/// three-valued number rather than with 126 comparisons, and it swung widely.
 ///
 /// **Eighteen fresh-seed runs came out between 30% and 46%**, and 30% turned up
 /// twice. That clears [`SOME_COMPARISONS_MUST_HAPPEN`] by four hundredths of one
@@ -318,7 +316,28 @@ const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
 /// would have been a flake. A fifth is a **margin of ten points under the worst
 /// of the eighteen**, about two of that spread's own standard deviations, and it
 /// still fires on anything that halves the rate, which is what a floor is for.
+///
+/// **The boundary that sized it is gone and the eighteen runs were not redone.**
+/// `arrange`'s third `HowItRuns` variant answers the configurations that
+/// boundary turned down, so this family compares more than it did and a fifth is
+/// slacker than it was. It is left where it was measured rather than moved on a
+/// guess: raising it needs the eighteen fresh-seed runs done again, and a floor
+/// nobody re-measured is worth less than one that is merely generous.
 const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
+
+/// How many of the eighty-four-configuration grid's comparisons have both sides.
+///
+/// An exact count rather than a floor, because
+/// [`every_frustum_on_the_wider_grid_answers_the_same_whichever_side_comes_first`]
+/// walks a grid that is written out and not drawn, so this is the same number
+/// every run on every machine. Measured: 168 comparisons meant, **106 made**,
+/// out of 336 fuses of which 124 refused — every one of the 124 naming
+/// `select.rs`'s *a point inside a piece of a face*, and none of them coming
+/// back as something a `Model` cannot hold.
+///
+/// A drop here is a fuse that stopped answering, which is a regression and not a
+/// draw. Re-derive it when it moves; do not relax it to a floor (§19.1).
+const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 106;
 
 /// How much of the lattice control comes back as something a `Model` cannot
 /// hold.
@@ -2324,19 +2343,25 @@ fn every_frustum_of_the_family_has_skin_inside_the_block_and_skin_outside_it() {
 /// frustum family at 6 answers out of 96, and §47.2 says all six of those are
 /// the row where the block misses the frustum altogether.
 ///
-/// **Two fifths of this family answers, and every answer commutes.** The
-/// difference is the fixture rather than the kernel: this family's frustum
+/// **Three fifths of this family answers, and every answer commutes.** Two
+/// fifths when this was written, and the third came from `arrange` learning to
+/// order points along a bend: one fresh-seed run reached 74 of its 126
+/// comparisons, where eighteen of them gave 30% to 46% before. This one draws
+/// its own seed every run, so read that as a band moving and not as a number.
+/// The difference from the file above is the fixture rather than the kernel:
+/// this family's frustum
 /// really does stand up through the block's floor
 /// ([`every_frustum_of_the_family_has_skin_inside_the_block_and_skin_outside_it`]
 /// classifies every point of its skin and finds some inside and some outside),
-/// and it is clear of every side wall by a whole unit. Which two fifths is not
-/// left as a rate:
-/// [`what_stops_a_block_cutting_a_frustum_is_the_cone_above_its_own_top_cap`]
-/// pins the boundary exactly, over a grid of 84, and it is not where anyone
-/// would have guessed.
+/// and it is clear of every side wall by a whole unit. Which of them answer is
+/// not left as a rate: `tests/ordering_points_along_an_endless_bend.rs` walks a
+/// grid of 84 configuration by configuration.
 ///
-/// The rest refuse on [`ORDERING_ALONG_AN_ENDLESS_BEND`], which is §47.7's first
-/// row and the work that would buy this family the other three fifths.
+/// **The rest no longer refuse on [`ORDERING_ALONG_AN_ENDLESS_BEND`].** They did
+/// when this was written — §47.7's first row — and `arrange`'s third
+/// `HowItRuns` variant took that refusal off the grid entirely. What is left
+/// stops in `select.rs` and in triangulation, which
+/// `how_often_a_fuse_with_a_cone_refuses.rs` names one family at a time.
 ///
 /// **Neither side of a comparison has ever been the odd one out.** Every case
 /// here either answers both ways round or refuses both ways round — 100 answered
@@ -2382,51 +2407,45 @@ fn swapping_the_two_sides_of_a_block_and_a_frustum_changes_not_one_bit() {
     );
 }
 
-/// **What actually stops a block cutting a frustum, measured rather than
-/// guessed** — and it is not the cone's own face.
+/// The same law over the eighty-four-configuration grid, which the family
+/// cannot draw.
 ///
-/// §47.7's first row says the open bend is what stands between a cone and a
-/// block, and the row above finds two fifths of the family answering anyway. So
-/// which two fifths? This is the answer, and it is exact: **the fuse answers if
-/// and only if the cone, carried up to the block's roof, is still narrower than
-/// the distance to the nearest side wall.**
+/// **This grid used to pin a rule, and the rule is dead.** §49.6 published *the
+/// fuse answers if and only if the cone, carried up to the block's roof, is
+/// still narrower than the distance to the nearest side wall*, and this file
+/// asserted it over these eighty-four. `arrange`'s third `HowItRuns` variant
+/// puts points in order along a hyperbola now, so fifteen of the forty-four the
+/// rule turned down answer instead.
+/// `tests/ordering_points_along_an_endless_bend.rs` is where that death is
+/// measured — none refused for want of an order, fifty-three answering, and the
+/// fifteen the rule was wrong about — and re-asserting any of it here would be a
+/// second copy of one measurement.
 ///
-/// Every frustum on this grid is clear of every side wall by a whole unit, so
-/// its own *face* never comes near one, and the wide cap is never more than two
-/// across while the nearest wall is never nearer than three. The boundary is
-/// about the cone **above its own top cap** — the surface the face sits on,
-/// carried on past where the face stops. Where that reaches a side wall inside
-/// the block, the fuse has a plane parallel to a cone's axis to arrange, which
-/// is a hyperbola, and §47.2's open bend is what refuses.
+/// What is left for *this* file is the law this file is for, asked over the grid
+/// rather than over [`a_frustum_and_a_block`].
 ///
-/// **The one exception is a different degeneracy and is pinned with it**: where
-/// the top cap lands exactly in the roof plane the fuse comes back
-/// [`Error::Undecidable`] instead, which is a face flush against a plane and not
-/// an open bend at all.
+/// # Why the grid rather than the generator
 ///
-/// # The grid, and how it differs from what the family draws
+/// The generator keeps the top cap at least a unit below the block's roof, and
+/// it never pairs a slope of one eighth with a block under eight across. So the
+/// row above cannot draw a top cap sitting exactly in the roof plane and cannot
+/// draw the steepest cone in the smallest block. Both are on this grid, both are
+/// among the configurations the bend newly reaches, and a commutativity law that
+/// has never been asked of them has its hole in exactly the new place.
 ///
-/// Eighty-four configurations: the three slopes, every block from six to twelve
-/// across, and the frustum's axis at every whole place that leaves the wide cap
-/// a unit clear of both walls. The narrow cap is fixed at one and the wide at
-/// two so that the only things varying are the ones the boundary is about.
+/// The grid is the same eighty-four: the three slopes, every block from six to
+/// twelve across, and the frustum's axis at every whole place that leaves the
+/// wide cap a unit clear of both walls, with the narrow cap fixed at one and the
+/// wide at two.
 ///
-/// It is **wider than [`a_frustum_and_a_block`] draws**, deliberately. That
-/// generator keeps the top cap at least a unit below the roof, so it can never
-/// draw the flush case, and it never pairs a slope of one eighth with a block
-/// under eight across. Both of those are on this grid, and the flush case is
-/// the one that says the boundary above has an exception rather than being the
-/// whole story.
-///
-/// This is the shape §47.2 asks for. A count of how many answered would have
-/// been true and would not have said which, and *"which"* is the whole finding:
-/// the ordering work §47.7 names would buy this family the other three fifths,
-/// and nothing else would.
+/// **Written out rather than drawn**, so the count it compares is the same
+/// number every run on every machine. That is why it is an equality and not a
+/// floor: a drop in it is a regression and not a draw. Re-derive it when it
+/// moves; do not relax it (§19.1).
 #[test]
-fn what_stops_a_block_cutting_a_frustum_is_the_cone_above_its_own_top_cap() {
-    let mut answered = 0;
-    let mut refused = 0;
-    let mut flush = 0;
+fn every_frustum_on_the_wider_grid_answers_the_same_whichever_side_comes_first() {
+    let coordinates = Coordinates::LieOnAConesWall;
+    let tally = Tally::default();
     for up_per_unit_wider in [2u32, 4, 8] {
         for side in 6u32..=12 {
             for at in 3u32..=(side - 3) {
@@ -2437,96 +2456,49 @@ fn what_stops_a_block_cutting_a_frustum_is_the_cone_above_its_own_top_cap() {
                     up_per_unit_wider,
                     at: [at, at],
                 };
-                let (mut model, keys) = pair.build();
-                let what = model.fuse(
-                    &keys[..1],
-                    &keys[1..],
-                    Rule::Union,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
+                for rule in [Rule::Union, Rule::Intersection] {
+                    tally.meaning_to_compare();
+                    let (model, keys) = pair.build();
+                    let (block, frustum) = (keys[0], keys[1]);
 
-                if the_top_cap_lands_in_the_roof(&pair) {
-                    flush += 1;
-                    assert!(
-                        matches!(what, Err(Error::Undecidable { .. })),
-                        "a top cap flush with the roof is a different refusal: {pair:?} gave \
-                         {:?}",
-                        what.err()
-                    );
-                    continue;
-                }
+                    let forwards = fused(&tally, coordinates, &model, &[block], &[frustum], rule)
+                        .unwrap_or_else(|why| panic!("{pair:?}: {why}"));
+                    let backwards = fused(&tally, coordinates, &model, &[frustum], &[block], rule)
+                        .unwrap_or_else(|why| panic!("{pair:?}: {why}"));
+                    both_agree_about_whether_there_is_an_answer(
+                        &tally,
+                        coordinates,
+                        &forwards,
+                        &backwards,
+                        rule,
+                        "swapping the two sides",
+                    )
+                    .unwrap_or_else(|why| panic!("{pair:?}: {why}"));
+                    let (Some(forwards), Some(backwards)) = (forwards.answer(), backwards.answer())
+                    else {
+                        continue;
+                    };
 
-                if the_cone_stays_clear_of_the_walls(&pair) {
-                    answered += 1;
-                    what.unwrap_or_else(|why| {
-                        panic!(
-                            "the cone of {pair:?} is {} across at the roof and the nearest \
-                             wall is {} away, so nothing here is an open bend: {why}",
-                            how_wide_the_cone_is_at_the_roof(&pair),
-                            how_far_the_nearest_wall_is(&pair)
-                        )
-                    });
-                } else {
-                    refused += 1;
-                    assert!(
-                        matches!(what, Err(Error::ACrossingThisCannotBeOrderedAlong)),
-                        "the cone of {pair:?} reaches a side wall inside the block, so this \
-                         is an open bend and not {:?}",
-                        what.err()
-                    );
+                    tally.comparing();
+                    same_answer(
+                        &answer_of(&forwards.0, &forwards.1),
+                        &answer_of(&backwards.0, &backwards.1),
+                        rule,
+                        "swapping the two sides of a block and a frustum on the wider grid",
+                    )
+                    .unwrap_or_else(|why| panic!("{pair:?}: {why}"));
                 }
             }
         }
     }
-    println!(
-        "a frustum up through a block: {answered} answered, {refused} refused on an open bend, \
-         {flush} refused with the top cap flush against the roof"
+    tally.report("commutativity, the eighty-four-configuration frustum grid");
+    assert_eq!(
+        tally.compared.get(),
+        THE_WIDER_GRID_COMPARES_THIS_MANY,
+        "the grid set out to make {} comparisons and made {} of them",
+        tally.meant_to_compare.get(),
+        tally.compared.get()
     );
-    assert!(
-        answered > 0 && refused > 0 && flush > 0,
-        "the grid has to reach all three sides of the boundary, and it reached \
-         {answered}, {refused} and {flush}"
-    );
-}
-
-/// Whether the frustum's upper cap lands exactly in the block's roof plane.
-///
-/// Both are whole numbers, so this is exact and never nearly true.
-fn the_top_cap_lands_in_the_roof(pair: &FrustumAndBlock) -> bool {
-    pair.far() + where_the_apex_sits(pair) == f64::from(pair.side)
-}
-
-/// Whether the cone, carried up to the block's roof, stays inside the block's
-/// side walls.
-fn the_cone_stays_clear_of_the_walls(pair: &FrustumAndBlock) -> bool {
-    how_wide_the_cone_is_at_the_roof(pair) < how_far_the_nearest_wall_is(pair)
-}
-
-/// How far across the cone is where the block's roof plane cuts it — the face's
-/// own top cap ignored, because the surface does not stop there.
-fn how_wide_the_cone_is_at_the_roof(pair: &FrustumAndBlock) -> f64 {
-    (f64::from(pair.side) - where_the_apex_sits(pair)) * pair.slope()
-}
-
-/// How far the frustum's axis stands from the nearest of the block's four side
-/// walls.
-fn how_far_the_nearest_wall_is(pair: &FrustumAndBlock) -> f64 {
-    let nearest = pair
-        .at
-        .iter()
-        .flat_map(|&along| [along, pair.side - along])
-        .min()
-        .expect("a block has walls");
-    f64::from(nearest)
-}
-
-/// How far below the block's floor the cone's apex sits.
-///
-/// [`FrustumAndBlock::build`] drops the frustum by one more than its lower cap's
-/// height, and the cone it is cut from has its apex at the origin.
-fn where_the_apex_sits(pair: &FrustumAndBlock) -> f64 {
-    -1.0 - pair.near()
 }
 
 /// Roadmap §11.2's first instruction, over a round solid, four milestones late.
