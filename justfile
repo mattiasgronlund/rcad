@@ -73,7 +73,26 @@ check:
 # A ratchet that resets its own instrument in the same commit range as the tree
 # has lost its baseline, so the bridging figures are written here rather than
 # left to be re-derived. Whoever changes the scan again owes the same four rows.
-wildcard_arms := "87"
+#
+# **87 → 89 over the unit called "the endless bend", and every point of it was
+# read.** Measured on three commits with one instrument:
+#
+#     06bc048  the unit's own starting main   81 direct + 6 composite = 87
+#     198de07  after E, F and C merged        81 direct + 5 composite = 86
+#     2c236f9  after A and B merged           84 direct + 5 composite = 89
+#
+# The composite point is the happy fourth reason: `is_on_a_knife_edge` in
+# `the_same_pair_turned_names_the_same_kind_of_crossing.rs` grew a ball-and-pipe
+# arm, so that match leaves two of `Surface`'s variants unnamed where it left
+# three. The three direct points are all in `intersect.rs` and all belong to
+# naming the coaxial cone and pipe: two are the `other => unreachable!("a sum of
+# squares is never below zero")` arms `#[non_exhaustive]` forces at the two `ask`
+# call sites in `where_a_cone_and_a_pipe_cross`, which is what the other twenty-two
+# arms in that file already are; the third is `leaning => leaning` in
+# `whether_a_cone_and_a_pipe_share_an_axis`, a pass-through that hands any answer
+# but `Zero` straight back, and its precedent is `same => same` in
+# `Picker::side_of_point` (`half_space.rs:441`).
+wildcard_arms := "89"
 
 check-wildcards:
     @find crates -name lib.rs -path '*/src/*' -exec touch {} +
