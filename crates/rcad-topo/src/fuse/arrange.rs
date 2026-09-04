@@ -3075,7 +3075,10 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
         // A ball against a pipe, a cone or a ring crosses in a quartic.
         | (Surface::Sphere(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_))
         | (Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_), Surface::Sphere(_))
-        // So does every pair among the pipe, the cone and the ring.
+        // So does every pair among the pipe, the cone and the ring, bar two
+        // side-by-side pipes, which cut straight lines. `false` is right for
+        // them here — a pair of endless lines is not a closed conic — and wrong
+        // one step up, which `a_pair_that_crosses_in_straight_lines` records.
         | (
             Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
             Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
@@ -3093,8 +3096,24 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 ///
 /// The other pairs are named rather than swept up, because `false` for them is a
 /// fact about the question and not about the shapes: nothing but a plane holds a
-/// straight line with a ball or a ring on the other side of it, and every pair
-/// among the pipe, the cone and the ring is a degree-four space curve. The `_`
+/// straight line with a ball or a ring on the other side of it, and a cone
+/// against a ball, a pipe or another cone is a degree-four space curve.
+///
+/// **Two pipes are the exception, and the `false` this hands back for them is a
+/// gap.** Two pipes whose axes run along one direction cut each other in one
+/// straight line or two: `rcad-geom`'s `where_two_pipes_side_by_side_cross`
+/// builds them and its own doc says *"every answer is straight"*, and
+/// `assemble.rs`'s `the_crossing_of_these_runs_straight` answers `true` for
+/// exactly that pair by comparing the two axis directions. This says `false`,
+/// so such a run falls past the straight gate into the conic gate, which is
+/// `false` for a pair that does not close, and
+/// [`how_a_crossing_runs`] refuses it. The answer exists and no arithmetic ran
+/// out reaching for it — `∇S × ∇Q` on either line is the common axis with
+/// nothing cancelling — so this is a **gap** and not a limit, measured by
+/// `two_side_by_side_pipes_cut_straight_lines_that_nothing_here_will_order`.
+/// The fix is one arm spelled the way `assemble.rs` already spells it.
+///
+/// The `_`
 /// at the bottom is for a sixth kind and nothing else (§40) — but a sixth kind
 /// falls into it silently rather than failing to compile, because [`Surface`] is
 /// `#[non_exhaustive]` and belongs to another crate.
@@ -4124,13 +4143,17 @@ mod curved {
 #[cfg(test)]
 mod what_the_curved_arrangement_reaches {
     use rcad_geom::{
-        Axis, Cone, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus, Vector, intersect,
+        Axis, Cone, Cylinder, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus, Vector,
+        intersect,
     };
-    use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 
     use super::super::bake::bake;
     use super::super::cuts;
-    use super::{HowItRuns, how_a_crossing_runs, round_a_closed_crossing, split_a_face};
+    use super::{
+        HowItRuns, a_pair_that_crosses_in_straight_lines, cross_of, gradient_at,
+        how_a_crossing_runs, round_a_closed_crossing, split_a_face,
+    };
     use crate::{Error, Model, SolidKey};
 
     /// What every face of a pair comes apart into, as one word per face: the
@@ -4546,16 +4569,97 @@ mod what_the_curved_arrangement_reaches {
             panic!("a tangent plane touches along a curve and nothing else");
         };
         assert!(
-            how_a_crossing_runs(
-                &touching,
-                &cone,
-                &ruling[0],
-                PredicatePoint::from([2.0, 0.0, 4.0]),
-                &mut log
-            )
-            .is_err(),
+            matches!(
+                how_a_crossing_runs(
+                    &touching,
+                    &cone,
+                    &ruling[0],
+                    PredicatePoint::from([2.0, 0.0, 4.0]),
+                    &mut log
+                ),
+                Err(Error::Undecidable { .. })
+            ),
             "the direction of a tangent plane's ruling is `∇S × ∇Q`, which is nothing"
         );
+
+        // `.is_err()` used to be the whole of the line above, and it would have
+        // passed just as well had the straight gate turned the pair away — which
+        // is `ACrossingThisCannotBeOrderedAlong` and a different sentence. The
+        // gate lets it through, and what gives up is the direction.
+        assert!(
+            a_pair_that_crosses_in_straight_lines(&touching, &cone),
+            "a plane resting along a cone's own side cuts one endless ruling"
+        );
+        assert_eq!(
+            cross_of(
+                gradient_at(&touching, PredicatePoint::from([2.0, 0.0, 4.0])),
+                gradient_at(&cone, PredicatePoint::from([2.0, 0.0, 4.0])),
+            )
+            .map(Interval::sign),
+            [Decision::Zero; 3],
+            "the two gradients are parallel, so the cross product is exactly nothing"
+        );
+    }
+
+    /// **Two pipes side by side cut straight lines, and this refuses them.**
+    ///
+    /// A pin on today's answer and not on a right one. Two pipes of radius five
+    /// whose axes both run up `z`, six apart, meet along the two lines through
+    /// `(3, ±4, z)` — a 3-4-5 on both, so the meeting is the real one and not a
+    /// near one. `intersect` builds both, and
+    /// `where_two_pipes_side_by_side_cross`'s own doc says every answer it gives
+    /// is straight.
+    ///
+    /// **A gap and not a limit.** `∇S × ∇Q` at `(3, 4, 0)` is
+    /// `(3, 4, 0) × (−3, 4, 0) = (0, 0, 24)`, which is the common axis with
+    /// nothing cancelling, so `dominant_axis_of_a_direction` would name `z` at
+    /// once. What refuses is `a_pair_that_crosses_in_straight_lines` answering
+    /// `false` for the pair, one arm above where `assemble.rs`'s
+    /// `the_crossing_of_these_runs_straight` answers `true` for it.
+    #[test]
+    fn two_side_by_side_pipes_cut_straight_lines_that_nothing_here_will_order() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let here = Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe of radius five"));
+        let there = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(6.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                    .expect("an axis six along `x`"),
+                5.0,
+            )
+            .expect("a second pipe of the same radius"),
+        );
+
+        let SurfaceMeet::Curves(runs) = intersect(&here, &there, &policy, &mut log)
+            .expect("two pipes of radius five, six apart, meet")
+        else {
+            panic!("two pipes side by side meet along curves and nothing else");
+        };
+        assert_eq!(runs.len(), 2, "one line either side of the plane of the axes");
+
+        let at = PredicatePoint::from([3.0, 4.0, 0.0]);
+        assert_eq!(
+            cross_of(gradient_at(&here, at), gradient_at(&there, at)),
+            [
+                Interval::exactly(0.0),
+                Interval::exactly(0.0),
+                Interval::exactly(24.0),
+            ],
+            "the direction is there, exactly, and it is the common axis"
+        );
+        assert!(
+            !a_pair_that_crosses_in_straight_lines(&here, &there),
+            "and this is the arm that throws it away"
+        );
+        for run in &runs {
+            assert!(
+                matches!(
+                    how_a_crossing_runs(&here, &there, run, at, &mut log),
+                    Err(Error::ACrossingThisCannotBeOrderedAlong)
+                ),
+                "today's answer, and a gap: the line runs up `z` and nothing asks"
+            );
+        }
     }
 }
 
