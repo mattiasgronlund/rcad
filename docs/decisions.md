@@ -15725,11 +15725,15 @@ predicates — `Pos`, `Zero`, or `Undecidable` carrying its enclosure — asked 
 both doors, in the style `along_a_crossing.rs` already uses.
 
 **A third rounded row is still rounded.** `a_plane_cuts_a_cone_in_rulings`
-decides a degree-four expression in plain `f64`, and its doc still claims that
+decides a degree-six expression in plain `f64`, and its doc still claims that
 disagreeing with `intersect` costs a refusal rather than a wrong answer. By the
 two findings above that is likely false in the same way. **It is not
 demonstrated**, and the lane that found the other two said so instead of
 assuming. It wants its own lane.
+
+> **§49.8 closes this: it was demonstrated, and it was a bug.** The paragraph
+> above stands as written because it was right to refuse to claim it — but the
+> claim it declined to make was true, and the row is now three of three.
 
 ### 49.3 What else the two gates found that thirteen lanes did not
 
@@ -15824,7 +15828,7 @@ no corner sits on can merge a later differently-named corner into an old one; an
 
 | open | where |
 |---|---|
-| **the third rounded row** | `a_plane_cuts_a_cone_in_rulings`, degree four, undemonstrated but expected false by the same argument as §49.2's two |
+| ~~**the third rounded row**~~ | **closed by §49.8.** It was a bug, and it needed both of its two signs to be wrong at once |
 | **ordering along an endless bend** | the spike passed: `sign((p₁ − p₂) · (n × own_way))`, 16 400 pairs, none undecided, none out of order. One `HowItRuns` variant and the call sites. **X2 measured what it buys**: the frustum family answers iff `slope · (roof − apex) < distance to the nearest side wall`, 84 of 84, so this is the other three fifths |
 | **`CannotTellTheCellsOfAFaceApart`** | no longer undemonstrated. A face with a round hole has a rim wire of one closed edge, and a one-corner wire has no winding to read. Blocks associativity over a curved trio |
 | **the general quartic** | plane and two quadrics that bend differently. The pencil route wants `det(λM₁ + μM₂) = 0`, whose cubic roots are not exact, so every sign below them is a box |
@@ -15855,3 +15859,56 @@ published** — it was in an expression nobody had asked to be exact.
 > the test itself has to be proved and not merely reused. Score it by asking, at
 > the next gate, whether any predicate reached a new call site without being
 > re-derived there.
+
+### 49.8 The third row was a bug too, and three of three is a class
+
+Run after §49 was written, on the row §49.6 listed first among what stands.
+
+**The dangerous direction is the same one**: the gate says *straight*, the
+crossing is really a conic, and `how_a_crossing_runs` returns `AlongAnAxis` —
+**a closed ellipse ordered along an axis**, exactly as the cylinders were.
+
+What hid it is that it takes **both** of the function's two signs being wrong at
+once, which is why nobody found it by inspection:
+
+| the gate said | the truth | draws | what happened |
+|---|---|---:|---|
+| rulings | one closed ellipse | **3 655** | `AlongAnAxis`, all 3 655. **Not one refused** |
+| rulings | the apex alone | 16 077 | no run exists to order |
+| a curve | two rulings | 7 761 | harmless **only** because `intersect` refuses to name a near-tangent ruling direction |
+
+Out of 360 000 draws over three families. Either sign wrong alone is safe: a
+rounded apex with `E < 0` makes the truth a hyperbola, and `intersect` refused
+all **17 645** of those because a branch clearance of about `1e-17` cannot beat
+one ulp of `n·a`; a rounded lean with the apex genuinely on the plane makes the
+truth `TouchAtOnePoint`, and no run exists. Both wrong together names one closed
+ellipse and calls it two rulings.
+
+Both signs are now exact `Decision` predicates asked by both doors, with the lean
+written as `(n·w)² − Σ(slope·(n_j w_k − n_k w_j))²` so it needs only squares of
+short expansions and never a product of two long ones. The nearly-tangent plane
+that used to be misordered is now **ordered correctly** — `RoundAClosedCurve` —
+which is a better landing than the plane-and-pipe row got, because a cone's
+ellipse is not `1/(n·w)` long and a place to start on it is still findable. Every
+cone rate is bit-identical, including the frustum-against-a-block row at 90 of 96.
+
+**The reuse was not achieved and that is the open item.** `intersect` computes
+both signs exactly already, inside `where_a_plane_and_a_cone_cross`, over an
+`Exact` that is `pub(crate)`. Asking one question in one place needs two
+functions exported from `rcad-geom`, which was outside the lane's write set — so
+the expression now exists in a third copy, guarded by a 360 000-draw test
+asserting the door and `intersect` agree on every draw. **That guard is not the
+same thing as not having a copy**, and §49.5's lesson says so.
+
+**Three rounded gates, three bugs, all the same shape**: an `f64` expression
+compared against zero, believed to fail into a refusal, in fact failing into a
+wrong answer. That is not three incidents. The next unit should ask what *else*
+in `arrange.rs` and `assemble.rs` decides a shape by comparing a sum of products
+to zero, and treat a rounded answer there as a defect until it is shown
+otherwise — the reverse of the burden these three carried.
+
+Two paths remain unexercised and are recorded as such rather than as clean: the
+`None`/`Undecidable` arm of these predicates never fired in 360 000 draws or
+anywhere in the suite, and neither did its twin next door; and the 7 761 draws of
+the safe direction are safe only until
+`TwoLinesThroughAConesApexAreOneCurveThroughItself`'s neighbouring gap closes.
