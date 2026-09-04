@@ -4081,22 +4081,25 @@ mod curved {
             table,
             [
                 // The bar's wall, cut by the block's top and bottom into three
-                // rings, each between two closed curves.
-                ("pipe", 2, vec![2, 2, 2]),
-                // The block's top and bottom: a square with a round hole in it,
-                // and the disk that came out.
-                ("plane", 1, vec![1, 2]),
-                ("plane", 1, vec![1, 2]),
-                // The block's four walls: cut by the bar's two cap planes, which
-                // reach right past them and cut nothing off.
-                ("plane", 2, vec![1]),
-                ("plane", 2, vec![1]),
-                ("plane", 2, vec![1]),
-                ("plane", 2, vec![1]),
+                // rings, each between two closed curves, and by the bar's own
+                // two caps, which cut nothing off it.
+                ("pipe", 4, vec![2, 2, 2]),
                 // The bar's two caps, cut by the block's four walls, which are
-                // nowhere near them.
-                ("plane", 4, vec![1]),
-                ("plane", 4, vec![1]),
+                // nowhere near them, and by the bar's own wall.
+                ("plane", 5, vec![1]),
+                ("plane", 5, vec![1]),
+                // The block's top and bottom: a square with a round hole in it,
+                // and the disk that came out. The other four cuts are the
+                // block's own walls, along the edges of the square.
+                ("plane", 5, vec![1, 2]),
+                ("plane", 5, vec![1, 2]),
+                // The block's four walls: cut by the bar's two cap planes, which
+                // reach right past them and cut nothing off, and by the block's
+                // own top, bottom and two walls beside them.
+                ("plane", 6, vec![1]),
+                ("plane", 6, vec![1]),
+                ("plane", 6, vec![1]),
+                ("plane", 6, vec![1]),
             ]
         );
     }
@@ -4230,15 +4233,15 @@ mod what_the_curved_arrangement_reaches {
         assert_eq!(
             what_it_cuts(&model, block, bar),
             [
-                "pipe cut by 2 -> [2, 2]",
-                "plane cut by 1 -> [2, 1]",
-                "plane cut by 1 -> [2, 1]",
-                "plane cut by 2 -> [1, 1]",
-                "plane cut by 2 -> [1, 1]",
-                "plane cut by 2 -> [1, 1]",
-                "plane cut by 2 -> [1, 1]",
-                "plane cut by 4 -> [1]",
-                "plane cut by 4 -> [1]",
+                "pipe cut by 4 -> [2, 2]",
+                "plane cut by 5 -> [1]",
+                "plane cut by 5 -> [1]",
+                "plane cut by 5 -> [2, 1]",
+                "plane cut by 5 -> [2, 1]",
+                "plane cut by 6 -> [1, 1]",
+                "plane cut by 6 -> [1, 1]",
+                "plane cut by 6 -> [1, 1]",
+                "plane cut by 6 -> [1, 1]",
             ]
         );
     }
@@ -4264,12 +4267,12 @@ mod what_the_curved_arrangement_reaches {
             what_it_cuts(&model, block, ball),
             [
                 "ball cut by 1 -> [1, 1]",
-                "plane cut by 0 -> [1]",
-                "plane cut by 0 -> [1]",
-                "plane cut by 0 -> [1]",
-                "plane cut by 0 -> [1]",
-                "plane cut by 0 -> [1]",
-                "plane cut by 1 -> [2, 1]",
+                "plane cut by 4 -> [1]",
+                "plane cut by 4 -> [1]",
+                "plane cut by 4 -> [1]",
+                "plane cut by 4 -> [1]",
+                "plane cut by 4 -> [1]",
+                "plane cut by 5 -> [2, 1]",
             ]
         );
     }
@@ -4299,15 +4302,15 @@ mod what_the_curved_arrangement_reaches {
         assert_eq!(
             what_it_cuts(&model, block, bar),
             [
-                "pipe cut by 6 -> [2, 1, 1, 2, 2]",
-                "plane cut by 3 -> [1]",
-                "plane cut by 3 -> [1]",
-                "plane cut by 3 -> [1]",
-                "plane cut by 3 -> [1]",
-                "plane cut by 3 -> [2, 1]",
-                "plane cut by 3 -> [2, 1]",
-                "plane cut by 6 -> [1, 1]",
-                "plane cut by 6 -> [1, 1]",
+                "pipe cut by 8 -> [2, 1, 1, 2, 2]",
+                "plane cut by 7 -> [1, 1]",
+                "plane cut by 7 -> [1, 1]",
+                "plane cut by 7 -> [1]",
+                "plane cut by 7 -> [1]",
+                "plane cut by 7 -> [1]",
+                "plane cut by 7 -> [1]",
+                "plane cut by 7 -> [2, 1]",
+                "plane cut by 7 -> [2, 1]",
             ]
         );
     }
