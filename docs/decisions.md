@@ -16005,7 +16005,7 @@ into an answer rather than a refusal when the refusal lifts. So Lane A names the
 coaxial cone-and-pipe case **and nothing else**, and the day cone-and-cone is
 named, `assemble.rs:2118` is the first thing that changes.
 
-**5. §50.9's prediction fired inside this section, before a single lane ran.**
+**5. §50.10's prediction fired inside this section, before a single lane ran.**
 Pruning the lane worktrees turned up two branches that were never merged and
 that looked like stranded fixes, and this section was about to carry both into
 the wave:
@@ -16053,6 +16053,8 @@ an interface another lane must guess is how two lanes become one (§48.4).
 | step | one deliverable | may write |
 |---|---|---|
 | **S the spike** | is coaxial cone-against-pipe one sign question? | scratchpad only, never merged |
+| **E the oracles** | `rcad-fuzz`'s order and scale oracles, re-applied (§50.9) | `tests/fuzzing/mod.rs`, `tests/every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs`, `fuzz/fuzz_targets/where_two_surfaces_cross.rs` |
+| **F the soak** | a shared soak module, the `checked_mul` bug, the missing knife-edge arm (§50.9) | `tests/soak/mod.rs`, `tests/how_far_the_marcher_strays_from_a_crossing_that_is_a_circle.rs`, `tests/every_point_along_a_crossing_is_on_both_surfaces.rs`, `tests/the_same_pair_turned_names_the_same_kind_of_crossing.rs`, `tests/how_often_naming_a_crossing_refuses.rs`, `rcad-topo/tests/turning_a_fuse.rs` |
 | **A the crossing** | name the coaxial pair; split `intersect.rs:181`'s arm | `rcad-geom`: `intersect.rs`, `error.rs`, `walk.rs`, its own tests |
 | **B the bend** | third `HowItRuns` variant, the ordering call sites, and the 84 of 84 | `rcad-topo/src/fuse/arrange.rs` |
 | **C the consumer** | `settle_on_the_lower_rounding`'s superseded key; wire A's answer into `the_crossing_of_these_runs_straight` | `rcad-topo/src/fuse/assemble.rs` |
@@ -16165,7 +16167,74 @@ each one is cheap now and expensive during a wave.
   stated risk is that *a pattern that does not match fails quietly*, and quiet
   failure is what a gate reading a diff is worst at catching.
 
-### 50.9 The prediction
+### 50.9 What the two unmerged branches were worth, audited rather than assumed
+
+§50.2 item 5 settled `m5-predicates-scaling`: already in main, byte for byte.
+`rcad-fuzz` needed reading, because main fixed the same overflow by a **different
+route** and a diff cannot tell a superseded fix from a missing one. Merge base
+`67a6b7f`; `rcad-geom` has grown ~17 300 lines since.
+
+**Dead, and the reason matters more than the verdict.** The branch's headline —
+*"an axis whose direction was too big to square stored no direction"* — is fixed
+on main **twice over**, and the branch's own fix would be unreachable code there.
+`normalized_as` measures at a rescaled copy (`point.rs:363`, via
+`power_of_two_that_keeps_the_squares_in_range` at `:267`), so its proposed
+`if !length.is_finite()` arm can never fire; and `Axis::new` (`point.rs:513`) no
+longer calls the raw path at all. Main's version also fixes the **underflow** end
+that the branch declined — its doc said *"a direction too small for it is not"* —
+so main is strictly better. Both regression seeds are dead too: the defect they
+pin is fixed (`half_space.rs:171-175` names this caller by name), and the seeds
+are ChaCha byte-strings that no longer replay the recorded pairs after the
+generator drifted. **Every number the branch published is stale**, by 5× to 40×,
+because M4 and §33 moved the refusal rates underneath them.
+
+**Live, and one of it is a bug in main.**
+
+1. **The order and scale oracles.** `tests/fuzzing/mod.rs` on main exports exactly
+   one oracle. There is **no commutativity oracle anywhere in `rcad-geom`** over
+   the fuzz corpus — a swapped-argument `intersect` appears twice in the crate,
+   both hand-written. The branch adds two: `intersect(a,b)` against
+   `intersect(b,a)`, and the same pair written at `2^±1`. That closes a hole the
+   branch states plainly — a pair the fuzzer *refuses* to name produces no point
+   to check, so every defect that shows up as a refusal was outside what any
+   amount of fuzzing could see. It is also the oracle that found the branch's own
+   fix, so its catch rate is demonstrated rather than argued.
+2. **`MEASURED_CASES * factor` is a bare multiply, and in release it wraps.**
+   `how_often_naming_a_crossing_refuses.rs:619`, compounded twenty-fold at
+   `:309`, and again at `rcad-topo/tests/turning_a_fuse.rs:318-325`. A soak that
+   overflows runs **fewer** cases than shipped while the operator reads the
+   number as the wide one — a green run that says nothing, which is §48.2's
+   whole subject. `checked_mul` is the fix.
+3. **Three files in `rcad-geom` cannot be soaked at all.**
+   `how_far_the_marcher_strays…` (96 draws), `every_point_along_a_crossing…`
+   (512), `the_same_pair_turned…` (2048) are hard-seeded and hard-sized on main,
+   so soaking them reruns the same draws for ever. The branch's defect
+   description is **verbatim still true**. Meanwhile `rcad-topo` has grown to
+   *three* private copies of the same two variable names, so the argument for one
+   shared module is stronger now than when it was written.
+4. **`is_on_a_knife_edge` has no `[Sphere, Cylinder]` arm**
+   (`the_same_pair_turned…:212`). A ball tangent along a whole circle inside a
+   pipe falls through to `_ => false`, so that property reads as covering more
+   than it does. Re-derive the case by hand; do not re-add the dead seed. The
+   oracle lane deliberately omits a *turn* oracle citing exactly this gap, so
+   closing it unblocks a third.
+
+**Two lanes, not one, and they are split by write set rather than by theme.**
+Items 2, 3 and 4 all touch the fixed-seed test files, so they are one lane; the
+oracles are another. **Lane E may not write
+`how_often_naming_a_crossing_refuses.rs`** — that file is Lane F's, and it is the
+one file on the branch that conflicts hard, because main rewrote its whole
+constants block for M4/§33. Take main's constants wholesale and redo the
+private-helper deletion by hand.
+
+**What Lane E must re-derive rather than inherit**, per §50.5's rule applied to a
+branch instead of a spike: the branch's `scaled()` and `kind_of()` predate
+`Surface::Cone` and `Surface::Torus`, so without new arms they will **silently
+skip every cone and torus pair** — a green oracle over a shrinking family, which
+is the §48.2 failure again. And its three published floors were measured against
+the old surface set; they move.
+
+### 50.10 The prediction
 
 **§49.7's prediction is carried into this unit and scored by charge 2** — a
 correct fix that carries a rounded test into a place where it decides an answer.
