@@ -4,13 +4,36 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two of the three have to be flat, and that is a gap rather than a limit
+//! # Two planes and a quadric is the road, and two of the roads back to it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
-//! unknown whose discriminant is a polynomial in the stored numbers. One plane
-//! and two quadrics is a quartic and three quadrics is a degree-eight system;
-//! both have answers, and reaching them takes an algebraic solver rather than a
-//! discriminant. So this refuses by name (§16.10, §31.2), and
+//! unknown whose discriminant is a polynomial in the stored numbers. That is the
+//! one route that is worked out here, and everything else either arrives at it
+//! or is refused.
+//!
+//! One plane and two quadrics is a quartic in general — the plane crosses each
+//! quadric in a conic and two conics in one plane meet where a quartic is zero —
+//! and reaching *that* takes an algebraic solver rather than a discriminant. But
+//! **two families of it are not a quartic at all**, and both are ordinary
+//! mechanical CAD rather than curiosities:
+//!
+//! - **Two quadrics that bend the same way.** Write a quadric out as
+//!   `p·(M p) + 2b·p + c`. Two of them with the same `M` differ by something
+//!   *linear*, so every point both of them hold sits on one flat surface — the
+//!   plane `2(b₁ − b₂)·p = c₂ − c₁`, whose every number this file works out
+//!   exactly. Two balls have it, two pipes running the same way have it, and two
+//!   cones of one slope about one direction have it. So the triple is two planes
+//!   and a quadric after all, and the road above answers it.
+//!   [`where_a_plane_and_two_quadrics_of_one_bend_meet`].
+//! - **A plane that only grazes one of them.** A plane that misses a quadric
+//!   leaves the three sharing nothing, and a plane that *touches* one at a single
+//!   point leaves one candidate — so the whole question is which side of the
+//!   third surface that point is on. [`what_a_plane_that_grazes_one_of_them_leaves`].
+//!
+//! What is left over is refused by name (§16.10, §31.2): one plane and two
+//! quadrics that bend differently and cross the plane in curves — a pipe and a
+//! ball, or two pipes leaning against each other — and any triple with a torus
+//! and fewer than two planes.
 //! [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] says which of the two
 //! kinds of refusal it is in its own doc.
 //!
@@ -35,13 +58,14 @@
 
 use rcad_predicates::{
     Decision, Interval, Level, Measures, NOTHING_IS_KNOWN, Point as PredicatePoint, Policy,
-    ProvenanceLog, Record,
+    ProvenanceLog, Record, SideOfSurface,
 };
 use smallvec::{SmallVec, smallvec};
 
 use crate::enclosure::{quotient_or_everything, root_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{Question, ask, intersect, squared_length_of_a_cross_product};
+use crate::plane::which_side_of_a_flat_surface;
 use crate::real_roots::where_a_polynomial_is_zero;
 use crate::{
     Cone, Cylinder, Error, Plane, PlaneAgreement, Result, Sphere, Surface, SurfaceMeet, Torus,
@@ -86,7 +110,8 @@ pub enum MeetOfThree {
 /// # Errors
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
-/// the three are planes.
+/// the three are planes and neither road back to two of them runs — the two the
+/// module doc names.
 ///
 /// [`Error::Undecidable`] when a sign the answer depends on could not be
 /// settled, or when a product the exact arithmetic needs falls out of `f64`'s
@@ -103,7 +128,7 @@ pub fn meet_of_three_surfaces(
 ) -> Result<MeetOfThree> {
     let [first, second, third] = in_a_fixed_order(surfaces);
     let (Surface::Plane(one), Surface::Plane(other)) = (&first, &second) else {
-        return Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat);
+        return where_one_plane_and_two_curved_surfaces_meet(&first, &second, &third, policy, log);
     };
     if let Surface::Plane(last) = &third {
         return where_three_planes_meet(one, other, last, policy, log);
@@ -477,19 +502,523 @@ fn what_a_third_surface_leaves_of_one_plane(
     match one.agreement_with(other) {
         PlaneAgreement::Different => Ok(MeetOfThree::Nowhere),
         PlaneAgreement::SameWay | PlaneAgreement::OppositeWay => {
-            match intersect(&Surface::Plane(*one), third, policy, log)? {
-                SurfaceMeet::Nothing => Ok(MeetOfThree::Nowhere),
-                SurfaceMeet::TouchAtOnePoint { at } => Ok(MeetOfThree::At(smallvec![at])),
-                SurfaceMeet::Curves(_) | SurfaceMeet::SameSurface => {
-                    Ok(MeetOfThree::MoreThanAPoint)
-                }
-            }
+            what_one_plane_and_one_curved_surface_share(one, third, policy, log)
         }
         PlaneAgreement::CannotTell => Err(an_exact_step_could_not_be_taken(
             WHERE_THREE_SURFACES_MEET,
             at,
         )),
     }
+}
+
+/// The whole of what one plane and one other surface have in common, read as an
+/// answer about three surfaces.
+///
+/// Two callers reach it, and both have already worked out that the third surface
+/// takes nothing away: two planes that turned out to be one plane, and — through
+/// [`where_a_plane_and_two_quadrics_of_one_bend_meet`] — two quadrics whose
+/// difference holds everywhere, which is two ways of writing one surface.
+/// [`intersect`] is the one authority on where a plane and a curved surface
+/// cross and this does not answer it a second time (§23.8).
+fn what_one_plane_and_one_curved_surface_share(
+    flat: &Plane,
+    other: &Surface,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    match intersect(&Surface::Plane(*flat), other, policy, log)? {
+        SurfaceMeet::Nothing => Ok(MeetOfThree::Nowhere),
+        SurfaceMeet::TouchAtOnePoint { at } => Ok(MeetOfThree::At(smallvec![at])),
+        SurfaceMeet::Curves(_) | SurfaceMeet::SameSurface => Ok(MeetOfThree::MoreThanAPoint),
+    }
+}
+
+/// One plane and two curved surfaces, by the two roads back to two planes and a
+/// quadric that the module doc names.
+///
+/// **Nothing here guesses.** Each road either reaches an answer it has earned or
+/// hands the question on, and what nothing reaches is the refusal that was here
+/// before either road was: the quartic is real, its roots are real, and reaching
+/// them takes a solver this file does not have.
+fn where_one_plane_and_two_curved_surfaces_meet(
+    first: &Surface,
+    second: &Surface,
+    third: &Surface,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    let Surface::Plane(flat) = first else {
+        return Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat);
+    };
+    let at = the_places_these_three_sit(first, second, third);
+    if let Some(answer) =
+        where_a_plane_and_two_quadrics_of_one_bend_meet(flat, second, third, &at, policy, log)?
+    {
+        return Ok(answer);
+    }
+    if let Some(answer) =
+        what_a_plane_that_grazes_one_of_them_leaves(flat, second, third, &at, policy, log)?
+    {
+        return Ok(answer);
+    }
+    Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+}
+
+/// A plane and two quadrics that bend the same way, or `None` when they do not
+/// bend the same way and this road is not the one.
+///
+/// Write a quadric as `Q(p) = p·(M p) + 2b·p + c`. Where `M₁` and `M₂` are the
+/// same nine numbers, `Q₁ − Q₂` has no `p·p` left in it: it is the flat surface
+/// `2(b₁ − b₂)·p = c₂ − c₁`, and **every point the two quadrics share lies on
+/// it**, because `Q₂ = Q₁ − (Q₁ − Q₂)`. So the three surfaces share exactly what
+/// the plane, that flat surface and the first quadric share, which is two planes
+/// and a quadric and is worked out above.
+///
+/// Two balls bend the same way, two pipes running the same way do, and two cones
+/// of one slope about one direction do. A ball and a pipe never do:
+/// [`HowASurfaceIsWritten::squared`] is `I` for the one and `(w·w)I − wwᵀ` for
+/// the other, and a direction with no length is not a pipe. Two pipes match when
+/// their stored directions are the same or opposite and at no other time, which
+/// `two_bars_whose_axes_are_written_pointing_opposite_ways_still_meet_a_cap`
+/// walks and `two_bars_leaning_across_each_other_and_a_plane_are_still_refused`
+/// holds the other side of.
+///
+/// **The flat surface it builds is not a [`Plane`]**, and could not be: its
+/// numbers are differences of products of the stored ones and an `f64` almost
+/// never holds one. It is carried as the [`Exact`] expansions it really is, and
+/// [`what_a_stored_plane_and_an_exact_one_share`] crosses it with the stored
+/// plane without rounding anything on the way.
+fn where_a_plane_and_two_quadrics_of_one_bend_meet(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<MeetOfThree>> {
+    let (Some(mine), Some(theirs)) = (
+        how_a_surface_is_written(one),
+        how_a_surface_is_written(other),
+    ) else {
+        return Ok(None);
+    };
+    if !they_bend_the_same_way(&mine, &theirs) {
+        return Ok(None);
+    }
+
+    // Past here the family is settled, so arithmetic that runs out is a
+    // refusal about *this* triple and not a reason to try the next road.
+    let leaning = core::array::from_fn(|axis| {
+        let apart = mine.half_linear[axis].minus(&theirs.half_linear[axis]);
+        apart.plus(&apart)
+    });
+    let reach = theirs.constant.minus(&mine.constant);
+    let Some(shared) = what_a_stored_plane_and_an_exact_one_share(flat, &leaning, &reach) else {
+        return Err(an_exact_step_could_not_be_taken(
+            WHERE_THREE_SURFACES_MEET,
+            at,
+        ));
+    };
+
+    let line = match shared {
+        WhatTwoPlanesShare::Nothing => return Ok(Some(MeetOfThree::Nowhere)),
+        WhatTwoPlanesShare::TheWholeOfTheStoredOne => {
+            return what_one_plane_and_one_curved_surface_share(flat, one, policy, log).map(Some);
+        }
+        WhatTwoPlanesShare::ALine(line) => line,
+    };
+    let quadratic = how_a_quadric_cuts_the_line(&line, one)
+        .ok_or_else(|| an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at))?;
+    let found =
+        where_a_line_meets_a_quadric(WHERE_THREE_SURFACES_MEET, &quadratic, at, policy, log)?;
+    the_points_those_steps_name(
+        WHERE_THREE_SURFACES_MEET,
+        &line,
+        found,
+        at,
+        policy,
+        log,
+        || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at),
+    )
+    .map(Some)
+}
+
+/// A quadric written out as `p·(M p) + 2b·p + c`, exactly.
+///
+/// The three names are the ones [`Quadratic`] uses for the same three parts of a
+/// polynomial in one unknown, because they are the same three parts.
+struct HowASurfaceIsWritten {
+    /// `M`, the part that squares `p`. Symmetric, and all nine stored rather
+    /// than the six that are different, because nine is what a comparison reads
+    /// and there is no arithmetic here to save.
+    squared: [[Exact; 3]; 3],
+    /// `b`, which is **half** the part that is linear in `p`.
+    half_linear: [Exact; 3],
+    /// `c`, the part with no `p` in it.
+    constant: Exact,
+}
+
+/// A quadric written out, or `None` for a surface that is not one — a torus,
+/// whose own expression is a quartic, or a plane.
+///
+/// A plane is answered above and never arrives here. `None` rather than a panic,
+/// because the reason it never arrives is that planes sort first — a fact about
+/// [`Surface::how_it_sorts_against`] in another file, which is the trap
+/// [`how_a_quadric_cuts_the_line`]'s own doc names.
+///
+/// `None` also where a product it needs falls out of `f64`'s range. That is a
+/// refusal to say **whether the family applies**, so it hands the question on
+/// rather than ending it.
+fn how_a_surface_is_written(surface: &Surface) -> Option<HowASurfaceIsWritten> {
+    match surface {
+        Surface::Sphere(ball) => how_a_ball_is_written(ball),
+        Surface::Cylinder(pipe) => how_a_pipe_is_written(pipe),
+        Surface::Cone(cone) => how_a_cone_is_written(cone),
+        Surface::Plane(_) | Surface::Torus(_) => None,
+    }
+}
+
+/// `‖p − c‖² − R²`, which is [`Sphere`]'s own sign expression and not a second
+/// spelling of it.
+fn how_a_ball_is_written(ball: &Sphere) -> Option<HowASurfaceIsWritten> {
+    let centre = ball.centre().coordinates();
+    Some(HowASurfaceIsWritten {
+        squared: core::array::from_fn(|row| {
+            core::array::from_fn(|column| Exact::of(if row == column { 1.0 } else { 0.0 }))
+        }),
+        half_linear: core::array::from_fn(|axis| Exact::of(-centre[axis])),
+        constant: Exact::dot_of(centre, centre)?
+            .minus(&Exact::product_of(ball.radius(), ball.radius())?),
+    })
+}
+
+/// `‖(p − o) × w‖² − r²`, which is [`Cylinder`]'s own sign expression, opened
+/// out as `(w·w)(p·p) − (p·w)²` plus what the axis point leaves.
+///
+/// The radius is squared against nothing, the way
+/// [`SideOfSurface`](rcad_predicates::SideOfSurface) does it — the pipe these
+/// numbers name has radius `r/‖w‖`, and scaling the radius differently here
+/// would write out a different pipe from the one the sign predicate reads
+/// (§27.1).
+fn how_a_pipe_is_written(pipe: &Cylinder) -> Option<HowASurfaceIsWritten> {
+    let along = pipe.axis().direction().components();
+    let origin = pipe.axis().origin().coordinates();
+    let mut written = how_a_ruled_surface_is_written(along, origin, &Exact::of(1.0))?;
+    written.constant = written
+        .constant
+        .minus(&Exact::product_of(pipe.radius(), pipe.radius())?);
+    Some(written)
+}
+
+/// `‖(p − apex) × w‖² − slope²((p − apex)·w)²`, which is [`Cone`]'s own sign
+/// expression, opened out as `(w·w)(p·p) − (1 + slope²)(p·w)²` plus what the
+/// apex leaves.
+fn how_a_cone_is_written(cone: &Cone) -> Option<HowASurfaceIsWritten> {
+    let along = cone.axis().direction().components();
+    let apex = cone.apex().coordinates();
+    let squeeze = Exact::of(1.0).plus(&Exact::product_of(cone.slope(), cone.slope())?);
+    how_a_ruled_surface_is_written(along, apex, &squeeze)
+}
+
+/// `(w·w)(x·x) − squeeze·(x·w)²` for `x = p − place`, written out in `p`.
+///
+/// A pipe and a cone are the same expression with a different `squeeze` — one
+/// for a pipe, `1 + slope²` for a cone — because `‖x × w‖²` is
+/// `(w·w)(x·x) − (x·w)²` and a cone takes `slope²(x·w)²` off that as well.
+fn how_a_ruled_surface_is_written(
+    along: [f64; 3],
+    place: [f64; 3],
+    squeeze: &Exact,
+) -> Option<HowASurfaceIsWritten> {
+    let axis_squared = Exact::dot_of(along, along)?;
+    let reach = Exact::dot_of(place, along)?;
+    let squeezed_reach = squeeze.times(&reach)?;
+
+    let mut squared = nothing_squared();
+    for (row, entries) in squared.iter_mut().enumerate() {
+        for (column, entry) in entries.iter_mut().enumerate() {
+            let leaning = squeeze.times(&Exact::product_of(along[row], along[column])?)?;
+            *entry = if row == column {
+                axis_squared.minus(&leaning)
+            } else {
+                Exact::of(0.0).minus(&leaning)
+            };
+        }
+    }
+
+    let mut half_linear = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, entry) in half_linear.iter_mut().enumerate() {
+        *entry = squeezed_reach
+            .times(&Exact::of(along[axis]))?
+            .minus(&axis_squared.times(&Exact::of(place[axis]))?);
+    }
+
+    Some(HowASurfaceIsWritten {
+        squared,
+        half_linear,
+        constant: axis_squared
+            .times(&Exact::dot_of(place, place)?)?
+            .minus(&squeezed_reach.times(&reach)?),
+    })
+}
+
+/// Nine zeroes, to be written over.
+fn nothing_squared() -> [[Exact; 3]; 3] {
+    core::array::from_fn(|_| core::array::from_fn(|_| Exact::of(0.0)))
+}
+
+/// Whether two quadrics square `p` the same way, so their difference is flat.
+///
+/// Nine exact comparisons and no arithmetic that can round: an expansion always
+/// has a sign, so this always answers.
+fn they_bend_the_same_way(mine: &HowASurfaceIsWritten, theirs: &HowASurfaceIsWritten) -> bool {
+    mine.squared
+        .iter()
+        .zip(theirs.squared.iter())
+        .all(|(row, other)| {
+            row.iter()
+                .zip(other.iter())
+                .all(|(entry, against)| matches!(entry.minus(against).sign(), Decision::Zero))
+        })
+}
+
+/// What a stored plane and a plane written out exactly have in common.
+///
+/// The line is boxed, and the trade is the opposite of the one
+/// [`SurfaceMeet::Curves`](crate::SurfaceMeet) refuses: this is never the answer
+/// a fuse hands about, only a step on the way to one, and the arm carrying the
+/// line is followed by a degree-fourteen exact discriminant that costs far more
+/// than an allocation. Widening the other two arms to two hundred bytes to save
+/// it would be paying in the wrong place.
+enum WhatTwoPlanesShare {
+    /// One endless line.
+    ALine(Box<ALine>),
+    /// The whole of the stored plane, because the two are one plane — or because
+    /// the exact one is the equation `0 = 0`, which holds everywhere and is what
+    /// two quadrics written with the same numbers come to.
+    TheWholeOfTheStoredOne,
+    /// Nothing at all: two parallel planes that are not the same one, or the
+    /// equation `0 = d` for a `d` that is not zero, which two quadrics that
+    /// differ only in size come to.
+    Nothing,
+}
+
+/// What a stored plane and `normal·p = offset` share, or `None` when a product
+/// it needs falls out of `f64`'s range.
+///
+/// The same shape as [`the_line_two_planes_cross_in`] and for the same reasons —
+/// the zeroed coordinate is the one whose minor is largest, the ranking is
+/// worked out in `f64` and only ranks, and that a minor is **not zero** is
+/// decided exactly. What is different is the second plane's numbers being
+/// [`Exact`] expansions, and what that buys is the end of it: two normals whose
+/// every minor is exactly zero are parallel, decided, with no cascade to ask and
+/// no policy to consult.
+fn what_a_stored_plane_and_an_exact_one_share(
+    flat: &Plane,
+    normal: &[Exact; 3],
+    offset: &Exact,
+) -> Option<WhatTwoPlanesShare> {
+    let mine = Exact::of_each(flat.normal().components());
+    let my_offset = Exact::of(flat.offset());
+    let theirs = normal;
+    let their_offset = offset;
+
+    let mut by_size = [0usize, 1, 2];
+    let ranked: [f64; 3] = core::array::from_fn(|axis| {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        mine[next].nearest_f64() * theirs[after].nearest_f64()
+            - mine[after].nearest_f64() * theirs[next].nearest_f64()
+    });
+    by_size.sort_by(|&this, &that| ranked[that].abs().total_cmp(&ranked[this].abs()));
+
+    let mut something_would_not_fit = false;
+    for axis in by_size {
+        let (across, and) = ((axis + 1) % 3, (axis + 2) % 3);
+        let Some(minor) =
+            exactly_this_minus_that(&mine[across], &theirs[and], &mine[and], &theirs[across])
+        else {
+            something_would_not_fit = true;
+            continue;
+        };
+        let which_way = minor.sign();
+        if matches!(which_way, Decision::Zero) {
+            continue;
+        }
+        // An expansion always has a sign, so nothing reaches the second half
+        // today. It is read as arithmetic that ran out rather than as a zero
+        // minor, because falling through to the parallel test below on a sign
+        // nobody proved would answer a question this never asked.
+        if !matches!(which_way, Decision::Pos | Decision::Neg) {
+            something_would_not_fit = true;
+            continue;
+        }
+        let (Some(here), Some(there), Some(direction)) = (
+            exactly_this_minus_that(&my_offset, &theirs[and], their_offset, &mine[and]),
+            exactly_this_minus_that(&mine[across], their_offset, &theirs[across], &my_offset),
+            cross_of_two_exact(&mine, theirs),
+        ) else {
+            something_would_not_fit = true;
+            continue;
+        };
+        let mut through = [Term::of(0.0), Term::of(0.0), Term::of(0.0)];
+        through[across] = Term::Exactly(here);
+        through[and] = Term::Exactly(there);
+        return Some(WhatTwoPlanesShare::ALine(Box::new(ALine {
+            through,
+            direction: direction.map(Term::Exactly),
+            divided_by: Term::Exactly(minor),
+        })));
+    }
+    if something_would_not_fit {
+        return None;
+    }
+
+    // Parallel, so what tells the same plane from two that never meet is whether
+    // the offsets are in the same ratio as the normals — `d₂·n₁ − d₁·n₂`,
+    // componentwise (§17.4). A stored plane's normal has length, so where the
+    // exact one's normal is all zeroes this reads `d₂·n₁`, which is zero exactly
+    // when `d₂` is: the equation `0 = 0` holds everywhere and `0 = d₂` nowhere.
+    for axis in 0..3 {
+        let same = exactly_this_minus_that(their_offset, &mine[axis], &my_offset, &theirs[axis])?;
+        let which_way = same.sign();
+        if matches!(which_way, Decision::Zero) {
+            continue;
+        }
+        if matches!(which_way, Decision::Pos | Decision::Neg) {
+            return Some(WhatTwoPlanesShare::Nothing);
+        }
+        return None;
+    }
+    Some(WhatTwoPlanesShare::TheWholeOfTheStoredOne)
+}
+
+/// `first · second − third · fourth` over four expansions, or `None` when either
+/// product would round.
+fn exactly_this_minus_that(
+    first: &Exact,
+    second: &Exact,
+    third: &Exact,
+    fourth: &Exact,
+) -> Option<Exact> {
+    Some(first.times(second)?.minus(&third.times(fourth)?))
+}
+
+/// `u × v` for two triples of expansions, exactly.
+fn cross_of_two_exact(u: &[Exact; 3], v: &[Exact; 3]) -> Option<[Exact; 3]> {
+    let mut across = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, component) in across.iter_mut().enumerate() {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        *component = exactly_this_minus_that(&u[next], &v[after], &u[after], &v[next])?;
+    }
+    Some(across)
+}
+
+/// What a plane that misses one of the two curved surfaces, or touches it at a
+/// single point, leaves of the three — or `None` where it does neither.
+///
+/// **A plane that misses a quadric settles the triple on its own**: nothing on
+/// the plane is on that quadric, so nothing is on all three. And a plane that
+/// touches one at a single point leaves exactly one candidate, so the whole of
+/// what is left is which side of the *other* surface that point is on. Neither
+/// needs a quartic and neither is a guess.
+///
+/// A ball resting on a block's floor is the second: the floor touches the ball
+/// at one point, and whether a bar also resting on that floor passes through it
+/// is one sign question. It is answered the same way at every distance, because
+/// nothing in it depends on how far apart the two round solids are.
+///
+/// [`intersect`] refusing is not passed on. It says this road could not be
+/// walked, which is a different thing from the triple having no answer, and the
+/// other surface is still worth asking about. What is passed on is the refusal
+/// at the end of every road, which was the answer before this road existed.
+fn what_a_plane_that_grazes_one_of_them_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<MeetOfThree>> {
+    for (this, that) in [(one, other), (other, one)] {
+        match intersect(&Surface::Plane(*flat), this, policy, log) {
+            Ok(SurfaceMeet::Nothing) => return Ok(Some(MeetOfThree::Nowhere)),
+            Ok(SurfaceMeet::TouchAtOnePoint { at: touch }) => {
+                return whether_a_touch_is_on_it(touch, that, at).map(Some);
+            }
+            Ok(SurfaceMeet::Curves(_) | SurfaceMeet::SameSurface) | Err(_) => (),
+        }
+    }
+    Ok(None)
+}
+
+/// Whether the one point a plane touches a surface at is on a second surface
+/// too.
+///
+/// **Certified and never tolerant**, and that is the one place in this file
+/// where the caller's policy does not reach.
+/// [`SideOfSurface`](rcad_predicates::SideOfSurface) hands back a
+/// [`Decision`] and not the [`Level`] it reached, so there is no [`Record`] to
+/// put in front of a policy and nothing to convert against its budget. Refusing
+/// is the conservative half of that: a tolerant policy only ever accepts more,
+/// so a refusal here is never an answer given wrongly — only one not given.
+/// Closing it takes a `decide`-shaped route into a surface's own sign
+/// expression, which is a change to another crate.
+fn whether_a_touch_is_on_it(
+    touch: PredicatePoint,
+    surface: &Surface,
+    at: &[PredicatePoint],
+) -> Result<MeetOfThree> {
+    match which_side_of_it(surface, touch) {
+        Decision::Zero => Ok(MeetOfThree::At(smallvec![touch])),
+        Decision::Pos | Decision::Neg => Ok(MeetOfThree::Nowhere),
+        Decision::Undecidable { enclosure } => Err(a_touching_point_could_not_be_placed(
+            WHERE_THREE_SURFACES_MEET,
+            at,
+            enclosure,
+        )),
+        other => unreachable!("a side-of question answers with one of the four: {other:?}"),
+    }
+}
+
+/// Which side of a surface a point is on, for every kind there is.
+fn which_side_of_it(surface: &Surface, point: PredicatePoint) -> Decision {
+    match surface {
+        Surface::Plane(flat) => which_side_of_a_flat_surface(
+            WHERE_THREE_SURFACES_MEET,
+            flat.normal().components(),
+            flat.offset(),
+            point,
+        ),
+        Surface::Sphere(ball) => ball.side_of(point),
+        Surface::Cylinder(pipe) => pipe.side_of(point),
+        Surface::Cone(cone) => cone.side_of(point),
+        Surface::Torus(ring) => ring.side_of(point),
+    }
+}
+
+/// The refusal for a touching point that could be put neither on the third
+/// surface nor off it.
+///
+/// **Not the exact arithmetic running out.** Where a plane touches a quadric is
+/// a quotient and rarely lands on an `f64` (§2.5), so the box has width and an
+/// interval evaluation of the third surface's own expression over it straddles
+/// zero. A **gap** where the touch is on the lattice — that case is answered,
+/// and a ball on a block's floor is it — and what a box of a point honestly
+/// comes to where it is not.
+fn a_touching_point_could_not_be_placed(
+    named: &'static str,
+    at: &[PredicatePoint],
+    enclosure: f64,
+) -> Error {
+    let mut records = ProvenanceLog::new();
+    records.push(Record::new(
+        named,
+        at,
+        Level::Interval,
+        Decision::Undecidable { enclosure },
+        Measures::Area,
+    ));
+    Error::Undecidable { records }
 }
 
 /// A line, written as `(through + s · direction) / divided_by`.

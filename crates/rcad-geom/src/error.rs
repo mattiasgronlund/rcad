@@ -532,12 +532,22 @@ pub enum Error {
     #[error("these two surfaces do not cross in one closed curve lying in a plane")]
     TheseTwoSurfacesDoNotCrossInAConic,
 
-    /// Three surfaces of which fewer than two are flat.
+    /// Three surfaces of which fewer than two are flat, and no road back to two
+    /// of them.
     ///
     /// Two planes cross in a line, and where a quadric cuts that line is a
     /// quadratic in one unknown whose discriminant is a polynomial in the stored
-    /// numbers. One plane and two quadrics is a quartic, and three quadrics is a
-    /// degree-eight system.
+    /// numbers. One plane and two quadrics is a quartic in general, and three
+    /// quadrics is a degree-eight system.
+    ///
+    /// **"In general" is doing real work in that sentence**, and
+    /// `three_surfaces.rs`'s module doc names the two
+    /// families it excludes: two quadrics that square `p` the same way differ by
+    /// something flat, and a plane that misses or barely touches one of the two
+    /// settles the triple with a sign. Two pipes running the same way and a cap
+    /// plane — a union of two overlapping parallel bars — is the first, and a
+    /// ball and a bar both resting on a block's floor is the second. Both are
+    /// answered, and this is what is left over.
     ///
     /// A **gap** and not a limit (§16.10): the points are there, and a real
     /// algebraic solver reaches them. The family of fixes is the
@@ -546,7 +556,8 @@ pub enum Error {
     /// a lane (`docs/decisions.md` §31.2). The consumer that calls it due is
     /// named there too: two capped bars crossing near one of their caps.
     /// `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`
-    /// is the demonstration that the points exist.
+    /// and `two_bars_leaning_across_each_other_and_a_plane_are_still_refused`
+    /// are the demonstrations that the points exist.
     #[error(
         "where three surfaces meet is only worked out when two of them are flat, and fewer than \
          two of these are"
