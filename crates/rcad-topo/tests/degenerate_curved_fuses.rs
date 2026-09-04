@@ -763,17 +763,15 @@ fn the_plane_of_the_wedges_slanted_face_really_does_rest_on_the_cone() {
         &mut ProvenanceLog::new(),
     )
     .expect("all seven shapes of a plane against a cone are named");
-    match touching {
-        SurfaceMeet::Curves(runs) => {
-            assert_eq!(runs.len(), 1, "a tangent plane touches along one ruling");
-            assert!(
-                matches!(runs[0].run(), EdgeRun::Straight),
-                "and a ruling is a straight line, not a bending run: {:?}",
-                runs[0].run()
-            );
-        }
-        other => panic!("a plane resting on a cone's side touches along a curve, got {other:?}"),
-    }
+    let SurfaceMeet::Curves(runs) = &touching else {
+        panic!("a plane resting on a cone's side touches along a curve, got {touching:?}")
+    };
+    assert_eq!(runs.len(), 1, "a tangent plane touches along one ruling");
+    assert!(
+        matches!(runs[0].run(), EdgeRun::Straight),
+        "and a ruling is a straight line, not a bending run: {:?}",
+        runs[0].run()
+    );
 
     let leaning_across = intersect(
         &Surface::Plane(flat),
@@ -831,6 +829,13 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
 /// vector. `arrange.rs`'s `how_a_crossing_runs` carries the four families of fix
 /// and why none of them is small.
 ///
+/// **A gap and not a limit** (§16.10), and the same gap the bar's row leaves.
+/// The direction is there to be had — it is the ruling's own, `(1, 0, 8)` up to
+/// length — and what runs out is the single form this kernel writes a crossing's
+/// direction in. A cone adds no new one: it is the bar's gap reached by a second
+/// road, which is what says the gap is about a plane resting on a curved surface
+/// and not about a pipe.
+///
 /// **The unit test next to that note is not this test.** `arrange.rs`'s
 /// `the_two_rulings_a_plane_through_a_cones_apex_cuts_are_ordered_along_an_axis`
 /// hands `how_a_crossing_runs` a tangent plane and a cone directly. It says
@@ -869,21 +874,19 @@ fn a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction() {
         for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
             let mut model = a_model();
             let pair = a_wedge_lying_on_a_cones_side(&mut model);
-            match refusal(&mut model, &pair, rule, &policy) {
-                why @ Error::Undecidable { .. } => {
-                    assert_eq!(
-                        what_it_gave_up_on(&why),
-                        "which way a crossing runs",
-                        "a wall lying on a cone's side gives that crossing no direction"
-                    );
-                    assert_eq!(
-                        the_direction_it_could_not_name(&why),
-                        [[0.0, 0.0]; 3],
-                        "and the direction it could not name is the zero vector itself"
-                    );
-                }
-                other => panic!("a wall lying on a cone's side refused with {other:?}"),
-            }
+            // Both readers below panic on anything but `Undecidable`, so the
+            // shape of the refusal is asked as firmly as its contents.
+            let why = refusal(&mut model, &pair, rule, &policy);
+            assert_eq!(
+                what_it_gave_up_on(&why),
+                "which way a crossing runs",
+                "a wall lying on a cone's side gives that crossing no direction"
+            );
+            assert_eq!(
+                the_direction_it_could_not_name(&why),
+                [[0.0, 0.0]; 3],
+                "and the direction it could not name is the zero vector itself"
+            );
         }
     }
 
@@ -1998,6 +2001,15 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             pair: "a bar of radius two and a wall on `y = -2`",
             case: Case::Fused {
                 build: a_block_whose_wall_touches_a_bar,
+                rule: Rule::Difference,
+                outcome: Outcome::GaveUp("which way a crossing runs"),
+            },
+        },
+        Entry {
+            degeneracy: "tangent cylinder-plane, over a cone",
+            pair: "a frustum of slope an eighth and a wedge resting on its side",
+            case: Case::Fused {
+                build: a_wedge_lying_on_a_cones_side,
                 rule: Rule::Difference,
                 outcome: Outcome::GaveUp("which way a crossing runs"),
             },
