@@ -15588,3 +15588,60 @@ So: **the next unit's largest finding is already written in §47.7 or §48.7, in
 row nobody has priced.** The countermeasure is §48.8's second rule, and the way
 to score this prediction is to check, at the next gate, whether the unit's
 biggest surprise had a row waiting for it.
+
+### 48.10 The spike passed, and the risk it was written for does not exist
+
+*Added after the spike ran. §48.4 is left exactly as it was written — rewriting a
+pass rule to match a pass is the discipline this unit is named for.*
+
+**PASS**, against §48.4's rule and with no part of it relaxed.
+
+| curve | ordered pairs asked | undecided | out of order |
+|---|---|---:|---:|
+| parabola | 4 920 | 0 | 0 |
+| one branch of a hyperbola | 11 480 | 0 | 0 |
+
+All under `Policy::certified()`, all settled by intervals, with the exact level
+never reached. Fixtures span cones of slope 0.25, 1 and 4, and planes through
+the origin and 500 units out.
+
+The key is what §48.4 proposed:
+
+> `sign((ahead − behind) · (n × the_bend's_own_way))`
+
+where `the_bend's_own_way` is a parabola's `bend` or a hyperbola branch's `out`,
+and `n` is the cutting plane's stored normal.
+
+**The contamination §48.4 budgeted for is not small — it is absent, and the
+reason is a spelling.** §48.4 wrote that `own_way · (n × own_way)` is *"zero as a
+polynomial and merely near zero in `f64`"*, and reasoned that the walk's
+`cosh σ ≤ 2` cap bounds what that costs. That reasoning applies only if the cross
+product is built as three `f64`s first. **Kept inside `Exact` as a determinant,
+the triple product returns `Decision::Zero`, asserted, on every fixture.** It is
+the choice `HowThreeOnACurveWind` already makes about not building its fourth
+point, one level further down.
+
+The built-vector spelling would also have passed — the worst own-way term
+measured is `4.65e-17` against a signal of `9.95` — but that is luck and not a
+cancellation, and the determinant is what the ordering lane should write.
+
+**The check has teeth, which is the number that makes the zeroes worth reading.**
+Aimed down `across` instead — a direction the quadratic term does *not* cancel
+against — the identical tally reports **404 out of order and 13 undecided out of
+820**. Resolution, found by halving the gap until it refuses, is about `1e-16`
+relative on both curves: the `f64` grid itself, not a margin the triple product
+eats into.
+
+**What it does not show, stated because §48.8's rule cuts both ways.** Every
+sample is an exact point; `arrange.rs` passes boxes at three-surface corners, and
+nothing here says a wide box decides — though every pair settled at level 2 with
+the exact level unused beneath it. And only plane-against-cone was tried, because
+it is the only pair that makes an open bend today; `n` being a *plane's* normal is
+part of the key, so an open bend from a pair with no plane in it needs its own
+derivation.
+
+**So the ordering work is priced, and it is not roadmap §13 row 1.** What stands
+between a block and a frustum is one `HowItRuns` variant (§48.6), one predicate
+that now exists in production shape, and the call sites. The predicate is kept on
+the branch `worktree-agent-a1820cae9666ed345` rather than thrown away with the
+worktree.
