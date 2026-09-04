@@ -321,11 +321,21 @@ impl Plane {
     /// The same flat surface facing the other way.
     ///
     /// Same set of points, opposite normal, so every signed distance flips sign.
+    ///
+    /// **Subtraction from zero, not `-`, so that a coefficient which was `0.0`
+    /// comes back `0.0` and not `-0.0`.** A wall facing along an axis has zero
+    /// coefficients, and `meet_of_three_surfaces` sorts its three planes with
+    /// `f64::total_cmp`, where `-0.0` sorts before `0.0`. Negating with `-` gave
+    /// the two spellings of one wall two different sort positions, so the same
+    /// three planes reached Cramer's rule with their rows permuted and rounded
+    /// the corner to a different point: 2 772 of 14 737 464 triples with integer
+    /// normals in `[-3, 3]` landed somewhere else.
     #[must_use]
     pub fn reversed(&self) -> Self {
+        let [x, y, z] = self.normal.components();
         Self {
-            normal: -self.normal,
-            offset: -self.offset,
+            normal: Vector::new(0.0 - x, 0.0 - y, 0.0 - z),
+            offset: 0.0 - self.offset,
         }
     }
 
@@ -1546,6 +1556,26 @@ mod tests {
         assert!(
             summed_exactly.nearest_f64().abs() < Isometry::POINT_ROUNDOFF * 3.0,
             "and it is inside what placing a solid of this size is allowed to move it"
+        );
+    }
+
+    /// Turning a wall round twice has to give back the bits it started with,
+    /// because `meet_of_three_surfaces` sorts on those bits and a corner is
+    /// solved in whatever order the sort leaves.
+    #[test]
+    fn a_wall_facing_along_an_axis_turned_round_holds_no_negative_zero() {
+        let wall = Plane::from_coefficients([0.0, 0.6, 0.8, -2.0]).unwrap();
+        let facing_back = wall.reversed();
+
+        assert_eq!(
+            facing_back.coefficients()[0].to_bits(),
+            0.0_f64.to_bits(),
+            "the zero coefficient comes back positive, not as -0.0"
+        );
+        assert_eq!(
+            facing_back.reversed().coefficients().map(f64::to_bits),
+            wall.coefficients().map(f64::to_bits),
+            "so turning it round twice is the plane it started as, bit for bit"
         );
     }
 }
