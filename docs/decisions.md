@@ -15952,7 +15952,7 @@ headline"* — is the consumer that proves it, because a cone and a pipe on one
 axis cross in exactly the kind of curve that has no ends. Shipping the ordering
 without the consumer would be a `HowItRuns` variant nothing constructs.
 
-### 50.2 Four corrections, before any lane reads them
+### 50.2 Five corrections, before any lane reads them
 
 **1. §49.3 describes the second latent defect as something the function does not
 do.** It says `three_planes_faced_the_one_way` *"canonicalises to `-0.0` where its
@@ -16004,6 +16004,36 @@ is not**, and naming it would turn that arm into a wrong answer of exactly
 into an answer rather than a refusal when the refusal lifts. So Lane A names the
 coaxial cone-and-pipe case **and nothing else**, and the day cone-and-cone is
 named, `assemble.rs:2118` is the first thing that changes.
+
+**5. §50.9's prediction fired inside this section, before a single lane ran.**
+Pruning the lane worktrees turned up two branches that were never merged and
+that looked like stranded fixes, and this section was about to carry both into
+the wave:
+
+- `m5-predicates-scaling` — *"meet_of_three_planes retries scaled per plane on
+  refusal"*, which is the case CLAUDE.md §16.10 cites by name: *"true of
+  orderings and silent about scalings, and a representable answer was refused
+  for it."* It is **already in main, byte for byte**.
+  `git diff m5-predicates-scaling:crates/rcad-predicates/src/planes.rs
+  main:crates/rcad-predicates/src/planes.rs` is empty. `meet_after_rescaling_each_plane`,
+  `meet_of_three_planes_at_this_scale` and `rescaled` all stand at
+  `planes.rs:48-160` with the branch's own doc wording. The fix reached main by
+  another route and the branch's merge was never recorded, so `git
+  merge-base --is-ancestor` still calls it unmerged and it reads, at a glance,
+  like work somebody dropped.
+- `rcad-fuzz` — **not** superseded, and not whole either. Main fixed the same
+  overflow by a different route (`power_of_two_that_keeps_the_squares_in_range`,
+  `point.rs:367`) rather than the branch's divide-by-the-largest-component, so
+  the *fix* may be dead while the *tests* are not: the branch's
+  `a_vector_too_huge_to_square_is_normalized_by_dividing_first` is in no file in
+  main, and `crates/rcad-geom/tests/soak/mod.rs` does not exist in main at all.
+
+**The prediction was that the next unit would build something the tree already
+has, somewhere else. It took the planning session, not a lane.** The
+countermeasure named there — grep before writing, not after review — is what
+found it, one turn after the recommendation to carry both was made. An unmerged
+branch is not evidence of unlanded work; it is evidence of an unrecorded merge,
+and the two look identical from `git branch --no-merged`.
 
 ### 50.3 The sentence the unit earns
 
