@@ -31,6 +31,32 @@ pub const SIDE_OF_PLANE: &str = "side of plane";
 /// nearly unit length can move the last bit or two, so a plane that has been
 /// written and read back is the same plane to within rounding, not bit for bit.
 ///
+/// # No stored number is `-0.0`
+///
+/// Two faces that are the same plane hold the same four numbers, and half the
+/// kernel rests on it: `Surface::how_it_sorts_against` puts a triple in a fixed
+/// order on those numbers, `rcad-topo`'s `name_of_surface_bits` names a corner
+/// by them, and `canonical_cut_surfaces` drops a repeat by them. `-0.0` is the
+/// same *number* as `0.0` and a different `f64`, so a single one of them
+/// anywhere in a plane makes that sentence false — and the ordering is
+/// [`f64::total_cmp`](f64::total_cmp), which sorts `-0.0` first, so two
+/// spellings of one wall reach Cramer's rule with their rows permuted and its
+/// corner is rounded to two places an ulp apart.
+///
+/// [`Plane::holding`] turns every stored zero the right way up, and every
+/// constructor here goes through it. Two consequences worth naming:
+///
+/// - **A caller may hand one in.** [`Plane::from_point_and_normal`] is public
+///   and reads whatever vector it is given; a STEP `DIRECTION` may be written
+///   `(-0.,0.,1.)` and `rcad-step` passes it straight through.
+/// - **[`Plane::reversed`] is an involution on the bits**, which is what lets
+///   `three_planes_faced_the_one_way` pick one of a plane's two spellings by
+///   the sign of its leading coefficient.
+///
+/// [`Axis`](crate::Axis) has the same exposure and does not do this yet, so a
+/// pipe, a cone or a torus built about `Vector::new(-0.0, 0.0, 1.0)` still
+/// stores a negative zero.
+///
 /// # Signs here are arithmetic, not decisions
 ///
 /// [`Plane::signed_distance_to`] is three multiplications and two additions.
@@ -101,7 +127,7 @@ impl Plane {
                 what: "distance from the origin to a plane",
             });
         }
-        Ok(Self { normal, offset })
+        Ok(Self::holding(normal, offset))
     }
 
     /// The plane through three points, with the normal following the right-hand
@@ -162,7 +188,7 @@ impl Plane {
                 what: "distance from the origin to a plane",
             });
         }
-        Ok(Self { normal, offset })
+        Ok(Self::holding(normal, offset))
     }
 
     /// `direction` divided by its largest-magnitude component, and the positive
@@ -225,11 +251,14 @@ impl Plane {
     /// `[a, b, c, d]` for `a * x + b * y + c * z + d = 0`.
     ///
     /// `[a, b, c]` is the unit normal. This is the form a three-plane
-    /// intersection and the side-of-plane predicate take.
+    /// intersection and the side-of-plane predicate take, and the row every key
+    /// over surfaces is built from — so `d` gets the same turn back the right
+    /// way up that [`Plane::holding`] gives the four stored numbers. Negating
+    /// an offset of `0.0` is the one place a `-0.0` could still reach a key.
     #[must_use]
     pub fn coefficients(&self) -> [f64; 4] {
         let [a, b, c] = self.normal.components();
-        [a, b, c, -self.offset]
+        [a, b, c, -self.offset + 0.0]
     }
 
     /// The point on the plane nearest the world origin.
@@ -322,21 +351,14 @@ impl Plane {
     ///
     /// Same set of points, opposite normal, so every signed distance flips sign.
     ///
-    /// **Subtraction from zero, not `-`, so that a coefficient which was `0.0`
-    /// comes back `0.0` and not `-0.0`.** A wall facing along an axis has zero
-    /// coefficients, and `meet_of_three_surfaces` sorts its three planes with
-    /// `f64::total_cmp`, where `-0.0` sorts before `0.0`. Negating with `-` gave
-    /// the two spellings of one wall two different sort positions, so the same
-    /// three planes reached Cramer's rule with their rows permuted and rounded
-    /// the corner to a different point: 2 772 of 14 737 464 triples with integer
-    /// normals in `[-3, 3]` landed somewhere else.
+    /// **An involution on the bits**, which
+    /// `three_planes_faced_the_one_way` needs and gets from
+    /// [`Plane::holding`]: negating alone would turn `0.0` into `-0.0` and
+    /// turning round twice would not come back, so a wall facing along an axis
+    /// would have two canonical forms and its corner two places.
     #[must_use]
     pub fn reversed(&self) -> Self {
-        let [x, y, z] = self.normal.components();
-        Self {
-            normal: Vector::new(0.0 - x, 0.0 - y, 0.0 - z),
-            offset: 0.0 - self.offset,
-        }
+        Self::holding(-self.normal, -self.offset)
     }
 
     /// The same plane after `movement` is applied.
@@ -364,9 +386,28 @@ impl Plane {
     #[must_use]
     pub fn transformed(&self, movement: &Isometry) -> Self {
         let normal = movement.apply_to_vector(self.normal);
-        Self {
+        Self::holding(
             normal,
-            offset: self.offset + normal.dot(movement.translation_part()),
+            self.offset + normal.dot(movement.translation_part()),
+        )
+    }
+
+    /// The only place a `Plane` is built, so that no plane anywhere stores
+    /// `-0.0` — see the note on [`Plane`] for what rests on that.
+    ///
+    /// Adding zero is what turns one back the right way up: `-0.0 + 0.0` is
+    /// `0.0` and `x + 0.0` is `x` for every other finite `x`, so this rounds
+    /// nothing and moves no plane. It is also why moving a plane by
+    /// [`Isometry::identity`] still gives back the four numbers that were
+    /// stored: a turn that hands back `-0.0` for a component that was `0.0` is
+    /// folded here, not carried. `rcad-topo`'s
+    /// `name_of_the_surface_either_way_round` folds a key the same way for the
+    /// same reason.
+    fn holding(normal: Vector, offset: f64) -> Self {
+        let [x, y, z] = normal.components();
+        Self {
+            normal: Vector::new(x + 0.0, y + 0.0, z + 0.0),
+            offset: offset + 0.0,
         }
     }
 
@@ -1559,23 +1600,89 @@ mod tests {
         );
     }
 
-    /// Turning a wall round twice has to give back the bits it started with,
-    /// because `meet_of_three_surfaces` sorts on those bits and a corner is
-    /// solved in whatever order the sort leaves.
+    /// However a plane is built, and whatever it is handed, none of the four
+    /// numbers it stores comes out `-0.0`.
+    ///
+    /// A caller may hand in a negative zero — a STEP `DIRECTION` may be written
+    /// `(-0.,0.,1.)` and `rcad-step` passes it straight to
+    /// [`Plane::from_point_and_normal`] — and the sums inside these
+    /// constructors make their own. Every one has to be turned back the right
+    /// way up, because `meet_of_three_surfaces` sorts its three planes with
+    /// [`f64::total_cmp`](f64::total_cmp) and a wall stored two ways round has
+    /// its corner solved in two row orders.
     #[test]
-    fn a_wall_facing_along_an_axis_turned_round_holds_no_negative_zero() {
-        let wall = Plane::from_coefficients([0.0, 0.6, 0.8, -2.0]).unwrap();
-        let facing_back = wall.reversed();
+    fn nothing_a_plane_is_built_from_leaves_a_negative_zero_stored() {
+        let holds_no_negative_zero = |plane: &Plane, how: &str| {
+            for (number, name) in plane.coefficients().iter().zip(["a", "b", "c", "d"]) {
+                assert!(
+                    !(*number == 0.0 && number.is_sign_negative()),
+                    "{how} stored -0.0 as {name}: {:?}",
+                    plane.coefficients()
+                );
+            }
+        };
+
+        let from_a_negative_zero_normal =
+            Plane::from_point_and_normal(Point::new(1.0, 2.0, 3.0), Vector::new(1.0, -0.0, 1.0))
+                .expect("a normal with length");
+        holds_no_negative_zero(&from_a_negative_zero_normal, "from_point_and_normal");
+        holds_no_negative_zero(
+            &Plane::from_coefficients([1.0, -0.0, 1.0, -4.0]).expect("a normal with length"),
+            "from_coefficients",
+        );
+        holds_no_negative_zero(
+            &Plane::from_coefficients([0.0, 0.6, 0.8, -2.0])
+                .expect("a normal with length")
+                .reversed(),
+            "reversed",
+        );
+        holds_no_negative_zero(
+            &Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                .expect("a normal with length"),
+            "a plane through the origin facing down",
+        );
+        holds_no_negative_zero(
+            &plane_at_height_two().transformed(&Isometry::identity()),
+            "transformed",
+        );
+    }
+
+    /// A wall built facing one way and the same wall built facing the other are
+    /// the same four numbers negated, so turning either round gives the other
+    /// bit for bit.
+    ///
+    /// This is what `three_planes_faced_the_one_way` in `rcad-topo` rests on:
+    /// it picks one of a plane's two spellings by the sign of the leading
+    /// coefficient, and that picks *one* spelling only when the two spellings
+    /// really are a negation apart. A stored `-0.0` in one of them and a `0.0`
+    /// in the other would leave two canonical forms, and
+    /// `meet_of_three_surfaces` would sort them into two different row orders.
+    #[test]
+    fn a_wall_built_facing_either_way_is_one_plane_turned_round() {
+        let corner = Point::new(1.0, 2.0, 3.0);
+        let facing_up = Plane::from_point_and_normal(corner, Vector::new(1.0, -0.0, 1.0))
+            .expect("a normal with length");
+        let facing_down = Plane::from_point_and_normal(corner, Vector::new(-1.0, 0.0, -1.0))
+            .expect("a normal with length");
 
         assert_eq!(
-            facing_back.coefficients()[0].to_bits(),
-            0.0_f64.to_bits(),
-            "the zero coefficient comes back positive, not as -0.0"
+            facing_up.reversed().coefficients().map(f64::to_bits),
+            facing_down.coefficients().map(f64::to_bits),
+            "the wall built facing down is the one built facing up, turned round"
         );
         assert_eq!(
-            facing_back.reversed().coefficients().map(f64::to_bits),
-            wall.coefficients().map(f64::to_bits),
-            "so turning it round twice is the plane it started as, bit for bit"
+            facing_down.reversed().coefficients().map(f64::to_bits),
+            facing_up.coefficients().map(f64::to_bits),
+            "and the other way about"
+        );
+        assert_eq!(
+            facing_up
+                .reversed()
+                .reversed()
+                .coefficients()
+                .map(f64::to_bits),
+            facing_up.coefficients().map(f64::to_bits),
+            "so turning one round twice is the plane it started as, bit for bit"
         );
     }
 }
