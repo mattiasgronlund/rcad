@@ -388,6 +388,19 @@ pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 9
 /// is the same plane either way, and every face on it goes on carrying its own
 /// spelling for its own normal.
 ///
+/// **It rests on [`Plane::reversed`] not writing `-0.0` where a coefficient was
+/// `0.0`.** A wall facing along an axis has zero coefficients; `-0.0` is the
+/// same number as `0.0` and a different `f64`; and `rcad-geom` puts a triple in
+/// a fixed order with [`f64::total_cmp`](f64::total_cmp), which sorts `-0.0`
+/// first. So a reversal that wrote `-0.0` would send the two spellings of one
+/// wall to Cramer's rule with their rows permuted, and it would round the corner
+/// to two places an ulp apart — which is the whole of what this function is here
+/// to stop. Nothing in this file can undo it: a plane's two spellings are all
+/// [`Plane::reversed`] can reach, and rebuilding one from its coefficients
+/// moves it (`Plane::from_coefficients` is not the identity on a stored plane).
+/// `a_shared_wall_facing_along_an_axis_puts_the_corner_in_one_place` is the
+/// demonstration.
+///
 /// A triple with anything curved in it is handed over untouched. There, `which`
 /// numbers the meeting points along the line the two planes cross in and turning
 /// a plane round turns that line round, so the same point would be `which: 0`
@@ -6173,10 +6186,16 @@ mod how_often_cutting_a_curved_face_refuses {
 
 #[cfg(test)]
 mod naming_a_surface {
-    use rcad_geom::{Axis, Cylinder, Plane, Point, Sphere, Surface, Vector};
+    use rcad_geom::{
+        Axis, Cylinder, MeetOfThree, Plane, Point, Sphere, Surface, Vector, meet_of_three_surfaces,
+    };
+    use rcad_predicates::{Policy, ProvenanceLog};
+
+    use crate::fuse::middle_of;
 
     use super::{
-        in_the_order_a_float_compares, name_of_surface_bits, three_planes_faced_the_one_way,
+        as_exact_as_it_is, in_the_order_a_float_compares, name_of_surface_bits,
+        three_planes_faced_the_one_way,
     };
 
     /// The key a corner is named by has to order surfaces the way `rcad-geom`
@@ -6266,5 +6285,44 @@ mod naming_a_surface {
         let asked = [Surface::Plane(floor), Surface::Plane(side), ball];
 
         assert_eq!(three_planes_faced_the_one_way(asked), asked);
+    }
+
+    /// The same is asked of a shared wall that faces along an axis, and today it
+    /// does not hold.
+    ///
+    /// Such a wall has a zero coefficient, and turning it round negates that
+    /// zero. `-0.0` is the same number as `0.0` and a different `f64`;
+    /// `rcad-geom` puts a triple in a fixed order with
+    /// [`f64::total_cmp`](f64::total_cmp), which sorts `-0.0` first. So the two
+    /// spellings of one wall reach Cramer's rule with their rows permuted, and
+    /// it rounds the corner to two places an ulp apart. The two faces then name
+    /// one corner and stand at two, and `assemble::exactly_at` joins corners by
+    /// coordinate — so the input vertex that sits on one of the two is joined to
+    /// one face's corner and not the other's.
+    #[test]
+    fn a_shared_wall_facing_along_an_axis_puts_the_corner_in_one_place() {
+        let at = |normal, through| {
+            Plane::from_point_and_normal(through, normal).expect("a normal with length")
+        };
+        let facing_one_way = at(Vector::new(-1.0, 0.0, -1.0), Point::new(1.0, 2.0, 3.0));
+        let facing_the_other = at(Vector::new(1.0, 0.0, 1.0), Point::new(1.0, 2.0, 3.0));
+        let floor = at(Vector::new(-3.0, -3.0, -1.0), Point::new(0.5, 0.25, 0.125));
+        let side = at(Vector::new(1.0, 0.0, -1.0), Point::new(-1.0, 3.0, 0.5));
+
+        let corner = |wall| {
+            let asked = three_planes_faced_the_one_way([wall, floor, side].map(Surface::Plane));
+            let meet = meet_of_three_surfaces(
+                [&asked[0], &asked[1], &asked[2]],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("three planes that meet at one point");
+            let MeetOfThree::At(places) = meet else {
+                panic!("three planes leaning three ways meet at one point, not {meet:?}");
+            };
+            middle_of(as_exact_as_it_is(places[0])).coordinates()
+        };
+
+        assert_eq!(corner(facing_one_way), corner(facing_the_other));
     }
 }
