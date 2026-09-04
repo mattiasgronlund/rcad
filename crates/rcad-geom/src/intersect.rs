@@ -1833,10 +1833,9 @@ fn where_the_apex_stands(flat: &Plane, cone: &Cone) -> impl Predicate {
 /// **Degree six in the stored numbers, and every degree of it is carried.**
 /// Written as `(n·w)² − Σ(slope·(n_j w_k − n_k w_j))²`, which is
 /// `slope²‖n × w‖²` with the slope taken inside the squares — so the exact arm
-/// squares four short expansions and never multiplies two long ones together.
-/// Everything it multiplies stays that much further from the ends of the range
-/// where the expansion arithmetic stops being exact and the question has to be
-/// refused.
+/// squares four short expansions and never multiplies two long ones together,
+/// which is the form §49.8 chose for it and the form the door in `rcad-topo`
+/// used to carry a copy of.
 ///
 /// It is dimensionless: every number in it is a direction component or a slope.
 /// [`Measures::Length`] is the arm whose conversion is the identity, which is the
