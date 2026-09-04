@@ -19,11 +19,21 @@
 //! for the same §16.10 reason: one plane and two quadrics is a quartic, it has
 //! roots, and reaching them takes a solver rather than a discriminant.
 //!
-//! The order is why the gate alone cannot be enough. `Arrangement::of` runs
+//! **No fuse of two pipes reaches the flipped gate today, and the reason is one
+//! line rather than a survey of the callers.** `Arrangement::of` runs
 //! `place_the_corners`, then `place_the_meets`, and only then
-//! `work_out_how_each_crossing_runs`. Corners come before order, so a fuse of
-//! two side-by-side pipes cannot reach the straight gate until the corner it
-//! needs exists.
+//! `work_out_how_each_crossing_runs`: corners come before order. Every corner on
+//! a pipe-against-pipe crossing is a meet of three surfaces two of which are
+//! those pipes, whatever the third is and whichever face is being cut — so **two
+//! pipes and anything is at most one plane**, which is one short of what
+//! `meet_of_three_surfaces` takes. `place_the_meets` skips a pair of crossings
+//! that share a partner, so the two runs of one pipe pair do not ask about each
+//! other; what does ask is either run against the face's own boundary, and a
+//! bounded face has a boundary.
+//!
+//! So the gate flip is on the path and is not the last thing on it. Closing the
+//! rest is `rcad-geom`'s three-surface meet learning one plane and two quadrics,
+//! which is another crate and another unit.
 
 use rcad_geom::{
     Axis, Cylinder, Error as GeomError, Isometry, Plane, Point, Scale, Surface, Vector,
