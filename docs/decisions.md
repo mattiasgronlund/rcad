@@ -10228,7 +10228,7 @@ still refuses.
 |---|---|---|---|
 | `TwoCurvesTouchWithoutCrossing` | a `3 × 4` block corner on a bar or a ball of radius five, so two crossings are one curve | **gap** | `a_block_corner_exactly_on_a_bars_wall_is_refused_by_name`. The answer is the bar. Tolerant refuses it too, and the determinant is exactly zero, so it is not a budget question. §38.2 has the family of fixes |
 | `AClosedEdgeOfTheAnswerWouldStartAtAPole` | a ball cut by a plane containing its polar axis | **gap** | `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`, with the equator and a leaning plane answered as controls. §38.3 measures what a direction handed to it buys, which is a different refusal two steps on |
-| `ResultIsNotManifold { count: 1 }` | **withdrawn.** It was a chord standing in for an arc, and the pair it was reached by is answered | — | `a_bar_with_a_tab_on_it_is_answered_rather_than_left_with_a_hole_in_its_skin` |
+| `ResultIsNotManifold { count: 1 }` | ~~**withdrawn.** It was a chord standing in for an arc, and the pair it was reached by is answered~~ — **§48 corrects this: withdrawing the row was right about *that pair* and wrong about the refusal. It is live and it is a gap**, reached by turned pairs and by a trio fused two-against-one, and by three axis-aligned boxes on the integer grid where no curve and no rounding is involved | **gap** | `a_bar_with_a_tab_on_it_is_answered_rather_than_left_with_a_hole_in_its_skin` for the withdrawn pair; `an_edge_with_one_face_along_it.rs` for the live refusal |
 | `ACurvedFaceGoesRightRoundWithNoSeam` | now also a face with **no** boundary at all on a surface that does not pinch — a plane or a pipe with nothing trimming it | **limit** | unreachable from the public API and reachable from `Deserialize`, which is why it is a refusal and not an assert (§16.11). No answer exists: such a face is unbounded |
 
 The four rows §37.5 marked `gap` for coincident bars, two tools on one plane, the
@@ -10690,6 +10690,18 @@ is the second. `Invalid::AClosedEdgeIsWalkedAgainstItsSurface`,
 `AnEdgeWithoutTwoFacesAlongItCannotBeWalked` are models whose topology and
 geometry disagree, which §16.11 says arrive from a file.
 `ResultIsNotManifold { count: 1 }` is **withdrawn** (§38.6).
+
+> **§48 corrects this line: it is live, and it is a gap.** 83 268 fuses reach it
+> in two of six families — turned pairs and a trio fused two-against-one — and
+> `tests/an_edge_with_one_face_along_it.rs` pins it, including an exact tally
+> that fails the day it closes. Its sharpest form needs no curve and no
+> rounding: three axis-aligned boxes on the integer grid, where
+> `fuse([far, near], [bar], Intersection)` refuses while `near ∩ bar` on its own
+> answers with volume 2 and validates. **The argument that contributes nothing
+> turns an answer into a refusal.** A tolerant policy refuses identically, so it
+> is a gap and not a budget. The four families the earlier record was written
+> from — two-solid lattice, flush, skew and elsewhere — reach it in none of
+> 3 000 fuses each, which is why it looked closed.
 
 **Seven rows are named, classified and undemonstrated**, marked above. §30.5 had
 one such row and called it the one worth reading twice; seven is a different
