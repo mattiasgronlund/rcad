@@ -3337,8 +3337,15 @@ pub(super) fn a_plane_cuts_a_cone_in_rulings(flat: &Plane, cone: &Cone) -> bool 
 /// the sign of `‖w₁ × w₂‖²`, which is the very question
 /// [`intersect`](rcad_geom::intersect) splits the pipe-and-pipe row on, so this
 /// door, `assemble.rs`'s [`the_crossing_of_these_runs_straight`] and the
-/// intersector all ask one question and cannot disagree about the shape of a
-/// crossing.
+/// intersector all ask one question of one pair of stored directions.
+///
+/// **Under [`Policy::certified`] that is the same arithmetic and the same
+/// answer.** Under a tolerant policy `intersect` can read an enclosure this
+/// refuses as nothing, and then the two part company — but only into a
+/// **refusal**: this door hands the pair to the conic gate or gives up, and
+/// neither builds an order. What cannot happen either way is a crossing
+/// `intersect` names as closing being ordered as an endless line, which is what
+/// the rounded test allowed.
 ///
 /// [`the_crossing_of_these_runs_straight`]: super::assemble
 ///
