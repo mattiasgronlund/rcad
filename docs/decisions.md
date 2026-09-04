@@ -16122,6 +16122,13 @@ each one is cheap now and expensive during a wave.
   give back, then `gc`, then the daemon installed as a service rather than left
   on demand, because four concurrent lanes are exactly what an on-demand daemon
   has not been tested for.
+- **Every lane brief carries `RCAD_STEP_CORPUS`.** Without it four `rcad-step`
+  tests fail — by §44.10's decision, so that green means the corpus ran — and a
+  lane that runs `just default` without the variable reads a red suite as its own
+  doing. It is not in the tree (375 MB of third-party files) and it is not in
+  `mise.toml` (a machine-specific absolute path), so the only place left is the
+  brief. Four lanes hitting the same unexplained failure is four debugging
+  sessions for a variable.
 - **The heredoc ban is enforced by a hook rather than recorded again.** §49.5
   found three of thirteen lanes patching `.rs` files with heredocs or `sed -i`
   and chose to record it; recording has now been tried and changed nothing. The
