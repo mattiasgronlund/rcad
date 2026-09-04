@@ -48,6 +48,22 @@
 //!   whole number divided by another, so two runs that agree about the solid
 //!   agree about the rounding as well.
 //!
+//! **The curved families keep that**, which is not obvious and is the whole
+//! point of §48. A ball's centre and radius and a bar's axis and radius are
+//! whole numbers, where its skin meets the block is a circle of that same
+//! radius, and the only corners on that circle are where the seam crosses it —
+//! so every corner of those answers is a whole number too, and a whole-number
+//! shift of them is exact. The laws that hold over a ball hold bit for bit.
+//!
+//! The one row here that is **not** a comparison is
+//! [`what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does`].
+//! It measures how far four meshed volumes are from adding up and how fast that
+//! closes as the mesh refines, because `Solid::measure` is not
+//! decomposition-invariant on a curved skin and inclusion and exclusion is
+//! therefore not assertable over a ball. It is a measurement with a threshold on
+//! it, not a comparison with slack in it, and nothing it does is used to decide
+//! whether two answers agree.
+//!
 //! The turned family has none of that, so the only properties run over it are
 //! the ones that are exactly true whatever the coordinates are: two answers
 //! agreeing bit for bit, and a result being empty. **Inclusion and exclusion is
