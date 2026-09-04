@@ -477,6 +477,13 @@ impl From<Vector> for na::Vector3<f64> {
 /// moved axis points along a direction of length one to within the rounding of
 /// the turn. Serializes as `(origin, direction)` and is re-checked on the way
 /// back in, so a file cannot hand us an axis without a direction.
+///
+/// # No stored number is `-0.0`
+///
+/// Two faces that are the same pipe, cone or bend hold the same six numbers,
+/// and the fuse rests on it. [`Axis::holding`] turns every stored zero the
+/// right way up and every constructor here goes through it; see it for what a
+/// single negative zero costs and for the three ways one arrives.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "(Point, Vector)", into = "(Point, Vector)")]
 pub struct Axis {
@@ -508,37 +515,28 @@ impl Axis {
                 what: "axis origin",
             });
         }
-        Ok(Self {
+        Ok(Self::holding(
             origin,
-            direction: direction.scaled_to_length_one_from_anywhere("axis direction")?,
-        })
+            direction.scaled_to_length_one_from_anywhere("axis direction")?,
+        ))
     }
 
     /// The first coordinate axis: through the origin, pointing along `x`.
     #[must_use]
     pub fn x() -> Self {
-        Self {
-            origin: Point::origin(),
-            direction: Vector::new(1.0, 0.0, 0.0),
-        }
+        Self::holding(Point::origin(), Vector::new(1.0, 0.0, 0.0))
     }
 
     /// The second coordinate axis: through the origin, pointing along `y`.
     #[must_use]
     pub fn y() -> Self {
-        Self {
-            origin: Point::origin(),
-            direction: Vector::new(0.0, 1.0, 0.0),
-        }
+        Self::holding(Point::origin(), Vector::new(0.0, 1.0, 0.0))
     }
 
     /// The third coordinate axis: through the origin, pointing along `z`.
     #[must_use]
     pub fn z() -> Self {
-        Self {
-            origin: Point::origin(),
-            direction: Vector::new(0.0, 0.0, 1.0),
-        }
+        Self::holding(Point::origin(), Vector::new(0.0, 0.0, 1.0))
     }
 
     /// A point the line passes through.
@@ -554,12 +552,14 @@ impl Axis {
     }
 
     /// The same line pointing the other way.
+    ///
+    /// **An involution on the bits**, which [`Axis::holding`] is what gives it:
+    /// negating alone turns `0.0` into `-0.0`, so a pipe about `z` turned round
+    /// would hold other bits than the same pipe named pointing down, and turning
+    /// it round twice would not come back to what it started as.
     #[must_use]
     pub fn reversed(&self) -> Self {
-        Self {
-            origin: self.origin,
-            direction: -self.direction,
-        }
+        Self::holding(self.origin, -self.direction)
     }
 
     /// The point on the line nearest to `point`.
@@ -586,9 +586,41 @@ impl Axis {
     /// thing at more length.
     #[must_use]
     pub fn transformed(&self, movement: &Isometry) -> Self {
+        Self::holding(
+            movement.apply_to_point(self.origin),
+            movement.apply_to_vector(self.direction),
+        )
+    }
+
+    /// The only place an `Axis` is built, so that no axis anywhere stores
+    /// `-0.0`.
+    ///
+    /// Two faces that are the same pipe, cone or bend have to hold the same
+    /// numbers, and four places rest on it: `Surface::how_it_sorts_against` puts
+    /// a triple in a fixed order on the axis origin and direction, `rcad-topo`'s
+    /// `name_of_surface_bits` names a corner by them, `canonical_cut_surfaces`
+    /// drops a repeat by them, and `docs/decisions.md` §32.5 is the rule itself.
+    /// All four order with [`f64::total_cmp`](f64::total_cmp), which sorts
+    /// `-0.0` before `0.0`, so a single negative zero anywhere in an axis makes
+    /// two spellings of one surface two surfaces.
+    ///
+    /// Three ways in, none of them hypothetical: [`Axis::new`] is public and
+    /// [`Vector::scaled_to_length_one_from_anywhere`] divides by two positive
+    /// numbers, so a `DIRECTION` written `(-0.,0.,1.)` — which 93 of the checked
+    /// corpus's files hold — reaches storage through `rcad-step`'s `geometry.rs`
+    /// as it came; [`Axis::reversed`] negates, and negating `0.0` gives `-0.0`;
+    /// and a turn can hand back `-0.0` for a component that was `0.0`.
+    ///
+    /// Adding zero is what turns one back the right way up: `-0.0 + 0.0` is
+    /// `0.0` and `x + 0.0` is `x` for every other finite `x`, so this rounds
+    /// nothing and moves no axis. [`Plane::holding`](crate::Plane) folds a plane
+    /// the same way for the same reason.
+    fn holding(origin: Point, direction: Vector) -> Self {
+        let [x, y, z] = origin.coordinates();
+        let [u, v, w] = direction.components();
         Self {
-            origin: movement.apply_to_point(self.origin),
-            direction: movement.apply_to_vector(self.direction),
+            origin: Point::new(x + 0.0, y + 0.0, z + 0.0),
+            direction: Vector::new(u + 0.0, v + 0.0, w + 0.0),
         }
     }
 }
@@ -609,7 +641,10 @@ impl From<Axis> for (Point, Vector) {
 
 #[cfg(test)]
 mod tests {
+    use core::cmp::Ordering;
+
     use super::*;
+    use crate::{Cone, Cylinder, Surface, Torus};
 
     #[test]
     fn subtracting_two_points_gives_the_step_from_one_to_the_other() {
@@ -922,5 +957,134 @@ mod tests {
     fn an_axis_rebuilt_from_stored_parts_without_a_direction_is_refused() {
         let stored = (Point::origin(), Vector::zero());
         assert!(Axis::try_from(stored).is_err());
+    }
+
+    fn bits_of(axis: Axis) -> [u64; 6] {
+        let [x, y, z] = axis.origin().coordinates();
+        let [u, v, w] = axis.direction().components();
+        [x, y, z, u, v, w].map(f64::to_bits)
+    }
+
+    /// Every way of signing the zeros of one axis, through the door `rcad-step`
+    /// opens.
+    ///
+    /// A STEP `DIRECTION` may be written `(-0.,0.,1.)` and `brep.rs` hands the
+    /// three numbers to [`Axis::new`] as they came. `-0.0` is the same number as
+    /// `0.0` and a different `f64`, and everything that asks whether two faces
+    /// are the same surface compares with [`f64::total_cmp`](f64::total_cmp),
+    /// which sorts `-0.0` first.
+    ///
+    /// The scaling turns none of these back up, and the count says so rather
+    /// than a sentence: [`Vector::scaled_to_length_one_from_anywhere`] divides
+    /// by the largest magnitude and then by a length, and neither divisor is
+    /// ever negative, so every sign that goes in comes out.
+    #[test]
+    fn an_axis_holds_the_same_bits_however_its_zeros_were_signed() {
+        let plain = Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0)).unwrap();
+        let mut spellings = 0usize;
+        let mut the_scaling_kept_the_sign = 0usize;
+
+        for origin_x in [0.0, -0.0] {
+            for origin_y in [0.0, -0.0] {
+                for direction_x in [0.0, -0.0] {
+                    for direction_y in [0.0, -0.0] {
+                        let direction = Vector::new(direction_x, direction_y, 1.0);
+                        spellings += 1;
+                        let scaled = direction
+                            .scaled_to_length_one_from_anywhere("axis direction")
+                            .unwrap();
+                        if scaled.components().map(f64::to_bits)
+                            != plain.direction().components().map(f64::to_bits)
+                        {
+                            the_scaling_kept_the_sign += 1;
+                        }
+                        let spelt =
+                            Axis::new(Point::new(origin_x, origin_y, 4.0), direction).unwrap();
+                        assert_eq!(
+                            bits_of(spelt),
+                            bits_of(plain),
+                            "an axis spelled with origin ({origin_x}, {origin_y}, 4) and \
+                             direction ({direction_x}, {direction_y}, 1) holds other bits than \
+                             the same axis spelled with every zero positive"
+                        );
+                    }
+                }
+            }
+        }
+
+        println!(
+            "{the_scaling_kept_the_sign} of {spellings} spellings still hold a negative zero \
+             after the scaling alone"
+        );
+        assert_eq!(
+            the_scaling_kept_the_sign, 12,
+            "the scaling divides by two positive numbers, so it turns no signed zero back up and \
+             all twelve spellings with one in the direction should survive it"
+        );
+    }
+
+    /// The bits an axis holds are the bits a pipe, a cone and a bend sort on.
+    ///
+    /// `Surface::how_it_sorts_against` reads the axis origin and direction
+    /// straight out, and so does `rcad-topo`'s `name_of_surface_bits`, which
+    /// names a corner by them one crate away. A cone's apex and a torus's centre
+    /// are the axis origin, so this pair covers what all three write down.
+    ///
+    /// [`Axis::reversed`] is the second spelling worth naming: negating `0.0`
+    /// gives `-0.0`, so a pipe turned round used to hold other bits than the
+    /// same pipe named pointing down in the first place.
+    #[test]
+    fn one_axis_spelled_two_ways_builds_surfaces_that_sort_as_one() {
+        let up = Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).unwrap();
+        let down = Axis::new(Point::origin(), Vector::new(0.0, 0.0, -1.0)).unwrap();
+
+        for (one, other, how_it_was_spelled) in [
+            (
+                up,
+                Axis::new(Point::new(-0.0, 0.0, 0.0), Vector::new(-0.0, 0.0, 1.0)).unwrap(),
+                "a negative zero as it was written in the file",
+            ),
+            (
+                down,
+                up.reversed(),
+                "turned round rather than named downward",
+            ),
+        ] {
+            let surfaces = |axis: Axis| {
+                [
+                    Surface::Cylinder(Cylinder::new(axis, 2.0).unwrap()),
+                    Surface::Cone(Cone::new(axis, 0.5).unwrap()),
+                    Surface::Torus(Torus::new(axis, 3.0, 1.0).unwrap()),
+                ]
+            };
+            for (mine, theirs) in surfaces(one).into_iter().zip(surfaces(other)) {
+                assert_eq!(
+                    mine.how_it_sorts_against(&theirs),
+                    Ordering::Equal,
+                    "{mine:?} and the same surface, {how_it_was_spelled}, sort apart"
+                );
+            }
+        }
+    }
+
+    /// §32.5's trap, on the type it was written about.
+    ///
+    /// Turning an axis by nothing has to give back the numbers that were stored,
+    /// or `Cylinder::transformed` — which is how a pipe is read out of a model
+    /// at whatever location its face carries — moves a bit on every read.
+    #[test]
+    fn moving_an_axis_by_the_identity_gives_back_the_bits_it_held() {
+        for axis in [
+            Axis::x(),
+            Axis::y(),
+            Axis::z(),
+            Axis::z().reversed(),
+            Axis::new(Point::new(1.0, -2.5, 3.0), Vector::new(1.0, 2.0, 3.0)).unwrap(),
+        ] {
+            assert_eq!(
+                bits_of(axis.transformed(&Isometry::identity())),
+                bits_of(axis)
+            );
+        }
     }
 }
