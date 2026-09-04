@@ -36,14 +36,26 @@ impl Measurement {
         self.volume
     }
 
-    /// How much more space the solid could enclose than [`Measurement::volume`]
-    /// says — a **cubed** quantity, in the model's own unit.
+    /// How far [`Measurement::volume`] can be from the space the solid really
+    /// encloses — a **distance**, and a **cubed** quantity in the model's own
+    /// unit.
     ///
-    /// The triangles a curved face is cut into are drawn through points on the
-    /// surface itself, so they lie inside the material and the sum over them is
-    /// short of the real answer. What is missing is the shell between the
-    /// triangles and the surface, and
-    /// [`how_much_space_hides_under_a_flat_stand_in`] bounds it.
+    /// **A distance and not a shortfall, because which way it is out depends on
+    /// which way the surface bends.** The triangles a curved face is cut into
+    /// are drawn through points on the surface itself, so on a round bar they
+    /// lie inside the material and the sum over them falls short. A round
+    /// **hole**'s wall bends the other way: the same chords cut into the block,
+    /// so the mesh reports more material than there is — a cube of side 8 with a
+    /// hole of radius 1 through it comes out `0.477` **over** at a deflection of
+    /// `0.1`. `a_block_with_a_round_hole_measures_bigger_than_it_is` is that
+    /// shape, and
+    /// `a_measured_volume_sits_inside_the_published_bound_over_balls_and_bars`
+    /// is where this number is checked against `|true − measured|` rather than
+    /// against a signed shortfall.
+    ///
+    /// What is on the wrong side of the triangles either way is the shell
+    /// between them and the surface — same shell, same thickness, opposite sign
+    /// — and [`how_much_space_hides_under_a_flat_stand_in`] bounds it.
     ///
     /// Exactly `0.0` for a wholly flat solid, and never negative.
     #[must_use]
@@ -57,15 +69,26 @@ impl Measurement {
         self.surface_area
     }
 
-    /// How much more skin the solid could have than
-    /// [`Measurement::surface_area`] says — a **squared** quantity, in the
-    /// model's own unit.
+    /// How far [`Measurement::surface_area`] can be from the skin the solid
+    /// really has — a **distance**, and a **squared** quantity in the model's
+    /// own unit.
     ///
-    /// Two things are missing and both are counted:
+    /// Two things are charged and both are counted:
     /// [`how_much_more_surface_there_can_be`] for the curved faces, whose true
     /// surface bulges away from the flat triangles standing in for it, and
     /// [`rim_of_the_flat_faces`] for the flat ones, whose meshed outline is a
     /// polygon inscribed in a curve.
+    ///
+    /// **A distance for the same reason [`Measurement::volume_error`] is, and
+    /// the two terms are what pull opposite ways.** On a round bar both are
+    /// short of the truth. Round a **hole**, the flat face's inscribed polygon
+    /// takes *less* away than the circle it stands for, so that face is meshed
+    /// too large, while the hole's wall is still meshed too small. Which of the
+    /// two wins is the hole's depth: a cube of side 8 with a hole of radius 1
+    /// straight through comes out `0.128` under at a deflection of `0.1`, and an
+    /// 8 × 8 plate half a unit thick with the same hole comes out `0.127`
+    /// **over**. `a_thin_plate_with_a_hole_measures_more_skin_than_it_has` is
+    /// both of those measured.
     ///
     /// Exactly `0.0` for a wholly flat solid, and never negative.
     #[must_use]
@@ -86,10 +109,11 @@ impl Measurement {
     /// with [`Policy::max_wobble`] (§25.4). See [`SolidView::measure`] for what
     /// that comparison is worth and who makes it.
     ///
-    /// The missing material is no more than [`Measurement::volume_error`] of
-    /// space, and none of it is further from the centroid than the solid
-    /// reaches, so moving all of it to the far side shifts the balance point by
-    /// at most `volume_error / volume` of that reach.
+    /// The material the mesh gets wrong — missing on a bar, added round a hole
+    /// — is no more than [`Measurement::volume_error`] of space, and none of it
+    /// is further from the centroid than the solid reaches, so moving all of it
+    /// to the far side shifts the balance point by at most
+    /// `volume_error / volume` of that reach.
     ///
     /// Exactly `0.0` for a wholly flat solid.
     #[must_use]
@@ -561,9 +585,10 @@ fn area_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> f64 {
 /// triangles standing in for it.
 ///
 /// **The derivation, for a face on a sphere of radius `r` cut to a deviation of
-/// `d`.** Every point of every triangle is inside the material and no further
-/// than `d` from the surface, so all of them sit between the radii `r − d` and
-/// `r`. Projecting the triangles radially in onto the sphere of radius `r − d`
+/// `d`.** Every point of every triangle is on the near side of the surface and
+/// no further than `d` from it, so all of them sit between the radii `r − d` and
+/// `r` — which is all the argument uses, so it covers a hole's wall on the same
+/// lines as a ball's, with the material on the other side of it. Projecting the triangles radially in onto the sphere of radius `r − d`
 /// scales an area element by `cos θ · ((r − d) / ρ)²`, where `ρ ≥ r − d` is how
 /// far out the element is and `θ` is how far its normal leans off the radial
 /// direction — never more than one — so the solid angle the face covers is at
@@ -588,8 +613,12 @@ fn how_much_more_surface_there_can_be(area: f64, radius: f64, deviation: f64) ->
     area * ((radius / inner) * (radius / inner) - 1.0)
 }
 
-/// How much space can hide between a curved face's triangles and the surface
-/// they stand in for, over the `area` of those triangles.
+/// How much space lies between a curved face's triangles and the surface they
+/// stand in for, over the `area` of those triangles.
+///
+/// How much, not which way: on a bar that space is material the mesh left out
+/// and round a hole it is material the mesh put in, and
+/// [`Measurement::volume_error`] is where that is said.
 ///
 /// The same shell as [`how_much_more_surface_there_can_be`], now measured rather
 /// than projected. The face covers a solid angle of at most `area / (r − d)²`,
@@ -827,4 +856,159 @@ fn lexicographically_smaller(corner: [f64; 3], so_far: [f64; 3]) -> bool {
             core::cmp::Ordering::Greater => Some(false),
         })
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use rcad_geom::{Isometry, Scale, Vector};
+
+    use crate::{Model, ProfileBuilder, Rule, SolidKey};
+
+    use super::*;
+
+    const PI: f64 = core::f64::consts::PI;
+
+    /// A plate `side` across and `thick` deep with a hole of radius `radius`
+    /// bored through the middle, and the skin it really has.
+    ///
+    /// Two rectangles and a bar rather than a builder that takes a hole,
+    /// because the fuse is what puts a curved wall inside a flat face.
+    fn a_plate_with_a_hole(side: f64, thick: f64, radius: f64) -> (Model, SolidKey, f64) {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let rectangle =
+            ProfileBuilder::new(vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]])
+                .build(&policy, &mut ProvenanceLog::new())
+                .expect("a square");
+        let plate = model
+            .add_extrusion(&rectangle, thick, &Isometry::identity())
+            .expect("a plate");
+        let bar = model
+            .add_round_bar(
+                radius,
+                thick + 4.0,
+                &Isometry::translation(Vector::new(side / 2.0, side / 2.0, -2.0)).expect("a shift"),
+            )
+            .expect("a bar longer than the plate is thick");
+        let holed = model
+            .fuse(
+                &[plate],
+                &[bar],
+                Rule::Difference,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a plate with a hole through it");
+        let holed = holed.solids()[0];
+
+        let true_area = 2.0 * (side * side - PI * radius * radius)
+            + 4.0 * side * thick
+            + 2.0 * PI * radius * thick;
+        (model, holed, true_area)
+    }
+
+    /// [`Measurement::area_error`] is a distance and not a shortfall, and this
+    /// is the pair of shapes that says it has to be.
+    ///
+    /// A meshed hole gets its two ends and its wall wrong in opposite
+    /// directions. The flat face's outline round the hole is a polygon
+    /// **inscribed** in the circle, so it takes less away than the circle does
+    /// and that face comes out too large; the wall's chords are shorter than the
+    /// arcs they stand for, so the wall comes out too small. Which one wins is
+    /// how deep the hole is, so the same kind of solid lands on both sides of
+    /// the answer and only the magnitude can be published.
+    ///
+    /// Both true areas are closed forms worked out here from what the shapes
+    /// were built with, not read back off the kernel.
+    #[test]
+    fn a_thin_plate_with_a_hole_measures_more_skin_than_it_has() {
+        let policy = Policy::certified();
+        let measured = |model: &Model, solid: SolidKey, how_fine: f64| {
+            model
+                .solid(solid)
+                .measure(
+                    Deflection::of(how_fine).expect("a length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a plate with a hole measures")
+        };
+
+        for how_fine in [0.1, 0.03, 0.01] {
+            let (model, plate, true_area) = a_plate_with_a_hole(8.0, 0.5, 1.0);
+            let thin = measured(&model, plate, how_fine);
+            let over = thin.surface_area() - true_area;
+            println!("a plate half a unit thick at {how_fine}: {over:+} of skin too much");
+            assert!(
+                over > 0.0,
+                "a hole through a thin plate has to measure more skin than the {true_area} it \
+                 has, and it measured {}",
+                thin.surface_area()
+            );
+
+            let (model, block, true_area) = a_plate_with_a_hole(8.0, 8.0, 1.0);
+            let deep = measured(&model, block, how_fine);
+            let under = deep.surface_area() - true_area;
+            println!("a hole eight deep at {how_fine}: {under:+} of skin");
+            assert!(
+                under < 0.0,
+                "a hole eight units deep has to measure less skin than the {true_area} it has, \
+                 and it measured {}",
+                deep.surface_area()
+            );
+
+            // Which is the whole point: the published number covers both signs,
+            // and neither of the two would be covered by a one-sided one.
+            for (out_by, measurement) in [(over, thin), (under, deep)] {
+                assert!(
+                    measurement.area_error().is_finite(),
+                    "nothing is worth asserting against an infinite bound (§47.4)"
+                );
+                assert!(
+                    out_by.abs() <= measurement.area_error(),
+                    "the skin is {out_by} out and the kernel owned up to {}",
+                    measurement.area_error()
+                );
+            }
+        }
+    }
+
+    /// The volume goes the other way round on the same two shapes, which is what
+    /// makes [`Measurement::volume_error`] a distance too.
+    ///
+    /// `a_block_with_a_round_hole_measures_bigger_than_it_is` in
+    /// `what_a_deflection_costs_a_measured_volume.rs` is the same finding
+    /// against a closed-form volume; this is the half that says the two error
+    /// terms do not agree on a sign even for one solid, so neither of them can
+    /// publish one.
+    #[test]
+    fn a_hole_makes_the_volume_read_high_where_the_same_hole_makes_the_skin_read_low() {
+        let policy = Policy::certified();
+        let (model, block, _) = a_plate_with_a_hole(8.0, 8.0, 1.0);
+        let true_volume = (64.0 - PI) * 8.0;
+
+        for how_fine in [0.1, 0.03, 0.01] {
+            let measurement = model
+                .solid(block)
+                .measure(
+                    Deflection::of(how_fine).expect("a length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("the block measures");
+            let over = measurement.volume() - true_volume;
+            println!("a hole eight deep at {how_fine}: {over:+} of material too much");
+            assert!(
+                over > 0.0,
+                "the mesh of a hole is a prism inside it, so the block has to come out bigger \
+                 than the {true_volume} it is, and it came out {}",
+                measurement.volume()
+            );
+            assert!(
+                over <= measurement.volume_error(),
+                "the block is {over} over and the kernel owned up to {}",
+                measurement.volume_error()
+            );
+        }
+    }
 }
