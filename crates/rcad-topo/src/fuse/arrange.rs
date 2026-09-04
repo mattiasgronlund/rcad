@@ -4796,7 +4796,7 @@ mod what_the_curved_arrangement_reaches {
         HowItRuns, a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
         a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
         gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
-        round_a_closed_crossing, split_a_face, two_pipes_run_along_one_line,
+        round_a_closed_crossing, side_of_surface, split_a_face, two_pipes_run_along_one_line,
         where_a_cones_apex_stands_against_a_plane,
     };
     use crate::{Error, Model, SolidKey};
@@ -5216,6 +5216,140 @@ mod what_the_curved_arrangement_reaches {
                 super::the_other_way(first),
                 "asking the other way round turns the answer round"
             );
+        }
+    }
+
+    /// A plane lying parallel to one of a cone's rulings cuts a **parabola**,
+    /// and it is put in order across the bend's own axis like the hyperbola
+    /// above.
+    ///
+    /// # A stored unit normal reaches `E = 0` exactly
+    ///
+    /// The parabola is the knife edge of
+    /// [`how_a_plane_leans_against_a_cone`]: `E = (n·w)² − slope²‖n × w‖²` has
+    /// to be *nothing*, and `n` is the normal
+    /// [`Plane::from_point_and_normal`] stored after dividing by its length,
+    /// which for a plane along a cone's side is an irrational number. That
+    /// division does not stand in the way, because **`E` is homogeneous of
+    /// degree two in `n`**: dividing `n` by `L` divides `E` by `L²` and moves
+    /// no sign. What is left is whether the *rounding* of that division keeps
+    /// the components in the ratio `E = 0` wants, and it does whenever the
+    /// ratio is a power of two — scaling an operand and its result by a power
+    /// of two commutes with correct rounding.
+    ///
+    /// So `slope = ½` with `n ∝ (−2, 0, 1)` lands on the edge from whole
+    /// numbers. The stored normal is `(−2u, 0, u)` for `u = fl(1/√5)`,
+    /// thoroughly irrational and still exactly twice one component of itself,
+    /// which makes `E = u² − ¼(2u)² = 0` bit for bit.
+    ///
+    /// # The shape it cuts
+    ///
+    /// The cone leans a half about `z`, so `x² + y² = z²/4`; the plane is
+    /// `z = 2x + 4`, which meets it in `y² = 4x + 4` — a parabola, in the top
+    /// nappe alone. Its points are whole numbers: `(−1, 0, 2)` at the vertex,
+    /// `(0, ±2, 4)` either side and `(3, ±4, 10)` further along, running down
+    /// `y` in that order. `n × w` is along `y`, so the order is the order of
+    /// `y`, and a vertex has to come **between** the points either side of it.
+    #[test]
+    fn the_parabola_a_plane_along_a_cones_side_cuts_is_ordered_across_its_own_axis() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let cone = Cone::new(Axis::z(), 0.5).expect("a cone leaning a half");
+        let flat =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(-1.0, 0.0, 0.5))
+                .expect("a plane parallel to one of the cone's rulings");
+
+        let stored = flat.normal().components();
+        assert_eq!(
+            stored[0],
+            -2.0 * stored[2],
+            "the stored normal is irrational and still in the ratio `E = 0` wants: {stored:?}"
+        );
+        assert_eq!(
+            where_a_cones_apex_stands_against_a_plane(&flat, &cone),
+            Decision::Neg,
+            "the apex is off the plane, so the crossing is a curve and not rulings"
+        );
+        assert_eq!(
+            how_a_plane_leans_against_a_cone(&flat, &cone),
+            Decision::Zero,
+            "and the plane leans exactly along the cone's side, which is the parabola row"
+        );
+
+        let (surface, partner) = (Surface::Plane(flat), Surface::Cone(cone));
+        let SurfaceMeet::Curves(runs) = intersect(&surface, &partner, &policy, &mut log)
+            .expect("a plane along a cone's side cuts a parabola")
+        else {
+            panic!("a plane along a cone's side cuts curves and nothing else");
+        };
+        assert_eq!(
+            runs.len(),
+            1,
+            "a parabola lies in one nappe, so it is one run"
+        );
+
+        // Every point the ordering is asked about is on both surfaces, or the
+        // run it claims to order is not the one being walked.
+        let along_the_parabola = [
+            [3.0, -4.0, 10.0],
+            [0.0, -2.0, 4.0],
+            [-1.0, 0.0, 2.0],
+            [0.0, 2.0, 4.0],
+            [3.0, 4.0, 10.0],
+        ];
+        for point in along_the_parabola {
+            for surface in [&surface, &partner] {
+                assert_eq!(
+                    side_of_surface(surface, PredicatePoint::from(point)),
+                    Decision::Zero,
+                    "{point:?} is on the crossing"
+                );
+            }
+        }
+
+        let vertex = PredicatePoint::from([-1.0, 0.0, 2.0]);
+        let HowItRuns::AlongABend {
+            plane_normal,
+            cone_axis,
+            forward_runs_with_the_bend,
+        } = how_a_crossing_runs(&surface, &partner, &runs[0], vertex, &mut log)
+            .expect("a parabola is ordered across the bend's own axis")
+        else {
+            panic!("a parabola neither closes nor runs straight");
+        };
+        assert_eq!(plane_normal, stored, "the plane's stored normal");
+        assert_eq!(cone_axis, [0.0, 0.0, 1.0], "the cone's stored axis");
+
+        let order = |first: [f64; 3], second: [f64; 3]| {
+            along_a_bend(
+                plane_normal,
+                cone_axis,
+                forward_runs_with_the_bend,
+                PredicatePoint::from(first),
+                PredicatePoint::from(second),
+            )
+        };
+        let first = order(along_the_parabola[0], along_the_parabola[1]);
+        assert_ne!(first, Decision::Zero, "two places on the run are two");
+        for (at, one) in along_the_parabola.iter().enumerate() {
+            assert_eq!(
+                order(*one, *one),
+                Decision::Zero,
+                "{one:?} is not before itself"
+            );
+            for other in &along_the_parabola[at + 1..] {
+                assert_eq!(
+                    order(*one, *other),
+                    first,
+                    "{one:?} comes before {other:?} the same way every earlier point does, \
+                     which is what a merely local comparison would miss"
+                );
+                assert_eq!(
+                    order(*other, *one),
+                    super::the_other_way(first),
+                    "and asking the other way round turns the answer round"
+                );
+            }
         }
     }
 
