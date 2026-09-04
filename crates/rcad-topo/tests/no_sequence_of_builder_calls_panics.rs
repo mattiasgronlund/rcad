@@ -482,12 +482,27 @@ fn a_surface(which: usize) -> Surface {
 
 /// How many of each family to draw. `RCAD_SOAK_FACTOR` multiplies it, the way
 /// the rest of the suite does.
+///
+/// # Panics
+///
+/// If the variable is set to something that is not a whole number above zero, or
+/// to one whose product is more than a run can count. Both used to run the
+/// shipped corpus or less and say nothing about it: a factor that did not parse
+/// fell back to one, and a product that wrapped drew **nought** while the
+/// operator read the number as the wide one (§48.2, §50.9). Measured: at a
+/// factor of 36 028 797 018 963 968 this drew no cubes at all and the run went
+/// green.
 fn how_many() -> usize {
-    let factor: usize = std::env::var("RCAD_SOAK_FACTOR")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(1);
-    DRAWS * factor
+    let Ok(factor) = std::env::var("RCAD_SOAK_FACTOR") else {
+        return DRAWS;
+    };
+    let factor: usize = factor
+        .parse()
+        .unwrap_or_else(|_| panic!("RCAD_SOAK_FACTOR has to be a whole number, not {factor:?}"));
+    assert!(factor > 0, "RCAD_SOAK_FACTOR has to be at least one");
+    DRAWS
+        .checked_mul(factor)
+        .unwrap_or_else(|| panic!("{DRAWS} draws times {factor} is more than one run can count"))
 }
 
 /// A deterministic sequence, so a number reported here is one number and not a
