@@ -1313,6 +1313,116 @@ pub fn a_ball_and_a_block() -> impl Strategy<Value = BallAndBlock> {
         })
 }
 
+/// A block with a ball half sunk into its floor and a round bar driven through
+/// it, the ball and the bar well apart from each other.
+///
+/// **The first curved fixture that is not a pair**, and it exists because
+/// associativity needs three solids: `(A ∪ B) ∪ C` against `A ∪ (B ∪ C)` cannot
+/// be asked of two. Every other curved family here is a pair, so until this one
+/// no algebraic law needing a trio had ever run over a round face at all.
+///
+/// # Why the ball and the bar never touch
+///
+/// Because a sphere crossing a pipe is a quartic, and nothing in this kernel can
+/// put points in order along one — `docs/decisions.md` §48.2 item 4, and
+/// `Error::ACrossingThisCannotBeOrderedAlong` is what comes back. One grouping
+/// of the trio fuses the ball against the bar directly, so a fixture where those
+/// two overlap would refuse on that grouping every time and leave the law green
+/// having compared nothing (§14.7).
+///
+/// Kept apart, both curved solids still meet the **block**, which is where every
+/// crossing the fuse has to arrange comes from: a circle where the ball's skin
+/// cuts the floor, and two circles where the bar's wall cuts the floor and the
+/// roof. That is a real curved arrangement in every grouping, not an easy one
+/// bought by moving the round faces out of each other's way.
+///
+/// # What it does today
+///
+/// Every pair of the three fuses. **No trio of them does**, and
+/// `fuses_that_must_agree.rs`'s
+/// `uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first`
+/// pins the refusal and says which face stops it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BallBarAndBlock {
+    /// How wide the block is, and how tall.
+    pub side: u32,
+    /// The ball's radius.
+    pub ball_radius: u32,
+    /// The bar's radius.
+    pub bar_radius: u32,
+}
+
+impl BallBarAndBlock {
+    /// Build the block, then the ball, then the bar, in that order.
+    ///
+    /// The ball stands a unit clear of one side wall and the bar a unit clear of
+    /// the far one, both on the line halfway across the block, which is what
+    /// keeps them apart without any number having to be checked at build time.
+    #[must_use]
+    pub fn build(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let side = f64::from(self.side);
+        let halfway = f64::from(self.side / 2);
+        let block = model
+            .add_cube(side, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a whole-number cube");
+        let ball = model
+            .add_ball(
+                f64::from(self.ball_radius),
+                &Isometry::translation(Vector::new(self.ball_stands_at(), halfway, 0.0))
+                    .expect("a whole-number shift"),
+            )
+            .expect("a whole-number ball");
+        let bar = model
+            .add_round_bar(
+                f64::from(self.bar_radius),
+                side + 4.0,
+                &Isometry::translation(Vector::new(self.bar_stands_at(), halfway, -2.0))
+                    .expect("a whole-number shift"),
+            )
+            .expect("a bar long enough to go right through");
+        (model, vec![block, ball, bar])
+    }
+
+    /// How far along `x` the ball's centre stands, a unit clear of the near wall.
+    #[must_use]
+    pub fn ball_stands_at(&self) -> f64 {
+        f64::from(self.ball_radius + 1)
+    }
+
+    /// How far along `x` the bar's axis stands, a unit clear of the far wall.
+    #[must_use]
+    pub fn bar_stands_at(&self) -> f64 {
+        f64::from(self.side - self.bar_radius - 1)
+    }
+}
+
+/// A block with a ball in its floor and a bar through it, everything a whole
+/// unit clear of everything else.
+///
+/// The block is drawn wide enough to hold both with a unit of room at every
+/// wall and a unit of room between the two round solids, which is
+/// `2·ball + 2·bar + 3` at its narrowest.
+///
+/// Shrinks toward a block of side seven with a ball of radius one against one
+/// wall and a bar of radius one against the other.
+pub fn a_ball_a_bar_and_a_block() -> impl Strategy<Value = BallBarAndBlock> {
+    (1u32..=2, 1u32..=2)
+        .prop_flat_map(|(ball_radius, bar_radius)| {
+            let narrowest = 2 * ball_radius + 2 * bar_radius + 3;
+            (
+                Just(ball_radius),
+                Just(bar_radius),
+                narrowest..=narrowest + 4,
+            )
+        })
+        .prop_map(|(ball_radius, bar_radius, side)| BallBarAndBlock {
+            side,
+            ball_radius,
+            bar_radius,
+        })
+}
+
 /// A block with a frustum standing up through its floor.
 ///
 /// The third curved family, and the first whose surface is neither a pipe nor a
