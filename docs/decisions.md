@@ -15928,3 +15928,222 @@ Two paths remain unexercised and are recorded as such rather than as clean: the
 anywhere in the suite, and neither did its twin next door; and the 7 761 draws of
 the safe direction are safe only until
 `TwoLinesThroughAConesApexAreOneCurveThroughItself`'s neighbouring gap closes.
+
+## 50. The endless bend — the unit after nothing round was ever checked, recorded 2026-09-04
+
+*Written before any lane was dispatched. Every file and line it cites was checked
+against the tree at `4b3ecda` by opening the file, not by trusting the report that
+named it. Three citations changed when that was done and one of them changed the
+scope of a lane, which is §48's preamble earning its place a second time.*
+
+### 50.1 The name, and what the unit is
+
+Called **the endless bend**, after the thing the kernel cannot do: put points in
+order along a curve that has no ends. §47.7 named it, §48.7 held it out with the
+reason *"it wants `arrange.rs`, which the claim audit is reading"*, and §48.10's
+spike then passed on it. It has been the missing capability for three units and
+it is now the spine of one.
+
+**`the cut` stays held**, a third time. It has still never been earned.
+
+The unit is two things that turn out to be one. Ordering along an endless bend is
+the capability; **cone against pipe** — §48.7's *"this is the next unit's
+headline"* — is the consumer that proves it, because a cone and a pipe on one
+axis cross in exactly the kind of curve that has no ends. Shipping the ordering
+without the consumer would be a `HowItRuns` variant nothing constructs.
+
+### 50.2 Four corrections, before any lane reads them
+
+**1. §49.3 describes the second latent defect as something the function does not
+do.** It says `three_planes_faced_the_one_way` *"canonicalises to `-0.0` where its
+sibling adds `+ 0.0`"*. Opening `arrange.rs:396-411`: the function does not
+canonicalise to anything. It calls `flat.reversed()` when the first nonzero
+coefficient is negative, and reversing a plane whose *other* coefficients are
+`0.0` is what **produces** `-0.0`. The sibling is `exactly_at`
+(`assemble.rs:1882-1889`), which maps `-0.0 → 0.0` with a comment saying why, and
+the key that tells the two apart is `in_the_order_a_float_compares`
+(`arrange.rs:419-422`), a `total_cmp`-equivalent ordering.
+
+The defect is real and §49.3 was right that it is one. But a lane briefed to
+"stop it canonicalising to `-0.0`" would look for a canonicalisation that is not
+there. The fix is on the *producing* side or the *ordering* side, and which one is
+the lane's to decide.
+
+**2. `HowItRuns` has moved.** §48.6 cites `fuse/arrange.rs:448-467`; it is now
+`arrange.rs:495-513`, with the same two variants. Ordinary drift, recorded because
+§48.6 is where the third variant was decided and it is the paragraph a lane will
+be sent to read.
+
+**3. The §49.8 directive was priced as a lane and it is not one.** *"What else in
+`arrange.rs` and `assemble.rs` decides a shape by comparing a sum of products to
+zero"* sounds like a sweep of two 3 000-line files. Counted: **20 sites in
+production code** — 12 in `arrange.rs` (`:358, 408, 1264, 1306, 1337, 1864, 1949,
+3529, 3648`, plus `:419`), 8 in `assemble.rs` (`:248, 1122, 1129, 1135, 1666,
+1826, 1887`) — and most already go through `Interval::sign()` or return a
+`Decision` rather than comparing floats. The raw `== 0.0` sites are `assemble.rs`
+`:1887`, `:248` and `:1122`. **This is a gate charge, not a lane**, and it is
+moved to §50.7 accordingly. It also collided head-on with the ordering lane, which
+writes the same file; making it a gate charge dissolves the collision rather than
+scheduling around it, and buys independence — an audit of new code by the lane
+that wrote it is what §49.7 predicts will go wrong.
+
+**4. Lane A's scope is bounded by an arm in another crate, and the arm says so
+itself.** `assemble.rs:2118-2123` returns `false` — *this crossing holds no
+straight line* — for a cone against a ball, a pipe or another cone, and its
+comment states the whole hazard:
+
+> ***`false` rests on `intersect` and not on the geometry*** *… two cones that
+> share an apex meet along rulings, which are lines. No such pair reaches here …
+> so this arm is right for as long as that refusal stands, and is the arm to
+> revisit the day it lifts.*
+
+This unit lifts part of that refusal. **Coaxial cone against pipe is safe**: they
+cross in circles, which hold no lines, so `false` stays right. **Cone against cone
+is not**, and naming it would turn that arm into a wrong answer of exactly
+§49.8's shape — an arm believed safe because a refusal upstream holds, failing
+into an answer rather than a refusal when the refusal lifts. So Lane A names the
+coaxial cone-and-pipe case **and nothing else**, and the day cone-and-cone is
+named, `assemble.rs:2118` is the first thing that changes.
+
+### 50.3 The sentence the unit earns
+
+> **The fuse can put points in order along a curve that never ends, and a cone
+> coaxial with a pipe is cut by it.**
+
+Falsifiable two ways: `HowItRuns` has a third variant with a construction site
+that is not a test, and `intersect.rs:181` no longer refuses the coaxial pair.
+
+### 50.4 The shape of the wave, and what each lane may write
+
+**Spike first, alone.** It is short, and it settles two things at once: whether
+coaxial really is one sign question, and what the predicate's signature is. That
+signature goes in this section before A, B and C start, because a lane inventing
+an interface another lane must guess is how two lanes become one (§48.4).
+
+| step | one deliverable | may write |
+|---|---|---|
+| **S the spike** | is coaxial cone-against-pipe one sign question? | scratchpad only, never merged |
+| **A the crossing** | name the coaxial pair; split `intersect.rs:181`'s arm | `rcad-geom`: `intersect.rs`, `error.rs`, `walk.rs`, its own tests |
+| **B the bend** | third `HowItRuns` variant, the ordering call sites, and the 84 of 84 | `rcad-topo/src/fuse/arrange.rs` |
+| **C the consumer** | `settle_on_the_lower_rounding`'s superseded key; wire A's answer into `the_crossing_of_these_runs_straight` | `rcad-topo/src/fuse/assemble.rs` |
+| **D the negative zero** | the second latent defect, which spans both files | `arrange.rs` **and** `assemble.rs`, after B and C merge |
+
+**A, B and C run concurrently. D is serialized behind both.** D is one defect
+owning two small regions in two files that other lanes are writing; splitting it
+across B and C would put the failing test — which CLAUDE.md rule 2 requires
+*first* — in a place where neither half can make it fail for the right reason.
+
+**C is thin without the consumer.** `settle_on_the_lower_rounding` is one private
+function with one caller (`assemble.rs:1774`). Giving C the `assemble.rs` side of
+A's work is what stops A shipping a predicate with nothing calling it, which §13
+says should not be built at all.
+
+### 50.5 The five rules whose pass and fail are written before the lane runs
+
+§47.6 and §49.5 both record that the brief which said what counted as *failing*
+produced better work than the brief that said what to build. Three units running.
+
+- **S.** **Pass:** every coaxial pair in the draw decides under a certified
+  policy, zero undecided, at §48.10's bar of a comparable draw. **Fail:** one
+  undecided pair on a well-separated configuration, or forty minutes gone. A
+  non-zero count is **not** a unit failure — it is the spike working, and cone
+  against pipe converts from code to a written answer under §50.6's rule.
+- **A.** **Fail:** the coaxial case is named but `intersect.rs:181` still raises
+  `ACrossingBetweenAConeAndAnotherCurvedSurface` for it; or the *"not named at
+  all"* claim at `intersect.rs:110-114` is left standing; or anything beyond the
+  coaxial pair is named (§50.2 item 4).
+- **B.** **Fail:** the frustum family answers fewer than **84 of 84**; or any new
+  call site of the ordering predicate carries the spike's derivation instead of
+  its own. §49.6 published 84 of 84 on a spike's word and §15.6 says a published
+  bound needs a test.
+- **C.** **Fail:** the `assemble.rs:2121` refusal still fires for a coaxial pair
+  that A now names.
+- **D.** **Fail:** either latent-defect test passes against the unfixed code.
+
+**At forty-five minutes a lane commits what is done, writes what is left, and
+hands back** (CLAUDE.md). The handback point is named per lane so that "what is
+left" is not "a tree that does not compile": for **B** the variant and its match
+arms land first and the 84 of 84 is a second commit; for **A** the dispatch arm
+splits first and the shape discriminant is second.
+
+### 50.6 What stays out
+
+| out | why |
+|---|---|
+| **cone against cone, cone against ball** | §50.2 item 4. Naming either makes `assemble.rs:2118` a wrong answer |
+| **torus against anything curved** | six pairs unnamed; untouched by this unit |
+| **`cuts.rs`, most of `three_surfaces.rs`** | §49.6 records them **unaudited**, and they stay recorded that way. §50.7 charge 5 covers two files, not four |
+| **`ResultIsNotManifold` with `count` other than 1** | 864 of 31 104 and counted by nothing. Unmeasured is not this unit's spine |
+| **the writer, fillets, B-splines** | unchanged. Fillets stay gated on §44.7's reason |
+| **connecting `BSplineSurface`** | built, tested, and reachable from nothing. Left deliberately: §13 wants a named consumer and §14356 already sent the free-form marcher away. Recorded here so it is a decision and not an omission |
+
+### 50.7 The gate's five charges
+
+Named, because §49.5 found that briefs naming failure beat briefs naming work, and
+a gate is a brief like any other.
+
+1. **Re-derive 84 of 84** on the frustum family, independently of B's test.
+2. **Score §49.7's prediction.** Name every call site the ordering predicate
+   reached, and check each carries its own derivation and not the spike's.
+3. **Run both latent-defect tests against the unfixed code** and confirm they
+   fail. A test that passes without the fix proves nothing.
+4. **Read the audit's negative claims for §16.10 shape.** An audit's output is
+   mostly *"this one is fine"*, and a negative claim needs a demonstration and not
+   a paragraph.
+5. **The §49.8 sweep**, moved here from a lane by §50.2 item 3: the 20 sites, after
+   A, B, C and D have landed, so that the sweep sees the new call sites. If the
+   class is found present, say so about `cuts.rs` and `three_surfaces.rs` too —
+   they become *more likely dirty than before*, not unchanged.
+
+### 50.8 The machinery this unit changes before it dispatches
+
+None of this is a deliverable. All of it is done before the spike runs, because
+each one is cheap now and expensive during a wave.
+
+- **Worktrees move out of the repo.** They are created at
+  `.claude/worktrees/<name>` inside the tree; 38 of them held **166 GB**, and
+  `.gitignore` did not cover them, so `git add -A` at the root would stage the
+  lot. The cause is exact and not neglect: the harness sweep keeps any worktree
+  with unpushed commits, **this repo has no remote**, so every lane branch was
+  unpushed and the sweep kept all 38 for ever. They move to a sibling
+  `rcad-worktrees/`, which is where the 14 hand-made ones already live.
+  `.claude/worktrees/` is gitignored anyway, as insurance against the default
+  coming back.
+- **The repo gets a remote.** 67 000 lines of source and 51 000 of tests exist in
+  one place on one disk. It is also what makes the sweep work as designed.
+- **`just clean-targets` and `just prune-worktrees`, kept separate.** Stripping
+  `target/` is always safe — kache refills it. Removing a worktree is safe only
+  once the work is merged, which is why it is the gate's to run. Collapsing them
+  makes the safe one inherit the unsafe one's ceremony.
+- **kache is given room.** It has been the `RUSTC_WRAPPER` since `mise.toml:24`
+  and it is running over budget: **71.4 GiB in a 50 GiB store, 143%**, hit rate
+  57%, misses eating 93.7% of wrapper time. `doctor` passes every check — the
+  budget is simply too small. Raised to 150 GiB out of the space the worktrees
+  give back, then `gc`, then the daemon installed as a service rather than left
+  on demand, because four concurrent lanes are exactly what an on-demand daemon
+  has not been tested for.
+- **The heredoc ban is enforced by a hook rather than recorded again.** §49.5
+  found three of thirteen lanes patching `.rs` files with heredocs or `sed -i`
+  and chose to record it; recording has now been tried and changed nothing. The
+  stated risk is that *a pattern that does not match fails quietly*, and quiet
+  failure is what a gate reading a diff is worst at catching.
+
+### 50.9 The prediction
+
+**§49.7's prediction is carried into this unit and scored by charge 2** — a
+correct fix that carries a rounded test into a place where it decides an answer.
+It is not restated as this unit's own; a prediction scored by the gate that
+inherits it is the point.
+
+**The prediction for the unit after this one comes from what this planning session
+did wrong twice.** Both times, a plan was made about the tree without reading the
+part of the tree that already answered it: a producer and its consumer were put in
+concurrent lanes with the dependency unnoticed until a second pass, and a build
+cache was proposed as future work while the same tool sat configured in
+`mise.toml` and had since 2026-09-02. §49.8 closed on the same shape from the
+other end — an expression in a third copy, guarded rather than removed.
+
+> **The next unit will build something the tree already has, somewhere else.**
+> Score it by asking, at the next gate, of every new function: was there already
+> one, and what search would have found it? The countermeasure is the cheap one —
+> grep before writing, not after review.
