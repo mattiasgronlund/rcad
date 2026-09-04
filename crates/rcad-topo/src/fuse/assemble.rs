@@ -2022,6 +2022,13 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         }
         // A cone against a ball, a pipe or another cone crosses in a degree-four
         // space curve, which holds no line; the ring row below covers the fourth.
+        //
+        // **`false` rests on `intersect` and not on the geometry** for the last
+        // of those: two cones that share an apex meet along rulings, which are
+        // lines. No such pair reaches here — `intersect` answers
+        // `ACrossingBetweenAConeAndAnotherCurvedSurface` for every cone-and-cone
+        // that is not the same cone — so this arm is right for as long as that
+        // refusal stands, and is the arm to revisit the day it lifts.
         [
             Surface::Cone(_),
             Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),

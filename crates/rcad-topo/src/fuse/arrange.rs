@@ -4635,7 +4635,11 @@ mod what_the_curved_arrangement_reaches {
         else {
             panic!("two pipes side by side meet along curves and nothing else");
         };
-        assert_eq!(runs.len(), 2, "one line either side of the plane of the axes");
+        assert_eq!(
+            runs.len(),
+            2,
+            "one line either side of the plane of the axes"
+        );
 
         let at = PredicatePoint::from([3.0, 4.0, 0.0]);
         assert_eq!(
