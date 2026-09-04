@@ -21,8 +21,9 @@
 //!   determinant of three normals, with `∇S` in each normal's place, which is
 //!   the same derivation with flatness never used (§31.2 row 9);
 //! - the order of points along a crossing is a comparison on the direction's
-//!   dominant axis where the crossing is straight, and
-//!   [`which_comes_first_round_a_crossing`] where it closes.
+//!   dominant axis where the crossing is straight,
+//!   [`which_comes_first_round_a_crossing`] where it closes, and
+//!   [`along_a_bend`] where it runs on for ever and bends anyway.
 //!
 //! # How the pieces are found, and what a closed curve changes
 //!
@@ -504,11 +505,36 @@ enum HowItRuns {
     /// `from` is where [`walk`](rcad_geom::walk) starts, which depends on the
     /// unordered pair of surfaces and on nothing else (§34.4).
     RoundAClosedCurve { from: PredicatePoint },
+    /// It runs on for ever **and bends**, so it has no axis to climb and
+    /// nowhere to start: a plane cutting a cone in a parabola or in one branch
+    /// of a hyperbola. The order is how far along `n × w` a point sits, for the
+    /// plane's normal `n` and the cone's axis direction `w`
+    /// ([`along_a_bend`] carries the derivation).
+    AlongABend {
+        plane_normal: [f64; 3],
+        cone_axis: [f64; 3],
+        /// Whether `∇S × ∇Q` points the way `n × w` does rather than the other
+        /// way — the job [`HowItRuns::AlongAnAxis`]'s
+        /// `forward_climbs_the_axis` does one variant up.
+        forward_runs_with_the_bend: bool,
+    },
 }
 
 impl HowItRuns {
     fn closes(&self) -> bool {
         matches!(self, HowItRuns::RoundAClosedCurve { .. })
+    }
+
+    /// Whether the curve is a straight line.
+    ///
+    /// **Not the opposite of [`HowItRuns::closes`]**, and the difference is what
+    /// the third variant added: a bend neither closes nor runs straight. The
+    /// two questions used to have one answer between them, and every place that
+    /// wanted *straight* asked for *does not close* because that was the same
+    /// thing. It is not any more, and
+    /// [`Arrangement::wire_from`] is where the two part company.
+    fn runs_straight(&self) -> bool {
+        matches!(self, HowItRuns::AlongAnAxis { .. })
     }
 }
 
@@ -1241,10 +1267,11 @@ impl<'f> Arrangement<'f> {
     /// The nodes on one crossing, in the order they run along it.
     ///
     /// Sorted on something that settles nothing on its own — the low end of each
-    /// enclosure along the dominant axis for a straight crossing, and the cyclic
-    /// order from the crossing's own start for a closed one. Every neighbouring
-    /// pair is then *proved* to be in that order or merged, and proved order
-    /// between neighbours is order all the way along.
+    /// enclosure along the dominant axis for a straight crossing, the low end of
+    /// how far along `n × w` it reaches for a bend, and the cyclic order from
+    /// the crossing's own start for a closed one. Every neighbouring pair is
+    /// then *proved* to be in that order or merged, and proved order between
+    /// neighbours is order all the way along.
     fn nodes_along(
         &self,
         crossing: usize,
@@ -1264,6 +1291,20 @@ impl<'f> Arrangement<'f> {
                     low(one).total_cmp(&low(other))
                 });
                 if !forward_climbs_the_axis {
+                    order.reverse();
+                }
+            }
+            HowItRuns::AlongABend {
+                plane_normal,
+                cone_axis,
+                forward_runs_with_the_bend,
+            } => {
+                let across = across_a_bend(plane_normal, cone_axis);
+                order.sort_by(|&one, &other| {
+                    let low = |node: usize| dot_of(self.nodes[node].point.enclosure(), across).lo();
+                    low(one).total_cmp(&low(other))
+                });
+                if !forward_runs_with_the_bend {
                     order.reverse();
                 }
             }
@@ -1305,6 +1346,17 @@ impl<'f> Arrangement<'f> {
                 }
                 apart.sign()
             }
+            HowItRuns::AlongABend {
+                plane_normal,
+                cone_axis,
+                forward_runs_with_the_bend,
+            } => along_a_bend(
+                plane_normal,
+                cone_axis,
+                forward_runs_with_the_bend,
+                one,
+                other,
+            ),
             HowItRuns::RoundAClosedCurve { from } => {
                 let partner = self.crossings[crossing].partner;
                 round_a_closed_crossing([&self.surface, &partner], from, one, other).ok()?
@@ -1342,6 +1394,24 @@ impl<'f> Arrangement<'f> {
                     log,
                 )
             }
+            HowItRuns::AlongABend {
+                plane_normal,
+                cone_axis,
+                forward_runs_with_the_bend,
+            } => must_decide(
+                along_a_bend(
+                    plane_normal,
+                    cone_axis,
+                    forward_runs_with_the_bend,
+                    one,
+                    other,
+                ),
+                ALONG_A_CROSSING,
+                &[one, other],
+                Measures::Volume,
+                policy,
+                log,
+            ),
             HowItRuns::RoundAClosedCurve { from } => {
                 let partner = self.crossings[crossing].partner;
                 let decided = round_a_closed_crossing([&self.surface, &partner], from, one, other)?;
@@ -2549,9 +2619,9 @@ impl<'f> Arrangement<'f> {
     /// along has no cut arcs at all, and the answer is that it goes nowhere near
     /// the inside — which is right: the boundary is not the inside.
     ///
-    /// **A crossing that closes has no axis to measure along and comes back
-    /// empty.** That makes the self-crossing check say nothing about a curved
-    /// pair rather than the wrong thing, and §36 files it as a gap.
+    /// **A crossing that closes or bends has no axis to measure along and comes
+    /// back empty.** That makes the self-crossing check say nothing about a
+    /// curved pair rather than the wrong thing, and §36 files it as a gap.
     fn stretches_inside(&self) -> Stretches {
         let nothing = Stretches {
             axis: 0,
@@ -2620,11 +2690,19 @@ impl<'f> Arrangement<'f> {
             .map(|half_edge| lump[self.cycle_of[half_edge]])
     }
 
+    /// # Panics
+    ///
+    /// If a wire made only of straight sides has fewer than three of them. Two
+    /// straight lines enclose no area. **Two sides one of which bends do**, and
+    /// that is the whole reason this asks
+    /// [`HowItRuns::runs_straight`] rather than the "does not close" it used to:
+    /// a block wall cuts a cone in a hyperbola, and the piece that hyperbola
+    /// leaves against the wall's own edge is a wire of two sides.
     fn wire_from(&self, cycle: usize) -> Result<Vec<FaceMeet>> {
         let all_straight = self.cycles[cycle].iter().all(|&half_edge| {
-            !self.crossings[self.arcs[half_edge / 2].crossing]
+            self.crossings[self.arcs[half_edge / 2].crossing]
                 .order
-                .closes()
+                .runs_straight()
         });
         assert!(
             !all_straight || self.cycles[cycle].len() >= 3,
@@ -3045,10 +3123,10 @@ fn dot_of(one: [Interval; 3], other: [Interval; 3]) -> Interval {
 /// # Errors
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a pair whose crossing is
-/// neither an endless straight line nor one closed curve lying in a plane — a
-/// ball against a pipe, or two pipes. That is a **gap**: the curve is there and
-/// ordering points along it takes the marcher rather than a determinant
-/// (§34.10).
+/// none of an endless straight line, one closed curve lying in a plane, or a
+/// plane's endless bend across a cone — a ball against a pipe, or two pipes.
+/// That is a **gap**: the curve is there and ordering points along it takes the
+/// marcher rather than a determinant (§34.10).
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when the shape of the
 /// crossing itself cannot be told — two pipes whose axes cannot be shown to run
@@ -3056,7 +3134,7 @@ fn dot_of(one: [Interval; 3], other: [Interval; 3]) -> Interval {
 /// lean cannot be placed, both of which are
 /// [`a_pair_that_crosses_in_straight_lines`]'s own refusal — or when the
 /// direction of a run that *is* straight comes out as a box straddling every
-/// axis.
+/// axis, or when nothing can say which way round a bend's own direction runs.
 fn how_a_crossing_runs(
     surface: &Surface,
     partner: &Surface,
@@ -3110,6 +3188,31 @@ fn how_a_crossing_runs(
             forward_climbs_the_axis,
         });
     }
+    // A plane against a cone is the one pair here whose crossing can run on for
+    // ever *and* bend, and which of the two it is takes no new arithmetic: it is
+    // the same lean `intersect` splits its own table on. Leaning steeper than
+    // the cone's own side cuts an ellipse and falls through to the conic gate;
+    // level with the side cuts a parabola and shallower cuts a hyperbola, and
+    // both of those are endless bends.
+    if let Some((flat, cone)) = a_plane_and_a_cone(surface, partner) {
+        match how_a_plane_leans_against_a_cone(flat, cone) {
+            Decision::Pos => {}
+            Decision::Zero | Decision::Neg => {
+                return how_an_endless_bend_runs(surface, partner, flat, cone, at, log);
+            }
+            Decision::Undecidable { .. } | _ => {
+                return Err(gave_up(
+                    A_PLANE_AGAINST_A_CONE,
+                    &[
+                        PredicatePoint::from(flat.normal().components()),
+                        PredicatePoint::from(cone.axis().direction().components()),
+                    ],
+                    Measures::Length,
+                    log,
+                ));
+            }
+        }
+    }
     // Everything left is either a conic or a quartic, and only the conic can be
     // ordered: three points on a convex curve run round it in the order they
     // wind, which is one determinant (§34.5). A quartic closes too — a ball
@@ -3125,6 +3228,154 @@ fn how_a_crossing_runs(
             from: PredicatePoint::from(from.coordinates()),
         }),
         Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
+    }
+}
+
+/// The pair as a plane and a cone, whichever way round it arrived.
+///
+/// Two `if let`s rather than one `match`, because a match over two
+/// `#[non_exhaustive]` surfaces needs a wildcard arm and there is nothing here
+/// for a wildcard to say (§40).
+fn a_plane_and_a_cone<'s>(one: &'s Surface, other: &'s Surface) -> Option<(&'s Plane, &'s Cone)> {
+    if let (Some(flat), Surface::Cone(cone)) = (one.as_plane(), other) {
+        return Some((flat, cone));
+    }
+    if let (Surface::Cone(cone), Some(flat)) = (one, other.as_plane()) {
+        return Some((flat, cone));
+    }
+    None
+}
+
+/// Which way round an endless bend's own direction runs, read once at a point
+/// already known to be on both surfaces.
+///
+/// The order along the bend is how far along `n × w` a point sits
+/// ([`along_a_bend`] is the derivation), and `n × w` is a direction of the
+/// plane's choosing that knows nothing about which way the arrangement walks
+/// this crossing. Everything else here walks it along `∇S × ∇Q`, so the two
+/// have to be brought together, and this is the one sign that does it — the
+/// same job [`dominant_axis_of_a_direction`] does for a straight run, where
+/// `forward_climbs_the_axis` comes out of the very same cross product.
+///
+/// **One reading holds for the whole curve.** `∇S × ∇Q` is the tangent, and a
+/// tangent's component across the bend's axis never changes sign: a parabola
+/// `vertex + across·s + bend·s²` has tangent `across + 2·bend·s`, whose part
+/// along `across` is `‖across‖²`, and a hyperbola branch
+/// `centre + out·cosh σ + across·sinh σ` has tangent `out·sinh σ + across·cosh σ`,
+/// whose part along `across` is `‖across‖² cosh σ` — constant and positive on
+/// one, positive on the other. So the sign this reads at one point is the sign
+/// everywhere on the run.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`](crate::Error::Undecidable) when the sign cannot be
+/// proved either way. [`Decision::Zero`] is refused with it and is not a
+/// separate answer: `n × w` is nothing only where the plane is square to the
+/// cone's axis, which cuts a circle and never reaches here, and the tangent is
+/// nothing only where the plane is tangent to the cone, which needs the apex on
+/// the plane and is a pair of rulings. So a `Zero` here is arithmetic that ran
+/// out and not a shape, and the honest thing to do with it is give up.
+fn how_an_endless_bend_runs(
+    surface: &Surface,
+    partner: &Surface,
+    flat: &Plane,
+    cone: &Cone,
+    at: PredicatePoint,
+    log: &mut ProvenanceLog,
+) -> Result<HowItRuns> {
+    let plane_normal = flat.normal().components();
+    let cone_axis = cone.axis().direction().components();
+    let forward = cross_of(gradient_at(surface, at), gradient_at(partner, at));
+    let with_the_bend = dot_of(forward, across_a_bend(plane_normal, cone_axis));
+    let forward_runs_with_the_bend = match with_the_bend.sign() {
+        Decision::Pos => true,
+        Decision::Neg => false,
+        Decision::Zero | Decision::Undecidable { .. } | _ => {
+            return Err(gave_up(
+                WHICH_WAY_A_CROSSING_RUNS,
+                &[
+                    PredicatePoint::Constructed(forward),
+                    PredicatePoint::from(plane_normal),
+                    PredicatePoint::from(cone_axis),
+                ],
+                Measures::Volume,
+                log,
+            ));
+        }
+    };
+    Ok(HowItRuns::AlongABend {
+        plane_normal,
+        cone_axis,
+        forward_runs_with_the_bend,
+    })
+}
+
+/// The direction points along an endless bend are put in order by: `n × w`, for
+/// the plane's normal and the cone's axis direction.
+///
+/// The two are stored triples, so every product here is one multiplication of
+/// two `f64`s and the range round it is as tight as an interval gets.
+fn across_a_bend(plane_normal: [f64; 3], cone_axis: [f64; 3]) -> [Interval; 3] {
+    cross_of(
+        PredicatePoint::from(plane_normal),
+        PredicatePoint::from(cone_axis),
+    )
+}
+
+/// Which of two points comes first along an endless bend: [`Decision::Pos`]
+/// when `first` does, [`Decision::Zero`] when they are the same point.
+///
+/// # Why a comparison across the bend's axis orders the whole curve
+///
+/// The bend lies in the plane, and the plane's copy of the cone's axis —
+/// `(n·n)w − (n·w)n`, the axis projected into the plane — is the bend's own
+/// axis of symmetry: reflecting in the plane spanned by `n` and `w` carries the
+/// cone to itself and the plane to itself, so it carries the crossing to itself.
+/// Square to that axis, inside the plane, is
+/// `n × ((n·n)w − (n·w)n) = (n·n)(n × w)`, and `n·n` is positive, so **`n × w`
+/// is the across-direction up to a positive factor**.
+///
+/// Both endless conics run one way along it. A parabola is
+/// `vertex + across·s + bend·s²` with `across` square to `bend`, so its part
+/// along `across` is `‖across‖²s`; one branch of a hyperbola is
+/// `centre + out·cosh σ + across·sinh σ` with `across` square to `out`, so its
+/// part along `across` is `‖across‖² sinh σ`. Both are strictly increasing in
+/// the parameter, so a point's place along `n × w` is a **total** order along
+/// the whole run and not merely a local one.
+///
+/// That is also why [`Decision::Zero`] means one point here. Two points of the
+/// run differing by nothing along `n × w` differ by a vector that is in the
+/// plane and square to `n × w`, which is a multiple of the axis; the two
+/// parametrisations above hold no such pair, because equal `s` and equal
+/// `sinh σ` each mean equal parameter.
+///
+/// # It is a determinant and never a built vector
+///
+/// `(second − first)·(n × w)` is `det(second − first, n, w)`, and it is asked
+/// as one — [`orient3d_of_points`] against the origin, with the cascade behind
+/// it — rather than by building `n × w` as three `f64`s and dotting. §48.10
+/// measured what the difference is worth on the neighbouring triple product: a
+/// built vector left `4.65e-17` where the determinant leaves nothing, and
+/// called the passing result luck rather than cancellation.
+fn along_a_bend(
+    plane_normal: [f64; 3],
+    cone_axis: [f64; 3],
+    forward_runs_with_the_bend: bool,
+    first: PredicatePoint,
+    second: PredicatePoint,
+) -> Decision {
+    let (mine, theirs) = (second.enclosure(), first.enclosure());
+    let apart = PredicatePoint::Constructed([0, 1, 2].map(|axis| mine[axis] - theirs[axis]));
+    let decided = orient3d_of_points(
+        as_exact_as_it_is(apart),
+        PredicatePoint::from(plane_normal),
+        PredicatePoint::from(cone_axis),
+        PredicatePoint::from([0.0; 3]),
+    );
+    if forward_runs_with_the_bend {
+        decided
+    } else {
+        the_other_way(decided)
     }
 }
 
@@ -3167,7 +3418,9 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
         // The two that cut straight lines instead — a plane along a pipe's axis,
         // and a plane through a cone's apex leaning no shallower than the cone —
         // never reach here: `a_pair_that_crosses_in_straight_lines` answers both
-        // one step up.
+        // one step up. Neither does a plane whose bend across a cone never
+        // closes, which `how_a_plane_leans_against_a_cone` picks off one step up
+        // as well, so a plane and a cone arriving here is an ellipse.
         (Surface::Plane(_), Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_))
         | (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_), Surface::Plane(_))
         // Two balls cross in the circle their radical plane cuts.
