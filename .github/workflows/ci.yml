@@ -35,6 +35,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # mise installs the `cargo:` tools in parallel, and each one triggers
+      # rustup to materialise the toolchain pinned in `rust-toolchain.toml`.
+      # They race over the same `.partial` file in ~/.rustup/downloads and all
+      # but one die renaming it. Materialising the toolchain first leaves
+      # nothing to race for.
+      - run: rustup show
       - uses: jdx/mise-action@v2
         with:
           experimental: true

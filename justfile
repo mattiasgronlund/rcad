@@ -1,5 +1,30 @@
 default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks lint test deny
 
+# kache is a content-addressed build cache, which cargo picks up as a compiler
+# wrapper: a crate whose inputs have been compiled before is fetched instead of
+# built.
+#
+# The variable is exported here rather than in `mise.toml`'s `[env]`, and rather
+# than as `build.rustc-wrapper` in `.cargo/config.toml`, because both of those
+# break in ways this one does not:
+#
+#   `.cargo/config.toml` applies to every cargo invocation in the repo,
+#   including one made on a machine without kache, and cargo does not degrade
+#   politely — it fails outright on a wrapper it cannot find.
+#
+#   `mise.toml`'s `[env]` is in force while mise installs `[tools]`. Those
+#   install through cargo, so cargo demands a wrapper that is itself one of the
+#   six things being installed. It works on a machine that has already
+#   bootstrapped and deadlocks on every clean one — which is what the first CI
+#   run on this repo did, in 23 seconds, with all six tools failing at once.
+#
+# Exported from the justfile it reaches every build we invoke and no tool
+# installation, `mise exec -- just ...` still carries it, and a bare `cargo
+# build` outside `just` merely goes uncached instead of failing.
+#
+# To build without the cache for a run: `RUSTC_WRAPPER= just default`.
+export RUSTC_WRAPPER := "kache"
+
 check:
     cargo check --workspace --all-targets
 
