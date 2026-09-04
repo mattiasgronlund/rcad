@@ -928,6 +928,16 @@ impl<'f> Arrangement<'f> {
     /// [`MeetOfThree::MoreThanAPoint`] is an answer and not a refusal (§34.9):
     /// two faces on one plane with a curved surface across them share a whole
     /// curve, and there is no node there rather than a node nothing can place.
+    ///
+    /// # Not every pair is worth asking about
+    ///
+    /// A pair of crossings whose two partners share no point at all has no node
+    /// between them, and [`meet_of_three_surfaces`] is not the way to find that
+    /// out: a plane cut by a ball and by a pipe is one plane short of what it can
+    /// solve, so it refuses by name whether or not the ball and the pipe are
+    /// anywhere near each other. So when it gives up, ask the cheaper question
+    /// first — and only when the answer is *nothing*, which is a proof and not a
+    /// distance, is there nothing to place (§48).
     fn place_the_meets(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         for first in 0..self.crossings.len() {
             for second in (first + 1)..self.crossings.len() {
@@ -940,7 +950,17 @@ impl<'f> Arrangement<'f> {
                     self.crossings[second].partner,
                 ];
                 let asked = three_planes_faced_the_one_way(surfaces);
-                let meet = meet_of_three_surfaces([&asked[0], &asked[1], &asked[2]], policy, log)?;
+                let meet =
+                    match meet_of_three_surfaces([&asked[0], &asked[1], &asked[2]], policy, log) {
+                        Ok(meet) => meet,
+                        Err(gave_up_on_it) => {
+                            if self.two_crossings_provably_share_nothing(first, second, policy, log)
+                            {
+                                continue;
+                            }
+                            return Err(gave_up_on_it.into());
+                        }
+                    };
                 let MeetOfThree::At(places) = meet else {
                     continue;
                 };
@@ -984,6 +1004,42 @@ impl<'f> Arrangement<'f> {
             }
         }
         Ok(())
+    }
+
+    /// Whether the two crossings can be shown to have no point in common.
+    ///
+    /// A node of this pair would be a point of the face's own surface lying on
+    /// both partners, so a pair of partners with nothing in common has no node
+    /// between them anywhere — not on this face, not off it, not for any policy.
+    /// The face's surface is not asked about: it crosses each partner by
+    /// construction, which is why there is a crossing at all, so the partners are
+    /// the only pair of the three that can share nothing.
+    ///
+    /// **The proof is [`SurfaceMeet::Nothing`] and nothing else.**
+    /// [`SurfaceMeet::TouchAtOnePoint`] is a point the third surface may well run
+    /// through, and every other answer names a whole curve. There is no distance
+    /// here and no threshold: a ball a millionth of a unit clear of a pipe is
+    /// skipped and a ball resting against one is not.
+    ///
+    /// An `Err` from [`intersect`] is *no proof* rather than a second failure.
+    /// The caller has a refusal in its hand already and reports that one, so
+    /// nothing is swallowed: asking a question that did not answer leaves the
+    /// answer exactly where it was.
+    fn two_crossings_provably_share_nothing(
+        &self,
+        first: usize,
+        second: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let (one, other) = (
+            self.crossings[first].partner,
+            self.crossings[second].partner,
+        );
+        matches!(
+            intersect(&one, &other, policy, log),
+            Ok(SurfaceMeet::Nothing)
+        )
     }
 
     /// A closed crossing with no node on it still needs one.
