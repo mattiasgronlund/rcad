@@ -78,6 +78,79 @@ impl Mesh {
     /// Exactly zero for a wholly flat solid: every point of that mesh is a
     /// corner the model already held, and a flat triangle standing in for a flat
     /// surface stands in for nothing.
+    ///
+    /// # What this costs a volume measured over the triangles
+    ///
+    /// Write `d` for this number, `skin` for the total area of the triangles and
+    /// `R` for the smallest radius any curved face of the solid bends at. A
+    /// volume summed over this mesh is out by at most
+    ///
+    /// ```text
+    ///     skin · d · (R / (R − d))²
+    /// ```
+    ///
+    /// and that is `f64::INFINITY` unless `d < R`. Whether it is a number at all
+    /// is the first thing to ask of it and not a footnote: §47.4 item 1 is a
+    /// volume checked against a bound of this shape at `R = 0`, where the check
+    /// could not fail.
+    ///
+    /// **Out either way, and not merely short.** A bar's wall bends away from
+    /// its own material, so its chords lie inside the bar and the sum over them
+    /// comes up short. A round *hole*'s wall bends the other way: the chords cut
+    /// into the block, so the mesh is the block minus a prism inscribed in the
+    /// hole and the sum comes out **over**. The shell between the triangles and
+    /// the surface is the same shell and the same thickness either way, which is
+    /// why the bound does not care and why it is stated as a distance.
+    ///
+    /// **Where it comes from.** [`Measurement::volume_error`] bounds that shell
+    /// one curved face at a time, at `area · (R³ − (R − d)³) / (3(R − d)²)` with
+    /// each face's own radius. Written over `u = R − d` that is
+    /// `area · (d + d²/u + d³/(3u²))`, which plainly *falls* as `R` grows, so
+    /// charging every face the smallest radius in the solid only raises it; and
+    /// charging the whole skin rather than only its curved part raises it again.
+    /// Finally `d + d²/u + d³/(3u²) ≤ d + 2d²/u + d³/u² = d·(R/u)²`, which is
+    /// the expression above. So nothing is claimed here that that number does
+    /// not already carry. What this form buys is that it takes three numbers
+    /// instead of a walk over a mesh, so a caller who knows roughly how much
+    /// skin a shape has can work out how much room to leave for it **before**
+    /// meshing it — which is what a law over curved solids needs.
+    ///
+    /// **How tight it is, measured and not hoped for.** Four balls and eight
+    /// bars, radii from 0.25 to 10, at six deflections from 1 down to 0.003:
+    /// 63 of the 72 are inside the bound's own domain and the other 9 are the
+    /// ones asking for a mesh a whole radius out. The closest any of the 63 came
+    /// to the bound was **a fifth of it**, on a ball of radius three at a
+    /// deflection of 0.003 — so five times of slack where it is tightest. It is
+    /// loosest on a short wide bar, at over two hundred times what really goes
+    /// missing, because it charges the flat caps' area as though it bent and
+    /// nothing hides under a flat face at all. A caller who has already measured
+    /// should read [`Measurement::volume_error`] instead, which charges only the
+    /// curved faces: over the same 63 the closest it came was a **quarter** of
+    /// itself, so four times of slack rather than five.
+    ///
+    /// **What goes missing falls in step with `d`, not with `d²`.** A
+    /// least-squares slope of `log(missing)` against `log(deflection)` over the
+    /// five finest deflections of each of the twelve shapes lands between 0.955
+    /// and 0.996. Sixty measurements, because two of them fix a line through
+    /// anything.
+    ///
+    /// **What it does not cover.** A cone that reaches its apex bends at no
+    /// radius at all there, so `R` is zero and this hands back
+    /// `f64::INFINITY` — honest, and not a bound. What would close that gap is
+    /// written up beside the radius it needs, in `measure::radius_of_each_face`.
+    /// Nor does it cover a mesh cut coarser than it was asked for: a tolerant
+    /// policy may do that when the arithmetic cannot reach the request — see
+    /// `SolidView::room_a_mesh_has_to_work_in` — and then the deflection the
+    /// caller passed bounds nothing and only this number does. Under a certified
+    /// policy this number is never more than the deflection asked for, so the
+    /// deflection may be put in for it, and
+    /// `a_certified_mesh_never_strays_further_than_the_deflection_it_was_asked_for`
+    /// is what says so rather than a paragraph.
+    ///
+    /// `what_a_deflection_costs_a_measured_volume.rs` is all of the above, which
+    /// is what §15.6 asks of a published bound.
+    ///
+    /// [`Measurement::volume_error`]: crate::Measurement::volume_error
     #[must_use]
     pub fn deviation(&self) -> Approximation {
         self.deviation

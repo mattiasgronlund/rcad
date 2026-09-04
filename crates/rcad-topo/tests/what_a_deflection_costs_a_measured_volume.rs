@@ -32,6 +32,12 @@ const HOW_FINE: [f64; 6] = [1.0, 0.3, 0.1, 0.03, 0.01, 0.003];
 /// surface, and `R` the smallest radius any curved face of the solid bends at.
 /// Infinite when the mesh may be a whole radius out, which is the case that has
 /// to be checked for before anything is asserted against it.
+///
+/// Every caller below passes the **deflection it asked for** rather than the
+/// deviation the mesh came back with. That is the looser of the two, because the
+/// deviation is never the larger under a certified policy and the bound only
+/// grows with `d` — and it is the one worth checking, because a deflection is
+/// what a caller has before there is a mesh to read a deviation off.
 fn how_far_a_measured_volume_can_be_out(skin: f64, deflection: f64, smallest_radius: f64) -> f64 {
     let inner = smallest_radius - deflection;
     if inner <= 0.0 {
@@ -97,6 +103,9 @@ fn a_measured_volume_sits_inside_the_published_bound_over_balls_and_bars() {
 
     let mut worst_share = 0.0f64;
     let mut worst_at = String::new();
+    let mut slackest_share = f64::MAX;
+    let mut slackest_at = String::new();
+    let mut worst_share_of_the_kernels_own = 0.0f64;
     let mut too_coarse_to_bound = 0;
     let mut bounded = 0;
     for (what, solid, true_volume, radius) in shapes {
@@ -127,6 +136,24 @@ fn a_measured_volume_sits_inside_the_published_bound_over_balls_and_bars() {
                 worst_share = share;
                 worst_at = format!("a {what} at a deflection of {how_fine}");
             }
+            if share < slackest_share {
+                slackest_share = share;
+                slackest_at = format!("a {what} at a deflection of {how_fine}");
+            }
+
+            // The kernel's own bound is the tighter of the two, and the doc
+            // says by how much. It is checked here rather than in `measuring.rs`
+            // because this is where the comparison is published, and it is
+            // checked **two-sided**: `volume_error` reads as a shortfall and is
+            // a distance.
+            assert!(
+                measured.volume_error().is_finite() && out_by <= measured.volume_error(),
+                "a {what} at a deflection of {how_fine} is {out_by} out and the kernel \
+                 owned up to {}",
+                measured.volume_error()
+            );
+            worst_share_of_the_kernels_own =
+                worst_share_of_the_kernels_own.max(out_by / measured.volume_error());
         }
     }
 
@@ -145,7 +172,24 @@ fn a_measured_volume_sits_inside_the_published_bound_over_balls_and_bars() {
         "the bound is meant to be within about five times what really goes missing, and \
          the closest anything came was {worst_share} at {worst_at}"
     );
+    // The other end, published beside it because a bound is worth having only
+    // if how much slack it has is said out loud. A short wide bar is where it
+    // is loosest: its flat caps carry area that the bound charges as if it
+    // bent, and nothing at all hides under a flat face.
+    assert!(
+        slackest_share < 0.01,
+        "the doc says the bound runs to a hundred times the truth on a short wide bar, \
+         and the loosest here was {slackest_share} at {slackest_at}"
+    );
+    assert!(
+        worst_share_of_the_kernels_own > 0.24,
+        "the doc says `volume_error` runs at four times what really goes missing, and \
+         the closest it came was {worst_share_of_the_kernels_own}"
+    );
+    println!("{bounded} bounded, {too_coarse_to_bound} too coarse to bound");
+    println!("worst share of `volume_error` used: {worst_share_of_the_kernels_own:.4}");
     println!("worst share of the bound used: {worst_share:.4} at {worst_at}");
+    println!("slackest share of the bound used: {slackest_share:.5} at {slackest_at}");
 }
 
 /// What goes missing falls **in step with** the deflection, not with its square.
@@ -247,6 +291,94 @@ fn a_block_with_a_round_hole_measures_bigger_than_it_is() {
             measured.volume() - true_volume <= bound,
             "the block is {} over the {true_volume} it holds, against a bound of {bound}",
             measured.volume() - true_volume
+        );
+    }
+}
+
+/// What the bound is **for**: `vol(A ∪ B) + vol(A ∩ B) = vol(A) + vol(B)` over a
+/// pair with a curved face in it.
+///
+/// `fuses_that_must_agree.rs` asserts that law exactly, and exactly is all it
+/// can do over flat solids, where every volume is a determinant. A curved
+/// volume is a sum over an approximation, so the law can only be asserted to a
+/// tolerance — and a tolerance picked to make the test pass is worth nothing.
+/// This is the tolerance the four measurements themselves declare: each is out
+/// by at most its own `volume_error`, so the four sides of the law are out by at
+/// most the four added up.
+///
+/// A block and a bar through it, because that pair is one the fuse suite already
+/// trusts.
+#[test]
+fn a_curved_pair_obeys_inclusion_and_exclusion_inside_the_error_the_four_declare() {
+    for how_fine in [0.1, 0.03, 0.01, 0.003] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = model
+            .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a block eight across");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                12.0,
+                &Isometry::translation(Vector::new(4.0, 4.0, -2.0)).expect("a shift"),
+            )
+            .expect("a bar through the middle of it");
+
+        let mut both_ways = Vec::new();
+        for rule in [Rule::Union, Rule::Intersection] {
+            let fused = model
+                .fuse(
+                    &[block],
+                    &[bar],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("a block and a bar {rule:?}: {why}"));
+            let solids = fused.solids();
+            assert_eq!(
+                solids.len(),
+                1,
+                "{rule:?} of a block and a bar is one solid"
+            );
+            both_ways.push(measured(&model, solids[0], how_fine));
+        }
+        let each_side = [
+            measured(&model, block, how_fine),
+            measured(&model, bar, how_fine),
+        ];
+
+        let out_by = both_ways.iter().map(|m| m.volume()).sum::<f64>()
+            - each_side.iter().map(|m| m.volume()).sum::<f64>();
+        let allowed = both_ways
+            .iter()
+            .chain(&each_side)
+            .map(|m| m.volume_error())
+            .sum::<f64>();
+        assert!(
+            allowed.is_finite(),
+            "nothing is worth asserting against an infinite tolerance (§47.4)"
+        );
+        assert!(
+            out_by.abs() <= allowed,
+            "at a deflection of {how_fine} the two sides of the law differ by {out_by}, \
+             and the four measurements only declared {allowed}"
+        );
+        // **And a hundredth of the tolerance is all it uses**, which is the
+        // honest thing to say about it: the four bounds added up would still
+        // pass a fuse whose volume was seventy times further out than this one
+        // is. The errors on the four sides are the same shells charged twice
+        // with opposite signs, so they cancel and the sum does not know it.
+        // Pinning the share is what gives the check teeth; it is a pin on this
+        // pair's arithmetic and it will move if the mesher does.
+        assert!(
+            out_by.abs() < 0.02 * allowed,
+            "at a deflection of {how_fine} the law is {out_by} out, which is more of the \
+             declared {allowed} than the hundredth this pair has ever used"
+        );
+        println!(
+            "deflection {how_fine}: the law is {out_by:.6e} out of a declared {allowed:.6e}, \
+             which is {:.4} of it",
+            out_by.abs() / allowed
         );
     }
 }
