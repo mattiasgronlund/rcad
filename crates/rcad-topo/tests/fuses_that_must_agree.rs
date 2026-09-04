@@ -1444,6 +1444,64 @@ fn a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
     }
 }
 
+/// The same three questions of a **ball**, and the ball answers all three where
+/// the bar answers none.
+///
+/// Idempotence is one of §48.3's laws and nothing had asked it of a round solid.
+/// A ball with a bit-identical copy of itself taken away leaves nothing at all,
+/// united with it is itself, and shared with it is itself — the whole of what
+/// [`a_solid_united_with_a_copy_of_itself_is_itself`] and
+/// [`a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all`] assert over
+/// the flat families, asserted here for real rather than pinned.
+///
+/// **This is what makes the row above a statement about a pipe.** The bar
+/// refuses `A \ A` on [`A_POINT_INSIDE_A_PIECE_OF_A_FACE`] and the ball does
+/// not, so §36.16's row is not *"two coincident curved faces"* — it is two
+/// coincident faces on a surface that closes round a seam, and a ball's skin has
+/// no seam a difference has to walk along. Which of those two the fix is aimed
+/// at is the difference between one surface's problem and every surface's, and
+/// nothing in the tree had asked.
+#[test]
+fn a_ball_and_a_copy_of_it_unite_share_and_cancel_the_way_a_solid_should() {
+    let pair = BallAndBlock {
+        side: 8,
+        radius: 2,
+        at: [4, 4],
+    };
+
+    let (model, keys) = pair.built_as_a_ball_and_a_copy_of_it();
+    let itself = invariants_of(&model, &[keys[0]]);
+
+    let nothing = plainly_fused(&model, &[keys[0]], &[keys[1]], Rule::Difference);
+    assert!(
+        nothing.1.is_empty(),
+        "a ball with a copy of itself taken away leaves nothing, got {} solids",
+        nothing.1.len()
+    );
+
+    let united = plainly_fused(&model, &[keys[0]], &[keys[1]], Rule::Union);
+    assert_eq!(
+        invariants_of(&united.0, &united.1),
+        itself,
+        "a ball united with a copy of itself is itself"
+    );
+
+    let shared = plainly_fused(&model, &[keys[0]], &[keys[1]], Rule::Intersection);
+    assert_eq!(
+        invariants_of(&shared.0, &shared.1),
+        itself,
+        "a ball sharing with a copy of itself is itself"
+    );
+
+    same_answer(
+        &answer_of(&united.0, &united.1),
+        &answer_of(&shared.0, &shared.1),
+        Rule::Union,
+        "uniting a ball with a copy of itself against sharing with it",
+    )
+    .expect("the two are the same answer, bit for bit");
+}
+
 /// An empty answer over a curved pair is a success and not an error.
 ///
 /// §17.4 settles that for the flat case and nothing had asked it of a curved
@@ -1512,6 +1570,343 @@ fn a_ball_half_sunk_into_a_block_fuses_under_every_rule() {
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
             .unwrap_or_else(|why| panic!("what a {rule:?} left is not a sound model: {why}"));
     }
+}
+
+/// Swapping the two sides of a ball and a block, bit for bit.
+///
+/// **§48.3's sentence, at the first law that keeps it.** The curved family that
+/// ran commutativity before this one is a pipe, whose wall curves one way; a
+/// ball's curves both, and where its skin meets the block's floor is a whole
+/// circle rather than two arcs. Swapping the sides sends the same pieces down
+/// different rows of the selection table and the answer has to come back the
+/// same down to the last bit of the ball's radius.
+///
+/// [`Coordinates::LieOnARoundWall`] makes a refusal a failure and
+/// [`every_certified_fuse_of_a_ball_and_a_block_is_decided_and_records_nothing`]
+/// is the row that says both sides really arrive, so this is not a family
+/// reading clean by never reaching its subject (§14.7).
+#[test]
+fn swapping_the_two_sides_of_a_block_and_a_ball_changes_not_one_bit() {
+    let tally = over(CASES, a_ball_and_a_block(), |pair, tally| {
+        for rule in [Rule::Union, Rule::Intersection] {
+            tally.meaning_to_compare();
+            let (model, keys) = pair.build();
+            let (block, ball) = (keys[0], keys[1]);
+
+            let forwards = fused(
+                tally,
+                Coordinates::LieOnARoundWall,
+                &model,
+                &[block],
+                &[ball],
+                rule,
+            )?;
+            let backwards = fused(
+                tally,
+                Coordinates::LieOnARoundWall,
+                &model,
+                &[ball],
+                &[block],
+                rule,
+            )?;
+            both_agree_about_whether_there_is_an_answer(
+                tally,
+                Coordinates::LieOnARoundWall,
+                &forwards,
+                &backwards,
+                rule,
+                "swapping the two sides",
+            )?;
+            let (Some(forwards), Some(backwards)) = (forwards.answer(), backwards.answer()) else {
+                continue;
+            };
+
+            tally.comparing();
+            same_answer(
+                &answer_of(&forwards.0, &forwards.1),
+                &answer_of(&backwards.0, &backwards.1),
+                rule,
+                "swapping the two sides of a ball and a block",
+            )?;
+        }
+        Ok(())
+    });
+    tally.report_what_it_compared("commutativity, a ball in a block");
+}
+
+/// The ball family's measured row, and what makes the row above worth its pass.
+///
+/// The same discipline as [`every_certified_fuse_of_a_curved_pair_is_decided_and_records_nothing`]
+/// next door: a fixed seed, every rule, a refusal is a failure, and no band on
+/// answers that are not solids because there are none.
+#[test]
+fn every_certified_fuse_of_a_ball_and_a_block_is_decided_and_records_nothing() {
+    let tally = measured(a_ball_and_a_block(), |pair, tally| {
+        let (model, keys) = pair.build();
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            fused(
+                tally,
+                Coordinates::LieOnARoundWall,
+                &model,
+                &[keys[0]],
+                &[keys[1]],
+                rule,
+            )?;
+        }
+        Ok(())
+    });
+    tally.report("§48 control: a ball half sunk into a block, every rule");
+    assert_eq!(
+        tally.refused.get(),
+        0,
+        "a ball sitting on a block's floor, clear of every side wall, is decided by proof alone"
+    );
+    assert_eq!(
+        tally.not_a_solid.get(),
+        0,
+        "no arrangement of this family puts four faces along one edge"
+    );
+}
+
+/// Inclusion and exclusion over a ball, and **why it is not asserted**.
+///
+/// The lattice row asserts `vol(A ∪ B) + vol(A ∩ B) = vol(A) + vol(B)` exactly,
+/// and the reason it can is at the top of this file: a rectilinear solid's
+/// six-volume is a whole number reached with no rounding. A ball has no such
+/// volume. `Solid::measure` meshes a curved skin to a [`Deflection`], and the
+/// mesh of a whole ball is not the mesh of its two halves put together — so the
+/// four volumes do not add up, and the amount by which they miss is a fact about
+/// the mesh and not about the fuse.
+///
+/// This measures that rather than asserting the law, and the measurement is what
+/// tells the two apart: **the gap falls by more than a hundredfold when the
+/// deflection falls a hundredfold**, which a wrong answer would not do.
+///
+/// It is the same call §17.6's tenth piece is owed for the turned family, one
+/// surface further out: a bound on the mesh is what would let the law be
+/// asserted here, and guessing a tolerance instead would make the test measure
+/// the tolerance (§14.1 question 1).
+#[test]
+fn what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does() {
+    let pair = BallAndBlock {
+        side: 8,
+        radius: 2,
+        at: [4, 4],
+    };
+    let (model, keys) = pair.build();
+    let (block, ball) = (keys[0], keys[1]);
+    let united = plainly_fused(&model, &[block], &[ball], Rule::Union);
+    let shared = plainly_fused(&model, &[block], &[ball], Rule::Intersection);
+
+    let how_far_out = |deflection| {
+        let apart = volume_at(&united.0, &united.1, deflection)
+            + volume_at(&shared.0, &shared.1, deflection)
+            - volume_at(&model, &[block], deflection)
+            - volume_at(&model, &[ball], deflection);
+        apart.abs()
+    };
+    let coarse = how_far_out(a_deflection());
+    let fine =
+        how_far_out(Deflection::of(0.001).expect("a thousandth of a millimetre is a length"));
+
+    assert!(
+        coarse > 1e-6,
+        "if the four volumes already added up, this row should assert the law instead: {coarse}"
+    );
+    assert!(
+        fine * 100.0 < coarse,
+        "a hundredfold finer mesh closed the gap from {coarse} to {fine}, which is under a \
+         hundredfold — so the gap is not only the mesh and something else is wrong"
+    );
+}
+
+/// Absorption, over a round solid: `A ∪ (A ∩ B)` is `A` — **and it cannot run
+/// today**.
+///
+/// The first fuse answers every time. The second is handed half a ball whose
+/// flat face lies exactly in the block's floor and whose skin lies exactly on a
+/// piece of the answer's own boundary, and that is §36.16's coincident-surface
+/// row: it refuses, naming [`A_POINT_INSIDE_A_PIECE_OF_A_FACE`], on **61 of 61**
+/// of the shipped corpus.
+///
+/// So this pins the refusal over the whole family rather than reporting a green
+/// run over a property that compared nothing (§14.7) — see
+/// [`Tally::nothing_was_compared_because_it_all_refused`]. The control is the
+/// same law over the lattice family, which
+/// [`a_solid_united_with_what_it_shares_with_another_is_itself`] asserts for
+/// real, so the difference between the two rows is the curve and nothing else.
+#[test]
+fn a_block_united_with_what_it_shares_with_a_ball_is_the_block() {
+    let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
+    let tally = over(CASES, a_ball_and_a_block(), |pair, tally| {
+        let (model, keys) = pair.build();
+        let (block, ball) = (keys[0], keys[1]);
+        tally.meaning_to_compare();
+
+        let Some(shared) = fused(
+            tally,
+            coordinates,
+            &model,
+            &[block],
+            &[ball],
+            Rule::Intersection,
+        )?
+        .answer() else {
+            return Ok(());
+        };
+        let Some(swallowed) = fused(
+            tally,
+            coordinates,
+            &shared.0,
+            &[block],
+            &shared.1,
+            Rule::Union,
+        )?
+        .answer() else {
+            return Ok(());
+        };
+
+        tally.comparing();
+        prop_assert_eq!(
+            invariants_of(&swallowed.0, &swallowed.1),
+            invariants_of(&model, &[block]),
+            "A ∪ (A ∩ B) is A"
+        );
+        Ok(())
+    });
+    tally.nothing_was_compared_because_it_all_refused(
+        "absorption over a ball, which refuses",
+        A_POINT_INSIDE_A_PIECE_OF_A_FACE,
+    );
+}
+
+/// `A \ (A \ B)` is `A ∩ B`, over a round solid — **and it cannot run today**
+/// either, for the same reason.
+///
+/// Two ways to the same half ball: cut the dent and then cut the dent's
+/// complement back out of the block, against sharing the block with the ball
+/// once. The second cut is handed the dent, whose skin is the ball's own, so it
+/// refuses on [`A_POINT_INSIDE_A_PIECE_OF_A_FACE`] on 61 of 61. Pinned, with
+/// [`taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_share`]
+/// as the flat control.
+#[test]
+fn taking_the_dent_out_of_a_block_again_leaves_what_the_block_and_the_ball_share() {
+    let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
+    let tally = over(CASES, a_ball_and_a_block(), |pair, tally| {
+        let (model, keys) = pair.build();
+        let (block, ball) = (keys[0], keys[1]);
+        tally.meaning_to_compare();
+
+        let Some(dented) = fused(
+            tally,
+            coordinates,
+            &model,
+            &[block],
+            &[ball],
+            Rule::Difference,
+        )?
+        .answer() else {
+            return Ok(());
+        };
+        let Some(twice_bitten) = fused(
+            tally,
+            coordinates,
+            &dented.0,
+            &[block],
+            &dented.1,
+            Rule::Difference,
+        )?
+        .answer() else {
+            return Ok(());
+        };
+        let Some(shared) = fused(
+            tally,
+            coordinates,
+            &model,
+            &[block],
+            &[ball],
+            Rule::Intersection,
+        )?
+        .answer() else {
+            return Ok(());
+        };
+
+        tally.comparing();
+        prop_assert_eq!(
+            invariants_of(&twice_bitten.0, &twice_bitten.1),
+            invariants_of(&shared.0, &shared.1),
+            "A \\ (A \\ B) is A ∩ B"
+        );
+        Ok(())
+    });
+    tally.nothing_was_compared_because_it_all_refused(
+        "A \\ (A \\ B) = A ∩ B over a ball, which refuses",
+        A_POINT_INSIDE_A_PIECE_OF_A_FACE,
+    );
+}
+
+/// `((A ∪ B) \ B) ∪ B` is `A ∪ B`, over a round solid — **and it stops at a
+/// different refusal from the other two**, which is why it is worth having
+/// separately.
+///
+/// The deepest chain any curved family has been asked for. The middle fuse takes
+/// the ball back out of the answer the first one built, and what stops it is not
+/// two coincident faces but [`WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON`] — the
+/// dome the union left is a face whose every corner sits on the ball's skin, so
+/// nothing in the model says which side of it the face is on. §30.8 item 10, on
+/// 61 of 61.
+///
+/// Two laws blocked by one refusal and a third blocked by another is a sharper
+/// statement than *"the laws do not run over a ball"*, and it says the ball
+/// needs both closed and not either.
+#[test]
+fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_union_again() {
+    let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
+    let tally = over(CASES, a_ball_and_a_block(), |pair, tally| {
+        let (model, keys) = pair.build();
+        let (block, ball) = (keys[0], keys[1]);
+        tally.meaning_to_compare();
+
+        let Some(united) =
+            fused(tally, coordinates, &model, &[block], &[ball], Rule::Union)?.answer()
+        else {
+            return Ok(());
+        };
+        let Some(bitten) = fused(
+            tally,
+            coordinates,
+            &united.0,
+            &united.1,
+            &[ball],
+            Rule::Difference,
+        )?
+        .answer() else {
+            return Ok(());
+        };
+        let Some(back) = fused(
+            tally,
+            coordinates,
+            &bitten.0,
+            &bitten.1,
+            &[ball],
+            Rule::Union,
+        )?
+        .answer() else {
+            return Ok(());
+        };
+
+        tally.comparing();
+        prop_assert_eq!(
+            invariants_of(&back.0, &back.1),
+            invariants_of(&united.0, &united.1),
+            "((A ∪ B) \\ B) ∪ B is A ∪ B"
+        );
+        Ok(())
+    });
+    tally.nothing_was_compared_because_it_all_refused(
+        "((A ∪ B) \\ B) ∪ B = A ∪ B over a ball, which refuses",
+        WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON,
+    );
 }
 
 /// Roadmap §11.2's first instruction, over a round solid, four milestones late.
@@ -1772,6 +2167,23 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
 /// same question — the count this family asserts on did not move.
 const ORDER_ALONG_A_LINE: &str = "order along a crossing";
 
+/// What the fuse gives up on when it is handed two curved faces lying on the
+/// same surface.
+///
+/// §36.16's row. `a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all` is
+/// the plainest shape that reaches it, and every law that puts an answer back
+/// against one of its own inputs reaches it too.
+const A_POINT_INSIDE_A_PIECE_OF_A_FACE: &str = "a point inside a piece of a face";
+
+/// The refusal §30.8 item 10 owns, as [`fused`] names it.
+///
+/// Not a predicate that gave up but a whole face the arrangement could not
+/// place: [`Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`]. It is counted
+/// alongside the predicates because the question a report answers is *what
+/// stopped this*, and that does not care which of the two shapes the answer
+/// arrives in.
+const WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON: &str = "which side of its trimming a face lies on";
+
 /// Whether this run is the shipped measurement rather than a soak.
 ///
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] is a statement about one deterministic
@@ -1919,9 +2331,9 @@ fn fused(
                     .or_default() += 1;
             }
             match coordinates {
-                Coordinates::AreUnderAGeneralRotation | Coordinates::SitOnTiltedWalls => {
-                    Ok(Fused::Refused)
-                }
+                Coordinates::AreUnderAGeneralRotation
+                | Coordinates::SitOnTiltedWalls
+                | Coordinates::LieOnARoundWallAndMayCoincide => Ok(Fused::Refused),
                 Coordinates::AreExactlyRepresentable | Coordinates::LieOnARoundWall => {
                     Err(TestCaseError::fail(format!(
                         "a {rule:?} over a family that has never refused refused, with {} records",
@@ -1935,14 +2347,42 @@ fn fused(
             match coordinates {
                 Coordinates::AreUnderAGeneralRotation
                 | Coordinates::SitOnTiltedWalls
-                | Coordinates::AreExactlyRepresentable => Ok(Fused::NotASolid),
+                | Coordinates::AreExactlyRepresentable
+                | Coordinates::LieOnARoundWallAndMayCoincide => Ok(Fused::NotASolid),
                 Coordinates::LieOnARoundWall => Err(TestCaseError::fail(format!(
                     "a {rule:?} over a family that has never handed back four faces along \
                      one edge did, and that is not something this kernel can hold"
                 ))),
             }
         }
-        Err(why) => Err(TestCaseError::fail(format!("{rule:?} went wrong: {why}"))),
+        Err(why) => match (coordinates, a_curved_refusal(&why)) {
+            (Coordinates::LieOnARoundWallAndMayCoincide, Some(named)) => {
+                tally.refused.set(tally.refused.get() + 1);
+                *tally.gave_up.borrow_mut().entry(named).or_default() += 1;
+                Ok(Fused::Refused)
+            }
+            _ => Err(TestCaseError::fail(format!("{rule:?} went wrong: {why}"))),
+        },
+    }
+}
+
+/// The refusals a chain of curved fuses is allowed to hit today, by name.
+///
+/// Both are gaps the kernel's own error documentation already owns: §30.8 item
+/// 10 for the first and §33.1 for the second. Anything else is a bug, so this
+/// hands back `None` for it and [`fused`] fails.
+fn a_curved_refusal(why: &Error) -> Option<&'static str> {
+    match why {
+        Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { .. } => {
+            Some(WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON)
+        }
+        Error::AFaceMissesPartOfWhereItsSurfacesCross { .. } => {
+            Some("a face running along all of where its surfaces cross")
+        }
+        Error::Undecidable { .. } | Error::ResultIsNotManifold { .. } => {
+            unreachable!("those two are matched above")
+        }
+        _ => None,
     }
 }
 
@@ -2028,10 +2468,12 @@ fn both_agree_about_whether_there_is_an_answer(
         Coordinates::AreExactlyRepresentable
         | Coordinates::AreUnderAGeneralRotation
         | Coordinates::SitOnTiltedWalls => Ok(()),
-        Coordinates::LieOnARoundWall => Err(TestCaseError::fail(format!(
-            "{what_changed} turned a {rule:?} whose answer is a solid into one whose \
-             answer no `Model` can hold, which cannot depend on the path taken"
-        ))),
+        Coordinates::LieOnARoundWall | Coordinates::LieOnARoundWallAndMayCoincide => {
+            Err(TestCaseError::fail(format!(
+                "{what_changed} turned a {rule:?} whose answer is a solid into one whose \
+                 answer no `Model` can hold, which cannot depend on the path taken"
+            )))
+        }
     }
 }
 
@@ -2121,6 +2563,19 @@ enum Coordinates {
     /// which is the same thing the rectilinear control rows say, reached by a
     /// different route.
     LieOnARoundWall,
+    /// The same, in a chain of fuses deep enough that one of them is handed two
+    /// curved faces lying on the same surface.
+    ///
+    /// **A refusal is an outcome to count here**, unlike
+    /// [`Coordinates::LieOnARoundWall`], and the difference is §36.16's row:
+    /// two coincident curved faces are refused today, by name, and
+    /// [`a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all`] pins the
+    /// plainest shape that reaches it. Every law that puts an answer back
+    /// against one of its own inputs — absorption, `A \ (A \ B)`,
+    /// `((A ∪ B) \ B) ∪ B` — reaches it too, so a chain like that is measured
+    /// rather than asserted, and the vacuity floor is what says whether the
+    /// measurement is worth anything.
+    LieOnARoundWallAndMayCoincide,
 }
 
 /// What every fuse a property ran came back with.
@@ -2259,6 +2714,32 @@ impl Tally {
         );
     }
 
+    /// Report, and pin that the property compared **nothing**, because every
+    /// second fuse in it refused and named `predicate`.
+    ///
+    /// The counterpart of [`Tally::report_what_it_compared`] for a law that
+    /// cannot run yet. A property that has stopped comparing anything must not
+    /// read as a pass (§14.7), and the honest form of that is not a floor it
+    /// fails but an assertion that says out loud what today's kernel does — the
+    /// shape [`a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all`]
+    /// already uses at one hand-written pair, over a whole family.
+    ///
+    /// **The day the refusal closes, this fails**, and what replaces it is
+    /// [`Tally::report_what_it_compared`] and the law asserted for real.
+    fn nothing_was_compared_because_it_all_refused(&self, what: &str, predicate: &str) {
+        self.report(what);
+        let meant_to = self.meant_to_compare.get();
+        assert!(meant_to > 0, "{what} never tried to compare anything");
+        assert_eq!(
+            self.compared.get(),
+            0,
+            "{what}: {} of {meant_to} comparisons got both sides, so this law has started \
+             running and should be asserted rather than pinned",
+            self.compared.get()
+        );
+        self.the_cause_named_most_often_is(predicate);
+    }
+
     /// Insist the share of fuses whose answer was not a solid this kernel can
     /// hold is still about what it has always been.
     ///
@@ -2379,16 +2860,21 @@ fn configured(cases: u32) -> Config {
 
 /// How much space an answer takes up, all of its solids together.
 fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
+    volume_at(model, solids, a_deflection())
+}
+
+/// The same, measured to a deflection the caller names.
+///
+/// Only [`what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does`]
+/// wants that, and it wants it because the deflection is the thing it is
+/// measuring.
+fn volume_at(model: &Model, solids: &[SolidKey], deflection: Deflection) -> f64 {
     solids
         .iter()
         .map(|&solid| {
             model
                 .solid(solid)
-                .measure(
-                    a_deflection(),
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                )
+                .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
                 .expect("a solid this size measures")
                 .volume()
         })
