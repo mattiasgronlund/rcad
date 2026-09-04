@@ -126,9 +126,9 @@ use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{
     BallAndBlock, Configuration, CurvedPair, Elsewhere, Movement, Placed, Rigid, Shape, Skew, Turn,
-    a_ball_and_a_block, a_chain_of_fuses, a_curved_pair, a_flush_pair, a_frustum_and_a_block,
-    a_lattice_pair, a_lattice_trio, a_pair_leaning_the_same_way, a_pair_somewhere_else,
-    a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
+    a_ball_a_bar_and_a_block, a_ball_and_a_block, a_chain_of_fuses, a_curved_pair, a_flush_pair,
+    a_frustum_and_a_block, a_lattice_pair, a_lattice_trio, a_pair_leaning_the_same_way,
+    a_pair_somewhere_else, a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
     a_turned_solid_and_its_copy, a_turned_solid_and_several_copies,
 };
 
@@ -397,10 +397,13 @@ fn uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the
         let (one, two, three) = (keys[0], keys[1], keys[2]);
         tally.meaning_to_compare();
 
-        let Some(left) = united_in_turn(tally, &model, &[one], &[two], &[three])? else {
+        let coordinates = Coordinates::AreExactlyRepresentable;
+        let Some(left) = united_in_turn(tally, coordinates, &model, &[one], &[two], &[three])?
+        else {
             return Ok(());
         };
-        let Some(right) = united_in_turn(tally, &model, &[two], &[three], &[one])? else {
+        let Some(right) = united_in_turn(tally, coordinates, &model, &[two], &[three], &[one])?
+        else {
             return Ok(());
         };
 
@@ -1925,6 +1928,92 @@ fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_uni
     );
 }
 
+/// Associativity of union over a **curved trio**, which no law in this file had
+/// ever been able to ask.
+///
+/// §48.2 item 1's row, at its narrowest: every property here that compares
+/// invariants needs a trio or a pair, and every curved fixture was a pair, so
+/// `(A ∪ B) ∪ C` against `A ∪ (B ∪ C)` had never once been asked of a round
+/// face. [`a_ball_a_bar_and_a_block`] is the trio, and its own doc says why the
+/// ball and the bar are kept out of each other's way.
+///
+/// **Compared with [`invariants_of`] and not with [`answer_of`]**, because the
+/// two groupings may legitimately cut the answer into different faces —
+/// roadmap §11.2's point, and the reason this file picks between the two
+/// comparisons per property rather than once.
+///
+/// # It does not run today, and what stops it is not the trio
+///
+/// Every pairwise fuse of the three answers — block ∪ ball, block ∪ bar, and
+/// ball ∪ bar back as two solids. It is the **second** fuse of either grouping
+/// that stops, on [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`], so this
+/// pins the refusal rather than reporting a green run over a property that
+/// compared nothing (§14.7). The count says it exactly: **half the fuses
+/// refuse**, and there are four per case, so it is the second of each grouping
+/// every case and the first of each answering every case. That halving is
+/// asserted below and not merely printed.
+///
+/// The cause is one face crossed by two different round surfaces. The
+/// arrangement asks where three surfaces meet once per **pair of crossings on a
+/// face** (`fuse/arrange.rs`'s `place_the_meets`), and here the face is the
+/// block's floor, one crossing is the circle the ball's skin cuts in it and the
+/// other is the circle the bar's wall cuts in it. Plane, sphere, pipe — one
+/// plane short of what §31.2 row 8 can solve.
+///
+/// **How far apart the two round solids are makes no difference**, which is what
+/// says the cause is the triple and not the geometry: the family draws blocks
+/// from seven to fifteen across and leaves the ball and the bar anywhere from
+/// one to five units apart, and the count below is every case refusing the same
+/// way. There is no proximity test in front of that call — `place_the_meets`
+/// walks every pair of crossings on a face and asks about all of them.
+///
+/// **And the obvious way round it is refused for its own reason.** Putting the
+/// ball in a *side* wall instead of the floor would leave each plane with one
+/// round crossing on it — but a vertical plane through a ball cuts both of its
+/// poles, which is
+/// `degenerate_curved_fuses.rs`'s `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`.
+/// A ball can only be cut by a horizontal plane here, and a bar standing up `z`
+/// is only ever cut by horizontal planes too, so the two share a plane whatever
+/// a fixture does with them.
+#[test]
+fn uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first() {
+    let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
+    let tally = over(LONGER_CASES, a_ball_a_bar_and_a_block(), |trio, tally| {
+        let (model, keys) = trio.build();
+        let (block, ball, bar) = (keys[0], keys[1], keys[2]);
+        tally.meaning_to_compare();
+
+        // Both groupings are asked for, every case, and neither short-circuits
+        // the other. What this pins is that *each* of them stops, so a run that
+        // only ever tried the first would be pinning half the claim.
+        let left = united_in_turn(tally, coordinates, &model, &[block], &[ball], &[bar])?;
+        let right = united_in_turn(tally, coordinates, &model, &[ball], &[bar], &[block])?;
+        let (Some(left), Some(right)) = (left, right) else {
+            return Ok(());
+        };
+
+        tally.comparing();
+        prop_assert_eq!(
+            invariants_of(&left.0, &left.1),
+            invariants_of(&right.0, &right.1),
+            "uniting a block, a ball and a bar does not depend on which two go first"
+        );
+        Ok(())
+    });
+    tally.nothing_was_compared_because_it_all_refused(
+        "associativity of union over a ball and a bar in a block, which refuses",
+        WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT,
+    );
+    assert_eq!(
+        2 * tally.refused.get(),
+        tally.fuses.get(),
+        "the pin is that the first fuse of each grouping answers and the second does not, \
+         which is exactly half of the four this property runs per case: {} of {} refused",
+        tally.refused.get(),
+        tally.fuses.get()
+    );
+}
+
 /// Every frustum the family draws really does have skin inside the block and
 /// skin outside it — asserted over the family, before any law is run over it.
 ///
@@ -2290,6 +2379,20 @@ const A_POINT_INSIDE_A_PIECE_OF_A_FACE: &str = "a point inside a piece of a face
 /// arrives in.
 const WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON: &str = "which side of its trimming a face lies on";
 
+/// What stops a fuse when one face is crossed by two different round surfaces.
+///
+/// `rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, §31.2 row 8's
+/// gap, as [`fused`] names it.
+///
+/// The arrangement asks where three surfaces meet once per **pair of crossings
+/// on a face** (`fuse/arrange.rs`'s `place_the_meets`), and the answer is only
+/// worked out when two of the three are flat. A block's floor crossed by a ball
+/// and by a bar is a plane, a sphere and a pipe — one plane short — and that is
+/// what [`uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first`]
+/// stops at.
+const WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT: &str =
+    "where three surfaces meet, with fewer than two of them flat";
+
 /// Whether this run is the shipped measurement rather than a soak.
 ///
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] is a statement about one deterministic
@@ -2357,31 +2460,16 @@ fn every_rule(
 /// Unite the first two, then unite that with the third.
 fn united_in_turn(
     tally: &Tally,
+    coordinates: Coordinates,
     model: &Model,
     first: &[SolidKey],
     second: &[SolidKey],
     third: &[SolidKey],
 ) -> Result<Option<(Model, Vec<SolidKey>)>, TestCaseError> {
-    let Some(pair) = fused(
-        tally,
-        Coordinates::AreExactlyRepresentable,
-        model,
-        first,
-        second,
-        Rule::Union,
-    )?
-    .answer() else {
+    let Some(pair) = fused(tally, coordinates, model, first, second, Rule::Union)?.answer() else {
         return Ok(None);
     };
-    Ok(fused(
-        tally,
-        Coordinates::AreExactlyRepresentable,
-        &pair.0,
-        &pair.1,
-        third,
-        Rule::Union,
-    )?
-    .answer())
+    Ok(fused(tally, coordinates, &pair.0, &pair.1, third, Rule::Union)?.answer())
 }
 
 /// Fuse a copy of `model`, counting what came back.
@@ -2474,9 +2562,9 @@ fn fused(
 
 /// The refusals a chain of curved fuses is allowed to hit today, by name.
 ///
-/// Both are gaps the kernel's own error documentation already owns: §30.8 item
-/// 10 for the first and §33.1 for the second. Anything else is a bug, so this
-/// hands back `None` for it and [`fused`] fails.
+/// All three are gaps the kernel's own error documentation already owns: §30.8
+/// item 10 for the first, §33.1 for the second and §31.2 row 8 for the third.
+/// Anything else is a bug, so this hands back `None` for it and [`fused`] fails.
 fn a_curved_refusal(why: &Error) -> Option<&'static str> {
     match why {
         Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { .. } => {
@@ -2484,6 +2572,9 @@ fn a_curved_refusal(why: &Error) -> Option<&'static str> {
         }
         Error::AFaceMissesPartOfWhereItsSurfacesCross { .. } => {
             Some("a face running along all of where its surfaces cross")
+        }
+        Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat) => {
+            Some(WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT)
         }
         Error::Undecidable { .. } | Error::ResultIsNotManifold { .. } => {
             unreachable!("those two are matched above")
