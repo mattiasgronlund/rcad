@@ -110,8 +110,10 @@ enum Family {
     /// A frustum against a block that overlaps it sideways. Four of the block's
     /// faces run parallel to the cone's axis and cut it in hyperbolas.
     AFrustumAgainstABlock,
-    /// A frustum against a round bar: cone against pipe, a degree-four space
-    /// curve.
+    /// A frustum against a round bar. The bar is only ever slid along `z` and
+    /// the cone stands on `Axis::z()`, so this is a **cone coaxial with a
+    /// pipe**, which crosses in exactly two circles and not in a degree-four
+    /// curve (§50.11).
     AFrustumAgainstABar,
     /// Two coaxial frustums of different slopes: cone against cone.
     TwoFrustumsOnOneAxis,
@@ -266,10 +268,21 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 ///
 /// # What is asserted and what is only reported
 ///
-/// The two curved-tool families are asserted at **nothing answered**: their
-/// crossings are shapes this vocabulary has no arm for, and a fuse that answered
-/// one would be answering something it cannot name — the wrong answer §4.1 ranks
-/// below refusing.
+/// The two curved-tool families are each asserted at **nothing answered**, and
+/// they have **one assertion apiece** because the reason is no longer the same
+/// one.
+///
+/// `AFrustumAgainstABar` is a cone coaxial with a pipe. That pair crosses in
+/// exactly two circles, so the old shared reason — a degree-four space curve —
+/// was never true of it (§50.11). It sits at nothing answered because
+/// `intersect` does not name the pair yet, and **this pin is written to break on
+/// the day it does**, which is what a pin is for.
+///
+/// `TwoFrustumsOnOneAxis` is a cone against another cone, which §50.2 item 4
+/// keeps out of scope: two cones sharing an apex meet along rulings, which are
+/// lines, so naming the pair would turn `assemble`'s *"this crossing holds no
+/// straight line"* into a wrong answer rather than a refusal — the wrong answer
+/// §4.1 ranks below refusing. It **stays** pinned at nothing answered.
 ///
 /// The two corner-up-cube families are asserted at **something answered and
 /// something refused**, and no more than that. Every plane of such a cube leans
@@ -363,11 +376,26 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                     family.named()
                 );
             }
-            Family::AFrustumAgainstABar | Family::TwoFrustumsOnOneAxis => assert_eq!(
+            Family::AFrustumAgainstABar => assert_eq!(
                 answered,
                 0,
-                "{}: a cone against another curved surface is a degree-four space curve nothing \
-                 here can name, and this answered {answered} of {fuses}",
+                "{}: this is a cone coaxial with a pipe, which crosses in exactly two circles \
+                 and not in the degree-four curve this pin used to name (§50.11). It was \
+                 measured at 0 answered of 96, every refusal `intersect` declining to name \
+                 that pair. The pin is written to break the day the pair is named and points \
+                 can be put in order along it, and it answered {answered} of {fuses} here. \
+                 When it breaks, re-derive the number over this whole family and pin the \
+                 measured one — do not relax it to a floor and do not guess it (§19.1)",
+                family.named()
+            ),
+            Family::TwoFrustumsOnOneAxis => assert_eq!(
+                answered,
+                0,
+                "{}: this is a cone against another cone, which §50.2 item 4 keeps out of \
+                 scope — two cones that share an apex meet along rulings, which are lines, so \
+                 naming the pair turns `the_crossing_of_these_runs_straight`'s `false` into a \
+                 wrong answer rather than a refusal. It stays pinned at nothing answered, and \
+                 it answered {answered} of {fuses}",
                 family.named()
             ),
             Family::AFrustumAgainstABlock => assert!(
