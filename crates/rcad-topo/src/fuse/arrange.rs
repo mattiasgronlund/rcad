@@ -64,7 +64,9 @@ use rcad_geom::{
     Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector, intersect,
     meet_of_three_surfaces, where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
 };
-use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
+use rcad_predicates::expansion::{
+    expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
+};
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
     ProvenanceLog, orient2d, orient3d, orient3d_of_points,
@@ -3273,7 +3275,18 @@ fn a_pair_that_crosses_in_straight_lines(
         }
         (Surface::Plane(flat), Surface::Cone(cone))
         | (Surface::Cone(cone), Surface::Plane(flat)) => {
-            Ok(a_plane_cuts_a_cone_in_rulings(flat, cone))
+            match a_plane_cuts_a_cone_in_rulings(flat, cone) {
+                Some(straight) => Ok(straight),
+                None => Err(gave_up(
+                    A_PLANE_AGAINST_A_CONE,
+                    &[
+                        PredicatePoint::from(flat.normal().components()),
+                        PredicatePoint::from(cone.axis().direction().components()),
+                    ],
+                    Measures::Length,
+                    log,
+                )),
+            }
         }
         (Surface::Cylinder(one), Surface::Cylinder(other)) => {
             match two_pipes_run_along_one_line(one, other) {
@@ -3313,21 +3326,232 @@ fn a_pair_that_crosses_in_straight_lines(
 /// ellipse, a parabola or a hyperbola, and through the apex with `E > 0` the two
 /// share the apex alone, which is no curve at all.
 ///
-/// **Rounded here and exact in `intersect`**, which is the same footing the pipe
-/// row above stands on: both dot products are one `f64` sum each. Where the two
-/// disagree the answer is a run ordered along the wrong shape, not a wrong
-/// shape built, and the ordering refuses rather than guessing — a nearly-tangent
-/// plane is the case, and it is the same case a plane nearly along a pipe's axis
-/// has had since M2.
-pub(super) fn a_plane_cuts_a_cone_in_rulings(flat: &Plane, cone: &Cone) -> bool {
-    if flat.signed_distance_to(cone.apex()) != 0.0 {
-        return false;
+/// **Both signs are proved and neither is rounded**, and [`None`] is the third
+/// answer for a pair where the arithmetic runs out. `Some(true)` is rulings,
+/// `Some(false)` is a curve or the apex alone, and neither is the safe reading
+/// of a pair nobody has decided: `true` orders a closed ellipse along an axis
+/// and `false` puts two arcs where a ruling has one.
+///
+/// # This used to be rounded, and it said a closed ellipse was an endless line
+///
+/// It was `flat.signed_distance_to(cone.apex()) != 0.0` and then
+/// `up*up - slope*slope*sideways <= 0.0`, with the doc claiming that
+/// disagreeing with [`intersect`](rcad_geom::intersect) cost a refusal rather
+/// than a wrong answer. **It cost a wrong answer**, the same one the two rows
+/// above cost before them (§49.2), and it takes both signs being wrong at once:
+///
+/// - the apex a rounding off the plane, which the `f64` distance reads as zero
+///   — the plane-and-pipe trap one row up, with the offset subtracted as well;
+/// - the plane a rounding off tangent to the cone, which sends `E` — degree six
+///   in the stored numbers — the wrong side of zero.
+///
+/// Both together and `intersect` names one closed **ellipse** while this says
+/// two rulings, so [`how_a_crossing_runs`] orders that ellipse along an axis.
+/// `a_plane_a_rounded_apex_and_a_rounded_lean_call_a_cones_rulings_is_an_ellipse`
+/// writes one such pair out and
+/// `how_many_near_tangent_planes_a_rounded_cone_gate_gets_wrong` says how common
+/// it is: of 40 000 planes drawn a rounding off tangent to a random cone with
+/// the apex nudged that way, **3 338 are named rulings by the rounded gate and
+/// named one closed ellipse by `intersect`, and every one of them was ordered
+/// along an axis**.
+///
+/// # What each way of being wrong actually costs
+///
+/// Measured rather than argued, over the same draws:
+///
+/// | the gate said | the truth | what happened |
+/// |---|---|---|
+/// | rulings | one closed ellipse | **ordered along an axis** — the wrong answer |
+/// | rulings | the apex alone | nothing: `intersect` names no run to order |
+/// | rulings | two rulings `intersect` cannot name | nothing: the pair is refused before it gets here |
+/// | a curve | two rulings | nothing **today**: every one of the 6 648 draws that landed here was refused by `intersect` for want of an exactly representable ruling direction. Nothing but that refusal stands between it and the two-arc branch of `which_arc_this_is`, so the sign is proved here too rather than left to it |
+pub(super) fn a_plane_cuts_a_cone_in_rulings(flat: &Plane, cone: &Cone) -> Option<bool> {
+    match where_a_cones_apex_stands_against_a_plane(flat, cone) {
+        Decision::Zero => {}
+        Decision::Pos | Decision::Neg => return Some(false),
+        Decision::Undecidable { .. } | _ => return None,
     }
-    let normal = flat.normal();
-    let along = cone.axis().direction();
-    let up = normal.dot(along);
-    let sideways = normal.cross(along).length_squared();
-    up * up - cone.slope() * cone.slope() * sideways <= 0.0
+    match how_a_plane_leans_against_a_cone(flat, cone) {
+        Decision::Zero | Decision::Neg => Some(true),
+        Decision::Pos => Some(false),
+        Decision::Undecidable { .. } | _ => None,
+    }
+}
+
+/// Where a cone's apex stands against a plane: the sign of `n·a − d`, **proved
+/// and not rounded**.
+///
+/// [`Decision::Zero`] and the apex is on the plane, which is the half of
+/// [`a_plane_cuts_a_cone_in_rulings`] that every straight case needs.
+///
+/// Three products of stored numbers and one stored offset, summed with no
+/// rounding thrown away — the same level 3 written out that
+/// [`a_plane_lies_along_a_pipes_axis`] is, with the offset as a fourth term.
+/// `f64`'s own `n·a − d` is what [`Plane::signed_distance_to`] gives and what
+/// this replaces; a sum of four terms rounding to nothing is not a proof that
+/// it is nothing.
+pub(super) fn where_a_cones_apex_stands_against_a_plane(flat: &Plane, cone: &Cone) -> Decision {
+    let mut reach = [0.0; LONGEST_DOT];
+    let Some(len) = exactly_the_dot_of(
+        flat.normal().components(),
+        cone.apex().coordinates(),
+        &mut reach,
+    ) else {
+        return Decision::Undecidable {
+            enclosure: f64::INFINITY,
+        };
+    };
+    let mut standing_off = [0.0; LONGEST_DOT + 1];
+    let len = expansion_sum(&reach[..len], &[-flat.offset()], &mut standing_off);
+    expansion_sign(&standing_off[..len])
+}
+
+/// How a plane leans against a cone's own side: the sign of
+/// `E = (n·w)² − slope²‖n × w‖²`, **proved and not rounded**.
+///
+/// Above zero the plane cuts across the cone, at zero it is parallel to one
+/// ruling, below zero it is steeper than the cone and reaches both nappes.
+/// That is [`where_a_plane_and_a_cone_cross`](rcad_geom::intersect)'s own
+/// second sign, and it is the one the whole table turns on.
+///
+/// **Degree six in the stored numbers, and every degree of it is carried.**
+/// `slope²‖n × w‖²` is three squares of `slope·(n_j w_k − n_k w_j)`, so
+/// nothing here needs the product of two long expansions — one square of one
+/// short expansion four times over is the whole of it.
+///
+/// [`Decision::Undecidable`] with an infinite enclosure when a product on the
+/// way lands where `two_product` stops being exact. There is no bound to report
+/// for one that does, so no policy can accept it, which is the same rule
+/// [`a_plane_lies_along_a_pipes_axis`] states.
+pub(super) fn how_a_plane_leans_against_a_cone(flat: &Plane, cone: &Cone) -> Decision {
+    let gave_up = Decision::Undecidable {
+        enclosure: f64::INFINITY,
+    };
+    let normal = flat.normal().components();
+    let along = cone.axis().direction().components();
+    let slope = cone.slope();
+
+    let mut up = [0.0; LONGEST_DOT];
+    let Some(up_len) = exactly_the_dot_of(normal, along, &mut up) else {
+        return gave_up;
+    };
+    let mut leaning = [0.0; LONGEST_LEAN];
+    let Some(mut len) = exactly_the_square_of(&up[..up_len], &mut leaning) else {
+        return gave_up;
+    };
+
+    for axis in 0..3 {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        let mut across = [0.0; 4];
+        let Some(across_len) = exactly_the_two_by_two_of(
+            [normal[next], normal[after]],
+            [along[next], along[after]],
+            &mut across,
+        ) else {
+            return gave_up;
+        };
+        if !across[..across_len]
+            .iter()
+            .all(|&entry| product_is_exact(entry, slope))
+        {
+            return gave_up;
+        }
+        let mut leaned = [0.0; 2 * 4];
+        let leaned_len = scale_expansion(&across[..across_len], slope, &mut leaned);
+        let mut squared = [0.0; LONGEST_SQUARE];
+        let Some(squared_len) = exactly_the_square_of(&leaned[..leaned_len], &mut squared) else {
+            return gave_up;
+        };
+        for entry in &mut squared[..squared_len] {
+            *entry = -*entry;
+        }
+        let mut grown = [0.0; LONGEST_LEAN];
+        len = expansion_sum(&leaning[..len], &squared[..squared_len], &mut grown);
+        leaning[..len].copy_from_slice(&grown[..len]);
+    }
+    expansion_sign(&leaning[..len])
+}
+
+/// How many entries the exact dot product of two stored triples can need: one
+/// two-entry product per axis.
+const LONGEST_DOT: usize = 6;
+
+/// The longest expansion [`exactly_the_square_of`] is ever handed, which is a
+/// two-by-two determinant of stored numbers scaled by the slope.
+const LONGEST_SQUARED_INPUT: usize = 8;
+
+/// How many entries the square of an expansion that long can need: one
+/// [`scale_expansion`] per entry, each at most twice the input length.
+const LONGEST_SQUARE: usize = 2 * LONGEST_SQUARED_INPUT * LONGEST_SQUARED_INPUT;
+
+/// How many entries `E` can need: the square of a dot product, less three
+/// squares of a scaled determinant.
+const LONGEST_LEAN: usize = LONGEST_DOT * LONGEST_DOT * 2 + 3 * LONGEST_SQUARE;
+
+/// The exact dot product of two stored triples, written into `out`.
+///
+/// [`None`] when one of the three products would round, which is what
+/// [`product_is_exact`] is for — not that the answer is zero.
+fn exactly_the_dot_of(one: [f64; 3], other: [f64; 3], out: &mut [f64]) -> Option<usize> {
+    let mut total = [0.0; LONGEST_DOT];
+    let mut len = 0;
+    for axis in 0..3 {
+        if !product_is_exact(one[axis], other[axis]) {
+            return None;
+        }
+        let (high, low) = two_product(one[axis], other[axis]);
+        let mut grown = [0.0; LONGEST_DOT];
+        len = expansion_sum(&total[..len], &[low, high], &mut grown);
+        total[..len].copy_from_slice(&grown[..len]);
+    }
+    out[..len].copy_from_slice(&total[..len]);
+    Some(len)
+}
+
+/// The exact square of an expansion, written into `out`.
+///
+/// [`None`] when one of the products it needs would round.
+///
+/// # Panics
+///
+/// If `value` is longer than [`LONGEST_SQUARED_INPUT`].
+fn exactly_the_square_of(value: &[f64], out: &mut [f64]) -> Option<usize> {
+    assert!(
+        value.len() <= LONGEST_SQUARED_INPUT,
+        "squaring an expansion of {} entries needs a bigger scratch buffer",
+        value.len()
+    );
+    let mut running = [0.0; LONGEST_SQUARE];
+    let mut running_len = 0;
+    let mut merged = [0.0; LONGEST_SQUARE];
+    let mut scaled = [0.0; 2 * LONGEST_SQUARED_INPUT];
+    for &factor in value {
+        if !value.iter().all(|&entry| product_is_exact(entry, factor)) {
+            return None;
+        }
+        let scaled_len = scale_expansion(value, factor, &mut scaled);
+        running_len = expansion_sum(&running[..running_len], &scaled[..scaled_len], &mut merged);
+        running[..running_len].copy_from_slice(&merged[..running_len]);
+    }
+    out[..running_len].copy_from_slice(&running[..running_len]);
+    Some(running_len)
+}
+
+/// The exact two-by-two determinant `one[0]·other[1] − one[1]·other[0]`,
+/// written into `out`.
+///
+/// [`None`] when either product would round.
+fn exactly_the_two_by_two_of(one: [f64; 2], other: [f64; 2], out: &mut [f64]) -> Option<usize> {
+    if !product_is_exact(one[0], other[1]) || !product_is_exact(one[1], other[0]) {
+        return None;
+    }
+    let (high, low) = two_product(one[0], other[1]);
+    let (taken_high, taken_low) = two_product(one[1], other[0]);
+    Some(expansion_sum(
+        &[low, high],
+        &[-taken_low, -taken_high],
+        out,
+    ))
 }
 
 /// Whether two pipes' axes run along one line, **proved and not rounded**.
@@ -3438,6 +3662,10 @@ pub(super) fn a_plane_lies_along_a_pipes_axis(flat: &Plane, pipe: &Cylinder) -> 
 /// The name the question of whether a plane holds a direction goes by in
 /// provenance records.
 const A_PLANE_AGAINST_AN_AXIS: &str = "a plane against an axis";
+
+/// The name the pair of questions about where a cone's apex stands and how the
+/// plane leans goes by in provenance records.
+const A_PLANE_AGAINST_A_CONE: &str = "a plane against a cone";
 
 /// The cross product of two boxes.
 fn cross_of(one: PredicatePoint, other: PredicatePoint) -> [Interval; 3] {
@@ -4417,16 +4645,17 @@ mod curved {
 mod what_the_curved_arrangement_reaches {
     use rcad_geom::{
         Axis, Cone, Cylinder, EdgeRun, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus,
-        Vector, intersect,
+        Vector, intersect, where_a_closed_crossing_starts,
     };
     use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 
     use super::super::bake::bake;
     use super::super::cuts;
     use super::{
-        HowItRuns, a_pair_that_crosses_in_straight_lines, a_plane_lies_along_a_pipes_axis,
-        cross_of, gradient_at, how_a_crossing_runs, round_a_closed_crossing, split_a_face,
-        two_pipes_run_along_one_line,
+        HowItRuns, a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
+        a_plane_lies_along_a_pipes_axis, cross_of, dominant_axis_of_a_direction, gradient_at,
+        how_a_crossing_runs, how_a_plane_leans_against_a_cone, round_a_closed_crossing,
+        split_a_face, two_pipes_run_along_one_line, where_a_cones_apex_stands_against_a_plane,
     };
     use crate::{Error, Model, SolidKey};
 
@@ -5250,6 +5479,295 @@ mod what_the_curved_arrangement_reaches {
         assert!(
             disagreed * 10 > drawn,
             "these are meant to be a family and not a curiosity: {disagreed} of {drawn}"
+        );
+    }
+
+    /// **A plane and a cone the two rounded tests together call two rulings, and
+    /// whose crossing is one closed ellipse.**
+    ///
+    /// The third row of the same trap, and the one that takes **both** of its
+    /// signs being wrong at once. The plane goes through the origin and the
+    /// cone's apex is a single ulp off it: the `f64` distance from the plane to
+    /// the apex is exactly nothing and the exact one is not. The plane is also
+    /// drawn a rounding off tangent to the cone, so `f64`'s
+    /// `up² − slope²·sideways` lands at or below nothing where the exact `E` is
+    /// above it.
+    ///
+    /// Either sign right on its own and the pair is a curve. Both wrong
+    /// together and the old gate said *two rulings meeting at the apex* about a
+    /// crossing `intersect` names `RightRoundWhereItsFacesCross` — one closed
+    /// ellipse — and [`how_a_crossing_runs`] ordered that ellipse **along an
+    /// axis**, exactly as the two pipe rows above did before them.
+    ///
+    /// **What it gets now is the closed curve it is.** Both signs are proved,
+    /// the apex comes back off the plane, the pair falls to the conic gate, and
+    /// what orders it is `where_a_closed_crossing_starts` — a place to start on
+    /// an ellipse this long is still findable here, so this one ends in an
+    /// answer and not a refusal.
+    #[test]
+    fn a_rounded_apex_and_a_rounded_lean_together_call_a_closed_ellipse_two_rulings() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let normal = Vector::new(
+            -0.363_397_689_122_298_75,
+            -0.399_628_971_525_338,
+            0.841_569_251_255_161_7,
+        );
+        let along = Vector::new(
+            -0.426_496_054_832_981_4,
+            0.483_888_527_748_997_2,
+            0.764_168_180_392_778_8,
+        );
+        let apex = Point::new(
+            -0.162_754_196_529_426_2,
+            0.361_000_414_878_634_9,
+            0.101_146_430_287_779_8,
+        );
+        let slope = 0.759_265_215_818_364_9;
+        let flat = Plane::from_point_and_normal(Point::origin(), normal).expect("a plane");
+        let cone = Cone::new(Axis::new(apex, along).expect("an axis"), slope).expect("a cone");
+        assert_eq!(
+            flat.normal(),
+            normal,
+            "the plane stores the normal it was given, so the numbers below are the \
+             ones the doors read"
+        );
+        assert_eq!(cone.axis().direction(), along, "and so does the axis");
+        assert_eq!(cone.apex(), apex, "and so does the apex");
+
+        assert_eq!(
+            flat.signed_distance_to(cone.apex()),
+            0.0,
+            "the `f64` distance to the apex is exactly nothing, and that is the first \
+             thing that used to decide this row"
+        );
+        let up = normal.dot(along);
+        let sideways = normal.cross(along).length_squared();
+        assert!(
+            up * up - slope * slope * sideways <= 0.0,
+            "and `f64`'s own `E` is at or below nothing, which is the second"
+        );
+
+        assert_eq!(
+            where_a_cones_apex_stands_against_a_plane(&flat, &cone),
+            Decision::Pos,
+            "summed with no rounding thrown away, the apex is proved off the plane"
+        );
+        assert_eq!(
+            how_a_plane_leans_against_a_cone(&flat, &cone),
+            Decision::Pos,
+            "and `E` is proved above nothing, so the plane cuts across the cone"
+        );
+        assert_eq!(
+            a_plane_cuts_a_cone_in_rulings(&flat, &cone),
+            Some(false),
+            "so the pair does not cut rulings, and nothing ran out of arithmetic saying so"
+        );
+
+        let (here, there) = (Surface::Plane(flat), Surface::Cone(cone));
+        let SurfaceMeet::Curves(runs) =
+            intersect(&here, &there, &policy, &mut log).expect("a plane cutting across a cone")
+        else {
+            panic!("a plane cutting across a cone meets it along curves and nothing else");
+        };
+        assert_eq!(runs.len(), 1, "one closed ellipse");
+        assert_eq!(
+            runs[0].run(),
+            &EdgeRun::RightRoundWhereItsFacesCross,
+            "`intersect` decides the same two signs exactly, and names a curve that closes"
+        );
+
+        assert!(
+            !a_pair_that_crosses_in_straight_lines(&here, &there, &mut log)
+                .expect("both signs are proved, so nothing ran out of arithmetic"),
+            "an ellipse is not a pair of endless rulings"
+        );
+        let start = where_a_closed_crossing_starts(&runs[0], [&here, &there], &mut log)
+            .expect("a place to start on the ellipse");
+        assert!(
+            matches!(
+                how_a_crossing_runs(
+                    &here,
+                    &there,
+                    &runs[0],
+                    PredicatePoint::from(start.coordinates()),
+                    &mut log
+                ),
+                Ok(HowItRuns::RoundAClosedCurve { .. })
+            ),
+            "the ellipse is ordered round the closed curve it is, where the rounded \
+             gate had it ordered along an axis"
+        );
+    }
+
+    /// **How many planes drawn a rounding off tangent to a cone the two rounded
+    /// tests get wrong, what each one costs, and that the proved gate gets every
+    /// one of them right.**
+    ///
+    /// A search, not a bound. Three families of draw, forty thousand each:
+    ///
+    /// 0. a plane through the origin with a **random** normal, and a cone whose
+    ///    apex is nudged by one ulp until the `f64` distance to the plane reads
+    ///    exactly nothing;
+    /// 1. the same nudged apex, with the plane drawn a rounding off **tangent**
+    ///    to the cone — the normal `−cos θ·û + sin θ·ŵ` of the plane that rests
+    ///    along one ruling, which puts `E` within a rounding of nothing;
+    /// 2. the near-tangent plane again with the apex left exactly **on** it, so
+    ///    that `E` alone decides the row.
+    ///
+    /// Every draw is put to `intersect`, which decides the same two signs
+    /// exactly and is the oracle. The rounded gate is written out here rather
+    /// than called, because the one in the tree is the proved one now.
+    ///
+    /// Only floors are asserted — the counts move with the seed — and the one
+    /// thing asserted exactly is that **the proved gate never disagrees with
+    /// `intersect` about any of the 360 000 draws**.
+    #[test]
+    fn how_many_near_tangent_planes_a_rounded_cone_gate_gets_wrong() {
+        let policy = Policy::certified();
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut draw = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+        };
+
+        let mut drawn = 0_usize;
+        let mut a_closed_ellipse_called_rulings = 0_usize;
+        let mut ordered_along_an_axis = 0_usize;
+        let mut rulings_called_a_curve = 0_usize;
+        let mut the_apex_alone_called_rulings = 0_usize;
+        for round in 0..3 {
+            for _ in 0..40_000 {
+                let Ok(axis) = Axis::new(Point::origin(), Vector::new(draw(), draw(), draw()))
+                else {
+                    continue;
+                };
+                let along = axis.direction();
+                let Ok(square_to_it) =
+                    Axis::new(Point::origin(), along.cross(Vector::new(draw(), draw(), draw())))
+                else {
+                    continue;
+                };
+                let half_angle = draw().abs() * 1.3 + 0.1;
+                let slope = half_angle.tan();
+                let leaning = if round == 0 {
+                    Vector::new(draw(), draw(), draw())
+                } else {
+                    square_to_it.direction() * -half_angle.cos() + along * half_angle.sin()
+                };
+                let Ok(flat) = Plane::from_point_and_normal(Point::origin(), leaning) else {
+                    continue;
+                };
+                let normal = flat.normal();
+                let [x, y, z] = normal
+                    .cross(Vector::new(draw(), draw(), draw()))
+                    .components();
+                let apexes = if round == 2 {
+                    [Point::origin(); 3]
+                } else {
+                    [
+                        Point::new(f64::from_bits(x.to_bits() + 1), y, z),
+                        Point::new(x, f64::from_bits(y.to_bits() + 1), z),
+                        Point::new(x, y, f64::from_bits(z.to_bits() + 1)),
+                    ]
+                };
+                for apex in apexes {
+                    let Ok(cone) = Cone::new(
+                        Axis::new(apex, along).expect("an axis through the apex"),
+                        slope,
+                    ) else {
+                        continue;
+                    };
+                    let up = normal.dot(along);
+                    let sideways = normal.cross(along).length_squared();
+                    let rounded = flat.signed_distance_to(apex) == 0.0
+                        && up * up - slope * slope * sideways <= 0.0;
+                    drawn += 1;
+
+                    let mut log = ProvenanceLog::new();
+                    let here = Surface::Plane(flat);
+                    let there = Surface::Cone(cone);
+                    let met = intersect(&here, &there, &policy, &mut log);
+                    let proved = a_plane_cuts_a_cone_in_rulings(&flat, &cone);
+                    match &met {
+                        Ok(SurfaceMeet::TouchAtOnePoint { .. }) => {
+                            assert_eq!(
+                                proved,
+                                Some(false),
+                                "two surfaces sharing only the apex do not share a ruling"
+                            );
+                            the_apex_alone_called_rulings += usize::from(rounded);
+                        }
+                        Ok(SurfaceMeet::Curves(runs))
+                            if runs[0].run() == &EdgeRun::RightRoundWhereItsFacesCross =>
+                        {
+                            assert_eq!(
+                                proved,
+                                Some(false),
+                                "a closed ellipse is not a pair of endless rulings"
+                            );
+                            if !rounded {
+                                continue;
+                            }
+                            a_closed_ellipse_called_rulings += 1;
+                            let Ok(start) =
+                                where_a_closed_crossing_starts(&runs[0], [&here, &there], &mut log)
+                            else {
+                                continue;
+                            };
+                            // The rounded gate is what `a_pair_that_crosses_in_
+                            // straight_lines` used to answer, so this is what
+                            // `how_a_crossing_runs` did with the ellipse.
+                            ordered_along_an_axis += usize::from(matches!(
+                                dominant_axis_of_a_direction(
+                                    cross_of(
+                                        gradient_at(&here, PredicatePoint::from(start.coordinates())),
+                                        gradient_at(
+                                            &there,
+                                            PredicatePoint::from(start.coordinates())
+                                        ),
+                                    ),
+                                    &mut log,
+                                ),
+                                Ok(_)
+                            ));
+                        }
+                        // Every other named shape is straight or bending, and
+                        // `intersect` refusing to name which piece a run is says
+                        // nothing about the two signs. Only the rounded gate's
+                        // second direction is counted here, and it is counted
+                        // against the proved gate rather than against the shape.
+                        _ => {
+                            if proved == Some(true) && !rounded {
+                                rulings_called_a_curve += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        println!(
+            "{drawn} draws: {a_closed_ellipse_called_rulings} closed ellipses the rounded \
+             gate called rulings, {ordered_along_an_axis} of them with a direction to be \
+             ordered along; {the_apex_alone_called_rulings} apexes-alone called rulings; \
+             {rulings_called_a_curve} rulings called a curve"
+        );
+        assert!(
+            a_closed_ellipse_called_rulings > 1_000,
+            "a closed curve named an endless line is meant to be a family and not a \
+             curiosity: {a_closed_ellipse_called_rulings} of {drawn}"
+        );
+        assert_eq!(
+            ordered_along_an_axis, a_closed_ellipse_called_rulings,
+            "every one of them had a direction, so every one of them was ordered along \
+             an axis rather than refused"
+        );
+        assert!(
+            rulings_called_a_curve > 1_000,
+            "and the other way round is a family too: {rulings_called_a_curve} of {drawn}"
         );
     }
 }

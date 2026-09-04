@@ -2101,9 +2101,13 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         // refused by name. They are named now, so a `FaceMeet` carrying such a
         // pair is built by the ordinary path and the old claim would put two
         // arcs where a ruling has one.
+        //
+        // Both of the signs it turns on are proved rather than rounded, and
+        // `None` when neither can be — the third row of the same trap the two
+        // above were in, and its own doc carries the pair of numbers.
         [Surface::Plane(flat), Surface::Cone(cone)]
         | [Surface::Cone(cone), Surface::Plane(flat)] => {
-            Some(a_plane_cuts_a_cone_in_rulings(flat, cone))
+            a_plane_cuts_a_cone_in_rulings(flat, cone)
         }
         // A cone against a ball, a pipe or another cone crosses in a degree-four
         // space curve, which holds no line; the ring row below covers the fourth.
@@ -2536,6 +2540,78 @@ mod tests {
                 "{named} came back from `intersect` as {met:?}"
             );
         }
+    }
+
+    /// **This door reads a plane against a cone with the same two proofs the
+    /// other one does**, so a closed ellipse is never read as a pair of rulings
+    /// here either.
+    ///
+    /// The same plane and cone `arrange`'s
+    /// `a_rounded_apex_and_a_rounded_lean_together_call_a_closed_ellipse_two_rulings`
+    /// builds: the cone's apex one ulp off a plane through the origin, so the
+    /// `f64` distance to it is exactly nothing, and the plane a rounding off
+    /// tangent to the cone, so `f64`'s own `E` is at or below nothing. Both
+    /// rounded tests say two rulings and `intersect` names one closed ellipse.
+    ///
+    /// This row used to answer `Some(true)` for it, which is
+    /// [`which_arc_this_is`]'s one-arc branch — one arc where two corners on a
+    /// closed ellipse leave two.
+    #[test]
+    fn a_plane_and_a_cone_are_read_straight_only_where_both_signs_are_proved() {
+        let normal = Vector::new(
+            -0.363_397_689_122_298_75,
+            -0.399_628_971_525_338,
+            0.841_569_251_255_161_7,
+        );
+        let along = Vector::new(
+            -0.426_496_054_832_981_4,
+            0.483_888_527_748_997_2,
+            0.764_168_180_392_778_8,
+        );
+        let apex = Point::new(
+            -0.162_754_196_529_426_2,
+            0.361_000_414_878_634_9,
+            0.101_146_430_287_779_8,
+        );
+        let slope = 0.759_265_215_818_364_9;
+        let flat = Plane::from_point_and_normal(Point::origin(), normal).expect("a plane");
+        let cone = Cone::new(Axis::new(apex, along).expect("an axis"), slope).expect("a cone");
+        assert_eq!(
+            flat.signed_distance_to(cone.apex()),
+            0.0,
+            "the `f64` distance to the apex rounds to nothing, and that is half of \
+             what used to decide this row"
+        );
+        let up = normal.dot(along);
+        assert!(
+            up * up - slope * slope * normal.cross(along).length_squared() <= 0.0,
+            "and `f64`'s own `E` is at or below nothing, which is the other half"
+        );
+
+        for turned in [
+            [Surface::Plane(flat), Surface::Cone(cone)],
+            [Surface::Cone(cone), Surface::Plane(flat)],
+        ] {
+            assert_eq!(
+                the_crossing_of_these_runs_straight(&turned),
+                Some(false),
+                "a closed ellipse read the wrong way round {turned:?}"
+            );
+        }
+
+        let met = rcad_geom::intersect(
+            &Surface::Plane(flat),
+            &Surface::Cone(cone),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a plane cutting across a cone is a shape `intersect` names");
+        assert!(
+            matches!(&met, SurfaceMeet::Curves(runs) if runs.len() == 1
+                && runs[0].run() == &EdgeRun::RightRoundWhereItsFacesCross),
+            "both doors ask one question of one pair of surfaces, and `intersect` \
+             says {met:?}"
+        );
     }
 
     /// No pair of the five surface kinds there are falls into the `_`, so what
