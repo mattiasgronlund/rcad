@@ -1827,7 +1827,16 @@ impl Corners {
             .find(|order| order.is_ne())
             .is_some_and(Ordering::is_lt);
         if lower {
+            let left_behind = exactly_at(made.point);
             made.point = at;
+            // No corner sits on the rounding this one just left, so a later
+            // corner of another name landing there would be joined to this one
+            // over a coordinate neither of them is on (§49.3). Another corner
+            // that has since settled onto that coordinate *is* on it, and keeps
+            // its claim.
+            if self.at.get(&left_behind) == Some(&corner) {
+                self.at.remove(&left_behind);
+            }
             self.at.insert(exactly_at(at), corner);
         }
     }
@@ -2274,13 +2283,56 @@ fn sides_of(
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cone, Cylinder, EdgeRun, Plane, Sphere, Surface, SurfaceMeet, Torus};
+    use rcad_geom::{
+        Axis, Cone, Cylinder, EdgeRun, Plane, Scale, Sphere, Surface, SurfaceMeet, Torus,
+    };
     use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::{
-        Point, Vector, names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_half_space_both_ends_are_on,
+        Corners, MeetPoint, Model, Point, PredicatePoint, Vector, names_of_the_three_surfaces,
+        the_crossing_of_these_runs_straight, the_half_space_both_ends_are_on,
     };
+
+    /// A corner that settles on a lower rounding leaves the coordinate it came
+    /// from, and nothing may be joined to it there afterwards.
+    ///
+    /// Once the lower rounding wins, no corner sits on the higher one. A later
+    /// corner with a **different** name that does land there is a different
+    /// corner, and joining the two puts one vertex where the answer needs two —
+    /// §49.3's latent defect, which nothing else in the suite reaches.
+    #[test]
+    fn a_corner_that_moved_does_not_swallow_a_later_one_where_it_used_to_be() {
+        let model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let flat = |normal: Vector| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), normal).expect("a normal with length"),
+            )
+        };
+        let across = flat(Vector::new(1.0, 0.0, 0.0));
+        let along = flat(Vector::new(0.0, 1.0, 0.0));
+        let upright = flat(Vector::new(0.0, 0.0, 1.0));
+        let starts = |carried_by: [Surface; 2], at: [f64; 3]| MeetPoint::WhereAClosedCurveStarts {
+            carried_by,
+            point: PredicatePoint::from(at),
+        };
+
+        let mut corners = Corners::default();
+        let moved = corners.of(&model, &starts([across, along], [1.0, 0.0, 0.0]));
+        let again = corners.of(&model, &starts([across, along], [0.0, 0.0, 0.0]));
+        assert_eq!(again, moved, "one name is one corner");
+        assert_eq!(
+            corners.made[moved].point,
+            Point::origin(),
+            "the lower of the two roundings is the one kept"
+        );
+
+        let other = corners.of(&model, &starts([across, upright], [1.0, 0.0, 0.0]));
+        assert_ne!(
+            other, moved,
+            "a corner was joined to one that had already moved off this coordinate"
+        );
+        assert_eq!(corners.made.len(), 2, "two names on one place is two corners");
+    }
 
     /// Why every pair with a ball or a ring on it is answered `false`.
     ///
