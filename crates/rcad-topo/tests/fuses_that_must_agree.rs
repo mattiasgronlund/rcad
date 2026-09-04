@@ -126,10 +126,10 @@ use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{
     BallAndBlock, Configuration, CurvedPair, Elsewhere, Movement, Placed, Rigid, Shape, Skew, Turn,
-    a_ball_and_a_block, a_chain_of_fuses, a_curved_pair, a_flush_pair, a_lattice_pair,
-    a_lattice_trio, a_pair_leaning_the_same_way, a_pair_somewhere_else, a_rigid_movement,
-    a_skew_pair, a_solid_and_its_copy, a_turned_pair, a_turned_solid_and_its_copy,
-    a_turned_solid_and_several_copies,
+    a_ball_and_a_block, a_chain_of_fuses, a_curved_pair, a_flush_pair, a_frustum_and_a_block,
+    a_lattice_pair, a_lattice_trio, a_pair_leaning_the_same_way, a_pair_somewhere_else,
+    a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
+    a_turned_solid_and_its_copy, a_turned_solid_and_several_copies,
 };
 
 /// How many configurations a property that runs two fuses per case sees.
@@ -1922,6 +1922,96 @@ fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_uni
     tally.nothing_was_compared_because_it_all_refused(
         "((A ∪ B) \\ B) ∪ B = A ∪ B over a ball, which refuses",
         WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON,
+    );
+}
+
+/// Every frustum the family draws really does have skin inside the block and
+/// skin outside it — asserted over the family, before any law is run over it.
+///
+/// **§47.2 is why this exists.** `AFrustumAgainstABlock` was pinned at a count,
+/// the count moved the right way, and the sentence written beside it — *"a block
+/// can now take a piece out of a frustum"* — was false: all six answers were the
+/// one row of the grid where the two solids miss each other altogether. An
+/// assertion on a count is still a count. A fixture family nobody has shown
+/// overlaps can go quietly empty and every property over it stays green.
+///
+/// This says what a count cannot. The block is a cube, so the box round it *is*
+/// the block, and a point strictly inside that box is strictly inside the
+/// material. The frustum's skin is asked for as a mesh and every point of it is
+/// classified: some are strictly inside the block and some are strictly outside
+/// it, which is what *"these two overlap and neither swallows the other"* means.
+///
+/// The two ends it finds are the two the family is built around — the narrow cap
+/// sits a whole unit below the floor, and the wide cap sits inside the block a
+/// whole unit clear of every side wall.
+#[test]
+fn every_frustum_of_the_family_has_skin_inside_the_block_and_skin_outside_it() {
+    let mut runner = TestRunner::new(configured(CASES));
+    let checked = Cell::new(0usize);
+    let inside = Cell::new(0usize);
+    let outside = Cell::new(0usize);
+
+    let ran = runner.run(&a_frustum_and_a_block(), |pair| {
+        let (model, keys) = pair.build();
+        let (block, frustum) = (keys[0], keys[1]);
+
+        let (low, high) = model
+            .solid(block)
+            .box_around_it()
+            .expect("a cube has faces to measure");
+        let (low, high) = (low.coordinates(), high.coordinates());
+        let skin = model
+            .solid(frustum)
+            .mesh(
+                a_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a frustum this size meshes");
+
+        let mut in_the_block = 0usize;
+        let mut out_of_the_block = 0usize;
+        for point in skin.points() {
+            let at = point.coordinates();
+            if (0..3).all(|axis| low[axis] < at[axis] && at[axis] < high[axis]) {
+                in_the_block += 1;
+            } else if (0..3).any(|axis| at[axis] < low[axis] || high[axis] < at[axis]) {
+                out_of_the_block += 1;
+            }
+        }
+
+        checked.set(checked.get() + 1);
+        inside.set(inside.get() + in_the_block);
+        outside.set(outside.get() + out_of_the_block);
+        prop_assert!(
+            in_the_block > 0,
+            "not one point of this frustum's skin is inside the block, so the two \
+             miss each other: {pair:?}"
+        );
+        prop_assert!(
+            out_of_the_block > 0,
+            "not one point of this frustum's skin is outside the block, so the block \
+             swallows it whole: {pair:?}"
+        );
+        Ok(())
+    });
+    if let Err(why) = ran {
+        panic!("{why}");
+    }
+    println!(
+        "a frustum against a block: {} configurations, {} skin points inside the block \
+         and {} outside it",
+        checked.get(),
+        inside.get(),
+        outside.get()
+    );
+    // At least, and not exactly: the persistence file's saved seeds are replayed
+    // before any novel case, so this family draws 61 for a corpus of 48.
+    assert!(
+        checked.get() >= CASES as usize,
+        "only {} of the {CASES} configurations were checked, so this pin is not over \
+         the family",
+        checked.get()
     );
 }
 
