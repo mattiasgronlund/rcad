@@ -2006,8 +2006,9 @@ fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Option<bool>
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] when
 /// [`the_crossing_of_these_runs_straight`] has no answer for the pair — a sixth
-/// kind of [`Surface`], or a pipe against a plane or another pipe whose axes it
-/// can prove neither flush nor apart. **One arc and two arcs are both answers, so
+/// kind of [`Surface`], a pipe against a plane or another pipe whose axes it can
+/// prove neither flush nor apart, or a plane against a cone whose apex it cannot
+/// place or whose lean it cannot read. **One arc and two arcs are both answers, so
 /// neither is the safe reading of a pair nobody has decided.** Guessing *two*
 /// is the wrong answer commit `4b62fd0` records the whole cone row getting for
 /// three units: an arc where the surfaces cross in a ruling comes out as two
@@ -2056,17 +2057,21 @@ fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> Result<W
 /// exact wrong answer is what commit `4b62fd0` records having gone out for the
 /// whole cone row for three units, under the same blanket verdict.
 ///
-/// **Two rows are the other `None`, and both are arithmetic rather than a
-/// missing row.** Whether two pipes' axes run along one line is
-/// [`two_pipes_run_along_one_line`] and whether a plane holds a pipe's axis is
-/// [`a_plane_lies_along_a_pipes_axis`]; each proves its answer or says it
-/// cannot. They used to be `w₁.cross(w₂) == Vector::zero()` and
-/// `n.dot(w) == 0.0`, and neither an `f64` cross product nor an `f64` sum of
-/// three products rounding to nothing is a proof that it is nothing. Both
-/// predicates' own docs carry the counterexample, and `arrange`'s
-/// `two_pipes_a_rounded_cross_product_calls_parallel_are_not` and
-/// `a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not` are the
-/// demonstrations.
+/// **Three rows are the other `None`, and all three are arithmetic rather than
+/// a missing row.** Whether two pipes' axes run along one line is
+/// [`two_pipes_run_along_one_line`], whether a plane holds a pipe's axis is
+/// [`a_plane_lies_along_a_pipes_axis`], and whether a plane cuts a cone in
+/// rulings is [`a_plane_cuts_a_cone_in_rulings`]; each proves its answer or says
+/// it cannot. They used to be `w₁.cross(w₂) == Vector::zero()`,
+/// `n.dot(w) == 0.0` and a pair of rounded comparisons about a cone's apex and
+/// how the plane leans against it — and neither an `f64` cross product, nor an
+/// `f64` sum of three products, nor an `f64` degree-six `E` rounding to nothing
+/// is a proof that it is nothing. All three predicates' own docs carry the
+/// counterexample, and `arrange`'s
+/// `two_pipes_a_rounded_cross_product_calls_parallel_are_not`,
+/// `a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not` and
+/// `a_rounded_apex_and_a_rounded_lean_together_call_a_closed_ellipse_two_rulings`
+/// are the demonstrations.
 ///
 /// `tests/a_sixth_kind_of_surface.rs` is what notices the day a sixth kind
 /// arrives; `every_pair_of_the_five_kinds_there_are_is_answered` below is what
@@ -2106,9 +2111,7 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         // `None` when neither can be — the third row of the same trap the two
         // above were in, and its own doc carries the pair of numbers.
         [Surface::Plane(flat), Surface::Cone(cone)]
-        | [Surface::Cone(cone), Surface::Plane(flat)] => {
-            a_plane_cuts_a_cone_in_rulings(flat, cone)
-        }
+        | [Surface::Cone(cone), Surface::Plane(flat)] => a_plane_cuts_a_cone_in_rulings(flat, cone),
         // A cone against a ball, a pipe or another cone crosses in a degree-four
         // space curve, which holds no line; the ring row below covers the fourth.
         //

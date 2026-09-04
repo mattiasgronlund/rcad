@@ -3052,7 +3052,8 @@ fn dot_of(one: [Interval; 3], other: [Interval; 3]) -> Interval {
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when the shape of the
 /// crossing itself cannot be told — two pipes whose axes cannot be shown to run
-/// along one line or shown not to, which is
+/// along one line or shown not to, and a plane and a cone whose apex or whose
+/// lean cannot be placed, both of which are
 /// [`a_pair_that_crosses_in_straight_lines`]'s own refusal — or when the
 /// direction of a run that *is* straight comes out as a box straddling every
 /// axis.
@@ -3210,6 +3211,13 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 /// `a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not` is the
 /// demonstration.
 ///
+/// **A plane against a cone is [`a_plane_cuts_a_cone_in_rulings`], and it was in
+/// the same trap twice over** — an `f64` distance to the apex and an `f64` `E`,
+/// both rounded, both able to go the wrong way. Its own doc carries the pair of
+/// numbers and what each way of being wrong costs;
+/// `a_rounded_apex_and_a_rounded_lean_together_call_a_closed_ellipse_two_rulings`
+/// is the demonstration.
+///
 /// The other pairs are named rather than swept up, because `false` for them is a
 /// fact about the question and not about the shapes: nothing but a plane holds a
 /// straight line with a ball or a ring on the other side of it, and a cone
@@ -3247,7 +3255,8 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when
 /// [`two_pipes_run_along_one_line`] or [`a_plane_lies_along_a_pipes_axis`] can
-/// prove neither that the two directions are flush nor that they are not.
+/// prove neither that the two directions are flush nor that they are not, and
+/// when [`a_plane_cuts_a_cone_in_rulings`] can prove neither of *its* two signs.
 /// Neither `true` nor `false` is the safe reading of that: `true` orders a
 /// closed curve as an endless straight line, and `false` sends a pair of endless
 /// lines to the conic gate.
@@ -3347,24 +3356,25 @@ fn a_pair_that_crosses_in_straight_lines(
 ///
 /// Both together and `intersect` names one closed **ellipse** while this says
 /// two rulings, so [`how_a_crossing_runs`] orders that ellipse along an axis.
-/// `a_plane_a_rounded_apex_and_a_rounded_lean_call_a_cones_rulings_is_an_ellipse`
-/// writes one such pair out and
-/// `how_many_near_tangent_planes_a_rounded_cone_gate_gets_wrong` says how common
-/// it is: of 40 000 planes drawn a rounding off tangent to a random cone with
-/// the apex nudged that way, **3 338 are named rulings by the rounded gate and
-/// named one closed ellipse by `intersect`, and every one of them was ordered
-/// along an axis**.
+/// `a_rounded_apex_and_a_rounded_lean_together_call_a_closed_ellipse_two_rulings`
+/// writes one such pair out.
 ///
 /// # What each way of being wrong actually costs
 ///
-/// Measured rather than argued, over the same draws:
+/// Measured rather than argued.
+/// `how_many_near_tangent_planes_a_rounded_cone_gate_gets_wrong` draws 360 000
+/// planes against cones — random normals, normals a rounding off tangent, and
+/// apexes both nudged a rounding off the plane and left exactly on it — puts
+/// every one of them to `intersect`, and counts what the rounded pair of tests
+/// would have said:
 ///
-/// | the gate said | the truth | what happened |
-/// |---|---|---|
-/// | rulings | one closed ellipse | **ordered along an axis** — the wrong answer |
-/// | rulings | the apex alone | nothing: `intersect` names no run to order |
-/// | rulings | two rulings `intersect` cannot name | nothing: the pair is refused before it gets here |
-/// | a curve | two rulings | nothing **today**: every one of the 6 648 draws that landed here was refused by `intersect` for want of an exactly representable ruling direction. Nothing but that refusal stands between it and the two-arc branch of `which_arc_this_is`, so the sign is proved here too rather than left to it |
+/// | the gate said | the truth | how many | what happened |
+/// |---|---|---|---|
+/// | rulings | one closed ellipse | **3 655** | **ordered along an axis**, all 3 655 of them: the wrong answer |
+/// | rulings | the apex alone | 16 077 | nothing: `intersect` names no run to order |
+/// | a curve | two rulings | 7 761 | nothing **today**: every one was refused by `intersect` for want of an exactly representable ruling direction. Nothing but that refusal stands between it and the two-arc branch of `which_arc_this_is`, so this sign is proved here too rather than left to it |
+///
+/// The proved gate disagreed with `intersect` about **none** of the 360 000.
 pub(super) fn a_plane_cuts_a_cone_in_rulings(flat: &Plane, cone: &Cone) -> Option<bool> {
     match where_a_cones_apex_stands_against_a_plane(flat, cone) {
         Decision::Zero => {}
@@ -3547,11 +3557,7 @@ fn exactly_the_two_by_two_of(one: [f64; 2], other: [f64; 2], out: &mut [f64]) ->
     }
     let (high, low) = two_product(one[0], other[1]);
     let (taken_high, taken_low) = two_product(one[1], other[0]);
-    Some(expansion_sum(
-        &[low, high],
-        &[-taken_low, -taken_high],
-        out,
-    ))
+    Some(expansion_sum(&[low, high], &[-taken_low, -taken_high], out))
 }
 
 /// Whether two pipes' axes run along one line, **proved and not rounded**.
@@ -3641,22 +3647,17 @@ pub(super) fn two_pipes_run_along_one_line(one: &Cylinder, other: &Cylinder) -> 
 /// rests on stops holding; there is no bound to report for one that does, so the
 /// enclosure is infinite and no policy can accept it.
 pub(super) fn a_plane_lies_along_a_pipes_axis(flat: &Plane, pipe: &Cylinder) -> Decision {
-    let normal = flat.normal().components();
-    let along = pipe.axis().direction().components();
-    let mut total = [0.0; 6];
-    let mut len = 0;
-    for axis in 0..3 {
-        if !product_is_exact(normal[axis], along[axis]) {
-            return Decision::Undecidable {
-                enclosure: f64::INFINITY,
-            };
-        }
-        let (high, low) = two_product(normal[axis], along[axis]);
-        let mut grown = [0.0; 6];
-        len = expansion_sum(&total[..len], &[low, high], &mut grown);
-        total[..len].copy_from_slice(&grown[..len]);
-    }
-    expansion_sign(&total[..len])
+    let mut reach = [0.0; LONGEST_DOT];
+    let Some(len) = exactly_the_dot_of(
+        flat.normal().components(),
+        pipe.axis().direction().components(),
+        &mut reach,
+    ) else {
+        return Decision::Undecidable {
+            enclosure: f64::INFINITY,
+        };
+    };
+    expansion_sign(&reach[..len])
 }
 
 /// The name the question of whether a plane holds a direction goes by in
@@ -5645,9 +5646,10 @@ mod what_the_curved_arrangement_reaches {
                     continue;
                 };
                 let along = axis.direction();
-                let Ok(square_to_it) =
-                    Axis::new(Point::origin(), along.cross(Vector::new(draw(), draw(), draw())))
-                else {
+                let Ok(square_to_it) = Axis::new(
+                    Point::origin(),
+                    along.cross(Vector::new(draw(), draw(), draw())),
+                ) else {
                     continue;
                 };
                 let half_angle = draw().abs() * 1.3 + 0.1;
@@ -5720,19 +5722,14 @@ mod what_the_curved_arrangement_reaches {
                             // The rounded gate is what `a_pair_that_crosses_in_
                             // straight_lines` used to answer, so this is what
                             // `how_a_crossing_runs` did with the ellipse.
-                            ordered_along_an_axis += usize::from(matches!(
+                            let at = PredicatePoint::from(start.coordinates());
+                            ordered_along_an_axis += usize::from(
                                 dominant_axis_of_a_direction(
-                                    cross_of(
-                                        gradient_at(&here, PredicatePoint::from(start.coordinates())),
-                                        gradient_at(
-                                            &there,
-                                            PredicatePoint::from(start.coordinates())
-                                        ),
-                                    ),
+                                    cross_of(gradient_at(&here, at), gradient_at(&there, at)),
                                     &mut log,
-                                ),
-                                Ok(_)
-                            ));
+                                )
+                                .is_ok(),
+                            );
                         }
                         // Every other named shape is straight or bending, and
                         // `intersect` refusing to name which piece a run is says
