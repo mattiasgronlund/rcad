@@ -23,11 +23,26 @@
 //! only draw ordinary sizes would never see the one refusal the four planar
 //! pairs have.
 //!
-//! # This file is the one authority
+//! # This file is the one authority, and this is what it cannot draw
 //!
 //! `fuzz/fuzz_targets/where_two_surfaces_cross.rs` reaches across to this file
 //! rather than copying it, so the property `cargo fuzz` explores and the
 //! property the suite replays are the same lines of code.
+//!
+//! **No byte string reaches a cone or a torus.** [`two_surfaces_from`] reads two
+//! bits per surface and asks `which % 3`, so a plane, a ball and a pipe are the
+//! whole of what it can name. Measured over the checked-in corpus: 743 of its
+//! 824 seeds decode to a pair, and those 1486 surfaces are 232 planes, 423 balls
+//! and 831 pipes. Bits 4 to 7 of the kinds byte are read by nothing at all.
+//!
+//! **The three it does draw are not drawn evenly.** `which % 3` sends both 0 and
+//! 3 to a plane, so uniform bytes ask for a plane twice as often as for a ball
+//! or a pipe. Measured over the soak's 200 000 draws, of which 199 943 decode:
+//! 200 003 planes, 99 925 balls, 99 958 pipes.
+//!
+//! Cones and tori are covered by a hand-written family in
+//! `every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs` instead, and
+//! that file holds the measurements behind leaving this layout alone.
 
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
@@ -81,7 +96,8 @@ pub fn two_surfaces_from(bytes: &[u8]) -> Option<[Surface; 2]> {
     Some([first, second])
 }
 
-/// One surface of the kind `which` names.
+/// One surface of the kind `which % 3` names: a plane for 0 and for 3, a ball
+/// for 1, a pipe for 2.
 fn one_surface_from(which: u8, reading: &mut impl Iterator<Item = u8>) -> Option<Surface> {
     match which % 3 {
         0 => {
