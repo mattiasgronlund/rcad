@@ -143,9 +143,8 @@ fn a_ball_and_a_bar_that_miss_each_other_fuse_into_one_block() {
          at each end"
     );
 
-    let closed_form = SIDE * SIDE * SIDE
-        + 2.0 / 3.0 * PI * RADIUS * RADIUS * RADIUS
-        + 4.0 * PI * RADIUS * RADIUS;
+    let closed_form =
+        SIDE * SIDE * SIDE + 2.0 / 3.0 * PI * RADIUS * RADIUS * RADIUS + 4.0 * PI * RADIUS * RADIUS;
     let measured = volume_of(&model, &solids);
     assert!(
         (0.0..HOW_FAR_A_MESH_MAY_BE).contains(&((closed_form - measured) / closed_form)),
@@ -254,10 +253,7 @@ fn a_ball_driven_into_the_bar_is_refused_by_name() {
 fn the_same_three_one_pair_at_a_time_stop_somewhere_else() {
     let (_, answer) = united_one_at_a_time(2.0);
     assert!(
-        matches!(
-            answer,
-            Err(Error::CannotTellTheCellsOfAFaceApart { .. })
-        ),
+        matches!(answer, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
         "the triple is no longer what stops this, and what does is §39.4's own row: {answer:?}"
     );
 }
