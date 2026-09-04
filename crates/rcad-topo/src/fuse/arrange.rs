@@ -364,6 +364,49 @@ pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 9
     bits
 }
 
+/// Three planes turned to face the one way, so that where they meet is a fact
+/// about the three of them and not about which faces carry them.
+///
+/// §48, W5. Two solids flush against each other work the plane they share out
+/// separately and one of them holds it reversed, so a corner on that plane is
+/// asked for as `P, Q, R` by a face of one and as `−P, Q, R` by a face of the
+/// other. [`meet_of_three_surfaces`] sorts its three on the numbers they store,
+/// a reversed plane sorts to a different row, and a solve with its rows
+/// permuted rounds a bit or two elsewhere. Which face happened to ask then
+/// decided where the corner went, and a `fuse(A, B)` and a `fuse(B, A)` that
+/// keep different copies of the shared face — which is the whole point of
+/// keeping one — got corners a bit apart. §17.4 forbids that, and
+/// `fuses_that_must_agree.rs` compares the two bit for bit with no tolerance.
+///
+/// The turning is exact: [`Plane::reversed`] negates all four coefficients and
+/// negating twice comes back to where it started, so this picks one of the two
+/// spellings and never a third thing. **The choice is which one, not what**: it
+/// is the same plane either way, and every face on it goes on carrying its own
+/// spelling for its own normal.
+///
+/// A triple with anything curved in it is handed over untouched. There, `which`
+/// numbers the meeting points along the line the two planes cross in and turning
+/// a plane round turns that line round, so the same point would be `which: 0`
+/// under one spelling and `which: 1` under the other —
+/// `assemble::names_of_the_three_surfaces` is the other half of this and says
+/// the same.
+fn three_planes_faced_the_one_way(surfaces: [Surface; 3]) -> [Surface; 3] {
+    if !surfaces.iter().all(|surface| surface.as_plane().is_some()) {
+        return surfaces;
+    }
+    surfaces.map(|surface| {
+        let Surface::Plane(flat) = surface else {
+            unreachable!("every one of the three was just checked to be a plane")
+        };
+        let backwards = flat
+            .coefficients()
+            .iter()
+            .find(|coefficient| **coefficient != 0.0)
+            .is_some_and(|coefficient| *coefficient < 0.0);
+        Surface::Plane(if backwards { flat.reversed() } else { flat })
+    })
+}
+
 /// The bits of a float, rearranged so that comparing them as whole numbers is
 /// comparing the floats.
 ///
@@ -896,11 +939,8 @@ impl<'f> Arrangement<'f> {
                     self.crossings[first].partner,
                     self.crossings[second].partner,
                 ];
-                let meet = meet_of_three_surfaces(
-                    [&surfaces[0], &surfaces[1], &surfaces[2]],
-                    policy,
-                    log,
-                )?;
+                let asked = three_planes_faced_the_one_way(surfaces);
+                let meet = meet_of_three_surfaces([&asked[0], &asked[1], &asked[2]], policy, log)?;
                 let MeetOfThree::At(places) = meet else {
                     continue;
                 };
@@ -4868,7 +4908,9 @@ mod how_often_cutting_a_curved_face_refuses {
 mod naming_a_surface {
     use rcad_geom::{Axis, Cylinder, Plane, Point, Sphere, Surface, Vector};
 
-    use super::{in_the_order_a_float_compares, name_of_surface_bits};
+    use super::{
+        in_the_order_a_float_compares, name_of_surface_bits, three_planes_faced_the_one_way,
+    };
 
     /// The key a corner is named by has to order surfaces the way `rcad-geom`
     /// does, or a `which` counted along that crate's order sits beside a triple
@@ -4920,5 +4962,42 @@ mod naming_a_surface {
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a radius"));
         assert!(name_of_surface_bits(&flat) < name_of_surface_bits(&ball));
         assert!(name_of_surface_bits(&ball) < name_of_surface_bits(&pipe));
+    }
+
+    /// A triple asked for with one of its planes turned round is the same three
+    /// planes handed to the solve, so it meets at the same point down to the
+    /// last bit.
+    ///
+    /// Which is what a fuse needs: the two solids either side of a shared plane
+    /// hold it facing opposite ways, and the answer must not depend on which of
+    /// them the arrangement asked about the corner.
+    #[test]
+    fn a_plane_turned_round_is_handed_to_the_solve_the_same_way() {
+        let at = |normal, through| {
+            Plane::from_point_and_normal(through, normal).expect("a normal with length")
+        };
+        let wall = at(Vector::new(1.0, 2.0, 3.0), Point::new(3.0, 0.0, 0.0));
+        let floor = at(Vector::new(0.0, 0.0, 1.0), Point::origin());
+        let side = at(Vector::new(0.0, 1.0, 0.0), Point::origin());
+
+        assert_eq!(
+            three_planes_faced_the_one_way([wall, floor, side].map(Surface::Plane)),
+            three_planes_faced_the_one_way([wall.reversed(), floor, side].map(Surface::Plane))
+        );
+    }
+
+    /// A triple with a ball in it is handed over untouched, because turning one
+    /// of its planes round would renumber `which` of the two meeting points a
+    /// corner is.
+    #[test]
+    fn a_triple_with_a_ball_in_it_keeps_the_planes_it_was_given() {
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a radius"));
+        let floor = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("a normal with length");
+        let side = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, -1.0, 0.0))
+            .expect("a normal with length");
+        let asked = [Surface::Plane(floor), Surface::Plane(side), ball];
+
+        assert_eq!(three_planes_faced_the_one_way(asked), asked);
     }
 }
