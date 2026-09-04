@@ -64,6 +64,7 @@ use rcad_geom::{
     Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector, intersect,
     meet_of_three_surfaces, where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
 };
+use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
     ProvenanceLog, orient2d, orient3d, orient3d_of_points,
@@ -3199,6 +3200,14 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 /// Two planes cross in a straight line too, and are answered a step up before
 /// this is asked.
 ///
+/// **A plane against a pipe is [`a_plane_lies_along_a_pipes_axis`], and it used
+/// to be `flat.normal().dot(pipe.axis().direction()) == 0.0`.** That is the same
+/// trap the pipe-and-pipe row below was in: a sum of three products rounding to
+/// nothing is not a proof that it is nothing, and a plane it wrongly calls flush
+/// with the axis has its closed ellipse ordered along an axis instead.
+/// `a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not` is the
+/// demonstration.
+///
 /// The other pairs are named rather than swept up, because `false` for them is a
 /// fact about the question and not about the shapes: nothing but a plane holds a
 /// straight line with a ball or a ring on the other side of it, and a cone
@@ -3235,10 +3244,11 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 /// # Errors
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when
-/// [`two_pipes_run_along_one_line`] can prove neither that the axes run along
-/// one line nor that they do not. Neither `true` nor `false` is the safe reading
-/// of that: `true` orders a closed quartic loop as an endless straight line, and
-/// `false` sends a pair of endless lines to the conic gate.
+/// [`two_pipes_run_along_one_line`] or [`a_plane_lies_along_a_pipes_axis`] can
+/// prove neither that the two directions are flush nor that they are not.
+/// Neither `true` nor `false` is the safe reading of that: `true` orders a
+/// closed curve as an endless straight line, and `false` sends a pair of endless
+/// lines to the conic gate.
 fn a_pair_that_crosses_in_straight_lines(
     one: &Surface,
     other: &Surface,
@@ -3247,7 +3257,19 @@ fn a_pair_that_crosses_in_straight_lines(
     match (one, other) {
         (Surface::Plane(flat), Surface::Cylinder(pipe))
         | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
-            Ok(flat.normal().dot(pipe.axis().direction()) == 0.0)
+            match a_plane_lies_along_a_pipes_axis(flat, pipe) {
+                Decision::Zero => Ok(true),
+                Decision::Neg | Decision::Pos => Ok(false),
+                Decision::Undecidable { .. } | _ => Err(gave_up(
+                    A_PLANE_AGAINST_AN_AXIS,
+                    &[
+                        PredicatePoint::from(flat.normal().components()),
+                        PredicatePoint::from(pipe.axis().direction().components()),
+                    ],
+                    Measures::Length,
+                    log,
+                )),
+            }
         }
         (Surface::Plane(flat), Surface::Cone(cone))
         | (Surface::Cone(cone), Surface::Plane(flat)) => {
@@ -3260,9 +3282,8 @@ fn a_pair_that_crosses_in_straight_lines(
                 Decision::Neg => unreachable!("a squared length is never below zero"),
                 Decision::Undecidable { .. } | _ => Err(gave_up(
                     ORIENT2D,
-                    &[one, other].map(|pipe| {
-                        PredicatePoint::from(pipe.axis().direction().components())
-                    }),
+                    &[one, other]
+                        .map(|pipe| PredicatePoint::from(pipe.axis().direction().components())),
                     Measures::Area,
                     log,
                 )),
@@ -3353,8 +3374,9 @@ pub(super) fn two_pipes_run_along_one_line(one: &Cylinder, other: &Cylinder) -> 
             Decision::Zero => {}
             Decision::Pos | Decision::Neg => return Decision::Pos,
             Decision::Undecidable { enclosure } => {
-                widest_that_was_not_told =
-                    Some(widest_that_was_not_told.map_or(enclosure, |so_far| so_far.max(enclosure)));
+                widest_that_was_not_told = Some(
+                    widest_that_was_not_told.map_or(enclosure, |so_far| so_far.max(enclosure)),
+                );
             }
             other => panic!("a two-by-two determinant came back with no sign: {other:?}"),
         }
@@ -3364,6 +3386,51 @@ pub(super) fn two_pipes_run_along_one_line(one: &Cylinder, other: &Cylinder) -> 
         Some(enclosure) => Decision::Undecidable { enclosure },
     }
 }
+
+/// Whether a plane lies along a pipe's axis, **proved and not rounded**.
+///
+/// The sign of `n·w`. [`Decision::Zero`] and the plane holds the axis's
+/// direction, so it cuts the pipe in one endless ruling or two; anything else
+/// and it cuts across, which is an ellipse that closes.
+///
+/// **The same trap as [`two_pipes_run_along_one_line`], one row down.** Both
+/// doors wrote `flat.normal().dot(pipe.axis().direction()) == 0.0`, and a sum of
+/// three products rounding to nothing is not a proof that it is nothing.
+/// `intersect` decides this sign exactly, names such a crossing
+/// `RightRoundWhereItsFacesCross`, and the rounded test had
+/// [`how_a_crossing_runs`] order that closed ellipse along an axis.
+/// `a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not` is one such pair
+/// written out, and
+/// `how_many_planes_a_rounded_dot_calls_flush_with_an_axis_are_not` says how
+/// common they are rather than leaving it at "possible".
+///
+/// Three products of stored numbers summed with no rounding thrown away, which
+/// is level 3 of the cascade written out. `product_is_exact` is the guard
+/// against a product that lands in the subnormals, where the exactness this
+/// rests on stops holding; there is no bound to report for one that does, so the
+/// enclosure is infinite and no policy can accept it.
+pub(super) fn a_plane_lies_along_a_pipes_axis(flat: &Plane, pipe: &Cylinder) -> Decision {
+    let normal = flat.normal().components();
+    let along = pipe.axis().direction().components();
+    let mut total = [0.0; 6];
+    let mut len = 0;
+    for axis in 0..3 {
+        if !product_is_exact(normal[axis], along[axis]) {
+            return Decision::Undecidable {
+                enclosure: f64::INFINITY,
+            };
+        }
+        let (high, low) = two_product(normal[axis], along[axis]);
+        let mut grown = [0.0; 6];
+        len = expansion_sum(&total[..len], &[low, high], &mut grown);
+        total[..len].copy_from_slice(&grown[..len]);
+    }
+    expansion_sign(&total[..len])
+}
+
+/// The name the question of whether a plane holds a direction goes by in
+/// provenance records.
+const A_PLANE_AGAINST_AN_AXIS: &str = "a plane against an axis";
 
 /// The cross product of two boxes.
 fn cross_of(one: PredicatePoint, other: PredicatePoint) -> [Interval; 3] {
@@ -4342,16 +4409,17 @@ mod curved {
 #[cfg(test)]
 mod what_the_curved_arrangement_reaches {
     use rcad_geom::{
-        Axis, Cone, Cylinder, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus, Vector,
-        intersect,
+        Axis, Cone, Cylinder, EdgeRun, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus,
+        Vector, intersect,
     };
     use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 
     use super::super::bake::bake;
     use super::super::cuts;
     use super::{
-        HowItRuns, a_pair_that_crosses_in_straight_lines, cross_of, gradient_at,
-        how_a_crossing_runs, round_a_closed_crossing, split_a_face, two_pipes_run_along_one_line,
+        HowItRuns, a_pair_that_crosses_in_straight_lines, a_plane_lies_along_a_pipes_axis,
+        cross_of, gradient_at, how_a_crossing_runs, round_a_closed_crossing, split_a_face,
+        two_pipes_run_along_one_line,
     };
     use crate::{Error, Model, SolidKey};
 
@@ -4979,7 +5047,11 @@ mod what_the_curved_arrangement_reaches {
         else {
             panic!("two leaning pipes cross along curves and nothing else");
         };
-        assert_eq!(runs.len(), 1, "one closed loop right round where they cross");
+        assert_eq!(
+            runs.len(),
+            1,
+            "one closed loop right round where they cross"
+        );
 
         assert!(
             !a_pair_that_crosses_in_straight_lines(&here, &there, &mut log)
@@ -4993,6 +5065,161 @@ mod what_the_curved_arrangement_reaches {
                 Err(Error::ACrossingThisCannotBeOrderedAlong)
             ),
             "a quartic is refused by name, where it used to be ordered along `y`"
+        );
+    }
+
+    /// **A plane whose `f64` dot with a pipe's axis is exactly nothing and which
+    /// does not hold that axis.**
+    ///
+    /// The pipe-and-pipe row above one row down. A stored normal and a stored
+    /// axis direction whose three products sum to exactly `0.0` in `f64` while
+    /// the exact sum is above zero.
+    /// [`how_many_planes_a_rounded_dot_calls_flush_with_an_axis_are_not`] says
+    /// how common that is; this one is the pair written out end to end.
+    ///
+    /// `intersect` decides the same sign exactly and names the crossing
+    /// `RightRoundWhereItsFacesCross`: one closed ellipse. The rounded test said
+    /// the plane lay along the axis, so [`how_a_crossing_runs`] ordered that
+    /// ellipse along an axis as though it were an endless ruling.
+    #[test]
+    fn a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let normal = Vector::new(
+            0.050_410_611_140_686_46,
+            0.827_151_841_248_433_8,
+            -0.559_712_963_762_452_5,
+        );
+        let along = Vector::new(
+            0.566_485_713_199_844_4,
+            -0.485_233_694_733_434_14,
+            -0.666_064_710_246_537_6,
+        );
+        let flat = Plane::from_point_and_normal(Point::origin(), normal).expect("a plane");
+        let pipe = Cylinder::new(Axis::new(Point::origin(), along).expect("an axis"), 1.0)
+            .expect("a pipe of radius one");
+        assert_eq!(
+            flat.normal(),
+            normal,
+            "the plane stores the normal it was given, so the numbers below are the \
+             ones the doors read"
+        );
+        assert_eq!(pipe.axis().direction(), along, "and so does the axis");
+        assert_eq!(
+            flat.normal().dot(pipe.axis().direction()),
+            0.0,
+            "the `f64` dot is exactly nothing, and that is what used to decide this row"
+        );
+
+        assert_eq!(
+            a_plane_lies_along_a_pipes_axis(&flat, &pipe),
+            Decision::Pos,
+            "summed with no rounding thrown away, the dot is proved above zero"
+        );
+
+        let (here, there) = (Surface::Plane(flat), Surface::Cylinder(pipe));
+        let SurfaceMeet::Curves(runs) = intersect(&here, &there, &policy, &mut log)
+            .expect("a plane cutting across a pipe crosses it")
+        else {
+            panic!("a plane cutting a pipe meets it along curves and nothing else");
+        };
+        assert_eq!(runs.len(), 1, "one closed ellipse");
+        assert_eq!(
+            runs[0].run(),
+            &EdgeRun::RightRoundWhereItsFacesCross,
+            "`intersect` decides the same sign exactly, and names a curve that closes"
+        );
+
+        assert!(
+            !a_pair_that_crosses_in_straight_lines(&here, &there, &mut log)
+                .expect("the dot is proved above zero, so nothing ran out of arithmetic"),
+            "an ellipse is not an endless straight line"
+        );
+    }
+
+    /// **How many planes the rounded dot called flush with a pipe's axis and the
+    /// exact one does not, and what `intersect` says about each.**
+    ///
+    /// A search, not a bound: twenty thousand random axes, each given three
+    /// normals built square to it in `f64` and then nudged by one ulp. The
+    /// draws that survive are the ones both [`Axis::new`] and
+    /// [`Plane::from_point_and_normal`] hand straight back, because only those
+    /// let a reader write the numbers the doors read.
+    ///
+    /// Every disagreement is put to `intersect`, which decides the same sign
+    /// exactly: it names a curve that **closes** every time, so the rounded test
+    /// was wrong on all of them and never merely unlucky. Only a floor is
+    /// asserted — the exact count moves with the seed, and what has to stay true
+    /// is that this is a family and not a curiosity.
+    #[test]
+    fn how_many_planes_a_rounded_dot_calls_flush_with_an_axis_are_not() {
+        let policy = Policy::certified();
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut draw = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+        };
+
+        let mut drawn = 0_usize;
+        let mut disagreed = 0_usize;
+        for _ in 0..20_000 {
+            let Ok(axis) = Axis::new(Point::origin(), Vector::new(draw(), draw(), draw())) else {
+                continue;
+            };
+            let along = axis.direction();
+            if Axis::new(Point::origin(), along)
+                .expect("an axis")
+                .direction()
+                != along
+            {
+                continue;
+            }
+            let [x, y, z] = along
+                .cross(Vector::new(draw(), draw(), draw()))
+                .components();
+            for nudged in [
+                Vector::new(f64::from_bits(x.to_bits() + 1), y, z),
+                Vector::new(x, f64::from_bits(y.to_bits() + 1), z),
+                Vector::new(x, y, f64::from_bits(z.to_bits() + 1)),
+            ] {
+                let Ok(flat) = Plane::from_point_and_normal(Point::origin(), nudged) else {
+                    continue;
+                };
+                drawn += 1;
+                if flat.normal().dot(along) != 0.0 {
+                    continue;
+                }
+                let pipe = Cylinder::new(axis, 1.0).expect("a pipe of radius one");
+                if a_plane_lies_along_a_pipes_axis(&flat, &pipe) == Decision::Zero {
+                    continue;
+                }
+                disagreed += 1;
+                let mut log = ProvenanceLog::new();
+                let met = intersect(
+                    &Surface::Plane(flat),
+                    &Surface::Cylinder(pipe),
+                    &policy,
+                    &mut log,
+                )
+                .expect("a plane cutting across a pipe is a shape `intersect` names");
+                assert!(
+                    matches!(&met, SurfaceMeet::Curves(runs) if runs.len() == 1
+                        && runs[0].run() == &EdgeRun::RightRoundWhereItsFacesCross),
+                    "the rounded dot called this plane flush with the axis, and \
+                     `intersect` says {met:?}"
+                );
+            }
+        }
+
+        println!(
+            "{disagreed} of {drawn} near-square planes are called flush with the axis by a \
+             rounded dot and are not"
+        );
+        assert!(
+            disagreed * 10 > drawn,
+            "these are meant to be a family and not a curiosity: {disagreed} of {drawn}"
         );
     }
 }

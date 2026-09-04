@@ -70,8 +70,8 @@ use crate::{
 };
 
 use super::arrange::{
-    a_plane_cuts_a_cone_in_rulings, agreement_of_two_planes, name_of_surface_bits,
-    name_of_the_surface_either_way_round, two_pipes_run_along_one_line,
+    a_plane_cuts_a_cone_in_rulings, a_plane_lies_along_a_pipes_axis, agreement_of_two_planes,
+    name_of_surface_bits, name_of_the_surface_either_way_round, two_pipes_run_along_one_line,
 };
 use super::select::Chosen;
 use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
@@ -2006,8 +2006,8 @@ fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Option<bool>
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] when
 /// [`the_crossing_of_these_runs_straight`] has no answer for the pair — a sixth
-/// kind of [`Surface`], or two pipes whose axes it can prove neither along one
-/// line nor apart. **One arc and two arcs are both answers, so
+/// kind of [`Surface`], or a pipe against a plane or another pipe whose axes it
+/// can prove neither flush nor apart. **One arc and two arcs are both answers, so
 /// neither is the safe reading of a pair nobody has decided.** Guessing *two*
 /// is the wrong answer commit `4b62fd0` records the whole cone row getting for
 /// three units: an arc where the surfaces cross in a ruling comes out as two
@@ -2056,14 +2056,17 @@ fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> Result<W
 /// exact wrong answer is what commit `4b62fd0` records having gone out for the
 /// whole cone row for three units, under the same blanket verdict.
 ///
-/// **Two pipes are the other `None`, and it is arithmetic and not a missing
-/// row.** Whether their axes run along one line is
-/// [`two_pipes_run_along_one_line`], which proves the answer or says it cannot;
-/// this row used to be `w₁.cross(w₂) == Vector::zero()`, and an `f64` cross
-/// product rounding to nothing is not a proof of anything. That predicate's own
-/// doc carries the counterexample and
-/// `arrange`'s `two_pipes_a_rounded_cross_product_calls_parallel_are_not` is the
-/// demonstration.
+/// **Two rows are the other `None`, and both are arithmetic rather than a
+/// missing row.** Whether two pipes' axes run along one line is
+/// [`two_pipes_run_along_one_line`] and whether a plane holds a pipe's axis is
+/// [`a_plane_lies_along_a_pipes_axis`]; each proves its answer or says it
+/// cannot. They used to be `w₁.cross(w₂) == Vector::zero()` and
+/// `n.dot(w) == 0.0`, and neither an `f64` cross product nor an `f64` sum of
+/// three products rounding to nothing is a proof that it is nothing. Both
+/// predicates' own docs carry the counterexample, and `arrange`'s
+/// `two_pipes_a_rounded_cross_product_calls_parallel_are_not` and
+/// `a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not` are the
+/// demonstrations.
 ///
 /// `tests/a_sixth_kind_of_surface.rs` is what notices the day a sixth kind
 /// arrives; `every_pair_of_the_five_kinds_there_are_is_answered` below is what
@@ -2073,7 +2076,11 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         [Surface::Plane(_), Surface::Plane(_)] => Some(true),
         [Surface::Plane(flat), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Plane(flat)] => {
-            Some(flat.normal().dot(pipe.axis().direction()) == 0.0)
+            match a_plane_lies_along_a_pipes_axis(flat, pipe) {
+                Decision::Zero => Some(true),
+                Decision::Neg | Decision::Pos => Some(false),
+                Decision::Undecidable { .. } | _ => None,
+            }
         }
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
             match two_pipes_run_along_one_line(one, other) {
@@ -2492,8 +2499,16 @@ mod tests {
         );
 
         for (named, pair, runs_straight) in [
-            ("two pipes a rounded cross product calls parallel", leaning, false),
-            ("two pipes whose axes really are along one line", side_by_side, true),
+            (
+                "two pipes a rounded cross product calls parallel",
+                leaning,
+                false,
+            ),
+            (
+                "two pipes whose axes really are along one line",
+                side_by_side,
+                true,
+            ),
         ] {
             for turned in [pair, [pair[1], pair[0]]] {
                 assert_eq!(
@@ -2511,11 +2526,11 @@ mod tests {
             )
             .unwrap_or_else(|why| panic!("{named} is a shape `intersect` names: {why:?}"));
             let intersect_says_lines = matches!(&met, SurfaceMeet::Curves(runs) if runs
-                .iter()
-                .all(|run| matches!(
-                    run.run(),
-                    EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. }
-                )));
+            .iter()
+            .all(|run| matches!(
+                run.run(),
+                EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. }
+            )));
             assert_eq!(
                 intersect_says_lines, runs_straight,
                 "{named} came back from `intersect` as {met:?}"
