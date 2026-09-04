@@ -51,11 +51,9 @@
 //! plane of both solids is the closure of the argument above: every face on
 //! either side of any edge of the answer is then diced by the one set, so the
 //! two sides agree about where the corners are wherever they come from.
-//! [`join_up_what_is_one_face`] folds the extra pieces back into one face and
-//! drops the corners that stopped being corners, so nothing of the split
-//! reaches the answer.
-//!
-//! [`join_up_what_is_one_face`]: super::assemble
+//! [`assemble`](super::assemble)'s joining folds the extra pieces back into one
+//! face and drops the corners that stopped being corners, so nothing of the
+//! split reaches the answer.
 //!
 //! # Two gaps, left open on purpose
 //!
