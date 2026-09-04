@@ -11,24 +11,26 @@
 //!
 //! `intersect` names a plane against a cone in **all seven** of the shapes they
 //! can meet in — its own table says so, and this file's
-//! `a_block_wall_beside_a_cone_stops_at_a_hyperbola_that_never_closes` puts a
-//! block's wall through it and gets a curve back. Naming the crossing is
-//! therefore no longer where a cone's fusibility is decided. **Whether the named
-//! curve closes** is, because going round a closed curve is the only order
-//! `arrange` has for a conic:
+//! `a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes` puts a
+//! block's wall through it and gets a curve back. Naming the crossing is not
+//! where a cone's fusibility is decided, and neither is **whether the named
+//! curve closes** any more:
 //!
 //! - a plane **square to the cone's axis** cuts a circle, which closes;
 //! - a plane leaning less than the cone's own side cuts an ellipse, which
 //!   closes;
 //! - a plane **parallel to the axis**, which is four of a block's six faces when
 //!   the block stands upright, cuts a **hyperbola**. `intersect` names it and
-//!   hands back one endless run per nappe; `arrange` is what then gives up, and
-//!   the message that reaches the caller is *"nothing can put points in order
-//!   along this curve"*. That is where the block family's 90 refusals stop
-//!   today, and the test named above is the demonstration rather than the
-//!   paragraph;
-//! - anything curved against a cone is a degree-four space curve, and that one
-//!   `intersect` does still refuse outright.
+//!   hands back one endless run per nappe. That branch still never closes, and
+//!   `arrange`'s `HowItRuns::AlongABend` orders points along it anyway, so the
+//!   block family's 90 refusals no longer stop there — they stop in four later
+//!   places, which
+//!   `what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`
+//!   counts one by one;
+//! - anything curved against a cone `intersect` does still refuse outright. For
+//!   a cone against another cone that is the degree-four space curve; for a cone
+//!   coaxial with a pipe it is two circles, which `intersect` names now, and the
+//!   refusal moves one step later to `three_surfaces.rs`.
 //!
 //! The families are chosen to measure each of those rather than to average them
 //! away.
@@ -76,6 +78,15 @@ use cones::{a_frustum, a_pointed_cone};
 
 /// How many pairs each family draws.
 const DRAWS: usize = 16;
+
+/// What every refusal of a cone against a coaxial pipe says today.
+///
+/// `intersect` names that pair now, so the fuse gets past the geometry and stops
+/// where three surfaces have to be solved at once. Written out because the
+/// assertion that uses it is the record of *which* wall the family sits behind,
+/// and a message compared against itself would record nothing.
+const THREE_SURFACES_AND_ONLY_ONE_FLAT: &str = "geometry: where three surfaces meet is only \
+     worked out when two of them are flat, and fewer than two of these are";
 
 /// A deterministic sequence, so that a rate is one number and not a range.
 struct Draw(u64);
@@ -274,9 +285,16 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 ///
 /// `AFrustumAgainstABar` is a cone coaxial with a pipe. That pair crosses in
 /// exactly two circles, so the old shared reason — a degree-four space curve —
-/// was never true of it (§50.11). It sits at nothing answered because
-/// `intersect` does not name the pair yet, and **this pin is written to break on
-/// the day it does**, which is what a pin is for.
+/// was never true of it (§50.11). **The pin was written to break the day
+/// `intersect` named the pair. `intersect` names it now, and the pin did not
+/// break**, because the fuse gets one step further and stops at a different
+/// wall: where three surfaces meet is only worked out when two of them are flat,
+/// and a cone, a pipe and a cap plane give one flat surface out of three. All 96
+/// refusals say so, and this is the number and the name to re-derive when
+/// `three_surfaces.rs` learns the case — which §50.6 keeps out of this unit.
+///
+/// A pin that holds for a new reason is a pin saying nothing until the reason is
+/// written down, so the refusals are asserted by name here and not only counted.
 ///
 /// `TwoFrustumsOnOneAxis` is a cone against another cone, which §50.2 item 4
 /// keeps out of scope: two cones sharing an apex meet along rulings, which are
@@ -309,12 +327,22 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// - The other **90 refusals all moved**, from `where_a_plane_and_a_cone_cross`
 ///   refusing to name the curve, to *"nothing can put points in order along this
 ///   curve"*. Naming and drawing a hyperbola were the whole of the geometry's
-///   part; **ordering points along one is the arrangement's**, and it is the next
-///   piece of work this family is waiting on.
+///   part; **ordering points along one is the arrangement's**.
 ///
-/// So the assertion is now a **floor at what has been measured**, in the shape
-/// §19.1 asks for: this family may not answer fewer than it does today. Re-derive
-/// it when it moves; do not relax it.
+/// **It has since happened a second time, and the rate did not move at all.**
+/// `arrange`'s `HowItRuns::AlongABend` orders points along a hyperbola now, and
+/// this family still answers 6 of 96 — the same six, the draw whose block misses
+/// the frustum. What changed is all 90 names, and they no longer share one:
+/// `select.rs`'s *a point inside a piece of a face* 60, a corner too far out for
+/// the triangulator 14, a face whose boundary crosses itself 7, and four faces
+/// along one edge 9.
+/// [`what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`]
+/// is that breakdown pinned rather than printed, which is what §15.10 asks of a
+/// rate that stayed still while everything under it moved.
+///
+/// So the assertion here stays a **floor at what has been measured**, in the
+/// shape §19.1 asks for: this family may not answer fewer than it does today.
+/// Re-derive it when it moves; do not relax it.
 ///
 /// # The six are not six cuts, and a count could not say so
 ///
@@ -357,10 +385,10 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
             100.0 * refused as f64 / fuses as f64
         );
         assert!(fuses >= 90, "{}: only {fuses} fuses", family.named());
-        every.push((family, fuses, answered, refused));
+        every.push((family, fuses, answered, refused, gave_up));
     }
 
-    for (family, fuses, answered, refused) in every {
+    for (family, fuses, answered, refused, gave_up) in every {
         match family {
             Family::AFrustumAgainstACornerUpCube | Family::APointedConeAgainstACornerUpCube => {
                 assert!(
@@ -376,18 +404,29 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                     family.named()
                 );
             }
-            Family::AFrustumAgainstABar => assert_eq!(
-                answered,
-                0,
-                "{}: this is a cone coaxial with a pipe, which crosses in exactly two circles \
-                 and not in the degree-four curve this pin used to name (§50.11). It was \
-                 measured at 0 answered of 96, every refusal `intersect` declining to name \
-                 that pair. The pin is written to break the day the pair is named and points \
-                 can be put in order along it, and it answered {answered} of {fuses} here. \
-                 When it breaks, re-derive the number over this whole family and pin the \
-                 measured one — do not relax it to a floor and do not guess it (§19.1)",
-                family.named()
-            ),
+            Family::AFrustumAgainstABar => {
+                assert_eq!(
+                    answered,
+                    0,
+                    "{}: this is a cone coaxial with a pipe, which crosses in exactly two \
+                     circles (§50.11). `intersect` names that pair now, so what holds this \
+                     family at nothing answered is one step further down: where three \
+                     surfaces meet is only worked out when two of them are flat, and a cone, \
+                     a pipe and a cap plane give one flat surface out of three. It answered \
+                     {answered} of {fuses} here. When this breaks, re-derive the number over \
+                     this whole family and pin the measured one — do not relax it to a floor \
+                     and do not guess it (§19.1)",
+                    family.named()
+                );
+                assert_eq!(
+                    gave_up,
+                    BTreeMap::from([(THREE_SURFACES_AND_ONLY_ONE_FLAT.to_owned(), fuses)]),
+                    "{}: every one of these refusals is the three-surface meet, measured. A \
+                     different name here means the wall moved and this pin's reason has to be \
+                     re-derived with it (§15.10)",
+                    family.named()
+                );
+            }
             Family::TwoFrustumsOnOneAxis => assert_eq!(
                 answered,
                 0,
@@ -852,35 +891,39 @@ fn uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_as
     );
 }
 
-/// The 90 refusals stop where they say they stop, and this is the step named.
+/// The curve is still a hyperbola and it still never closes — and that has
+/// stopped being what stops the fuse.
 ///
-/// *"Nothing can put points in order along this curve"* is a late message: it is
-/// what four separate arrivals in the fuse all print, and one of them is a
-/// wildcard arm for a shape `intersect` has no word for. A refusal that had
-/// really gone wrong two steps earlier would look exactly the same from outside,
-/// so the label is checked here rather than believed.
+/// This test used to end by asserting that the fuse of the pair below came back
+/// *"nothing can put points in order along this curve"*, which is where the
+/// block family's 90 refusals stopped. `arrange`'s `HowItRuns::AlongABend` puts
+/// points in order along a bend now, so the last of the three steps below has
+/// been turned round: the geometry is unchanged and the arrangement walks past
+/// it.
 ///
 /// Three things, in the order the fuse asks them, over the block plane that
-/// actually refuses:
+/// refuses:
 ///
-/// 1. **`intersect` names the curve.** The geometry is not where this stops any
-///    more — that is what the unit changed, and the pin at the top of this file
-///    is what caught it changing.
-/// 2. **`where_a_closed_crossing_starts` refuses it**, and its own name for the
-///    refusal is the sharp one: *these two surfaces cross in a curve that runs on
-///    for ever rather than a closed one*. A hyperbola branch is a conic and is
-///    not closed, and going round a closed curve is the only order the
-///    arrangement has for a conic.
-/// 3. **The fuse of that same pair refuses**, so the two above are on the path
-///    and not beside it.
+/// 1. **`intersect` names the curve.** The geometry is not where this stops, and
+///    never was after the hyperbola landed.
+/// 2. **`where_a_closed_crossing_starts` still refuses it**, with the sharp
+///    name: *these two surfaces cross in a curve that runs on for ever rather
+///    than a closed one*. A hyperbola branch is a conic and is not closed, so
+///    going round it is not an order anything can use. That is a fact about the
+///    curve and no amount of arrangement work changes it.
+/// 3. **The fuse of that same pair no longer stops there.** It still refuses,
+///    and what it says now is a triangulation the mesher would not take — a
+///    place four steps further down. Asserted as *not* the ordering message
+///    rather than as one particular later one, because which later wall a given
+///    draw reaches is what
+///    [`what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`]
+///    counts, and pinning one draw's wall in two places would be one
+///    measurement written twice.
 ///
-/// So the label means what it says: the arrangement, not the intersector, and
-/// ordering, not naming. What the message loses on the way out is precision —
-/// `arrange`'s `Err(_) =>` turns the geometry's *"this crossing is not closed"*
-/// into *"nothing can put points in order"*, which is true but says less than
-/// what was known one line earlier.
+/// So step 2 is what keeps this test honest. Without it, "the fuse got past the
+/// ordering" could mean the curve had quietly stopped being a hyperbola.
 #[test]
-fn a_block_wall_beside_a_cone_stops_at_a_hyperbola_that_never_closes() {
+fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
     let policy = Policy::certified();
     let mut draw = Draw(0x5EED);
     let (mut model, cone, block) =
@@ -935,9 +978,88 @@ fn a_block_wall_beside_a_cone_stops_at_a_hyperbola_that_never_closes() {
             &policy,
             &mut ProvenanceLog::new(),
         )
-        .expect_err("and the fuse of that same pair refuses");
+        .expect_err("this pair still refuses, further down");
+    println!("and the fuse of that same pair now says: {refused}");
     assert!(
-        format!("{refused}").contains("put points in order"),
-        "this family's 90 refusals are supposed to be that one, and this said {refused}"
+        !format!("{refused}").contains("put points in order"),
+        "the curve above is ordered along the bend now, so nothing here may still \
+         stop for want of an order: {refused}"
     );
+}
+
+/// What the block family's 90 refusals are, now that none of them is the
+/// ordering.
+///
+/// §15.10: a rate that moves is published with the list of what moved. **The
+/// rate did not move** — this family answered 6 of 96 before the bend and
+/// answers 6 of 96 after — and every one of the 90 refusals changed its name, so
+/// the list is what there is to publish. Before, all 90 were *"nothing can put
+/// points in order along this curve"*. After, they are four different walls, and
+/// a count on its own could not have said that.
+///
+/// The four, measured over this family's own draws rather than taken from
+/// anywhere:
+///
+/// - **a point inside a piece of a face**, 60. `select.rs` could not say whether
+///   a piece it had cut was in or out. The same wall
+///   `ordering_points_along_an_endless_bend.rs` finds behind all thirty-one of
+///   its grid's refusals.
+/// - **a corner too far out for the triangulator**, 14. A face went to be cut
+///   into triangles and a corner of it was outside the range the triangulator
+///   takes.
+/// - **a face whose boundary crosses itself**, 7. The same step, refusing for
+///   the other of its two reasons.
+/// - **four faces along one edge**, 9. The answer is not something a `Model` can
+///   hold, which is §17.7's catalogued case and not an arithmetic refusal at
+///   all.
+///
+/// Matched on what each message *is about* rather than on the whole string,
+/// because two of them carry the number of the corner they stopped at and that
+/// number is a fact about one draw. Anything the four do not describe fails the
+/// test rather than being counted as an other, so a fifth wall cannot arrive
+/// unnoticed.
+#[test]
+fn what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering() {
+    let (fuses, answered, gave_up) = how_each_fuse_went(Family::AFrustumAgainstABlock);
+    let mut walls: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for (named, how_many) in &gave_up {
+        *walls.entry(which_wall_it_stopped_at(named)).or_default() += how_many;
+    }
+    println!(
+        "a frustum against a block: {answered} of {fuses} answered, and the rest stopped at {walls:?}"
+    );
+
+    assert_eq!(
+        walls,
+        BTreeMap::from([
+            ("a point inside a piece of a face", 60),
+            ("a corner too far out for the triangulator", 14),
+            ("a face whose boundary crosses itself", 7),
+            ("four faces along one edge", 9),
+        ]),
+        "these are the four walls this family was measured against; re-derive them \
+         when they move rather than widening the test (§19.1)"
+    );
+}
+
+/// Which of the four walls a refusal's message is about.
+///
+/// Panics on anything else, so a fifth wall is a failure and not a silent
+/// bucket.
+fn which_wall_it_stopped_at(named: &str) -> &'static str {
+    if named == "a point inside a piece of a face" {
+        return "a point inside a piece of a face";
+    }
+    if named.contains("could not be cut into triangles") {
+        if named.contains("TooLarge") {
+            return "a corner too far out for the triangulator";
+        }
+        if named.contains("the boundary crosses itself") {
+            return "a face whose boundary crosses itself";
+        }
+    }
+    if named.contains("an edge would have 4 faces along it") {
+        return "four faces along one edge";
+    }
+    panic!("a block against a cone stopped somewhere none of the four names: {named:?}")
 }
