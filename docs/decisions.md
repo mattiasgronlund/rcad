@@ -16057,7 +16057,7 @@ an interface another lane must guess is how two lanes become one (§48.4).
 | **F the soak** | a shared soak module, the `checked_mul` bug, the missing knife-edge arm (§50.9) | `tests/soak/mod.rs`, `tests/how_far_the_marcher_strays_from_a_crossing_that_is_a_circle.rs`, `tests/every_point_along_a_crossing_is_on_both_surfaces.rs`, `tests/the_same_pair_turned_names_the_same_kind_of_crossing.rs`, `tests/how_often_naming_a_crossing_refuses.rs`, `rcad-topo/tests/turning_a_fuse.rs` |
 | **A the crossing** | name the coaxial pair; split `intersect.rs:181`'s arm | `rcad-geom`: `intersect.rs`, `error.rs`, `walk.rs`, its own tests |
 | **B the bend** | third `HowItRuns` variant, the ordering call sites, and the 84 of 84 | `rcad-topo/src/fuse/arrange.rs` |
-| **C the consumer** | `settle_on_the_lower_rounding`'s superseded key; wire A's answer into `the_crossing_of_these_runs_straight` | `rcad-topo/src/fuse/assemble.rs` |
+| **C the consumer** | `settle_on_the_lower_rounding`'s superseded key; split the two frustum families' pin apart, and re-word `assemble.rs:2118`'s comment to cite the circles rather than the refusal (§50.11) | `rcad-topo/src/fuse/assemble.rs`, `rcad-topo/tests/how_often_a_fuse_with_a_cone_refuses.rs` |
 | **D the negative zero** | the second latent defect, which spans both files | `arrange.rs` **and** `assemble.rs`, after B and C merge |
 
 **A, B and C run concurrently. D is serialized behind both.** D is one defect
@@ -16083,7 +16083,11 @@ produced better work than the brief that said what to build. Three units running
 - **A.** **Fail:** the coaxial case is named but `intersect.rs:181` still raises
   `ACrossingBetweenAConeAndAnotherCurvedSurface` for it; or the *"not named at
   all"* claim at `intersect.rs:110-114` is left standing; or anything beyond the
-  coaxial pair is named (§50.2 item 4).
+  coaxial pair is named (§50.2 item 4); or `error.rs:331-335`'s *"one sign
+  question apiece"* is left standing, which §50.11 showed is wrong twice over —
+  there is no shape question, and there are two coaxiality signs, not one. **Also
+  a fail: reporting this work as moving the import rate.** It moves it by zero
+  files and §50.11 measured that before the lane ran.
 - **B.** **Fail:** the frustum family answers fewer than **84 of 84**; or any new
   call site of the ordering predicate carries the spike's derivation instead of
   its own. §49.6 published 84 of 84 on a spike's word and §15.6 says a published
@@ -16253,3 +16257,78 @@ other end — an expression in a third copy, guarded rather than removed.
 > Score it by asking, at the next gate, of every new function: was there already
 > one, and what search would have found it? The countermeasure is the cheap one —
 > grep before writing, not after review.
+
+### 50.11 The spike passed, and it moved the work it was written for
+
+**Pass. 80 000 pairs, 0 undecided, 0 disagreements**, over four draws of 20 000
+with slopes and radii spanning `1e-4 … 1e4` each, so the circle standoff
+`r/(s·√W)` spanned sixteen decades. Every decision came from level 2 or level 3.
+
+**The claim it was sent to demonstrate is wrong, and in a useful direction.**
+`error.rs:331-335` says the coaxial cases are *"one sign question apiece"*. There
+is **no shape question at all**: a `Cone` is double-napped (`cone.rs:20-34`) and a
+`Cylinder` has a positive radius, so `slope·|h| = ρ` has exactly two roots
+`h = ±ρ/slope`. It is **always exactly two circles** — never zero, never one, and
+the sphere-and-pipe row's `Pos/Zero/Neg` table has no analogue here. The two signs
+that *are* asked decide whether the pair is **coaxial**, and there are two, not
+one: `‖w_cone × w_pipe‖² = 0` and `‖(apex − o_pipe) × w_pipe‖² = 0`. Both are sums
+of squares, so both answer only `Pos` or `Zero`, and both are shapes
+`where_two_pipes_cross:853` already asks. **Nothing new needs deriving**, which is
+§50.10's prediction pointing at a lane before the lane ran.
+
+**§50.2 item 4 was right to flag the hazard and wrong that it applies here.**
+`assemble.rs:2118` asks *does this crossing hold a straight line*, and **both**
+answers to the coaxiality sign give the same answer to it — a quartic holds no
+line, and two circles hold no line either. The arm stays `Some(false)`, now under
+a proof about geometry instead of about `intersect`'s refusal. So **Lane C's
+`assemble.rs` work is a comment, not a door**, and no `Policy`-free export is
+needed at all — unlike §49.8's pair. Lane C is thin again and takes its weight
+from the pin below instead.
+
+**A limit, total and deferred.** 20 000 of 20 000 apexes built as `origin + t·ŵ`
+on a **non-coordinate** axis land off the stored line and are refused. Worst miss
+`2.6e-14` on coordinates of order 100 — one or two ulps — and the exact predicate
+is *right*: those surfaces genuinely are not coaxial. A limit, not a gap (§16.10).
+
+**Then the corpus was asked whether any of this is worth doing, and the first
+answer was no.** Across all 367 files, `ACrossingBetweenAConeAndAnotherCurvedSurface`
+is raised **zero times**, and naming the coaxial pair moves the import rate by
+**exactly zero files**. Never blended, per §15.10: kicad holds a cone in 9 of 323
+files and a coaxial cone-pipe neighbour in **6 of 323 (1.9%)**; nist holds one in
+**32 of 44 (73%)**, with **1046 of 1162** adjacent cone-pipe edges exactly
+coaxial. All 38 of those files refuse for something else — 26 of nist's 32 die in
+the *reader*, on `B_SPLINE_CURVE_WITH_KNOTS` and `VERTEX_LOOP`, before geometry is
+asked at all.
+
+Two findings inside that measurement are worth keeping. **Every coaxial pair in
+both corpora — 24 of 24 kicad, 2190 of 2190 nist — sits on a coordinate
+direction**, which is the spike's limit confirmed from the other side and makes
+the count robust. And **nothing anywhere shares an `AXIS2_PLACEMENT_3D` between a
+cone and a cylinder** — zero pairs, both corpora — so the expected "they qualify
+because the exporter reused a placement" is simply false. About 5% of nist's real
+countersinks sit on leaning axes and stay refused even with Lane A.
+
+**But the importer was the wrong place to look, and §48.7 had already said so.**
+`crates/rcad-topo/tests/how_often_a_fuse_with_a_cone_refuses.rs:366` pins
+`AFrustumAgainstABar` and `TwoFrustumsOnOneAxis` at `answered == 0`, with the
+reason written into the assertion: *"a cone against another curved surface is a
+degree-four space curve nothing here can name."* `a_frustum` builds on
+`Cone::new(Axis::z(), slope)` (`tests/cones/mod.rs:49`) and the bar is translated
+along `z` alone (`:207-213`), so **`AFrustumAgainstABar` is a coaxial cone and
+pipe on a coordinate axis — precisely the case the spike decided 20 000 times out
+of 20 000.**
+
+- **`AFrustumAgainstABar` is Lane A's named consumer**, and §13 is satisfied by it
+  rather than by any file.
+- **`TwoFrustumsOnOneAxis` is not.** It is cone against cone (`:216-219`), which
+  §50.2 item 4 keeps out of scope, and it stays pinned at zero.
+- **The pin at `:366` has to move, and no lane owned that file.** Lane A landing
+  makes that assertion *fail*, which is the correct behaviour of a pin and the
+  reason it was written. `how_often_a_fuse_with_a_cone_refuses.rs` is added to
+  **Lane C's** write set, and splitting the two families' expectations apart is
+  what Lane C is for now that its door turned into a comment.
+
+**So Lane A stands, with its claim rewritten and its consumer named.** What it
+must not claim is an import-rate gain: there is none, and §50.5's failure
+criterion for Lane A is extended to say so — a lane that reports this work as
+moving the corpus has reported a number the measurement above already refutes.
