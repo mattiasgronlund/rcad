@@ -55,14 +55,25 @@
 //! so every corner of those answers is a whole number too, and a whole-number
 //! shift of them is exact. The laws that hold over a ball hold bit for bit.
 //!
-//! The one row here that is **not** a comparison is
-//! [`what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does`].
-//! It measures how far four meshed volumes are from adding up and how fast that
-//! closes as the mesh refines, because `Solid::measure` is not
-//! decomposition-invariant on a curved skin and inclusion and exclusion is
-//! therefore not assertable over a ball. It is a measurement with a threshold on
-//! it, not a comparison with slack in it, and nothing it does is used to decide
-//! whether two answers agree.
+//! **The two rows about a curved volume are the exception, and neither of them
+//! is a comparison.** `Solid::measure` is not decomposition-invariant on a
+//! curved skin — the mesh of a whole ball is not the mesh of its two halves put
+//! together — so inclusion and exclusion over a ball cannot be asserted exactly
+//! the way it is over the lattice family.
+//!
+//! [`what_a_block_and_a_ball_take_up_adds_up_inside_a_stated_share_of_what_they_declare`]
+//! asserts it anyway, and what makes that honest is that the four measurements
+//! each declare how far out they are. The residual is checked against a
+//! **stated share** of the four added up and never against the sum itself: the
+//! four charge the same shells twice with opposite signs, so the sum runs two
+//! orders of magnitude over the residual and a law asserted at it could not
+//! fail. [`A_CURVED_LAW_MAY_USE_THIS_MUCH_OF_WHAT_THE_FOUR_DECLARE`] carries the
+//! measurement and the margin.
+//! [`what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does`] is
+//! the other half of the same statement, from the other side: the gap closes
+//! faster than a hundredfold when the deflection does, which says the residual
+//! is the mesh and not the fuse. Neither is used to decide whether two answers
+//! agree.
 //!
 //! The turned family has none of that, so the only properties run over it are
 //! the ones that are exactly true whatever the coordinates are: two answers
@@ -125,11 +136,12 @@ use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{
-    BallAndBlock, Configuration, CurvedPair, Elsewhere, Movement, Placed, Rigid, Shape, Skew, Turn,
-    a_ball_a_bar_and_a_block, a_ball_and_a_block, a_chain_of_fuses, a_curved_pair, a_flush_pair,
-    a_frustum_and_a_block, a_lattice_pair, a_lattice_trio, a_pair_leaning_the_same_way,
-    a_pair_somewhere_else, a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
-    a_turned_solid_and_its_copy, a_turned_solid_and_several_copies,
+    BallAndBlock, Configuration, CurvedPair, Elsewhere, FrustumAndBlock, Movement, Placed, Rigid,
+    Shape, Skew, Turn, a_ball_a_bar_and_a_block, a_ball_and_a_block, a_chain_of_fuses,
+    a_curved_pair, a_flush_pair, a_frustum_and_a_block, a_lattice_pair, a_lattice_trio,
+    a_pair_leaning_the_same_way, a_pair_somewhere_else, a_rigid_movement, a_skew_pair,
+    a_solid_and_its_copy, a_turned_pair, a_turned_solid_and_its_copy,
+    a_turned_solid_and_several_copies,
 };
 
 /// How many configurations a property that runs two fuses per case sees.
@@ -289,6 +301,25 @@ const SKEW_REFUSALS_MUST_STAY_BELOW: f64 = 0.18;
 /// let a property that has stopped comparing anything through: halving the rate
 /// of any of them trips it.
 const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
+
+/// The same for the one family that sits under [`SOME_COMPARISONS_MUST_HAPPEN`].
+///
+/// A frustum standing up through a block answers when the cone above its own top
+/// cap stays clear of the block's side walls and refuses when it does not —
+/// [`what_stops_a_block_cutting_a_frustum_is_the_cone_above_its_own_top_cap`]
+/// pins that boundary exactly. Which side of it a drawn case lands on is decided
+/// almost entirely by the one slope the case draws, so the share that answers
+/// swings with 48 draws of a three-valued number rather than with 126
+/// comparisons, and it swings widely.
+///
+/// **Eight fresh-seed runs reached 30%, 33%, 37%, 38%, 40%, 44%, 44% and 46%.**
+/// The worst of those clears [`SOME_COMPARISONS_MUST_HAPPEN`] by four hundredths
+/// of one comparison, which is a floor a property brushes rather than a guard,
+/// and shipping it would have been a flake. A fifth is a **margin of ten points
+/// under the worst measured** — about one and a half of that spread's own
+/// standard deviations — and it still fires on anything that halves the rate,
+/// which is what the floor is for.
+const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
 
 /// How much of the lattice control comes back as something a `Model` cannot
 /// hold.
@@ -1700,24 +1731,189 @@ fn every_certified_fuse_of_a_ball_and_a_block_is_decided_and_records_nothing() {
     );
 }
 
-/// Inclusion and exclusion over a ball, and **why it is not asserted**.
+/// Inclusion and exclusion over a round pair: `vol(A ∪ B) + vol(A ∩ B)` is
+/// `vol(A) + vol(B)`, asserted to a **stated share** of what the four
+/// measurements declare.
 ///
-/// The lattice row asserts `vol(A ∪ B) + vol(A ∩ B) = vol(A) + vol(B)` exactly,
-/// and the reason it can is at the top of this file: a rectilinear solid's
-/// six-volume is a whole number reached with no rounding. A ball has no such
-/// volume. `Solid::measure` meshes a curved skin to a [`Deflection`], and the
-/// mesh of a whole ball is not the mesh of its two halves put together — so the
-/// four volumes do not add up, and the amount by which they miss is a fact about
-/// the mesh and not about the fuse.
+/// The lattice row asserts the same law exactly, and the reason it can is at the
+/// top of this file: a rectilinear solid's six-volume is a whole number reached
+/// with no rounding. A ball has no such volume. `Solid::measure` meshes a curved
+/// skin to a [`Deflection`], and the mesh of a whole ball is not the mesh of its
+/// two halves put together, so the four volumes miss each other by an amount
+/// that is a fact about the mesh.
 ///
-/// This measures that rather than asserting the law, and the measurement is what
-/// tells the two apart: **the gap falls by more than a hundredfold when the
-/// deflection falls a hundredfold**, which a wrong answer would not do.
+/// **Each of the four says how far out it is**, though, and that is what makes
+/// the law assertable rather than only measurable: `Measurement::volume_error`
+/// is a bound on how much material one meshed solid hides, so the four sides
+/// added up bound the law's residual. The summed bound is not what is asserted
+/// against — see [`A_CURVED_LAW_MAY_USE_THIS_MUCH_OF_WHAT_THE_FOUR_DECLARE`] for
+/// why that would be vacuous and where the share comes from.
 ///
-/// It is the same call §17.6's tenth piece is owed for the turned family, one
-/// surface further out: a bound on the mesh is what would let the law be
-/// asserted here, and guessing a tolerance instead would make the test measure
-/// the tolerance (§14.1 question 1).
+/// **The block is flat and declares nothing**, so three of the four terms carry
+/// the tolerance and the fourth contributes exactly zero — which is the honest
+/// shape of it, since a cube's volume is exact.
+#[test]
+fn what_a_block_and_a_ball_take_up_adds_up_inside_a_stated_share_of_what_they_declare() {
+    let worst = Cell::new(0.0f64);
+    let worst_at = RefCell::new(String::new());
+    let grid: RefCell<BTreeMap<(u32, String), f64>> = RefCell::new(BTreeMap::new());
+    let tally = over(CASES, a_ball_and_a_block(), |pair, tally| {
+        let (model, keys) = pair.build();
+        let (block, ball) = (keys[0], keys[1]);
+        tally.meaning_to_compare();
+
+        let coordinates = Coordinates::LieOnARoundWall;
+        let Some(united) =
+            fused(tally, coordinates, &model, &[block], &[ball], Rule::Union)?.answer()
+        else {
+            return Ok(());
+        };
+        let Some(shared) = fused(
+            tally,
+            coordinates,
+            &model,
+            &[block],
+            &[ball],
+            Rule::Intersection,
+        )?
+        .answer() else {
+            return Ok(());
+        };
+        tally.comparing();
+
+        for how_fine in HOW_FINE_THE_LAW_IS_ASKED_AT {
+            let deflection = Deflection::of(how_fine).expect("a length");
+            let sides = [
+                how_much_it_holds(&united.0, &united.1, deflection),
+                how_much_it_holds(&shared.0, &shared.1, deflection),
+                how_much_it_holds(&model, &[block], deflection),
+                how_much_it_holds(&model, &[ball], deflection),
+            ];
+            let out_by = sides[0].0 + sides[1].0 - sides[2].0 - sides[3].0;
+            let declared: f64 = sides.iter().map(|(_, error)| error).sum();
+
+            // §47.4 item 1: a tolerance nothing can exceed has measured nothing,
+            // and an infinite one is the plainest form of that. A ball's skin
+            // bends at its own radius, which is one or two here and never near
+            // the deflection, so this is a guard and not a case.
+            prop_assert!(
+                declared.is_finite() && declared > 0.0,
+                "at a deflection of {} the four measurements declared {declared}, and \
+                 nothing is worth asserting against that",
+                how_fine
+            );
+            let share = out_by.abs() / declared;
+            {
+                let mut grid = grid.borrow_mut();
+                let cell = grid
+                    .entry((pair.radius, format!("{how_fine}")))
+                    .or_insert(0.0);
+                *cell = cell.max(share);
+            }
+            if share > worst.get() {
+                worst.set(share);
+                *worst_at.borrow_mut() = format!("{pair:?} at a deflection of {how_fine}");
+            }
+            prop_assert!(
+                share < A_CURVED_LAW_MAY_USE_THIS_MUCH_OF_WHAT_THE_FOUR_DECLARE,
+                "at a deflection of {how_fine} inclusion and exclusion is {out_by} out over \
+                 {pair:?}, which is {share} of the {declared} the four measurements declared \
+                 and over the share this family has ever used"
+            );
+        }
+        Ok(())
+    });
+    tally.report_what_it_compared("inclusion and exclusion, a ball in a block");
+    println!(
+        "    the worst share of the declared error used was {:.4} at {}",
+        worst.get(),
+        worst_at.borrow()
+    );
+    for ((radius, how_fine), share) in grid.borrow().iter() {
+        println!("    radius {radius} at {how_fine}: {share:.5}");
+    }
+}
+
+/// The deflections the law above is asked at.
+///
+/// Three over two decades, and more than one because **the share is not monotone
+/// in the deflection and the worst one is at a different deflection for each
+/// radius the family draws.** Measured over five deflections from `0.3` to
+/// `0.003`, the share of the declared error the residual uses runs:
+///
+/// ```text
+/// deflection    0.3     0.1     0.03    0.01    0.003
+/// radius 1     0.0250  0.0084  0.0059  0.0048  0.0052
+/// radius 2     0.0053  0.0154  0.0218  0.0180  0.0042
+/// ```
+///
+/// A single deflection would have found a third of the worst. `0.003` is left
+/// out because it uses less of the bound than anything else and costs the file
+/// four seconds of wall clock.
+const HOW_FINE_THE_LAW_IS_ASKED_AT: [f64; 3] = [0.3, 0.03, 0.01];
+
+/// How much of what the four measurements declare inclusion and exclusion over a
+/// round pair is allowed to use.
+///
+/// **The whole point of this number is that the declared error is not a
+/// tolerance.** Each of the four sides is out by at most its own
+/// `Measurement::volume_error`, so the four added up bound the residual — and
+/// they bound it so loosely that asserting against the sum would be vacuous in
+/// §47.4 item 1's sense even though the sum is finite.
+/// `what_a_deflection_costs_a_measured_volume.rs` measured why: the four sides
+/// charge the same shells twice with opposite signs and they cancel, so the sum
+/// runs 70 to 150 times the residual for a block and a bar. A law asserted at
+/// the sum would pass a fuse a hundred times more wrong than this one.
+///
+/// So the share is measured over this family rather than copied from that one.
+/// The worst of the grid in [`HOW_FINE_THE_LAW_IS_ASKED_AT`] is **0.0250** — a
+/// ball of radius one at a deflection of `0.3` — and one twentieth is a
+/// **margin of two** over it. That is the same margin
+/// `what_a_deflection_costs_a_measured_volume.rs` keeps over the same kind of
+/// number next door, and it is **twenty times tighter than the summed bound**: a
+/// fuse that mislaid a twentieth of the ball would fail this and pass that.
+///
+/// **Two is a thin margin and it is affordable here**, which is worth saying
+/// out loud because it is not affordable everywhere. The share turns out to be a
+/// function of the ball's radius and the deflection and almost nothing else —
+/// eight fresh-seed runs move it in the third significant figure, because the
+/// block is flat and declares nothing, and where the ball stands on the floor
+/// changes what is meshed but not how much of it hides. The family draws only
+/// two radii, so **every corpus enumerates the whole grid** and there is no
+/// unlucky draw for a margin to have to cover. What the margin has to cover is a
+/// change to the mesher, and a change to the mesher is a thing somebody should
+/// look at.
+const A_CURVED_LAW_MAY_USE_THIS_MUCH_OF_WHAT_THE_FOUR_DECLARE: f64 = 0.05;
+
+/// How much space an answer takes up, and how much of it the mesh could be
+/// hiding, added up over the answer's solids.
+///
+/// Two numbers rather than one because the second is what makes the first worth
+/// asserting anything about: `Measurement::volume_error` is the mesher's own
+/// statement of how much material sits between its triangles and the surface
+/// they stand in for.
+fn how_much_it_holds(model: &Model, solids: &[SolidKey], how_fine: Deflection) -> (f64, f64) {
+    solids
+        .iter()
+        .map(|&solid| {
+            let measured = model
+                .solid(solid)
+                .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a solid this size measures");
+            (measured.volume(), measured.volume_error())
+        })
+        .fold((0.0, 0.0), |(volume, error), (more, worse)| {
+            (volume + more, error + worse)
+        })
+}
+
+/// How fast the gap the row above asserts a share of actually closes.
+///
+/// The share says the residual is small against what the mesh declares. This
+/// says the residual is the **mesh** and not the fuse, which is a different
+/// statement and needs a different measurement: **the gap falls by more than a
+/// hundredfold when the deflection falls a hundredfold**. A fuse that had lost
+/// material would leave a gap that stayed where it was.
 #[test]
 fn what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does() {
     let pair = BallAndBlock {
@@ -2117,6 +2313,205 @@ fn every_frustum_of_the_family_has_skin_inside_the_block_and_skin_outside_it() {
     );
 }
 
+/// Swapping the two sides of a block and a frustum, bit for bit.
+///
+/// §47.7's second row closed: *"cones are absent from
+/// `fuses_that_must_agree.rs`"*. This is the first law of any kind to run over
+/// the third curved family, and it was written expecting to pin a refusal — the
+/// brief said so, `how_often_a_fuse_with_a_cone_refuses.rs` measures its own
+/// frustum family at 6 answers out of 96, and §47.2 says all six of those are
+/// the row where the block misses the frustum altogether.
+///
+/// **Two fifths of this family answers, and every answer commutes.** The
+/// difference is the fixture rather than the kernel: this family's frustum
+/// really does stand up through the block's floor
+/// ([`every_frustum_of_the_family_has_skin_inside_the_block_and_skin_outside_it`]
+/// classifies every point of its skin and finds some inside and some outside),
+/// and it is clear of every side wall by a whole unit. Which two fifths is not
+/// left as a rate:
+/// [`what_stops_a_block_cutting_a_frustum_is_the_cone_above_its_own_top_cap`]
+/// pins the boundary exactly, over a grid of 84, and it is not where anyone
+/// would have guessed.
+///
+/// The rest refuse on [`ORDERING_ALONG_AN_ENDLESS_BEND`], which is §47.7's first
+/// row and the work that would buy this family the other three fifths.
+///
+/// **Neither side of a comparison has ever been the odd one out.** Every case
+/// here either answers both ways round or refuses both ways round — 100 answered
+/// fuses making 50 comparisons the first time it ran — which is worth saying
+/// because whether the fuse gives up is a fact about the arithmetic and the two
+/// sides genuinely take different paths through it.
+#[test]
+fn swapping_the_two_sides_of_a_block_and_a_frustum_changes_not_one_bit() {
+    let coordinates = Coordinates::LieOnAConesWall;
+    let tally = over(CASES, a_frustum_and_a_block(), |pair, tally| {
+        for rule in [Rule::Union, Rule::Intersection] {
+            tally.meaning_to_compare();
+            let (model, keys) = pair.build();
+            let (block, frustum) = (keys[0], keys[1]);
+
+            let forwards = fused(tally, coordinates, &model, &[block], &[frustum], rule)?;
+            let backwards = fused(tally, coordinates, &model, &[frustum], &[block], rule)?;
+            both_agree_about_whether_there_is_an_answer(
+                tally,
+                coordinates,
+                &forwards,
+                &backwards,
+                rule,
+                "swapping the two sides",
+            )?;
+            let (Some(forwards), Some(backwards)) = (forwards.answer(), backwards.answer()) else {
+                continue;
+            };
+
+            tally.comparing();
+            same_answer(
+                &answer_of(&forwards.0, &forwards.1),
+                &answer_of(&backwards.0, &backwards.1),
+                rule,
+                "swapping the two sides of a block and a frustum",
+            )?;
+        }
+        Ok(())
+    });
+    tally.report_what_it_compared_at_least(
+        "commutativity, a frustum up through a block",
+        A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH,
+    );
+}
+
+/// **What actually stops a block cutting a frustum, measured rather than
+/// guessed** — and it is not the cone's own face.
+///
+/// §47.7's first row says the open bend is what stands between a cone and a
+/// block, and the row above finds two fifths of the family answering anyway. So
+/// which two fifths? This is the answer, and it is exact: **the fuse answers if
+/// and only if the cone, carried up to the block's roof, is still narrower than
+/// the distance to the nearest side wall.**
+///
+/// Every frustum this family draws is clear of every side wall by a whole unit
+/// and stops well below the roof, so its own *face* never comes near a wall. The
+/// boundary is about the cone **above its own top cap** — the surface the face
+/// sits on, carried on past where the face stops. Where that reaches a side wall
+/// inside the block, the fuse has a plane parallel to a cone's axis to arrange,
+/// which is a hyperbola, and §47.2's open bend is what refuses.
+///
+/// **The one exception is a different degeneracy and is pinned with it**: where
+/// the top cap lands exactly in the roof plane the fuse comes back
+/// [`Error::Undecidable`] instead, which is a face flush against a plane and not
+/// an open bend at all.
+///
+/// This is the shape §47.2 asks for. A count of how many answered would have
+/// been true and would not have said which, and *"which"* is the whole finding:
+/// the ordering work §47.7 names would buy this family the other three fifths,
+/// and nothing else would.
+#[test]
+fn what_stops_a_block_cutting_a_frustum_is_the_cone_above_its_own_top_cap() {
+    let mut answered = 0;
+    let mut refused = 0;
+    let mut flush = 0;
+    for up_per_unit_wider in [2u32, 4, 8] {
+        for side in 6u32..=12 {
+            for at in 3u32..=(side - 3) {
+                let pair = FrustumAndBlock {
+                    side,
+                    narrow: 1,
+                    wide: 2,
+                    up_per_unit_wider,
+                    at: [at, at],
+                };
+                let (mut model, keys) = pair.build();
+                let what = model.fuse(
+                    &keys[..1],
+                    &keys[1..],
+                    Rule::Union,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+
+                if the_top_cap_lands_in_the_roof(&pair) {
+                    flush += 1;
+                    assert!(
+                        matches!(what, Err(Error::Undecidable { .. })),
+                        "a top cap flush with the roof is a different refusal: {pair:?} gave \
+                         {:?}",
+                        what.err()
+                    );
+                    continue;
+                }
+
+                if the_cone_stays_clear_of_the_walls(&pair) {
+                    answered += 1;
+                    what.unwrap_or_else(|why| {
+                        panic!(
+                            "the cone of {pair:?} is {} across at the roof and the nearest \
+                             wall is {} away, so nothing here is an open bend: {why}",
+                            how_wide_the_cone_is_at_the_roof(&pair),
+                            how_far_the_nearest_wall_is(&pair)
+                        )
+                    });
+                } else {
+                    refused += 1;
+                    assert!(
+                        matches!(what, Err(Error::ACrossingThisCannotBeOrderedAlong)),
+                        "the cone of {pair:?} reaches a side wall inside the block, so this \
+                         is an open bend and not {:?}",
+                        what.err()
+                    );
+                }
+            }
+        }
+    }
+    println!(
+        "a frustum up through a block: {answered} answered, {refused} refused on an open bend, \
+         {flush} refused with the top cap flush against the roof"
+    );
+    assert!(
+        answered > 0 && refused > 0 && flush > 0,
+        "the grid has to reach all three sides of the boundary, and it reached \
+         {answered}, {refused} and {flush}"
+    );
+}
+
+/// Whether the frustum's upper cap lands exactly in the block's roof plane.
+///
+/// Both are whole numbers, so this is exact and never nearly true.
+fn the_top_cap_lands_in_the_roof(pair: &FrustumAndBlock) -> bool {
+    pair.far() + where_the_apex_sits(pair) == f64::from(pair.side)
+}
+
+/// Whether the cone, carried up to the block's roof, stays inside the block's
+/// side walls.
+fn the_cone_stays_clear_of_the_walls(pair: &FrustumAndBlock) -> bool {
+    how_wide_the_cone_is_at_the_roof(pair) < how_far_the_nearest_wall_is(pair)
+}
+
+/// How far across the cone is where the block's roof plane cuts it — the face's
+/// own top cap ignored, because the surface does not stop there.
+fn how_wide_the_cone_is_at_the_roof(pair: &FrustumAndBlock) -> f64 {
+    (f64::from(pair.side) - where_the_apex_sits(pair)) * pair.slope()
+}
+
+/// How far the frustum's axis stands from the nearest of the block's four side
+/// walls.
+fn how_far_the_nearest_wall_is(pair: &FrustumAndBlock) -> f64 {
+    let nearest = pair
+        .at
+        .iter()
+        .flat_map(|&along| [along, pair.side - along])
+        .min()
+        .expect("a block has walls");
+    f64::from(nearest)
+}
+
+/// How far below the block's floor the cone's apex sits.
+///
+/// [`FrustumAndBlock::build`] drops the frustum by one more than its lower cap's
+/// height, and the cone it is cut from has its apex at the origin.
+fn where_the_apex_sits(pair: &FrustumAndBlock) -> f64 {
+    -1.0 - pair.near()
+}
+
 /// Roadmap §11.2's first instruction, over a round solid, four milestones late.
 ///
 /// *"Start with transform invariance. Kernels overfit badly to axis-aligned and
@@ -2406,6 +2801,27 @@ const WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON: &str = "which side of its trimm
 const WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT: &str =
     "where three surfaces meet, with fewer than two of them flat";
 
+/// What stops a fuse when a face is cut by a curve that never comes back.
+///
+/// [`Error::ACrossingThisCannotBeOrderedAlong`], as [`fused`] names it. A
+/// straight crossing is ordered by the axis it climbs fastest along and a closed
+/// conic by the area three of its points sweep; a hyperbola branch is neither,
+/// and §47.7's first row is the work that would settle it.
+///
+/// **Not the same refusal as [`A_CROSSING_THAT_DOES_NOT_CLOSE`]**, even though
+/// the same geometry reaches both. This one is the fuse saying it has no
+/// ordering; that one is `rcad-geom` saying the curve is open before the fuse
+/// asks. §47.4 item 4 is why they are counted apart.
+const ORDERING_ALONG_AN_ENDLESS_BEND: &str = "nothing can put points in order along this curve";
+
+/// What `rcad-geom` says when it is asked to walk round a crossing that does not
+/// come back to where it started.
+///
+/// `rcad_geom::Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`. A plane down the
+/// side of a cone cuts it in a hyperbola, and *"round a closed curve"* is the
+/// only conic order `arrange` has.
+const A_CROSSING_THAT_DOES_NOT_CLOSE: &str = "a crossing that does not close";
+
 /// Whether this run is the shipped measurement rather than a soak.
 ///
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] is a statement about one deterministic
@@ -2540,7 +2956,8 @@ fn fused(
             match coordinates {
                 Coordinates::AreUnderAGeneralRotation
                 | Coordinates::SitOnTiltedWalls
-                | Coordinates::LieOnARoundWallAndMayCoincide => Ok(Fused::Refused),
+                | Coordinates::LieOnARoundWallAndMayCoincide
+                | Coordinates::LieOnAConesWall => Ok(Fused::Refused),
                 Coordinates::AreExactlyRepresentable | Coordinates::LieOnARoundWall => {
                     Err(TestCaseError::fail(format!(
                         "a {rule:?} over a family that has never refused refused, with {} records",
@@ -2555,7 +2972,8 @@ fn fused(
                 Coordinates::AreUnderAGeneralRotation
                 | Coordinates::SitOnTiltedWalls
                 | Coordinates::AreExactlyRepresentable
-                | Coordinates::LieOnARoundWallAndMayCoincide => Ok(Fused::NotASolid),
+                | Coordinates::LieOnARoundWallAndMayCoincide
+                | Coordinates::LieOnAConesWall => Ok(Fused::NotASolid),
                 Coordinates::LieOnARoundWall => Err(TestCaseError::fail(format!(
                     "a {rule:?} over a family that has never handed back four faces along \
                      one edge did, and that is not something this kernel can hold"
@@ -2563,7 +2981,10 @@ fn fused(
             }
         }
         Err(why) => match (coordinates, a_curved_refusal(&why)) {
-            (Coordinates::LieOnARoundWallAndMayCoincide, Some(named)) => {
+            (
+                Coordinates::LieOnARoundWallAndMayCoincide | Coordinates::LieOnAConesWall,
+                Some(named),
+            ) => {
                 tally.refused.set(tally.refused.get() + 1);
                 *tally.gave_up.borrow_mut().entry(named).or_default() += 1;
                 Ok(Fused::Refused)
@@ -2573,11 +2994,17 @@ fn fused(
     }
 }
 
-/// The refusals a chain of curved fuses is allowed to hit today, by name.
+/// The refusals a curved fuse is allowed to hit today, by name.
 ///
-/// All three are gaps the kernel's own error documentation already owns: §30.8
-/// item 10 for the first, §33.1 for the second and §31.2 row 8 for the third.
-/// Anything else is a bug, so this hands back `None` for it and [`fused`] fails.
+/// Every one is a gap the kernel's own error documentation already owns: §30.8
+/// item 10 for the first, §33.1 for the second, §31.2 row 8 for the third, and
+/// §47.2 for the last two. Anything else is a bug, so this hands back `None` for
+/// it and [`fused`] fails.
+///
+/// **The last two are kept apart rather than folded into one name**, which is
+/// §47.4 item 4's warning taken seriously: an open bend and a quartic are two
+/// unrelated problems, and a report that named them the same way would let a
+/// count move from one to the other unseen.
 fn a_curved_refusal(why: &Error) -> Option<&'static str> {
     match why {
         Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { .. } => {
@@ -2588,6 +3015,10 @@ fn a_curved_refusal(why: &Error) -> Option<&'static str> {
         }
         Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat) => {
             Some(WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT)
+        }
+        Error::ACrossingThisCannotBeOrderedAlong => Some(ORDERING_ALONG_AN_ENDLESS_BEND),
+        Error::Geometry(rcad_geom::Error::TheCrossingOfTheseTwoSurfacesIsNotClosed) => {
+            Some(A_CROSSING_THAT_DOES_NOT_CLOSE)
         }
         Error::Undecidable { .. } | Error::ResultIsNotManifold { .. } => {
             unreachable!("those two are matched above")
@@ -2679,12 +3110,12 @@ fn both_agree_about_whether_there_is_an_answer(
         Coordinates::AreExactlyRepresentable
         | Coordinates::AreUnderAGeneralRotation
         | Coordinates::SitOnTiltedWalls => Ok(()),
-        Coordinates::LieOnARoundWall | Coordinates::LieOnARoundWallAndMayCoincide => {
-            Err(TestCaseError::fail(format!(
-                "{what_changed} turned a {rule:?} whose answer is a solid into one whose \
-                 answer no `Model` can hold, which cannot depend on the path taken"
-            )))
-        }
+        Coordinates::LieOnARoundWall
+        | Coordinates::LieOnARoundWallAndMayCoincide
+        | Coordinates::LieOnAConesWall => Err(TestCaseError::fail(format!(
+            "{what_changed} turned a {rule:?} whose answer is a solid into one whose \
+             answer no `Model` can hold, which cannot depend on the path taken"
+        ))),
     }
 }
 
@@ -2787,6 +3218,18 @@ enum Coordinates {
     /// rather than asserted, and the vacuity floor is what says whether the
     /// measurement is worth anything.
     LieOnARoundWallAndMayCoincide,
+    /// Whole-number corners with a **cone's** wall among them.
+    ///
+    /// **A refusal is an outcome to count here**, and unlike every other family
+    /// in this file it is the only outcome there is. A block that really
+    /// overlaps a frustum has a side wall down the cone, a plane down the side
+    /// of a cone cuts it in a hyperbola, and an open bend is not something
+    /// `arrange` can put points in order along (§47.2, §47.7's first row).
+    ///
+    /// An answer no `Model` can hold is counted rather than failed for the same
+    /// reason: nothing has ever seen one from this family, so there is no
+    /// measurement saying it would be new.
+    LieOnAConesWall,
 }
 
 /// What every fuse a property ran came back with.
@@ -2870,6 +3313,18 @@ impl Tally {
     /// own; what says something is how many of the comparisons the property set
     /// out to make it reached.
     fn report_what_it_compared(&self, what: &str) {
+        self.report_what_it_compared_at_least(what, SOME_COMPARISONS_MUST_HAPPEN);
+    }
+
+    /// The same against a floor the caller names.
+    ///
+    /// One family needs it, and needs it because
+    /// [`SOME_COMPARISONS_MUST_HAPPEN`] was sized against the properties that
+    /// existed when it was written — the worst of which reached 50% to 69% —
+    /// and the frustum family sits below all of them. A floor a property brushes
+    /// is a flake and not a guard, and moving the shared number to suit one
+    /// family would blunt it for the other fourteen.
+    fn report_what_it_compared_at_least(&self, what: &str, floor: f64) {
         self.report(what);
         let meant_to = self.meant_to_compare.get();
         assert!(
@@ -2883,7 +3338,7 @@ impl Tally {
             100.0 * self.compared.get() as f64 / meant_to as f64
         );
         assert!(
-            self.compared.get() as f64 >= SOME_COMPARISONS_MUST_HAPPEN * meant_to as f64,
+            self.compared.get() as f64 >= floor * meant_to as f64,
             "{what}: only {} of {meant_to} comparisons had an answer on both sides, \
              so this property barely asserted anything",
             self.compared.get()
