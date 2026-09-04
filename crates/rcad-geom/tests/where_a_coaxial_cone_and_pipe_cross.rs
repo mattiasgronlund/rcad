@@ -14,8 +14,11 @@
 //! Sharing an axis is decided **exactly**, so a cone whose apex was written as
 //! `origin + t·ŵ` on a direction that is not a coordinate one lands an ulp or
 //! two off the stored line and is refused — correctly, because those two
-//! surfaces really do not share an axis. That is a limit and not a gap
-//! (`docs/decisions.md` §16.10, §50.11), and
+//! surfaces really do not share an axis as stored. That refusal answers the
+//! coaxiality question correctly; nothing is refused at that step. What is
+//! refused next is the quartic the placed pair really does cross in, and that
+//! quartic exists — so this is the row's standing gap (`docs/decisions.md`
+//! §16.10, §50.11), reached down a second road, and not a limit, and
 //! `an_apex_written_along_a_leaning_axis_lands_off_it_and_is_refused` is the row
 //! that pins it rather than leaving it as a sentence.
 
@@ -316,10 +319,16 @@ fn a_cone_against_a_ball_or_another_cone_is_refused_axis_or_no_axis() {
 /// An apex built as `origin + t·ŵ` on a direction that is not a coordinate one
 /// usually lands off the stored line, and every one that does is refused.
 ///
-/// **A limit and not a gap** (§16.10). The multiply-and-add rounds, the apex it
-/// produces is genuinely not on the pipe's axis, and the crossing of the two
-/// surfaces *as stored* genuinely is a quartic. There is no answer being refused
-/// here, so there is nothing to fix — which is why this is a test and not a
+/// **A gap and not a limit** (§16.10). The multiply-and-add rounds, the apex it
+/// produces is genuinely not on the pipe's axis, and the coaxiality question is
+/// answered correctly there — nothing is refused at that step. What is refused
+/// is the quartic the placed pair really does cross in, and that quartic
+/// exists: it is the row's standing gap, reached here by a placement rather
+/// than by an axis someone wrote leaning on purpose. `intersect.rs`'s
+/// `a_frustum_in_a_bore_stops_sharing_its_axis_as_soon_as_it_is_turned_off_the_lattice`
+/// is the ordinary form of it — a frustum sitting in a bore, turned about a
+/// diagonal, loses the axis on 62 of 64 turns — and this row measures the same
+/// thing from a hand-written apex, which is why this is a test and not a
 /// paragraph. §50.11 measured 20 000 of 20 000 apexes drawn this way refused,
 /// worst miss `2.6e-14` on coordinates of order 100.
 ///
