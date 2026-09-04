@@ -59,19 +59,32 @@
 //! |---|---|---|---|---|
 //! | corpus | 743 of 824 seeds | 1983 | 542 | 1083 |
 //! | soak | 199 943 of 200 000 draws | 400 342 | 178 631 | 355 291 |
-//! | cones and tori | 136 | 435 | 32 | 64 |
+//! | cones and tori | 136 | 696 | 39 | 78 |
 //!
 //! **Not one of them is `rcad-fuzz`'s number.** That branch published three
 //! floors measured before M4 and §33 moved the refusal rates under them, and
 //! §50.9 records that everything it published is stale by 5× to 40×. Each floor
-//! here is set at roughly three quarters of what was measured, so it catches an
+//! here was set at roughly three quarters of what was measured, so it catches an
 //! oracle falling silent without failing on ordinary drift.
 //!
-//! **The cone-and-torus row's 32 is a moving number and moves upward.** 104 of
-//! its 136 pairs are refused both ways round today, and teaching `intersect` to
-//! name a coaxial cone and pipe — which is happening in a sibling lane as this
-//! is written — can only turn a refusal into an answer. That is why this row's
-//! floor is 30 and not 32.
+//! # The cone-and-torus row moved, exactly as it was written to
+//!
+//! Naming the coaxial cone and pipe landed, and the row is the seven pairs
+//! better for it: 97 of its 136 pairs are refused both ways round where 104 were
+//! before, points 696 where they were 435, orders 39 where they were 32,
+//! scalings 78 where they were 64. Seven cone-and-pipe pairs in the table share
+//! an axis — two cones about `z` against two pipes about `z`, the raised cone
+//! against the same two, and the cone about `x` against the pipe about `x` — and
+//! each contributes one order and two scalings, which is the whole of the move.
+//!
+//! **The three floors stay where they were, and only one of them is still three
+//! quarters of measured**: orders at 30 of 39, scalings at 48 of 78, points at
+//! 300 of 696. They are left low on purpose. A cone against a ball or another
+//! cone, and a torus against anything curved, are still refused, and naming any
+//! of them turns refusals into answers and lifts all three counts again. A floor
+//! re-cut to three quarters of today would have to be re-cut on each of those
+//! landings, and what it is for — noticing an oracle that has gone silent — it
+//! does at 300 exactly as well as at 522.
 
 #![forbid(unsafe_code)]
 
