@@ -104,15 +104,16 @@ use proptest::prelude::*;
 use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
 };
-use rcad_geom::{Deflection, Orientation, Plane, Point, Surface, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Orientation, Plane, Point, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{
-    BallAndBlock, Configuration, CurvedPair, Movement, Rigid, a_chain_of_fuses, a_curved_pair,
-    a_flush_pair, a_lattice_pair, a_lattice_trio, a_pair_leaning_the_same_way,
-    a_pair_somewhere_else, a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
-    a_turned_solid_and_its_copy, a_turned_solid_and_several_copies,
+    BallAndBlock, Configuration, CurvedPair, Elsewhere, Movement, Placed, Rigid, Shape, Skew, Turn,
+    a_ball_and_a_block, a_chain_of_fuses, a_curved_pair, a_flush_pair, a_lattice_pair,
+    a_lattice_trio, a_pair_leaning_the_same_way, a_pair_somewhere_else, a_rigid_movement,
+    a_skew_pair, a_solid_and_its_copy, a_turned_pair, a_turned_solid_and_its_copy,
+    a_turned_solid_and_several_copies,
 };
 
 /// How many configurations a property that runs two fuses per case sees.
@@ -347,7 +348,7 @@ fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
             &[other],
             Rule::Union,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         let Some(shared) = fused(
@@ -358,7 +359,7 @@ fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
             &[other],
             Rule::Intersection,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
 
@@ -413,7 +414,7 @@ fn taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_shar
             &[other],
             Rule::Difference,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         let Some(twice_bitten) = fused(
@@ -424,7 +425,7 @@ fn taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_shar
             &bitten.1,
             Rule::Difference,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         let Some(shared) = fused(
@@ -435,7 +436,7 @@ fn taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_shar
             &[other],
             Rule::Intersection,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
 
@@ -489,39 +490,64 @@ fn moving_a_pair_leaves_the_answer_alone(
     (configuration, movement): (Configuration, Rigid),
     tally: &Tally,
 ) -> Result<(), TestCaseError> {
+    moving_a_built_pair_leaves_the_answer_alone(
+        tally,
+        Coordinates::AreExactlyRepresentable,
+        &|| configuration.build(),
+        &|| configuration.built_after(&movement),
+        &movement.in_the_world_of(configuration.elsewhere),
+    )
+}
+
+/// The same property over a pair built by hand rather than from a
+/// [`Configuration`], so the curved families can run it too.
+///
+/// `still` builds the pair where it stands and `moved` builds it after
+/// `movement`; the two closures are what the curved families supply instead of
+/// [`Configuration::built_after`].
+fn moving_a_built_pair_leaves_the_answer_alone(
+    tally: &Tally,
+    coordinates: Coordinates,
+    still: &dyn Fn() -> (Model, Vec<SolidKey>),
+    moved: &dyn Fn() -> (Model, Vec<SolidKey>),
+    movement: &Movement,
+) -> Result<(), TestCaseError> {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         tally.meaning_to_compare();
-        let (still, keys) = configuration.build();
-        let Some(before) = fused(
+        let (before_model, keys) = still();
+        let before = fused(
             tally,
-            Coordinates::AreExactlyRepresentable,
-            &still,
+            coordinates,
+            &before_model,
             &[keys[0]],
             &[keys[1]],
             rule,
-        )?
-        else {
+        )?;
+
+        let (after_model, keys) = moved();
+        let after = fused(
+            tally,
+            coordinates,
+            &after_model,
+            &[keys[0]],
+            &[keys[1]],
+            rule,
+        )?;
+
+        both_agree_about_whether_there_is_an_answer(
+            tally,
+            coordinates,
+            &before,
+            &after,
+            rule,
+            "moving it",
+        )?;
+        let (Some(before), Some(after)) = (before.answer(), after.answer()) else {
             continue;
         };
 
-        let (moved, keys) = configuration.built_after(&movement);
-        let Some(after) = fused(
-            tally,
-            Coordinates::AreExactlyRepresentable,
-            &moved,
-            &[keys[0]],
-            &[keys[1]],
-            rule,
-        )?
-        else {
-            return Err(TestCaseError::fail(format!(
-                "{rule:?} came back with an answer where the moved pair did not"
-            )));
-        };
-
         tally.comparing();
-        let expected = answer_of(&before.0, &before.1)
-            .moved_by(&movement.in_the_world_of(configuration.elsewhere));
+        let expected = answer_of(&before.0, &before.1).moved_by(movement);
         same_answer(&expected, &answer_of(&after.0, &after.1), rule, "moving it")?;
     }
     Ok(())
@@ -541,6 +567,159 @@ fn swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit() {
         both_ways_round(tally, Coordinates::AreUnderAGeneralRotation, configuration)
     });
     tally.report_what_it_compared("commutativity, turned pairs");
+}
+
+/// §48.2 item 5's defect, at the first configuration that found it, **and it is
+/// wrong**.
+///
+/// A frame and a comb, turned together by one sixty-fourth of a turn about
+/// `(-2, -1, 0)`. What the two share is two solids, and whether the kernel can
+/// hold them depends on which of the pair is handed over first: comb against
+/// frame gives the two, frame against comb gives
+/// [`Error::ResultIsNotManifold`]. Whether four faces end up along one edge is a
+/// fact about the answer, and the answer does not know which argument came
+/// first.
+///
+/// **The same pair unturned gives the two solids either way round**, which is
+/// the control: the two are in the same places relative to each other, and the
+/// only thing between the two rows is that the rotation leaves nothing exactly
+/// representable.
+///
+/// This is pinned rather than fixed. §48.4 gives the fuse to nobody this wave,
+/// and the lane that found it may only write this file — so what it can do is
+/// stop the suite lying about it, which is
+/// [`both_agree_about_whether_there_is_an_answer`], and say here exactly what
+/// today's kernel does. **The day it is fixed this test fails**, and what
+/// replaces it is deleting that check's exemption for this family.
+#[test]
+fn turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first() {
+    let frame = Placed {
+        shape: Shape::Frame { width: 4, depth: 3 },
+        skew: Skew::none(),
+        height: 1,
+        at: [0, 0, 0],
+    };
+    let comb = Placed {
+        shape: Shape::Comb {
+            teeth: 3,
+            tooth_height: 2,
+        },
+        skew: Skew::none(),
+        height: 1,
+        at: [0, -2, 0],
+    };
+    let pair = |turn| Configuration {
+        solids: vec![frame, comb],
+        turn,
+        elsewhere: Elsewhere::here(),
+    };
+
+    let (model, keys) = pair(None).build();
+    for (arguments, tools) in [(keys[0], keys[1]), (keys[1], keys[0])] {
+        assert_eq!(
+            what_a_fuse_came_back_with(&model, arguments, tools, Rule::Intersection),
+            WhatCameBack::Solids(2),
+            "the control: unturned, either order shares the same two solids"
+        );
+    }
+
+    let (model, keys) = pair(Some(Turn {
+        direction: [-2, -1, 0],
+        steps: 1,
+    }))
+    .build();
+    assert_eq!(
+        what_a_fuse_came_back_with(&model, keys[0], keys[1], Rule::Intersection),
+        WhatCameBack::NotASolid,
+        "pinning what happens today, and it is wrong"
+    );
+    assert_eq!(
+        what_a_fuse_came_back_with(&model, keys[1], keys[0], Rule::Intersection),
+        WhatCameBack::Solids(2),
+        "the same two solids, handed over the other way round"
+    );
+}
+
+/// The same defect with **no rotation and no tilt at all**, and this is the
+/// sharp form of it.
+///
+/// A block two by one by two at the origin, and a frame three by three and one
+/// thick two behind it. Every corner of both solids is a small whole number,
+/// every wall is axis-aligned, and every meet of three of their planes is a
+/// Cramer solve with a determinant of ±1 — this is the family §17.7's control
+/// row asserts the kernel decides all of, and it does decide it. It still unites
+/// to one solid one way round and to [`Error::ResultIsNotManifold`] the other.
+///
+/// So the order-dependence §48.2 item 5 predicted is **not** a story about
+/// rounding. Nothing rounds here. Two solids that meet along a whole edge put
+/// four faces along it and there is no answer a `Model` can hold; that is a fact
+/// about these two solids, and one of the two orders is not seeing it.
+///
+/// The turned row above is the same defect where a rotation could have been
+/// blamed for it. This one is where nothing can.
+#[test]
+fn a_lattice_pair_unites_to_a_solid_one_way_round_and_to_nothing_holdable_the_other() {
+    let block = Placed {
+        shape: Shape::Block { width: 2, depth: 1 },
+        skew: Skew::none(),
+        height: 2,
+        at: [0, 0, 0],
+    };
+    let frame = Placed {
+        shape: Shape::Frame { width: 3, depth: 3 },
+        skew: Skew::none(),
+        height: 1,
+        at: [0, -2, 0],
+    };
+    let (model, keys) = Configuration {
+        solids: vec![block, frame],
+        turn: None,
+        elsewhere: Elsewhere::here(),
+    }
+    .build();
+
+    assert_eq!(
+        what_a_fuse_came_back_with(&model, keys[0], keys[1], Rule::Union),
+        WhatCameBack::Solids(1),
+        "pinning what happens today, and it is wrong"
+    );
+    assert_eq!(
+        what_a_fuse_came_back_with(&model, keys[1], keys[0], Rule::Union),
+        WhatCameBack::NotASolid,
+        "the same two solids, handed over the other way round"
+    );
+}
+
+/// What one certified fuse of two solids came back with.
+fn what_a_fuse_came_back_with(
+    model: &Model,
+    arguments: SolidKey,
+    tools: SolidKey,
+    rule: Rule,
+) -> WhatCameBack {
+    let mut model = model.clone();
+    match model.fuse(
+        &[arguments],
+        &[tools],
+        rule,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) {
+        Ok(fused) => WhatCameBack::Solids(fused.solids().len()),
+        Err(Error::ResultIsNotManifold { .. }) => WhatCameBack::NotASolid,
+        Err(why) => WhatCameBack::WentWrong(format!("{why}")),
+    }
+}
+
+/// The outcome of one named fuse, in the three shapes the pins above tell apart.
+#[derive(Debug, PartialEq, Eq)]
+enum WhatCameBack {
+    /// An answer, and how many solids were in it.
+    Solids(usize),
+    /// An answer no `Model` can hold.
+    NotASolid,
+    /// Anything else, kept as what it said.
+    WentWrong(String),
 }
 
 #[test]
@@ -567,7 +746,7 @@ fn a_solid_united_with_a_copy_of_itself_is_itself() {
             &[copy],
             Rule::Union,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         prop_assert_eq!(invariants_of(&united.0, &united.1), itself.clone());
@@ -580,7 +759,7 @@ fn a_solid_united_with_a_copy_of_itself_is_itself() {
             &[copy],
             Rule::Intersection,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         prop_assert_eq!(invariants_of(&shared.0, &shared.1), itself);
@@ -627,7 +806,7 @@ fn a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
                 &[keys[1]],
                 Rule::Difference,
             )?
-            else {
+            .answer() else {
                 return Ok(());
             };
             tally.comparing();
@@ -657,7 +836,7 @@ fn a_solid_united_with_what_it_shares_with_another_is_itself() {
             &[other],
             Rule::Intersection,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         let Some(swallowed) = fused(
@@ -668,7 +847,7 @@ fn a_solid_united_with_what_it_shares_with_another_is_itself() {
             &shared.1,
             Rule::Union,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
 
@@ -697,7 +876,7 @@ fn uniting_three_at_once_is_uniting_two_and_then_the_third() {
             &[],
             Rule::Union,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         let Some(first_two) = fused(
@@ -708,7 +887,7 @@ fn uniting_three_at_once_is_uniting_two_and_then_the_third() {
             &[],
             Rule::Union,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         let mut then_the_third = first_two.1.clone();
@@ -721,7 +900,7 @@ fn uniting_three_at_once_is_uniting_two_and_then_the_third() {
             &[],
             Rule::Union,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
 
@@ -757,7 +936,7 @@ fn taking_a_solid_out_of_a_union_and_putting_it_back_gives_the_union_again() {
             &[other],
             Rule::Union,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         let Some(bitten) = fused(
@@ -768,7 +947,7 @@ fn taking_a_solid_out_of_a_union_and_putting_it_back_gives_the_union_again() {
             &[other],
             Rule::Difference,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
         let Some(back) = fused(
@@ -779,7 +958,7 @@ fn taking_a_solid_out_of_a_union_and_putting_it_back_gives_the_union_again() {
             &[other],
             Rule::Union,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
 
@@ -814,7 +993,7 @@ fn uniting_four_at_once_is_uniting_them_one_at_a_time() {
             &[],
             Rule::Union,
         )?
-        else {
+        .answer() else {
             return Ok(());
         };
 
@@ -828,7 +1007,7 @@ fn uniting_four_at_once_is_uniting_them_one_at_a_time() {
                 &[next],
                 Rule::Union,
             )?
-            else {
+            .answer() else {
                 return Ok(());
             };
             so_far = wider;
@@ -893,7 +1072,7 @@ fn uniting_a_turned_solid_with_more_copies_of_itself_settles_after_the_first_uni
                 &[keys[1]],
                 Rule::Union,
             )?
-            else {
+            .answer() else {
                 return Ok(());
             };
             let settled = answer_of(&so_far.0, &so_far.1);
@@ -908,7 +1087,7 @@ fn uniting_a_turned_solid_with_more_copies_of_itself_settles_after_the_first_uni
                     &[copy],
                     Rule::Union,
                 )?
-                else {
+                .answer() else {
                     return Ok(());
                 };
                 tally.comparing();
@@ -1143,7 +1322,7 @@ fn swapping_the_two_sides_of_a_curved_pair_changes_not_one_bit() {
                 &[bar],
                 rule,
             )?
-            else {
+            .answer() else {
                 continue;
             };
             let Some(backwards) = fused(
@@ -1154,7 +1333,7 @@ fn swapping_the_two_sides_of_a_curved_pair_changes_not_one_bit() {
                 &[block],
                 rule,
             )?
-            else {
+            .answer() else {
                 continue;
             };
 
@@ -1335,6 +1514,139 @@ fn a_ball_half_sunk_into_a_block_fuses_under_every_rule() {
     }
 }
 
+/// Roadmap §11.2's first instruction, over a round solid, four milestones late.
+///
+/// *"Start with transform invariance. Kernels overfit badly to axis-aligned and
+/// origin-centred configurations."* Until §48 that had never been asked of a
+/// curved face at all: [`Answer::moved_by`] panicked on one, so a pure
+/// translation of a ball would have brought the suite down.
+///
+/// **Bit for bit, with no tolerance**, like every other row here. The pair's
+/// numbers are all small whole ones and the shift is a whole number, so a
+/// translation is one addition per coordinate and rounds nowhere
+/// (`Isometry::apply_to_point`'s own doc, and `rcad-geom`'s
+/// `a_movement_with_no_turn_moves_a_point_by_one_addition_and_nothing_else`).
+/// The corners the fuse invents are whole numbers too: a bar up `z` meets the
+/// block's floor and roof in circles of the bar's own radius, and the only
+/// corners on those circles are where the bar's seam crosses them.
+///
+/// **A shift and no quarter turn**, which is the one thing weaker here than the
+/// rectilinear rows next door, and the reason is
+/// [`a_quarter_turn_of_a_round_solid_cannot_be_asked_for_exactly`] rather than
+/// an afternoon.
+#[test]
+fn shifting_a_block_and_a_bar_a_whole_number_changes_not_one_bit() {
+    let tally = over(
+        CASES,
+        (a_curved_pair(), a_whole_number_shift()),
+        |(pair, shift), tally| {
+            moving_a_built_pair_leaves_the_answer_alone(
+                tally,
+                Coordinates::LieOnARoundWall,
+                &|| pair.build(),
+                &|| shifted(pair.build(), &shift),
+                &shift,
+            )
+        },
+    );
+    tally.report_what_it_compared(
+        "transform invariance, a bar through a block under whole-number shifts",
+    );
+}
+
+/// The same over the second curved family, whose wall curves both ways.
+///
+/// The ball's centre is a whole-number point on the block's floor and its radius
+/// is a whole number, so the same argument holds: where its skin meets the floor
+/// is a circle of its own radius, and the corners on that circle are where its
+/// seam crosses it.
+#[test]
+fn shifting_a_block_and_a_ball_a_whole_number_changes_not_one_bit() {
+    let tally = over(
+        CASES,
+        (a_ball_and_a_block(), a_whole_number_shift()),
+        |(pair, shift), tally| {
+            moving_a_built_pair_leaves_the_answer_alone(
+                tally,
+                Coordinates::LieOnARoundWall,
+                &|| pair.build(),
+                &|| shifted(pair.build(), &shift),
+                &shift,
+            )
+        },
+    );
+    tally.report_what_it_compared(
+        "transform invariance, a ball in a block under whole-number shifts",
+    );
+}
+
+/// Why the two rows above shift and never turn.
+///
+/// A rectilinear family turns exactly because [`Configuration::built_after`]
+/// applies the quarter turn to the outline's *whole numbers* before anything is
+/// built, so no `f64` rounds on the way in. A round solid has no whole numbers
+/// to turn: `add_round_bar` and `add_ball` take a placement, and the only turn
+/// `rcad-geom` will build is [`Isometry::rotation`], which takes an angle. This
+/// is what that costs at the one angle the suite would want.
+///
+/// So an exactly turned round solid is **not reachable through the public API**,
+/// and that is a limit and not a gap (`docs/decisions.md` §16.10): the family of
+/// fixes is *"name the turn some other way"*, and every member of it — a
+/// quaternion, a matrix, four composed eighth-turns — has to arrive through
+/// [`Isometry::rotation`], because that is the only constructor with a turn in
+/// it. The other family, *"rebuild the round solid turned"*, does not exist
+/// either: a bar built at a turned placement has its seam where the builder puts
+/// it, on `+x`, and not where the turn would have carried it, so the two answers
+/// differ over a seam and not over any arithmetic.
+#[test]
+fn a_quarter_turn_of_a_round_solid_cannot_be_asked_for_exactly() {
+    let z = Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("an axis along z");
+    let quarter =
+        Isometry::rotation(&z, core::f64::consts::FRAC_PI_2).expect("a quarter turn about z");
+
+    let turned = quarter
+        .apply_to_point(Point::new(1.0, 0.0, 0.0))
+        .coordinates();
+    assert_ne!(
+        turned,
+        [0.0, 1.0, 0.0],
+        "if this ever holds, the curved rows above can turn as well as shift"
+    );
+    // `y` lands on one exactly; it is `x` that misses, by one step of the grid
+    // at one, which is `2⁻⁵²`. A corner of the answer at a hundred would miss by
+    // a hundred times that, and the comparison above has no room for any of it.
+    assert_eq!(turned[1], 1.0);
+    assert_eq!(turned[0], f64::EPSILON);
+}
+
+/// A whole-number shift and no turn, which is all of a [`Movement`] a round
+/// solid can be moved by today.
+///
+/// Four either way along each axis. Small on purpose: the block is four to eight
+/// across, so the pair stays well inside the working size and every coordinate
+/// stays a small whole number.
+fn a_whole_number_shift() -> impl Strategy<Value = Movement> {
+    [-4i32..=4, -4i32..=4, -4i32..=4].prop_map(|shift| Movement {
+        quarters: 0,
+        shift: shift.map(f64::from),
+    })
+}
+
+/// The same pair with every solid of it moved by `shift`.
+///
+/// `place_solid` composes the shift onto the placement each solid already
+/// carries, and composing two movements with no turn adds their translations and
+/// does nothing else, so a whole-number shift of a whole-number placement is
+/// exact.
+fn shifted((mut model, keys): (Model, Vec<SolidKey>), shift: &Movement) -> (Model, Vec<SolidKey>) {
+    let away = Isometry::translation(Vector::new(shift.shift[0], shift.shift[1], shift.shift[2]))
+        .expect("a whole-number shift");
+    for &key in &keys {
+        model.place_solid(key, &away);
+    }
+    (model, keys)
+}
+
 /// The curved family's measured row, and the thing that makes every property
 /// above worth its pass.
 ///
@@ -1486,10 +1798,17 @@ fn both_ways_round(
         let (model, keys) = configuration.build();
         let (one, other) = (keys[0], keys[1]);
 
-        let Some(forwards) = fused(tally, coordinates, &model, &[one], &[other], rule)? else {
-            continue;
-        };
-        let Some(backwards) = fused(tally, coordinates, &model, &[other], &[one], rule)? else {
+        let forwards = fused(tally, coordinates, &model, &[one], &[other], rule)?;
+        let backwards = fused(tally, coordinates, &model, &[other], &[one], rule)?;
+        both_agree_about_whether_there_is_an_answer(
+            tally,
+            coordinates,
+            &forwards,
+            &backwards,
+            rule,
+            "swapping the two sides",
+        )?;
+        let (Some(forwards), Some(backwards)) = (forwards.answer(), backwards.answer()) else {
             continue;
         };
 
@@ -1533,25 +1852,29 @@ fn united_in_turn(
         second,
         Rule::Union,
     )?
-    else {
+    .answer() else {
         return Ok(None);
     };
-    fused(
+    Ok(fused(
         tally,
         Coordinates::AreExactlyRepresentable,
         &pair.0,
         &pair.1,
         third,
         Rule::Union,
-    )
+    )?
+    .answer())
 }
 
 /// Fuse a copy of `model`, counting what came back.
 ///
 /// A copy, so that every fuse in a property starts from the same model rather
-/// than from whatever the last one left behind. `None` means the answer was not
-/// a solid this kernel can hold, or was refused where refusals are expected —
-/// both counted, neither swept away.
+/// than from whatever the last one left behind. A [`Fused`] that is not an
+/// answer says *which* of the two ways there was no answer — refused, or an
+/// answer no `Model` can hold — because those two are different facts and one
+/// property's worth of them tells the two apart (see
+/// [`both_agree_about_whether_there_is_an_answer`]). Both are counted, neither
+/// swept away.
 ///
 /// Every answer goes through
 /// [`every_surface_of_the_answer_is_a_surface_of_an_input`], so §17.1's deciding
@@ -1564,7 +1887,7 @@ fn fused(
     arguments: &[SolidKey],
     tools: &[SolidKey],
     rule: Rule,
-) -> Result<Option<(Model, Vec<SolidKey>)>, TestCaseError> {
+) -> Result<Fused, TestCaseError> {
     let mut model = model.clone();
     let mut log = ProvenanceLog::new();
     tally.fuses.set(tally.fuses.get() + 1);
@@ -1584,7 +1907,7 @@ fn fused(
                 &solids,
                 rule,
             )?;
-            Ok(Some((model, solids)))
+            Ok(Fused::Answered(Box::new(model), solids))
         }
         Err(Error::Undecidable { records }) => {
             tally.refused.set(tally.refused.get() + 1);
@@ -1596,7 +1919,9 @@ fn fused(
                     .or_default() += 1;
             }
             match coordinates {
-                Coordinates::AreUnderAGeneralRotation | Coordinates::SitOnTiltedWalls => Ok(None),
+                Coordinates::AreUnderAGeneralRotation | Coordinates::SitOnTiltedWalls => {
+                    Ok(Fused::Refused)
+                }
                 Coordinates::AreExactlyRepresentable | Coordinates::LieOnARoundWall => {
                     Err(TestCaseError::fail(format!(
                         "a {rule:?} over a family that has never refused refused, with {} records",
@@ -1607,9 +1932,106 @@ fn fused(
         }
         Err(Error::ResultIsNotManifold { .. }) => {
             tally.not_a_solid.set(tally.not_a_solid.get() + 1);
-            Ok(None)
+            match coordinates {
+                Coordinates::AreUnderAGeneralRotation
+                | Coordinates::SitOnTiltedWalls
+                | Coordinates::AreExactlyRepresentable => Ok(Fused::NotASolid),
+                Coordinates::LieOnARoundWall => Err(TestCaseError::fail(format!(
+                    "a {rule:?} over a family that has never handed back four faces along \
+                     one edge did, and that is not something this kernel can hold"
+                ))),
+            }
         }
         Err(why) => Err(TestCaseError::fail(format!("{rule:?} went wrong: {why}"))),
+    }
+}
+
+/// What one fuse came back with.
+///
+/// Three outcomes and not two. §48.2 item 5: the arm that catches
+/// [`Error::ResultIsNotManifold`] used to hand back the same `None` a refusal
+/// does, so a property could not tell the two apart and `A ∪ B` coming back as
+/// something no `Model` can hold while `B ∪ A` answered was skipped in silence.
+/// Order-dependence, invisible to the suite whose one job is finding it.
+enum Fused {
+    /// The fuse answered: the model it left behind and the solids of the answer.
+    ///
+    /// Boxed because a `Model` is four hundred bytes and the other two arms are
+    /// empty, and every fuse in the file builds one of these.
+    Answered(Box<Model>, Vec<SolidKey>),
+    /// The kernel would not decide it. Counted, and a failure on the families
+    /// that have never refused.
+    Refused,
+    /// The answer was not something a `Model` can hold — four faces along one
+    /// edge, and the rest of §17.7's catalogue.
+    NotASolid,
+}
+
+impl Fused {
+    fn answer(self) -> Option<(Model, Vec<SolidKey>)> {
+        match self {
+            Fused::Answered(model, solids) => Some((*model, solids)),
+            Fused::Refused | Fused::NotASolid => None,
+        }
+    }
+}
+
+/// Two runs of the same question may not disagree about whether the answer is a
+/// solid.
+///
+/// §48.2 item 5's gap, closed. Whether four faces end up along one edge is a
+/// fact about the answer and not about the path taken to it, so two runs that
+/// both decide have to agree about it: one of them handing back a solid while
+/// the other says the answer is not one is order-dependence in the arrangement,
+/// whatever family it happens on.
+///
+/// A refusal on one side is *not* held to this. That is a fact about the
+/// arithmetic and the two sides genuinely take different paths through it, which
+/// is why the families where a refusal is an outcome to count exist at all.
+///
+/// # Which family this fails on, and which it only counts on
+///
+/// **It counts on every family and fails on the round one.** Turning it on found
+/// the disagreement immediately on the flat families — on the turned pairs, on
+/// the skew pairs, and, once the shape was shrunk, on the lattice pairs, where
+/// nothing rounds at all. Both ends of that are pinned by hand:
+/// [`turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first`]
+/// and
+/// [`a_lattice_pair_unites_to_a_solid_one_way_round_and_to_nothing_holdable_the_other`].
+///
+/// The fuse is not this lane's to fix (§48.4), and a property that is red for a
+/// reason already written down stops catching the reasons that are not. So what
+/// the flat families get is a count in their report and a pin with their name
+/// on it, and what the curved families get is a failure — they have never
+/// handed back an answer no `Model` can hold at all, so a disagreement there
+/// would be new.
+///
+/// **The counted rate is the number to watch.** It is printed by [`Tally::report`]
+/// and it is zero on a fixed kernel.
+fn both_agree_about_whether_there_is_an_answer(
+    tally: &Tally,
+    coordinates: Coordinates,
+    one: &Fused,
+    other: &Fused,
+    rule: Rule,
+    what_changed: &str,
+) -> Result<(), TestCaseError> {
+    match (one, other) {
+        (Fused::NotASolid, Fused::Answered(..)) | (Fused::Answered(..), Fused::NotASolid) => {}
+        _ => return Ok(()),
+    }
+
+    tally
+        .disagreed_about_being_a_solid
+        .set(tally.disagreed_about_being_a_solid.get() + 1);
+    match coordinates {
+        Coordinates::AreExactlyRepresentable
+        | Coordinates::AreUnderAGeneralRotation
+        | Coordinates::SitOnTiltedWalls => Ok(()),
+        Coordinates::LieOnARoundWall => Err(TestCaseError::fail(format!(
+            "{what_changed} turned a {rule:?} whose answer is a solid into one whose \
+             answer no `Model` can hold, which cannot depend on the path taken"
+        ))),
     }
 }
 
@@ -1712,6 +2134,14 @@ struct Tally {
     fuses: Cell<usize>,
     refused: Cell<usize>,
     not_a_solid: Cell<usize>,
+    /// How often two runs of one question disagreed about whether the answer
+    /// was a solid at all.
+    ///
+    /// §48.2 item 5's blind spot, now a number. Zero is the only right value and
+    /// it is not zero today — see
+    /// [`both_agree_about_whether_there_is_an_answer`] for which families it
+    /// fails on and which it only counts on.
+    disagreed_about_being_a_solid: Cell<usize>,
     /// Comparisons a property set out to make, and made.
     ///
     /// Every property here returns `Ok(())` the moment a fuse comes back with
@@ -1748,6 +2178,13 @@ impl Tally {
             self.not_a_solid.get(),
             100.0 * self.not_a_solid.get() as f64 / fuses as f64
         );
+        if self.disagreed_about_being_a_solid.get() > 0 {
+            println!(
+                "    {} of them disagreed with their other way round about whether the \
+                 answer is a solid",
+                self.disagreed_about_being_a_solid.get()
+            );
+        }
         // Two decimal places, because the rarest cause a soak turns up runs at
         // about one fuse in eight hundred and one place would round it to the
         // same 0.1% as a cause ten times commoner.
@@ -2170,12 +2607,13 @@ fn answer_of(model: &Model, solids: &[SolidKey]) -> Answer {
 impl Answer {
     /// The same answer after an exactly representable movement.
     ///
-    /// # Panics
-    ///
-    /// If a face of the answer is curved. Only the rectilinear families are
-    /// moved and compared — a [`Movement`] is a quarter turn and a whole-number
-    /// shift, which is exact on a plane's four coefficients and on a corner, and
-    /// nothing here has worked out what it is on a pipe's axis.
+    /// A [`Movement`] is a quarter turn about `z` and a whole-number shift, and
+    /// every surface here moves under it by the same two steps `Surface::transformed`
+    /// takes in `rcad-geom`: the points that name it move, the directions that
+    /// name it turn, and every scalar — a radius, a slope, a tube's thickness —
+    /// is carried over untouched because a rigid movement does not change a
+    /// length. A quarter turn about `z` is a swap and a negation, so all of that
+    /// is exact.
     fn moved_by(&self, movement: &Movement) -> Answer {
         Answer {
             solids: self
@@ -2189,9 +2627,24 @@ impl Answer {
                                 WhatItSitsOn::Flat(coefficients) => {
                                     WhatItSitsOn::Flat(movement.plane(coefficients))
                                 }
-                                _ => panic!(
-                                    "only the rectilinear families move an answer, and this one \
-                                     has a curved face in it"
+                                WhatItSitsOn::Ball(centre, radius) => {
+                                    WhatItSitsOn::Ball(movement.point(centre), radius)
+                                }
+                                WhatItSitsOn::Pipe(origin, way, radius) => WhatItSitsOn::Pipe(
+                                    movement.point(origin),
+                                    movement.direction(way),
+                                    radius,
+                                ),
+                                WhatItSitsOn::Cone(apex, way, slope) => WhatItSitsOn::Cone(
+                                    movement.point(apex),
+                                    movement.direction(way),
+                                    slope,
+                                ),
+                                WhatItSitsOn::Ring(centre, way, big, small) => WhatItSitsOn::Ring(
+                                    movement.point(centre),
+                                    movement.direction(way),
+                                    big,
+                                    small,
                                 ),
                             },
                             reversed: face.reversed,
