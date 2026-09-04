@@ -1230,6 +1230,89 @@ pub fn a_curved_pair() -> impl Strategy<Value = CurvedPair> {
         })
 }
 
+/// A block with a ball sitting half in it, centred on the block's floor.
+///
+/// The second curved family, and the first one that is not a pipe. Where the
+/// ball's skin meets the floor is a circle in the plane `z = 0`, so a union
+/// leaves a dome on top of the block and a shared answer is half a ball.
+///
+/// The centre is a whole-number point on the floor and the radius is a whole
+/// number, so both are exact. What is **not** exact is any corner where the
+/// ball's skin meets a wall of the block — the same thing [`CurvedPair`] is for,
+/// on a surface that curves both ways instead of one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BallAndBlock {
+    /// How wide the block is, and how tall.
+    pub side: u32,
+    /// The ball's radius.
+    pub radius: u32,
+    /// Where the ball's centre stands on the floor, in the block's coordinates.
+    pub at: [u32; 2],
+}
+
+impl BallAndBlock {
+    /// Build the block and then the ball, in that order.
+    #[must_use]
+    pub fn build(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let block = model
+            .add_cube(
+                f64::from(self.side),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a whole-number cube");
+        let ball = model
+            .add_ball(
+                f64::from(self.radius),
+                &Isometry::translation(Vector::new(
+                    f64::from(self.at[0]),
+                    f64::from(self.at[1]),
+                    0.0,
+                ))
+                .expect("a whole-number shift"),
+            )
+            .expect("a whole-number ball");
+        (model, vec![block, ball])
+    }
+
+    /// The same ball built twice in the same place, and no block.
+    ///
+    /// What `A \ A` is asked of, and the counterpart of
+    /// [`CurvedPair::built_as_a_bar_and_a_copy_of_it`]. Both copies come out of
+    /// the same numbers by the same code, so they are bit-identical rather than
+    /// nearly so.
+    #[must_use]
+    pub fn built_as_a_ball_and_a_copy_of_it(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let mut ball = || {
+            model
+                .add_ball(f64::from(self.radius), &Isometry::identity())
+                .expect("a whole-number ball")
+        };
+        let one = ball();
+        let copy = ball();
+        (model, vec![one, copy])
+    }
+}
+
+/// A block with a ball half sunk into its floor, the ball clear of every side
+/// wall by at least one and never taller than the block.
+///
+/// Shrinks toward a block of side four with a ball of radius one on the middle
+/// of its floor.
+pub fn a_ball_and_a_block() -> impl Strategy<Value = BallAndBlock> {
+    (4u32..=8)
+        .prop_flat_map(|side| (Just(side), 1u32..=(side / 2 - 1).min(2)))
+        .prop_flat_map(|(side, radius)| {
+            // A whole unit of room between the ball and every side wall, so no
+            // drawn pair is tangent to anything.
+            let room = radius + 1..=side - radius - 1;
+            (Just(side), Just(radius), [room.clone(), room])
+                .prop_map(|(side, radius, at)| BallAndBlock { side, radius, at })
+        })
+}
+
 /// Where the second solid of a degenerate pair sits along one axis.
 ///
 /// In the order shrinking walks: right on top of the first, then flush against

@@ -109,9 +109,9 @@ use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{
-    Configuration, CurvedPair, Movement, Rigid, a_chain_of_fuses, a_curved_pair, a_flush_pair,
-    a_lattice_pair, a_lattice_trio, a_pair_leaning_the_same_way, a_pair_somewhere_else,
-    a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
+    BallAndBlock, Configuration, CurvedPair, Movement, Rigid, a_chain_of_fuses, a_curved_pair,
+    a_flush_pair, a_lattice_pair, a_lattice_trio, a_pair_leaning_the_same_way,
+    a_pair_somewhere_else, a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
     a_turned_solid_and_its_copy, a_turned_solid_and_several_copies,
 };
 
@@ -1297,6 +1297,42 @@ fn what_a_curved_pair_that_misses_shares_is_nothing_and_that_is_a_success() {
         .expect("two solids that miss each other share nothing, which is an answer");
     assert!(shared.solids().is_empty());
     assert!(log.records().is_empty(), "nothing here had to be settled");
+}
+
+/// A ball half sunk into a block fuses at all, which nothing had asked.
+///
+/// The floor of the second curved family, landed by the dispatcher of §48 ahead
+/// of the lane that wires it into the properties, so the lane starts against a
+/// fixture that is known to work rather than one it has to debug first. It says
+/// only that the three rules answer and that what comes back is a solid — the
+/// laws themselves are §48.4's L1.
+#[test]
+fn a_ball_half_sunk_into_a_block_fuses_under_every_rule() {
+    let pair = BallAndBlock {
+        side: 8,
+        radius: 2,
+        at: [4, 4],
+    };
+
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        let (mut model, keys) = pair.build();
+        let answer = model
+            .fuse(
+                &keys[..1],
+                &keys[1..],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("a {rule:?} of a ball and a block: {why}"));
+        assert!(
+            !answer.solids().is_empty(),
+            "a {rule:?} of a ball half sunk into a block leaves something behind"
+        );
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("what a {rule:?} left is not a sound model: {why}"));
+    }
 }
 
 /// The curved family's measured row, and the thing that makes every property
