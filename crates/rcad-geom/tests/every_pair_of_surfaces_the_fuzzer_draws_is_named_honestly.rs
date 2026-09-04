@@ -28,6 +28,50 @@
 //! coverage-guided run keeps an input because it reached somewhere new, and the
 //! decoder's own refusals — a radius of nothing, a direction of nothing — are
 //! branches like any other.
+//!
+//! # A third row, because the bytes cannot draw a cone or a torus
+//!
+//! [`fuzzing::two_surfaces_from`] reads two bits per surface and asks for
+//! `which % 3`, so the only kinds it ever names are a plane, a ball and a pipe.
+//! `Surface` has had a `Cone` and a `Torus` since M4. Left there, the two
+//! relation oracles would be green over a family that stopped growing when the
+//! kernel did not — §48.2's failure exactly, and §50.9 sent this lane to avoid
+//! it.
+//!
+//! The byte layout is not widened to fix that: 824 minimised seeds were kept by
+//! coverage-guided runs against *this* decoder, and repacking the kind bits
+//! would silently reinterpret every one of them. So the cones and tori come from
+//! a **second family, reported separately and never blended into the byte rows**
+//! (§17.7): a small table of shapes on the integer lattice, every pair of which
+//! has a cone or a torus in it.
+//!
+//! # Where the floors below come from
+//!
+//! Every one was measured on this tree, on 2026-09-04, by
+//!
+//! ```text
+//! cargo nextest run -p rcad-geom \
+//!     --test every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly \
+//!     --no-capture --no-fail-fast
+//! ```
+//!
+//! | row | pairs | points | orders |
+//! |---|---|---|---|
+//! | corpus | 743 of 824 seeds | 1983 | 542 |
+//! | soak | 199 943 of 200 000 draws | 400 342 | 178 631 |
+//! | cones and tori | 136 | 435 | 32 |
+//!
+//! **Not one of them is `rcad-fuzz`'s number.** That branch published three
+//! floors measured before M4 and §33 moved the refusal rates under them, and
+//! §50.9 records that everything it published is stale by 5× to 40×. Each floor
+//! here is set at roughly three quarters of what was measured, so it catches an
+//! oracle falling silent without failing on ordinary drift.
+//!
+//! **The cone-and-torus row's 32 is a moving number and moves upward.** 104 of
+//! its 136 pairs are refused both ways round today, and teaching `intersect` to
+//! name a coaxial cone and pipe — which is happening in a sibling lane as this
+//! is written — can only turn a refusal into an answer. That is why this row's
+//! floor is 30 and not 32.
 
 #![forbid(unsafe_code)]
 
@@ -35,9 +79,8 @@ mod fuzzing;
 
 use std::path::PathBuf;
 
-use fuzzing::{
-    MOST_BYTES_A_PAIR_READS, every_point_of_every_crossing_is_on_both_surfaces, two_surfaces_from,
-};
+use fuzzing::{Asked, MOST_BYTES_A_PAIR_READS, every_oracle_holds_of, two_surfaces_from};
+use rcad_geom::{Axis, Cone, Cylinder, Plane, Point, Sphere, Surface, Torus, Vector};
 
 /// How many pseudo-random byte strings the soak draws.
 const SOAK: usize = 200_000;
@@ -52,7 +95,7 @@ fn corpus() -> PathBuf {
 fn every_seed_in_the_checked_in_corpus_names_its_crossing_honestly() {
     let mut seeds = 0;
     let mut named = 0;
-    let mut points = 0;
+    let mut asked = Asked::default();
     let listing = std::fs::read_dir(corpus()).expect("the corpus is checked in beside the target");
     for entry in listing {
         let path = entry.expect("a readable directory entry").path();
@@ -63,23 +106,17 @@ fn every_seed_in_the_checked_in_corpus_names_its_crossing_honestly() {
         seeds += 1;
         if let Some(pair) = two_surfaces_from(&bytes) {
             named += 1;
-            points += every_point_of_every_crossing_is_on_both_surfaces(pair);
+            asked = asked.and(every_oracle_holds_of(pair));
         }
     }
-    println!(
-        "{seeds} seeds in the corpus, {named} of them a pair of surfaces, {points} points asked \
-         about"
-    );
+    println!("{seeds} seeds in the corpus, {named} of them a pair of surfaces, {asked:?}");
     assert!(seeds >= 100, "only {seeds} seeds are checked in");
     assert!(
         named * 2 > seeds,
         "only {named} of {seeds} seeds decoded to a pair, so the corpus has drifted away from \
          the thing it is a corpus of"
     );
-    assert!(
-        points > 50,
-        "the corpus asked about only {points} points, so it is barely exercising the oracle"
-    );
+    every_oracle_was_reached(asked, 1_400, 400);
 }
 
 /// The soak, over the whole decoded space.
@@ -92,7 +129,7 @@ fn a_soak_over_pseudo_random_bytes_names_every_crossing_honestly() {
     let mut state = 0x2545_f491_4f6c_dd1d_u64;
     let mut drawn = 0;
     let mut named = 0;
-    let mut points = 0;
+    let mut asked = Asked::default();
     let mut bytes = vec![0u8; MOST_BYTES_A_PAIR_READS];
 
     for _ in 0..SOAK {
@@ -105,21 +142,119 @@ fn a_soak_over_pseudo_random_bytes_names_every_crossing_honestly() {
         drawn += 1;
         if let Some(pair) = two_surfaces_from(&bytes) {
             named += 1;
-            points += every_point_of_every_crossing_is_on_both_surfaces(pair);
+            asked = asked.and(every_oracle_holds_of(pair));
         }
     }
 
-    println!(
-        "{drawn} byte strings drawn, {named} of them a pair of surfaces, {points} points asked \
-         about"
-    );
+    println!("{drawn} byte strings drawn, {named} of them a pair of surfaces, {asked:?}");
     assert!(
         named * 4 > drawn,
         "only {named} of {drawn} draws named a pair, so the decoder is refusing most of the \
          space rather than exploring it"
     );
+    every_oracle_was_reached(asked, 300_000, 130_000);
+}
+
+/// **The cones and the tori, which no byte string reaches.**
+///
+/// The kinds are hard-wired rather than decoded, so this row grows when
+/// `Surface` grows and not when the byte layout does.
+///
+/// Most of it refuses, and the refusals are the reason it is here: a cone
+/// against a cone or a torus is a curve of degree four or eight that nothing
+/// names yet, and a refusal hands the point oracle nothing to walk. The order
+/// oracle is the one that still says something across a refusal, because it
+/// compares a refusal against the other way round.
+#[test]
+fn every_pair_with_a_cone_or_a_torus_in_it_is_named_the_same_way_round_and_at_any_scale() {
+    let mut asked = Asked::default();
+    let mut pairs = 0;
+    for pair in every_pair_with_a_cone_or_a_torus_in_it() {
+        pairs += 1;
+        asked = asked.and(every_oracle_holds_of(pair));
+    }
+    println!("{pairs} pairs with a cone or a torus in them, {asked:?}");
     assert!(
-        points > 10_000,
-        "the soak asked about only {points} points, so it is barely exercising the oracle"
+        pairs >= 100,
+        "only {pairs} pairs were built, so the family has shrunk"
+    );
+    every_oracle_was_reached(asked, 300, 30);
+}
+
+/// Every pair the table below makes that has a cone or a torus on one side.
+///
+/// Whole numbers and powers of two throughout, so scaling by `2^±1` is exact and
+/// the scale oracle is comparing the same geometry rather than a near copy of
+/// it.
+fn every_pair_with_a_cone_or_a_torus_in_it() -> Vec<[Surface; 2]> {
+    let mut out = Vec::new();
+    for one in the_cones_and_the_tori() {
+        for other in the_cones_and_the_tori()
+            .into_iter()
+            .chain(the_shapes_the_bytes_already_draw())
+        {
+            out.push([one, other]);
+        }
+    }
+    out
+}
+
+fn the_cones_and_the_tori() -> Vec<Surface> {
+    let z = Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::from([0.0, 0.0, 1.0]))
+        .expect("z is a direction");
+    let raised = Axis::new(Point::from([0.0, 0.0, 4.0]), Vector::from([0.0, 0.0, 1.0]))
+        .expect("z is a direction");
+    let leaning = Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::from([1.0, 1.0, 1.0]))
+        .expect("a diagonal is a direction");
+    let x = Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::from([1.0, 0.0, 0.0]))
+        .expect("x is a direction");
+    vec![
+        Surface::Cone(Cone::new(z, 1.0).expect("a positive slope")),
+        Surface::Cone(Cone::new(z, 0.5).expect("a positive slope")),
+        Surface::Cone(Cone::new(raised, 2.0).expect("a positive slope")),
+        Surface::Cone(Cone::new(leaning, 1.0).expect("a positive slope")),
+        Surface::Cone(Cone::new(x, 1.0).expect("a positive slope")),
+        Surface::Torus(Torus::new(z, 4.0, 1.0).expect("a ring wider than its tube")),
+        Surface::Torus(Torus::new(raised, 8.0, 2.0).expect("a ring wider than its tube")),
+        Surface::Torus(Torus::new(x, 4.0, 2.0).expect("a ring wider than its tube")),
+    ]
+}
+
+fn the_shapes_the_bytes_already_draw() -> Vec<Surface> {
+    let z = Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::from([0.0, 0.0, 1.0]))
+        .expect("z is a direction");
+    let x = Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::from([1.0, 0.0, 0.0]))
+        .expect("x is a direction");
+    vec![
+        Surface::Plane(Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal")),
+        Surface::Plane(Plane::from_coefficients([0.0, 0.0, 1.0, -2.0]).expect("a normal")),
+        Surface::Plane(Plane::from_coefficients([1.0, 0.0, 0.0, 0.0]).expect("a normal")),
+        Surface::Plane(Plane::from_coefficients([1.0, 1.0, 1.0, 0.0]).expect("a normal")),
+        Surface::Sphere(Sphere::new(Point::from([0.0, 0.0, 0.0]), 4.0).expect("a radius")),
+        Surface::Sphere(Sphere::new(Point::from([0.0, 0.0, 4.0]), 2.0).expect("a radius")),
+        Surface::Cylinder(Cylinder::new(z, 2.0).expect("a radius")),
+        Surface::Cylinder(Cylinder::new(z, 4.0).expect("a radius")),
+        Surface::Cylinder(Cylinder::new(x, 2.0).expect("a radius")),
+    ]
+}
+
+/// Insist that each oracle was reached often enough to have been asserting
+/// anything.
+///
+/// A floor apiece and not one shared floor, because the oracles skip for
+/// entirely different reasons: a walk that refuses costs the point oracle
+/// nothing to skip, while the order oracle counts a pair that either order
+/// named. A single count would let one of them fall to nothing behind the
+/// other.
+fn every_oracle_was_reached(asked: Asked, points: usize, orders: usize) {
+    assert!(
+        asked.points >= points,
+        "only {} points were asked about: {asked:?}",
+        asked.points
+    );
+    assert!(
+        asked.orders >= orders,
+        "only {} pairs were named both ways round: {asked:?}",
+        asked.orders
     );
 }

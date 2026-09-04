@@ -33,8 +33,8 @@
 #![allow(dead_code)]
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Sphere, Surface,
-    SurfaceMeet, Vector, intersect, walk,
+    Axis, Cylinder, Deflection, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Result, Sphere,
+    Surface, SurfaceMeet, Vector, intersect, walk,
 };
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -142,6 +142,60 @@ fn a_number(reading: &mut impl Iterator<Item = u8>) -> Option<f64> {
 /// How many powers of two one step of the exponent byte is worth.
 const FIVES_PER_STEP: i32 = 5;
 
+/// What one pair was actually asked.
+///
+/// Every field counts comparisons *reached*, never draws seen. A pair that
+/// refuses is not a failure here — giving up is an answer a caller can read —
+/// so without these a harness could not tell an oracle that held from one that
+/// skipped every draw it was given.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Asked {
+    /// Walked points checked against both the surfaces that named them.
+    pub points: usize,
+    /// Pairs named both ways round where at least one order named something.
+    pub orders: usize,
+}
+
+impl Asked {
+    /// What two pairs were asked between them.
+    #[must_use]
+    pub fn and(self, other: Self) -> Self {
+        Self {
+            points: self.points + other.points,
+            orders: self.orders + other.orders,
+        }
+    }
+}
+
+/// **Every oracle this harness has, asked of one pair of surfaces.**
+///
+/// The fuzz target and the suite's replay both call this and nothing narrower,
+/// so a property added here is explored by `cargo fuzz` and replayed in CI
+/// without either being edited. That is the file header's one-authority rule
+/// applied to the oracles and not only to the decoder.
+///
+/// # Why turning is not among them
+///
+/// A pair turned by a rotation was the obvious third oracle and it is
+/// deliberately absent. Turning changes what an exactly tangent pair crosses
+/// in — legitimately, because the turned coordinates are a rounding away and
+/// the surfaces really do come apart — so the property is only true away from a
+/// knife edge. `the_same_pair_turned_names_the_same_kind_of_crossing.rs` has the
+/// filter for that, and §50.9 records that the filter is known to miss a ball
+/// tangent along a whole circle inside a pipe. Adding a turning oracle on top of
+/// a guard that is known to miss cases would report that one miss on every
+/// degenerate draw the corpus holds, and bury whatever else it found.
+///
+/// # Panics
+///
+/// If any oracle below fails.
+pub fn every_oracle_holds_of(pair: [Surface; 2]) -> Asked {
+    Asked {
+        points: every_point_of_every_crossing_is_on_both_surfaces(pair),
+        orders: naming_a_pair_does_not_depend_on_which_way_round_it_is_asked(&pair),
+    }
+}
+
 /// **Criterion 3, asked of one pair of surfaces.**
 ///
 /// Name where they cross; where that is a curve, walk it; and of every point
@@ -233,6 +287,77 @@ fn side_of(surface: &Surface, point: PredicatePoint) -> Decision {
         Surface::Cone(cone) => cone.side_of(point),
         Surface::Torus(ring) => ring.side_of(point),
         other => panic!("nothing here can ask about {other:?}"),
+    }
+}
+
+/// **Which way round the pair is asked does not change the answer.**
+///
+/// `intersect(a, b)` and `intersect(b, a)` are one question, and the pair table
+/// sends them down different rows to answer it.
+///
+/// What is compared is the *kind* of answer and not its geometry. Two correct
+/// runs may describe one curve from either surface's point of view, and
+/// insisting on the same bits would assert a choice rather than a fact. Every
+/// refusal compares equal to every other for the same reason: which one a path
+/// reaches is a property of the path.
+///
+/// **The sharp half is one order answering where the other gives up.** That says
+/// the answer exists and the arithmetic did not reach it from one side, which is
+/// §16.10's gap rather than a limit — and no amount of walking points can see
+/// it, because the refusing order never produces a point to check. That is the
+/// hole §50.9 sent this oracle to close.
+///
+/// # Panics
+///
+/// If the two orders disagree about what the pair crosses in.
+fn naming_a_pair_does_not_depend_on_which_way_round_it_is_asked(pair: &[Surface; 2]) -> usize {
+    let one_way = intersect(
+        &pair[0],
+        &pair[1],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let other_way = intersect(
+        &pair[1],
+        &pair[0],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert_eq!(
+        answer_of(&one_way),
+        answer_of(&other_way),
+        "asking this pair the other way round changed the answer.\n  first {:?}\n  second {:?}\n  pair {pair:?}",
+        one_way.as_ref().err(),
+        other_way.as_ref().err(),
+    );
+    usize::from(one_way.is_ok() || other_way.is_ok())
+}
+
+/// What a pair crosses in, or that it was refused.
+///
+/// Every refusal reads the same, because which one a path reaches is a property
+/// of the path and not of the pair.
+fn answer_of(met: &Result<SurfaceMeet>) -> (&'static str, usize) {
+    match met {
+        Ok(named) => kind_of(named),
+        Err(_) => ("refused", 0),
+    }
+}
+
+/// What a pair crosses in, at the coarseness the two relation oracles compare.
+///
+/// [`SurfaceMeet`] is `#[non_exhaustive]` and this is another crate, so the
+/// wildcard is forced. Every arm that exists is named above it, and the
+/// wildcard panics rather than folding a new arm into an old one — a new kind of
+/// crossing silently compared equal to `Nothing` is exactly how these oracles
+/// would go quiet.
+fn kind_of(met: &SurfaceMeet) -> (&'static str, usize) {
+    match met {
+        SurfaceMeet::Nothing => ("nothing", 0),
+        SurfaceMeet::TouchAtOnePoint { .. } => ("one point", 0),
+        SurfaceMeet::Curves(runs) => ("curves", runs.len()),
+        SurfaceMeet::SameSurface => ("the same surface", 0),
+        other => panic!("unhandled crossing: {other:?}"),
     }
 }
 
