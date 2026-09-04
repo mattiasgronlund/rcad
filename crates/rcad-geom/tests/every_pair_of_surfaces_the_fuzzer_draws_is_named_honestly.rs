@@ -55,11 +55,11 @@
 //!     --no-capture --no-fail-fast
 //! ```
 //!
-//! | row | pairs | points | orders |
-//! |---|---|---|---|
-//! | corpus | 743 of 824 seeds | 1983 | 542 |
-//! | soak | 199 943 of 200 000 draws | 400 342 | 178 631 |
-//! | cones and tori | 136 | 435 | 32 |
+//! | row | pairs | points | orders | scalings |
+//! |---|---|---|---|---|
+//! | corpus | 743 of 824 seeds | 1983 | 542 | 1083 |
+//! | soak | 199 943 of 200 000 draws | 400 342 | 178 631 | 355 291 |
+//! | cones and tori | 136 | 435 | 32 | 64 |
 //!
 //! **Not one of them is `rcad-fuzz`'s number.** That branch published three
 //! floors measured before M4 and §33 moved the refusal rates under them, and
@@ -116,7 +116,7 @@ fn every_seed_in_the_checked_in_corpus_names_its_crossing_honestly() {
         "only {named} of {seeds} seeds decoded to a pair, so the corpus has drifted away from \
          the thing it is a corpus of"
     );
-    every_oracle_was_reached(asked, 1_400, 400);
+    every_oracle_was_reached(asked, 1_400, 400, 800);
 }
 
 /// The soak, over the whole decoded space.
@@ -152,7 +152,7 @@ fn a_soak_over_pseudo_random_bytes_names_every_crossing_honestly() {
         "only {named} of {drawn} draws named a pair, so the decoder is refusing most of the \
          space rather than exploring it"
     );
-    every_oracle_was_reached(asked, 300_000, 130_000);
+    every_oracle_was_reached(asked, 300_000, 130_000, 260_000);
 }
 
 /// **The cones and the tori, which no byte string reaches.**
@@ -178,7 +178,7 @@ fn every_pair_with_a_cone_or_a_torus_in_it_is_named_the_same_way_round_and_at_an
         pairs >= 100,
         "only {pairs} pairs were built, so the family has shrunk"
     );
-    every_oracle_was_reached(asked, 300, 30);
+    every_oracle_was_reached(asked, 300, 30, 48);
 }
 
 /// Every pair the table below makes that has a cone or a torus on one side.
@@ -241,12 +241,13 @@ fn the_shapes_the_bytes_already_draw() -> Vec<Surface> {
 /// Insist that each oracle was reached often enough to have been asserting
 /// anything.
 ///
-/// A floor apiece and not one shared floor, because the oracles skip for
-/// entirely different reasons: a walk that refuses costs the point oracle
-/// nothing to skip, while the order oracle counts a pair that either order
-/// named. A single count would let one of them fall to nothing behind the
-/// other.
-fn every_oracle_was_reached(asked: Asked, points: usize, orders: usize) {
+/// A floor apiece and not one shared floor, because the three skip for entirely
+/// different reasons: a walk that refuses costs the point oracle nothing to
+/// skip, the order oracle counts a pair that *either* order named, and the scale
+/// oracle needs *both* scales decided and drops any pair already near the ends
+/// of the range. A single count would let one of them fall to nothing behind
+/// the other two.
+fn every_oracle_was_reached(asked: Asked, points: usize, orders: usize, scalings: usize) {
     assert!(
         asked.points >= points,
         "only {} points were asked about: {asked:?}",
@@ -256,5 +257,10 @@ fn every_oracle_was_reached(asked: Asked, points: usize, orders: usize) {
         asked.orders >= orders,
         "only {} pairs were named both ways round: {asked:?}",
         asked.orders
+    );
+    assert!(
+        asked.scalings >= scalings,
+        "only {} pairs were named at two scales: {asked:?}",
+        asked.scalings
     );
 }

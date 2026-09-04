@@ -33,8 +33,8 @@
 #![allow(dead_code)]
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Result, Sphere,
-    Surface, SurfaceMeet, Vector, intersect, walk,
+    Axis, Cone, Cylinder, Deflection, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Result,
+    Sphere, Surface, SurfaceMeet, Torus, Vector, intersect, walk,
 };
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -154,6 +154,8 @@ pub struct Asked {
     pub points: usize,
     /// Pairs named both ways round where at least one order named something.
     pub orders: usize,
+    /// Pairs named at two scales where both scales were decided.
+    pub scalings: usize,
 }
 
 impl Asked {
@@ -163,6 +165,7 @@ impl Asked {
         Self {
             points: self.points + other.points,
             orders: self.orders + other.orders,
+            scalings: self.scalings + other.scalings,
         }
     }
 }
@@ -193,6 +196,7 @@ pub fn every_oracle_holds_of(pair: [Surface; 2]) -> Asked {
     Asked {
         points: every_point_of_every_crossing_is_on_both_surfaces(pair),
         orders: naming_a_pair_does_not_depend_on_which_way_round_it_is_asked(&pair),
+        scalings: writing_a_pair_at_another_power_of_two_does_not_change_it(&pair),
     }
 }
 
@@ -359,6 +363,133 @@ fn kind_of(met: &SurfaceMeet) -> (&'static str, usize) {
         SurfaceMeet::SameSurface => ("the same surface", 0),
         other => panic!("unhandled crossing: {other:?}"),
     }
+}
+
+/// **The same pair written at another power of two crosses in the same kind of
+/// thing.**
+///
+/// Multiplying every coordinate by `2^k` is exact until a number leaves the
+/// range, and it carries the crossing to the scaled crossing, so the kind of
+/// answer has to survive it. [`exactly_scaled`] divides back and compares, which
+/// refuses the scaling outright wherever it would have overflowed or rounded in
+/// the subnormals — so the two runs really are the same geometry rather than a
+/// near copy of it, which is the argument
+/// `scaling_a_surface_must_not_change_its_answer.rs` makes for its own samples.
+///
+/// **A pair that refuses at either scale is skipped, and that is not a
+/// weakening.** §30.5's first row is a known gap: a product leaves `f64`'s range
+/// while naming, and the same shapes written back on the lattice are named.
+/// Asserting across a refusal would re-report that one gap on every draw and
+/// drown out whatever else is here. What is left is the sharp case — both scales
+/// decided, and disagreeing.
+///
+/// # Panics
+///
+/// If the two scales disagree about what the pair crosses in.
+fn writing_a_pair_at_another_power_of_two_does_not_change_it(pair: &[Surface; 2]) -> usize {
+    let Ok(here) = intersect(
+        &pair[0],
+        &pair[1],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) else {
+        return 0;
+    };
+
+    let mut compared = 0;
+    for by in [-1, 1] {
+        let (Some(first), Some(second)) = (scaled(&pair[0], by), scaled(&pair[1], by)) else {
+            continue;
+        };
+        let Ok(there) = intersect(
+            &first,
+            &second,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) else {
+            continue;
+        };
+        compared += 1;
+        assert_eq!(
+            kind_of(&here),
+            kind_of(&there),
+            "writing this pair at 2^{by} changed what it crosses in.\n  pair {pair:?}"
+        );
+    }
+    compared
+}
+
+/// The same surface with every length multiplied by `2^by`, or `None` where that
+/// is not exact.
+///
+/// **A cone's slope and a plane's normal do not scale, and every other number
+/// here does.** A slope is a ratio of two lengths and a normal is a direction;
+/// scaling either would tilt the surface rather than resize it, and the oracle
+/// above would then be comparing two different shapes and calling their
+/// agreement a property.
+///
+/// `Surface` is `#[non_exhaustive]` and this is another crate, so the wildcard
+/// is forced. All five arms that exist are named above it, and the wildcard
+/// panics: a sixth kind of surface must be scaled on purpose here, not skipped
+/// quietly into a green run over a family that stopped growing (§48.2).
+fn scaled(surface: &Surface, by: i32) -> Option<Surface> {
+    let factor = 2f64.powi(by);
+    match surface {
+        Surface::Plane(flat) => {
+            let [a, b, c, d] = flat.coefficients();
+            Plane::from_coefficients([a, b, c, exactly_scaled(d, factor)?])
+                .ok()
+                .map(Surface::Plane)
+        }
+        Surface::Sphere(ball) => Sphere::new(
+            scaled_place(ball.centre(), factor)?,
+            exactly_scaled(ball.radius(), factor)?,
+        )
+        .ok()
+        .map(Surface::Sphere),
+        Surface::Cylinder(pipe) => {
+            Cylinder::new(
+                scaled_axis(pipe.axis(), factor)?,
+                exactly_scaled(pipe.radius(), factor)?,
+            )
+            .ok()
+            .map(Surface::Cylinder)
+        }
+        Surface::Cone(cone) => Cone::new(scaled_axis(cone.axis(), factor)?, cone.slope())
+            .ok()
+            .map(Surface::Cone),
+        Surface::Torus(ring) => Torus::new(
+            scaled_axis(ring.axis(), factor)?,
+            exactly_scaled(ring.ring_radius(), factor)?,
+            exactly_scaled(ring.tube_radius(), factor)?,
+        )
+        .ok()
+        .map(Surface::Torus),
+        other => panic!("nothing here can scale {other:?}"),
+    }
+}
+
+/// The same axis moved to where scaling puts it, pointing the same way.
+fn scaled_axis(axis: Axis, factor: f64) -> Option<Axis> {
+    Axis::new(scaled_place(axis.origin(), factor)?, axis.direction()).ok()
+}
+
+fn scaled_place(point: Point, factor: f64) -> Option<Point> {
+    let mut moved = [0.0; 3];
+    for (out, coordinate) in moved.iter_mut().zip(point.coordinates()) {
+        *out = exactly_scaled(coordinate, factor)?;
+    }
+    Some(Point::from(moved))
+}
+
+/// `value · factor`, or `None` where that product is not exact.
+///
+/// `factor` is a power of two, so dividing it back out is exact too and the
+/// comparison catches every way the multiplication can lose something:
+/// overflow to infinity, underflow to zero, and rounding in the subnormals.
+fn exactly_scaled(value: f64, factor: f64) -> Option<f64> {
+    let scaled = value * factor;
+    (scaled.is_finite() && scaled / factor == value).then_some(scaled)
 }
 
 /// The bytes a pair of surfaces would be decoded from, for writing a corpus out.
