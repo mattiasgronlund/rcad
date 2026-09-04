@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use rcad_geom::{Cone, Deflection, Point, Surface, Vector};
+use rcad_predicates::expansion::{expansion_sum, scale_expansion, two_diff};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::mesh::{Mesh, MeshTriangle};
@@ -346,21 +347,75 @@ impl SolidView<'_> {
     /// used to happen inside this loop now happens in [`shift`] on the way out,
     /// where it means the answer does not fit rather than that the sum went
     /// wrong.
+    ///
+    /// # The shift is no defence against cancellation, and the sign needs one
+    ///
+    /// **The sign of this sum says what a shell *is*.** The fuse's
+    /// `nest_the_shells` sorts a shell into a lump or a void of one by it, and
+    /// [`Model::validate`](crate::Model::validate) and
+    /// [`SolidView::measure`] call a negative one
+    /// [`Invalid::VolumeIsNotPositive`]. A rounded comparison against zero
+    /// deciding a shape is `docs/decisions.md` §49.8's class, and this is the
+    /// member of it that fails into a wrong answer rather than a refusal.
+    ///
+    /// The paragraph above defends against being far from the origin. It does
+    /// nothing against cancellation, and **the shift cannot be made to**: every
+    /// term of a `3 × 3` determinant carries one factor from each axis, so
+    /// shrinking an axis shrinks every term by exactly the same power of two
+    /// and the sum comes back bit for bit what it was, scaled. That is what
+    /// makes the shift free, and it is the same fact that makes it useless
+    /// here — it moves where the terms sit and never how much of each other
+    /// they eat. It does rescue a solid thin along an *axis*, because there
+    /// every term is as small as the volume already. A solid thin along a
+    /// *diagonal* has all three axis extents at its full size, terms of that
+    /// size cubed, and a volume the terms must cancel down to reach.
+    /// `a_flat_solid_whose_volume_signs_the_wrong_way.rs` is a rod `1e-9`
+    /// across down `(1, 1, 1)`, with nothing near-parallel anywhere in it,
+    /// whose `1e-18` of space used to measure `-4.5e-18`.
+    ///
+    /// So the rounded sum stands when a forward bound proves its own sign, and
+    /// [`six_volumes_exactly`] answers when it does not. **The exact one always
+    /// decides.** The corners are `f64` triples and every step from them to the
+    /// sum is `+`, `-` and `×`, which dyadic fractions are closed under, so
+    /// there is no undecided case to have here — unlike a predicate over a
+    /// corner that is only known to lie in a box (§2.3). The one thing that
+    /// can still come back without a sign is an overflow, and that is the
+    /// answer not fitting rather than the sum going wrong, so it is handed
+    /// straight back for [`shift`]'s callers to refuse.
+    ///
+    /// The moment is left rounded. It is a position, and where a solid
+    /// balances is [`Measurement::centroid`], which nothing branches on.
     fn volume_and_moment(self, hub: Point, shifts: [i32; 3]) -> (f64, [f64; 3]) {
+        let mut fan: Vec<[[f64; 2]; 9]> = Vec::new();
         let mut six_volumes = 0.0;
+        let mut how_big_the_terms_are = 0.0;
         let mut moment = [0.0f64; 3];
         for face in self.faces() {
             face.for_each_triangle(|corners| {
-                let [a, b, c] = corners.map(|corner| shrink_each_axis(corner - hub, shifts));
+                let exact = corners.map(|corner| exactly_how_far_from(hub, corner, shifts));
+                let [a, b, c] = exact.map(the_rounded_part_of);
                 let six_volume = a.dot(b.cross(c));
                 six_volumes += six_volume;
+                how_big_the_terms_are +=
+                    across_the_axes(a) * across_the_axes(b) * across_the_axes(c);
                 let offsets = [a, b, c].map(|offset| offset.components());
                 for (axis, total) in moment.iter_mut().enumerate() {
                     *total += six_volume * (offsets[0][axis] + offsets[1][axis] + offsets[2][axis]);
                 }
+                fan.push(core::array::from_fn(|slot| exact[slot / 3][slot % 3]));
             });
         }
-        (six_volumes, moment)
+
+        // Every triple product costs at most eight roundings against the sum of
+        // the six terms it is made of, and the running total one more each time
+        // it is added to. `across_the_axes` dominates that six-term sum, so
+        // this covers the lot with room to spare — and spare room only ever
+        // costs the exact pass being run when it need not have been.
+        let slack = (fan.len() as f64 + 8.0) * f64::EPSILON * how_big_the_terms_are;
+        if six_volumes.abs() > slack || !how_big_the_terms_are.is_finite() {
+            return (six_volumes, moment);
+        }
+        (six_volumes_exactly(&fan), moment)
     }
 
     /// The total area of the faces, each measured in a scale of its own.
@@ -452,6 +507,106 @@ impl SolidView<'_> {
     }
 }
 
+/// How far `corner` is from `hub` along each axis, exactly, in the units
+/// `shifts` picked: the `f64` difference the rounded sum uses, and the bit of
+/// that difference the subtraction threw away.
+///
+/// **The scaling is done to the difference and not to the two coordinates**,
+/// because the shifts are read off the offsets and say nothing about where the
+/// solid sits. A part `1e-300` across at `1e300` from the origin has a shift of
+/// about `2^997`, which no coordinate of it survives being multiplied by and
+/// every offset of it does.
+///
+/// The two entries are the expansion of the offset, smallest first, which is
+/// the order everything in [`rcad_predicates::expansion`] wants.
+fn exactly_how_far_from(hub: Point, corner: Point, shifts: [i32; 3]) -> [[f64; 2]; 3] {
+    let hub = hub.coordinates();
+    let corner = corner.coordinates();
+    [0, 1, 2].map(|axis| {
+        let (near, lost) = two_diff(corner[axis], hub[axis]);
+        [shift(lost, -shifts[axis]), shift(near, -shifts[axis])]
+    })
+}
+
+/// The offset the plain `f64` subtraction would have given, which is the larger
+/// entry of each axis.
+fn the_rounded_part_of(offset: [[f64; 2]; 3]) -> Vector {
+    Vector::from(offset.map(|axis| axis[1]))
+}
+
+/// The three axes of an offset added up, ignoring their signs.
+///
+/// The product of this over the three corners of a triangle dominates the sum
+/// of the six terms of their determinant, which is what a forward error bound
+/// on that determinant is a multiple of.
+fn across_the_axes(offset: Vector) -> f64 {
+    offset
+        .components()
+        .iter()
+        .map(|component| component.abs())
+        .sum()
+}
+
+/// Six times the signed volume of a whole fan, exactly.
+///
+/// Each triangle is nine offsets — three corners of three axes — and each
+/// offset is two `f64` that add up to it with nothing lost. From there to the
+/// sum is nothing but `+`, `-` and `×` on those, and
+/// [`rcad_predicates::expansion`] does all three without throwing a bit away,
+/// so what comes back has the sign the solid really has.
+///
+/// The entries never overlap and come out smallest first, so adding them up in
+/// that order lands on the nearest `f64` to the true sum: the last addition is
+/// the only one that can round, and it rounds the whole answer once.
+fn six_volumes_exactly(fan: &[[[f64; 2]; 9]]) -> f64 {
+    let mut total: Vec<f64> = Vec::new();
+    for triangle in fan {
+        total = added(&total, &determinant_of(triangle));
+    }
+    total.iter().sum()
+}
+
+/// The exact determinant of one triangle's three offsets.
+///
+/// The six terms of a `3 × 3` determinant: three that take the axes in an even
+/// order and count for themselves, three in an odd order and count against.
+fn determinant_of(triangle: &[[f64; 2]; 9]) -> Vec<f64> {
+    let mut total: Vec<f64> = Vec::new();
+    for (axes, turn) in [
+        ([0, 1, 2], 1.0),
+        ([1, 2, 0], 1.0),
+        ([2, 0, 1], 1.0),
+        ([0, 2, 1], -1.0),
+        ([2, 1, 0], -1.0),
+        ([1, 0, 2], -1.0),
+    ] {
+        let pair = multiplied(&triangle[axes[0]], &triangle[3 + axes[1]]);
+        let term = multiplied(&pair, &triangle[6 + axes[2]]);
+        let signed: Vec<f64> = term.iter().map(|entry| turn * entry).collect();
+        total = added(&total, &signed);
+    }
+    total
+}
+
+/// Two expansions multiplied out: every entry of one scaled by every entry of
+/// the other, all added up.
+fn multiplied(left: &[f64], right: &[f64]) -> Vec<f64> {
+    let mut total: Vec<f64> = Vec::new();
+    let mut piece = vec![0.0; 2 * left.len()];
+    for &factor in right {
+        let used = scale_expansion(left, factor, &mut piece);
+        total = added(&total, &piece[..used]);
+    }
+    total
+}
+
+fn added(left: &[f64], right: &[f64]) -> Vec<f64> {
+    let mut sum = vec![0.0; left.len() + right.len()];
+    let used = expansion_sum(left, right, &mut sum);
+    sum.truncate(used);
+    sum
+}
+
 /// The widest component of any edge of any of `face`'s triangles.
 ///
 /// The face's own extent, not its distance from the hub. A small face a long
@@ -506,20 +661,38 @@ fn axis_shifts_over(mesh: &Mesh, hub: Point) -> [i32; 3] {
 ///
 /// The mesh's triangles in the order it stores them, which is fixed (§25.7), so
 /// two runs give the same sum bit for bit.
+///
+/// The sign is settled the same way [`SolidView::volume_and_moment`] settles
+/// it, and for the same reason: `Model::validate` calls a negative one
+/// [`Invalid::VolumeIsNotPositive`], and the fuse's `nest_the_shells` sorts a
+/// curved shell into a lump or a void of one by it. What the exact sum here is
+/// exact *about* is the mesh, which stands in for the solid to within
+/// [`Measurement::volume_error`]; the sign it decides is the sign the mesh's
+/// own triangles have, which is what these two callers branch on.
 fn volume_and_moment_over(mesh: &Mesh, hub: Point, shifts: [i32; 3]) -> (f64, [f64; 3]) {
+    let mut fan: Vec<[[f64; 2]; 9]> = Vec::new();
     let mut six_volumes = 0.0;
+    let mut how_big_the_terms_are = 0.0;
     let mut moment = [0.0f64; 3];
     for triangle in mesh.triangles() {
-        let [a, b, c] =
-            corners_of(mesh, triangle).map(|corner| shrink_each_axis(corner - hub, shifts));
+        let exact =
+            corners_of(mesh, triangle).map(|corner| exactly_how_far_from(hub, corner, shifts));
+        let [a, b, c] = exact.map(the_rounded_part_of);
         let six_volume = a.dot(b.cross(c));
         six_volumes += six_volume;
+        how_big_the_terms_are += across_the_axes(a) * across_the_axes(b) * across_the_axes(c);
         let offsets = [a, b, c].map(|offset| offset.components());
         for (axis, total) in moment.iter_mut().enumerate() {
             *total += six_volume * (offsets[0][axis] + offsets[1][axis] + offsets[2][axis]);
         }
+        fan.push(core::array::from_fn(|slot| exact[slot / 3][slot % 3]));
     }
-    (six_volumes, moment)
+
+    let slack = (fan.len() as f64 + 8.0) * f64::EPSILON * how_big_the_terms_are;
+    if six_volumes.abs() > slack || !how_big_the_terms_are.is_finite() {
+        return (six_volumes, moment);
+    }
+    (six_volumes_exactly(&fan), moment)
 }
 
 /// The signed volume of a mesh, for
@@ -807,12 +980,6 @@ fn shift_for(value: f64) -> i32 {
         return 0;
     }
     i32::try_from(value.to_bits() >> 52 & 0x7ff).expect("eleven bits") - 1023
-}
-
-/// `offset` with each axis shrunk by its own power of two.
-fn shrink_each_axis(offset: Vector, shifts: [i32; 3]) -> Vector {
-    let components = offset.components();
-    Vector::from([0, 1, 2].map(|axis| shift(components[axis], -shifts[axis])))
 }
 
 /// `offset` with every axis shrunk by the same power of two.
