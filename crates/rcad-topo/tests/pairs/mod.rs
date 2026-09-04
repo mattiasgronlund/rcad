@@ -72,9 +72,9 @@
 #![allow(dead_code)]
 
 use proptest::prelude::*;
-use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
+use rcad_geom::{Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, ProfileBuilder, SolidKey};
+use rcad_topo::{DraftStep, Model, ProfileBuilder, SolidBuilder, SolidKey};
 
 /// Roughly how big a generated configuration is, for [`Scale`].
 pub const WORKING_SIZE: f64 = 100.0;
@@ -1311,6 +1311,256 @@ pub fn a_ball_and_a_block() -> impl Strategy<Value = BallAndBlock> {
             (Just(side), Just(radius), [room.clone(), room])
                 .prop_map(|(side, radius, at)| BallAndBlock { side, radius, at })
         })
+}
+
+/// A block with a frustum standing up through its floor.
+///
+/// The third curved family, and the first whose surface is neither a pipe nor a
+/// ball. A cone is the one round surface here that gets *wider* as it goes, so
+/// the frustum is put where that matters: its narrow cap sticks out below the
+/// block's floor, its wide cap sits inside the block, and the block's floor
+/// crosses the cone's wall in a circle.
+///
+/// **Clear of every side wall on purpose.** A wall passing through the cone cuts
+/// it in a hyperbola, and `how_often_a_fuse_with_a_cone_refuses.rs` pins that
+/// arrangement — its "a frustum against a block" family — at 6 answers out of
+/// 96, with the other 90 refused because nothing can put points in order along
+/// the curve. A family the fuse mostly refuses leaves every property here green
+/// having compared nothing (§14.7), and §47.2 is what those six answers turned
+/// out to be worth. The degenerate arrangements are hand-written one at a time
+/// elsewhere.
+///
+/// # Why the slope is one over a power of two
+///
+/// `Model::validate` asks that every corner of a curved face be certified on its
+/// surface. A cone's corner has to satisfy `radius = slope · height`, a product
+/// of two stored numbers, and a slope of `0.6` would round that off its own
+/// face. So the two cap radii are the whole numbers here and the heights are
+/// derived: a cap of radius `r` sits `r · up_per_unit_wider` up the axis, exact
+/// for every `r` an `f64` can hold. `tests/cones/mod.rs` carries the same note at
+/// length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrustumAndBlock {
+    /// How wide the block is, and how tall.
+    pub side: u32,
+    /// The radius of the frustum's lower cap, the one below the floor.
+    pub narrow: u32,
+    /// The radius of the frustum's upper cap, the one inside the block.
+    pub wide: u32,
+    /// How far up the axis the cone goes for each unit it gains in radius.
+    ///
+    /// The slope is one over this, so it is always a power of two.
+    pub up_per_unit_wider: u32,
+    /// Where the frustum's axis stands, in the block's own coordinates.
+    pub at: [u32; 2],
+}
+
+impl FrustumAndBlock {
+    /// Build the block and then the frustum, in that order.
+    ///
+    /// The frustum is dropped by one more than its lower cap's height, so that
+    /// cap ends up one unit below the block's floor and the upper cap ends up
+    /// inside the block.
+    #[must_use]
+    pub fn build(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let block = model
+            .add_cube(
+                f64::from(self.side),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a whole-number cube");
+        let frustum = a_frustum(&mut model, self.slope(), self.near(), self.far());
+        model.place_solid(
+            frustum,
+            &Isometry::translation(Vector::new(
+                f64::from(self.at[0]),
+                f64::from(self.at[1]),
+                -1.0 - self.near(),
+            ))
+            .expect("a whole-number shift"),
+        );
+        (model, vec![block, frustum])
+    }
+
+    /// The same frustum built twice in the same place, and no block.
+    ///
+    /// What `A \ A` is asked of, and the counterpart of
+    /// [`BallAndBlock::built_as_a_ball_and_a_copy_of_it`]. Both copies come out
+    /// of the same numbers by the same code, so they are bit-identical rather
+    /// than nearly so.
+    #[must_use]
+    pub fn built_as_a_frustum_and_a_copy_of_it(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let one = a_frustum(&mut model, self.slope(), self.near(), self.far());
+        let copy = a_frustum(&mut model, self.slope(), self.near(), self.far());
+        (model, vec![one, copy])
+    }
+
+    /// How far out the cone goes per unit up, which is one over a power of two.
+    #[must_use]
+    pub fn slope(&self) -> f64 {
+        1.0 / f64::from(self.up_per_unit_wider)
+    }
+
+    /// How far up the axis the lower cap sits, before the frustum is dropped.
+    #[must_use]
+    pub fn near(&self) -> f64 {
+        f64::from(self.narrow * self.up_per_unit_wider)
+    }
+
+    /// How far up the axis the upper cap sits, before the frustum is dropped.
+    #[must_use]
+    pub fn far(&self) -> f64 {
+        f64::from(self.wide * self.up_per_unit_wider)
+    }
+}
+
+/// A block with a frustum up through its floor, the frustum clear of every side
+/// wall by at least one and its upper cap at least one below the block's roof.
+///
+/// Three slopes — a half, a quarter and an eighth — so the family is not one
+/// cone shape drawn at three sizes.
+///
+/// Shrinks toward a block of side six with a frustum of slope one half standing
+/// in the middle of its floor, running from a cap of radius one a unit below the
+/// floor to a cap of radius two a unit above it.
+pub fn a_frustum_and_a_block() -> impl Strategy<Value = FrustumAndBlock> {
+    (1u32..=3)
+        .prop_flat_map(|halvings| {
+            let up_per_unit_wider = 1u32 << halvings;
+            // Tall enough to hold a frustum that gains a whole unit of radius,
+            // and at least six across so the wide cap clears both walls.
+            (Just(up_per_unit_wider), up_per_unit_wider.max(6)..=12)
+        })
+        .prop_flat_map(|(up_per_unit_wider, side)| {
+            // A whole unit of room between the wide cap and every side wall.
+            let widest = (side / 2 - 1).min(3);
+            (Just(side), Just(up_per_unit_wider), 1u32..widest)
+        })
+        .prop_flat_map(|(side, up_per_unit_wider, narrow)| {
+            // No taller than the block, so the wide cap stays a unit below the
+            // roof.
+            let widest = (side / 2 - 1).min(3).min(narrow + side / up_per_unit_wider);
+            (
+                Just(side),
+                Just(up_per_unit_wider),
+                Just(narrow),
+                narrow + 1..=widest,
+            )
+        })
+        .prop_flat_map(|(side, up_per_unit_wider, narrow, wide)| {
+            let room = wide + 1..=side - wide - 1;
+            (
+                Just(side),
+                Just(narrow),
+                Just(wide),
+                Just(up_per_unit_wider),
+                [room.clone(), room],
+            )
+                .prop_map(|(side, narrow, wide, up_per_unit_wider, at)| {
+                    FrustumAndBlock {
+                        side,
+                        narrow,
+                        wide,
+                        up_per_unit_wider,
+                        at,
+                    }
+                })
+        })
+}
+
+/// A frustum about `+z` — apex at the origin, `slope` out per unit up, cap
+/// circles at `near` and `far` up the axis — described face by face through
+/// [`SolidBuilder`].
+///
+/// Lifted from `tests/cones/mod.rs`, which the binaries that include this file
+/// do not include. There is no `Model::add_cone` to call instead.
+fn a_frustum(model: &mut Model, slope: f64, near: f64, far: f64) -> SolidKey {
+    assert!(0.0 < near && near < far, "a frustum has two different ends");
+    let skin = Cone::new(Axis::z(), slope).expect("a positive slope");
+    let mut builder = SolidBuilder::new();
+
+    let bottom_corner = builder
+        .add_vertex(Point::new(slope * near, 0.0, near))
+        .expect("a finite point");
+    let top_corner = builder
+        .add_vertex(Point::new(slope * far, 0.0, far))
+        .expect("a finite point");
+    let seam = builder
+        .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
+        .expect("a ruling of a cone is straight, which is the whole of what a seam here is");
+    let bottom_circle = builder
+        .add_edge(
+            bottom_corner,
+            bottom_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
+        .expect("the cap plane cuts the cone in one closed curve");
+    let top_circle = builder
+        .add_edge(
+            top_corner,
+            top_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
+        .expect("the cap plane cuts the cone in one closed curve");
+
+    let cap = |builder: &mut SolidBuilder, at: f64, outward: f64, edge, turn| {
+        let plane =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, at), Vector::new(0.0, 0.0, outward))
+                .expect("the z axis is a unit normal");
+        let coedge = builder
+            .add_coedge(edge, turn)
+            .expect("an edge of this build");
+        let wire = builder
+            .add_wire(&[DraftStep::Along(coedge)])
+            .expect("one closed edge is a wire");
+        builder
+            .add_face(Surface::Plane(plane), &[wire])
+            .expect("a cap is a plane trimmed by its circle")
+    };
+    let bottom = cap(
+        &mut builder,
+        near,
+        -1.0,
+        bottom_circle,
+        Orientation::Reversed,
+    );
+    let top = cap(&mut builder, far, 1.0, top_circle, Orientation::Forward);
+
+    let round_the_wall: Vec<DraftStep> = [
+        (bottom_circle, Orientation::Forward),
+        (seam, Orientation::Forward),
+        (top_circle, Orientation::Reversed),
+        (seam, Orientation::Reversed),
+    ]
+    .into_iter()
+    .map(|(edge, turn)| {
+        DraftStep::Along(
+            builder
+                .add_coedge(edge, turn)
+                .expect("an edge of this build"),
+        )
+    })
+    .collect();
+    let wire = builder
+        .add_wire(&round_the_wall)
+        .expect("round the bottom, up the seam, back round the top, down the seam");
+    let side = builder
+        .add_face(Surface::Cone(skin), &[wire])
+        .expect("a face on the cone");
+
+    builder
+        .add_shell(&[
+            (bottom, Orientation::Forward),
+            (top, Orientation::Forward),
+            (side, Orientation::Forward),
+        ])
+        .expect("three faces close");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a frustum described this way is a solid")
 }
 
 /// Where the second solid of a degenerate pair sits along one axis.
