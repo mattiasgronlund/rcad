@@ -2241,7 +2241,7 @@ fn it_holds_this_line_and_only_the_apex_of_the_other(
 /// [`where_two_pipes_cross`] asks the first and [`where_a_ball_and_a_pipe_cross`]
 /// the second.
 ///
-/// # What stays refused, and one of them is a limit rather than a gap
+/// # What stays refused is one gap, reached down two roads
 ///
 /// A cone and a pipe whose axes lean against each other cross in a genuine
 /// degree-four space curve and are refused, which is the row's standing **gap**.
@@ -2255,14 +2255,29 @@ fn it_holds_this_line_and_only_the_apex_of_the_other(
 /// a second family. Two circles hold no line, so the coaxial pair leaves it
 /// right.
 ///
-/// A cone whose apex was written as `origin + t·ŵ` on a direction that is not a
-/// coordinate one is a different matter: the multiply-and-add lands an ulp or
-/// two off the stored line, the second question answers [`Decision::Pos`], and
-/// the refusal is **right**. Those two surfaces, as stored, genuinely do not
-/// share an axis, and what they cross in genuinely is a quartic. A **limit**
-/// and not a gap (§16.10): there is no answer being refused. §50.11 measured
-/// 20 000 of 20 000 such apexes refused, worst miss `2.6e-14` on coordinates of
-/// order 100.
+/// **A pair a person drew coaxial reaches that same gap down the second road,
+/// and a placement is all it takes.** Both surfaces arrive here with their
+/// locations already composed, so what the apex question reads is the *placed*
+/// pair. Turn a frustum sitting in a bore — one line, two axis origins written
+/// at different points along it, which is how a countersink met by a bore comes
+/// out of a file — about anything but a coordinate direction, and the two
+/// origins round apart: `‖(a − o_p) × w_p‖²` answers [`Decision::Pos`] and the
+/// two surfaces **as stored** genuinely are not coaxial. The coaxiality question
+/// is answered correctly and nothing is being refused there. What is refused is
+/// the quartic the placed pair really does cross in, and that is the gap booked
+/// above, reached from one more direction (§16.10).
+///
+/// **That road is not a corner of the input space.** Any coaxial pair whose two
+/// axis origins are written as different points can lose its axis to nothing
+/// but a placement, and nearly all of them do:
+/// `a_frustum_in_a_bore_stops_sharing_its_axis_as_soon_as_it_is_turned_off_the_lattice`
+/// finds 62 of 64 turns about the diagonal costing the pair its axis. The
+/// boundary is two origins written as **one** point, which one arithmetic sends
+/// to one place however it is turned. §50.11 reaches the same place from the
+/// corpus side — about 5% of nist's real countersinks sit on leaning axes and
+/// stay refused — and from the arithmetic side, where 20 000 of 20 000 apexes
+/// spelled `origin + t·ŵ` on a non-coordinate direction land an ulp or two off
+/// the stored line, worst miss `2.6e-14` on coordinates of order 100.
 ///
 /// # Errors
 ///
@@ -2310,8 +2325,21 @@ fn a_cone_and_a_pipe_point_along_one_direction(cone: &Cone, pipe: &Cylinder) -> 
 ///
 /// [`Decision::Zero`] and the two stored axes name one line, so the pair crosses
 /// in the two circles [`where_a_cone_and_a_pipe_cross`] names and in nothing
-/// else. Anything else and the crossing is a quartic that may hold a straight
-/// line.
+/// else.
+///
+/// **Every other answer means "not proved coaxial", and that is all it means.**
+/// [`Decision::Pos`] says the two axes are apart. [`Decision::Undecidable`] says
+/// the arithmetic settled nothing — *not* that the crossing is a quartic, which
+/// is a claim nobody made. The `leaning => leaning` arm below hands both back
+/// untouched, and hands back whatever variant [`Decision`] grows next, because
+/// the invariant it rests on is about the **caller** and not about the enum: a
+/// caller has to treat everything but `Zero` as a refusal, and `walk`'s
+/// cone-and-pipe cut — the one caller there is — does, by asking
+/// `!= Decision::Zero`. So a variant this enum grows later lands on the
+/// refusing side instead of being mistaken for a proof, and a second caller
+/// owes the same shape. That is the opposite of [`Picker::side_of_point`]'s
+/// `same => same`, where `Zero` and `Undecidable` both genuinely say *not on a
+/// side*, so a caller of this one may not lean on that precedent.
 ///
 /// **No [`Policy`], on purpose**, for the reason
 /// [`how_a_plane_leans_against_a_cone`] gives at length: [`walk`](crate::walk)
@@ -2821,7 +2849,7 @@ mod tests {
     use rcad_predicates::{Level, SideOfSurface, decide};
 
     use super::*;
-    use crate::Axis;
+    use crate::{Axis, Isometry};
 
     fn a_plane(normal: [f64; 3], through: [f64; 3]) -> Surface {
         Surface::Plane(
@@ -3374,6 +3402,77 @@ mod tests {
         let one = a_pipe([1.0, 2.0, 3.0], [0.0, 0.0, 0.0], 1.0);
         let other = a_pipe([3.0, -1.0, 1.0], [0.0, 0.0, 20.0], 1.0);
         assert_eq!(crossing(&one, &other), SurfaceMeet::Nothing);
+    }
+
+    /// **A placement is the way into the cone-and-pipe refusal, not an odd way
+    /// of writing an apex.** Both surfaces reach [`intersect`] with their
+    /// locations already composed, so what the coaxiality question reads is the
+    /// *placed* pair.
+    ///
+    /// A frustum sitting in a bore is the ordinary spelling: one line, two axis
+    /// origins at different points along it. Turned about anything but a
+    /// coordinate direction, the two origins round apart, `(a − o_p)` stops
+    /// being a multiple of `w_p` and the apex question answers
+    /// [`Decision::Pos`]. The two directions survive, because both are the same
+    /// triple through the same arithmetic.
+    ///
+    /// Two origins written as one point survive too, and that is the boundary:
+    /// the same point through the same arithmetic lands in the same place.
+    #[test]
+    fn a_frustum_in_a_bore_stops_sharing_its_axis_as_soon_as_it_is_turned_off_the_lattice() {
+        let up = Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::from([0.0, 0.0, 1.0]))
+            .expect("z is a direction");
+        let cone = Cone::new(up, 1.0).expect("a positive slope");
+        let bore = |height: f64| {
+            Cylinder::new(
+                Axis::new(
+                    Point::from([0.0, 0.0, height]),
+                    Vector::from([0.0, 0.0, 1.0]),
+                )
+                .expect("z is a direction"),
+                2.0,
+            )
+            .expect("a radius")
+        };
+
+        assert_eq!(
+            whether_a_cone_and_a_pipe_share_an_axis(&cone, &bore(3.0)),
+            Decision::Zero,
+            "on the lattice the pair is coaxial and the exact predicate says so"
+        );
+
+        let turn = Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::from([1.0, 1.0, 1.0]))
+            .expect("a diagonal is a direction");
+        let survivors: Vec<i32> = (1..=64)
+            .filter(|step| {
+                let placement =
+                    Isometry::rotation(&turn, f64::from(*step) * 0.05).expect("a finite angle");
+                whether_a_cone_and_a_pipe_share_an_axis(
+                    &cone.transformed(&placement),
+                    &bore(3.0).transformed(&placement),
+                ) == Decision::Zero
+            })
+            .collect();
+        assert!(
+            survivors.len() <= 4,
+            "62 of these 64 turns cost the pair its axis when this was measured, and the two \
+             that kept it kept it by luck of the rounding; {} keeping it means the placement \
+             has stopped reaching the apex question at all: {survivors:?}",
+            survivors.len()
+        );
+
+        for step in 1..=64 {
+            let placement =
+                Isometry::rotation(&turn, f64::from(step) * 0.05).expect("a finite angle");
+            assert_eq!(
+                whether_a_cone_and_a_pipe_share_an_axis(
+                    &cone.transformed(&placement),
+                    &bore(0.0).transformed(&placement),
+                ),
+                Decision::Zero,
+                "one origin written twice lands in one place however it is turned"
+            );
+        }
     }
 
     /// A discriminant whose products fall off the bottom of the `f64` range is

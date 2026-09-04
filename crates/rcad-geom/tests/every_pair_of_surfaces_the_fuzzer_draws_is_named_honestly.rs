@@ -12,7 +12,8 @@
 //! same decoder: `crates/rcad-geom/tests/fuzzing/mod.rs` holds both, and the
 //! fuzz target reaches across to that file rather than copying it.
 //!
-//! Two rows. The **corpus** is what is checked in beside the target: a handful
+//! Three rows, and the two in this section are the ones that read bytes. The
+//! **corpus** is what is checked in beside the target: a handful
 //! of seeds written out by hand and named for the configuration each one is,
 //! plus everything a coverage-guided run kept, minimised. Every one is replayed,
 //! so a case a fuzzing run once found can never come back unnoticed — and one of
@@ -38,9 +39,26 @@
 //! kernel did not — §48.2's failure exactly, and §50.9 sent this lane to avoid
 //! it.
 //!
-//! The byte layout is not widened to fix that: 824 minimised seeds were kept by
-//! coverage-guided runs against *this* decoder, and repacking the kind bits
-//! would silently reinterpret every one of them. So the cones and tori come from
+//! The byte layout is not widened to fix that, and **not because a repack would
+//! reinterpret the whole corpus — measured, it would not.** Over the 824
+//! minimised seeds, promoting the two unread bits 4 and 5 to a third kind bit
+//! apiece and reading five kinds instead of three gives a different kind to at
+//! least one side of **92** seeds, 67 of them among the 743 that decode to a
+//! pair. Handing the already-redundant kind value 3 to `Cone` and leaving the
+//! layout alone moves **42**, 35 of them decoding. A seed whose two kind fields
+//! come out unchanged reads the same bytes into the same pair, so those counts
+//! are the whole of what either repack disturbs.
+//!
+//! Two things settle it instead. **A minimised seed is worth keeping only for
+//! the branch it reached**, so ninety-odd of them quietly meaning something else
+//! is a real cost against a corpus of 824. And **the repack does not buy the
+//! coverage it is for**: a torus reads eight numbers where a pipe reads seven,
+//! so a torus against a cone, a pipe or another torus needs 76 bytes, and the
+//! longest seed checked in is 71. Those pairs would decode to nothing whatever
+//! the kind bits said. Widening the number budget as well moves every seed's
+//! bytes and not just its first one.
+//!
+//! So the cones and tori come from
 //! a **second family, reported separately and never blended into the byte rows**
 //! (§17.7): a small table of shapes on the integer lattice, every pair of which
 //! has a cone or a torus in it.
@@ -179,10 +197,10 @@ fn a_soak_over_pseudo_random_bytes_names_every_crossing_honestly() {
 /// oracle is the one that still says something across a refusal, because it
 /// compares a refusal against the other way round.
 #[test]
-fn every_pair_with_a_cone_or_a_torus_in_it_is_named_the_same_way_round_and_at_any_scale() {
+fn every_pair_in_the_cone_and_torus_table_is_named_the_same_way_round_and_at_two_scales() {
     let mut asked = Asked::default();
     let mut pairs = 0;
-    for pair in every_pair_with_a_cone_or_a_torus_in_it() {
+    for pair in every_pair_the_table_makes_with_a_cone_or_a_torus_in_it() {
         pairs += 1;
         asked = asked.and(every_oracle_holds_of(pair));
     }
@@ -199,7 +217,7 @@ fn every_pair_with_a_cone_or_a_torus_in_it_is_named_the_same_way_round_and_at_an
 /// Whole numbers and powers of two throughout, so scaling by `2^±1` is exact and
 /// the scale oracle is comparing the same geometry rather than a near copy of
 /// it.
-fn every_pair_with_a_cone_or_a_torus_in_it() -> Vec<[Surface; 2]> {
+fn every_pair_the_table_makes_with_a_cone_or_a_torus_in_it() -> Vec<[Surface; 2]> {
     let mut out = Vec::new();
     for one in the_cones_and_the_tori() {
         for other in the_cones_and_the_tori()
