@@ -1827,7 +1827,16 @@ impl Corners {
             .find(|order| order.is_ne())
             .is_some_and(Ordering::is_lt);
         if lower {
+            let left_behind = exactly_at(made.point);
             made.point = at;
+            // No corner sits on the rounding this one just left, so a later
+            // corner of another name landing there would be joined to this one
+            // over a coordinate neither of them is on (§49.3). Another corner
+            // that has since settled onto that coordinate *is* on it, and keeps
+            // its claim.
+            if self.at.get(&left_behind) == Some(&corner) {
+                self.at.remove(&left_behind);
+            }
             self.at.insert(exactly_at(at), corner);
         }
     }
@@ -2112,15 +2121,29 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         // above were in, and its own doc carries the pair of numbers.
         [Surface::Plane(flat), Surface::Cone(cone)]
         | [Surface::Cone(cone), Surface::Plane(flat)] => a_plane_cuts_a_cone_in_rulings(flat, cone),
-        // A cone against a ball, a pipe or another cone crosses in a degree-four
-        // space curve, which holds no line; the ring row below covers the fourth.
+        // A cone against a ball, a pipe or another cone; the ring row below
+        // covers the fourth. The three do not rest on the same thing.
         //
-        // **`false` rests on `intersect` and not on the geometry** for the last
-        // of those: two cones that share an apex meet along rulings, which are
-        // lines. No such pair reaches here — `intersect` answers
+        // **A ball is bounded and a straight line is not**, so a cone against a
+        // ball holds no line for the reason the ball row below gives.
+        //
+        // **A cone coaxial with a pipe crosses it in exactly two circles**, and a
+        // circle holds no line. `slope·|h| = ρ` has two roots and never one and
+        // never none, because a cone is both its nappes and a pipe's radius is
+        // above zero (§50.11) — so `false` is about the geometry here and not
+        // about what `intersect` will hand over. Every *other* cone and pipe is
+        // still refused by name and has to be: a pipe running parallel to one of
+        // the cone's rulings, one radius off it, holds that ruling.
+        // `a_cone_coaxial_with_a_pipe_crosses_it_in_circles_which_hold_no_line`
+        // and `a_pipe_alongside_one_of_a_cones_rulings_holds_it` are the two
+        // demonstrations.
+        //
+        // **`false` rests on `intersect` and not on the geometry** for cone
+        // against cone: two cones that share an apex meet along rulings, which
+        // are lines. No such pair reaches here — `intersect` answers
         // `ACrossingBetweenAConeAndAnotherCurvedSurface` for every cone-and-cone
-        // that is not the same cone — so this arm is right for as long as that
-        // refusal stands, and is the arm to revisit the day it lifts.
+        // that is not the same cone — so that row is right for as long as that
+        // refusal stands, and is the row to revisit the day it lifts.
         [
             Surface::Cone(_),
             Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
@@ -2274,13 +2297,61 @@ fn sides_of(
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cone, Cylinder, EdgeRun, Plane, Sphere, Surface, SurfaceMeet, Torus};
+    use rcad_geom::{
+        Axis, Cone, Cylinder, EdgeRun, Plane, Scale, Sphere, Surface, SurfaceMeet, Torus,
+    };
     use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::{
-        Point, Vector, names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_half_space_both_ends_are_on,
+        Corners, MeetPoint, Model, Point, PredicatePoint, Vector, names_of_the_three_surfaces,
+        the_crossing_of_these_runs_straight, the_half_space_both_ends_are_on,
     };
+
+    /// A corner that settles on a lower rounding leaves the coordinate it came
+    /// from, and nothing may be joined to it there afterwards.
+    ///
+    /// Once the lower rounding wins, no corner sits on the higher one. A later
+    /// corner with a **different** name that does land there is a different
+    /// corner, and joining the two puts one vertex where the answer needs two —
+    /// §49.3's latent defect, which nothing else in the suite reaches.
+    #[test]
+    fn a_corner_that_moved_does_not_swallow_a_later_one_where_it_used_to_be() {
+        let model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let flat = |normal: Vector| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), normal)
+                    .expect("a normal with length"),
+            )
+        };
+        let across = flat(Vector::new(1.0, 0.0, 0.0));
+        let along = flat(Vector::new(0.0, 1.0, 0.0));
+        let upright = flat(Vector::new(0.0, 0.0, 1.0));
+        let starts = |carried_by: [Surface; 2], at: [f64; 3]| MeetPoint::WhereAClosedCurveStarts {
+            carried_by,
+            point: PredicatePoint::from(at),
+        };
+
+        let mut corners = Corners::default();
+        let moved = corners.of(&model, &starts([across, along], [1.0, 0.0, 0.0]));
+        let again = corners.of(&model, &starts([across, along], [0.0, 0.0, 0.0]));
+        assert_eq!(again, moved, "one name is one corner");
+        assert_eq!(
+            corners.made[moved].point,
+            Point::origin(),
+            "the lower of the two roundings is the one kept"
+        );
+
+        let other = corners.of(&model, &starts([across, upright], [1.0, 0.0, 0.0]));
+        assert_ne!(
+            other, moved,
+            "a corner was joined to one that had already moved off this coordinate"
+        );
+        assert_eq!(
+            corners.made.len(),
+            2,
+            "two names on one place is two corners"
+        );
+    }
 
     /// Why every pair with a ball or a ring on it is answered `false`.
     ///
@@ -2458,6 +2529,108 @@ mod tests {
                 "{named} came back from `intersect` as {met:?}"
             );
         }
+    }
+
+    /// Why a cone coaxial with a pipe is answered `false` about the geometry
+    /// rather than about `intersect`'s refusal.
+    ///
+    /// The two meet where `slope·|h|` is the pipe's radius, and that is two
+    /// circles — never one and never none, because a cone is both its nappes so
+    /// `h` takes both signs, and a pipe's radius is above zero so neither root
+    /// is the apex (§50.11). Three points of one circle, checked onto both
+    /// surfaces with whole numbers and then shown to miss a line: a crossing
+    /// three of whose points miss a line is not a line.
+    #[test]
+    fn a_cone_coaxial_with_a_pipe_crosses_it_in_circles_which_hold_no_line() {
+        let cone = Cone::new(Axis::z(), 1.0).expect("a cone leaning one");
+        let pipe = Cylinder::new(Axis::z(), 3.0).expect("a pipe of radius three");
+
+        let circle = [
+            Point::new(3.0, 0.0, 3.0),
+            Point::new(0.0, 3.0, 3.0),
+            Point::new(-3.0, 0.0, 3.0),
+        ];
+        for point in circle {
+            let from_the_axis = point.x() * point.x() + point.y() * point.y();
+            assert_eq!(from_the_axis, 9.0, "{point:?} is not on the pipe");
+            assert_eq!(
+                from_the_axis,
+                point.z() * point.z(),
+                "{point:?} is not on the cone"
+            );
+        }
+        let [first, second, third] = circle;
+        assert_ne!(
+            (second - first).cross(third - first),
+            Vector::zero(),
+            "three points of this crossing lie on a line"
+        );
+
+        for pair in [
+            [Surface::Cone(cone), Surface::Cylinder(pipe)],
+            [Surface::Cylinder(pipe), Surface::Cone(cone)],
+        ] {
+            assert_eq!(
+                the_crossing_of_these_runs_straight(&pair),
+                Some(false),
+                "a crossing that is two circles was called straight {pair:?}"
+            );
+        }
+    }
+
+    /// A pipe that is not coaxial with a cone can hold one of the cone's
+    /// rulings, which is why `intersect` still refuses every cone and pipe but
+    /// the coaxial one.
+    ///
+    /// The ruling `(t, 0, t)` of a cone leaning one lies on a pipe of radius two
+    /// whose axis runs the same way two units off it: every point of the ruling
+    /// is exactly two from that axis, by whole numbers. `false` above would be
+    /// the wrong answer for this pair, and the refusal is the only thing keeping
+    /// it away.
+    #[test]
+    fn a_pipe_alongside_one_of_a_cones_rulings_holds_it() {
+        let cone = Cone::new(Axis::z(), 1.0).expect("a cone leaning one");
+        let along_the_ruling =
+            Axis::new(Point::new(0.0, 2.0, 0.0), Vector::new(1.0, 0.0, 1.0)).expect("a direction");
+        let alongside = Cylinder::new(along_the_ruling, 2.0).expect("a pipe of radius two");
+
+        let ruling = [
+            Point::new(1.0, 0.0, 1.0),
+            Point::new(2.0, 0.0, 2.0),
+            Point::new(3.0, 0.0, 3.0),
+        ];
+        for point in ruling {
+            assert_eq!(
+                point.x() * point.x() + point.y() * point.y(),
+                point.z() * point.z(),
+                "{point:?} is not on the cone"
+            );
+            let across = (point - along_the_ruling.origin()).cross(along_the_ruling.direction());
+            assert_eq!(
+                across.length_squared(),
+                4.0 * along_the_ruling.direction().length_squared(),
+                "{point:?} is not two from the pipe's axis"
+            );
+        }
+        let [first, second, third] = ruling;
+        assert_eq!(
+            (second - first).cross(third - first),
+            Vector::zero(),
+            "these three points were meant to be a straight line"
+        );
+
+        assert!(
+            matches!(
+                rcad_geom::intersect(
+                    &Surface::Cone(cone),
+                    &Surface::Cylinder(alongside),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                ),
+                Err(rcad_geom::Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+            ),
+            "a cone and a pipe sharing a ruling is named, and `the_crossing_of_these_runs_straight` answers it `false`"
+        );
     }
 
     /// **This door reads two pipes' axes with the same proof the other one
