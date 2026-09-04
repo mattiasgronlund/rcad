@@ -2152,37 +2152,39 @@ fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_uni
 ///
 /// # It does not run today, and what stops it is not the trio
 ///
-/// Every pairwise fuse of the three answers — block ∪ ball, block ∪ bar, and
-/// ball ∪ bar back as two solids. It is the **second** fuse of either grouping
-/// that stops, on [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`], so this
-/// pins the refusal rather than reporting a green run over a property that
-/// compared nothing (§14.7). The count says it exactly: **half the fuses
-/// refuse**, and there are four per case, so it is the second of each grouping
-/// every case and the first of each answering every case. That halving is
-/// asserted below and not merely printed.
+/// **One of the four fuses this property runs per case refuses**, and that is
+/// enough to leave it comparing nothing, so this pins the refusal rather than
+/// reporting a green run over a property that compared nothing (§14.7).
+/// Measured: **39 of 156, exactly a quarter**, all naming
+/// [`CANNOT_TELL_THE_CELLS_OF_A_FACE_APART`]. That quartering is asserted below
+/// and not merely printed.
 ///
-/// The cause is one face crossed by two different round surfaces. The
-/// arrangement asks where three surfaces meet once per **pair of crossings on a
-/// face** (`fuse/arrange.rs`'s `place_the_meets`), and here the face is the
-/// block's floor, one crossing is the circle the ball's skin cuts in it and the
-/// other is the circle the bar's wall cuts in it. Plane, sphere, pipe — one
-/// plane short of what §31.2 row 8 can solve.
+/// The one that stops is the **second** fuse of the grouping that sinks the ball
+/// into the block first. Its floor then has a round *hole* in it, so one of that
+/// face's rim wires is a single closed edge; `how_often_the_rim_winds_round` fans
+/// a rim wire's corners into a polygon, a one-corner wire fans into the segment
+/// from that corner to itself, and no turn off it is ever `Pos` or `Neg`. The
+/// bar's closed-cut lump then gets no winding at all, and a walk wound zero is
+/// joined to a walk whose winding is unknown. `a_ball_and_a_bar_in_one_block.rs`
+/// carries the measured cycle table.
 ///
-/// **How far apart the two round solids are makes no difference**, which is what
-/// says the cause is the triple and not the geometry: the family draws blocks
-/// from seven to fifteen across and leaves the ball and the bar anywhere from
-/// one to five units apart, and the count below is every case refusing the same
-/// way. There is no proximity test in front of that call — `place_the_meets`
-/// walks every pair of crossings on a face and asks about all of them.
+/// # What this pin used to say, and why it changed
 ///
-/// **And the obvious way round it is refused for its own reason.** Putting the
-/// ball in a *side* wall instead of the floor would leave each plane with one
-/// round crossing on it — but a vertical plane through a ball cuts both of its
-/// poles, which is
+/// It used to refuse on [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`], at
+/// **half** the fuses rather than a quarter, and the doc here explained at length
+/// that the cause was one face crossed by two round surfaces and that *"how far
+/// apart the two round solids are makes no difference"*. Both sentences were true
+/// when written and are false now. `place_the_meets` no longer gives up over a
+/// triple whose two partner surfaces provably share nothing — `intersect` is
+/// asked, and only `SurfaceMeet::Nothing` skips — so the far-apart cases that
+/// refused for a corner that could not exist now answer. **The refusal moved one
+/// step later; it did not go away**, and the grouping that never puts a hole in a
+/// face now answers both its fuses.
+///
+/// The old note that the obvious way round is itself refused still holds: putting
+/// the ball in a *side* wall would leave each plane one round crossing, but a
+/// vertical plane through a ball cuts both of its poles —
 /// `degenerate_curved_fuses.rs`'s `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`.
-/// A ball can only be cut by a horizontal plane here, and a bar standing up `z`
-/// is only ever cut by horizontal planes too, so the two share a plane whatever
-/// a fixture does with them.
 #[test]
 fn uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first() {
     let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
@@ -2210,13 +2212,14 @@ fn uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first()
     });
     tally.nothing_was_compared_because_it_all_refused(
         "associativity of union over a ball and a bar in a block, which refuses",
-        WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT,
+        CANNOT_TELL_THE_CELLS_OF_A_FACE_APART,
     );
     assert_eq!(
-        2 * tally.refused.get(),
+        4 * tally.refused.get(),
         tally.fuses.get(),
-        "the pin is that the first fuse of each grouping answers and the second does not, \
-         which is exactly half of the four this property runs per case: {} of {} refused",
+        "the pin is that exactly one of the four fuses this property runs per case refuses — \
+         the second of the grouping that sinks the ball into the block first, which leaves a \
+         round hole in the floor for the bar to be cut against: {} of {} refused",
         tally.refused.get(),
         tally.fuses.get()
     );
@@ -2815,6 +2818,9 @@ const WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON: &str = "which side of its trimm
 const WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT: &str =
     "where three surfaces meet, with fewer than two of them flat";
 
+/// What stops a fuse when two walks on one face cannot be told into cells.
+const CANNOT_TELL_THE_CELLS_OF_A_FACE_APART: &str = "telling the cells of a face apart";
+
 /// What stops a fuse when a face is cut by a curve that never comes back.
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`], as [`fused`] names it. A
@@ -3030,6 +3036,7 @@ fn a_curved_refusal(why: &Error) -> Option<&'static str> {
         Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat) => {
             Some(WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT)
         }
+        Error::CannotTellTheCellsOfAFaceApart { .. } => Some(CANNOT_TELL_THE_CELLS_OF_A_FACE_APART),
         Error::ACrossingThisCannotBeOrderedAlong => Some(ORDERING_ALONG_AN_ENDLESS_BEND),
         Error::Geometry(rcad_geom::Error::TheCrossingOfTheseTwoSurfacesIsNotClosed) => {
             Some(A_CROSSING_THAT_DOES_NOT_CLOSE)
