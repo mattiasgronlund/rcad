@@ -2130,20 +2130,30 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         // **A cone coaxial with a pipe crosses it in exactly two circles**, and a
         // circle holds no line. `slope·|h| = ρ` has two roots and never one and
         // never none, because a cone is both its nappes and a pipe's radius is
-        // above zero (§50.11) — so `false` is about the geometry here and not
-        // about what `intersect` will hand over. Every *other* cone and pipe is
-        // still refused by name and has to be: a pipe running parallel to one of
-        // the cone's rulings, one radius off it, holds that ruling.
+        // above zero (§50.11) — so `false` is about the geometry **for a
+        // coaxial pair**, and about what `intersect` will hand over for every
+        // other one. This arm is `Cone × Cylinder` whatever the two axes do,
+        // and a cone and a pipe that are not coaxial genuinely can share a
+        // line: a pipe of radius 2 about `(1, 0, 1)` through `(0, 2, 0)` holds
+        // the ruling `(t, 0, t)` of `Cone::new(Axis::z(), 1.0)`, since
+        // `‖(p − o) × d‖² = 8 = 4‖d‖²`. What keeps the arm right is that no
+        // such pair reaches here: `intersect` refuses a cone against a pipe
+        // that is not coaxial with it by name.
         // `a_cone_coaxial_with_a_pipe_crosses_it_in_circles_which_hold_no_line`
         // and `a_pipe_alongside_one_of_a_cones_rulings_holds_it` are the two
         // demonstrations.
         //
         // **`false` rests on `intersect` and not on the geometry** for cone
-        // against cone: two cones that share an apex meet along rulings, which
-        // are lines. No such pair reaches here — `intersect` answers
-        // `ACrossingBetweenAConeAndAnotherCurvedSurface` for every cone-and-cone
-        // that is not the same cone — so that row is right for as long as that
-        // refusal stands, and is the row to revisit the day it lifts.
+        // against cone as well: two cones that share an apex meet along
+        // rulings, which are lines. No such pair reaches here — `intersect`
+        // answers `ACrossingBetweenAConeAndAnotherCurvedSurface` for every
+        // cone-and-cone that is not the same cone.
+        //
+        // So **two** of the three rows here are right only for as long as
+        // those refusals stand, and both are rows to revisit the day one
+        // lifts: cone against cone, and cone against a pipe it is not coaxial
+        // with. Only the coaxial pipe and the ball answer out of the shapes
+        // themselves.
         [
             Surface::Cone(_),
             Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),

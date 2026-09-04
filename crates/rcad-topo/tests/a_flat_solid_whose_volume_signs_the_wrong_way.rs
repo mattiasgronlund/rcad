@@ -3,10 +3,11 @@
 //!
 //! `docs/decisions.md` §49.8's class: a shape decided by a rounded comparison
 //! against zero. The sum is `a·(b×c)` over the triangles a polyhedron's faces
-//! fan into, accumulated in plain `f64`, and its sign says what the solid *is*
-//! — [`SolidView::measure`] and `Model::validate` call a negative one
-//! `Invalid::VolumeIsNotPositive`, and the fuse's `nest_the_shells` reads the
-//! same sign to sort a shell into a lump or a void of one.
+//! fan into, and its sign says what the solid *is* — [`SolidView::measure`] and
+//! `Model::validate` call a negative one `Invalid::VolumeIsNotPositive`, and
+//! the fuse's `nest_the_shells` reads the same sign to sort a shell into a lump
+//! or a void of one. It used to be added up in plain `f64`, and every solid
+//! below came back the wrong way round.
 //!
 //! **Neither family here is thin along an axis.** One power of two per axis is
 //! taken out of the sum before it is added up, and that is exactly why an
@@ -34,7 +35,7 @@ fn a_working_size() -> Scale {
 ///
 /// [`orient2d`] proves the three profile points turn anticlockwise, so the
 /// triangle has area and the prism over it holds `area × 1` of space. The fan
-/// says `-2.3e-18`.
+/// used to answer `Invalid::VolumeIsNotPositive { volume: -2.3e-18 }`.
 #[test]
 fn a_prism_over_a_triangle_that_provably_turns_anticlockwise_has_a_positive_volume() {
     let corners = [
@@ -69,13 +70,14 @@ fn a_prism_over_a_triangle_that_provably_turns_anticlockwise_has_a_positive_volu
     );
 }
 
-/// How many prisms of that shape the fan gets the sign of wrong, over a family
-/// rather than the one case above.
+/// The same shape as a family rather than as the one case above, so that the
+/// case above is not a lucky draw.
 ///
 /// Two random points and a third rounded onto the line between them and then
 /// nudged a few ulps off it. [`orient2d`] settles which way each one really
 /// turns and the outline is written in that order, so every prism built here
-/// encloses space. The seed is fixed, so the count is a number and not a mood.
+/// encloses space. The seed is fixed, so the count is a number and not a mood:
+/// **2020 of the 20000 draws** used to be refused for a volume they have.
 #[test]
 fn no_prism_over_a_triangle_with_area_is_refused_for_having_none() {
     let policy = Policy::certified();
@@ -84,8 +86,14 @@ fn no_prism_over_a_triangle_with_area_is_refused_for_having_none() {
     let mut built = 0;
     let mut refused = Vec::new();
     for _ in 0..20_000 {
-        let one = [seed.between_minus_one_and_one(), seed.between_minus_one_and_one()];
-        let other = [seed.between_minus_one_and_one(), seed.between_minus_one_and_one()];
+        let one = [
+            seed.between_minus_one_and_one(),
+            seed.between_minus_one_and_one(),
+        ];
+        let other = [
+            seed.between_minus_one_and_one(),
+            seed.between_minus_one_and_one(),
+        ];
         let along = seed.unit();
         let on_the_line = [
             one[0] + along * (other[0] - one[0]),
@@ -95,10 +103,16 @@ fn no_prism_over_a_triangle_with_area_is_refused_for_having_none() {
             on_the_line[0],
             ulps_away(on_the_line[1], i64::from(seed.next() as u32 % 5) - 2),
         ];
-        let outline = match orient2d(one, other, nudged) {
-            Decision::Pos => vec![one, other, nudged],
-            Decision::Neg => vec![one, nudged, other],
-            _ => continue,
+        // Written the way round the exact predicate says it turns, so every
+        // profile built here is anticlockwise and holds area. A triangle it
+        // calls flat has none and is not a prism at all.
+        let turn = orient2d(one, other, nudged);
+        let outline = if turn == Decision::Pos {
+            vec![one, other, nudged]
+        } else if turn == Decision::Neg {
+            vec![one, nudged, other]
+        } else {
+            continue;
         };
         let Ok(profile) = ProfileBuilder::new(outline).build(&policy, &mut log) else {
             continue;
@@ -125,15 +139,16 @@ fn no_prism_over_a_triangle_with_area_is_refused_for_having_none() {
     );
 }
 
-/// A rod down the `(1, 1, 1)` diagonal, three ten-thousandths of a millimetre
-/// across, whose every corner is three planes meeting at right angles.
+/// A rod down the `(1, 1, 1)` diagonal, a billionth of a unit across and one
+/// unit long, whose every corner is three planes meeting at right angles.
 ///
 /// **The other half of the family, and the one that has no near-parallel
 /// planes in it at all.** The prisms above are thin because two of their side
 /// walls nearly agree, which is a shape the arrangement can refuse on its own
 /// grounds. A square rod refuses nothing: its walls meet squarely, its corners
 /// are as well conditioned as a cube's, and its volume is still `1e-18` beside
-/// terms of size one because the rod does not run down an axis.
+/// terms of size one because the rod does not run down an axis. It used to
+/// measure `-4.5e-18`.
 #[test]
 fn a_square_rod_down_a_diagonal_holds_the_space_its_own_cross_section_says() {
     let policy = Policy::certified();
