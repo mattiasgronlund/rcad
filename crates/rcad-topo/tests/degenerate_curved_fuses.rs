@@ -46,9 +46,16 @@
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_geom::{
+    Axis, Cone, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface,
+    SurfaceMeet, Vector, intersect,
+};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{
+    Containment, DraftStep, Error, Fused, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+};
+
+mod cones;
 
 /// How fine the meshes every volume here is read off are.
 const A_DEFLECTION: f64 = 0.02;
@@ -544,6 +551,385 @@ fn a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction() {
         "a point inside a piece of a face",
         "moving the wall off the tangent changes which refusal this is"
     );
+}
+
+// 2b. Tangent cone–plane — the same entry, asked of a cone instead of a bar.
+
+/// How far out per unit up the cone of this entry leans.
+///
+/// An eighth. Two things want a power of two here. `cones/mod.rs` wants one so
+/// that `slope · height` is exact and the frustum's own corners sit on it. This
+/// entry wants one for a second reason: a plane written `(1, 0, −slope)` keeps
+/// `n_z = −slope · n_x` **bit for bit** through the normalizing that
+/// [`Plane::from_point_and_normal`] does, because scaling by a power of two
+/// commutes with rounding. That relation is the whole of the tangency —
+/// [`the_plane_of_the_wedges_slanted_face_really_does_rest_on_the_cone`]
+/// measures it rather than assuming it.
+const A_CONES_SLOPE: f64 = 0.125;
+
+/// Where the frustum starts and stops. The wedge lives at `8 ≤ z ≤ 24`, well
+/// inside both, so no corner of it lands on a cap.
+const A_CONES_NEAR_END: f64 = 4.0;
+const A_CONES_FAR_END: f64 = 28.0;
+
+/// The cone the wedge rests on, and the shallower one that is the control.
+fn a_cone_of_slope(slope: f64) -> Cone {
+    Cone::new(Axis::z(), slope).expect("a positive slope")
+}
+
+/// The plane `x = slope · z`, through the apex and along the ruling
+/// `(t/8, 0, t)`, facing out of the wedge below.
+fn a_plane_resting_on_a_cones_side() -> Plane {
+    Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, -A_CONES_SLOPE))
+        .expect("a normal with length")
+}
+
+/// A wedge of four corners and four flat faces, one of them lying on
+/// [`a_plane_resting_on_a_cones_side`].
+///
+/// **Why not the block the bar entry uses.** A block standing beside a cone has
+/// four faces parallel to the cone's axis, and a plane parallel to the axis cuts
+/// a cone in a hyperbola — a run nothing here can order along. The fuse would
+/// give up on one of those long before it reached the tangency, and the entry
+/// would be measuring something else. So every face of this wedge but the
+/// tangent one is made to cut the cone in a **closed** curve.
+///
+/// Which is a sign the kernel settles exactly, on
+/// `E = (n·w)² − slope²‖n × w‖²`. With the axis up `z` that is
+/// `n_z² − slope²(n_x² + n_y²)`, and on the four normals below, written as whole
+/// numbers, it comes to
+///
+/// ```text
+/// (8, 0, −1)      1 − 64/64   = 0     the tangency: one ruling, touched
+/// (0, 0, −1)      1 − 0       = 1     a circle
+/// (−8, 16, 3)     9 − 320/64  = 4     an ellipse
+/// (−8, −16, 5)   25 − 320/64  = 20    an ellipse
+/// ```
+///
+/// Every one of those is a whole number of a sum of whole numbers, so the four
+/// signs are what they read.
+///
+/// The wedge really does overlap the cone: the axis point `(0, 0, 9)` is inside
+/// all four of its half-spaces and inside the cone, whose radius there is
+/// `9/8`.
+fn a_wedge_resting_on_a_cones_side(model: &mut Model) -> SolidKey {
+    let mut builder = SolidBuilder::new();
+    let corner = |builder: &mut SolidBuilder, x: f64, y: f64, z: f64| {
+        builder
+            .add_vertex(Point::new(x, y, z))
+            .expect("a finite point")
+    };
+    let left = corner(&mut builder, 1.0, -3.0, 8.0);
+    let right = corner(&mut builder, 1.0, 3.0, 8.0);
+    let back = corner(&mut builder, -5.0, 0.0, 8.0);
+    let up = corner(&mut builder, 3.0, 1.0, 24.0);
+
+    let mut edge = |from, to| {
+        builder
+            .add_edge(from, to, EdgeRun::Straight)
+            .expect("two corners of this build")
+    };
+    let left_to_right = edge(left, right);
+    let left_to_back = edge(left, back);
+    let right_to_back = edge(right, back);
+    let left_to_up = edge(left, up);
+    let right_to_up = edge(right, up);
+    let back_to_up = edge(back, up);
+
+    let mut face = |normal: Vector, through: Point, round: [(_, Orientation); 3]| {
+        let steps: Vec<DraftStep> = round
+            .into_iter()
+            .map(|(edge, turn)| {
+                DraftStep::Along(
+                    builder
+                        .add_coedge(edge, turn)
+                        .expect("an edge of this build"),
+                )
+            })
+            .collect();
+        let wire = builder.add_wire(&steps).expect("three edges close");
+        let plane = Plane::from_point_and_normal(through, normal).expect("a normal with length");
+        builder
+            .add_face(Surface::Plane(plane), &[wire])
+            .expect("a triangle on its own plane")
+    };
+    let resting = face(
+        Vector::new(1.0, 0.0, -A_CONES_SLOPE),
+        Point::origin(),
+        [
+            (left_to_right, Orientation::Forward),
+            (right_to_up, Orientation::Forward),
+            (left_to_up, Orientation::Reversed),
+        ],
+    );
+    let bottom = face(
+        Vector::new(0.0, 0.0, -1.0),
+        Point::new(0.0, 0.0, 8.0),
+        [
+            (left_to_back, Orientation::Forward),
+            (right_to_back, Orientation::Reversed),
+            (left_to_right, Orientation::Reversed),
+        ],
+    );
+    let one_side = face(
+        Vector::new(-8.0, 16.0, 3.0),
+        Point::new(1.0, 3.0, 8.0),
+        [
+            (right_to_back, Orientation::Forward),
+            (back_to_up, Orientation::Forward),
+            (right_to_up, Orientation::Reversed),
+        ],
+    );
+    let other_side = face(
+        Vector::new(-8.0, -16.0, 5.0),
+        Point::new(-5.0, 0.0, 8.0),
+        [
+            (left_to_back, Orientation::Reversed),
+            (left_to_up, Orientation::Forward),
+            (back_to_up, Orientation::Reversed),
+        ],
+    );
+
+    builder
+        .add_shell(&[
+            (resting, Orientation::Forward),
+            (bottom, Orientation::Forward),
+            (one_side, Orientation::Forward),
+            (other_side, Orientation::Forward),
+        ])
+        .expect("four faces close");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a wedge described this way is a solid")
+}
+
+/// The frustum of [`A_CONES_SLOPE`] and the wedge whose slanted face rests along
+/// its side.
+fn a_wedge_lying_on_a_cones_side(model: &mut Model) -> Pair {
+    let cone = cones::a_frustum(model, A_CONES_SLOPE, A_CONES_NEAR_END, A_CONES_FAR_END);
+    let wedge = a_wedge_resting_on_a_cones_side(model);
+    Pair::of(cone, wedge)
+}
+
+/// **Before anything is fused: the plane really is tangent, and here are the
+/// numbers.**
+///
+/// Three of them, each stronger than the last.
+///
+/// 1. The stored normal, after normalizing, still satisfies
+///    `n_z = −slope · n_x` exactly — the assertion is `==` on `f64`, not a
+///    tolerance.
+/// 2. `E = n_z² − slope²(n_x² + n_y²)`, which is the kernel's own way of asking
+///    how a plane leans against a cone, is exactly `0.0`. Zero is the tangency;
+///    above it the plane cuts across the cone, below it the plane is steeper and
+///    reaches both nappes.
+/// 3. `intersect` — asked the question in exact arithmetic, not in `f64` —
+///    hands back **one straight run**, which is the row of its own table
+///    reading "apex on the plane, `E = 0`: one ruling, touched along its whole
+///    length".
+///
+/// And the control cone says the same thing from the other side: halve the
+/// slope and the very same plane no longer rests on the cone at all — it now
+/// leans across it, and touches only at the apex.
+#[test]
+fn the_plane_of_the_wedges_slanted_face_really_does_rest_on_the_cone() {
+    let flat = a_plane_resting_on_a_cones_side();
+    let [across_x, across_y, up_z] = flat.normal().components();
+    assert_eq!(across_y, 0.0, "the plane holds the y direction");
+    assert_eq!(
+        up_z,
+        -A_CONES_SLOPE * across_x,
+        "normalizing kept the slope relation bit for bit"
+    );
+    let leaning =
+        up_z * up_z - A_CONES_SLOPE * A_CONES_SLOPE * (across_x * across_x + across_y * across_y);
+    assert_eq!(
+        leaning, 0.0,
+        "the plane leans at exactly the cone's own half-angle"
+    );
+    // The ruling itself: `(1, 0, 8)` is on the plane — `1 = 8/8` — and on the
+    // cone — `1² + 0² = (8/8)²`. Its distance to the plane is not small, it is
+    // zero.
+    assert_eq!(
+        flat.signed_distance_to(Point::new(1.0, 0.0, 8.0)),
+        0.0,
+        "a point of the ruling is on the plane exactly"
+    );
+
+    let touching = intersect(
+        &Surface::Plane(flat),
+        &Surface::Cone(a_cone_of_slope(A_CONES_SLOPE)),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("all seven shapes of a plane against a cone are named");
+    let SurfaceMeet::Curves(runs) = &touching else {
+        panic!("a plane resting on a cone's side touches along a curve, got {touching:?}")
+    };
+    assert_eq!(runs.len(), 1, "a tangent plane touches along one ruling");
+    assert!(
+        matches!(runs[0].run(), EdgeRun::Straight),
+        "and a ruling is a straight line, not a bending run: {:?}",
+        runs[0].run()
+    );
+
+    let leaning_across = intersect(
+        &Surface::Plane(flat),
+        &Surface::Cone(a_cone_of_slope(A_CONES_SLOPE / 2.0)),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("all seven shapes of a plane against a cone are named");
+    assert!(
+        matches!(leaning_across, SurfaceMeet::TouchAtOnePoint { .. }),
+        "halving the slope takes the plane off the side: {leaning_across:?}"
+    );
+}
+
+/// The wedge is the solid it is meant to be, and it really does cut the cone.
+///
+/// §14.7's vacuity rule. A tangency nothing reaches is a row about nothing, so
+/// the two things the entry leans on are measured: the wedge holds the 96 units
+/// its four corners say it should, and the point `(0, 0, 9)` — on the cone's
+/// axis, where the cone's radius is `9/8` — is **inside both**.
+#[test]
+fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
+    let policy = Policy::certified();
+    let mut model = a_model();
+    let pair = a_wedge_lying_on_a_cones_side(&mut model);
+    let [cone, wedge] = [pair.arguments[0], pair.tools[0]];
+
+    let held = volume_of(&model, &[wedge]);
+    assert!(
+        (held - 96.0).abs() < 1e-9,
+        "the wedge holds 96, measured {held}"
+    );
+    for (solid, named) in [(cone, "the frustum"), (wedge, "the wedge")] {
+        assert_eq!(
+            model.solid(solid).classify_point(
+                Point::new(0.0, 0.0, 9.0),
+                &policy,
+                &mut ProvenanceLog::new()
+            ),
+            Containment::Inside,
+            "(0, 0, 9) is inside {named}"
+        );
+    }
+}
+
+/// The tangency is refused, and what it gives up on is the tangency: the wedge's
+/// slanted face lies **on** the cone's side, so that one crossing has no
+/// direction.
+///
+/// This is [`a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction`]
+/// asked of a cone, and it is the same gap arriving by the same road. `∇S × ∇Q`
+/// is the only form this kernel has for which way a crossing runs, and along a
+/// ruling a plane rests on, the plane's normal and the cone's gradient are
+/// parallel at every point of it, so that cross product is exactly the zero
+/// vector. `arrange.rs`'s `how_a_crossing_runs` carries the four families of fix
+/// and why none of them is small.
+///
+/// **A gap and not a limit** (§16.10), and the same gap the bar's row leaves.
+/// The direction is there to be had — it is the ruling's own, `(1, 0, 8)` up to
+/// length — and what runs out is the single form this kernel writes a crossing's
+/// direction in. A cone adds no new one: it is the bar's gap reached by a second
+/// road, which is what says the gap is about a plane resting on a curved surface
+/// and not about a pipe.
+///
+/// **The unit test next to that note is not this test.** `arrange.rs`'s
+/// `the_two_rulings_a_plane_through_a_cones_apex_cuts_are_ordered_along_an_axis`
+/// hands `how_a_crossing_runs` a tangent plane and a cone directly. It says
+/// nothing about a *fuse* — whether a solid carrying such a plane ever reaches
+/// that line, or gives up somewhere else first on the way. This is the end to
+/// end demonstration that it does reach it, and reaches it under every rule and
+/// under a tolerant policy too.
+///
+/// **The name of the predicate is not the whole of the evidence.** The refusal's
+/// own record carries the direction that was handed to
+/// `dominant_axis_of_a_direction`, and the assertion below reads it back and
+/// finds the box `(0, 0, 0)` — not a narrow one, the zero vector. Nothing else
+/// in this fuse hands that predicate anything: it is reached from one line of
+/// `how_a_crossing_runs`, the line under the straight gate.
+///
+/// **And the pair that gives up has to be the tangent one.** The control below
+/// changes the cone's slope and leaves the wedge alone, so the two runs share
+/// every plane-against-plane pair they have, right down to the stored normals.
+/// The control does not give up on a direction, so no plane-against-plane pair
+/// here does. What is left is the four planes against the cone, and only the
+/// slanted one cuts it in a straight run at all.
+///
+/// **The control halves the cone's slope and nothing else.** The same wedge
+/// against a cone of slope a sixteenth: the slanted face no longer rests on the
+/// side, it leans across it and meets the cone at the apex alone, and the
+/// refusal changes to a different one by name — `Undecidable` over a point
+/// inside a piece of a face, §36.28's chord-and-arc gap, which is what the bar's
+/// control gives too and has nothing to do with tangency. Two named outcomes
+/// either side of one number is what says this row is about what it claims.
+///
+/// A tolerant policy makes no difference, which is the other half: this is a
+/// statement about the shape and not about a budget.
+#[test]
+fn a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction() {
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let mut model = a_model();
+            let pair = a_wedge_lying_on_a_cones_side(&mut model);
+            // Both readers below panic on anything but `Undecidable`, so the
+            // shape of the refusal is asked as firmly as its contents.
+            let why = refusal(&mut model, &pair, rule, &policy);
+            assert_eq!(
+                what_it_gave_up_on(&why),
+                "which way a crossing runs",
+                "a wall lying on a cone's side gives that crossing no direction"
+            );
+            assert_eq!(
+                the_direction_it_could_not_name(&why),
+                [[0.0, 0.0]; 3],
+                "and the direction it could not name is the zero vector itself"
+            );
+        }
+    }
+
+    let mut model = a_model();
+    let cone = cones::a_frustum(
+        &mut model,
+        A_CONES_SLOPE / 2.0,
+        A_CONES_NEAR_END,
+        A_CONES_FAR_END,
+    );
+    let wedge = a_wedge_resting_on_a_cones_side(&mut model);
+    let why = refusal(
+        &mut model,
+        &Pair::of(cone, wedge),
+        Rule::Union,
+        &Policy::certified(),
+    );
+    assert_eq!(
+        what_it_gave_up_on(&why),
+        "a point inside a piece of a face",
+        "taking the wedge's face off the cone's side changes which refusal this is"
+    );
+}
+
+/// The direction `dominant_axis_of_a_direction` was handed and could not name,
+/// read straight out of the refusal's own record.
+///
+/// That record's one input is the cross product itself, as a box. Reading it is
+/// what turns "the predicate was called *which way a crossing runs*" into "the
+/// number it was given was `(0, 0, 0)`", which is the claim the entry actually
+/// makes.
+fn the_direction_it_could_not_name(why: &Error) -> [[f64; 2]; 3] {
+    let Error::Undecidable { records } = why else {
+        panic!("expected `Undecidable`, got {why:?}");
+    };
+    let last = records
+        .records()
+        .last()
+        .expect("a refusal names a decision");
+    match last.inputs() {
+        [PredicatePoint::Constructed(box_)] => box_.map(|along| [along.lo(), along.hi()]),
+        other => panic!("this refusal logs one worked-out direction, got {other:?}"),
+    }
 }
 
 // 3. Seam-crossing intersections — criterion 14's third entry.
@@ -1615,6 +2001,15 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             pair: "a bar of radius two and a wall on `y = -2`",
             case: Case::Fused {
                 build: a_block_whose_wall_touches_a_bar,
+                rule: Rule::Difference,
+                outcome: Outcome::GaveUp("which way a crossing runs"),
+            },
+        },
+        Entry {
+            degeneracy: "tangent cylinder-plane, over a cone",
+            pair: "a frustum of slope an eighth and a wedge resting on its side",
+            case: Case::Fused {
+                build: a_wedge_lying_on_a_cones_side,
                 rule: Rule::Difference,
                 outcome: Outcome::GaveUp("which way a crossing runs"),
             },
