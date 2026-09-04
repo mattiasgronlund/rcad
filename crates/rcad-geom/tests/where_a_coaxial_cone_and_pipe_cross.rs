@@ -59,12 +59,14 @@ fn the_pickers(answer: &SurfaceMeet) -> Vec<HalfSpace> {
         panic!("a coaxial cone and pipe cross in two circles: {answer:?}");
     };
     runs.iter()
-        .map(|run| match run.run() {
-            EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
-                [Picker::InFrontOf(half_space)] => *half_space,
-                other => panic!("each circle is picked by one flat half-space: {other:?}"),
-            },
-            other => panic!("each circle is a piece of the crossing: {other:?}"),
+        .map(|run| {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                panic!("each circle is a piece of the crossing: {run:?}");
+            };
+            let [Picker::InFrontOf(half_space)] = picked_by.as_slice() else {
+                panic!("each circle is picked by one flat half-space: {picked_by:?}");
+            };
+            *half_space
         })
         .collect()
 }

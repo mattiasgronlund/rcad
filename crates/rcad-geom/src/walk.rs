@@ -36,6 +36,7 @@ use rcad_predicates::{
 };
 
 use crate::exact::Exact;
+use crate::intersect::whether_a_cone_and_a_pipe_share_an_axis;
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
@@ -278,9 +279,10 @@ impl PointsAlongACrossing {
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a run between a
 /// cone or a torus and another curved surface — the same two refusals
-/// [`intersect`](crate::intersect) gives those pairs. Nothing in this crate
-/// builds such a run, and a file read in states one whenever it holds a pipe
-/// running into a bend.
+/// [`intersect`](crate::intersect) gives those pairs, and a cone against a pipe
+/// that shares its axis is drawn here exactly as it is named there. Nothing in
+/// this crate builds a refused run, and a file read in states one whenever it
+/// holds a pipe running into a bend.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller
 /// states as going right round a crossing that runs on for ever — a plane and a
@@ -480,9 +482,11 @@ enum WhatARunLiesOn {
 /// [`intersect`](crate::intersect) refuses under those same two names, in the
 /// same order — a cone against a torus is the torus's refusal in both halves,
 /// so the namer and the evaluator never disagree about what a pair is called.
-/// **The evaluator refuses exactly what the namer refuses**, and both are gaps:
-/// the crossing is there and none of the machinery for a degree-four or
-/// degree-eight curve with a cone or a torus in it exists.
+/// **The evaluator refuses exactly what the namer refuses**, which is why the
+/// cone-and-pipe arm asks whether the two share an axis rather than taking the
+/// caller's word for it. Both refusals are gaps: the crossing is there and none
+/// of the machinery for a degree-four or degree-eight curve with a cone or a
+/// torus in it exists.
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed for a degree-four
 /// crossing comes out as something that is not a point.
@@ -584,11 +588,15 @@ fn what_a_run_between_these_two_lies_on(
             };
             a_quartic_picked_up_at(where_one_pipe_reaches_across_another(&thin, &fat))
         }
-        [
-            Surface::Cone(_),
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
-        ]
-        | [Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)] => {
+        // A cone and a pipe on one axis cross in two circles and everything
+        // else in that row is refused, so this arm reads the run: which of the
+        // two circles it is, is the picker's to say.
+        [Surface::Cone(cone), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Cone(cone)] => {
+            where_a_coaxial_cone_and_pipe_cut(&cone, &pipe, run, log).map(WhatARunLiesOn::Conic)
+        }
+        [Surface::Cone(_), Surface::Sphere(_) | Surface::Cone(_)]
+        | [Surface::Sphere(_), Surface::Cone(_)] => {
             Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
         }
         [
@@ -1892,40 +1900,7 @@ fn where_a_plane_cuts_a_torus(
     } else {
         the_two_meridian_circles(flat, ring)
     };
-    if candidates.iter().any(|circle| {
-        !(circle.centre.is_finite() && circle.across.is_finite() && circle.and.is_finite())
-    }) {
-        return Err(Error::CannotWorkOutHowBigACrossingIs);
-    }
-
-    let picked_by: &[Picker] = match run.run() {
-        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
-    };
-    let ends: Vec<Point> = run
-        .ends()
-        .into_iter()
-        .filter(|end| *end != nowhere_in_particular())
-        .map(|end| Point::from(end.enclosure().map(middle_of)))
-        .collect();
-
-    let mut held: Vec<Conic> = Vec::new();
-    for circle in candidates {
-        let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * circle.the_size_it_was_worked_out_from();
-        let holds_every_end = ends
-            .iter()
-            .all(|end| circle.how_far_off_it(*end) <= deviation);
-        if holds_every_end
-            && (picked_by.is_empty()
-                || every_half_space_holds(picked_by, circle.at(0.0), deviation, log))
-        {
-            held.push(circle);
-        }
-    }
-    match held.as_slice() {
-        [only] => Ok(*only),
-        _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
-    }
+    which_of_these_circles_this_run_is(candidates, run, log)
 }
 
 /// The circles a plane square to a torus's axis cuts, outer first.
@@ -1996,6 +1971,117 @@ fn the_two_meridian_circles(flat: &Plane, ring: &Torus) -> Vec<Conic> {
             }
         })
         .collect()
+}
+
+/// The circle a cone and a pipe on one axis cross in, picked out of the two of
+/// them by the run's own half-space.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two do not
+/// share an axis, which is the same refusal
+/// [`intersect`](crate::intersect) gives that pair and for the same reason. The
+/// question is asked here rather than assumed from the caller: [`walk`] is
+/// public, and a file read in states a cone against a pipe whenever it holds a
+/// countersink met by a bore.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when the circles' own numbers do
+/// not come out finite, and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the pickers hold both
+/// circles or neither.
+fn where_a_coaxial_cone_and_pipe_cut(
+    cone: &Cone,
+    pipe: &Cylinder,
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    if whether_a_cone_and_a_pipe_share_an_axis(cone, pipe) != Decision::Zero {
+        return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+    }
+    which_of_these_circles_this_run_is(the_two_circles_a_cone_and_a_pipe_cut(cone, pipe), run, log)
+}
+
+/// The two circles a cone and a pipe on one axis cross in, the one the axis
+/// points towards first.
+///
+/// Both have the pipe's certified radius `r/‖w_p‖`, and they sit that over the
+/// slope along the axis from the apex either way — which is the `±ρ/slope` the
+/// namer proved there were exactly two of.
+fn the_two_circles_a_cone_and_a_pipe_cut(cone: &Cone, pipe: &Cylinder) -> Vec<Conic> {
+    let along = cone.axis().direction();
+    let up = along * along.length().recip();
+    let radius = pipe.radius() / pipe.axis().direction().length();
+    let standoff = radius / cone.slope();
+    let (across, and) = cone.basis();
+
+    [standoff, -standoff]
+        .into_iter()
+        .map(|reach| {
+            let middle = cone.apex() + up * reach;
+            Conic {
+                centre: middle,
+                across: across * radius,
+                and: and * radius,
+                size: how_big_this_is(&[middle, cone.apex()], &[radius, standoff]),
+            }
+        })
+        .collect()
+}
+
+/// Which of a handful of candidate circles the run names, told by its ends and
+/// by the half-spaces on it.
+///
+/// **Two shapes of crossing need this and they are not alike.** A plane cuts a
+/// torus in two circles, and a cone and a pipe on one axis cut two more; in both
+/// the pair of surfaces names *both* circles and only the run says which. A run
+/// with neither an end nor a picker on it takes the only candidate there is,
+/// which is how a plane resting on a torus's tube gets its one circle.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a candidate's own numbers do
+/// not come out finite, and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when what is on the run
+/// holds more than one of them or none.
+fn which_of_these_circles_this_run_is(
+    candidates: Vec<Conic>,
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    if candidates.iter().any(|circle| {
+        !(circle.centre.is_finite() && circle.across.is_finite() && circle.and.is_finite())
+    }) {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
+
+    let picked_by: &[Picker] = match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
+    };
+    let ends: Vec<Point> = run
+        .ends()
+        .into_iter()
+        .filter(|end| *end != nowhere_in_particular())
+        .map(|end| Point::from(end.enclosure().map(middle_of)))
+        .collect();
+
+    let mut held: Vec<Conic> = Vec::new();
+    for circle in candidates {
+        let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * circle.the_size_it_was_worked_out_from();
+        let holds_every_end = ends
+            .iter()
+            .all(|end| circle.how_far_off_it(*end) <= deviation);
+        if holds_every_end
+            && (picked_by.is_empty()
+                || every_half_space_holds(picked_by, circle.at(0.0), deviation, log))
+        {
+            held.push(circle);
+        }
+    }
+    match held.as_slice() {
+        [only] => Ok(*only),
+        _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
 }
 
 /// The largest magnitude anything about a conic was worked out from.

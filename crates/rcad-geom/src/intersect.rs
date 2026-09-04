@@ -2306,6 +2306,24 @@ fn a_cone_and_a_pipe_point_along_one_direction(cone: &Cone, pipe: &Cylinder) -> 
     )
 }
 
+/// Whether a cone and a pipe share one axis, **proved and never rounded**.
+///
+/// [`Decision::Zero`] and the two stored axes name one line, so the pair crosses
+/// in the two circles [`where_a_cone_and_a_pipe_cross`] names and in nothing
+/// else. Anything else and the crossing is a quartic that may hold a straight
+/// line.
+///
+/// **No [`Policy`], on purpose**, for the reason
+/// [`how_a_plane_leans_against_a_cone`] gives at length: [`walk`](crate::walk)
+/// asks this to decide *which shape it is drawing*, and a `Zero` it has not
+/// earned would draw two circles where the two surfaces cross in a quartic.
+pub(crate) fn whether_a_cone_and_a_pipe_share_an_axis(cone: &Cone, pipe: &Cylinder) -> Decision {
+    match decide(&a_cone_and_a_pipe_point_along_one_direction(cone, pipe)).0 {
+        Decision::Zero => decide(&a_cones_apex_sits_on_a_pipes_axis(cone, pipe)).0,
+        leaning => leaning,
+    }
+}
+
 /// `‖(a − o_p) × w_p‖²`, shared the same way.
 fn a_cones_apex_sits_on_a_pipes_axis(cone: &Cone, pipe: &Cylinder) -> impl Predicate {
     let apex = cone.apex().coordinates();
