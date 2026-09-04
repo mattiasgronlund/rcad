@@ -321,21 +321,40 @@ pub enum Error {
     )]
     CannotNameWhichPieceOfACrossingThisIs,
 
-    /// A cone against a ball, a pipe, or another cone.
+    /// A cone against a ball or another cone, and a cone against a pipe that
+    /// does not share its axis.
     ///
     /// A **gap** and the same one two leaning pipes have (§29): the crossing is
     /// a degree-four space curve, naming which of its shapes it takes is an
     /// eighth-degree discriminant, and drawing it needs the marcher. None of
     /// that is built for a cone.
     ///
-    /// The family of fixes, shortest first. (a) The **coaxial** cases are
-    /// planar and are one sign question each: a ball centred on a cone's axis, a
-    /// pipe sharing it, and a second cone sharing it all cross in circles square
-    /// to that axis, exactly as `a_ball_centred_on_a_pipes_axis` already does
-    /// for its own row. That covers a countersink in a round bar, which is the
-    /// case a real file actually holds. (b) The general case wants the marcher
-    /// taught a cone and an eighth-degree discriminant derived, which is §29's
-    /// whole second stage over again.
+    /// The family of fixes, shortest first. (a) **A cone and a pipe on one axis
+    /// is done**, and it was neither planar nor one sign question. There is no
+    /// shape question in it at all: a cone is double-napped and a pipe's radius
+    /// is above zero, so `slope·|h| = ρ` has exactly two roots and the answer is
+    /// **always exactly two circles**, with no `Pos/Zero/Neg` table like the one
+    /// `a_ball_centred_on_a_pipes_axis` turns on. What is asked instead is
+    /// whether the pair shares an axis, and that is **two** sign questions —
+    /// `‖w_c × w_p‖² = 0` for the directions and `‖(a − o_p) × w_p‖² = 0` for
+    /// the apex — both of them sums of squares this crate already asks
+    /// elsewhere. `where_a_cone_and_a_pipe_cross` is the whole of it. (b) A ball
+    /// centred on a cone's axis is the same shape of answer and is **not**
+    /// built: §13 wants a named consumer and it has none. (c) A second cone
+    /// sharing the axis is held out for a stronger reason than that.
+    /// `rcad-topo`'s `assemble.rs` answers *this crossing holds no straight
+    /// line* for the whole cone-and-cone row on the strength of this refusal,
+    /// and two cones that share an apex meet along rulings, which are lines
+    /// (§50.2 item 4). That arm is the first thing to change the day this one
+    /// lifts. (d) The general case wants the marcher taught a cone and an
+    /// eighth-degree discriminant derived, which is §29's whole second stage
+    /// over again.
+    ///
+    /// **Naming the coaxial pair moved no file in the STEP corpus**, and §50.11
+    /// measured that before it was written: this variant is raised zero times
+    /// across all 367 files, and every file holding a coaxial cone-and-pipe
+    /// neighbour refuses for something else. Its consumer is a fuse of a frustum
+    /// with a bar, not an import.
     #[error("a cone crossing another curved surface is a degree-four space curve")]
     ACrossingBetweenAConeAndAnotherCurvedSurface,
 
