@@ -306,7 +306,11 @@ fn how_often_a_certified_naming_of_a_turned_quartic_crossing_refuses() {
 #[test]
 fn every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn() {
     let mut runner = TestRunner::new_with_rng(
-        configured(measured_cases() * DRAWS_A_KNIFE_EDGE_NOW_TAKES),
+        configured(
+            measured_cases()
+                .checked_mul(DRAWS_A_KNIFE_EDGE_NOW_TAKES)
+                .expect("that many draws is more than one run can count"),
+        ),
         fresh_seeded_soak(),
     );
     let refused = Cell::new(0usize);
@@ -607,7 +611,10 @@ fn measured(strategy: impl Strategy<Value = Crossing>) -> Tally {
 ///
 /// # Panics
 ///
-/// If the variable is set to something that is not a whole number above zero.
+/// If the variable is set to something that is not a whole number above zero, or
+/// to one whose product is more than a run can count. A product that wrapped
+/// would run **fewer** cases than the shipped corpus while the operator read the
+/// number as the wide one, which is a green run that says nothing (§48.2, §50.9).
 fn measured_cases() -> u32 {
     let Ok(factor) = std::env::var(SOAK_FACTOR) else {
         return MEASURED_CASES;
@@ -616,7 +623,9 @@ fn measured_cases() -> u32 {
         .parse()
         .unwrap_or_else(|_| panic!("{SOAK_FACTOR} has to be a whole number, not {factor:?}"));
     assert!(factor > 0, "{SOAK_FACTOR} has to be at least one");
-    MEASURED_CASES * factor
+    MEASURED_CASES.checked_mul(factor).unwrap_or_else(|| {
+        panic!("{MEASURED_CASES} cases times {factor} is more than one run can count")
+    })
 }
 
 /// The fixed seed, or the one [`SOAK_SEED`] names.
