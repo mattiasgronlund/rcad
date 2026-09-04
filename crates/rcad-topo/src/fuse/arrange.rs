@@ -4776,9 +4776,10 @@ mod what_the_curved_arrangement_reaches {
     use super::super::cuts;
     use super::{
         HowItRuns, a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
-        a_plane_lies_along_a_pipes_axis, cross_of, dominant_axis_of_a_direction, gradient_at,
-        how_a_crossing_runs, how_a_plane_leans_against_a_cone, round_a_closed_crossing,
-        split_a_face, two_pipes_run_along_one_line, where_a_cones_apex_stands_against_a_plane,
+        a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
+        gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
+        round_a_closed_crossing, split_a_face, two_pipes_run_along_one_line,
+        where_a_cones_apex_stands_against_a_plane,
     };
     use crate::{Error, Model, SolidKey};
 
@@ -5113,6 +5114,91 @@ mod what_the_curved_arrangement_reaches {
         let inner = ordered_round_the_axis(3.0);
         assert_eq!(outer, Decision::Pos, "the outer circle winds about `+n`");
         assert_eq!(inner, Decision::Neg, "and the inner one about `-n`");
+    }
+
+    /// A block wall beside a cone cuts a hyperbola, and both of its branches
+    /// are put in order **across the bend's own axis**.
+    ///
+    /// This used to be `ACrossingThisCannotBeOrderedAlong`: a hyperbola is
+    /// neither straight nor closed, and `HowItRuns` had a variant for each of
+    /// those and nothing for a curve that is neither.
+    ///
+    /// The cone leans a half about `z`, so `x² + y² = z²/4`, and the wall is
+    /// `x = 4`. The crossing is `z² /64 − y²/16 = 1`, whose two branches carry
+    /// exactly representable points: `(4, 0, ±8)` at the vertices and
+    /// `(4, ±3, ±10)` a way along. `n × w` is `(1,0,0) × (0,0,1) = (0,−1,0)`,
+    /// so the order runs down `y` — and the point at a vertex has to come
+    /// **between** the two either side of it, which is the claim a comparison
+    /// that only worked locally would fail.
+    #[test]
+    fn the_hyperbola_a_block_wall_cuts_in_a_cone_is_ordered_across_its_own_axis() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let cone = Surface::Cone(Cone::new(Axis::z(), 0.5).expect("a cone leaning a half"));
+        let wall = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(4.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .expect("the x axis is a unit normal"),
+        );
+
+        let SurfaceMeet::Curves(runs) = intersect(&wall, &cone, &policy, &mut log)
+            .expect("a wall beside a cone cuts a hyperbola")
+        else {
+            panic!("a wall beside a cone cuts curves and nothing else");
+        };
+        assert_eq!(runs.len(), 2, "a hyperbola has a branch on each nappe");
+
+        for (run, up) in runs.iter().zip([1.0, -1.0]) {
+            let vertex = PredicatePoint::from([4.0, 0.0, 8.0 * up]);
+            let ran = how_a_crossing_runs(&wall, &cone, run, vertex, &mut log)
+                .expect("a hyperbola branch is ordered across the bend's own axis");
+            let HowItRuns::AlongABend {
+                plane_normal,
+                cone_axis,
+                forward_runs_with_the_bend,
+            } = ran
+            else {
+                panic!("a hyperbola neither closes nor runs straight");
+            };
+            assert_eq!(plane_normal, [1.0, 0.0, 0.0], "the wall's stored normal");
+            assert_eq!(cone_axis, [0.0, 0.0, 1.0], "the cone's stored axis");
+
+            let order = |first: [f64; 3], second: [f64; 3]| {
+                along_a_bend(
+                    plane_normal,
+                    cone_axis,
+                    forward_runs_with_the_bend,
+                    PredicatePoint::from(first),
+                    PredicatePoint::from(second),
+                )
+            };
+            let (near_side, vertex, far_side) = (
+                [4.0, 3.0, 10.0 * up],
+                [4.0, 0.0, 8.0 * up],
+                [4.0, -3.0, 10.0 * up],
+            );
+            assert_eq!(
+                order(vertex, vertex),
+                Decision::Zero,
+                "one point is not before itself"
+            );
+            let first = order(near_side, vertex);
+            assert_ne!(first, Decision::Zero, "two places on a branch are two");
+            assert_eq!(
+                order(vertex, far_side),
+                first,
+                "the vertex comes between the two either side of it, the same way round"
+            );
+            assert_eq!(
+                order(near_side, far_side),
+                first,
+                "and the order is the same all the way along and not only between neighbours"
+            );
+            assert_eq!(
+                order(vertex, near_side),
+                super::the_other_way(first),
+                "asking the other way round turns the answer round"
+            );
+        }
     }
 
     /// The two rulings a plane down a cone's axis cuts are ordered along an
