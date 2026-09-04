@@ -15900,6 +15900,22 @@ the expression now exists in a third copy, guarded by a 360 000-draw test
 asserting the door and `intersect` agree on every draw. **That guard is not the
 same thing as not having a copy**, and §49.5's lesson says so.
 
+> **Closed.** The copy is gone. Both signs are built once, in
+> `intersect.rs`'s `where_the_apex_stands` and `how_the_plane_leans`, and asked
+> two ways: `where_a_plane_and_a_cone_cross` puts them through the policy, and
+> the two exported functions `where_a_cones_apex_stands_against_a_plane` and
+> `how_a_plane_leans_against_a_cone` stop at the cascade, which is what both
+> doors call. **The doors take no `Policy` on purpose** — a tolerant one may read
+> an enclosure the cascade refused as nothing, and a `Zero` a door has not earned
+> is what calls a closed ellipse two rulings. The two therefore part company only
+> under a tolerant policy and only into a refusal, which is the trade
+> `a_plane_lies_along_a_pipes_axis` already states one row down. The 360 000
+> draws stay: with one implementation they no longer compare two spellings of the
+> arithmetic, and what they check now is the *table* — this pair of signs means
+> straight, that pair means curved — against the shape `intersect` names, which
+> is still written out in both crates. Every rate is bit-identical, the frustum
+> row included.
+
 **Three rounded gates, three bugs, all the same shape**: an `f64` expression
 compared against zero, believed to fail into a refusal, in fact failing into a
 wrong answer. That is not three incidents. The next unit should ask what *else*

@@ -61,12 +61,12 @@ use core::cmp::Ordering;
 
 use rcad_geom::{
     Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF,
-    Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector, intersect,
-    meet_of_three_surfaces, where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
+    Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector,
+    how_a_plane_leans_against_a_cone, intersect, meet_of_three_surfaces,
+    where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
+    which_comes_first_round_a_crossing,
 };
-use rcad_predicates::expansion::{
-    expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
-};
+use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
     ProvenanceLog, orient2d, orient3d, orient3d_of_points,
@@ -3325,21 +3325,38 @@ fn a_pair_that_crosses_in_straight_lines(
 /// Whether a plane cuts a cone in rulings rather than in a conic that closes.
 ///
 /// The two signs [`where_a_plane_and_a_cone_cross`](rcad_geom::intersect) reads
-/// to tell its six cases apart, asked here in the same two forms: **where the
-/// apex stands**, `n·a − d`, and **how the plane leans**, `E = (n·w)² −
-/// slope²‖n × w‖²`. With the apex on the plane and `E` at or below nothing the
-/// crossing is one ruling the plane rests along (`E = 0`) or two rulings meeting
-/// at the apex (`E < 0`), and both are endless straight lines.
+/// to tell its six cases apart, **asked of the very functions it asks**:
+/// [`where_a_cones_apex_stands_against_a_plane`] for `n·a − d` and
+/// [`how_a_plane_leans_against_a_cone`] for `E = (n·w)² − slope²‖n × w‖²`, both
+/// of them `rcad-geom`'s. With the apex on the plane and `E` at or below nothing
+/// the crossing is one ruling the plane rests along (`E = 0`) or two rulings
+/// meeting at the apex (`E < 0`), and both are endless straight lines.
 ///
 /// Every other pair of signs is a curve: off the plane the crossing is an
 /// ellipse, a parabola or a hyperbola, and through the apex with `E > 0` the two
 /// share the apex alone, which is no curve at all.
+///
+/// **What is left here is the table and not the arithmetic.** The two
+/// expressions used to be written out a second time in this file, kept honest by
+/// a 360 000-draw test that asserted this door and `intersect` agreed on every
+/// draw; that guard is not the same thing as not having a copy (§49.8), and the
+/// copy is gone. The draws remain, and what they now check is this table —
+/// whether a pair of signs means straight or curved — against the shape
+/// `intersect` names for the same plane and cone.
 ///
 /// **Both signs are proved and neither is rounded**, and [`None`] is the third
 /// answer for a pair where the arithmetic runs out. `Some(true)` is rulings,
 /// `Some(false)` is a curve or the apex alone, and neither is the safe reading
 /// of a pair nobody has decided: `true` orders a closed ellipse along an axis
 /// and `false` puts two arcs where a ruling has one.
+///
+/// **Neither sign goes through a [`Policy`], and that is the point of them
+/// taking none.** `intersect` asks the same two questions with the caller's
+/// policy behind them, so a tolerant one can read an enclosure the cascade
+/// refused as nothing; this door gets the cascade and stops there. The two part
+/// company only under a tolerant policy and only into a refusal — `None` here,
+/// where `intersect` was handed an answer — and never into this door calling a
+/// closed curve two rulings, which is the trade the whole row exists to avoid.
 ///
 /// # This used to be rounded, and it said a closed ellipse was an endless line
 ///
@@ -3388,115 +3405,9 @@ pub(super) fn a_plane_cuts_a_cone_in_rulings(flat: &Plane, cone: &Cone) -> Optio
     }
 }
 
-/// Where a cone's apex stands against a plane: the sign of `n·a − d`, **proved
-/// and not rounded**.
-///
-/// [`Decision::Zero`] and the apex is on the plane, which is the half of
-/// [`a_plane_cuts_a_cone_in_rulings`] that every straight case needs.
-///
-/// Three products of stored numbers and one stored offset, summed with no
-/// rounding thrown away — the same level 3 written out that
-/// [`a_plane_lies_along_a_pipes_axis`] is, with the offset as a fourth term.
-/// `f64`'s own `n·a − d` is what [`Plane::signed_distance_to`] gives and what
-/// this replaces; a sum of four terms rounding to nothing is not a proof that
-/// it is nothing.
-pub(super) fn where_a_cones_apex_stands_against_a_plane(flat: &Plane, cone: &Cone) -> Decision {
-    let mut reach = [0.0; LONGEST_DOT];
-    let Some(len) = exactly_the_dot_of(
-        flat.normal().components(),
-        cone.apex().coordinates(),
-        &mut reach,
-    ) else {
-        return Decision::Undecidable {
-            enclosure: f64::INFINITY,
-        };
-    };
-    let mut standing_off = [0.0; LONGEST_DOT + 1];
-    let len = expansion_sum(&reach[..len], &[-flat.offset()], &mut standing_off);
-    expansion_sign(&standing_off[..len])
-}
-
-/// How a plane leans against a cone's own side: the sign of
-/// `E = (n·w)² − slope²‖n × w‖²`, **proved and not rounded**.
-///
-/// Above zero the plane cuts across the cone, at zero it is parallel to one
-/// ruling, below zero it is steeper than the cone and reaches both nappes.
-/// That is [`where_a_plane_and_a_cone_cross`](rcad_geom::intersect)'s own
-/// second sign, and it is the one the whole table turns on.
-///
-/// **Degree six in the stored numbers, and every degree of it is carried.**
-/// `slope²‖n × w‖²` is three squares of `slope·(n_j w_k − n_k w_j)`, so
-/// nothing here needs the product of two long expansions — one square of one
-/// short expansion four times over is the whole of it.
-///
-/// [`Decision::Undecidable`] with an infinite enclosure when a product on the
-/// way lands where `two_product` stops being exact. There is no bound to report
-/// for one that does, so no policy can accept it, which is the same rule
-/// [`a_plane_lies_along_a_pipes_axis`] states.
-pub(super) fn how_a_plane_leans_against_a_cone(flat: &Plane, cone: &Cone) -> Decision {
-    let gave_up = Decision::Undecidable {
-        enclosure: f64::INFINITY,
-    };
-    let normal = flat.normal().components();
-    let along = cone.axis().direction().components();
-    let slope = cone.slope();
-
-    let mut up = [0.0; LONGEST_DOT];
-    let Some(up_len) = exactly_the_dot_of(normal, along, &mut up) else {
-        return gave_up;
-    };
-    let mut leaning = [0.0; LONGEST_LEAN];
-    let Some(mut len) = exactly_the_square_of(&up[..up_len], &mut leaning) else {
-        return gave_up;
-    };
-
-    for axis in 0..3 {
-        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
-        let mut across = [0.0; 4];
-        let Some(across_len) = exactly_the_two_by_two_of(
-            [normal[next], normal[after]],
-            [along[next], along[after]],
-            &mut across,
-        ) else {
-            return gave_up;
-        };
-        if !across[..across_len]
-            .iter()
-            .all(|&entry| product_is_exact(entry, slope))
-        {
-            return gave_up;
-        }
-        let mut leaned = [0.0; 2 * 4];
-        let leaned_len = scale_expansion(&across[..across_len], slope, &mut leaned);
-        let mut squared = [0.0; LONGEST_SQUARE];
-        let Some(squared_len) = exactly_the_square_of(&leaned[..leaned_len], &mut squared) else {
-            return gave_up;
-        };
-        for entry in &mut squared[..squared_len] {
-            *entry = -*entry;
-        }
-        let mut grown = [0.0; LONGEST_LEAN];
-        len = expansion_sum(&leaning[..len], &squared[..squared_len], &mut grown);
-        leaning[..len].copy_from_slice(&grown[..len]);
-    }
-    expansion_sign(&leaning[..len])
-}
-
 /// How many entries the exact dot product of two stored triples can need: one
 /// two-entry product per axis.
 const LONGEST_DOT: usize = 6;
-
-/// The longest expansion [`exactly_the_square_of`] is ever handed, which is a
-/// two-by-two determinant of stored numbers scaled by the slope.
-const LONGEST_SQUARED_INPUT: usize = 8;
-
-/// How many entries the square of an expansion that long can need: one
-/// [`scale_expansion`] per entry, each at most twice the input length.
-const LONGEST_SQUARE: usize = 2 * LONGEST_SQUARED_INPUT * LONGEST_SQUARED_INPUT;
-
-/// How many entries `E` can need: the square of a dot product, less three
-/// squares of a scaled determinant.
-const LONGEST_LEAN: usize = LONGEST_DOT * LONGEST_DOT * 2 + 3 * LONGEST_SQUARE;
 
 /// The exact dot product of two stored triples, written into `out`.
 ///
@@ -3516,48 +3427,6 @@ fn exactly_the_dot_of(one: [f64; 3], other: [f64; 3], out: &mut [f64]) -> Option
     }
     out[..len].copy_from_slice(&total[..len]);
     Some(len)
-}
-
-/// The exact square of an expansion, written into `out`.
-///
-/// [`None`] when one of the products it needs would round.
-///
-/// # Panics
-///
-/// If `value` is longer than [`LONGEST_SQUARED_INPUT`].
-fn exactly_the_square_of(value: &[f64], out: &mut [f64]) -> Option<usize> {
-    assert!(
-        value.len() <= LONGEST_SQUARED_INPUT,
-        "squaring an expansion of {} entries needs a bigger scratch buffer",
-        value.len()
-    );
-    let mut running = [0.0; LONGEST_SQUARE];
-    let mut running_len = 0;
-    let mut merged = [0.0; LONGEST_SQUARE];
-    let mut scaled = [0.0; 2 * LONGEST_SQUARED_INPUT];
-    for &factor in value {
-        if !value.iter().all(|&entry| product_is_exact(entry, factor)) {
-            return None;
-        }
-        let scaled_len = scale_expansion(value, factor, &mut scaled);
-        running_len = expansion_sum(&running[..running_len], &scaled[..scaled_len], &mut merged);
-        running[..running_len].copy_from_slice(&merged[..running_len]);
-    }
-    out[..running_len].copy_from_slice(&running[..running_len]);
-    Some(running_len)
-}
-
-/// The exact two-by-two determinant `one[0]·other[1] − one[1]·other[0]`,
-/// written into `out`.
-///
-/// [`None`] when either product would round.
-fn exactly_the_two_by_two_of(one: [f64; 2], other: [f64; 2], out: &mut [f64]) -> Option<usize> {
-    if !product_is_exact(one[0], other[1]) || !product_is_exact(one[1], other[0]) {
-        return None;
-    }
-    let (high, low) = two_product(one[0], other[1]);
-    let (taken_high, taken_low) = two_product(one[1], other[0]);
-    Some(expansion_sum(&[low, high], &[-taken_low, -taken_high], out))
 }
 
 /// Whether two pipes' axes run along one line, **proved and not rounded**.
