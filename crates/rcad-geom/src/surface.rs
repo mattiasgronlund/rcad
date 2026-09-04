@@ -218,6 +218,14 @@ impl Surface {
     /// It is **not** sound for a [`HalfSpace`](crate::HalfSpace), which has no
     /// canonical form at all, and §33.8 is the other half of the same rule.
     ///
+    /// **[`f64::total_cmp`](f64::total_cmp) tells `-0.0` from `0.0`**, so "the
+    /// same four numbers" has to mean the same bits and not the same values.
+    /// [`Plane`](crate::Plane) arranges that by holding no negative zero at all
+    /// — see the note on it for what a single one costs.
+    /// [`Axis`](crate::Axis) does not do the same yet, so a pipe, a cone or a
+    /// torus built about `Vector::new(-0.0, 0.0, 1.0)` still sorts away from the
+    /// same one built about `Vector::new(0.0, 0.0, 1.0)`.
+    ///
     /// Planes sort before balls and balls before pipes, which is what puts the
     /// two flat ones of a triple at the front.
     pub(crate) fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
