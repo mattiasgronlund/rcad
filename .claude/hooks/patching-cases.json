@@ -1,0 +1,57 @@
+[
+  {
+    "expect": "deny",
+    "why": "sed in place on a source file",
+    "command": "sed -i 's/foo/bar/' crates/rcad-geom/src/meet.rs"
+  },
+  {
+    "expect": "deny",
+    "why": "perl in place on a source file",
+    "command": "perl -i -pe 's/a/b/' crates/rcad-topo/src/lib.rs"
+  },
+  {
+    "expect": "deny",
+    "why": "heredoc written straight over a source file",
+    "command": "cat > crates/rcad-topo/src/fuse/arrange.rs <<'EOF'\nfn x() {}\nEOF"
+  },
+  {
+    "expect": "deny",
+    "why": "the M5 shape: an interpreter fed a patch script",
+    "command": "python3 - <<'PY'\npatch('crates/rcad-geom/src/meet.rs', pairs)\nPY"
+  },
+  {
+    "expect": "deny",
+    "why": "append is a write too",
+    "command": "echo 'fn sneaky() {}' >> crates/rcad-mesh/src/lib.rs"
+  },
+  {
+    "expect": "allow",
+    "why": "sed -n reads, it does not write",
+    "command": "sed -n '170,190p' crates/rcad-geom/src/intersect.rs"
+  },
+  {
+    "expect": "allow",
+    "why": "grep over a source file",
+    "command": "grep -n 'enum HowItRuns' crates/rcad-topo/src/fuse/arrange.rs"
+  },
+  {
+    "expect": "allow",
+    "why": "git reading a source file",
+    "command": "git diff crates/rcad-geom/src/error.rs"
+  },
+  {
+    "expect": "allow",
+    "why": "a recipe whose own body writes .rs fixtures to a temp dir",
+    "command": "mise exec -- just check-wildcards-selftest"
+  },
+  {
+    "expect": "allow",
+    "why": "a commit message that describes this very rule is not a patch",
+    "command": "git commit -F - <<'MSG'\nbuild: refuse sed -i on a .rs file, per CLAUDE.md\nMSG"
+  },
+  {
+    "expect": "allow",
+    "why": "writing a shell script, not Rust",
+    "command": "cat > /tmp/measure.sh <<'SH'\necho hi\nSH"
+  }
+]

@@ -1,4 +1,4 @@
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored lint test deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks lint test deny
 
 check:
     cargo check --workspace --all-targets
@@ -222,6 +222,17 @@ test-ignored:
     fi; \
     cargo nextest run --workspace --run-ignored ignored-only --no-tests fail
 
+# The hook that refuses shell patching of a .rs file, against its own cases
+# (docs/decisions.md §50.8).
+#
+# It is in `default` because the hook fails in the direction that is hard to
+# notice: a pattern that stops matching lets the thing through silently, which
+# is the same failure mode the hook exists to prevent. Two of its eleven cases
+# are drafts of itself that were wrong — a commit message describing the rule,
+# and a recipe whose own body writes .rs fixtures.
+check-hooks:
+    @.claude/hooks/check-patching-hook.sh
+
 check-enums:
     @! awk '/^$/ {ok = 0} \
             /^#\[non_exhaustive\]/ {ok = 1} \
@@ -302,3 +313,64 @@ bench:
 fmt:
     cargo fmt --all
     taplo fmt
+
+# Strip `target/` from every lane worktree. Always safe: kache holds the
+# compilation, so a cleaned worktree refills from the cache instead of
+# rebuilding, and nothing a lane wrote can be lost this way.
+#
+# Separate from `prune-worktrees` on purpose (docs/decisions.md §50.8). That one
+# can only run once the work is merged; this one can run any time, and merging
+# the two would make the safe half inherit the unsafe half's ceremony until
+# nobody ran either. 38 worktrees held 166 GB of `target/` before this existed.
+clean-targets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="$(dirname "$(git rev-parse --show-toplevel)")/rcad-worktrees"
+    if [ ! -d "$base" ]; then
+        echo "no worktrees at $base, so there is nothing here to clean"
+        exit 0
+    fi
+    before=$(du -sh "$base" | cut -f1)
+    find "$base" -maxdepth 2 -type d -name target -prune -exec rm -rf {} +
+    echo "$base: $before -> $(du -sh "$base" | cut -f1)"
+
+# Remove lane worktrees whose branch has landed on main.
+#
+# A worktree is only removed when it is clean *and* its branch is an ancestor of
+# main; anything else is listed and left alone. The branch itself is never
+# deleted, so a spike that is never merged by design (§50.4) keeps its commits
+# even after its worktree goes.
+#
+# The closing gate runs this, because a merge is the only moment when removing a
+# worktree is provably safe, and this repo learned the hard way that nothing
+# reclaims them on its own: the harness sweep keeps any worktree holding unpushed
+# commits, so with no remote configured it kept all 38 for ever (§50.8).
+prune-worktrees:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo=$(git rev-parse --show-toplevel)
+    kept=0
+    # A lock means an agent is working in there right now — git holds one for the
+    # life of the agent and releases it on exit. Never force past it: the pid in
+    # the lock reason was a live 13-hour session the first time this ran.
+    locked=$(git -C "$repo" worktree list --porcelain \
+        | awk '/^worktree /{tree = $2} /^locked/{print tree}')
+    for tree in $(git -C "$repo" worktree list --porcelain | awk '/^worktree /{print $2}'); do
+        [ "$tree" = "$repo" ] && continue
+        branch=$(git -C "$tree" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        if grep -qxF "$tree" <<<"$locked"; then
+            echo "kept (locked, an agent is using it): $tree"
+            kept=$((kept + 1))
+        elif [ -n "$(git -C "$tree" status --porcelain 2>/dev/null)" ]; then
+            echo "kept (uncommitted changes): $tree"
+            kept=$((kept + 1))
+        elif [ -z "$branch" ] || ! git -C "$repo" merge-base --is-ancestor "$branch" main 2>/dev/null; then
+            echo "kept (not merged into main): $tree [$branch]"
+            kept=$((kept + 1))
+        else
+            git -C "$repo" worktree remove --force "$tree"
+            echo "removed: $tree"
+        fi
+    done
+    git -C "$repo" worktree prune
+    echo "$kept worktree(s) kept; their branches are untouched either way"
