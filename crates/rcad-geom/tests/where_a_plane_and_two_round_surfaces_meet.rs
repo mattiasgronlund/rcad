@@ -238,7 +238,10 @@ fn a_plane_holding_the_whole_of_where_two_bars_meet_is_more_than_a_point() {
     let there = pipe([8.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
     let wall = flat([1.0, 0.0, 0.0], [4.0, 0.0, 0.0]);
 
-    assert_eq!(meet([&wall, &here, &there]), Ok(MeetOfThree::MoreThanAPoint));
+    assert_eq!(
+        meet([&wall, &here, &there]),
+        Ok(MeetOfThree::MoreThanAPoint)
+    );
 }
 
 /// Two balls about one centre share nothing at all, and the plane never comes
@@ -317,6 +320,148 @@ fn a_plane_that_misses_one_of_the_two_leaves_them_sharing_nothing() {
 
     assert_eq!(meet([&far_off, &resting, &bar]), Ok(MeetOfThree::Nowhere));
 }
+
+/// **How many corners there are, against the closed form, over six hundred
+/// pairs of bars — and the same six hundred turned.**
+///
+/// Two circles of radius `r₁` and `r₂` whose centres are `apart` cross twice
+/// when `|r₁ − r₂| < apart < r₁ + r₂`, touch once at either end of that, and
+/// miss otherwise. Nothing about that needs the arithmetic, so it is the oracle
+/// and the code is what is measured against it.
+///
+/// **The turned half is the first time transform invariance has run on a curved
+/// face at all** (§48.2 item 1). A rotation does not move a circle relative to
+/// another circle, so the count may not change — and once turned, no corner
+/// lands on a number `f64` holds, so the second half of the oracle is the one
+/// the property suite uses: a corner may come back in a box, and it may never be
+/// certified *off* any of the three surfaces it came from.
+///
+/// **The tangent rows are the only ones the turn is allowed to move, and that
+/// is a rule rather than an exception.** Two bars that touch have a
+/// discriminant of exactly zero, and a rotation is not exact — so what the
+/// turned numbers name is two bars a rounding away from touching, which may
+/// touch, may miss, or may cross twice, and the arithmetic is entitled to any of
+/// those or to no answer at all. `every_turned_quartic_crossing_that_refuses_
+/// was_exactly_tangent_before_the_turn` says the same thing for a pair of
+/// surfaces, one dimension up.
+///
+/// A turned pair that was **not** tangent before the turn has a whole unit of
+/// room either side, so it must answer and must answer what the closed form
+/// says. That is the half of this that would catch a wrong corner, and it covers
+/// **1184 of the 1274 rows** — every square one and every turned one that was
+/// not tangent. What the ninety tangent-and-turned rows do is measured and
+/// pinned rather than asserted, so a change of shape there shows up without
+/// being called wrong.
+#[test]
+fn how_many_corners_two_bars_running_the_same_way_have_is_what_the_closed_form_says() {
+    let turn = rcad_geom::Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction"),
+        0.4,
+    )
+    .expect("a finite angle");
+
+    let mut counted = 0usize;
+    let mut tangent_and_turned = 0usize;
+    let mut refused_tangent = 0usize;
+    for here in 1..=7 {
+        for there in 1..=7 {
+            for apart in 1..=13 {
+                let (here, there, apart) = (f64::from(here), f64::from(there), f64::from(apart));
+                let expected = if apart > (here - there).abs() && apart < here + there {
+                    2
+                } else if apart == here + there || apart == (here - there).abs() {
+                    1
+                } else {
+                    0
+                };
+
+                for turned in [false, true] {
+                    let place = |surface: Surface| {
+                        if turned {
+                            surface.transformed(&turn)
+                        } else {
+                            surface
+                        }
+                    };
+                    let surfaces = [
+                        place(flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0])),
+                        place(pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], here)),
+                        place(pipe([apart, 0.0, 0.0], [0.0, 0.0, 1.0], there)),
+                    ];
+                    let asked = [&surfaces[0], &surfaces[1], &surfaces[2]];
+                    let a_rounding_could_move_it = turned && expected == 1;
+                    counted += 1;
+                    if a_rounding_could_move_it {
+                        tangent_and_turned += 1;
+                    }
+                    let answer = match meet(asked) {
+                        Ok(answer) => answer,
+                        Err(refused) => {
+                            assert!(
+                                a_rounding_could_move_it,
+                                "r = {here} and {there}, {apart} apart, turned {turned}: \
+                                 {refused:?}"
+                            );
+                            refused_tangent += 1;
+                            continue;
+                        }
+                    };
+                    let found = match &answer {
+                        MeetOfThree::Nowhere => 0,
+                        MeetOfThree::At(points) => points.len(),
+                        // Two bars that are two bars share no whole curve, and a
+                        // plane square to both cannot hold one either.
+                        MeetOfThree::MoreThanAPoint => {
+                            panic!("r = {here} and {there}, {apart} apart share a whole curve")
+                        }
+                        other => panic!("r = {here} and {there}, {apart} apart: {other:?}"),
+                    };
+                    if a_rounding_could_move_it {
+                        assert!(
+                            found <= 2,
+                            "r = {here} and {there}, {apart} apart, turned: {answer:?}"
+                        );
+                    } else {
+                        assert_eq!(
+                            found, expected,
+                            "r = {here} and {there}, {apart} apart, turned {turned}: {answer:?}"
+                        );
+                    }
+                    if let MeetOfThree::At(points) = &answer {
+                        for point in points {
+                            for surface in asked {
+                                let side = which_side_of(surface, *point);
+                                assert!(
+                                    !matches!(side, Decision::Pos | Decision::Neg),
+                                    "{point:?} was certified {side:?} off {surface:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(counted, 1274, "the sweep stopped short");
+    assert_eq!(tangent_and_turned, 90, "the tangent rows moved");
+    // Measured, and a watch rather than a bound: how many of the tangent rows
+    // the turn leaves undecided depends on where the rotation puts each pair's
+    // discriminant, and nothing derives it. What it is there to catch is the
+    // figure moving a long way, which would say the discriminant stopped being
+    // read out of the exact expansion.
+    assert_eq!(
+        refused_tangent, TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED,
+        "how many turned tangent pairs go undecided moved"
+    );
+}
+
+/// How many of the ninety tangent rows above the turn leaves undecided.
+///
+/// Square to the axes **not one of the ninety refuses**, so the whole of this is
+/// the turn and not the geometry. The other twenty-five come back with a count
+/// about the two bars the turned numbers actually name, which are a rounding
+/// away from touching and may genuinely miss or genuinely cross.
+const TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED: usize = 65;
 
 /// Which three surfaces they are decides the answer, and which face asked first
 /// does not (§31.3).

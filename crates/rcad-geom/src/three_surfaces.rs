@@ -128,9 +128,7 @@ pub fn meet_of_three_surfaces(
 ) -> Result<MeetOfThree> {
     let [first, second, third] = in_a_fixed_order(surfaces);
     let (Surface::Plane(one), Surface::Plane(other)) = (&first, &second) else {
-        return where_one_plane_and_two_curved_surfaces_meet(
-            &first, &second, &third, policy, log,
-        );
+        return where_one_plane_and_two_curved_surfaces_meet(&first, &second, &third, policy, log);
     };
     if let Surface::Plane(last) = &third {
         return where_three_planes_meet(one, other, last, policy, log);
@@ -594,8 +592,10 @@ fn where_a_plane_and_two_quadrics_of_one_bend_meet(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<MeetOfThree>> {
-    let (Some(mine), Some(theirs)) = (how_a_surface_is_written(one), how_a_surface_is_written(other))
-    else {
+    let (Some(mine), Some(theirs)) = (
+        how_a_surface_is_written(one),
+        how_a_surface_is_written(other),
+    ) else {
         return Ok(None);
     };
     if !they_bend_the_same_way(&mine, &theirs) {
@@ -768,17 +768,27 @@ fn nothing_squared() -> [[Exact; 3]; 3] {
 /// Nine exact comparisons and no arithmetic that can round: an expansion always
 /// has a sign, so this always answers.
 fn they_bend_the_same_way(mine: &HowASurfaceIsWritten, theirs: &HowASurfaceIsWritten) -> bool {
-    mine.squared.iter().zip(theirs.squared.iter()).all(|(row, other)| {
-        row.iter()
-            .zip(other.iter())
-            .all(|(entry, against)| matches!(entry.minus(against).sign(), Decision::Zero))
-    })
+    mine.squared
+        .iter()
+        .zip(theirs.squared.iter())
+        .all(|(row, other)| {
+            row.iter()
+                .zip(other.iter())
+                .all(|(entry, against)| matches!(entry.minus(against).sign(), Decision::Zero))
+        })
 }
 
 /// What a stored plane and a plane written out exactly have in common.
+///
+/// The line is boxed, and the trade is the opposite of the one
+/// [`SurfaceMeet::Curves`](crate::SurfaceMeet) refuses: this is never the answer
+/// a fuse hands about, only a step on the way to one, and the arm carrying the
+/// line is followed by a degree-fourteen exact discriminant that costs far more
+/// than an allocation. Widening the other two arms to two hundred bytes to save
+/// it would be paying in the wrong place.
 enum WhatTwoPlanesShare {
     /// One endless line.
-    ALine(ALine),
+    ALine(Box<ALine>),
     /// The whole of the stored plane, because the two are one plane — or because
     /// the exact one is the equation `0 = 0`, which holds everywhere and is what
     /// two quadrics written with the same numbers come to.
@@ -820,15 +830,23 @@ fn what_a_stored_plane_and_an_exact_one_share(
     let mut something_would_not_fit = false;
     for axis in by_size {
         let (across, and) = ((axis + 1) % 3, (axis + 2) % 3);
-        let Some(minor) = exactly_this_minus_that(&mine[across], &theirs[and], &mine[and], &theirs[across])
+        let Some(minor) =
+            exactly_this_minus_that(&mine[across], &theirs[and], &mine[and], &theirs[across])
         else {
             something_would_not_fit = true;
             continue;
         };
-        match minor.sign() {
-            Decision::Zero => continue,
-            Decision::Pos | Decision::Neg => (),
-            other => unreachable!("an exact expansion has a sign: {other:?}"),
+        let which_way = minor.sign();
+        if matches!(which_way, Decision::Zero) {
+            continue;
+        }
+        // An expansion always has a sign, so nothing reaches the second half
+        // today. It is read as arithmetic that ran out rather than as a zero
+        // minor, because falling through to the parallel test below on a sign
+        // nobody proved would answer a question this never asked.
+        if !matches!(which_way, Decision::Pos | Decision::Neg) {
+            something_would_not_fit = true;
+            continue;
         }
         let (Some(here), Some(there), Some(direction)) = (
             exactly_this_minus_that(&my_offset, &theirs[and], their_offset, &mine[and]),
@@ -841,11 +859,11 @@ fn what_a_stored_plane_and_an_exact_one_share(
         let mut through = [Term::of(0.0), Term::of(0.0), Term::of(0.0)];
         through[across] = Term::Exactly(here);
         through[and] = Term::Exactly(there);
-        return Some(WhatTwoPlanesShare::ALine(ALine {
+        return Some(WhatTwoPlanesShare::ALine(Box::new(ALine {
             through,
             direction: direction.map(Term::Exactly),
             divided_by: Term::Exactly(minor),
-        }));
+        })));
     }
     if something_would_not_fit {
         return None;
@@ -858,9 +876,14 @@ fn what_a_stored_plane_and_an_exact_one_share(
     // when `d₂` is: the equation `0 = 0` holds everywhere and `0 = d₂` nowhere.
     for axis in 0..3 {
         let same = exactly_this_minus_that(their_offset, &mine[axis], &my_offset, &theirs[axis])?;
-        if !matches!(same.sign(), Decision::Zero) {
+        let which_way = same.sign();
+        if matches!(which_way, Decision::Zero) {
+            continue;
+        }
+        if matches!(which_way, Decision::Pos | Decision::Neg) {
             return Some(WhatTwoPlanesShare::Nothing);
         }
+        return None;
     }
     Some(WhatTwoPlanesShare::TheWholeOfTheStoredOne)
 }

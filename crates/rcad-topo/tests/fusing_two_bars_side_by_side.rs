@@ -10,34 +10,32 @@
 //! `two_pipes_side_by_side_run_up_their_common_axis` in `arrange.rs` measures
 //! the crossing being ordered up `z` where it used to be refused.
 //!
-//! **Closing it was necessary and is not sufficient, and this file is what says
-//! so.** A corner of the answer is where a bar's flat cap meets *both* pipes,
-//! and `meet_of_three_surfaces` wants two of its three flat. It has one. So the
-//! fuse now refuses one step earlier than the gate it used to die at, by a
-//! different name — [`rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`]
-//! — which `three_surfaces.rs`'s own module doc calls a gap rather than a limit
-//! for the same §16.10 reason: one plane and two quadrics is a quartic, it has
-//! roots, and reaching them takes a solver rather than a discriminant.
+//! **The second reason is closed too, and this file moved with it.** A corner of
+//! the answer is where a bar's flat cap meets *both* pipes, which is one plane
+//! and two quadrics, and `meet_of_three_surfaces` used to want two of its three
+//! flat. It now answers this triple exactly: two pipes running the same way
+//! square `p` the same way, so their difference is a flat surface and the triple
+//! is two planes and a quadric after all. The corners come back as `(3, ±4, 0)`,
+//! whole numbers in boxes of no width, and
+//! `a_cap_plane_against_two_side_by_side_pipes_meets_them_at_three_and_four`
+//! below is where that is checked.
 //!
-//! **No fuse of two pipes reaches the flipped gate today, and the reason is one
-//! line rather than a survey of the callers.** `Arrangement::of` runs
-//! `place_the_corners`, then `place_the_meets`, and only then
-//! `work_out_how_each_crossing_runs`: corners come before order. Every corner on
-//! a pipe-against-pipe crossing is a meet of three surfaces two of which are
-//! those pipes, whatever the third is and whichever face is being cut — so **two
-//! pipes and anything is at most one plane**, which is one short of what
-//! `meet_of_three_surfaces` takes. `place_the_meets` skips a pair of crossings
-//! that share a partner, so the two runs of one pipe pair do not ask about each
-//! other; what does ask is either run against the face's own boundary, and a
-//! bounded face has a boundary.
+//! **So the fuse now stops one gate further in, and this file's job is to say
+//! which one.** It is no longer geometry at all: with the corners placed, the
+//! cap disc is cut into pieces by the other pipe's wall, and `select.rs` cannot
+//! place a point inside one of those pieces — `"a point inside a piece of a
+//! face"`, undecided with an unbounded enclosure. A piece bounded partly by an
+//! arc is what the winding fan has never been able to walk, which is the same
+//! missing capability §48 names in `ACrossingThisCannotBeOrderedAlong`'s conic
+//! half and not the quartic one.
 //!
-//! So the gate flip is on the path and is not the last thing on it. Closing the
-//! rest is `rcad-geom`'s three-surface meet learning one plane and two quadrics,
-//! which is another crate and another unit.
+//! Three refusals, in order, each one closed by a different unit: the straight
+//! gate, then the three-surface meet, then the winding fan on a curved piece.
+//! The first two are behind us and both regressions would show up here by name.
 
 use rcad_geom::{
-    Axis, Cylinder, Error as GeomError, Isometry, Plane, Point, Scale, Surface, Vector,
-    meet_of_three_surfaces,
+    Axis, Cylinder, Error as GeomError, Isometry, MeetOfThree, Plane, Point, Scale, Surface,
+    Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
@@ -69,14 +67,20 @@ fn two_bars_side_by_side() -> (Model, SolidKey, SolidKey) {
 
 /// **Where the union of two overlapping parallel bars stops today, by name.**
 ///
-/// Not `.is_err()`: the whole worth of this test is *which* refusal it is.
-/// `ACrossingThisCannotBeOrderedAlong` was the answer before §48's gate flip and
-/// would be a regression now.
+/// Not `.is_err()`: the whole worth of this test is *which* refusal it is. Two
+/// of them are behind us and both are named below, because either coming back is
+/// a regression rather than a curiosity — `ACrossingThisCannotBeOrderedAlong`
+/// was the answer before §48's gate flip, and
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` was the answer until the
+/// three-surface meet learned one plane and two quadrics.
+///
+/// What is left is `select.rs` unable to place a point inside a piece of the
+/// cap, and the record says so by name.
 ///
 /// All three rules and both orders of the pair, because a refusal that depended
 /// on which solid was the tool would be a different bug.
 #[test]
-fn two_overlapping_parallel_bars_refuse_where_a_cap_meets_both_pipes() {
+fn two_overlapping_parallel_bars_stop_at_a_point_inside_a_piece_of_a_cap() {
     let policy = Policy::certified();
     let (mut model, here, there) = two_bars_side_by_side();
 
@@ -85,14 +89,24 @@ fn two_overlapping_parallel_bars_refuse_where_a_cap_meets_both_pipes() {
             let mut log = ProvenanceLog::new();
             let refused = model.fuse(&arguments, &tools, rule, &policy, &mut log);
             assert!(
-                matches!(
+                !matches!(
                     refused,
                     Err(Error::Geometry(
                         GeomError::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                    ))
+                    )) | Err(Error::ACrossingThisCannotBeOrderedAlong)
                 ),
-                "{rule:?} on two side-by-side bars stops at the corner where a cap meets both \
-                 pipes, and it answered {refused:?}"
+                "{rule:?} on two side-by-side bars went back to a refusal that is closed: \
+                 {refused:?}"
+            );
+            let Err(Error::Undecidable { records }) = &refused else {
+                panic!("{rule:?} on two side-by-side bars answered {refused:?}");
+            };
+            assert!(
+                records
+                    .records()
+                    .iter()
+                    .any(|record| record.predicate() == "a point inside a piece of a face"),
+                "{rule:?} on two side-by-side bars stopped somewhere else: {records:?}"
             );
         }
     }
@@ -102,19 +116,20 @@ fn two_overlapping_parallel_bars_refuse_where_a_cap_meets_both_pipes() {
         .expect("a refused fuse leaves the model exactly as it was");
 }
 
-/// **The corner the fuse cannot place, asked for on its own.**
+/// **The corner the fuse could not place, and now can, asked for on its own.**
 ///
 /// A bar's cap plane against the two pipes: one flat surface and two quadrics.
-/// `meet_of_three_surfaces` refuses fewer than two flat, and this is the call
-/// `Arrangement::place_the_meets` makes and hands straight back — the only place
-/// in this crate that lets that error out, since `bake.rs`'s corner search
-/// swallows it and tries the next triple.
+/// `radius = 5` and `apart = 6` gives `x² + y² = 25` against
+/// `(x − 6)² + y² = 25`, and subtracting one from the other leaves `12x = 36` —
+/// so the corners are `(3, ±4, 0)`, a 3-4-5 with every number whole. Checked
+/// against those numbers and against boxes of no width, so what is compared is
+/// the whole answer and not a rounding of it.
 ///
-/// The two points it would have named are `(3, ±4, 0)`, which are exact. So the
-/// refusal is about the shape of the system and not about the arithmetic, and
-/// that is what makes it a gap rather than a limit (§16.10).
+/// This is the call `Arrangement::place_the_meets` makes and hands straight
+/// back — the only place in this crate that lets that error out, since
+/// `bake.rs`'s corner search swallows it and tries the next triple.
 #[test]
-fn a_cap_plane_against_two_side_by_side_pipes_has_only_one_flat_surface() {
+fn a_cap_plane_against_two_side_by_side_pipes_meets_them_at_three_and_four() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
     let cap = Surface::Plane(
@@ -131,9 +146,24 @@ fn a_cap_plane_against_two_side_by_side_pipes_has_only_one_flat_surface() {
         .expect("the second pipe"),
     );
 
-    assert_eq!(
-        meet_of_three_surfaces([&cap, &here, &there], &policy, &mut log),
-        Err(GeomError::WhereThreeSurfacesMeetNeedsTwoOfThemFlat),
-        "one plane and two pipes is a quartic, and this wants two planes"
+    let answer = meet_of_three_surfaces([&cap, &here, &there], &policy, &mut log)
+        .expect("two pipes running the same way and a cap");
+    let MeetOfThree::At(corners) = &answer else {
+        panic!("expected two corners, got {answer:?}");
+    };
+    let mut placed: Vec<[f64; 3]> = corners
+        .iter()
+        .map(|corner| {
+            corner.enclosure().map(|side| {
+                assert_eq!(side.lo(), side.hi(), "{corner:?} is a box with width");
+                side.lo()
+            })
+        })
+        .collect();
+    placed.sort_by(|one, other| one[1].total_cmp(&other[1]));
+    assert_eq!(placed, vec![[3.0, -4.0, 0.0], [3.0, 4.0, 0.0]]);
+    assert!(
+        log.is_empty(),
+        "a certified answer wrote {log:?} into the log"
     );
 }
