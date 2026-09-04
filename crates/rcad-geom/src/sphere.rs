@@ -26,6 +26,13 @@ pub const SIDE_OF_SPHERE: &str = "side of sphere";
 /// answer, and callers would reach for the cheap one.
 ///
 /// Serializes as `(centre, radius)` and is re-checked on the way in.
+///
+/// # No stored number is `-0.0`
+///
+/// Two faces that are the same ball hold the same four numbers, and the fuse
+/// rests on it. [`Sphere::holding`] turns every stored zero the right way up
+/// and every constructor here goes through it; see it for what a single
+/// negative zero costs and for where one comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "(Point, f64)", into = "(Point, f64)")]
 pub struct Sphere {
@@ -50,7 +57,7 @@ impl Sphere {
         if !(radius.is_finite() && radius > 0.0) {
             return Err(Error::RadiusNotPositive { radius });
         }
-        Ok(Self { centre, radius })
+        Ok(Self::holding(centre, radius))
     }
 
     /// The point in the middle.
@@ -69,9 +76,50 @@ impl Sphere {
     /// change the radius.
     #[must_use]
     pub fn transformed(&self, movement: &Isometry) -> Self {
+        Self::holding(movement.apply_to_point(self.centre), self.radius)
+    }
+
+    /// The only place a `Sphere` is built, so that no ball anywhere stores
+    /// `-0.0`.
+    ///
+    /// Two faces that are the same ball have to hold the same numbers, and four
+    /// places rest on it: [`Surface::how_it_sorts_against`](crate::Surface) puts
+    /// a triple in a fixed order on the centre and the radius, `rcad-topo`'s
+    /// `name_of_surface_bits` names a corner by them, `canonical_cut_surfaces`
+    /// drops a repeat by them, and `docs/decisions.md` §32.5 is the rule itself.
+    /// All four order with [`f64::total_cmp`](f64::total_cmp), which sorts
+    /// `-0.0` before `0.0`, so a single negative zero in a centre makes two
+    /// spellings of one ball two balls.
+    ///
+    /// [`Sphere::new`] is public and stores the centre it is handed, and that
+    /// public door is what this rests on rather than a file that walks through
+    /// it. The file route exists and is not exercised: three of the checked
+    /// corpus's files hold a three-number `CARTESIAN_POINT` with a `-0.`
+    /// component — `(-4.6,2.85,-0.)` is one — and `rcad-step` passes a
+    /// placement's three numbers through as they came, but none of those three
+    /// files carries a `SPHERICAL_SURFACE` for such a point to be the centre of.
+    ///
+    /// A turn is folded here rather than argued away. Every coordinate a
+    /// movement hands back leaves an addition — Rodrigues' form ends
+    /// `(… + centreᵢ) + shiftᵢ`, see [`Isometry::apply_to_point`] — and an
+    /// addition gives `-0.0` only when both sides are already `-0.0`, so a
+    /// centre folded on the way in stays folded. That argument is about
+    /// `nalgebra`'s arithmetic rather than this crate's, and §32.5's guarantee is
+    /// not one to rest on a dependency's choice of formula.
+    ///
+    /// The radius is not folded because it cannot be a zero of either sign:
+    /// [`Sphere::new`] refuses anything not greater than zero, and a rigid
+    /// movement carries the radius over untouched.
+    ///
+    /// Adding zero is what turns a negative zero back the right way up:
+    /// `-0.0 + 0.0` is `0.0` and `x + 0.0` is `x` for every other finite `x`, so
+    /// this rounds nothing and moves no ball. [`Plane::holding`](crate::Plane)
+    /// and [`Axis::holding`](crate::Axis) fold the same way for the same reason.
+    fn holding(centre: Point, radius: f64) -> Self {
+        let [x, y, z] = centre.coordinates();
         Self {
-            centre: movement.apply_to_point(self.centre),
-            radius: self.radius,
+            centre: Point::new(x + 0.0, y + 0.0, z + 0.0),
+            radius,
         }
     }
 
@@ -315,13 +363,87 @@ impl From<Sphere> for (Point, f64) {
 
 #[cfg(test)]
 mod tests {
+    use core::cmp::Ordering;
+
     use rcad_predicates::{Level, decide, meet_of_three_planes};
 
     use super::*;
-    use crate::Vector;
+    use crate::{Surface, Vector};
 
     fn unit_sphere() -> Sphere {
         Sphere::new(Point::origin(), 1.0).unwrap()
+    }
+
+    fn bits_of(ball: Sphere) -> [u64; 4] {
+        let [x, y, z] = ball.centre().coordinates();
+        [x, y, z, ball.radius()].map(f64::to_bits)
+    }
+
+    /// Every way of signing the zeros of one centre, through the public door.
+    ///
+    /// `-0.0` is the same number as `0.0` and a different `f64`, and everything
+    /// that asks whether two faces are the same surface compares with
+    /// [`f64::total_cmp`](f64::total_cmp), which sorts `-0.0` first. Nothing
+    /// between [`Sphere::new`]'s argument and the field it lands in changes a
+    /// sign — there is no scaling on a centre, the way there is on a normal or
+    /// an axis direction — so what a caller writes is what would be stored.
+    #[test]
+    fn a_ball_holds_the_same_bits_however_its_centres_zeros_were_signed() {
+        let plain = Sphere::new(Point::new(0.0, 0.0, 4.0), 2.0).unwrap();
+
+        for x in [0.0, -0.0] {
+            for y in [0.0, -0.0] {
+                let spelt = Sphere::new(Point::new(x, y, 4.0), 2.0).unwrap();
+                assert_eq!(
+                    bits_of(spelt),
+                    bits_of(plain),
+                    "a ball centred on ({x}, {y}, 4) holds other bits than the same ball \
+                     centred with every zero positive"
+                );
+            }
+        }
+    }
+
+    /// The bits a ball holds are the bits a face on it sorts by.
+    ///
+    /// `Surface::how_it_sorts_against` reads the centre straight out, and so
+    /// does `rcad-topo`'s `name_of_surface_bits`, which names a corner by them
+    /// one crate away. Two spellings of one ball that sort apart are two
+    /// surfaces to both of them, and the corner where they meet a third lands
+    /// in two places.
+    #[test]
+    fn one_ball_spelled_two_ways_sorts_as_one() {
+        let plain = Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 4.0), 2.0).unwrap());
+        let with_a_negative_zero =
+            Surface::Sphere(Sphere::new(Point::new(-0.0, 0.0, 4.0), 2.0).unwrap());
+
+        assert_eq!(
+            plain.how_it_sorts_against(&with_a_negative_zero),
+            Ordering::Equal,
+            "a ball centred on (-0, 0, 4) and the same ball centred on (0, 0, 4) sort apart"
+        );
+    }
+
+    /// §32.5's trap, on a ball.
+    ///
+    /// Moving a ball by nothing has to give back the numbers that were stored,
+    /// or `Surface::transformed` — which is how a ball is read out of a model at
+    /// whatever location its face carries — moves a bit on every read. A
+    /// movement's last step on each coordinate is an addition, and an addition
+    /// turns a stored `-0.0` back into `0.0`, so an unfolded centre would come
+    /// out of the identity as a different ball from the one that went in.
+    #[test]
+    fn moving_a_ball_by_the_identity_gives_back_the_bits_it_held() {
+        for ball in [
+            Sphere::new(Point::new(-0.0, 0.0, 4.0), 2.0).unwrap(),
+            Sphere::new(Point::new(1.0, -2.5, 3.0), 0.5).unwrap(),
+            Sphere::new(Point::origin(), 1.0).unwrap(),
+        ] {
+            assert_eq!(
+                bits_of(ball.transformed(&Isometry::identity())),
+                bits_of(ball)
+            );
+        }
     }
 
     #[test]
