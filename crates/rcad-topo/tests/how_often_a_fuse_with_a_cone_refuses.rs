@@ -79,6 +79,15 @@ use cones::{a_frustum, a_pointed_cone};
 /// How many pairs each family draws.
 const DRAWS: usize = 16;
 
+/// What every refusal of a cone against a coaxial pipe says today.
+///
+/// `intersect` names that pair now, so the fuse gets past the geometry and stops
+/// where three surfaces have to be solved at once. Written out because the
+/// assertion that uses it is the record of *which* wall the family sits behind,
+/// and a message compared against itself would record nothing.
+const THREE_SURFACES_AND_ONLY_ONE_FLAT: &str = "geometry: where three surfaces meet is only \
+     worked out when two of them are flat, and fewer than two of these are";
+
 /// A deterministic sequence, so that a rate is one number and not a range.
 struct Draw(u64);
 
@@ -276,9 +285,16 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 ///
 /// `AFrustumAgainstABar` is a cone coaxial with a pipe. That pair crosses in
 /// exactly two circles, so the old shared reason — a degree-four space curve —
-/// was never true of it (§50.11). It sits at nothing answered because
-/// `intersect` does not name the pair yet, and **this pin is written to break on
-/// the day it does**, which is what a pin is for.
+/// was never true of it (§50.11). **The pin was written to break the day
+/// `intersect` named the pair. `intersect` names it now, and the pin did not
+/// break**, because the fuse gets one step further and stops at a different
+/// wall: where three surfaces meet is only worked out when two of them are flat,
+/// and a cone, a pipe and a cap plane give one flat surface out of three. All 96
+/// refusals say so, and this is the number and the name to re-derive when
+/// `three_surfaces.rs` learns the case — which §50.6 keeps out of this unit.
+///
+/// A pin that holds for a new reason is a pin saying nothing until the reason is
+/// written down, so the refusals are asserted by name here and not only counted.
 ///
 /// `TwoFrustumsOnOneAxis` is a cone against another cone, which §50.2 item 4
 /// keeps out of scope: two cones sharing an apex meet along rulings, which are
@@ -369,10 +385,10 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
             100.0 * refused as f64 / fuses as f64
         );
         assert!(fuses >= 90, "{}: only {fuses} fuses", family.named());
-        every.push((family, fuses, answered, refused));
+        every.push((family, fuses, answered, refused, gave_up));
     }
 
-    for (family, fuses, answered, refused) in every {
+    for (family, fuses, answered, refused, gave_up) in every {
         match family {
             Family::AFrustumAgainstACornerUpCube | Family::APointedConeAgainstACornerUpCube => {
                 assert!(
@@ -388,18 +404,29 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                     family.named()
                 );
             }
-            Family::AFrustumAgainstABar => assert_eq!(
-                answered,
-                0,
-                "{}: this is a cone coaxial with a pipe, which crosses in exactly two circles \
-                 and not in the degree-four curve this pin used to name (§50.11). It was \
-                 measured at 0 answered of 96, every refusal `intersect` declining to name \
-                 that pair. The pin is written to break the day the pair is named and points \
-                 can be put in order along it, and it answered {answered} of {fuses} here. \
-                 When it breaks, re-derive the number over this whole family and pin the \
-                 measured one — do not relax it to a floor and do not guess it (§19.1)",
-                family.named()
-            ),
+            Family::AFrustumAgainstABar => {
+                assert_eq!(
+                    answered,
+                    0,
+                    "{}: this is a cone coaxial with a pipe, which crosses in exactly two \
+                     circles (§50.11). `intersect` names that pair now, so what holds this \
+                     family at nothing answered is one step further down: where three \
+                     surfaces meet is only worked out when two of them are flat, and a cone, \
+                     a pipe and a cap plane give one flat surface out of three. It answered \
+                     {answered} of {fuses} here. When this breaks, re-derive the number over \
+                     this whole family and pin the measured one — do not relax it to a floor \
+                     and do not guess it (§19.1)",
+                    family.named()
+                );
+                assert_eq!(
+                    gave_up,
+                    BTreeMap::from([(THREE_SURFACES_AND_ONLY_ONE_FLAT.to_owned(), fuses)]),
+                    "{}: every one of these refusals is the three-surface meet, measured. A \
+                     different name here means the wall moved and this pin's reason has to be \
+                     re-derived with it (§15.10)",
+                    family.named()
+                );
+            }
             Family::TwoFrustumsOnOneAxis => assert_eq!(
                 answered,
                 0,
