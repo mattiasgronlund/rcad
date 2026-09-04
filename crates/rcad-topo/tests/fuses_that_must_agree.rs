@@ -312,13 +312,12 @@ const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
 /// swings with 48 draws of a three-valued number rather than with 126
 /// comparisons, and it swings widely.
 ///
-/// **Eight fresh-seed runs reached 30%, 33%, 37%, 38%, 40%, 44%, 44% and 46%.**
-/// The worst of those clears [`SOME_COMPARISONS_MUST_HAPPEN`] by four hundredths
-/// of one comparison, which is a floor a property brushes rather than a guard,
-/// and shipping it would have been a flake. A fifth is a **margin of ten points
-/// under the worst measured** — about one and a half of that spread's own
-/// standard deviations — and it still fires on anything that halves the rate,
-/// which is what the floor is for.
+/// **Eighteen fresh-seed runs came out between 30% and 46%**, and 30% turned up
+/// twice. That clears [`SOME_COMPARISONS_MUST_HAPPEN`] by four hundredths of one
+/// comparison — a floor a property brushes rather than a guard, and shipping it
+/// would have been a flake. A fifth is a **margin of ten points under the worst
+/// of the eighteen**, about two of that spread's own standard deviations, and it
+/// still fires on anything that halves the rate, which is what a floor is for.
 const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
 
 /// How much of the lattice control comes back as something a `Model` cannot
