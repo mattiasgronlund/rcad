@@ -16332,3 +16332,202 @@ of 20 000.**
 must not claim is an import-rate gain: there is none, and §50.5's failure
 criterion for Lane A is extended to say so — a lane that reports this work as
 moving the corpus has reported a number the measurement above already refutes.
+
+## 51. What the endless bend cost and found, recorded 2026-09-05
+
+*Written after the wave, from two closing gates' verdicts rather than from the
+lane reports. Where a gate and a lane disagreed, both numbers are given and the
+one that was re-derived from the tree wins. Seventeen lanes across four waves,
+fifty-two commits, `just default` green twice at the end.*
+
+### 51.1 The sentence, and which half was earned
+
+> **The fuse can put points in order along a curve that never ends, and a cone
+> coaxial with a pipe is cut by it.**
+
+**Both of §50.3's falsifiers are satisfied.** `HowItRuns` has a third variant,
+`AlongABend`, with a construction site that is not a test; `intersect` no longer
+refuses the coaxial pair, and `walk` draws the two circles.
+
+**The consumer the unit was built to prove still answers nothing.**
+`AFrustumAgainstABar` is 0 of 96, because the fuse now gets past `intersect` and
+stops one step later — *where three surfaces meet is only worked out when two of
+them are flat*, and a cone, a pipe and a cap plane give one flat surface. §50.6
+puts `three_surfaces.rs` out of scope, so this is the next wall and not a gap in
+the work. The pin now carries the new reason and fails the day that wall moves,
+which is the only thing that makes a pin holding at zero worth keeping.
+
+### 51.2 Four defects nobody planned for, and what each was hiding behind
+
+None of these is the headline. All four came from a lane or a gate contradicting
+the brief it was given.
+
+1. **A fuse refused solids that provably have volume.** `nest_the_shells` decided
+   *solid or cavity* on the sign of a rounded sum of triple products —
+   `signed_volume` accumulating `a.dot(b.cross(c))` in plain `f64`, with no
+   `Decision`, no `Interval` and no exact fallback anywhere on the path. A prism
+   over a triangle three ulps off its own long side, whose area `orient2d` proves
+   `Pos`, measured `-2.3129646346357427e-18`: **2020 of 20 000 draws refused for
+   having no volume.** A square rod `1e-9` across down the `(1,1,1)` diagonal,
+   corners as well conditioned as a cube's, measured `-4.5e-18` of `1e-18`.
+   Fixed by keeping the rounded sum when a forward bound proves its own sign and
+   adding the fan up in `expansion` arithmetic when it does not.
+
+   **Why the existing defence never covered it, proved rather than observed.**
+   Every term of a 3×3 determinant carries exactly one factor from each axis, so
+   shrinking an axis by a power of two shrinks every term by that power and the
+   sum returns bit for bit what it was, scaled. That is what makes `axis_shifts`
+   free, and it is the same fact that makes it useless against cancellation: it
+   rescues a solid thin along an **axis** and does nothing for one thin along a
+   **diagonal**. The guard is also downstream of the decision it would protect —
+   `check_dynamic_range` is twenty-three lines and one conditional after
+   `nest_the_shells` has already believed the sign.
+
+2. **One surface, two names, from a signed zero — three surfaces in a row.** The
+   kernel states *two faces that are the same surface hold the same numbers* in
+   four places — `Surface::how_it_sorts_against`, `name_of_surface_bits`,
+   `canonical_cut_surfaces`, §32.5 — and all four compare with `total_cmp`, where
+   `-0.0 < 0.0`. It enforced it in none. A shared wall put a corner in two places
+   one ulp apart. Fixed at construction in `Plane`, then `Axis`, then `Sphere`,
+   each by the lane fixing the one before it, each stopping at its write-set
+   boundary and handing back rather than reaching. `HalfSpace` is exempt by
+   §33.8 — it has no canonical form at all.
+
+   Two measurements worth keeping. Normalization folds **none** of it and can
+   **manufacture** a negative zero: a component small enough to underflow against
+   the largest (`-5e-324` beside `1e300`) comes out `-0.0` where nothing in the
+   input was a zero. And the way in is not exotic — **93 corpus files hold a
+   `DIRECTION` with a `-0.` component**, spellings like
+   `DIRECTION('',(-0.0,-0.0000000001,-1.0))`, which `direction_at` puts straight
+   into `Vector::new` and `placement_at` hands to `Axis::new`.
+
+3. **A soak that reported 4.29 billion cases and ran 2049.** `MEASURED_CASES *
+   factor` as a bare multiply, in five places across two crates. In release it
+   wraps, so the run is silently narrower than shipped while the operator reads
+   the wide number — §48.2's subject, in the machinery built to answer §48.2.
+   `checked_mul` throughout, each site demonstrated wrapping before it was fixed.
+
+4. **A soak that could not soak.** Once the multiply was fixed,
+   `the_same_pair_turned…` still died at `FACTOR=50` on proptest's
+   `max_global_rejects`, a flat 1024 whatever the case count, **before any
+   assertion about geometry ran**. Scaled to proptest's own four-per-case ratio;
+   ten seeds now compare 2.05 million turned pairs.
+
+### 51.3 The fuzz corpus had stopped growing with the kernel
+
+`two_surfaces_from` reads two bits per surface and asks `which % 3`, so the
+824-seed corpus has only ever held planes, balls and pipes — decoded and matched
+on `Surface`: **232 planes, 423 balls, 831 pipes, 0 cones, 0 tori**. Bits 4 to 7
+of the kinds byte are read by nothing, and `3 % 3` aliases to a plane, so the
+draw is 2:1:1 and not uniform. Every claim in the crate that says *over the fuzz
+corpus* was a claim about three of five surface kinds.
+
+**The corpus is not repacked, and the second reason is the load-bearing one.**
+Promoting the unread bits reinterprets 92 of 824 minimised seeds — not "every one
+of them", which is what the file said. But a torus reads eight numbers where a
+pipe reads seven, so a torus against a cone, a pipe or another torus needs **76
+bytes and the longest seed checked in is 71**. Those pairs would decode to
+nothing whatever the kind bits said. Widening the decoder is a lane of its own
+and wants the corpus re-minimised with it.
+
+Two oracles landed meanwhile — `intersect(a,b)` against `intersect(b,a)`, and the
+same pair written at `2^±1` — closing a hole the tree had no way to see: **a pair
+the fuzzer refuses to name produces no point to check**, so every defect that
+shows up as a refusal was outside what any amount of fuzzing could reach. Cones
+and tori are covered by a separate hand-written table of 136 pairs on the integer
+lattice, reported as its own row and never blended (§17.7).
+
+### 51.4 Six false sentences, every one beside a number that was right
+
+This is the unit's finding about itself, and it is §47.8's shape for the fourth
+consecutive unit.
+
+| the sentence | what was actually true |
+|---|---|
+| §50.5: the frustum family answers **84 of 84** | §49.6's 84 was configurations on which a **rule** held, never answers. Pre-wave: 38 answered. Post-wave: **53**, with 0 refused for want of an order where 44 were, and all 31 remaining stopped in `select.rs` |
+| §50.2 item 4: naming beyond the coaxial pair is unsafe **because of cone-against-cone** | a **non-coaxial cone and pipe can share a line** — a pipe of radius 2 about `(1,0,1)` through `(0,2,0)` holds the ruling `(t,0,t)` of `Cone::new(Axis::z(), 1.0)`, since `‖(p−o)×d‖² = 8 = 4‖d‖²`. Two families rest on `intersect`'s refusal, not one |
+| a lane report: the parabola knife edge is **not reachable with rational numbers** through the public door | `E` is homogeneous of degree 2 in `n`, so normalizing divides it by `L²` and moves no sign, and the division rounds exactly at **power-of-two ratios**. `Cone::new(Axis::z(), 0.5)` against `Plane::from_point_and_normal((0,0,4), (−1,0,0.5))` is a parabola with whole-number points |
+| `NO_POINT_MAY_USE_ALL_OF_ITS_BOUND`: the worst a search finds is about **3·ε** against a published 256·ε | true of three planar rows. The quartic control sits at **0.738 of its bound**, about 189·ε; the headline 0.429, the band 0.477 and rising with corpus width |
+| the fuzz file: repacking would reinterpret **every one** of the 824 seeds | **92**, or 42 for the narrower repack |
+| `plane.rs`, mine: turning a wall round twice is the plane it started as, **bit for bit** | false for a plane storing `-0.0`, which my own fix had just made possible |
+
+Two of the six were written into §50 before any lane ran, and both were the same
+error: **quoting a row from an earlier section without opening what it measured.**
+§50's preamble says every file and line it cites was checked against the tree by
+opening the file. That was true of the file citations and false of the numeric
+ones, and the distinction is the whole finding.
+
+### 51.5 §49.7's prediction fired, on one site
+
+> *"The next unit will ship a correct fix that carries a rounded test into a place
+> where it decides an answer."*
+
+**Fired, on the presort and only there.** Six of the seven call sites the ordering
+predicate reached carry their own derivations and hold up under reading. The
+seventh — the hint sort in `nodes_along`, which the building lane's own table
+omitted — is a rounded `total_cmp` justified by a sentence inherited verbatim from
+the straight-crossing case: *"every neighbouring pair is then proved."* It was
+not. `merge_points_that_are_one_point` asked and acted **only on `Decision::Zero`**,
+discarding a `Neg`. A gate swapped one pair in the hint and got **8 tests failing
+with wrong answers, not refusals**.
+
+Nobody could make the rounded key actually wrong — instrumented, the topo suite
+stays green at soak factor 8 with 1024 proptest cases, and the instrument fires
+immediately when inverted. So there was no demonstrated defect and no proof
+either, and the sentence claimed one.
+
+**The fix is not the assertion the gate proposed**, and the reason belongs in the
+record. The hint is a rounded read of the **caller's** coordinates, so asserting
+on it puts caller data into a panic; and `order_along` is holding the right answer
+at that exact line, which makes it §16.10's **gap** — refusing over an answer
+already in hand is the family the rule names. `prove_the_hinted_order` turns the
+hint into the order by insertion sort over the proved comparison. The gate's swap
+experiment, re-run against the fix, changes nothing: 586 of 586 pass with the hint
+deliberately scrambled, for straight crossings and for bends.
+
+### 51.6 The prediction for the next unit
+
+Six sentences, four consecutive units, and the countermeasures already tried are
+§15.10's case list (works), the fail-condition brief (works), and the closing gate
+(works — it caught five of the six). What none of them reaches is a sentence
+written **before** the work, in the planning section, quoting an earlier unit.
+
+> **The next unit's largest error will be inherited from a section it quotes, not
+> produced by a lane.** Score it at the next gate by taking every number §51 or
+> the next planning section cites from an earlier §, opening what that § actually
+> measured, and checking the reading. The countermeasure is cheap and specific:
+> **a planning section may not cite a number from an earlier section without
+> naming the test or command that produced it.** A row that cannot name one is
+> quoted as prose, not as a bound.
+
+### 51.7 What stands, and what this unit made more likely dirty
+
+| open | where |
+|---|---|
+| **`three_surfaces.rs` wants two flat surfaces** | the new wall for `AFrustumAgainstABar`, 96 of 96, pinned with its reason. §50.6 kept it out |
+| **one pipe, two names, from an axis written either way** | `Cylinder::new(Axis::z(), 2.0)` and `Cylinder::new(Axis::z().reversed(), 2.0)` are one surface whose names differ in three of nine numbers. `three_planes_faced_the_one_way` canonicalises this for planes and hands any triple with a curved surface over untouched — deliberately, with a reason about a plane's reversal that is **silent about a curved surface's axis**. Same "one surface, two names" class as §51.2 item 2, different mechanism, unfixed |
+| **a mis-signed shell reaching `nest_the_shells`** | both families that flip the sign refuse earlier in the arrangement. Neither barrier is principled — the rod's union answered at `1e-6` and `1e-7` — so it is unproven in both directions. The fix removes the question rather than settling it |
+| **`how_much_space_a_curved_solid_encloses`** | in `validate.rs`, still compares refinements against a rounded `f64`. The sign it reads is now exact; the comparison is not audited |
+| **the fuzz decoder draws 3 of 5 kinds** | §51.3. Wants the corpus re-minimised with it |
+| **`cuts.rs` and most of `three_surfaces.rs`** | still **unaudited**, and now **more likely dirty than before**. §49.8's class was found a fifth time this unit, in the file next door. A comparison-operator grep over both is nearly empty — and that is not evidence, because **it is the same grep that missed the volume sign**, where the rounded sum sat three call-levels away behind a function returning `f64`. Whatever audits them must follow every `f64`-returning call |
+| **`ResultIsNotManifold` with `count` other than 1** | unchanged, and now with 9 named draws from the `AFrustumAgainstABlock` family |
+| **the writer, fillets, the torus, cone against cone** | unchanged |
+
+### 51.8 What was learned about running the work
+
+- **Five lanes at once, then three, three and one.** Write sets were named before
+  any lane started and every merge was clean — no conflict in seventeen lanes.
+  The cost of that discipline is that a lane which finds a defect one file outside
+  its set must hand it back; the benefit is that four of them did, and each
+  handback became the next lane's whole deliverable.
+- **Briefs that name what counts as *failing* keep working.** Third unit running.
+  Every one of §51.4's corrections came from a lane or gate contradicting its own
+  brief — which only happens if the brief says what a wrong answer would look like.
+- **Two gates, split by numbers and by claims, beat one gate.** Each found things
+  the other did not, and each disagreed with a lane. A gate is also not exempt:
+  the claims gate published corpus kind counts that did not sum to `743 × 2`, and
+  the lane that re-derived them said so and showed the arithmetic.
+- **A `sonnet` lane staged its whole deliverable and never committed it.** The
+  brief said commit as you go; had it been killed, all of it was lost. Worth a
+  hook rather than another sentence in a brief, on §50.8's reasoning that
+  recording a rule has been tried.
