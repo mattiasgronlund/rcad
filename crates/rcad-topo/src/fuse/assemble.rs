@@ -71,7 +71,7 @@ use crate::{
 
 use super::arrange::{
     a_plane_cuts_a_cone_in_rulings, agreement_of_two_planes, name_of_surface_bits,
-    name_of_the_surface_either_way_round,
+    name_of_the_surface_either_way_round, two_pipes_run_along_one_line,
 };
 use super::select::Chosen;
 use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
@@ -2005,8 +2005,9 @@ fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Option<bool>
 /// # Errors
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] when
-/// [`the_crossing_of_these_runs_straight`] has no row for the pair, which takes
-/// a sixth kind of [`Surface`]. **One arc and two arcs are both answers, so
+/// [`the_crossing_of_these_runs_straight`] has no answer for the pair — a sixth
+/// kind of [`Surface`], or two pipes whose axes it can prove neither along one
+/// line nor apart. **One arc and two arcs are both answers, so
 /// neither is the safe reading of a pair nobody has decided.** Guessing *two*
 /// is the wrong answer commit `4b62fd0` records the whole cone row getting for
 /// three units: an arc where the surfaces cross in a ruling comes out as two
@@ -2045,15 +2046,24 @@ fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> Result<W
 /// tangent, and this question has to stay one about the pair.
 ///
 /// Every pair of the five surfaces there are is named below, and each of them
-/// gets a `Some`. The `_` left at the bottom is for a sixth [`Surface`] and
-/// nothing else, which is what §40 asks for — and because [`Surface`] is
-/// `#[non_exhaustive]` and belongs to another crate, a sixth kind lands in it
-/// without a compile error here. **So it answers `None`, which is not an
-/// answer.** It used to answer `false`, and `false` is not the safe side of
-/// anything: it is the two-arc branch of [`which_arc_this_is`], which puts two
-/// arcs where a straight run has one. That exact wrong answer is what commit
-/// `4b62fd0` records having gone out for the whole cone row for three units,
-/// under the same blanket verdict.
+/// gets a `Some` for the surfaces this kernel can tell apart. The `_` left at
+/// the bottom is for a sixth [`Surface`] and nothing else, which is what §40
+/// asks for — and because [`Surface`] is `#[non_exhaustive]` and belongs to
+/// another crate, a sixth kind lands in it without a compile error here. **So it
+/// answers `None`, which is not an answer.** It used to answer `false`, and
+/// `false` is not the safe side of anything: it is the two-arc branch of
+/// [`which_arc_this_is`], which puts two arcs where a straight run has one. That
+/// exact wrong answer is what commit `4b62fd0` records having gone out for the
+/// whole cone row for three units, under the same blanket verdict.
+///
+/// **Two pipes are the other `None`, and it is arithmetic and not a missing
+/// row.** Whether their axes run along one line is
+/// [`two_pipes_run_along_one_line`], which proves the answer or says it cannot;
+/// this row used to be `w₁.cross(w₂) == Vector::zero()`, and an `f64` cross
+/// product rounding to nothing is not a proof of anything. That predicate's own
+/// doc carries the counterexample and
+/// `arrange`'s `two_pipes_a_rounded_cross_product_calls_parallel_are_not` is the
+/// demonstration.
 ///
 /// `tests/a_sixth_kind_of_surface.rs` is what notices the day a sixth kind
 /// arrives; `every_pair_of_the_five_kinds_there_are_is_answered` below is what
@@ -2066,7 +2076,12 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
             Some(flat.normal().dot(pipe.axis().direction()) == 0.0)
         }
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
-            Some(one.axis().direction().cross(other.axis().direction()) == Vector::zero())
+            match two_pipes_run_along_one_line(one, other) {
+                Decision::Zero => Some(true),
+                Decision::Pos => Some(false),
+                Decision::Neg => unreachable!("a squared length is never below zero"),
+                Decision::Undecidable { .. } | _ => None,
+            }
         }
         // A plane and a cone cross in rulings when the plane goes through the
         // apex and leans no shallower than the cone's own side: one ruling the
@@ -2424,6 +2439,83 @@ mod tests {
                 run.run(),
                 EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. }
             )));
+            assert_eq!(
+                intersect_says_lines, runs_straight,
+                "{named} came back from `intersect` as {met:?}"
+            );
+        }
+    }
+
+    /// **This door reads two pipes' axes with the same proof the other one
+    /// does**, so a pair that is not provably side by side is never read as
+    /// running straight here either.
+    ///
+    /// The same two directions `arrange`'s
+    /// `two_pipes_a_rounded_cross_product_calls_parallel_are_not` builds: `(a, 0,
+    /// c)` and `(b, 0, c)`, one ulp apart, whose `f64` cross product is exactly
+    /// nothing while the axes are not along one line. `intersect` names their
+    /// crossing one closed loop, and this row used to call it straight — which is
+    /// [`which_arc_this_is`]'s one-arc branch, so the two corners of a closed
+    /// loop would have left one arc where they leave two.
+    ///
+    /// Two pipes whose axes really are along one line still answer `Some(true)`,
+    /// and the second row is what says so.
+    #[test]
+    fn two_pipes_are_read_straight_only_where_their_axes_are_proved_along_one_line() {
+        let (a, b, c) = (
+            0.393_507_725_793_881_44_f64,
+            0.393_507_725_793_881_4_f64,
+            0.919_321_309_304_058_f64,
+        );
+        let pipe = |origin: Point, along: Vector| {
+            Surface::Cylinder(
+                Cylinder::new(Axis::new(origin, along).expect("an axis"), 1.0).expect("a pipe"),
+            )
+        };
+        let leaning = [
+            pipe(Point::origin(), Vector::new(a, 0.0, c)),
+            pipe(Point::new(0.0, 1.0, 0.0), Vector::new(b, 0.0, c)),
+        ];
+        let side_by_side = [
+            pipe(Point::origin(), Vector::new(0.0, 0.0, 1.0)),
+            pipe(Point::new(1.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)),
+        ];
+
+        let [Surface::Cylinder(one), Surface::Cylinder(other)] = leaning else {
+            panic!("both of them are pipes");
+        };
+        assert_eq!(
+            one.axis().direction().cross(other.axis().direction()),
+            Vector::zero(),
+            "the `f64` cross product rounds to nothing, and that is what used to \
+             decide this row"
+        );
+
+        for (named, pair, runs_straight) in [
+            ("two pipes a rounded cross product calls parallel", leaning, false),
+            ("two pipes whose axes really are along one line", side_by_side, true),
+        ] {
+            for turned in [pair, [pair[1], pair[0]]] {
+                assert_eq!(
+                    the_crossing_of_these_runs_straight(&turned),
+                    Some(runs_straight),
+                    "{named} was read the wrong way round {turned:?}"
+                );
+            }
+
+            let met = rcad_geom::intersect(
+                &pair[0],
+                &pair[1],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{named} is a shape `intersect` names: {why:?}"));
+            let intersect_says_lines = matches!(&met, SurfaceMeet::Curves(runs) if runs
+                .iter()
+                .all(|run| matches!(
+                    run.run(),
+                    EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. }
+                )));
             assert_eq!(
                 intersect_says_lines, runs_straight,
                 "{named} came back from `intersect` as {met:?}"

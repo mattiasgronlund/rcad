@@ -60,8 +60,8 @@
 use core::cmp::Ordering;
 
 use rcad_geom::{
-    Cone, EdgeRun, MeetOfThree, NamedRun, Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Picker,
-    Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector, intersect,
+    Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF,
+    Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector, intersect,
     meet_of_three_surfaces, where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{
@@ -3046,6 +3046,13 @@ fn dot_of(one: [Interval; 3], other: [Interval; 3]) -> Interval {
 /// ball against a pipe, or two pipes. That is a **gap**: the curve is there and
 /// ordering points along it takes the marcher rather than a determinant
 /// (§34.10).
+///
+/// [`Error::Undecidable`](crate::Error::Undecidable) when the shape of the
+/// crossing itself cannot be told — two pipes whose axes cannot be shown to run
+/// along one line or shown not to, which is
+/// [`a_pair_that_crosses_in_straight_lines`]'s own refusal — or when the
+/// direction of a run that *is* straight comes out as a box straddling every
+/// axis.
 fn how_a_crossing_runs(
     surface: &Surface,
     partner: &Surface,
@@ -3089,7 +3096,7 @@ fn how_a_crossing_runs(
     //    it. `cuts.rs`'s own module comment turns down the same shape of skip
     //    for the same reason: leave a pair out and only one side of a shared
     //    edge gets split, and the answer is not a manifold (§17.4).
-    if a_pair_that_crosses_in_straight_lines(surface, partner) {
+    if a_pair_that_crosses_in_straight_lines(surface, partner, log)? {
         let (axis, forward_climbs_the_axis) = dominant_axis_of_a_direction(
             cross_of(gradient_at(surface, at), gradient_at(partner, at)),
             log,
@@ -3197,9 +3204,8 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 /// straight line with a ball or a ring on the other side of it, and a cone
 /// against a ball, a pipe or another cone is a degree-four space curve.
 ///
-/// **Two pipes side by side are the third straight row, and the test comparing
-/// the two axis directions is the one `assemble.rs`'s
-/// `the_crossing_of_these_runs_straight` already uses.** `rcad-geom`'s
+/// **Two pipes side by side are the third straight row, and both doors ask
+/// [`two_pipes_run_along_one_line`] for it.** `rcad-geom`'s
 /// `where_two_pipes_side_by_side_cross` builds one line or two for exactly that
 /// pair and its own doc says *"every answer is straight"*. This used to answer
 /// `false`, so such a run fell past this gate into the conic gate — `false`
@@ -3225,16 +3231,42 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 /// `#[non_exhaustive]` and belongs to another crate.
 /// `tests/a_sixth_kind_of_surface.rs` is what notices, and says why the compiler
 /// cannot.
-fn a_pair_that_crosses_in_straight_lines(one: &Surface, other: &Surface) -> bool {
+///
+/// # Errors
+///
+/// [`Error::Undecidable`](crate::Error::Undecidable) when
+/// [`two_pipes_run_along_one_line`] can prove neither that the axes run along
+/// one line nor that they do not. Neither `true` nor `false` is the safe reading
+/// of that: `true` orders a closed quartic loop as an endless straight line, and
+/// `false` sends a pair of endless lines to the conic gate.
+fn a_pair_that_crosses_in_straight_lines(
+    one: &Surface,
+    other: &Surface,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
     match (one, other) {
         (Surface::Plane(flat), Surface::Cylinder(pipe))
         | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
-            flat.normal().dot(pipe.axis().direction()) == 0.0
+            Ok(flat.normal().dot(pipe.axis().direction()) == 0.0)
         }
         (Surface::Plane(flat), Surface::Cone(cone))
-        | (Surface::Cone(cone), Surface::Plane(flat)) => a_plane_cuts_a_cone_in_rulings(flat, cone),
+        | (Surface::Cone(cone), Surface::Plane(flat)) => {
+            Ok(a_plane_cuts_a_cone_in_rulings(flat, cone))
+        }
         (Surface::Cylinder(one), Surface::Cylinder(other)) => {
-            one.axis().direction().cross(other.axis().direction()) == Vector::zero()
+            match two_pipes_run_along_one_line(one, other) {
+                Decision::Zero => Ok(true),
+                Decision::Pos => Ok(false),
+                Decision::Neg => unreachable!("a squared length is never below zero"),
+                Decision::Undecidable { .. } | _ => Err(gave_up(
+                    ORIENT2D,
+                    &[one, other].map(|pipe| {
+                        PredicatePoint::from(pipe.axis().direction().components())
+                    }),
+                    Measures::Area,
+                    log,
+                )),
+            }
         }
         (Surface::Plane(_), Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_))
         | (Surface::Sphere(_) | Surface::Torus(_), Surface::Plane(_))
@@ -3242,8 +3274,8 @@ fn a_pair_that_crosses_in_straight_lines(one: &Surface, other: &Surface) -> bool
         | (Surface::Cylinder(_) | Surface::Cone(_), Surface::Sphere(_) | Surface::Torus(_))
         | (Surface::Sphere(_) | Surface::Torus(_), Surface::Cylinder(_) | Surface::Cone(_))
         | (Surface::Cylinder(_), Surface::Cone(_))
-        | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_)) => false,
-        _ => false,
+        | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_)) => Ok(false),
+        _ => Ok(false),
     }
 }
 
@@ -3275,6 +3307,62 @@ pub(super) fn a_plane_cuts_a_cone_in_rulings(flat: &Plane, cone: &Cone) -> bool 
     let up = normal.dot(along);
     let sideways = normal.cross(along).length_squared();
     up * up - cone.slope() * cone.slope() * sideways <= 0.0
+}
+
+/// Whether two pipes' axes run along one line, **proved and not rounded**.
+///
+/// [`Decision::Zero`] when `w₁ × w₂` is nothing, [`Decision::Pos`] when it is
+/// something, and [`Decision::Undecidable`] when neither can be shown. That is
+/// the sign of `‖w₁ × w₂‖²`, which is the very question
+/// [`intersect`](rcad_geom::intersect) splits the pipe-and-pipe row on, so this
+/// door, `assemble.rs`'s [`the_crossing_of_these_runs_straight`] and the
+/// intersector all ask one question and cannot disagree about the shape of a
+/// crossing.
+///
+/// [`the_crossing_of_these_runs_straight`]: super::assemble
+///
+/// # An `f64` cross product rounding to nothing is not a proof
+///
+/// Both doors used to write `w₁.cross(w₂) == Vector::zero()`. Take the unit
+/// directions `(a, 0, c)` and `(b, 0, c)` with
+/// `a = 0.39350772579388144`, `b = 0.3935077257938814` and
+/// `c = 0.919321309304058`: `a` and `b` differ by one ulp, `a·c` and `b·c` round
+/// to the same `f64`, so the cross product's `y` component *rounds* to nothing
+/// while it exactly is `(b − a)·c ≈ −5.1e-17`. Those two pipes cross in a closed
+/// quartic loop, and the rounded test called the loop an endless straight line.
+///
+/// Each component is a two-by-two determinant of stored numbers, which is
+/// [`orient2d`] measured from the origin — the same form
+/// [`dominant_axis`] reads a pair of plane normals with, exact for exact `f64`
+/// inputs and honest about the spread it cannot multiply through. One component
+/// proved non-zero settles the pair on its own; the three have to be proved
+/// *zero* together for the axes to be along one line.
+pub(super) fn two_pipes_run_along_one_line(one: &Cylinder, other: &Cylinder) -> Decision {
+    let (mine, theirs) = (
+        one.axis().direction().components(),
+        other.axis().direction().components(),
+    );
+    let mut widest_that_was_not_told = None::<f64>;
+    for axis in 0..3 {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        match orient2d(
+            [0.0, 0.0],
+            [mine[next], mine[after]],
+            [theirs[next], theirs[after]],
+        ) {
+            Decision::Zero => {}
+            Decision::Pos | Decision::Neg => return Decision::Pos,
+            Decision::Undecidable { enclosure } => {
+                widest_that_was_not_told =
+                    Some(widest_that_was_not_told.map_or(enclosure, |so_far| so_far.max(enclosure)));
+            }
+            other => panic!("a two-by-two determinant came back with no sign: {other:?}"),
+        }
+    }
+    match widest_that_was_not_told {
+        None => Decision::Zero,
+        Some(enclosure) => Decision::Undecidable { enclosure },
+    }
 }
 
 /// The cross product of two boxes.
@@ -4263,7 +4351,7 @@ mod what_the_curved_arrangement_reaches {
     use super::super::cuts;
     use super::{
         HowItRuns, a_pair_that_crosses_in_straight_lines, cross_of, gradient_at,
-        how_a_crossing_runs, round_a_closed_crossing, split_a_face,
+        how_a_crossing_runs, round_a_closed_crossing, split_a_face, two_pipes_run_along_one_line,
     };
     use crate::{Error, Model, SolidKey};
 
@@ -4698,7 +4786,8 @@ mod what_the_curved_arrangement_reaches {
         // is `ACrossingThisCannotBeOrderedAlong` and a different sentence. The
         // gate lets it through, and what gives up is the direction.
         assert!(
-            a_pair_that_crosses_in_straight_lines(&touching, &cone),
+            a_pair_that_crosses_in_straight_lines(&touching, &cone, &mut log)
+                .expect("a plane and a cone is a row nothing can run out of arithmetic on"),
             "a plane resting along a cone's own side cuts one endless ruling"
         );
         assert_eq!(
@@ -4763,7 +4852,8 @@ mod what_the_curved_arrangement_reaches {
             "the direction is there, exactly, and it is the common axis"
         );
         assert!(
-            a_pair_that_crosses_in_straight_lines(&here, &there),
+            a_pair_that_crosses_in_straight_lines(&here, &there, &mut log)
+                .expect("two axes both stored as `z` are proved along one line"),
             "two pipes whose axes run one way cut endless lines"
         );
         for run in &runs {
@@ -4821,7 +4911,8 @@ mod what_the_curved_arrangement_reaches {
             "the two gradients are opposite, so the cross product is exactly nothing"
         );
         assert!(
-            a_pair_that_crosses_in_straight_lines(&here, &there),
+            a_pair_that_crosses_in_straight_lines(&here, &there, &mut log)
+                .expect("two axes both stored as `z` are proved along one line"),
             "the gate lets it through — the axes are parallel"
         );
         assert!(
@@ -4830,6 +4921,78 @@ mod what_the_curved_arrangement_reaches {
                 Err(Error::Undecidable { .. })
             ),
             "the direction of the shared ruling is `∇S × ∇Q`, which is nothing"
+        );
+    }
+
+    /// **Two pipes whose `f64` cross product is exactly nothing and whose axes
+    /// are not along one line.**
+    ///
+    /// The unit directions `(a, 0, c)` and `(b, 0, c)`, with `a` and `b` one ulp
+    /// apart and `a·c` and `b·c` rounding to the same `f64`. The cross product's
+    /// `y` component is `c·b − a·c`, which *rounds* to nothing and exactly is
+    /// `(b − a)·c ≈ −5.1e-17`. The other two components are nothing for a reason
+    /// that is not rounding: both directions have no `y` at all.
+    ///
+    /// So `w₁.cross(w₂) == Vector::zero()` — the test both doors used to run —
+    /// said these two pipes are side by side. They are not: `intersect` names
+    /// their crossing one closed quartic loop, and the gate saying `true` had
+    /// [`how_a_crossing_runs`] order that loop along an axis as though it were
+    /// an endless straight line. **A refusal turned into a silently wrong
+    /// ordering**, which is worse than the refusal it replaced.
+    ///
+    /// `two_pipes_run_along_one_line` proves the `y` component's sign with
+    /// [`orient2d`](rcad_predicates::orient2d) instead, so the pair comes back
+    /// `Decision::Pos`, the gate answers `false`, and the crossing goes to the
+    /// conic gate — which turns a quartic away by name.
+    #[test]
+    fn two_pipes_a_rounded_cross_product_calls_parallel_are_not() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let (a, b, c) = (
+            0.393_507_725_793_881_44_f64,
+            0.393_507_725_793_881_4_f64,
+            0.919_321_309_304_058_f64,
+        );
+        assert_ne!(a, b, "the two directions are one ulp apart");
+        assert_eq!(a * c, b * c, "and their products round to the same `f64`");
+
+        let pipe = |origin: Point, along: Vector| {
+            Cylinder::new(Axis::new(origin, along).expect("an axis"), 1.0).expect("a pipe")
+        };
+        let one = pipe(Point::origin(), Vector::new(a, 0.0, c));
+        let other = pipe(Point::new(0.0, 1.0, 0.0), Vector::new(b, 0.0, c));
+        assert_eq!(
+            one.axis().direction().cross(other.axis().direction()),
+            Vector::zero(),
+            "the `f64` cross product is exactly nothing, and that is the trap"
+        );
+
+        assert_eq!(
+            two_pipes_run_along_one_line(&one, &other),
+            Decision::Pos,
+            "kept as three determinants, the `y` component is proved below zero"
+        );
+
+        let (here, there) = (Surface::Cylinder(one), Surface::Cylinder(other));
+        let SurfaceMeet::Curves(runs) = intersect(&here, &there, &policy, &mut log)
+            .expect("two leaning pipes a unit apart cross")
+        else {
+            panic!("two leaning pipes cross along curves and nothing else");
+        };
+        assert_eq!(runs.len(), 1, "one closed loop right round where they cross");
+
+        assert!(
+            !a_pair_that_crosses_in_straight_lines(&here, &there, &mut log)
+                .expect("the axes are proved apart, so nothing ran out of arithmetic"),
+            "a closed loop is not an endless straight line"
+        );
+        let at = PredicatePoint::from([1.0, 0.0, 0.0]);
+        assert!(
+            matches!(
+                how_a_crossing_runs(&here, &there, &runs[0], at, &mut log),
+                Err(Error::ACrossingThisCannotBeOrderedAlong)
+            ),
+            "a quartic is refused by name, where it used to be ordered along `y`"
         );
     }
 }
