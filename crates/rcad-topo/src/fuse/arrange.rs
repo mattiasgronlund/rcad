@@ -3117,8 +3117,9 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
         | (Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_), Surface::Sphere(_))
         // So does every pair among the pipe, the cone and the ring, bar two
         // side-by-side pipes, which cut straight lines. `false` is right for
-        // them here — a pair of endless lines is not a closed conic — and wrong
-        // one step up, which `a_pair_that_crosses_in_straight_lines` records.
+        // them here — a pair of endless lines is not a closed conic — and they
+        // never reach here anyway: `a_pair_that_crosses_in_straight_lines`
+        // answers them one step up.
         | (
             Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
             Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
@@ -3128,8 +3129,9 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 }
 
 /// Whether the pair crosses in endless straight lines rather than in a closed
-/// curve: a plane parallel to a pipe's axis, or a plane through a cone's apex
-/// that is no shallower than the cone's own side.
+/// curve: a plane parallel to a pipe's axis, a plane through a cone's apex that
+/// is no shallower than the cone's own side, or two pipes whose axes run along
+/// one direction.
 ///
 /// Two planes cross in a straight line too, and are answered a step up before
 /// this is asked.
@@ -3139,19 +3141,27 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 /// straight line with a ball or a ring on the other side of it, and a cone
 /// against a ball, a pipe or another cone is a degree-four space curve.
 ///
-/// **Two pipes are the exception, and the `false` this hands back for them is a
-/// gap.** Two pipes whose axes run along one direction cut each other in one
-/// straight line or two: `rcad-geom`'s `where_two_pipes_side_by_side_cross`
-/// builds them and its own doc says *"every answer is straight"*, and
-/// `assemble.rs`'s `the_crossing_of_these_runs_straight` answers `true` for
-/// exactly that pair by comparing the two axis directions. This says `false`,
-/// so such a run falls past the straight gate into the conic gate, which is
-/// `false` for a pair that does not close, and
-/// [`how_a_crossing_runs`] refuses it. The answer exists and no arithmetic ran
-/// out reaching for it — `∇S × ∇Q` on either line is the common axis with
-/// nothing cancelling — so this is a **gap** and not a limit, measured by
-/// `two_side_by_side_pipes_cut_straight_lines_that_nothing_here_will_order`.
-/// The fix is one arm spelled the way `assemble.rs` already spells it.
+/// **Two pipes side by side are the third straight row, and the test comparing
+/// the two axis directions is the one `assemble.rs`'s
+/// `the_crossing_of_these_runs_straight` already uses.** `rcad-geom`'s
+/// `where_two_pipes_side_by_side_cross` builds one line or two for exactly that
+/// pair and its own doc says *"every answer is straight"*. This used to answer
+/// `false`, so such a run fell past this gate into the conic gate — `false`
+/// there too, because a pair of endless lines does not close — and
+/// [`how_a_crossing_runs`] refused it with nothing having run out of
+/// arithmetic. That was a **gap** and not a limit (§16.10), and
+/// `two_pipes_side_by_side_run_up_their_common_axis` measures what it answers
+/// now rather than what it used to refuse.
+///
+/// **Two pipes exactly touching along one ruling are still refused, and that is
+/// the same limit as a plane resting on a pipe.** The axes are parallel, so this
+/// says `true` and the line under the gate is `∇S × ∇Q` — which for two pipes
+/// touching along a ruling is exactly nothing, both gradients pointing along the
+/// line between the axes. The refusal moves from
+/// [`Error::ACrossingThisCannotBeOrderedAlong`] to [`Error::Undecidable`], which
+/// is [`how_a_crossing_runs`]'s own note on the four families of fix and why the
+/// working one is not a small change.
+/// `two_pipes_resting_against_each_other_have_no_direction_to_read` pins it.
 ///
 /// The `_`
 /// at the bottom is for a sixth kind and nothing else (§40) — but a sixth kind
@@ -3167,14 +3177,16 @@ fn a_pair_that_crosses_in_straight_lines(one: &Surface, other: &Surface) -> bool
         }
         (Surface::Plane(flat), Surface::Cone(cone))
         | (Surface::Cone(cone), Surface::Plane(flat)) => a_plane_cuts_a_cone_in_rulings(flat, cone),
+        (Surface::Cylinder(one), Surface::Cylinder(other)) => {
+            one.axis().direction().cross(other.axis().direction()) == Vector::zero()
+        }
         (Surface::Plane(_), Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_))
         | (Surface::Sphere(_) | Surface::Torus(_), Surface::Plane(_))
         | (Surface::Sphere(_) | Surface::Torus(_), Surface::Sphere(_) | Surface::Torus(_))
         | (Surface::Cylinder(_) | Surface::Cone(_), Surface::Sphere(_) | Surface::Torus(_))
         | (Surface::Sphere(_) | Surface::Torus(_), Surface::Cylinder(_) | Surface::Cone(_))
-        | (Surface::Cylinder(_) | Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_)) => {
-            false
-        }
+        | (Surface::Cylinder(_), Surface::Cone(_))
+        | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_)) => false,
         _ => false,
     }
 }
@@ -4644,23 +4656,23 @@ mod what_the_curved_arrangement_reaches {
         );
     }
 
-    /// **Two pipes side by side cut straight lines, and this refuses them.**
+    /// **Two pipes side by side cut straight lines, and both of them are
+    /// ordered up the common axis.**
     ///
-    /// A pin on today's answer and not on a right one. Two pipes of radius five
-    /// whose axes both run up `z`, six apart, meet along the two lines through
-    /// `(3, ±4, z)` — a 3-4-5 on both, so the meeting is the real one and not a
-    /// near one. `intersect` builds both, and
+    /// Two pipes of radius five whose axes both run up `z`, six apart, meet
+    /// along the two lines through `(3, ±4, z)` — a 3-4-5 on both, so the
+    /// meeting is the real one and not a near one. `intersect` builds both, and
     /// `where_two_pipes_side_by_side_cross`'s own doc says every answer it gives
     /// is straight.
     ///
-    /// **A gap and not a limit.** `∇S × ∇Q` at `(3, 4, 0)` is
-    /// `(3, 4, 0) × (−3, 4, 0) = (0, 0, 24)`, which is the common axis with
-    /// nothing cancelling, so `dominant_axis_of_a_direction` would name `z` at
-    /// once. What refuses is `a_pair_that_crosses_in_straight_lines` answering
-    /// `false` for the pair, one arm above where `assemble.rs`'s
-    /// `the_crossing_of_these_runs_straight` answers `true` for it.
+    /// `∇S × ∇Q` at `(3, 4, 0)` is `(3, 4, 0) × (−3, 4, 0) = (0, 0, 24)`, which
+    /// is the common axis with nothing cancelling, so
+    /// `dominant_axis_of_a_direction` names `z` and the sign is up it. This used
+    /// to be `Err(ACrossingThisCannotBeOrderedAlong)` and the gap §48 pinned:
+    /// the pair fell past a straight gate that said `false` for it into a conic
+    /// gate that says `false` for anything that does not close.
     #[test]
-    fn two_side_by_side_pipes_cut_straight_lines_that_nothing_here_will_order() {
+    fn two_pipes_side_by_side_run_up_their_common_axis() {
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
         let here = Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe of radius five"));
@@ -4695,18 +4707,74 @@ mod what_the_curved_arrangement_reaches {
             "the direction is there, exactly, and it is the common axis"
         );
         assert!(
-            !a_pair_that_crosses_in_straight_lines(&here, &there),
-            "and this is the arm that throws it away"
+            a_pair_that_crosses_in_straight_lines(&here, &there),
+            "two pipes whose axes run one way cut endless lines"
         );
         for run in &runs {
             assert!(
                 matches!(
                     how_a_crossing_runs(&here, &there, run, at, &mut log),
-                    Err(Error::ACrossingThisCannotBeOrderedAlong)
+                    Ok(HowItRuns::AlongAnAxis {
+                        axis: 2,
+                        forward_climbs_the_axis: true
+                    })
                 ),
-                "today's answer, and a gap: the line runs up `z` and nothing asks"
+                "the line runs up `z`, and `∇S × ∇Q` points up it"
             );
         }
+    }
+
+    /// **Two pipes resting against each other have no direction to read, the
+    /// same way a plane resting on a pipe has none.**
+    ///
+    /// Two pipes of radius five whose axes are ten apart touch along the one
+    /// ruling through `(5, 0, z)`. The axes are parallel, so the straight gate
+    /// lets the pair through — and what gives up under it is `∇S × ∇Q`, which is
+    /// `(10, 0, 0) × (−10, 0, 0)` and exactly nothing. Both gradients point
+    /// along the line between the axes.
+    ///
+    /// So the refusal moved from [`Error::ACrossingThisCannotBeOrderedAlong`] to
+    /// [`Error::Undecidable`], which is the limit `how_a_crossing_runs`'s own
+    /// note names the four families of fix for. Closing the side-by-side gap
+    /// does not close this and does not claim to.
+    #[test]
+    fn two_pipes_resting_against_each_other_have_no_direction_to_read() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let here = Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe of radius five"));
+        let there = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(10.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                    .expect("an axis ten along `x`"),
+                5.0,
+            )
+            .expect("a second pipe of the same radius"),
+        );
+
+        let SurfaceMeet::Curves(runs) = intersect(&here, &there, &policy, &mut log)
+            .expect("two pipes resting against each other touch")
+        else {
+            panic!("two pipes resting against each other touch along one ruling");
+        };
+        assert_eq!(runs.len(), 1, "one ruling and not two");
+
+        let at = PredicatePoint::from([5.0, 0.0, 0.0]);
+        assert_eq!(
+            cross_of(gradient_at(&here, at), gradient_at(&there, at)).map(Interval::sign),
+            [Decision::Zero; 3],
+            "the two gradients are opposite, so the cross product is exactly nothing"
+        );
+        assert!(
+            a_pair_that_crosses_in_straight_lines(&here, &there),
+            "the gate lets it through — the axes are parallel"
+        );
+        assert!(
+            matches!(
+                how_a_crossing_runs(&here, &there, &runs[0], at, &mut log),
+                Err(Error::Undecidable { .. })
+            ),
+            "the direction of the shared ruling is `∇S × ∇Q`, which is nothing"
+        );
     }
 }
 
