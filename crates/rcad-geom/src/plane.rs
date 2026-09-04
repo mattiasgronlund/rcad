@@ -53,9 +53,14 @@ pub const SIDE_OF_PLANE: &str = "side of plane";
 ///   `three_planes_faced_the_one_way` pick one of a plane's two spellings by
 ///   the sign of its leading coefficient.
 ///
-/// [`Axis`](crate::Axis) has the same exposure and does not do this yet, so a
-/// pipe, a cone or a torus built about `Vector::new(-0.0, 0.0, 1.0)` still
-/// stores a negative zero.
+/// [`Axis`](crate::Axis) and [`Sphere`](crate::Sphere) have the same exposure
+/// and fold the same way, so a pipe, a cone or a torus built about
+/// `Vector::new(-0.0, 0.0, 1.0)` and a ball centred on
+/// `Point::new(-0.0, 1.0, 2.0)` store what the same surface spelled with
+/// positive zeros stores. A [`HalfSpace`](crate::HalfSpace) is the one flat
+/// surface that does not, and deliberately: it has no canonical form at all, so
+/// nothing may compare two of them for equality in the first place
+/// (`docs/decisions.md` §33.8).
 ///
 /// # Signs here are arithmetic, not decisions
 ///

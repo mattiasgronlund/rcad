@@ -215,16 +215,24 @@ impl Surface {
     ///
     /// Sorting on the stored numbers is sound for exactly the reason §32.5's
     /// trap gives: two faces that are the same plane hold the same four numbers.
-    /// It is **not** sound for a [`HalfSpace`](crate::HalfSpace), which has no
-    /// canonical form at all, and §33.8 is the other half of the same rule.
+    /// Each of the five earns that for itself, and none of the five is left out:
+    /// a [`Plane`](crate::Plane)'s normal and an [`Axis`](crate::Axis)'s
+    /// direction are scaled to length one from the largest component, so two
+    /// spellings that differ only in how long the vector was written hold the
+    /// same bits, and a [`Sphere`]'s centre has nothing to scale. A pipe, a cone
+    /// and a bend take theirs from the axis they sit on.
+    ///
+    /// It is **not** sound for a [`HalfSpace`](crate::HalfSpace), and that one
+    /// is exempt rather than unfinished: a half-space has no canonical form at
+    /// all, two of them describing one flat surface may hold quite different
+    /// numbers, and nothing anywhere may compare two for equality or key on one
+    /// (§33.8). A half-space is not a [`Surface`] and cannot reach here.
     ///
     /// **[`f64::total_cmp`](f64::total_cmp) tells `-0.0` from `0.0`**, so "the
     /// same four numbers" has to mean the same bits and not the same values.
-    /// [`Plane`](crate::Plane) arranges that by holding no negative zero at all
-    /// — see the note on it for what a single one costs.
-    /// [`Axis`](crate::Axis) does not do the same yet, so a pipe, a cone or a
-    /// torus built about `Vector::new(-0.0, 0.0, 1.0)` still sorts away from the
-    /// same one built about `Vector::new(0.0, 0.0, 1.0)`.
+    /// [`Plane`](crate::Plane), [`Axis`](crate::Axis) and [`Sphere`] each fold a
+    /// negative zero out of every number they store — see the note on any of the
+    /// three for what a single one costs.
     ///
     /// Planes sort before balls and balls before pipes, which is what puts the
     /// two flat ones of a triple at the front.
