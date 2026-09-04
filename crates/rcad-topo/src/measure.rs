@@ -661,20 +661,38 @@ fn axis_shifts_over(mesh: &Mesh, hub: Point) -> [i32; 3] {
 ///
 /// The mesh's triangles in the order it stores them, which is fixed (§25.7), so
 /// two runs give the same sum bit for bit.
+///
+/// The sign is settled the same way [`SolidView::volume_and_moment`] settles
+/// it, and for the same reason: `Model::validate` calls a negative one
+/// [`Invalid::VolumeIsNotPositive`], and the fuse's `nest_the_shells` sorts a
+/// curved shell into a lump or a void of one by it. What the exact sum here is
+/// exact *about* is the mesh, which stands in for the solid to within
+/// [`Measurement::volume_error`]; the sign it decides is the sign the mesh's
+/// own triangles have, which is what these two callers branch on.
 fn volume_and_moment_over(mesh: &Mesh, hub: Point, shifts: [i32; 3]) -> (f64, [f64; 3]) {
+    let mut fan: Vec<[[f64; 2]; 9]> = Vec::new();
     let mut six_volumes = 0.0;
+    let mut how_big_the_terms_are = 0.0;
     let mut moment = [0.0f64; 3];
     for triangle in mesh.triangles() {
-        let [a, b, c] =
-            corners_of(mesh, triangle).map(|corner| shrink_each_axis(corner - hub, shifts));
+        let exact =
+            corners_of(mesh, triangle).map(|corner| exactly_how_far_from(hub, corner, shifts));
+        let [a, b, c] = exact.map(the_rounded_part_of);
         let six_volume = a.dot(b.cross(c));
         six_volumes += six_volume;
+        how_big_the_terms_are += across_the_axes(a) * across_the_axes(b) * across_the_axes(c);
         let offsets = [a, b, c].map(|offset| offset.components());
         for (axis, total) in moment.iter_mut().enumerate() {
             *total += six_volume * (offsets[0][axis] + offsets[1][axis] + offsets[2][axis]);
         }
+        fan.push(core::array::from_fn(|slot| exact[slot / 3][slot % 3]));
     }
-    (six_volumes, moment)
+
+    let slack = (fan.len() as f64 + 8.0) * f64::EPSILON * how_big_the_terms_are;
+    if six_volumes.abs() > slack || !how_big_the_terms_are.is_finite() {
+        return (six_volumes, moment);
+    }
+    (six_volumes_exactly(&fan), moment)
 }
 
 /// The signed volume of a mesh, for
@@ -962,12 +980,6 @@ fn shift_for(value: f64) -> i32 {
         return 0;
     }
     i32::try_from(value.to_bits() >> 52 & 0x7ff).expect("eleven bits") - 1023
-}
-
-/// `offset` with each axis shrunk by its own power of two.
-fn shrink_each_axis(offset: Vector, shifts: [i32; 3]) -> Vector {
-    let components = offset.components();
-    Vector::from([0, 1, 2].map(|axis| shift(components[axis], -shifts[axis])))
 }
 
 /// `offset` with every axis shrunk by the same power of two.
