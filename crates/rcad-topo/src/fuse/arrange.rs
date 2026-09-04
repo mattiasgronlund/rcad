@@ -1229,9 +1229,9 @@ impl<'f> Arrangement<'f> {
                         ),
                         // `order_along` asks under the policy, so an undecided
                         // pair left as the error at the `?` above.
-                        Decision::Undecidable { .. } => unreachable!(
-                            "order_along hands an undecided pair back as an error"
-                        ),
+                        Decision::Undecidable { .. } => {
+                            unreachable!("order_along hands an undecided pair back as an error")
+                        }
                         other => panic!("a decision nothing here knows: {other:?}"),
                     }
                 }
