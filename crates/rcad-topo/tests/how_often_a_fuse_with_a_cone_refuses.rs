@@ -9,18 +9,26 @@
 //!
 //! # What decides every number below
 //!
-//! `intersect` names a plane against a cone in exactly two of the seven shapes
-//! they can meet in — the ellipse and the apex touch — and refuses the other five
-//! by name. So the whole of a cone's fusibility today comes down to **which
-//! planes a solid brings**:
+//! `intersect` names a plane against a cone in **all seven** of the shapes they
+//! can meet in — its own table says so, and this file's
+//! `a_block_wall_beside_a_cone_stops_at_a_hyperbola_that_never_closes` puts a
+//! block's wall through it and gets a curve back. Naming the crossing is
+//! therefore no longer where a cone's fusibility is decided. **Whether the named
+//! curve closes** is, because going round a closed curve is the only order
+//! `arrange` has for a conic:
 //!
-//! - a plane **square to the cone's axis** cuts a circle, which is named;
-//! - a plane leaning less than the cone's own side cuts an ellipse, named;
+//! - a plane **square to the cone's axis** cuts a circle, which closes;
+//! - a plane leaning less than the cone's own side cuts an ellipse, which
+//!   closes;
 //! - a plane **parallel to the axis**, which is four of a block's six faces when
-//!   the block stands upright, cuts a **hyperbola**, and there is no arm in
-//!   `EdgeRun` for one;
-//! - anything curved against a cone is a degree-four space curve and is refused
-//!   outright.
+//!   the block stands upright, cuts a **hyperbola**. `intersect` names it and
+//!   hands back one endless run per nappe; `arrange` is what then gives up, and
+//!   the message that reaches the caller is *"nothing can put points in order
+//!   along this curve"*. That is where the block family's 90 refusals stop
+//!   today, and the test named above is the demonstration rather than the
+//!   paragraph;
+//! - anything curved against a cone is a degree-four space curve, and that one
+//!   `intersect` does still refuse outright.
 //!
 //! The families are chosen to measure each of those rather than to average them
 //! away.
@@ -40,8 +48,15 @@
 //! them comes back a hyperbola. The consequence is worth stating plainly because
 //! it is the whole of what a cone costs a fuse today:
 //!
-//! > A cone can be fused with a solid **only when every plane of that solid
-//! > leans more steeply than the cone's own half-angle.**
+//! > A cone can be cut by a solid **only when every plane of that solid leans
+//! > more steeply than the cone's own half-angle** — or when the two do not
+//! > reach each other at all, and nothing has to be cut.
+//!
+//! The second half is not a hedge, it is what the block family measured. Its six
+//! answers are all the one draw whose block misses the frustum, and
+//! `what_the_six_answered_block_fuses_actually_say.rs` is that turned into
+//! assertions. Without it the sentence above reads as *"a block never fuses with
+//! a cone"*, which the rate below contradicts.
 //!
 //! A cube stood on its corner is the tidiest solid that does: its three edge
 //! directions are then equally inclined to the vertical, so all six of its
@@ -615,8 +630,23 @@ fn a_grid_of_points_is_classified_the_way_the_cone_says() {
 /// solid, and the arrangement gives up at about the same rate on a cylinder,
 /// which has been in this kernel since M2. A cone's own cost is the row above
 /// it in `how_often_a_certified_fuse_with_a_cone_in_it_refuses` — the upright
-/// block, refused 96 of 96 for a hyperbola — and that one a bar answers
-/// completely.
+/// block, refused **90 of 96** because a hyperbola branch never closes.
+///
+/// **That row used to say 96 of 96, and used to say a bar answers it
+/// completely. Neither is true and neither ever was checked here.** The row is
+/// 90 of 96 since the hyperbola landed, which
+/// `how_often_a_certified_fuse_with_a_cone_in_it_refuses` does assert a floor
+/// on; and a round bar of radius `slope · far` standing where the frustum
+/// stands, against the same upright blocks over the same sixteen draws, answers
+/// **72 of 96** and refuses 24 for *"could not settle 1 decisions the answer
+/// depends on"*. So the hyperbola row does cost a cone something a bar does not
+/// pay — about 66 fuses of it — but "completely" was a guess, and the 24 a bar
+/// still loses is the part of that row this family was already measuring.
+///
+/// That 72 is a measurement and not a test: nothing in this suite stands an
+/// upright block against a bar. What would settle it is the control this file
+/// already has for corner-up cubes, run once more over
+/// `Family::AFrustumAgainstABlock`'s draws.
 ///
 /// Without this control the cone's number would have been read as the cone's
 /// fault and the next lane would have gone looking in the wrong place.

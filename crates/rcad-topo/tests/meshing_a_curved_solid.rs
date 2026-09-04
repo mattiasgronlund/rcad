@@ -898,10 +898,22 @@ fn a_tolerant_caller_gets_the_finest_mesh_the_arithmetic_reaches() {
 /// There are two: `MOST_POINTS_A_MESH_WILL_HOLD` over a whole solid, and
 /// `rcad_geom::MOST_POINTS_ALONG_ONE_CROSSING` over one edge, which is four
 /// times smaller. A ball has exactly one curved edge, so the second is what
-/// answers here and always will be — the first would need five curved edges on
-/// one solid and no builder makes a shape with more than three. They are the
-/// same refusal in the sense that matters, which is that it comes back at once
-/// instead of running.
+/// answers here. They are the same refusal in the sense that matters, which is
+/// that it comes back at once instead of running.
+///
+/// **Which of the two answers for a *different* solid is not settled here, and
+/// the sentence that used to say it is was a forecast.** It read "and always
+/// will be — the first would need five curved edges on one solid and no builder
+/// makes a shape with more than three". The builder half is right as far as it
+/// goes — counted through `EdgeView::run`, `add_ball` gives one curved edge and
+/// `add_round_bar` two — but `mesh` takes any solid, not only a built one, and
+/// the public API reaches further than the builders: `SolidBuilder` takes a
+/// description of any shape, and a fuse writes solids nothing built. What would
+/// settle it is a solid carrying five curved edges put to `mesh`. A block with
+/// two round holes is the obvious one and this kernel does not make it yet —
+/// both bars in one `Rule::Difference`, and one at a time, refuse with
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` — so the forecast is dropped
+/// rather than replaced.
 #[test]
 fn a_deflection_needing_more_points_than_can_be_held_is_refused() {
     let mut model = a_model();
