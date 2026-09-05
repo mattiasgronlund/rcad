@@ -46,6 +46,8 @@ use crate::{EdgeKey, Error, FaceKey, Invalid, Result, SolidView, VertexKey};
 pub struct Mesh {
     points: Vec<Point>,
     triangles: Vec<MeshTriangle>,
+    at_vertex: HashMap<VertexKey, u32>,
+    along_edge: HashMap<EdgeKey, Vec<u32>>,
     deviation: Approximation,
 }
 
@@ -65,6 +67,87 @@ impl Mesh {
     #[must_use]
     pub fn triangles(&self) -> &[MeshTriangle] {
         &self.triangles
+    }
+
+    /// The points that stand in for one edge of the solid, as entries in
+    /// [`Mesh::points`], in the order the **edge** is stored running.
+    ///
+    /// Only what lies **between** the edge's two ends. The ends are corners the
+    /// model already held; they are [`Mesh::point_at_vertex`] of the edge's two
+    /// vertices, and a caller drawing the whole edge puts them back at either
+    /// end. A closed edge's one corner goes at both ends.
+    ///
+    /// # Which way round
+    ///
+    /// The direction the edge is *stored* running, which is not the direction of
+    /// any one use of it. A round bar's bottom cap circle is used forwards by
+    /// the wall and backwards by the cap, and both read this one list — the cap
+    /// is what walks it backwards. A caller working from a coedge does the same,
+    /// on `coedge.edge().orientation().is_reversed()`; the mesher's own wire
+    /// walk is one copy of that and is what this convention is taken from.
+    ///
+    /// An edge with two different ends runs from the end it is stored starting
+    /// at. A **closed** edge is pinned by neither end, and is stored running the
+    /// way the longitude of the curved surface along it increases — see
+    /// `BuildingAMesh::walk` for why the model needs that rule at all.
+    ///
+    /// # Empty, and the three ways to be empty
+    ///
+    /// An edge that needed no help has an empty list: a straight edge is drawn
+    /// by its two ends alone, so every edge of a polyhedron is empty even though
+    /// it was walked.
+    ///
+    /// An edge that was never walked comes back empty as well. A boundary is
+    /// refined from a curved surface that bends round it, because a plane has
+    /// nothing to say about where a curve drawn on it goes, so an edge with a
+    /// plane on both sides is not walked at all. Nor is an edge of some other
+    /// solid than the one this mesh was cut from. All three mean one thing to a
+    /// caller — there is nothing to draw between the two ends — so they are not
+    /// told apart here.
+    ///
+    /// # One list per edge, and what sharing it costs
+    ///
+    /// **Walked once.** The solid's faces are taken in stored order and the first
+    /// curved face to reach an edge walks it; every other face along the edge
+    /// reads those same entries. That is what makes the two sides of an edge name
+    /// the same points rather than two sets that have to be welded (§25.7), and
+    /// it is why there is one list for an edge and not one per face.
+    ///
+    /// **The sharing costs nothing.** The room the walk is given is the mesh's
+    /// deflection less how far moving that face into place rounds, which is a
+    /// fact about where the face sits and not about how tightly it bends — so the
+    /// other face along the edge would have handed the walk the same number.
+    /// Measured rather than argued: two balls whose radii differ by 20, 200 and
+    /// 100 times, meeting in one circle, cut at three deflections each, come out
+    /// with the same points, the same triangles and the same
+    /// [`Mesh::deviation`] bit for bit when the stored order of the two faces is
+    /// reversed — and inside that deviation every time, the closest at half of
+    /// it. `whether_a_fine_face_is_handed_a_coarse_neighbours_edge.rs` is that.
+    ///
+    /// Those are balls, where a circle drawn on one is never wider than the ball
+    /// itself, so a shared boundary always fits the room kept for it. Where a
+    /// boundary does not fit, the triangulator **refuses** —
+    /// [`CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection`], which
+    /// measures every side of a patch against the deflection before refining
+    /// anything — rather than quietly cutting a coarser patch.
+    #[must_use]
+    pub fn points_along_edge(&self, edge: EdgeKey) -> &[u32] {
+        self.along_edge.get(&edge).map_or(&[], Vec::as_slice)
+    }
+
+    /// Which entry of [`Mesh::points`] stands at a corner of the model.
+    ///
+    /// Exactly the point the model holds for that vertex, moved into place and
+    /// moved nowhere else: a corner is never refined and never rounded off a
+    /// surface, and the one corner read by every face round it is one entry
+    /// rather than one per face.
+    ///
+    /// `None` for a vertex that is not a corner of the solid this mesh was cut
+    /// from. Every corner of that solid has one, because every corner of a solid
+    /// stands on a wire and every wire of every face is walked.
+    #[must_use]
+    pub fn point_at_vertex(&self, vertex: VertexKey) -> Option<u32> {
+        self.at_vertex.get(&vertex).copied()
     }
 
     /// How far any point of any triangle can be from the surface it stands in
@@ -1148,6 +1231,8 @@ impl BuildingAMesh {
         Mesh {
             points: self.points,
             triangles: self.triangles,
+            at_vertex: self.at_vertex,
+            along_edge: self.along_edge,
             deviation: Approximation::new(self.worst, Cause::FlatStandIn),
         }
     }
@@ -3228,5 +3313,366 @@ mod tests {
         let sum = x + y;
         let x_part = sum - y;
         (x - x_part) + (y - (sum - x_part))
+    }
+
+    /// [`Mesh::points_along_edge`] hands back an **open** edge's points running
+    /// from the end the edge is stored starting at, whichever way round the
+    /// caller's use of it runs.
+    ///
+    /// A ball's seam is the one edge here that is used both ways round by the
+    /// same face, so a list handed out in the direction of the *use* would have
+    /// to be two different lists — and both uses read this one. Where the points
+    /// sit is [`rcad_geom::walk`]'s business and
+    /// [`every_curved_edge_the_kernel_builds_is_walked_into_points_on_both_its_faces`]
+    /// is what checks it; the claim here is which list they come back in and in
+    /// what order.
+    #[test]
+    fn the_points_along_an_open_edge_run_from_the_end_it_is_stored_starting_at() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let ball = model.add_ball(1.0, &Isometry::identity()).expect("a ball");
+        let mesh = model
+            .solid(ball)
+            .mesh(
+                Deflection::of(0.05).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a ball meshes");
+
+        let uses = every_use_of_an_edge_of(model.solid(ball));
+        assert_eq!(
+            uses.len(),
+            2,
+            "a ball's one seam, used twice by its one face"
+        );
+        assert!(
+            uses[0].orientation().is_reversed() != uses[1].orientation().is_reversed(),
+            "the two uses of a seam run opposite ways round it"
+        );
+        let ends = [
+            ends_in_the_stored_order(uses[0]),
+            ends_in_the_stored_order(uses[1]),
+        ];
+        assert_eq!(
+            (ends[0].0.key(), ends[0].1.key()),
+            (ends[1].0.key(), ends[1].1.key()),
+            "both uses of an edge agree on which way round it is stored"
+        );
+        let (from, to) = ends[0];
+        let height_of_the_end = |end: VertexView<'_>| end.point().coordinates()[2];
+        assert!(
+            height_of_the_end(from) != height_of_the_end(to),
+            "a seam runs between the two poles"
+        );
+
+        let along = mesh.points_along_edge(uses[0].key());
+        assert_eq!(
+            along,
+            mesh.points_along_edge(uses[1].key()),
+            "one list, read by both uses"
+        );
+        assert!(
+            along.len() > 4,
+            "half a meridian of a ball cut to a twentieth of its radius takes more \
+             than four pieces, and got {}",
+            along.len()
+        );
+
+        let height = |at: u32| mesh.points()[at as usize].coordinates()[2];
+        let downwards = height_of_the_end(from) > height_of_the_end(to);
+        let mut last = height_of_the_end(from);
+        for &at in along {
+            let point = mesh.points()[at as usize];
+            assert_eq!(
+                point.coordinates()[1],
+                0.0,
+                "the seam is the half of the meridian circle in the plane y = 0"
+            );
+            assert!(
+                point.coordinates()[0] > 0.0,
+                "and it is the half with x >= 0, not the far one: {point:?}"
+            );
+            assert_eq!(
+                height(at) < last,
+                downwards,
+                "the points run from the end the edge is stored starting at towards \
+                 the other, and this one turned back at {:?}",
+                point
+            );
+            last = height(at);
+        }
+        assert_eq!(
+            last > height_of_the_end(to),
+            downwards,
+            "the last point stops short of the end the edge is stored running to"
+        );
+
+        for end in [from, to] {
+            let at = mesh
+                .point_at_vertex(end.key())
+                .expect("every corner of the meshed solid has a point");
+            assert!(
+                !along.contains(&at),
+                "the two ends are corners of the model and are not in the list"
+            );
+        }
+    }
+
+    /// A **closed** edge is stored running the way the longitude of the curved
+    /// surface along it increases, and the face that reads it backwards is what
+    /// reverses the list rather than getting a reversed one.
+    ///
+    /// A round bar's bottom cap circle is used forwards by the wall and
+    /// backwards by the cap. Both read this one list, so a list handed out in
+    /// the direction of the use would have to disagree with itself.
+    #[test]
+    fn a_cap_circle_runs_the_way_the_wall_round_it_turns_and_not_the_way_the_cap_reads_it() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = model
+            .add_round_bar(5.0, 10.0, &Isometry::identity())
+            .expect("a bar five across and ten tall");
+        let mesh = model
+            .solid(bar)
+            .mesh(
+                Deflection::of(0.5).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar meshes");
+
+        let bottom: Vec<EdgeView<'_>> = every_use_of_an_edge_of(model.solid(bar))
+            .into_iter()
+            .filter(|edge| {
+                edge.is_closed().expect("a bar's edges are all readable")
+                    && edge.start().point().coordinates()[2] == 0.0
+            })
+            .collect();
+        assert_eq!(
+            bottom.len(),
+            2,
+            "the bottom cap circle, used by the wall and by the cap"
+        );
+        assert!(
+            bottom[0].orientation().is_reversed() != bottom[1].orientation().is_reversed(),
+            "the cap reads the circle the other way round from the wall"
+        );
+        assert_eq!(bottom[0].key(), bottom[1].key(), "and it is one edge");
+
+        let along = mesh.points_along_edge(bottom[0].key());
+        assert!(
+            along.len() > 8,
+            "a circle five across cut to half a millimetre takes more than eight \
+             pieces, and got {}",
+            along.len()
+        );
+
+        // The one corner of the circle sits at `x = radius, y = 0`, so it is at
+        // longitude zero and every point after it is further round.
+        let mut last = 0.0;
+        for &at in along {
+            let point = mesh.points()[at as usize];
+            let [x, y, z] = point.coordinates();
+            assert_eq!(z, 0.0, "the bottom circle lies in the bottom cap's plane");
+            let longitude = y.atan2(x).rem_euclid(std::f64::consts::TAU);
+            assert!(
+                longitude > last,
+                "the points run the way the wall's longitude increases, and this one \
+                 went back from {last} to {longitude}"
+            );
+            last = longitude;
+        }
+        assert!(
+            last < std::f64::consts::TAU,
+            "and they stop short of coming back to the corner"
+        );
+
+        let corner = mesh
+            .point_at_vertex(bottom[0].start().key())
+            .expect("every corner of the meshed solid has a point");
+        assert!(
+            !along.contains(&corner),
+            "a closed edge's one corner goes at both ends and is not in the list"
+        );
+    }
+
+    /// Every point of a wholly flat solid's mesh is a corner it already held, so
+    /// no edge of it has a point of its own — and a corner of a solid this mesh
+    /// was not cut from has none at all.
+    #[test]
+    fn a_cube_is_its_eight_corners_and_no_edge_of_it_carries_a_point() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let cube = model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube");
+        let another = model
+            .add_cube(3.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("another cube");
+        let mesh = model
+            .solid(cube)
+            .mesh(
+                Deflection::of(0.5).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a cube meshes");
+
+        assert_eq!(mesh.points().len(), 8, "a cube is its own eight corners");
+        let mut seen = HashSet::new();
+        for corner in every_corner_of(model.solid(cube)) {
+            let at = mesh
+                .point_at_vertex(corner.key())
+                .expect("every corner of the meshed solid has a point");
+            assert_eq!(
+                mesh.points()[at as usize],
+                corner.point(),
+                "a corner is put in the table as the model holds it"
+            );
+            assert!(
+                seen.insert(at),
+                "one entry per corner, read by all three faces"
+            );
+        }
+        assert_eq!(seen.len(), 8);
+
+        for edge in every_use_of_an_edge_of(model.solid(cube)) {
+            assert!(
+                mesh.points_along_edge(edge.key()).is_empty(),
+                "a plane has nothing to say about a curve on it, and a straight edge \
+                 needs nothing said"
+            );
+        }
+        for corner in every_corner_of(model.solid(another)) {
+            assert_eq!(
+                mesh.point_at_vertex(corner.key()),
+                None,
+                "a corner of a solid this mesh was not cut from"
+            );
+        }
+        for edge in every_use_of_an_edge_of(model.solid(another)) {
+            assert!(mesh.points_along_edge(edge.key()).is_empty());
+        }
+    }
+
+    /// An edge walked into nothing and an edge nobody walked both come back
+    /// empty, which is the choice [`Mesh::points_along_edge`] publishes.
+    ///
+    /// A bar's seam is a straight ruling up a curved wall: the wall walks it and
+    /// there is nothing to put between its two ends. A cube's edges have a plane
+    /// either side and are never walked at all. Only from in here can the two be
+    /// told apart, which is the point of not making a caller try.
+    #[test]
+    fn an_edge_walked_into_nothing_and_an_edge_nobody_walked_look_the_same_from_outside() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = model
+            .add_round_bar(5.0, 10.0, &Isometry::identity())
+            .expect("a bar");
+        let cube = model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube");
+        let cut = |solid| {
+            model
+                .solid(solid)
+                .mesh(
+                    Deflection::of(0.5).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("both of these mesh")
+        };
+
+        let meshed_bar = cut(bar);
+        let seam: Vec<EdgeView<'_>> = every_use_of_an_edge_of(model.solid(bar))
+            .into_iter()
+            .filter(|edge| !edge.is_closed().expect("a bar's edges are all readable"))
+            .collect();
+        assert_eq!(seam.len(), 2, "the seam, used twice by the wall");
+        assert!(
+            meshed_bar.along_edge.contains_key(&seam[0].key()),
+            "the wall is curved, so it walks every edge round it including its seam"
+        );
+        assert!(
+            meshed_bar.points_along_edge(seam[0].key()).is_empty(),
+            "and a straight ruling comes back with nothing between its ends"
+        );
+
+        let meshed_cube = cut(cube);
+        for edge in every_use_of_an_edge_of(model.solid(cube)) {
+            assert!(
+                !meshed_cube.along_edge.contains_key(&edge.key()),
+                "an edge with a plane either side is never walked"
+            );
+            assert!(meshed_cube.points_along_edge(edge.key()).is_empty());
+            assert!(
+                !meshed_bar.along_edge.contains_key(&edge.key()),
+                "nor is an edge of another solid"
+            );
+            assert!(meshed_bar.points_along_edge(edge.key()).is_empty());
+        }
+    }
+
+    /// What the two maps cost a [`Mesh`]: each names a point of the mesh, and no
+    /// point twice.
+    ///
+    /// A corner goes in the table once however many faces read it, and each
+    /// point of a walk is put there by that one walk — so both maps together
+    /// hold at most one `u32` per point of the mesh, beside what the maps
+    /// themselves take per edge and per corner.
+    #[test]
+    fn the_two_maps_name_each_point_of_the_mesh_at_most_once() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let somewhere = Isometry::translation(Vector::new(4.0, -2.0, 1.0)).expect("a move");
+        let solids = [
+            model.add_round_bar(3.0, 5.0, &somewhere).expect("a bar"),
+            model.add_ball(2.0, &somewhere).expect("a ball"),
+            model
+                .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a cube"),
+        ];
+
+        for solid in solids {
+            let mesh = model
+                .solid(solid)
+                .mesh(
+                    Deflection::of(0.1).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("all three of these mesh");
+            let mut named = HashSet::new();
+            let along = mesh.along_edge.values().flatten().copied();
+            for at in along.chain(mesh.at_vertex.values().copied()) {
+                assert!(
+                    (at as usize) < mesh.points().len(),
+                    "an index into the point table"
+                );
+                assert!(named.insert(at), "and no point is named twice");
+            }
+            assert!(!named.is_empty(), "a solid has corners");
+        }
+    }
+
+    /// Every use of every edge of `solid`, each turned the way that use runs.
+    fn every_use_of_an_edge_of(solid: SolidView<'_>) -> Vec<EdgeView<'_>> {
+        solid
+            .faces()
+            .flat_map(FaceView::wires)
+            .flat_map(WireView::coedges)
+            .map(|coedge| coedge.edge())
+            .collect()
+    }
+
+    /// Every corner of `solid`, once each.
+    fn every_corner_of(solid: SolidView<'_>) -> Vec<VertexView<'_>> {
+        let mut seen = HashSet::new();
+        solid
+            .faces()
+            .flat_map(FaceView::wires)
+            .flat_map(WireView::steps)
+            .map(|step| match step {
+                WireStepView::Along(coedge) => coedge.start(),
+                WireStepView::Pole(vertex) => vertex,
+            })
+            .filter(|corner| seen.insert(corner.key()))
+            .collect()
     }
 }
