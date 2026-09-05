@@ -13,10 +13,32 @@
 //! `docs/decisions.md` §47.4 item 1 is why the first thing every check does is
 //! ask whether the bound is a number. A bound of `f64::INFINITY` cannot be
 //! violated, and a suite that asserts against one has measured nothing.
+//!
+//! # The second half of the file, and why the first half needed one
+//!
+//! Everything above runs on four balls and eight round bars at the origin. What
+//! feeds the bound underneath is the mesher's own idea of how far a face's
+//! points reach — `mesh::how_far_the_points_of_reach`, a face's wire corners
+//! plus the radius its surface bends at — and **on those twelve shapes that
+//! number cannot be told apart from a corrected one**. Both charges agree to the
+//! last bit on every one of the twelve, so a change to what the mesher charges
+//! could not move a single figure this file prints.
+//!
+//! §52.7 is what that costs: a bound was tightened, its own §15.6 search
+//! reported a change of one ulp, and the reason was that the search's family sat
+//! exactly on the subspace where the old and new formulas are algebraically the
+//! same. Green for years, watching a bound the code no longer computed.
+//!
+//! So the file carries a second family that is *not* on that subspace —
+//! [`shapes_whose_faces_run_past_their_own_corners`] — and prints both charges
+//! side by side on every row of both families, which is what says the second one
+//! can see what the first cannot.
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Measurement, Model, Rule, SolidKey};
+use rcad_topo::{
+    FaceKey, FaceView, Measurement, Mesh, MeshTriangle, Model, Rule, SolidKey, WireView,
+};
 
 const PI: f64 = core::f64::consts::PI;
 
@@ -425,4 +447,409 @@ fn the_bound_is_infinite_where_a_surface_bends_tighter_than_the_mesh_strays() {
     assert!(how_far_a_measured_volume_can_be_out(100.0, 0.1, 0.1).is_infinite());
     assert!(how_far_a_measured_volume_can_be_out(100.0, 0.1, 0.05).is_infinite());
     assert!(how_far_a_measured_volume_can_be_out(100.0, 0.1, 0.2).is_finite());
+}
+
+// ---------------------------------------------------------------------------
+// How far a face's points reach, charged two ways and then measured
+// ---------------------------------------------------------------------------
+
+#[path = "cones/mod.rs"]
+mod cones;
+
+/// The reach the mesher charges a face for: the largest coordinate its **wire
+/// corners** have, plus the radius its surface bends at.
+///
+/// A copy of `mesh::how_far_the_points_of_reach` at no movement, written out
+/// here rather than called. Calling it would make this test move with the thing
+/// it watches, which is §52.11's mistake and the whole reason this family
+/// exists.
+///
+/// Flat faces are charged nothing: a plane's mesh is drawn through corners the
+/// model already holds.
+fn what_the_corners_alone_charge(face: FaceView<'_>) -> f64 {
+    let radius = match face.surface() {
+        Surface::Plane(_) => return 0.0,
+        Surface::Sphere(ball) => ball.radius(),
+        Surface::Cylinder(pipe) => pipe.radius(),
+        Surface::Cone(cone) => {
+            let along = cone.axis().direction();
+            face.wires()
+                .flat_map(WireView::points)
+                .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
+                .fold(0.0, f64::max)
+        }
+        Surface::Torus(ring) => ring.ring_radius() + ring.tube_radius(),
+        other => panic!("this test cannot say how far {other:?} reaches"),
+    };
+    how_far_the_corners_are_from_the_origin(face) + radius
+}
+
+fn how_far_the_corners_are_from_the_origin(face: FaceView<'_>) -> f64 {
+    face.wires()
+        .flat_map(WireView::points)
+        .map(|corner| corner.largest_coordinate_magnitude())
+        .fold(0.0, f64::max)
+}
+
+/// The same reach worked out from **where the surface is placed** as well as
+/// from the corners, which is what the corners alone cannot say.
+///
+/// A point of the face is its surface's placing point — a ball's centre, a
+/// pipe's axis origin, a cone's apex — plus however far the face gets from it,
+/// so `|placing point| + spread` bounds every coordinate it can have. The
+/// spread is the surface's own size where the surface is bounded, and where it
+/// is not, the corners say how far along the axis the face runs:
+///
+/// - a **ball** reaches its radius from its centre and no further, corners or
+///   no corners;
+/// - a **pipe** reaches its radius sideways and as far along its axis as its
+///   corners do;
+/// - a **cone** at `h` up its axis from the apex reaches `h` along and
+///   `slope · h` out, so `(1 + slope) · h` bounds both, with `h` taken from the
+///   corners;
+/// - a **ring** reaches `R + r` from its centre whichever way it wraps.
+///
+/// Whichever of the two charges is larger is the one taken, so this is never
+/// below [`what_the_corners_alone_charge`] and the ratio between them is how
+/// much the corner-only charge is short by.
+///
+/// Nothing here is read back off the mesher. Every number comes off the shape
+/// the test built.
+fn what_the_whole_face_can_reach(face: FaceView<'_>) -> f64 {
+    let (placed_by, spread) = match face.surface() {
+        Surface::Plane(_) => return 0.0,
+        Surface::Sphere(ball) => (ball.centre(), ball.radius()),
+        Surface::Cylinder(pipe) => (
+            pipe.axis().origin(),
+            pipe.radius() + how_far_the_corners_run_along(face, pipe.axis()),
+        ),
+        Surface::Cone(cone) => (
+            cone.apex(),
+            (1.0 + cone.slope()) * how_far_the_corners_run_along(face, cone.axis()),
+        ),
+        Surface::Torus(ring) => (ring.centre(), ring.ring_radius() + ring.tube_radius()),
+        other => panic!("this test cannot say how far {other:?} reaches"),
+    };
+    what_the_corners_alone_charge(face).max(placed_by.largest_coordinate_magnitude() + spread)
+}
+
+fn how_far_the_corners_run_along(face: FaceView<'_>, axis: Axis) -> f64 {
+    face.wires()
+        .flat_map(WireView::points)
+        .map(|corner| axis.direction().dot(corner - axis.origin()).abs())
+        .fold(0.0, f64::max)
+}
+
+/// The largest coordinate any of this face's **own mesh points** really has.
+///
+/// Measured off the mesh and not derived from anything, so it is a floor under
+/// how far the face reaches and never a claim about the ceiling.
+fn how_far_the_points_of_this_face_went(mesh: &Mesh, face: FaceKey) -> f64 {
+    let points = mesh.points();
+    mesh.triangles()
+        .iter()
+        .copied()
+        .filter(|triangle| triangle.face() == face)
+        .flat_map(MeshTriangle::corners)
+        .map(|corner| points[corner as usize].largest_coordinate_magnitude())
+        .fold(0.0, f64::max)
+}
+
+/// One curved face's row: what the corners charge, what the whole face can
+/// reach, and where its mesh points really got to.
+struct WhatOneFaceReached {
+    charged: f64,
+    can_reach: f64,
+    went: f64,
+}
+
+/// Every curved face of `solid`, meshed at `how_fine` and charged both ways.
+///
+/// Flat faces are left out: both charges are zero on them and a ratio of zero
+/// over zero says nothing.
+fn what_each_curved_face_reached(
+    model: &Model,
+    solid: SolidKey,
+    how_fine: f64,
+) -> Vec<WhatOneFaceReached> {
+    let mesh = model
+        .solid(solid)
+        .mesh(
+            Deflection::of(how_fine).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("meshing at a deflection of {how_fine}: {why}"));
+    model
+        .solid(solid)
+        .faces()
+        .filter(|face| !matches!(face.surface(), Surface::Plane(_)))
+        .map(|face| WhatOneFaceReached {
+            charged: what_the_corners_alone_charge(face),
+            can_reach: what_the_whole_face_can_reach(face),
+            went: how_far_the_points_of_this_face_went(&mesh, face.key()),
+        })
+        .collect()
+}
+
+/// Print one shape's faces and hand back the worst two ratios on it.
+fn how_short_the_corners_came(what: &str, faces: &[WhatOneFaceReached]) -> (f64, f64) {
+    let mut worst_went = 0.0f64;
+    let mut worst_can_reach = 0.0f64;
+    for face in faces {
+        assert!(
+            face.went <= face.can_reach,
+            "a face of {what} put a mesh point {} out, and the whole face was said to \
+             reach no further than {}",
+            face.went,
+            face.can_reach
+        );
+        println!(
+            "{what}: corners charge {:.4}, the whole face reaches {:.4} ({:.4}x), its points \
+             got to {:.4} ({:.4}x)",
+            face.charged,
+            face.can_reach,
+            face.can_reach / face.charged,
+            face.went,
+            face.went / face.charged
+        );
+        worst_went = worst_went.max(face.went / face.charged);
+        worst_can_reach = worst_can_reach.max(face.can_reach / face.charged);
+    }
+    (worst_went, worst_can_reach)
+}
+
+/// Shapes with a curved face that runs further from the origin than its own
+/// corners do.
+///
+/// **A second family on purpose, rather than more shapes in
+/// [`shapes_whose_volume_is_known`].** That one is named in
+/// `a_measured_volume_sits_inside_the_published_bound_over_balls_and_bars`, and
+/// dropping a cone into it would make that test's own name false. None of these
+/// has a closed-form volume for this file to check either, which is the second
+/// reason they are not that family's business.
+///
+/// Four kinds, because one surface reaching past its corners could be a quirk of
+/// that one surface:
+///
+/// - a **pointed cone dropped until its rim sits at the origin**. Its one corner
+///   is on the rim and the face runs a whole height down to the apex. Three
+///   slopes, because the shortfall here is `1 / (2 · slope)` and a ladder says
+///   more than a number;
+/// - a **squat frustum slid sideways** until its seam runs down the near side of
+///   the axis, leaving the far side of the cone twice as far out as any corner;
+/// - a **ball fused onto a block**, so all that is left of its corners is a
+///   small circle near the origin while the face still reaches over the top;
+/// - a **wide flat bar slid off its own axis**, which is the same trick on a
+///   pipe.
+///
+/// Each carries its own model, because two of the four are put together by a
+/// placement and one by a fuse.
+fn shapes_whose_faces_run_past_their_own_corners() -> Vec<(String, Model, SolidKey, f64)> {
+    let mut shapes = Vec::new();
+
+    for slope in [0.25, 0.125, 0.0625] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let cone = cones::a_pointed_cone(&mut model, slope, 8.0);
+        model.place_solid(
+            cone,
+            &Isometry::translation(Vector::new(0.0, 0.0, -8.0)).expect("a shift"),
+        );
+        shapes.push((
+            format!("a cone of slope {slope} hanging below its own rim"),
+            model,
+            cone,
+            0.1,
+        ));
+    }
+
+    for (near, far) in [(0.125, 0.25), (0.25, 0.28125)] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let frustum = cones::a_frustum(&mut model, 8.0, near, far);
+        model.place_solid(
+            frustum,
+            &Isometry::translation(Vector::new(-8.0 * far, 0.0, 0.0)).expect("a shift"),
+        );
+        shapes.push((
+            format!("a squat frustum from {near} to {far} slid onto its own seam"),
+            model,
+            frustum,
+            0.1,
+        ));
+    }
+
+    for centre in [2.5, 2.75, 2.875] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = model
+            .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a block eight across");
+        model.place_solid(
+            block,
+            &Isometry::translation(Vector::new(-4.0, -4.0, -8.0)).expect("a shift"),
+        );
+        let ball = model
+            .add_ball(
+                3.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, centre)).expect("a shift"),
+            )
+            .expect("a ball");
+        let fused = model
+            .fuse(
+                &[block],
+                &[ball],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("a ball centred {centre} on a block: {why}"));
+        let solid = fused.solids()[0];
+        shapes.push((
+            format!("a ball centred {centre} up, sunk into a block"),
+            model,
+            solid,
+            0.1,
+        ));
+    }
+
+    for height in [0.5, 0.25, 0.125] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar = model
+            .add_round_bar(
+                5.0,
+                height,
+                &Isometry::translation(Vector::new(-5.0, 0.0, 0.0)).expect("a shift"),
+            )
+            .expect("a bar");
+        shapes.push((
+            format!("a bar five across and {height} tall, slid onto its own seam"),
+            model,
+            bar,
+            0.03,
+        ));
+    }
+
+    shapes
+}
+
+/// A face's own mesh points can land further from the origin than the reach its
+/// corners are charged for, so that charge is not an upper bound on anything.
+///
+/// **Both charges run side by side on every row**, which is what says the family
+/// can see the difference at all —
+/// [`no_ball_or_bar_the_volume_bound_measures_reaches_past_what_its_corners_charge`]
+/// is the same two numbers over the family this file measures volumes on, where
+/// they agree to the last bit. §52.7 is why that pair is written this way: a
+/// §15.6 search whose family sits where the two formulas agree measures a bound
+/// nobody computes, and stays green through the fix it was supposed to watch.
+///
+/// **The cones come out on a ladder that was predicted before it was run**, and
+/// that is what says the mechanism is understood rather than stumbled on. A
+/// cone of slope `s` hung below its own rim has one corner, on the rim, `s · far`
+/// out and `radius_at` there is `s · far` too, so the corners charge `2 · s · far`
+/// while the face runs the whole `far` down to the apex: `1 / (2s)`. At slopes a
+/// quarter, an eighth and a sixteenth that is 2, 4 and 8, and it is 2, 4 and 8.
+///
+/// **Seen failing under the corrected charge**, which is what §52.9 asks of a
+/// search that is meant to move: putting the surface's placing point into
+/// [`what_the_corners_alone_charge`] drops the first cone's row from 2.0000 to
+/// 0.8000 and this test fails on it, while every row of
+/// [`no_ball_or_bar_the_volume_bound_measures_reaches_past_what_its_corners_charge`]
+/// comes back bit for bit unchanged.
+#[test]
+fn a_cone_a_fused_ball_and_a_slid_bar_all_reach_past_what_their_corners_charge() {
+    let mut worst_went = 0.0f64;
+    let mut worst_went_at = String::new();
+    let mut worst_can_reach = 0.0f64;
+    let mut worst_can_reach_at = String::new();
+    let mut short_by_half_or_more = 0;
+    let shapes = shapes_whose_faces_run_past_their_own_corners();
+    let how_many = shapes.len();
+    for (what, model, solid, how_fine) in shapes {
+        let faces = what_each_curved_face_reached(&model, solid, how_fine);
+        assert!(!faces.is_empty(), "{what} has no curved face to charge");
+        let (went, can_reach) = how_short_the_corners_came(&what, &faces);
+        assert!(
+            went > 1.0,
+            "{what} is in this family because its points outrun the corner charge, and \
+             they only reached {went} of it"
+        );
+        if can_reach >= 2.0 {
+            short_by_half_or_more += 1;
+        }
+        if went > worst_went {
+            worst_went = went;
+            worst_went_at = what.clone();
+        }
+        if can_reach > worst_can_reach {
+            worst_can_reach = can_reach;
+            worst_can_reach_at = what;
+        }
+    }
+
+    assert_eq!(how_many, 11, "the family is eleven shapes");
+    // Eight, because a cone of slope one sixteenth hanging below its own rim is
+    // charged one and its points reach eight. Re-derive it if the family moves;
+    // do not relax it (§19.1).
+    assert!(
+        worst_went > 7.9,
+        "the worst a face outran its corner charge by was {worst_went} at {worst_went_at}, \
+         and this family was built to reach eight"
+    );
+    assert!(
+        worst_can_reach > 16.0,
+        "the whole-face reach was worst at {worst_can_reach} times the corner charge, at \
+         {worst_can_reach_at}"
+    );
+    // The three cones, at 4.5, 8.5 and 16.5 times. The eight others fall short
+    // by less than half — a ball and a pipe cannot be charged less than half
+    // what they reach, because a corner of such a face sits on the surface and
+    // so is already within one radius of the far side of it. A cone has no such
+    // ceiling: its radius is charged where its corners are and nowhere else.
+    assert!(
+        short_by_half_or_more >= 3,
+        "only {short_by_half_or_more} of the {how_many} were charged less than half what \
+         the whole face reaches, and the three cones alone are that"
+    );
+    println!("worst a face outran its corner charge: {worst_went:.4}x at {worst_went_at}");
+    println!(
+        "worst the corner charge fell short of the whole face: {worst_can_reach:.4}x at \
+         {worst_can_reach_at}"
+    );
+}
+
+/// **The blindness itself.** Over the balls and bars this file measures volumes
+/// on, the corner charge and the whole-face reach are the same number, and no
+/// face's points ever reach past either.
+///
+/// So a change to what the mesher charges a face for cannot move a single number
+/// in this file's volume tests, and a search that only ran on this family would
+/// report the same figure before and after such a change — which is exactly
+/// §52.7's failure. The family above is what stops that, and this test is what
+/// says it was needed.
+#[test]
+fn no_ball_or_bar_the_volume_bound_measures_reaches_past_what_its_corners_charge() {
+    let (model, shapes) = shapes_whose_volume_is_known();
+
+    let mut worst_went = 0.0f64;
+    let mut worst_can_reach = 0.0f64;
+    for (what, solid, _volume, _radius) in shapes {
+        let faces = what_each_curved_face_reached(&model, solid, 0.1);
+        assert!(!faces.is_empty(), "a {what} has a curved face");
+        let (went, can_reach) = how_short_the_corners_came(&what, &faces);
+        worst_went = worst_went.max(went);
+        worst_can_reach = worst_can_reach.max(can_reach);
+    }
+
+    assert!(
+        worst_went <= 1.0,
+        "no ball or bar in this family puts a mesh point past what its corners are \
+         charged for, and one reached {worst_went} of it"
+    );
+    assert_eq!(
+        worst_can_reach, 1.0,
+        "the two charges are the same number on every one of these shapes, and the \
+         furthest they came apart was {worst_can_reach}"
+    );
+    println!("the volume family's points reached {worst_went:.4} of what they were charged");
+    println!("and the two charges never came apart at all: {worst_can_reach}");
 }
