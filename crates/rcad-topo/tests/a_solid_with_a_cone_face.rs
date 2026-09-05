@@ -128,23 +128,34 @@ fn a_frustum_measures_the_closed_form_within_the_published_bound() {
 /// normal curvature over the face is zero. `how_tightly_a_cone_bends_over`
 /// carries the derivation and names what would close it.
 ///
-/// **And it will not mesh below about a four-hundredth of its own size.** A
-/// cone's local radius shrinks to nothing at the apex, so the chord a triangle
-/// there may have shrinks with it — while the triangulator's packing guard,
-/// which is what makes the refinement terminate at all, will not put two points
-/// closer than an eighth of the step the *whole patch* asked for. Measured on
-/// this cone, radius four and height eight:
+/// **And there is still a deflection it will not mesh at, but the apex is no
+/// longer what stops it.** A cone's local radius shrinks to nothing at the apex,
+/// so a triangle with two corners there is a *ruling*: in 3D it is a segment
+/// lying exactly on the cone, and it strays by nothing.
+/// `how_far_a_flat_piece_of_a_cone_strays` used to charge every corner of a
+/// piece the radius of the widest corner in it, which charged those two apex
+/// corners as though they sat out on the base circle, and the refinement then
+/// chased a deflection it could never meet until the packing guard stopped it
+/// with `RanOutOfRoomBeforeMeetingTheDeflection` — at a deflection of `0.005` on
+/// this very cone. That was a `docs/decisions.md` §16.10 **gap**: the answer
+/// existed and the bound could not see it. Each corner keeps its own radius now.
+/// Measured on this cone, radius four and height eight:
 ///
 /// | deflection | what came back |
 /// |---|---|
-/// | 0.2, 0.1, 0.05, 0.02, 0.01 | a mesh |
-/// | 0.005 | `RanOutOfRoomBeforeMeetingTheDeflection`, still straying 0.0070 |
-/// | 0.002 | `RanOutOfRoomBeforeMeetingTheDeflection`, still straying 0.0035 |
+/// | 0.2, 0.1, 0.05, 0.02, 0.01 | 44, 64, 90, 144, 204 triangles |
+/// | 0.005, 0.002, 0.001, 5e-4 | 290, 458, 648, 916 triangles |
+/// | 1e-4, 1e-5 | 2052, 6488 triangles |
+/// | 5e-6 and finer | `MoreTrianglesThanAPatchWillHold` |
 ///
-/// That is the **existing** refusal doing its job on a shape it was written
-/// before — a named refusal about the request, not a wrong answer — and
-/// `a_pointed_cone_asked_for_a_finer_mesh_than_its_apex_allows_is_refused_by_name`
-/// pins it so the limit cannot move unnoticed.
+/// So a refusal is still reached and it is a **different** one: the guard that
+/// counts the points a patch would need before it places any of them. The
+/// packing guard is still there and is still what makes the refinement
+/// terminate, but nothing on this solid reaches it any more — the count runs
+/// first, and it is the deflection's own monotone function, so once it says no
+/// every finer deflection gets the same answer.
+/// `a_pointed_cone_is_stopped_by_how_many_points_a_patch_holds_and_no_longer_by_its_apex`
+/// is the measurement.
 ///
 /// So this checks the closed form against a **stated share of the deflection**
 /// rather than dressing an unpublished number as a bound.
@@ -210,45 +221,114 @@ fn a_pointed_cone_meshes_and_measures_its_closed_form() {
 
 /// How fine a pointed cone will mesh, as a measurement rather than a sentence.
 ///
-/// The table in the test above, asserted: a hundredth of the solid's size comes
-/// back with a mesh and a four-hundredth comes back with the refusal that says
-/// there is nowhere left to put a point. **What it must not do is come back with
-/// a mesh that quietly misses**, which is what the `strays` in the refusal is
-/// there to rule out.
+/// The table in the test above, asserted.
+///
+/// # This test used to say the opposite, and the reversal is the point of it
+///
+/// It was called
+/// `a_pointed_cone_asked_for_a_finer_mesh_than_its_apex_allows_is_refused_by_name`
+/// and it **required** `0.005` and `0.002` to come back with
+/// `RanOutOfRoomBeforeMeetingTheDeflection`. Both mesh now, and the old name is
+/// gone rather than kept over a changed body. What that refusal was is written
+/// out in the test above: a bound that charged a triangle sitting on the apex as
+/// though its corners were out on the base circle, so the refinement chased a
+/// deflection that a correct bound says it had already met.
+///
+/// # What is left to pin, and it is not "it meshes"
+///
+/// Three things, none of which is a count read back from a previous run:
+///
+/// - **Every rung meshes and each one is finer than the last.** Strictly more
+///   triangles each time, and strictly closer to `πr²h/3`.
+/// - **No rung quietly misses.** The mesh is inscribed in a convex solid, so its
+///   volume is *below* the closed form and short of it by less than the
+///   deflection times the solid's own skin. A mesh that stopped refining and
+///   handed back what it had would fail this, which is the job the `strays` in
+///   the old refusal used to do.
+/// - **A refusal is still reached, by name, and it is a different one.** At a
+///   deflection of `5e-6` the count of points a patch would need is past what
+///   one patch holds, and that count is checked before a single point is placed.
+///   `1e-5` still meshes, so the two bracket where the limit sits and neither
+///   end can move without this failing.
 #[test]
-fn a_pointed_cone_asked_for_a_finer_mesh_than_its_apex_allows_is_refused_by_name() {
+fn a_pointed_cone_is_stopped_by_how_many_points_a_patch_holds_and_no_longer_by_its_apex() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
     let mut model = Model::new(a_working_size());
     let solid = a_pointed_cone(&mut model, 0.5, 8.0);
 
-    for coarse in [0.2, 0.1, 0.05, 0.02, 0.01] {
+    let (radius, height) = (4.0f64, 8.0f64);
+    let volume = core::f64::consts::PI * radius * radius * height / 3.0;
+    let area = core::f64::consts::PI
+        * (radius * (radius * radius + height * height).sqrt() + radius * radius);
+
+    let mut coarser: Option<(f64, usize, f64)> = None;
+    for how_fine in [
+        0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 5.0e-4, 1.0e-4, 1.0e-5,
+    ] {
+        let asked = Deflection::of(how_fine).expect("a positive length");
+        let triangles = model
+            .solid(solid)
+            .mesh(asked, &policy, &mut log)
+            .unwrap_or_else(|why| {
+                panic!("a pointed cone meshes at a deflection of {how_fine}: {why}")
+            })
+            .triangles()
+            .len();
+        let measured = model
+            .solid(solid)
+            .measure(asked, &policy, &mut log)
+            .expect("what meshed measures");
+        let short_by = volume - measured.volume();
+        println!(
+            "a pointed cone at a deflection of {how_fine}: {triangles} triangles, {short_by} \
+             short of πr²h/3 = {volume}, with {} of room",
+            how_fine * area
+        );
+
         assert!(
-            model
-                .solid(solid)
-                .measure(
-                    Deflection::of(coarse).expect("a positive length"),
-                    &policy,
-                    &mut log
-                )
-                .is_ok(),
-            "a pointed cone meshes at a deflection of {coarse}"
+            short_by > 0.0 && short_by < how_fine * area,
+            "the mesh at {how_fine} measures {}, which is not inside πr²h/3 = {volume} by less \
+             than a deflection's worth of skin",
+            measured.volume()
         );
-    }
-    for fine in [0.005, 0.002] {
-        let refused = model.solid(solid).measure(
-            Deflection::of(fine).expect("a positive length"),
-            &policy,
-            &mut log,
-        );
-        match refused {
-            Err(why) => println!("a pointed cone at a deflection of {fine}: {why}"),
-            Ok(measured) => panic!(
-                "a deflection of {fine} is finer than a cone's apex allows and this answered \
-                 with a mesh measuring {}",
-                measured.volume()
-            ),
+        if let Some((was, had, missed_by)) = coarser {
+            assert!(
+                triangles > had,
+                "a deflection of {how_fine} gave {triangles} triangles where {was} gave {had}, \
+                 so asking for a finer mesh did not get one"
+            );
+            assert!(
+                short_by < missed_by,
+                "a deflection of {how_fine} is {short_by} short of the closed form where {was} \
+                 was {missed_by} short, so the finer mesh is not the closer one"
+            );
         }
+        coarser = Some((how_fine, triangles, short_by));
+    }
+
+    // The next rung down, and three decades below it. `would_need` grows as the
+    // deflection shrinks — `a_step_that_stays_within` reads the deflection and
+    // nothing else that moves — so a refusal here is a refusal all the way down.
+    for too_fine in [5.0e-6, 1.0e-6] {
+        let asked = Deflection::of(too_fine).expect("a positive length");
+        let refused = model.solid(solid).mesh(asked, &policy, &mut log);
+        let Err(rcad_topo::Error::CannotMeshAFace {
+            why: rcad_mesh::CannotTriangulate::MoreTrianglesThanAPatchWillHold { would_need },
+            ..
+        }) = refused
+        else {
+            panic!(
+                "a deflection of {too_fine} needs more points than a patch holds, and this \
+                 answered {refused:?}"
+            )
+        };
+        println!("a pointed cone at a deflection of {too_fine}: it would need {would_need} points");
+        assert!(
+            would_need > 1.0e6,
+            "the refusal at {too_fine} says it would need only {would_need} points, which is \
+             not more than a patch holds"
+        );
     }
 }
 
