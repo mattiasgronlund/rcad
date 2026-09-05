@@ -28,9 +28,25 @@
 //! # The published bound, measured
 //!
 //! §15.6: a published bound needs a test. What `walk` hands back beside its
-//! points is how far any of them may sit off the curve, and this file measures
-//! the real distance from every point to both surfaces and prints the worst
-//! share of that bound a search could find.
+//! points is **how far any of them may sit off the curve**, and this file
+//! prints the worst share of that bound a search could find.
+//!
+//! **Off the curve is not off the two surfaces**, and for a long time this file
+//! measured the second and called it the first. A point that is a rounding away
+//! from a bar and a rounding away from the cap that cuts it can still be a long
+//! way from the ellipse the two of them meet in — because where two surfaces
+//! meet at a shallow angle, sliding a point along the sliver they share barely
+//! changes how far it is from either one. Measured here on a bar of radius one:
+//! the per-surface distance is between half a rounding and two roundings at
+//! every lean from a flat cap to one leaning by a thousand, and at that steepest
+//! lean the distance to the curve is **two hundred and fifty-six roundings**.
+//!
+//! `every_point_along_a_leaning_cap_is_within_its_bound_of_the_curve_the_two_surfaces_cross_in`
+//! is the row that measures the named quantity, and it carries the old one
+//! along beside it on every line so a reader can see the family is not blind to
+//! the difference (§52.7's shape). The six family rows above it still measure
+//! per-surface distance, and what they are worth is said on the table in
+//! [`NO_POINT_MAY_USE_ALL_OF_ITS_BOUND`].
 
 #![forbid(unsafe_code)]
 
@@ -81,6 +97,33 @@ const CASES_ON_A_KNIFE_EDGE: u32 = 128;
 /// way further than the shapes that made it.
 const HOW_FINE: f64 = 1e-3;
 
+/// How far the cap of a round bar leans, for the row that measures against the
+/// curve itself.
+///
+/// A lean of zero is a flat cap and a circle; a lean of one is the forty-five
+/// degree chamfer anybody would draw first; the rest climb by powers of two
+/// until the cap is very nearly parallel to the bar it is cutting.
+const HOW_FAR_A_CAP_LEANS: [f64; 9] = [0.0, 0.5, 1.0, 1.5, 2.0, 4.0, 16.0, 128.0, 1024.0];
+
+/// How many roundings of a bar's own radius the **per-surface** distance is
+/// allowed to be, at any lean.
+///
+/// Eight, and the whole point of the number is that nothing in the sweep ever
+/// approaches it. The worst measured, over both radii and all nine leans, is
+/// **exactly two roundings**, and it is reached at a lean of four and again at a
+/// lean of a hundred and twenty-eight; at the steepest lean of all it is back to
+/// one. That flatness is the blindness.
+const A_PER_SURFACE_DISTANCE_STAYS_THIS_FLAT: f64 = 8.0;
+
+/// How many roundings of a bar's radius the distance **to the curve** has to
+/// reach by the steepest lean in the sweep.
+///
+/// A hundred, against a per-surface distance pinned at two. Measured: `256`
+/// roundings at radius one and `192` at radius four, both at a lean of a
+/// thousand. Two quantities one of which is a hundred times the other are not
+/// the same measurement, and that is what this constant is here to say.
+const THE_DISTANCE_TO_THE_CURVE_CLIMBS_PAST_THIS: f64 = 100.0;
+
 /// The most of its own published bound a walked point was ever found to use.
 ///
 /// A share, printed by every row and asserted here. **One is the failure**: at
@@ -97,6 +140,12 @@ const HOW_FINE: f64 = 1e-3;
 /// | the quartic control | 0.738 | 0.738 | 0.738 |
 /// | the quartic headline | 0.355 | 0.429 | 0.429 |
 /// | the band | 0.410 | 0.410 | 0.477 |
+///
+/// **Those six measure per-surface distance, which is not what the bound is
+/// named after.** The leaning-cap row below them measures distance to the curve
+/// and worst-shares `0.0075`, at a fixed sweep the soak factor does not widen.
+/// A share that small next to the quartic control's `0.738` is not a tighter
+/// bound; it is a different quantity being divided by the same number.
 ///
 /// **The three planar rows and the three quartic ones are two different
 /// stories, and only the planar three turn into a multiple of `ε`.** Those
@@ -171,6 +220,160 @@ fn every_point_along_a_crossing_a_hair_from_tangency_is_on_both_the_surfaces_tha
         CASES_ON_A_KNIFE_EDGE,
     );
     assert!(worst < NO_POINT_MAY_USE_ALL_OF_ITS_BOUND);
+}
+
+/// **The row the bound is actually named after**: how far a walked point sits
+/// off *the curve the two surfaces cross in*.
+///
+/// Every row above measures how far each point sits off **each surface**, one
+/// at a time, and those are not the same number. A point can be a rounding away
+/// from the bar and a rounding away from the cap and still be a long way from
+/// the ellipse where the two of them meet — because *where* the two surfaces
+/// meet at a shallow angle, sliding a point sideways barely changes how far it
+/// is from either one. A cap leaning at forty-five degrees over a bar already
+/// meets it shallowly enough for the two distances to come apart by more than
+/// two, and the gap grows in proportion to the lean from there.
+///
+/// So this row draws a bar of a plain radius and cuts it with a cap leaning by
+/// [`HOW_FAR_A_CAP_LEANS`], and prints **both** quantities and their ratio for
+/// every lean. §52.7's replacement family is the shape being copied: a search
+/// proves it can see the thing it watches by carrying the blind quantity along
+/// beside the sighted one on every row.
+///
+/// Measured on this tree, a bar of radius one, both distances as multiples of
+/// one rounding of that radius:
+///
+/// | lean | off the surfaces | off the curve | ratio |
+/// |---|---|---|---|
+/// | 0 | 0.5 | 0.31 | 0.62 |
+/// | 1 | 1.5 | 2.24 | 1.50 |
+/// | 1.5 | 1.0 | 3.38 | **3.38** |
+/// | 16 | 1.5 | 23.5 | 15.69 |
+/// | 1024 | 1.0 | 256 | **256** |
+///
+/// **The two come apart at a lean of one and a half**, which is a chamfer a
+/// little steeper than forty-five degrees and the first cut anybody would draw.
+/// This is not exotic geometry.
+///
+/// Two halves, and the second is the one that makes the row worth keeping:
+///
+/// - `POINT_ALONG_A_CROSSING_ROUNDOFF` still bounds the distance to the curve,
+///   at every lean. Worst share of it found here: `0.0075`.
+/// - **The per-surface distance cannot see any of it.** It stays pinned under
+///   [`A_PER_SURFACE_DISTANCE_STAYS_THIS_FLAT`] roundings of the bar's radius
+///   across the whole sweep — worst measured, two — while the distance to the
+///   curve climbs past [`THE_DISTANCE_TO_THE_CURVE_CLIMBS_PAST_THIS`] of them.
+///   Swap the new measurement back for the old one and this half fails on the
+///   lean-16 row, which is what §52.13 asks of a test standing for a bound.
+///
+/// The walk is a thousandth of the **bar**, not of the stretched-out ellipse,
+/// and that matters: at a thousandth of the ellipse every lean gets the same
+/// seventy points, the steep rows get searched thinnest exactly where the
+/// spread is widest, and the ratio at a lean of a thousand comes back `9.94`
+/// instead of `256`. A search that puts the same number of probes on a curve
+/// however long it grows is a search that stops looking.
+#[test]
+fn every_point_along_a_leaning_cap_is_within_its_bound_of_the_curve_the_two_surfaces_cross_in() {
+    println!(
+        "a bar's leaning cap: radius, lean, points, off the surfaces, off the curve, ratio, \
+         share of the bound"
+    );
+    let mut worst_share = 0.0f64;
+    let mut widest_ratio = 0.0f64;
+    let mut ratio_at_a_chamfer = 0.0f64;
+    let flattest = HOW_FAR_A_CAP_LEANS[0];
+    let steepest = HOW_FAR_A_CAP_LEANS[HOW_FAR_A_CAP_LEANS.len() - 1];
+    for radius in [1.0, 4.0] {
+        let a_rounding_of_the_bar = f64::EPSILON * radius;
+        let mut flattest_cap = 0.0f64;
+        let mut steepest_cap = 0.0f64;
+        for lean in HOW_FAR_A_CAP_LEANS {
+            let row = walk_a_leaning_cap(radius, lean);
+            let ratio = row.off_the_curve / row.off_the_surfaces;
+            let share = row.off_the_curve / row.bound;
+            println!(
+                "  {radius:>4} {lean:>6} {:>5} {:>12.4e} {:>12.4e} {ratio:>9.2} {share:>8.4}",
+                row.points, row.off_the_surfaces, row.off_the_curve
+            );
+            assert!(
+                row.off_the_surfaces
+                    < A_PER_SURFACE_DISTANCE_STAYS_THIS_FLAT * a_rounding_of_the_bar,
+                "a lean of {lean} over a bar of {radius} put a point {} off one of its two \
+                 surfaces, and the per-surface distance is supposed to be flat at about one \
+                 rounding of {radius}",
+                row.off_the_surfaces
+            );
+            worst_share = worst_share.max(share);
+            widest_ratio = widest_ratio.max(ratio);
+            if lean == 1.5 {
+                ratio_at_a_chamfer = ratio_at_a_chamfer.max(ratio);
+            }
+            if lean == flattest {
+                flattest_cap = row.off_the_curve;
+            }
+            if lean == steepest {
+                steepest_cap = row.off_the_curve;
+            }
+        }
+        assert!(
+            flattest_cap < A_PER_SURFACE_DISTANCE_STAYS_THIS_FLAT * a_rounding_of_the_bar,
+            "a flat cap crosses a bar square on, so the two distances agree there: {flattest_cap}"
+        );
+        assert!(
+            steepest_cap > THE_DISTANCE_TO_THE_CURVE_CLIMBS_PAST_THIS * a_rounding_of_the_bar,
+            "the steepest cap in the sweep only reached {steepest_cap} off the curve, which is \
+             not far enough past a rounding of {radius} to tell the two measurements apart"
+        );
+    }
+
+    println!(
+        "a bar's leaning cap: the two distances came apart by {widest_ratio:.2} at the steepest \
+         lean and by {ratio_at_a_chamfer:.2} at an ordinary chamfer, and the worst share of the \
+         published bound was {worst_share:.4}"
+    );
+    assert!(
+        ratio_at_a_chamfer > 2.0,
+        "an ordinary chamfer is where the two measurements first come apart by more than two, \
+         and here they came apart by {ratio_at_a_chamfer}"
+    );
+    assert!(
+        worst_share < NO_POINT_MAY_USE_ALL_OF_ITS_BOUND,
+        "a point sat {worst_share} of its own published bound off the curve"
+    );
+}
+
+/// The measuring stick, checked against a point moved off the curve by an
+/// amount somebody chose.
+///
+/// §52.11's cheap check: *would the expected value change if the code did?* It
+/// would not. Nothing here calls `walk`. A point of the ellipse is worked out
+/// from the two surface equations, then pushed straight out of the bar by a
+/// distance written down in this test, and the answer has to be that distance
+/// back. Pushing straight out of the bar is pushing square to the curve,
+/// because the curve runs along the bar's skin.
+#[test]
+fn a_point_pushed_a_known_distance_off_a_leaning_cap_circle_is_measured_at_that_distance() {
+    let radius = 1.0;
+    let pushed_by = 1e-6;
+    for lean in [0.0, 2.0, 1024.0] {
+        let cap =
+            Plane::from_point_and_normal(Point::new(radius, 0.0, 0.5), Vector::new(lean, 0.0, 1.0))
+                .expect("a normal with a length");
+        let [nx, ny, nz] = cap.normal().components();
+
+        for step in 0..16 {
+            let angle = core::f64::consts::TAU * f64::from(step) / 16.0;
+            let (x, y) = (radius * angle.cos(), radius * angle.sin());
+            let z = (cap.offset() - nx * x - ny * y) / nz;
+            let straight_out = Vector::new(x, y, 0.0) * (pushed_by / radius);
+            let measured = how_far_off_the_curve(radius, &cap, Point::new(x, y, z) + straight_out);
+            assert!(
+                (measured - pushed_by).abs() < 1e-4 * pushed_by,
+                "a point pushed {pushed_by} off the curve of a cap leaning by {lean}, at {angle} \
+                 round the bar, was measured at {measured}"
+            );
+        }
+    }
 }
 
 /// The cap circle of a round bar, worked out rather than declared.
@@ -453,6 +656,81 @@ fn walk_them_all(
     worst.get()
 }
 
+/// What one lean of a bar's cap measured.
+struct ALeaningCap {
+    /// How many points the whole ellipse was walked into.
+    points: usize,
+    /// The furthest any of them sat off the bar or off the cap, whichever was
+    /// worse. This is the quantity every other row in the file measures.
+    off_the_surfaces: f64,
+    /// The furthest any of them sat off the ellipse itself.
+    off_the_curve: f64,
+    /// What `walk` published as the bound for this run.
+    bound: f64,
+}
+
+/// Walk the ellipse a cap leaning by `lean` cuts a bar of `radius` in, and
+/// measure both distances over every point of it.
+fn walk_a_leaning_cap(radius: f64, lean: f64) -> ALeaningCap {
+    let bar = Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a positive radius"));
+    let cap =
+        Plane::from_point_and_normal(Point::new(radius, 0.0, 0.5), Vector::new(lean, 0.0, 1.0))
+            .expect("a normal with a length");
+    let surfaces = [bar, Surface::Plane(cap)];
+
+    let Ok(SurfaceMeet::Curves(runs)) = intersect(
+        &surfaces[0],
+        &surfaces[1],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) else {
+        panic!("a cap leaning by {lean} cuts a bar of {radius} in an ellipse");
+    };
+
+    // A thousandth of the **bar**, not of the ellipse the lean stretches out, so
+    // that a steeper cap is walked in more steps rather than the same seventy.
+    // The search is over points, and a family that put the same number of points
+    // on every row would be searching a steep cap least where it matters most.
+    let deflection = Deflection::of(radius * HOW_FINE).expect("a positive length");
+
+    let mut measured = ALeaningCap {
+        points: 0,
+        off_the_surfaces: 0.0,
+        off_the_curve: 0.0,
+        bound: 0.0,
+    };
+    for run in &runs {
+        let along_it = walk(
+            run,
+            [&surfaces[0], &surfaces[1]],
+            deflection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar this size is walked without complaint");
+        let bound = along_it.deviation().magnitude();
+        every_point_is_on_both(&surfaces, along_it.points(), bound);
+
+        measured.points += along_it.points().len();
+        measured.bound = measured.bound.max(bound);
+        for &point in along_it.points() {
+            for surface in &surfaces {
+                measured.off_the_surfaces =
+                    measured.off_the_surfaces.max(how_far_off(surface, point));
+            }
+            measured.off_the_curve = measured
+                .off_the_curve
+                .max(how_far_off_the_curve(radius, &cap, point));
+        }
+    }
+    assert!(
+        measured.points > 8,
+        "a whole ellipse at a thousandth of the bar takes more than eight pieces, got {}",
+        measured.points
+    );
+    measured
+}
+
 /// Both halves of the acceptance oracle, for every point of one run.
 fn every_point_is_on_both(surfaces: &[Surface; 2], points: &[Point], bound: f64) {
     for &point in points {
@@ -520,6 +798,100 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
         }
         other => panic!("nothing here can measure against {other:?}"),
     }
+}
+
+/// How far `point` sits off the curve where a bar of `radius` down the `z` axis
+/// and the flat `cap` cross.
+///
+/// **Not the same thing as [`how_far_off`] against each of the two.** Being a
+/// rounding off the bar leaves a whole sheet of places to be; so does being a
+/// rounding off the cap; and where those two sheets meet at a shallow angle,
+/// the sliver they share is long. The distance to the curve is the distance to
+/// that sliver's spine, and it is the shorter of the two only when the surfaces
+/// meet square on.
+///
+/// Worked out from the two surface equations and nothing else. Write `F` for
+/// how far out of the bar the point is, `x² + y² − r²`, and `G` for how far
+/// past the cap it is, `n·p − offset`. The nearest place with both of those
+/// zero is the shortest step that undoes both at once, and near enough to the
+/// curve that both surfaces are as good as flat, that step is the smallest
+/// solution of two linear equations:
+///
+/// ```text
+/// ∇F·step = −F,   ∇G·step = −G
+/// ```
+///
+/// which has a two-line answer. The bar and the cap bend by about `1/r` over a
+/// step this small, so what that leaves out is of the order of `step²/r` —
+/// sixteen digits below the step itself, and this measures a step that is
+/// already at the last bit.
+///
+/// `F` and `G` are worked out with the bits an ordinary `f64` subtraction would
+/// throw away, because both of them are the difference between two numbers that
+/// agree to the last bit and the whole answer lives in the part that cancels.
+fn how_far_off_the_curve(radius: f64, cap: &Plane, point: Point) -> f64 {
+    let [x, y, z] = point.coordinates();
+    let [along_x, lost_x] = a_product_and_what_it_lost(x, x);
+    let [along_y, lost_y] = a_product_and_what_it_lost(y, y);
+    let [squared, lost_radius] = a_product_and_what_it_lost(radius, radius);
+    let out_of_the_bar =
+        added_up_exactly(&[along_x, along_y, -squared, lost_x, lost_y, -lost_radius]);
+    let straight_out = Vector::new(2.0 * x, 2.0 * y, 0.0);
+
+    let normal = cap.normal();
+    let [nx, ny, nz] = normal.components();
+    let [across_x, lost_across_x] = a_product_and_what_it_lost(nx, x);
+    let [across_y, lost_across_y] = a_product_and_what_it_lost(ny, y);
+    let [across_z, lost_across_z] = a_product_and_what_it_lost(nz, z);
+    let past_the_cap = added_up_exactly(&[
+        across_x,
+        across_y,
+        across_z,
+        -cap.offset(),
+        lost_across_x,
+        lost_across_y,
+        lost_across_z,
+    ]);
+
+    let out_by_out = straight_out.dot(straight_out);
+    let out_by_across = straight_out.dot(normal);
+    let across_by_across = normal.dot(normal);
+    // How squarely the two surfaces meet. It goes to zero as they flatten
+    // against each other, and that is what pulls the two distances apart.
+    let squareness = out_by_out * across_by_across - out_by_across * out_by_across;
+
+    let steps = across_by_across * out_of_the_bar * out_of_the_bar
+        - 2.0 * out_by_across * out_of_the_bar * past_the_cap
+        + out_by_out * past_the_cap * past_the_cap;
+    (steps / squareness).max(0.0).sqrt()
+}
+
+/// `a * b` as the nearest `f64`, and exactly the bit of it that did not fit.
+fn a_product_and_what_it_lost(a: f64, b: f64) -> [f64; 2] {
+    let rounded = a * b;
+    [rounded, a.mul_add(b, -rounded)]
+}
+
+/// Add exact numbers up without losing the answer to the cancellation between
+/// them.
+///
+/// Neumaier's sum: every addition is redone to recover the bit it dropped, and
+/// those bits are put back at the end. What comes out is right to the last bit
+/// of the *answer* rather than to the last bit of the biggest term, which is
+/// the whole point when the terms nearly cancel.
+fn added_up_exactly(terms: &[f64]) -> f64 {
+    let mut total = 0.0f64;
+    let mut dropped = 0.0f64;
+    for &term in terms {
+        let sum = total + term;
+        dropped += if total.abs() >= term.abs() {
+            (total - sum) + term
+        } else {
+            (term - sum) + total
+        };
+        total = sum;
+    }
+    total + dropped
 }
 
 /// The same surface moved far enough that a point on the original is plainly
