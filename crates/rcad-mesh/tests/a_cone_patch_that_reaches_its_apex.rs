@@ -68,7 +68,7 @@ fn a_cone_cut_up_to_its_apex_meshes_at_every_deflection_over_the_stretch() {
 
     for share in the_stretch_that_was_ragged() {
         let asked = share * FAR;
-        let domain = a_quarter_of_a_pointed_cones_face(surface.clone(), asked);
+        let domain = a_quarter_of_a_pointed_cones_face(surface, asked);
         let patch = match triangulate(&domain) {
             Ok(patch) => patch,
             Err(why) => panic!("a quarter cone at {share} of its size refused: {why}"),
@@ -154,7 +154,10 @@ fn a_quarter_of_a_pointed_cones_face(surface: Surface, deflection: f64) -> Trimm
         corners.push([along * FRAC_PI_2, FAR]);
     }
     for step in 1..DOWN_THE_CUT {
-        corners.push([FRAC_PI_2, FAR * f64::from(DOWN_THE_CUT - step) / f64::from(DOWN_THE_CUT)]);
+        corners.push([
+            FRAC_PI_2,
+            FAR * f64::from(DOWN_THE_CUT - step) / f64::from(DOWN_THE_CUT),
+        ]);
     }
     corners.push([FRAC_PI_2, 0.0]);
     corners.push([0.0, 0.0]);
@@ -210,8 +213,7 @@ fn how_far_the_mesh_really_strays(cone: &Cone, patch: &rcad_mesh::Patch) -> f64 
                 let up: f64 = (0..3).map(|which| weights[which] * at[which].z()).sum();
                 let x: f64 = (0..3).map(|which| weights[which] * at[which].x()).sum();
                 let y: f64 = (0..3).map(|which| weights[which] * at[which].y()).sum();
-                furthest =
-                    furthest.max((cone.slope() * up - x.hypot(y)) / cone.slope().hypot(1.0));
+                furthest = furthest.max((cone.slope() * up - x.hypot(y)) / cone.slope().hypot(1.0));
             }
         }
     }

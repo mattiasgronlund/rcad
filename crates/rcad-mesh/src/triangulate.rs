@@ -507,6 +507,14 @@ fn chords_across_the_curve(
             2.0 * pipe.radius() * ((from[0] - to[0]) / 2.0).sin().abs(),
             0.0,
         ],
+        // A cone is charged against each corner's own radius, which is exactly
+        // what one length between two corners has thrown away, so nothing routes
+        // one here and a cone arriving is a broken invariant of this file.
+        Surface::Cone(_) => {
+            panic!(
+                "a cone is charged by how_far_a_flat_piece_of_a_cone_strays and never by a chord"
+            )
+        }
         // **A torus curves two ways by two different amounts, so it has two
         // chords and this is the longer.** Round the ring the chord is measured
         // on the outer equator, which is the widest circle the surface has —
@@ -751,11 +759,7 @@ fn how_far_a_flat_piece_of_a_cone_strays(
 ///
 /// Zero when there is no pair, which is what [`triangulate`] asks for when it
 /// wants how close a mesh of no size at all can get.
-fn the_longest_chords(
-    surface: &Surface,
-    across: [[f64; 2]; 2],
-    corners: &[[f64; 2]],
-) -> [f64; 2] {
+fn the_longest_chords(surface: &Surface, across: [[f64; 2]; 2], corners: &[[f64; 2]]) -> [f64; 2] {
     let mut longest = [0.0_f64; 2];
     for (which, corner) in corners.iter().enumerate() {
         for other in &corners[(which + 1)..] {
