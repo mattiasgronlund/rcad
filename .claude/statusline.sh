@@ -2,7 +2,7 @@
 # Two lines that answer "how close am I to a handoff" and "what is waiting on
 # me", without either question costing a token.
 #
-# This exists because the obvious way to check — `!cat docs/open-questions.md` —
+# This exists because the obvious way to check — `!cat` on the questions file —
 # is not free. Shell mode adds its output to the session and Claude answers it:
 # on 2026-09-05 that put 21 command outputs and 5,710 characters into context
 # that nobody needed the model to read. The status line is terminal UI. It never
@@ -10,7 +10,12 @@
 #
 # Line 1 tracks the same budget `context-budget.sh` enforces, so the handoff is
 # visible on the way in rather than announced on arrival.
-# Line 2 is the open-question index, and the file is the long form.
+#
+# Line 2 is the open question numbers and nothing else. The questions live in
+# the session's own scratchpad, never in the tree: on 2026-09-05 four sessions
+# were live across these two repos, and a tracked file would have had all four
+# writing to it. Per session also means the numbering is the session's own, so
+# "Q3-Q8" means what it says in the conversation you are looking at.
 set -uo pipefail
 
 payload=$(cat)
@@ -57,32 +62,51 @@ if [ -n "$used" ]; then
 fi
 printf '%s\n' "$line1"
 
-# --- line 2: what is waiting on the user
-questions="$root/docs/open-questions.md"
-if [ ! -r "$questions" ]; then
-	printf '%s\n' "${dim}no docs/open-questions.md${off}"
+# --- line 2: which questions are still open, by number
+# The transcript sits at <projects>/<slug>/<session>.jsonl and the scratchpad at
+# <tmp>/claude-<uid>/<slug>/<session>/scratchpad, so one names the other.
+questions=${CLAUDE_QUESTIONS_FILE:-}
+if [ -z "$questions" ]; then
+	session=$(get '.session_id')
+	transcript=$(get '.transcript_path')
+	if [ -n "$session" ] && [ -n "$transcript" ]; then
+		slug=$(basename "$(dirname "$transcript")")
+		for base in "${TMPDIR:-/tmp}" /tmp; do
+			candidate="$base/claude-$(id -u)/$slug/$session/scratchpad/open-questions.md"
+			[ -r "$candidate" ] && questions=$candidate && break
+		done
+	fi
+fi
+[ -n "$questions" ] && [ -r "$questions" ] || exit 0
+
+numbers=$(awk '
+	/^[[:space:]]*```/ { fence = !fence; next }
+	fence { next }
+	/^- \[ \]/ { if (match($0, /Q[0-9]+/)) print substr($0, RSTART + 1, RLENGTH - 1) }
+' "$questions" | sort -n -u)
+
+if [ -z "$numbers" ]; then
+	printf '%s\n' "${green}✓${off} ${dim}no open questions${off}"
 	exit 0
 fi
 
-# Only the Waiting section counts. The file explains its own format in a fenced
-# example, and an example question is not a question.
-mapfile -t open < <(awk '/^## Waiting/ {f = 1; next} /^## / {f = 0} f' "$questions" 2>/dev/null |
-	grep -oP '^- \[ \]\s+\**\K(Q\d+)\**\s*[—-]\s*[^→]*' |
-	sed -e 's/\*\*//g' -e 's/[[:space:]]\+$//')
+# Consecutive runs collapse: 2 4 5 6 -> "Q2, Q4-Q6". A run of exactly two reads
+# better spelled out than hyphenated.
+compact=$(awk '
+	{ n[++c] = $1 }
+	END {
+		i = 1
+		while (i <= c) {
+			j = i
+			while (j < c && n[j + 1] == n[j] + 1) j++
+			if (j == i) seg = "Q" n[i]
+			else if (j == i + 1) seg = "Q" n[i] ", Q" n[j]
+			else seg = "Q" n[i] "-Q" n[j]
+			out = (out == "" ? seg : out ", " seg)
+			i = j + 1
+		}
+		print out
+	}
+' <<<"$numbers")
 
-if [ "${#open[@]}" -eq 0 ]; then
-	printf '%s\n' "${green}✓${off} ${dim}nothing waiting on you${off}"
-	exit 0
-fi
-
-shown=""
-for q in "${open[@]:0:3}"; do
-	short=${q:0:38}
-	[ "${#q}" -gt 38 ] && short="$short…"
-	[ -n "$shown" ] && shown="$shown ${dim}·${off} "
-	shown="$shown$short"
-done
-more=""
-[ "${#open[@]}" -gt 3 ] && more=" ${dim}+$(("${#open[@]}" - 3)) more${off}"
-
-printf '%s\n' "${yellow}❓ ${#open[@]} open${off} ${dim}—${off} $shown$more"
+printf '%s\n' "${yellow}❓${off} $compact"

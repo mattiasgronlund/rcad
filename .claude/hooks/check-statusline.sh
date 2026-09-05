@@ -9,7 +9,7 @@ here=$(dirname "$(readlink -f "$0")")
 line=$(dirname "$here")/statusline.sh
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-mkdir -p "$work/docs"
+file="$work/open-questions.md"
 
 failed=0
 total=0
@@ -17,75 +17,89 @@ total=0
 render() {
 	jq -n --arg d "$work" --argjson t "$1" \
 		'{model: {display_name: "Opus"}, context_window: {total_input_tokens: $t}, workspace: {project_dir: $d}}' |
-		CLAUDE_CONTEXT_BUDGET=300000 "$line" | sed -e 's/\x1b\[[0-9;]*m//g'
+		CLAUDE_CONTEXT_BUDGET=300000 CLAUDE_QUESTIONS_FILE="$2" "$line" | sed -e 's/\x1b\[[0-9;]*m//g'
 }
 
 want() {
-	local why=$1 tokens=$2 pattern=$3
 	total=$((total + 1))
 	local got
-	got=$(render "$tokens")
-	if ! grep -qE "$pattern" <<<"$got"; then
-		printf 'wanted /%s/, got: %s\n  (%s)\n' "$pattern" "$(tr '\n' '|' <<<"$got")" "$why"
+	got=$(render "$2" "$3")
+	if ! grep -qE "$4" <<<"$got"; then
+		printf 'wanted /%s/, got: %s\n  (%s)\n' "$4" "$(tr '\n' '|' <<<"$got")" "$1"
 		failed=$((failed + 1))
 	fi
 }
 
 reject() {
-	local why=$1 tokens=$2 pattern=$3
 	total=$((total + 1))
 	local got
-	got=$(render "$tokens")
-	if grep -qE "$pattern" <<<"$got"; then
-		printf 'did not want /%s/, got: %s\n  (%s)\n' "$pattern" "$(tr '\n' '|' <<<"$got")" "$why"
+	got=$(render "$2" "$3")
+	if grep -qE "$4" <<<"$got"; then
+		printf 'did not want /%s/, got: %s\n  (%s)\n' "$4" "$(tr '\n' '|' <<<"$got")" "$1"
 		failed=$((failed + 1))
 	fi
 }
 
-want "a missing file is said plainly, not crashed on" 1000 'no docs/open-questions.md'
+# --- line 1, which is the half the user reads most
+want "the budget line renders" 150000 /nowhere '150k/300k .* 50%'
+reject "under budget does not say hand off" 150000 /nowhere 'hand off'
+want "over budget says hand off" 340000 /nowhere 'hand off'
+want "over budget passes 100%" 340000 /nowhere '11[0-9]%'
+reject "a session with no questions file gets one line only" 1000 /nowhere '(open|❓|✓)'
 
-# The file documents its own format in a fenced example. An example is not a
-# question, and counting it was a real bug.
-cat >"$work/docs/open-questions.md" <<'FILE'
+# --- line 2
+printf '# Open questions\n\n' >"$file"
+want "a file with no questions says so" 1000 "$file" 'no open questions'
+
+cat >"$file" <<'FILE'
 # Open questions
 
-```
-- [ ] **Q11** — Short question in one line? → *recommend (a)*
-```
-
-## Waiting
-
-<!-- none right now -->
-
-## Answered
-
-- [x] **Q0** — Was this asked? → answered: yes
+- [ ] **Q2** — Run the sweep now? → *recommend now*
+- [ ] **Q4** — Bump the pin? → *recommend after*
+- [ ] **Q5** — Keep the branch? → *recommend yes*
+- [ ] **Q6** — Push tonight? → *recommend yes*
+- [x] **Q1** — Was this asked? → answered: yes
+- [x] **Q3** — And this? → answered: yes
 FILE
-want "an empty Waiting section says nothing is waiting" 1000 'nothing waiting on you'
-reject "the fenced example is not counted" 1000 'open'
-reject "an answered row is not counted" 1000 'Q0'
+want "a lone number and a run collapse together" 1000 "$file" '❓ Q2, Q4-Q6$'
+reject "an answered question is not open" 1000 "$file" 'Q1|Q3'
+reject "the recommendation stays in the file" 1000 "$file" 'recommend'
 
-cat >"$work/docs/open-questions.md" <<'FILE'
-## Waiting
-
-- [ ] **Q11** — Run the sweep now or after the merge? → *recommend now*
-- [ ] **Q12** — Bump the pin before the cap? → *recommend after*
-- [ ] **Q13** — Does the section stay open? → *recommend yes*
-- [ ] **Q14** — Push tonight? → *recommend yes*
-
-## Answered
-
-- [x] **Q0** — Was this asked? → answered: yes
+cat >"$file" <<'FILE'
+- [ ] **Q3** — One? → *a*
+- [ ] **Q4** — Two? → *b*
 FILE
-want "four open are counted as four" 1000 '4 open'
-want "only three are shown, the rest counted" 1000 '\+1 more'
-want "the recommendation is not shown, only the question" 1000 'Q11 — Run the sweep now'
-reject "the arrow and its argument stay in the file" 1000 'recommend now'
+want "a run of exactly two is spelled out, not hyphenated" 1000 "$file" '❓ Q3, Q4$'
 
-want "under budget shows the percentage" 150000 '150k/300k .* 50%'
-reject "under budget does not say hand off" 150000 'hand off'
-want "over budget says hand off" 340000 'hand off'
-want "over budget passes 100%" 340000 '11[0-9]%'
+cat >"$file" <<'FILE'
+- [ ] **Q2** — a?
+- [ ] **Q3** — b?
+- [ ] **Q4** — c?
+- [ ] **Q5** — d?
+- [ ] **Q6** — e?
+- [ ] **Q7** — f?
+- [ ] **Q8** — g?
+FILE
+want "a long run is one range" 1000 "$file" '❓ Q2-Q8$'
+
+cat >"$file" <<'FILE'
+- [ ] **Q10** — later?
+- [ ] **Q9** — earlier?
+- [ ] **Q9** — a duplicate line?
+FILE
+want "out of order sorts numerically and dedupes" 1000 "$file" '❓ Q9, Q10$'
+
+cat >"$file" <<'FILE'
+Example of the format:
+
+```
+- [ ] **Q99** — this is documentation, not a question
+```
+
+- [ ] **Q1** — a real one?
+FILE
+want "a fenced example is not a question" 1000 "$file" '❓ Q1$'
+reject "the fenced number does not leak" 1000 "$file" 'Q99'
 
 if [ "$failed" -gt 0 ]; then
 	echo "$failed of $total cases came out wrong"

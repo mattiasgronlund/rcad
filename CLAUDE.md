@@ -59,15 +59,32 @@ narrowing spelled out. That works: 51 user messages on 2026-09-05, one of which
 was a correction. Do not reach for `AskUserQuestion` for a design batch; it caps
 at four questions of four options and would split one message into seven.
 
-**Every question also goes in `docs/open-questions.md`, the same turn you ask
-it.** A question asked only in the terminal scrolls away, and recovering it costs
-a full-context turn — which happened, and is why the file exists. The status line
-shows the open count and the first three, so the user can read the index without
-`!cat`, which would add the file to the conversation and charge for it on every
-later turn.
+**Every question also goes in `open-questions.md` in this session's scratchpad,
+the same turn you ask it.** A question asked only in the terminal scrolls away,
+and recovering it costs a full-context turn — which happened, and is why the file
+exists. One line each:
+
+```
+- [ ] **Q11** — Short question in one line? → *recommend (a), because …*
+```
+
+`- [x]` and `→ answered: …` when the answer comes. The status line reads the file
+and shows the open numbers, collapsed — `❓ Q2, Q4-Q6`. The user can therefore
+read what is outstanding without `!cat`, which would add the file to the
+conversation and charge for it on every later turn.
+
+**Never in the tree.** Four sessions were live across these two repos on
+2026-09-05; a tracked file would have had all four writing to it. Per session
+also means the numbering is the session's own, so `Q3` means what it says in the
+conversation the user is looking at.
+
+The cost of that is the file dies with the session, so **carry every unanswered
+question into the handoff document.** Long argument still belongs in
+`docs/decisions.md` under the section it will become; the scratchpad file is what
+is outstanding, not why.
 
 End any turn that asks for a decision with a `## Waiting on you` block, last,
-after the prose. Tick the box and append `→ answered: …` when the answer comes.
+after the prose.
 
 ## Tooling
 

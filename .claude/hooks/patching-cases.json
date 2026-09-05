@@ -40,6 +40,11 @@
     "command": "sed -i 's/§51/§52/' docs/decisions.md"
   },
   {
+    "expect": "deny",
+    "why": "the path handed to the interpreter as an argument, not in the body",
+    "command": "python3 - CLAUDE.md docs/decisions.md <<'PY'\nimport sys, pathlib\nfor p in sys.argv[1:]:\n    pathlib.Path(p).write_text(edit(pathlib.Path(p).read_text()))\nPY"
+  },
+  {
     "expect": "allow",
     "why": "sed -n reads, it does not write",
     "command": "sed -n '170,190p' crates/rcad-geom/src/intersect.rs"

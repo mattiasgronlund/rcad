@@ -70,8 +70,14 @@ if names_tree_file "$(grep -oE "$redirect" <<<"$code")"; then
 	deny "CLAUDE.md bans writing a tracked .rs, .toml or .md file from the shell. Use Write for a new file, Edit for a change — a redirect that goes wrong takes the file with it. Writing under /tmp or a scratchpad is still fine."
 fi
 
+# The code is judged here as well as the bodies, because a path handed to the
+# interpreter as an argument is not in the body at all. That is not a
+# hypothetical: the session that widened this hook then patched two tracked
+# CLAUDE.md files with `python3 - "$W/CLAUDE.md" "$R/CLAUDE.md" <<'PY'`, and the
+# body-only check waved it through.
 if grep -qE '\b(python[0-9.]*|perl|ruby|node)\b[^|;]*<<' <<<"$code" &&
-	names_tree_file "$bodies"; then
+	names_tree_file "$code
+$bodies"; then
 	deny "CLAUDE.md bans heredoc patching of tracked .rs, .toml and .md files. In the M5 run this cost 145k tokens over 233 calls — a sixth of everything the run generated. Read then Edit instead."
 fi
 
