@@ -24,15 +24,24 @@ rather than trusting a summary here.
 **No rev is pinned yet**, and pinning needs no ceremony: rscene pins a sha once
 what it needs is merged here.
 
-### What rcad has agreed to build for it
+### What rcad built for it
 
-Neither is built. Both are agreed in shape, and both are §13-justified by rscene
-being the named consumer.
+Both are built and merged, and both are §13-justified by rscene being the named
+consumer. If rscene stops needing either, rcad wants to hear — see the
+withdrawal notice below.
 
-- **`Model::id()`** — an opaque `Copy + Eq + Hash` id, one `u64` on `Model`,
-  present in all builds, for a downstream cache-safety assert. Four properties:
-  distinct per `Model`, **stable across mutation**, **fresh on clone**, **fresh
-  on load**.
+- **`Model::which_model_this_is() -> WhichModelThisIs`** — an opaque
+  `Copy + Eq + Hash` mark, one `u64` on `Model`, present in all builds, for a
+  downstream cache-safety assert. Four properties: distinct per `Model`,
+  **stable across mutation**, **fresh on clone**, **fresh on load**.
+
+  rscene asked for `Model::id()`. That name was taken by a `pub(crate) fn id()`
+  with 41 call sites across ten files, and freeing it was the wrong trade —
+  worse, two methods called `id` on one type, one per-key and one per-model,
+  with **opposite** behaviour under `Clone`, would restate the trap rather than
+  avoid it. `identity` was rejected for the same reason at one remove: `Id` is
+  the abbreviation of *identity*, and `Isometry::identity()` already means "no
+  movement" here. The cost is 8 bytes per model, 376 → 384 in release.
 
   It is deliberately **not** the per-key `ModelId` (`crates/rcad-topo/src/key.rs`),
   and the two must not be merged. `ModelId` is zero-sized in release so keys pay
@@ -92,10 +101,17 @@ being the named consumer.
   (`rcad-mesh/src/triangulate.rs:175-186`) checks every boundary side before
   refining — so the failure mode is loud, not a quiet coarse patch.
 
-  When it ships, the published order is the **edge's** stored direction. Today
-  that convention is private knowledge at `mesh.rs:1102-1112`, where the caller
-  reads `edge.orientation().is_reversed()` and walks backwards; a public getter
-  has to say it out loud.
+  Three things the getters say out loud that were private knowledge before, and
+  a caller meets all three. **The points run the way the edge is stored**, not
+  the way any coedge uses it — a caller holding a coedge flips on
+  `coedge.edge().orientation().is_reversed()`. **The two end vertices are not in
+  the list**; they are `point_at_vertex` of the edge's two vertices, and a closed
+  edge's single corner sits at both ends. **A flat face contributes nothing**, so
+  a cube's `along_edge` is entirely empty, and absent and empty are deliberately
+  the same answer — `points_along_edge` returns `&[]` for a seam that walked to
+  nothing, for a never-walked edge, and for an edge of another solid, because all
+  three mean *nothing to draw between the ends*. `point_at_vertex` keeps its
+  `Option`, where `None` means something different: not a corner of this solid.
 
 A third demand — a display-edge polyline API — was **withdrawn by rscene** on its
 own inspection, because display edges should be built from mesh points and a more
@@ -109,7 +125,7 @@ the behaviour this arrangement depends on.
   It is a request, not a specification.
 - **rcad decides on rcad's own terms.** Being the named consumer is an argument,
   not a trump card, and *"same capability, different shape"* is a normal answer —
-  `Model::id()` above is one.
+  `Model::which_model_this_is()` above is one, asked for as `Model::id()`.
 - **The pin moves one way.** The consumer bumps its rev when it wants what
   landed. rcad never bumps it.
 - **No consumer in rcad's CI gate.** rcad's gate is `just default`. Coupling it
