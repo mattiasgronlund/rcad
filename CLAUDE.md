@@ -69,9 +69,17 @@ exists. One line each:
 ```
 
 `- [x]` and `→ answered: …` when the answer comes. The status line reads the file
-and shows the open numbers, collapsed — `❓ Q2, Q4-Q6`. The user can therefore
-read what is outstanding without `!cat`, which would add the file to the
-conversation and charge for it on every later turn.
+and shows the open labels, collapsed — `❓ K1-K4, Q2, Q4-Q6`. The user can
+therefore read what is outstanding without `!cat`, which would add the file to
+the conversation and charge for it on every later turn.
+
+**A label is a letter and a number, and the letter carries meaning.** `Q` for a
+grilling round or any plain decision — that is what the `grilling` skill's format
+already uses. A lane's findings take **the lane's own letter**, which is where
+`K1`-`K4` came from: they were Lane K's. Keep it, because "which lane is this
+from" is the first thing asked about a finding. The label goes straight after the
+checkbox; the status line reads it there and nowhere else, so a body is free to
+mention `M5` or `§52.11` without becoming a question.
 
 **Never in the tree.** Four sessions were live across these two repos on
 2026-09-05; a tracked file would have had all four writing to it. Per session

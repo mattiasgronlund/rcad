@@ -79,29 +79,44 @@ if [ -z "$questions" ]; then
 fi
 [ -n "$questions" ] && [ -r "$questions" ] || exit 0
 
+# The label is whatever letter and number sit right after the checkbox, not the
+# first Q anywhere on the line: a body is free to mention M5 or Q7 in passing.
+# The letter is kept because it is doing work — grilling numbers a round Q1, Q2,
+# and a wave numbers a lane's findings by the lane's own letter, so K1-K4 came
+# from "Lane K". Reading them as one undifferentiated series would lose that.
 numbers=$(awk '
 	/^[[:space:]]*```/ { fence = !fence; next }
 	fence { next }
-	/^- \[ \]/ { if (match($0, /Q[0-9]+/)) print substr($0, RSTART + 1, RLENGTH - 1) }
-' "$questions" | sort -n -u)
+	/^- \[ \]/ {
+		line = $0
+		sub(/^- \[ \][[:space:]]*/, "", line)
+		sub(/^\*+/, "", line)
+		if (match(line, /^[A-Z]+[0-9]+/)) {
+			label = substr(line, 1, RLENGTH)
+			match(label, /[0-9]+/)
+			print substr(label, 1, RSTART - 1), substr(label, RSTART)
+		}
+	}
+' "$questions" | sort -k1,1 -k2,2n -u)
 
 if [ -z "$numbers" ]; then
 	printf '%s\n' "${green}✓${off} ${dim}no open questions${off}"
 	exit 0
 fi
 
-# Consecutive runs collapse: 2 4 5 6 -> "Q2, Q4-Q6". A run of exactly two reads
-# better spelled out than hyphenated.
+# Consecutive runs collapse within a letter: Q2 Q4 Q5 Q6 K1 K2 K3 -> "K1-K3,
+# Q2, Q4-Q6". A run of exactly two reads better spelled out than hyphenated.
 compact=$(awk '
-	{ n[++c] = $1 }
+	{ letter[++c] = $1; n[c] = $2 }
 	END {
 		i = 1
 		while (i <= c) {
 			j = i
-			while (j < c && n[j + 1] == n[j] + 1) j++
-			if (j == i) seg = "Q" n[i]
-			else if (j == i + 1) seg = "Q" n[i] ", Q" n[j]
-			else seg = "Q" n[i] "-Q" n[j]
+			while (j < c && letter[j + 1] == letter[i] && n[j + 1] == n[j] + 1) j++
+			L = letter[i]
+			if (j == i) seg = L n[i]
+			else if (j == i + 1) seg = L n[i] ", " L n[j]
+			else seg = L n[i] "-" L n[j]
 			out = (out == "" ? seg : out ", " seg)
 			i = j + 1
 		}

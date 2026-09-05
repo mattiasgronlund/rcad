@@ -89,6 +89,24 @@ cat >"$file" <<'FILE'
 FILE
 want "out of order sorts numerically and dedupes" 1000 "$file" '❓ Q9, Q10$'
 
+# A wave numbers a lane's findings by the lane's letter, so "Lane K" produces
+# K1-K4. Dropping them because they were not Q was a real miss.
+cat >"$file" <<'FILE'
+- [ ] **K1** — the hole?
+- [ ] **K2** — the false claim?
+- [ ] **K3** — refuse or skip?
+- [ ] **K4** — both corrected?
+- [ ] **Q2** — a grilling question?
+FILE
+want "a lane's letter series survives" 1000 "$file" 'K1-K4'
+want "two series are both shown" 1000 "$file" '❓ K1-K4, Q2$'
+
+cat >"$file" <<'FILE'
+- [ ] **Q3** — does the body mention M5 or Q9 in passing?
+FILE
+want "the label is the one after the checkbox, not the first in the body" 1000 "$file" '❓ Q3$'
+reject "a number mentioned in the body is not a question" 1000 "$file" 'M5|Q9'
+
 cat >"$file" <<'FILE'
 Example of the format:
 
