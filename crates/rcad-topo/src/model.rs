@@ -28,9 +28,10 @@ use crate::{
 /// `&Model` is `Sync`. There is no interior mutability and no lazy cache, so
 /// read-only work — measuring, classifying points, validating — parallelizes
 /// with nothing more than a shared reference (roadmap §10).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Model {
     id: ModelId,
+    which_model_this_is: WhichModelThisIs,
     data: ModelData,
     index: Index,
     worst_approximation: f64,
@@ -45,10 +46,22 @@ impl Model {
     pub fn new(scale: Scale) -> Self {
         Self {
             id: ModelId::next(),
+            which_model_this_is: WhichModelThisIs::next(),
             data: ModelData::new(scale),
             index: Index::default(),
             worst_approximation: 0.0,
         }
+    }
+
+    /// Which model this is, for a caller holding something built from it.
+    ///
+    /// Editing a model does not change the answer, so work cached against a
+    /// model survives a fuse. Cloning or reading one in does change it, because
+    /// what comes back is a second model and not the one the cache was built
+    /// from.
+    #[must_use]
+    pub fn which_model_this_is(&self) -> WhichModelThisIs {
+        self.which_model_this_is
     }
 
     /// The unit and working size this model was built at.
@@ -413,6 +426,7 @@ impl Model {
         let worst_approximation = data.worst_approximation();
         Self {
             id: ModelId::next(),
+            which_model_this_is: WhichModelThisIs::next(),
             data,
             index,
             worst_approximation,
@@ -720,6 +734,51 @@ impl Model {
         } else {
             self.worst_approximation = self.worst_approximation.max(tag.magnitude());
         }
+    }
+}
+
+/// Written out rather than derived, because the two identities a model carries
+/// have to part company here.
+///
+/// The clone's keys address the same slots as the original's, so the per-key
+/// model id is copied across and a key handed out before the clone goes on
+/// working against either model. [`WhichModelThisIs`] is minted fresh, because
+/// the clone is a second model that can be edited on its own, and anything
+/// cached against the original was not built from it.
+impl Clone for Model {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            which_model_this_is: WhichModelThisIs::next(),
+            data: self.data.clone(),
+            index: self.index.clone(),
+            worst_approximation: self.worst_approximation,
+        }
+    }
+}
+
+/// The answer to [`Model::which_model_this_is`]: an opaque mark that says one
+/// model apart from every other.
+///
+/// It is for comparing, and nothing else. There is no way to make one, and no
+/// way to read a number out of one, so the only thing a caller can do with two
+/// of them is ask whether they match. That is what a cache keyed on a model
+/// needs: check the mark it stored against the mark the model carries now, and
+/// refuse to use the cache when they differ.
+///
+/// This is **not** the per-key model id the crate stamps into every key so that
+/// one model's key cannot resolve against another's arena (decisions.md §1.3).
+/// That one is zero-sized in release builds and survives a clone; this one is
+/// present in every build and does not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WhichModelThisIs(u64);
+
+impl WhichModelThisIs {
+    fn next() -> Self {
+        use core::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
     }
 }
 
@@ -1218,7 +1277,7 @@ mod tests {
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
 
     use super::Model;
-    use crate::{Error, Invalid, SolidKey};
+    use crate::{Error, Invalid, Rule, SolidKey};
 
     fn a_cube() -> (Model, SolidKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -1615,6 +1674,78 @@ mod tests {
             .expect("and may be tagged again with less");
 
         assert_eq!(model.worst_approximation(), 1e-12);
+    }
+
+    /// The first of the four things a cache keyed on a model needs
+    /// [`Model::which_model_this_is`] to promise (`docs/consumers.md`, rscene).
+    #[test]
+    fn two_models_built_one_after_the_other_are_not_the_same_model() {
+        let (one, _) = a_cube();
+        let (other, _) = a_cube();
+
+        assert_ne!(one.which_model_this_is(), other.which_model_this_is());
+    }
+
+    /// The second, and the one the consumer is actually buying: work cached
+    /// against a model has to survive the model being edited, or the cache is
+    /// thrown away on every change and never earns its keep.
+    #[test]
+    fn editing_a_model_leaves_it_the_same_model() {
+        let (mut model, cube) = a_cube();
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let before = model.which_model_this_is();
+
+        let other = model.add_cube(2.0, &policy, &mut log).expect("a second cube");
+        model.place_solid(
+            other,
+            &rcad_geom::Isometry::translation(Vector::new(1.0, 1.0, 1.0))
+                .expect("a finite shift"),
+        );
+        assert_eq!(
+            model.which_model_this_is(),
+            before,
+            "building into a model does not make it another model"
+        );
+
+        model
+            .fuse(&[cube], &[other], Rule::Union, &policy, &mut log)
+            .expect("two cubes overlapping at a corner union");
+
+        assert_eq!(
+            model.which_model_this_is(),
+            before,
+            "and neither does a fuse"
+        );
+    }
+
+    /// The third. A clone is a second model that can be edited on its own, so a
+    /// cache built for the original is not built for it — and the keys the
+    /// original handed out still address the clone's slots, which is why the
+    /// per-key model id goes the other way and is copied across.
+    #[test]
+    fn a_clone_is_a_different_model_but_its_keys_still_work() {
+        let (model, cube) = a_cube();
+
+        let copy = model.clone();
+
+        assert_ne!(copy.which_model_this_is(), model.which_model_this_is());
+        assert_eq!(copy.solid(cube).signed_volume(), 8.0);
+    }
+
+    /// The fourth. Reading a file gives back a model that no cache was built
+    /// from, however the bytes were produced.
+    #[test]
+    fn a_model_read_back_in_is_not_the_model_that_was_written_out() {
+        let (model, _) = a_cube();
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+
+        let read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");
+
+        assert_ne!(
+            read_back.which_model_this_is(),
+            model.which_model_this_is()
+        );
     }
 
     #[test]

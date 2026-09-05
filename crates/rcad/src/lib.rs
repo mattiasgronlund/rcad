@@ -408,8 +408,8 @@ pub use rcad_topo::{
     CoedgeKey, CoedgeView, Containment, DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex,
     DraftWire, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef, FaceView, Fused, Invalid,
     Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile, ProfileBuilder, Rule, ShellKey,
-    ShellView, SolidBuilder, SolidKey, SolidView, VertexKey, VertexView, WireKey, WireStepView,
-    WireView,
+    ShellView, SolidBuilder, SolidKey, SolidView, VertexKey, VertexView, WhichModelThisIs, WireKey,
+    WireStepView, WireView,
 };
 
 /// Reading and writing an ISO 10303-21 ("STEP", "Part 21") file.
