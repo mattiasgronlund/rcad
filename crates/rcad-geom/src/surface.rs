@@ -236,6 +236,18 @@ impl Surface {
     ///
     /// Planes sort before balls and balls before pipes, which is what puts the
     /// two flat ones of a triple at the front.
+    ///
+    /// **A pipe, a cone and a bend written with the axis pointing the other way
+    /// sort apart here, on purpose.** The two spellings are one surface, and
+    /// `rcad-topo`'s `name_of_the_surface_either_way_round` is where that is
+    /// folded, because folding it *here* would make two different bit patterns
+    /// compare **equal** — and a sort whose ties are broken by the order the
+    /// caller handed them in is the thing this exists to stop. What the fold
+    /// costs nothing to leave out is measured rather than argued:
+    /// `turning_a_stored_axis_round_moves_no_corner_and_renumbers_none` sweeps
+    /// 12 960 triples of pipes, cones and bends with every stored axis turned
+    /// round and gets the same corners in the same order, bit for bit, so the
+    /// row they sort into never mattered.
     pub(crate) fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
         let (mine, my_numbers) = self.the_numbers_it_is_written_with();
         let (theirs, their_numbers) = other.the_numbers_it_is_written_with();

@@ -258,6 +258,13 @@ fn canonical_cut_surfaces(face: &BakedFace) -> Vec<Surface> {
 /// triple sorted the other is two corners named as one. That is why the bits are
 /// flipped rather than taken raw — raw bits sort every negative number after
 /// every positive one, and `f64::total_cmp` does not.
+///
+/// **It folds nothing**, and that is the same choice
+/// [`Surface::how_it_sorts_against`](rcad_geom::Surface) makes for the same
+/// reason: a plane facing the other way and a pipe whose axis is written
+/// pointing the other way sort apart here, and
+/// [`name_of_the_surface_either_way_round`] is the key that puts them together.
+/// The one corner this names on its own is a pole, and only a ball has one.
 pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 9] {
     let mut bits = [0u64; 9];
     let mut fill = |kind: u64, numbers: &[f64]| {
