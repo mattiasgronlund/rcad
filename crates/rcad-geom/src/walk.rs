@@ -204,6 +204,15 @@ pub const POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF: f64 = 64.0 * f64::EPSILON;
 /// and building them quietly is worse than saying so.
 pub const MOST_POINTS_ALONG_ONE_CROSSING: usize = 1 << 20;
 
+/// The name a walk a tolerant caller waved through goes by in provenance
+/// records.
+///
+/// Pushed by [`room_left_over`] and nowhere else. A walk whose points already
+/// sit further off the crossing than the caller's deflection allows cannot be
+/// refined by drawing more of them, and a tolerant caller gets it anyway — which
+/// is a non-certified outcome and so gets a record (§5).
+pub const ROOM_LEFT_TO_REFINE_A_WALK: &str = "room left to refine a walk";
+
 /// Points along a crossing, and how far off it they may sit.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PointsAlongACrossing {
@@ -257,6 +266,15 @@ impl PointsAlongACrossing {
 /// what happens when a *point* cannot be placed that close to the curve at all.
 /// A caller who reached for the policy to ask for a rougher walk would have
 /// silently asked the kernel to certify less.
+///
+/// # A walk that could not be refined leaves a record
+///
+/// When the points' own deviation has eaten the whole deflection there is no
+/// step small enough to help, so a tolerant caller is handed the two ends and
+/// nothing between them. That is a walk that did not do what it was asked, and
+/// it lands in `log` under [`ROOM_LEFT_TO_REFINE_A_WALK`]. A walk that met the
+/// deflection records nothing, which is what makes an empty log worth reading
+/// (§5).
 ///
 /// # Errors
 ///
@@ -321,10 +339,10 @@ pub fn walk(
             return follow_the_quartic(run, pair, seeds, deflection, policy, log);
         }
         WhatARunLiesOn::Parabola(bend) => {
-            return walk_an_endless_bend(&bend, run, deflection, policy);
+            return walk_an_endless_bend(&bend, run, deflection, policy, log);
         }
         WhatARunLiesOn::OneBranchOfAHyperbola(branch) => {
-            return walk_an_endless_bend(&branch, run, deflection, policy);
+            return walk_an_endless_bend(&branch, run, deflection, policy, log);
         }
         WhatARunLiesOn::Conic(conic) => conic,
     };
@@ -337,7 +355,7 @@ pub fn walk(
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     }
     let tag = Approximation::new(deviation, Cause::PointAlongACrossing);
-    let Some(room) = room_left_over(deflection, deviation, policy)? else {
+    let Some(room) = room_left_over(deflection, deviation, policy, log)? else {
         return Ok(PointsAlongACrossing {
             points: Vec::new(),
             deviation: tag,
@@ -813,13 +831,14 @@ fn walk_an_endless_bend(
     run: &NamedRun,
     deflection: Deflection,
     policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> Result<PointsAlongACrossing> {
     let deviation = POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * bend.the_size_it_was_worked_out_from();
     if !deviation.is_finite() {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     }
     let tag = Approximation::new(deviation, Cause::PointAlongACrossing);
-    let Some(room) = room_left_over(deflection, deviation, policy)? else {
+    let Some(room) = room_left_over(deflection, deviation, policy, log)? else {
         return Ok(PointsAlongACrossing {
             points: Vec::new(),
             deviation: tag,
@@ -1167,12 +1186,50 @@ fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Su
 
 /// How much of the deflection is left for the straight pieces to spend, or
 /// `None` when a tolerant caller accepted a walk that cannot be refined at all.
-fn room_left_over(deflection: Deflection, deviation: f64, policy: &Policy) -> Result<Option<f64>> {
+///
+/// # The wave-through is recorded, and what the record says
+///
+/// A certified caller is refused here. A tolerant one is not, and what it gets
+/// back is a walk with no points between its ends — so the record is the only
+/// thing that separates it from a run that needed none. The return value carries
+/// the deviation as an [`Approximation`] either way, which is why the record does
+/// not carry one: two signals for one event is a reader having to work out which
+/// of them to believe.
+///
+/// **The outcome is [`Decision::Undecidable`] even though nothing was
+/// undecided**, for the reason [`DynamicRange::check_under_policy`] records one:
+/// this is not a predicate and has no sign to be uncertain about, and the honest
+/// thing an enclosure of `deviation` says is that every point this walk hands
+/// back is uncertain by that much. `Measures::Length` because `deviation` is
+/// already a distance and needs no converting to be read as a wobble (§15.2).
+///
+/// **The record is left unresolved**, so [`Record::approximation`] is `None` and
+/// no [`Cause`] is written here. [`Cause::TolerantFallback`] is what this event
+/// is, and `Record::resolve_to` is private to `rcad-predicates` — see the note in
+/// `a_waved_through_walk_leaves_a_record.rs`.
+///
+/// [`DynamicRange::check_under_policy`]: crate::DynamicRange::check_under_policy
+/// [`Record::approximation`]: rcad_predicates::Record::approximation
+fn room_left_over(
+    deflection: Deflection,
+    deviation: f64,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<f64>> {
     let room = deflection.length() - deviation;
     if room > 0.0 {
         return Ok(Some(room));
     }
     if policy.wobble_is_acceptable(deviation) {
+        log.push(Record::new(
+            ROOM_LEFT_TO_REFINE_A_WALK,
+            &[],
+            Level::Float,
+            Decision::Undecidable {
+                enclosure: deviation,
+            },
+            Measures::Length,
+        ));
         return Ok(None);
     }
     Err(Error::CannotPlaceAPointThatCloseToACrossing {
