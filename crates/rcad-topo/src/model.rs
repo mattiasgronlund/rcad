@@ -1696,11 +1696,12 @@ mod tests {
         let mut log = ProvenanceLog::new();
         let before = model.which_model_this_is();
 
-        let other = model.add_cube(2.0, &policy, &mut log).expect("a second cube");
+        let other = model
+            .add_cube(2.0, &policy, &mut log)
+            .expect("a second cube");
         model.place_solid(
             other,
-            &rcad_geom::Isometry::translation(Vector::new(1.0, 1.0, 1.0))
-                .expect("a finite shift"),
+            &rcad_geom::Isometry::translation(Vector::new(1.0, 1.0, 1.0)).expect("a finite shift"),
         );
         assert_eq!(
             model.which_model_this_is(),
@@ -1742,10 +1743,7 @@ mod tests {
 
         let read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");
 
-        assert_ne!(
-            read_back.which_model_this_is(),
-            model.which_model_this_is()
-        );
+        assert_ne!(read_back.which_model_this_is(), model.which_model_this_is());
     }
 
     #[test]
