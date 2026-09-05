@@ -137,6 +137,20 @@ the behaviour this arrangement depends on.
   needing a part, rcad wants to hear: §13 would rather delete an unconsumed part
   than carry it, and it cannot do that if the only record of the need is
   somewhere else.
+- **Say so before you depend on a claim, and this one runs both ways.** Before
+  pinning a claim about the other side — in a document, in an assertion, or in a
+  design that cannot survive its being false — name it to whoever owns it. It
+  asks for no work and it is not a demand: the owner may say nothing. It works
+  because a claim about to become load-bearing acquires a reader with a reason to
+  be adversarial about it, which is most of a closing gate at none of the cost
+  (`docs/decisions.md` §51.10). rcad owes it too — before rcad depends on
+  something a consumer publishes, the same sentence is available.
+
+  It has already paid twice, both times catching rcad's own error rather than a
+  consumer's: *at least four steps* restated as *at least four points*, where the
+  emit line excludes both ends and the floor is three; and a starved point list
+  blamed on a coarse deflection when the trigger is a tolerant policy, which no
+  choice of deflection can dodge.
 
 ### What rcad asks in return
 
