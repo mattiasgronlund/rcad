@@ -219,7 +219,10 @@ fn every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material() {
         + every_sample_faces(&taper, Facing::OutOfTheMaterial)
         + every_sample_faces(&ring, Facing::IntoTheMaterial);
 
-    assert_eq!(checked, 94, "every sample has to reach the oracle to count");
+    assert_eq!(
+        checked, 94,
+        "a spread that quietly emptied would agree with the table on nothing at all"
+    );
 }
 
 /// The five do not all cross the same way, which is the single bit a caller
