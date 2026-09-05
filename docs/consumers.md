@@ -168,15 +168,32 @@ not a demand: every surface publishes the parameters its normal follows from, so
 rscene differentiates the implicit form itself.
 
 Worth one sentence back, because it is a fact about rcad that a consumer nearly
-got wrong: **`∂u × ∂v` of `point_at` points out of the material for a sphere, a
-cylinder and a cone, and into it for a torus**, whose two coordinates are
-ordered tube-first so a bend of pipe charts like a straight bar. That ordering
-is right and rcad's rustdoc says why; the consequence for anyone reading a
-normal off the parameterization's handedness is that four surfaces agree and the
-fifth does not. rscene now takes gradients instead, and checks them against
-`SideOfSurface::side_of` and `Plane::side_of_point` — a step along a normal must
-land outside and a step back inside — which caught an inverted torus on the
-first sample.
+got wrong: **which way `∂u × ∂v` of `point_at` faces is not the same on all five
+surfaces.** That was rcad's to check and rcad had not checked it, so the table
+that stood here is gone and the measurement is in
+`crates/rcad-geom/tests/where_a_surfaces_own_two_coordinates_land.rs` instead.
+`every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material` is
+the table, surface by surface, taken against `SideOfSurface::side_of` and
+`Plane::side_of_point` rather than against the parameterization itself, at
+ninety-four samples clear of a ball's poles and a cone's apex.
+`the_five_surfaces_do_not_all_cross_their_two_coordinates_the_same_way` asserts
+only that they disagree — which is the one bit rscene's design rests on, and the
+one whose failure is news rather than a regression. Read the table there. A copy
+of it here could be wrong and internally consistent, and then it would pass —
+this file points at facts for the reason its opening gives, and does not keep
+second copies of them.
+
+What is rcad's to own and to say here is the **ordering** that makes one surface
+the odd one out, because that is a decision and not a measurement. A torus's two
+coordinates run tube-first so that a bend of pipe charts like a straight bar: one
+coordinate that wraps, one that runs cap to cap, one seam. `Torus::point_at`
+argues it in full under *Round the tube comes first, and that is not arbitrary*.
+The hand falls out of the ordering, and the ordering is worth more than the hand.
+
+rscene takes gradients instead of the parameterization's handedness, and checks
+them the same way — a step along a normal must land outside and a step back
+inside — which caught an inverted torus on the first sample. That is what
+prompted the two tests above.
 
 ### Withdrawal notice: rscene's §8.3 exception for the unlogged walk
 
