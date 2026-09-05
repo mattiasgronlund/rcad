@@ -25,16 +25,27 @@
 //! The lens between two overlapping balls of radius 10 and 0.5. It has exactly
 //! two faces, both spheres, twenty times apart in how tightly they bend, and
 //! they share one edge — the circle where the two balls cross. It is the
-//! sharpest form of the question this kernel can build: a ball against a bar
-//! refuses in the fuse with `ACrossingThisCannotBeOrderedAlong`, and two
-//! *coaxial* bars of different radii share a flat annulus rather than an edge,
-//! so neither reaches a curved face handed a differently-curved neighbour's
-//! boundary.
+//! sharpest form of the question this kernel can build. A ball against a bar
+//! would be sharper still and there is no such solid to mesh:
+//! [`a_ball_against_a_bar_never_gets_as_far_as_a_mesh`] is the demonstration
+//! §16.10 asks for rather than this sentence. Two *coaxial* bars of different
+//! radii, the other shape to reach for, meet along a flat annulus and not along
+//! an edge at all, so the annulus is a plane face between them and neither
+//! curved face ever sees the other's boundary.
 //!
 //! Fusing the small ball as the argument rather than the tool reverses the
 //! stored order of the two faces, which is the knob that decides who walks the
 //! shared circle. [`which_ball_walks_the_shared_circle_changes_nothing`] turns
 //! it and compares the two meshes point for point.
+//!
+//! # Why turning it changes nothing, which is the answer to the second question
+//!
+//! The budget an edge is walked to is
+//! `self.deflection.length() - how_far_moving_this_face_rounds(face)`, and the
+//! subtracted term is what *placing* that face rounds — not how tightly it
+//! bends. So the two faces along an edge hand the walk the same budget and
+//! there is no coarse face's budget for a fine face to inherit. The bit-for-bit
+//! comparison below is what says so; this paragraph only says where to look.
 //!
 //! # The oracle is closed form, and that is the point
 //!
@@ -48,9 +59,9 @@
 //! says the measurement has teeth: the same machinery, pointed at a mesh cut
 //! ten times too coarse for the number it is checked against, sees it.
 
-use rcad_geom::{Deflection, Isometry, Point, Scale, Sphere, Surface, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Sphere, Surface, Vector};
 use rcad_predicates::{Cause, Policy, ProvenanceLog};
-use rcad_topo::{Mesh, Model, Rule, SolidKey};
+use rcad_topo::{Error, Mesh, Model, Rule, SolidKey};
 
 /// The deflections every shape here is cut at.
 const HOW_FINE: [f64; 3] = [0.1, 0.01, 0.001];
@@ -290,6 +301,50 @@ fn no_triangle_of_either_face_strays_further_than_the_deflection_asked_for() {
         "no face came within a tenth of its deflection ({closest_to_the_deflection:e}), so this \
          would not notice a mesh cut twice as coarse as it asked for"
     );
+}
+
+/// The shape this file would rather have had, and why there is none to mesh.
+///
+/// A bar down a ball's own axis crosses its skin in two circles, which would be
+/// a pipe of radius a fifth against a ball of radius ten sharing an edge — a
+/// fifty-fold difference in curvature where the lens manages twenty. The fuse
+/// never gets that far: `intersect` gives a sphere against a cylinder a shape
+/// `fuse::cuts::how_two_faces_meet` has no order for, and it refuses by name.
+/// Turned to lie along `x` instead, so that the crossing misses the ball's
+/// poles and its seam, it refuses the same way — so it is the pair of surfaces
+/// and not where they were put.
+#[test]
+fn a_ball_against_a_bar_never_gets_as_far_as_a_mesh() {
+    for turned in [false, true] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let ball = model
+            .add_ball(10.0, &Isometry::identity())
+            .expect("a ball at the origin");
+        let down_z = Isometry::translation(Vector::new(0.0, 0.0, -20.0)).expect("a shift");
+        let along_x = Isometry::translation(Vector::new(-20.0, 0.0, 0.0))
+            .expect("a shift")
+            .compose(
+                &Isometry::rotation(&Axis::y(), core::f64::consts::FRAC_PI_2)
+                    .expect("a quarter turn"),
+            );
+        let bar = model
+            .add_round_bar(0.2, 40.0, if turned { &along_x } else { &down_z })
+            .expect("a bar right through it");
+        let why = model
+            .fuse(
+                &[ball],
+                &[bar],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a ball and a bar have no fuse here");
+        assert!(
+            matches!(why, Error::ACrossingThisCannotBeOrderedAlong),
+            "a bar {} a ball was refused with {why:?} rather than for the crossing",
+            if turned { "across" } else { "down" }
+        );
+    }
 }
 
 /// One mesh, cut under a certified policy with nothing left unsettled.
