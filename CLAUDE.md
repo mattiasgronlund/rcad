@@ -109,6 +109,12 @@ the `delegating` skill.
 - **A closing gate agent re-derives every load-bearing number.** Not the lane's own
   word for it. M5's gate caught an unclosed §19 violation and a 5.4x reported as 20x
   that all five lanes had missed.
+- **The dispatcher has a budget too, and it is 300k tokens.** The lane cap works —
+  51 lanes on 2026-09-05, median 17 minutes, none over 45. The dispatchers had no
+  cap and spent 485M input tokens over 1994 turns, 97% of it re-reading context,
+  while writing almost no code. `.claude/hooks/context-budget.sh` says so once when
+  the line is crossed; call the `handoff` skill then rather than at the end of the
+  next unit. Raise it for a session with `CLAUDE_CONTEXT_BUDGET`.
 
 ## Always use plain language instead of complex jargon
 

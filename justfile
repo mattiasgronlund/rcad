@@ -281,6 +281,7 @@ test-ignored:
 # refused in the scratchpad.
 check-hooks:
     @.claude/hooks/check-patching-hook.sh
+    @.claude/hooks/check-context-budget.sh
 
 check-enums:
     @! awk '/^$/ {ok = 0} \
