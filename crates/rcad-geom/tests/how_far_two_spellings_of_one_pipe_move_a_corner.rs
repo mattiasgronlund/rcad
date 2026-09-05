@@ -61,13 +61,23 @@ fn the_way_the_pipe_runs() -> Vector {
 /// the same bits.
 const HOW_FAR_ALONG_THE_AXIS: [f64; 7] = [
     0.0,
-    4.0,
-    1024.0,
-    1_048_576.0,
-    1_099_511_627_776.0,
-    1.2676506002282294e30,
-    1.0043362776618689e59,
+    two_to_the(2),
+    two_to_the(10),
+    two_to_the(20),
+    two_to_the(40),
+    two_to_the(100),
+    two_to_the(196),
 ];
+
+/// `2^power` exactly, built from the bits rather than written out.
+///
+/// `2^196` as a decimal literal wants more digits than an `f64` keeps, so the
+/// reader cannot tell by eye whether what is written is the power of two this
+/// file needs or a number a hair off it — and a hair off is a slid origin that
+/// misses the axis, which is the one thing these steps must not be.
+const fn two_to_the(power: u64) -> f64 {
+    f64::from_bits((1023 + power) << 52)
+}
 
 /// The pipe, with its axis origin written `steps` of the stored direction along
 /// its own axis.
