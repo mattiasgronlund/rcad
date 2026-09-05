@@ -312,6 +312,27 @@ decision resting on it in either direction.
   leaves a published sentence overstating how wrong the picture may be, and that
   sentence stopped being true the same as any other.
 
+  **No threshold, and the asymmetry is the reason.** The announcement fires on any
+  change to what the bound computes, not on one large enough for the consumer to
+  act on. A consumer that only wants to hear about numbers big enough to matter
+  trains the producer to filter, and **the producer's filter is invisible to the
+  consumer by construction** — the consumer cannot see what it was not told, so it
+  never finds out the threshold exists. rscene argued this after being told about
+  an understatement of `2.4e-5` that changed nothing it runs, and it is right: the
+  useful half of that message was not the size but that the term is charged against
+  corners a face can outrun, which is what will matter when somebody meshes
+  something stranger than a bar.
+
+  **A citation is not a second answer — but it does go stale.** Where a consumer
+  wants rcad's figure in its own documentation, citing rcad's measurement is the
+  right shape and does not breach the no-second-answer rule: a citation cannot
+  drift the way a paraphrase can, because there is still only one measurement. What
+  it can do is stop describing anything, the moment rcad fixes what it measures. So
+  a fix here carries a **second** obligation beyond announcing that the number
+  moved: any figure a consumer is citing has to be retired, and rcad says which,
+  at the same time. A stale citation is worse than a paraphrase, because its
+  provenance is exactly what makes a reader trust it.
+
   The half that is not rcad's: a raised floor arrives downstream as solids that
   meshed before and now refuse, which is rscene's retry ladder climbing rungs, and
   rscene's §4.8 owns telling a climb across many solids at once from a climb on
