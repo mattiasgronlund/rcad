@@ -1855,22 +1855,36 @@ impl Corners {
 /// [`name_of_the_surface_either_way_round`] was written for, arriving at the
 /// corners instead of at the edges.
 ///
-/// **A triple with a curved surface in it is named as each face spells it**, and
-/// that is not caution left in for its own sake. Three surfaces meet at up to
-/// four points; `which` numbers them along the line the two planes cross in; and
-/// reversing a plane reverses that line, so the same point is `which: 0` under
-/// one spelling and `which: 1` under the other. Folding the spellings together
-/// there would name two *different* corners alike, which is worse than leaving
-/// two names on one. Three planes have no such point to confuse: they meet at
-/// exactly one place ([`MeetOfThree::At`](rcad_geom::MeetOfThree) with a single
-/// entry), so `which` is always zero and the three names settle the corner on
-/// their own.
+/// **A plane in a triple with something curved in it is named as each face
+/// spells it**, and that is not caution left in for its own sake. Three surfaces
+/// meet at up to four points; `which` numbers them along the line the two planes
+/// cross in; and reversing a plane reverses that line, so the same point is
+/// `which: 0` under one spelling and `which: 1` under the other. Folding the
+/// spellings together there would name two *different* corners alike, which is
+/// worse than leaving two names on one. Three planes have no such point to
+/// confuse: they meet at exactly one place
+/// ([`MeetOfThree::At`](rcad_geom::MeetOfThree) with a single entry), so `which`
+/// is always zero and the three names settle the corner on their own.
+///
+/// **A pipe, a cone or a bend is folded whatever else is in the triple**, and
+/// the reason the plane rule does not carry over is that a curved surface is
+/// never one of the two planes whose line `which` is counted along. A plane
+/// sorts before every curved kind, and two of the three must be flat for the
+/// meet to be worked out at all, so the curved one is always the third row and
+/// the line is fixed by the other two. Turning its axis round is then neutral to
+/// the whole solve, which
+/// `turning_a_stored_axis_round_moves_no_corner_and_renumbers_none` measures
+/// over 12 960 triples of pipes, cones and bends: same points, same order, bit
+/// for bit.
 fn names_of_the_three_surfaces(surfaces: &[Surface; 3]) -> [[u64; 9]; 3] {
-    let mut named = if surfaces.iter().all(|surface| surface.as_plane().is_some()) {
-        surfaces.map(|surface| name_of_the_surface_either_way_round(&surface))
-    } else {
-        surfaces.map(|surface| name_of_surface_bits(&surface))
-    };
+    let all_flat = surfaces.iter().all(|surface| surface.as_plane().is_some());
+    let mut named = surfaces.map(|surface| {
+        if all_flat || surface.as_plane().is_none() {
+            name_of_the_surface_either_way_round(&surface)
+        } else {
+            name_of_surface_bits(&surface)
+        }
+    });
     named.sort_unstable();
     named
 }
@@ -2308,9 +2322,12 @@ fn sides_of(
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cone, Cylinder, EdgeRun, Plane, Scale, Sphere, Surface, SurfaceMeet, Torus,
+        Axis, Cone, Cylinder, EdgeRun, Orientation, Plane, Scale, Sphere, Surface, SurfaceMeet,
+        Torus,
     };
     use rcad_predicates::{Policy, ProvenanceLog};
+
+    use crate::{DraftStep, Rule, SolidBuilder};
 
     use super::{
         Corners, MeetPoint, Model, Point, PredicatePoint, Vector, names_of_the_three_surfaces,
@@ -2927,5 +2944,191 @@ mod tests {
             names_of_the_three_surfaces(&one_way),
             names_of_the_three_surfaces(&other_way)
         );
+    }
+
+    /// A triple with a pipe in it is named the same whichever way round the
+    /// pipe's axis is written, and still spells each plane as its own face
+    /// holds it.
+    ///
+    /// The corner half of the fix, and both halves of it matter. Two solids
+    /// pressed together on one pipe hold its axis both ways, and a corner on it
+    /// solved from `plane, plane, pipe` by one face and from
+    /// `plane, plane, pipe reversed` by another is one corner. Turning a
+    /// **plane** round is still two names, because that would renumber `which`.
+    #[test]
+    fn a_pipe_in_the_triple_is_named_the_same_either_way_round() {
+        let at = |normal, through| {
+            Plane::from_point_and_normal(through, normal).expect("a normal with length")
+        };
+        let floor = at(Vector::new(0.0, 0.0, 1.0), Point::new(0.0, 0.0, 7.0));
+        let side = at(Vector::new(0.0, 1.0, 0.0), Point::origin());
+        let up = Surface::Cylinder(Cylinder::new(Axis::z(), 3.0).expect("a radius"));
+        let down = Surface::Cylinder(Cylinder::new(Axis::z().reversed(), 3.0).expect("a radius"));
+
+        let one_way = [Surface::Plane(floor), Surface::Plane(side), up];
+        let pipe_turned_round = [Surface::Plane(floor), Surface::Plane(side), down];
+        let floor_turned_round = [Surface::Plane(floor.reversed()), Surface::Plane(side), up];
+
+        assert_eq!(
+            names_of_the_three_surfaces(&one_way),
+            names_of_the_three_surfaces(&pipe_turned_round),
+            "one pipe written two ways named one corner two things"
+        );
+        assert_ne!(
+            names_of_the_three_surfaces(&one_way),
+            names_of_the_three_surfaces(&floor_turned_round),
+            "turning a plane round renumbers `which`, so the two spellings stay apart"
+        );
+    }
+
+    /// Two bars end to end on one pipe are refused before the spelling of that
+    /// pipe can matter, and this pin is what says so.
+    ///
+    /// The defect wants two solids flush on a shared curved face and one of them
+    /// holding its axis the other way round. Two bars on one line is that pair,
+    /// and the fuse does not reach it: it stops at *a point inside a piece of a
+    /// face*, undecidable, and stops there **just the same when both bars spell
+    /// the pipe the same way**. So the fold above is demonstrated on the names
+    /// it fixes and not on an answer, and nothing here should be read as saying
+    /// the fuse handles two solids on one pipe.
+    ///
+    /// The pin fails the day that wall moves, which is the only thing that makes
+    /// a refusal worth keeping (§51.1).
+    #[test]
+    fn two_bars_on_one_pipe_are_refused_the_same_however_the_pipe_is_written() {
+        let up = Cylinder::new(Axis::z(), 1.0).expect("a radius");
+        let down = Cylinder::new(Axis::z().reversed(), 1.0).expect("a radius");
+        assert_ne!(
+            up.axis().direction(),
+            down.axis().direction(),
+            "the same pipe written two ways is different numbers, which is the difficulty"
+        );
+
+        let how_far_it_gets = |wall| {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let policy = Policy::certified();
+            let mut log = ProvenanceLog::new();
+            let lower = a_bar_between(&mut model, 0.0, 2.0, up, &policy, &mut log);
+            let upper = a_bar_between(&mut model, 2.0, 4.0, wall, &policy, &mut log);
+            format!(
+                "{:?}",
+                model
+                    .fuse(
+                        &[lower],
+                        &[upper],
+                        Rule::Union,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .map(|fused| fused.solids().len())
+            )
+        };
+
+        let both_ways_round = how_far_it_gets(down);
+        assert_eq!(
+            both_ways_round,
+            how_far_it_gets(up),
+            "the spelling of the pipe changed how far the fuse got"
+        );
+        assert!(
+            both_ways_round.contains("a point inside a piece of a face"),
+            "the wall moved, so the fold can be demonstrated on an answer now: {both_ways_round}"
+        );
+    }
+
+    /// A bar of radius one standing between two heights, on the pipe it is
+    /// handed, built the way [`Model::add_round_bar`] builds one.
+    ///
+    /// Built here rather than by that builder because the whole point is the
+    /// spelling of the pipe, and the builder writes its own.
+    fn a_bar_between(
+        model: &mut Model,
+        from: f64,
+        to: f64,
+        wall: Cylinder,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> crate::SolidKey {
+        let mut draft = SolidBuilder::new();
+        let bottom_corner = draft
+            .add_vertex(Point::new(1.0, 0.0, from))
+            .expect("a corner");
+        let top_corner = draft
+            .add_vertex(Point::new(1.0, 0.0, to))
+            .expect("a corner");
+        let seam = draft
+            .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
+            .expect("the seam up the wall");
+        let bottom_circle = draft
+            .add_edge(
+                bottom_corner,
+                bottom_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("a cap circle");
+        let top_circle = draft
+            .add_edge(
+                top_corner,
+                top_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("a cap circle");
+
+        // A closed edge is stored running along `ŵ × ∇C` for the wall's
+        // **stored** direction `ŵ` (`a_closed_crossing_is_walked_the_way_it_is_stored`),
+        // so a bar whose wall is written with the axis pointing down walks both
+        // its cap circles the other way round. Same bar, same skin, and the one
+        // thing that is not even in the spelling.
+        let round_a_circle = |turn| match (turn, wall.axis().direction().z() > 0.0) {
+            (turn, true) => turn,
+            (Orientation::Forward, false) => Orientation::Reversed,
+            (_, false) => Orientation::Forward,
+        };
+
+        let mut cap = |z: f64, outward: f64, circle, turn| {
+            let plane = Plane::from_point_and_normal(
+                Point::new(0.0, 0.0, z),
+                Vector::new(0.0, 0.0, outward),
+            )
+            .expect("the z axis is a unit normal");
+            let coedge = draft
+                .add_coedge(circle, round_a_circle(turn))
+                .expect("a use of the circle");
+            let wire = draft
+                .add_wire(&[DraftStep::Along(coedge)])
+                .expect("a cap is one circle");
+            draft
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a cap face")
+        };
+        let bottom = cap(from, -1.0, bottom_circle, Orientation::Reversed);
+        let top = cap(to, 1.0, top_circle, Orientation::Forward);
+
+        let round_the_wall = [
+            draft
+                .add_coedge(bottom_circle, round_a_circle(Orientation::Forward))
+                .expect("a use"),
+            draft.add_coedge(seam, Orientation::Forward).expect("a use"),
+            draft
+                .add_coedge(top_circle, round_a_circle(Orientation::Reversed))
+                .expect("a use"),
+            draft
+                .add_coedge(seam, Orientation::Reversed)
+                .expect("a use"),
+        ]
+        .map(DraftStep::Along);
+        let wire = draft.add_wire(&round_the_wall).expect("round the wall");
+        let side = draft
+            .add_face(Surface::Cylinder(wall), &[wire])
+            .expect("the wall");
+
+        draft
+            .add_shell(&[
+                (bottom, Orientation::Forward),
+                (top, Orientation::Forward),
+                (side, Orientation::Forward),
+            ])
+            .expect("a closed skin");
+        draft.build(model, policy, log).expect("a round bar")
     }
 }

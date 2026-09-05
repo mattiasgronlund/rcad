@@ -236,6 +236,18 @@ impl Surface {
     ///
     /// Planes sort before balls and balls before pipes, which is what puts the
     /// two flat ones of a triple at the front.
+    ///
+    /// **A pipe, a cone and a bend written with the axis pointing the other way
+    /// sort apart here, on purpose.** The two spellings are one surface, and
+    /// `rcad-topo`'s `name_of_the_surface_either_way_round` is where that is
+    /// folded, because folding it *here* would make two different bit patterns
+    /// compare **equal** — and a sort whose ties are broken by the order the
+    /// caller handed them in is the thing this exists to stop. What the fold
+    /// costs nothing to leave out is measured rather than argued:
+    /// `turning_a_stored_axis_round_moves_no_corner_and_renumbers_none` sweeps
+    /// 12 960 triples of pipes, cones and bends with every stored axis turned
+    /// round and gets the same corners in the same order, bit for bit, so the
+    /// row they sort into never mattered.
     pub(crate) fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
         let (mine, my_numbers) = self.the_numbers_it_is_written_with();
         let (theirs, their_numbers) = other.the_numbers_it_is_written_with();
@@ -331,7 +343,10 @@ impl From<Torus> for Surface {
 
 #[cfg(test)]
 mod tests {
+    use rcad_predicates::{Policy, ProvenanceLog};
+
     use super::*;
+    use crate::three_surfaces::{MeetOfThree, meet_of_three_surfaces};
     use crate::{Axis, Point, Vector};
 
     #[test]
@@ -357,5 +372,250 @@ mod tests {
             moved,
             Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 4.0), 1.0).unwrap())
         );
+    }
+
+    /// A pipe, a cone and a bend written with the axis pointing the other way
+    /// are the same surface, and every corner they take part in comes back at
+    /// the same bits and in the same order.
+    ///
+    /// The reason to expect it is that all three sign expressions are **even**
+    /// in the stored direction — `‖(p − o) × w‖²` and `slope²((p − o)·w)²` both
+    /// take `w` twice — so negating it negates two factors of every product and
+    /// nothing at all of any sum. Expecting it is not measuring it, and this
+    /// sweeps the whole of [`meet_of_three_surfaces`] rather than the
+    /// expression: two planes and one curved surface, and one plane against two
+    /// quadrics that bend the same way, with every subset of the stored axes
+    /// turned round. Bit for bit, points in order, refusals against refusals.
+    ///
+    /// **It is what makes folding the key safe.** A corner is named by its three
+    /// surfaces and by `which` of their meeting points it is, and `which` counts
+    /// along the line the two planes cross in. Two spellings of one pipe would
+    /// be named alike by a folded key, so if either spelling moved a corner or
+    /// renumbered one, the fold would put two different corners under one name —
+    /// which is worse than the two names it fixes.
+    #[test]
+    fn turning_a_stored_axis_round_moves_no_corner_and_renumbers_none() {
+        let (compared, placed, differed) = every_triple_against_its_turned_selves();
+        assert!(
+            compared > 10_000,
+            "a sweep this small proves little: {compared} comparisons"
+        );
+        // A refusal matching a refusal says nothing about where a corner lands,
+        // so the sweep is only worth its name if most of it placed corners.
+        assert!(
+            placed > compared / 2,
+            "{placed} of {compared} comparisons placed a corner at all"
+        );
+        assert_eq!(differed, 0, "of {compared} comparisons");
+    }
+
+    /// How many triples were compared against a turned-round spelling of
+    /// themselves, how many of those placed at least one corner, and how many
+    /// came back with a different answer.
+    fn every_triple_against_its_turned_selves() -> (usize, usize, usize) {
+        let mut compared = 0;
+        let mut placed = 0;
+        let mut differed = 0;
+        let mut check = |triple: [Surface; 3], turned: [Surface; 3]| {
+            compared += 1;
+            let (written, turned) = (what_they_meet_at(&triple), what_they_meet_at(&turned));
+            if written.as_ref().is_ok_and(|places| !places.is_empty()) {
+                placed += 1;
+            }
+            if written != turned {
+                differed += 1;
+            }
+        };
+
+        for curved in every_curved_surface() {
+            for (one, other) in every_pair_of_planes() {
+                check(
+                    [one, other, curved],
+                    [one, other, with_its_axis_turned_round(&curved)],
+                );
+            }
+        }
+        for (one, other) in every_pair_that_bends_the_same_way() {
+            for flat in every_plane() {
+                for turn_the_first in [false, true] {
+                    for turn_the_second in [false, true] {
+                        if !turn_the_first && !turn_the_second {
+                            continue;
+                        }
+                        let turn = |surface: &Surface, turning| {
+                            if turning {
+                                with_its_axis_turned_round(surface)
+                            } else {
+                                *surface
+                            }
+                        };
+                        check(
+                            [flat, one, other],
+                            [
+                                flat,
+                                turn(&one, turn_the_first),
+                                turn(&other, turn_the_second),
+                            ],
+                        );
+                    }
+                }
+            }
+        }
+        (compared, placed, differed)
+    }
+
+    /// What three surfaces meet at, as something two answers can be compared by
+    /// without a tolerance anywhere: each point's enclosure as the bits of its
+    /// two ends, in the order the meet put them, and a refusal as its own name.
+    fn what_they_meet_at(surfaces: &[Surface; 3]) -> Result<Vec<[u64; 6]>, String> {
+        let [first, second, third] = surfaces;
+        let answer = meet_of_three_surfaces(
+            [first, second, third],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        match answer {
+            Ok(MeetOfThree::At(places)) => Ok(places
+                .iter()
+                .map(|place| {
+                    let sides = place.enclosure();
+                    [
+                        sides[0].lo().to_bits(),
+                        sides[0].hi().to_bits(),
+                        sides[1].lo().to_bits(),
+                        sides[1].hi().to_bits(),
+                        sides[2].lo().to_bits(),
+                        sides[2].hi().to_bits(),
+                    ]
+                })
+                .collect()),
+            Ok(other) => Err(format!("{other:?}")),
+            Err(gave_up) => Err(format!("{gave_up:?}")),
+        }
+    }
+
+    fn with_its_axis_turned_round(surface: &Surface) -> Surface {
+        match surface {
+            Surface::Cylinder(pipe) => Surface::Cylinder(
+                Cylinder::new(pipe.axis().reversed(), pipe.radius()).expect("a turned pipe"),
+            ),
+            Surface::Cone(cone) => Surface::Cone(
+                Cone::new(cone.axis().reversed(), cone.slope()).expect("a turned cone"),
+            ),
+            Surface::Torus(ring) => Surface::Torus(
+                Torus::new(
+                    ring.axis().reversed(),
+                    ring.ring_radius(),
+                    ring.tube_radius(),
+                )
+                .expect("a turned bend"),
+            ),
+            Surface::Plane(_) | Surface::Sphere(_) => {
+                panic!("{surface:?} stores no axis to turn round")
+            }
+        }
+    }
+
+    fn every_curved_surface() -> Vec<Surface> {
+        let mut all = Vec::new();
+        for axis in every_axis() {
+            for radius in [1.0, 2.0, 3.0] {
+                all.push(Surface::Cylinder(
+                    Cylinder::new(axis, radius).expect("a radius"),
+                ));
+            }
+            for slope in [0.5, 2.0] {
+                all.push(Surface::Cone(Cone::new(axis, slope).expect("a slope")));
+            }
+            all.push(Surface::Torus(
+                Torus::new(axis, 3.0, 1.0).expect("a ring and a tube"),
+            ));
+        }
+        all
+    }
+
+    /// Pairs a plane can be asked about without the quartic: two pipes about one
+    /// line's worth of direction, or two cones of one slope about it.
+    fn every_pair_that_bends_the_same_way() -> Vec<(Surface, Surface)> {
+        let mut pairs = Vec::new();
+        for direction in every_direction() {
+            let places = [
+                Point::origin(),
+                Point::new(1.0, 0.0, 0.0),
+                Point::new(0.0, 2.0, -1.0),
+            ];
+            for (here, there) in [(0, 1), (0, 2), (1, 2)] {
+                let mine = Axis::new(places[here], direction).expect("a direction");
+                let theirs = Axis::new(places[there], direction).expect("a direction");
+                for radius in [1.0, 3.0] {
+                    pairs.push((
+                        Surface::Cylinder(Cylinder::new(mine, radius).expect("a radius")),
+                        Surface::Cylinder(Cylinder::new(theirs, 2.0).expect("a radius")),
+                    ));
+                }
+                pairs.push((
+                    Surface::Cone(Cone::new(mine, 0.5).expect("a slope")),
+                    Surface::Cone(Cone::new(theirs, 0.5).expect("a slope")),
+                ));
+            }
+        }
+        pairs
+    }
+
+    fn every_axis() -> Vec<Axis> {
+        let mut axes = Vec::new();
+        for origin in [
+            Point::origin(),
+            Point::new(1.0, 0.0, 0.0),
+            Point::new(0.0, 2.0, -1.0),
+        ] {
+            for direction in every_direction() {
+                axes.push(Axis::new(origin, direction).expect("a direction"));
+            }
+        }
+        axes
+    }
+
+    fn every_direction() -> [Vector; 4] {
+        [
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(1.0, 1.0, 0.0),
+            Vector::new(1.0, 2.0, 3.0),
+        ]
+    }
+
+    fn every_pair_of_planes() -> Vec<(Surface, Surface)> {
+        let all = every_plane();
+        let mut pairs = Vec::new();
+        for (here, one) in all.iter().enumerate() {
+            for other in all.iter().skip(here + 1) {
+                pairs.push((*one, *other));
+            }
+        }
+        pairs
+    }
+
+    fn every_plane() -> Vec<Surface> {
+        let mut all = Vec::new();
+        for normal in [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 1.0, 0.0),
+            Vector::new(0.0, 1.0, -1.0),
+            Vector::new(1.0, -2.0, 1.0),
+        ] {
+            for through in [
+                Point::origin(),
+                Point::new(0.0, 0.0, 2.0),
+                Point::new(1.0, 2.0, 3.0),
+            ] {
+                all.push(Surface::Plane(
+                    Plane::from_point_and_normal(through, normal).expect("a normal with length"),
+                ));
+            }
+        }
+        all
     }
 }
