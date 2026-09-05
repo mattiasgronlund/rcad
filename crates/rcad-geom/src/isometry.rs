@@ -225,6 +225,13 @@ impl Isometry {
     }
 
     /// The turn part, as `[w, i, j, k]`. Always has length one.
+    ///
+    /// **`glam`'s `DQuat::from_xyzw` wants those four in exactly the opposite
+    /// order.** Handing it this array as it stands compiles, runs, and builds
+    /// another turn of length one — a *different* turn, with nothing in the
+    /// types, the arithmetic or the drawing to say so — so the solid comes out
+    /// at the wrong angle and looks entirely plausible there. It wants
+    /// `[i, j, k, w]`.
     #[must_use]
     pub fn rotation_quaternion(&self) -> [f64; 4] {
         let turn = self.0.rotation.quaternion();
