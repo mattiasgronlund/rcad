@@ -16618,3 +16618,49 @@ a torus's centre are determined points. **Why the slide is a pipe's alone**: a
 plane stores one offset number where a pipe stores a whole three-number origin of
 which only the part across the axis matters, so two in-plane points either round
 to one offset or make two planes a rounding apart — never two names for one.
+
+### 51.10 The cheap form of a gate: a reader with a reason to be adversarial
+
+§51.8 records that a closing gate which re-derives every load-bearing number
+beats one that reads the lane's report. This unit found the cheap form of the
+same thing by accident, at the very end, and it is worth having because a gate
+costs a lane and this costs a sentence.
+
+**What happened.** A downstream consumer was told, in conversation, that a full
+circle is walked in *at least four steps* however coarse the deflection is —
+true, and `by_turning`'s quarter-turn cap is why. They restated it as *at least
+four points* and said they were about to turn it into a compile-time assertion.
+That sentence is wrong: `walk.rs:349` is `let points = (1..steps)`, both ends
+excluded because the ends are the corners, so `steps` steps emit `steps − 1`
+points and the floor is **three**. It was caught in the minute between their
+saying they would pin it and their pinning it.
+
+**A correct number in the wrong unit**, which is §51.4's family with a shorter
+fuse: *at least four* was true of steps and silent about points, and the two
+differ by exactly the ends-excluded rule both sides had already written down.
+
+**The active ingredient is not the test.** Nobody re-read the sentence more
+carefully. What happened is that the claim acquired **a reader with a reason to
+be adversarial about it** — being about to be pinned made it worth opening the
+emit line rather than trusting the recollection. A test is a reliable way to
+manufacture that reader on a schedule; the announcement of one manufactures it
+for free. So, alongside §51.6's rule:
+
+> **Telling the owner of a fact that you are about to depend on it is most of a
+> gate at none of the cost.** The moment to do it is when the claim is about to
+> become load-bearing, because that is when being wrong is expensive and
+> therefore when somebody will actually look.
+
+**And pin the mechanism, not the arithmetic.** The fix was not to pin `>= 3`.
+A pinned point count moves for two different reasons — the cap changing, or the
+emit arithmetic changing — and a reader hitting the failure cannot tell which.
+Pinned as *a closed run is cut into at least four segments*, a failure means the
+quarter-turn cap or the fewest-steps floor moved, which is a sentence somebody
+can act on. Correct and useless is a real category.
+
+**One argument for not copying a fact across a boundary**, better than the usual
+one. The usual reason is that two copies can disagree. The stronger reason is
+that a copy restated in the copier's own words can be **wrong and internally
+consistent**, and then it passes — where two copies that disagree are the case
+you find out about. Facts rcad measures are asserted in rcad's suite and cited,
+never restated, by anything downstream.
