@@ -716,6 +716,25 @@ fn how_far_a_flat_piece_strays(
 /// So the corners stay corners. Nothing else about the derivation moves, and the
 /// bound is never larger than the collapsed one — `rᵢ ≤ R_c` for every `i`.
 ///
+/// **A bound that is never larger is one the refinement stops against sooner, so
+/// meshes of cones got coarser, and they did.** That is not a side effect to
+/// apologise for; it is the same statement as the fix. Swept at 1e-4 of each
+/// solid's own size by `rcad-topo`'s
+/// `whether_a_coarser_deflection_always_meshes.rs`, the five cone solids in that
+/// family went `53742 → 32812` (frustum of slope 0.5 from 1 to 3),
+/// `56880 → 14550` (slope 0.25 from 2 to 8), `31666 → 29144` (slope 2 from 1 to
+/// 2), `71648 → 724` (pointed cone of slope 0.5 up to 4) and `77874 → 1026`
+/// (pointed cone of slope 1 up to 2). Every one of the other fifteen solids in
+/// that family came back with the identical triangle count at every rung, cones
+/// being the only surface this touched.
+///
+/// The claim worth making about those coarser meshes is **not** that nothing got
+/// coarser. It is that the smaller number is still an *upper* bound on how far
+/// the piece really strays, so a mesh the refinement stopped against it still
+/// meets the deflection it was asked for. That is what the §15.6 search below
+/// measures, and what `a_cone_patch_that_reaches_its_apex.rs` measures again
+/// against the cone's own closed-form distance on the meshes themselves.
+///
 /// **A patch spanning both nappes is bounded by nothing**, because
 /// `t·p_∥ = Σλᵢrᵢ` is false there. [`how_wide_a_cone_is_over`] is where the
 /// infinity comes from and says why it is the right answer.
@@ -1283,6 +1302,18 @@ pub enum CannotTriangulate {
     /// where it is wanted: the two coordinates it is between very nearly
     /// cancel and the triangulation will not take what is left, or the place it
     /// would go is already occupied.
+    ///
+    /// **Only the first of those two is reached by anything in this
+    /// workspace.** Counted rather than reasoned about: with the two ways
+    /// [`refine_the_inside`] can decline a point tallied separately and the
+    /// whole test suite run, this refusal came back exactly once in 1694 tests,
+    /// with no point declined for crowding and two declined by the
+    /// triangulation — `a_refinement_point_the_triangulation_will_not_take_is_refused_and_never_a_panic`.
+    /// The packing floor used to be reached by a pointed cone chasing a
+    /// deflection the collapsed bound invented for it, and
+    /// [`how_far_a_flat_piece_of_a_cone_strays`] no longer invents it. The floor
+    /// stays because it is what makes [`refine_the_inside`] terminate at all,
+    /// not because something is expected to land on it.
     #[error(
         "the mesh still strays {strays}, the deflection is {deflection}, and there is nowhere left to put a point"
     )]
@@ -1383,50 +1414,119 @@ mod tests {
         );
     }
 
-    /// [`how_far_a_flat_piece_strays`]'s cone arm is a published bound, so here
+    /// How the three corners of one search triangle sit up the cone: the `v` of
+    /// the corner at `u = 0`, of the one at `u = span`, and of the one at
+    /// `u = span/2`.
+    ///
+    /// **Three distinct heights in most of them, and that is the point.** The
+    /// bound charges every corner its *own* radius, so a family whose corners
+    /// all sit on one circle cannot tell it apart from the collapsed
+    /// `C²/(2·R_c)` this arm replaced — on `[far, far, near]` the two formulas
+    /// are algebraically the same number, `2·t·far·sin²(span/2)`, and a search
+    /// made only of those would have measured a bound the code does not
+    /// compute.
+    ///
+    /// The six `[far, far, near]` rows are still here, because that is the
+    /// shape a first row of triangles off a ring really has and one of them
+    /// reaches the apex. Every one of them scores **exactly 1** against the
+    /// collapsed form. The other six separate the two: the three frustum bands
+    /// `rcad-topo`'s own sweep meshes — from 1 to 3, from 2 to 8 and from 1 to
+    /// 2 — cut the way the refinement cuts them, so the third corner lands half
+    /// way up and the piece is charged `near/far` of what it was, a third, a
+    /// quarter and a half; the first of those three mirrored, so that the
+    /// widest corner is at the far end of the span rather than the near one and
+    /// nothing rests on which end `k` lands at; one with a corner **on** the apex,
+    /// which goes to an eighth; and one with **two** corners on the apex, which
+    /// in 3D is a ruling lying exactly on the cone and is charged nothing.
+    const HOW_THE_THREE_CORNERS_SIT: [[f64; 3]; 12] = [
+        [1.0, 1.0, 0.0],
+        [1.0, 1.0, 0.001],
+        [1.1, 1.1, 0.1],
+        [2.0, 2.0, 1.0],
+        [5.0, 5.0, 4.0],
+        [8.0, 8.0, 1.0],
+        [3.0, 1.0, 2.0],
+        [8.0, 2.0, 5.0],
+        [2.0, 1.0, 1.5],
+        [1.0, 3.0, 2.0],
+        [1.0, 0.0, 0.5],
+        [0.0, 0.0, 1.0],
+    ];
+
+    /// [`how_far_a_flat_piece_of_a_cone_strays`] is a published bound, so here
     /// is the search that could find something over it (`docs/decisions.md`
     /// §15.6).
     ///
-    /// The claim is `C²/(2·R_c·√(1 + t²))` with `C` the longest chord measured
-    /// on the circle of the piece's **widest** corner and `R_c = t·v_max` that
-    /// corner's own radius. What is measured against it is how far a point of
+    /// The claim is `maxᵢ rᵢ(1 − cos(uᵢ − u_k))/√(1 + t²)`, **one term per
+    /// corner**, with `rᵢ = t·vᵢ` that corner's own radius and `k` the corner
+    /// furthest up the cone. What is measured against it is how far a point of
     /// the flat triangle really sits off the cone, which for a point inside the
     /// nappe is `(t·p_∥ − ‖p_⊥‖)/√(1 + t²)` exactly — no sampling of the surface
     /// and no root-finding, because a cone is one of the few surfaces whose
     /// distance function is a closed form.
     ///
     /// The search is over eight slopes from a very shallow cone to a very steep
-    /// one, over triangles spanning from a hundredth of a turn to most of a
-    /// half turn, and over triangles that **reach the apex** — the case the
-    /// sphere's `L²/(3r)` has no answer for at all, and the reason this arm
-    /// exists. Each triangle is sampled on a barycentric grid.
+    /// one, over triangles spanning from a hundredth of a turn to most of a half
+    /// turn, and over the twelve ways [`HOW_THE_THREE_CORNERS_SIT`] puts the
+    /// three corners up it. Each triangle is sampled on a barycentric grid, and
+    /// each is given the `slop` [`triangulate`] would give it rather than none,
+    /// so what is measured is the number the mesher really compares against.
     ///
-    /// Over 240 triangles the worst uses **39.4%** of the bound, which is the
-    /// ordinary gap between a worst case and a drawn one and about the same
-    /// slack the sphere's own two-corner case carries. The lower assertion at
+    /// **It measures the corner-by-corner bound and not the collapsed one it
+    /// replaced**, and it says so with a number rather than by assertion:
+    /// [`what_the_collapsed_bound_would_have_charged`] is computed beside it on
+    /// every triangle, and the tightest triangle of the family sits at **an
+    /// eighth** of what the collapsed form charged. The frustum rows sit at a
+    /// half, a third and a quarter, which is where the tightening that cut the
+    /// slope-0.25 frustum's mesh from 56880 triangles to 14550 at 1e-4 of its
+    /// size lives. On the 48 rulings the collapsed form charges the whole span
+    /// at the far corner's radius, where the truth — and this bound — is nothing
+    /// at all.
+    ///
+    /// Over 576 triangles the worst uses **65.9%** of the bound, which is the
+    /// ordinary gap between a worst case and a drawn one. The lower assertion at
     /// the end is the other half of §15.6: a bound nothing ever comes near is a
     /// bound that proves nothing.
     #[test]
     fn how_far_a_flat_piece_of_a_cone_really_strays_stays_under_the_published_bound() {
         let mut worst_share = 0.0_f64;
+        let mut tightest_against_the_collapsed_form = 1.0_f64;
+        let mut rulings = 0usize;
         let mut checked = 0usize;
 
         for slope in [0.05, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 20.0] {
             let cone = Cone::new(Axis::z(), slope).expect("a positive slope");
             let surface = Surface::from(cone);
             for span in [0.01, 0.1, 0.5, 1.0, 1.6, 2.6] {
-                for near in [0.0, 0.001, 0.1, 1.0, 4.0] {
-                    let far = near + 1.0;
-                    // A triangle with two corners on the far ring and one on the
-                    // near one, which is what a mesh of a cone is made of, and
-                    // which is degenerate at the apex when `near` is zero.
-                    let at = [[0.0, far], [span, far], [span / 2.0, near]];
+                for [at_the_start, at_the_end, half_way_round] in HOW_THE_THREE_CORNERS_SIT {
+                    let at = [
+                        [0.0, at_the_start],
+                        [span, at_the_end],
+                        [span / 2.0, half_way_round],
+                    ];
                     let corners = at.map(|[round, along]| cone.point_at(round, along));
 
                     let across = the_range_of_each_coordinate(&at);
-                    let bound = how_far_a_flat_piece_strays(&surface, across, &at, 0.0);
-                    if bound == 0.0 {
-                        continue;
+                    let slop = how_far_a_point_lands_off_its_surface(&surface, &at);
+                    let bound = how_far_a_flat_piece_strays(&surface, across, &at, slop);
+                    let collapsed = what_the_collapsed_bound_would_have_charged(&cone, &at, slop);
+                    assert!(
+                        bound <= collapsed,
+                        "the corner-by-corner bound is never larger than the collapsed one, \
+                         and on a cone of slope {slope} spanning {span} over {at:?} it says \
+                         {bound} against {collapsed}"
+                    );
+                    // A piece the bound charges nothing for once the corners are
+                    // taken to be exactly on the cone is one that lies on the
+                    // cone: a ruling. Its share of the collapsed form is
+                    // whatever the rounding allowance happens to be over
+                    // whatever the span happens to cost, so it is counted rather
+                    // than averaged in.
+                    if how_far_a_flat_piece_strays(&surface, across, &at, 0.0) == 0.0 {
+                        rulings += 1;
+                    } else {
+                        tightest_against_the_collapsed_form =
+                            tightest_against_the_collapsed_form.min(bound / collapsed);
                     }
 
                     let mut furthest = 0.0_f64;
@@ -1450,15 +1550,37 @@ mod tests {
                     worst_share = worst_share.max(furthest / bound);
                     assert!(
                         furthest <= bound,
-                        "a triangle on a cone of slope {slope} spanning {span} from {near} \
+                        "a triangle on a cone of slope {slope} spanning {span} over {at:?} \
                          strays {furthest}, and the bound says {bound}"
                     );
                 }
             }
         }
 
-        println!("the worst of {checked} triangles used {worst_share} of its published bound");
-        assert!(checked > 200, "the search covered {checked} triangles");
+        println!(
+            "the worst of {checked} triangles used {worst_share} of its published bound; \
+             {rulings} of them are rulings the collapsed form charged the whole span for, \
+             and of the rest the tightest sits at {tightest_against_the_collapsed_form} \
+             of what the collapsed form charged"
+        );
+        assert!(checked > 500, "the search covered {checked} triangles");
+        // And it is the bound this file computes that was searched, not the
+        // collapsed one it replaced. Those two agree on every triangle whose
+        // corners share a circle, so a family made of only those would pass
+        // this whole test against either — which is exactly what the search
+        // here used to be. A ratio of one means the family stopped separating
+        // them; a ratio of one *everywhere* means the code went back.
+        assert!(
+            rulings > 0,
+            "not one triangle of the search lies on a ruling, which is the shape \
+             the collapsed bound could not see"
+        );
+        assert!(
+            tightest_against_the_collapsed_form < 0.2,
+            "the two formulas are supposed to be far apart on this family and the \
+             tightest triangle only got to {tightest_against_the_collapsed_form} \
+             of the collapsed form"
+        );
 
         // And a patch that spans both nappes is bounded by nothing at all,
         // because the derivation's `t·p_∥ = Σλᵢrᵢ` is false there. Nothing in
@@ -1480,6 +1602,34 @@ mod tests {
             "a bound nothing comes near is a bound that proves nothing: the worst was \
              {worst_share} of it"
         );
+    }
+
+    /// What the collapsed bound this arm replaced would have charged the same
+    /// piece: `C²/(2·R_c·√(1 + t²))`, with `R_c` the radius of the widest corner
+    /// and `C` the longest chord measured on **that** corner's circle.
+    ///
+    /// Here so the search above can show it is measuring the bound the code
+    /// really computes. Written as `2·R_c·sin²(Δ/2)`, which is the same number
+    /// with the squaring and the dividing cancelled out and no chance of a
+    /// rounding pulling it under the corner-by-corner form for a reason that is
+    /// not the derivation.
+    fn what_the_collapsed_bound_would_have_charged(
+        cone: &Cone,
+        at: &[[f64; 2]; 3],
+        slop: f64,
+    ) -> f64 {
+        let widest = at
+            .iter()
+            .map(|corner| cone.radius_at(corner[1].abs()))
+            .fold(0.0_f64, f64::max)
+            + slop;
+        let mut widest_turn = 0.0_f64;
+        for (which, corner) in at.iter().enumerate() {
+            for other in &at[(which + 1)..] {
+                widest_turn = widest_turn.max((corner[0] - other[0]).abs());
+            }
+        }
+        2.0 * widest * (widest_turn / 2.0).sin().powi(2) / cone.slope().hypot(1.0) + slop
     }
 
     /// [`HOW_FAR_THE_EVALUATOR_ROUNDS`] is a published bound, so here is the

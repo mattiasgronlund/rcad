@@ -42,9 +42,21 @@
 //! upward-closed. That is not the same as "a coarser deflection always meshes":
 //! it is twenty solids over six rungs with no counter-example in them, which is
 //! what §16.10 lets this file say and no more.
+//!
 //! [`the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves`] is
-//! what keeps the silence worth something — it reaches a refusal on purpose, so
-//! a sweep that saw none is a sweep that could have.
+//! what keeps the silence readable: it reaches a refusal on purpose, so a sweep
+//! that saw none is a sweep whose machinery can still report one. **It is not a
+//! stand-in for the refusal that went away, and it should not be read as one.**
+//! What it reaches is [`Error::DeflectionBelowWhatAMeshCanReach`], the up-front
+//! guard in `room_a_mesh_has_to_work_in` that runs before a single triangle is
+//! cut. What §51.7 reached was the packing floor inside `rcad-mesh`'s
+//! `refine_the_inside`, at the far end of the run. Different refusal, different
+//! code path; all the sentinel shows is that a refusal reaching this file is
+//! named and counted rather than swallowed.
+//!
+//! Nothing else in the workspace reaches the packing floor either, now that the
+//! cone bound no longer sends anything at it — counted, and written down on
+//! [`CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection`] itself.
 //!
 //! [`CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection`]:
 //!     rcad_mesh::CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection
@@ -407,6 +419,19 @@ fn a_rung_that_refused_above_one_that_worked(pattern: &[Rung]) -> Option<usize> 
 /// Pinned as a list rather than as a count, because §15.10 says a number that
 /// moves is reported with the cases that moved it: a solid joining this list
 /// fails here, and so does the old entry coming back.
+///
+/// **This pin on its own does not catch every way the cone bound could break,
+/// and here is one it misses.** Charge every corner the widest corner's radius
+/// while leaving the rest of the arm alone, and both pointed cones refuse at
+/// `1e-4` and mesh at every rung above it — which is upward-closed, so this list
+/// stays empty and this test passes with the mesher broken. Measured, not
+/// argued: the same mutation makes
+/// [`the_stretch_the_pointed_cone_used_to_refuse_in_meshes_all_the_way_through`]
+/// and [`which_refusals_never_turned_into_a_mesh_anywhere_on_the_ladder`] both
+/// fail. The second of those runs on this very family over these very six
+/// rungs, so it is not the twenty-one-rung ladder alone that carries the file —
+/// what this list cannot see is a refusal with nothing finer than it, and
+/// [`WHAT_EVERY_REFUSAL_HERE_LOOKED_LIKE`] sees that.
 const THE_ONES_THAT_ARE_NOT_UPWARD_CLOSED: [&str; 0] = [];
 
 /// The whole sweep, printed rung by rung and then judged.
@@ -417,12 +442,14 @@ const THE_ONES_THAT_ARE_NOT_UPWARD_CLOSED: [&str; 0] = [];
 /// exactly [`THE_ONES_THAT_ARE_NOT_UPWARD_CLOSED`] — which is now none of them.
 ///
 /// **There is no longer an assertion that something refused here**, because
-/// after the §51.7 fix nothing on this family does, at any of these rungs. The
-/// job that assertion was doing — stopping a silent sweep from reading as a
-/// result — is done by
-/// [`the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves`],
-/// which reaches a refusal on purpose and shows it healing when the deflection
-/// is loosened.
+/// after the §51.7 fix nothing on this family does, at any of these rungs.
+/// [`the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves`] is
+/// what stands in its place, and it stands in for **part** of the job: it
+/// reaches a refusal on purpose and shows it healing, so the machinery that
+/// would report one is known to work. It does not reach the refusal this
+/// assertion used to see — that was `rcad-mesh`'s packing floor at the end of
+/// the refinement and this is the deflection floor before it starts. The module
+/// doc says which is which.
 #[test]
 fn the_verdict_is_scoped_to_the_family_that_was_swept() {
     let family = the_family();
@@ -568,6 +595,26 @@ fn a_success_with_a_refusal_above_it_is_what_this_is_looking_for() {
 /// all mesh, on the shape that was the counter-example, so the ragged edge
 /// coming back fails loudly and at the deflections it came back at.
 ///
+/// **What was established about that pattern, and what was not.** Running this
+/// very test with `crates/rcad-mesh/src/triangulate.rs` put back to the commit
+/// before the fix gives, rung by rung: meshes at `1e-4` through `3.162e-4`,
+/// a refusal at `3.981e-4`, meshes at `5.012e-4` and `6.310e-4`, refusals at
+/// `7.943e-4`, `1.000e-3` and `1.259e-3`, a mesh at `1.585e-3`, refusals at
+/// `1.995e-3` and `2.512e-3`, then meshes from `3.162e-3` to `1e-2`. Six
+/// refusals, nine meshes finer than the coarsest of them, the answer changing
+/// six times going up. Why each individual refusal happened is settled: the
+/// collapsed bound charged a ruling for a turn it does not take, and the
+/// refinement fanned the apex until the packing floor declined the next point.
+///
+/// **Why that came out ragged rather than as one floor or one band was never
+/// worked out, and nothing here should be read as saying it was.** A floor and
+/// a band are both monotone and this was neither, so whatever decided which
+/// rungs fell on which side was finer-grained than "the bound was too big" —
+/// but no law was traced and none is claimed. It cannot be traced from this
+/// tree any more either, since the pattern only exists under a bound the code
+/// no longer computes. That is a fair place to leave it: the cause is removed,
+/// and the assertion below is what would notice the pattern returning.
+///
 /// The triangle counts are printed and not asserted. A finer deflection giving
 /// more triangles is what the mesher is for, but it is not a claim this file
 /// establishes and §16.10 says an unmeasured claim does not go in a test.
@@ -632,6 +679,15 @@ fn the_stretch_the_pointed_cone_used_to_refuse_in_meshes_all_the_way_through() {
 /// So: the same solid the family holds, asked for `1e-16` of a unit and then for
 /// a ten-thousandth of its size. Refused, then meshed — the monotone shape, and
 /// the contrast the cone is measured against.
+///
+/// **What this does not cover.** The refusal reached here is
+/// [`Error::DeflectionBelowWhatAMeshCanReach`], which `room_a_mesh_has_to_work_in`
+/// raises before any triangle is cut. The §51.7 refusal this file used to see
+/// was `RanOutOfRoomBeforeMeetingTheDeflection`, raised by `rcad-mesh`'s
+/// `refine_the_inside` when the packing floor leaves it nowhere to put the next
+/// point — a different variant on a different code path at the other end of the
+/// run. This test is not evidence about that one, and the sweep above no longer
+/// reaches it.
 #[test]
 fn the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves() {
     let mut model = a_model(1000.0);
