@@ -16508,6 +16508,16 @@ written **before** the work, in the planning section, quoting an earlier unit.
 > naming the test or command that produced it.** A row that cannot name one is
 > quoted as prose, not as a bound.
 
+**A rule that operates on prose needs the prose written to be found**, and this
+half came from rscene's editor rather than from here. *Grep for the reason, not
+the conclusion* is useless when the reason was paraphrased three different ways
+and only one of them sat near the distinctive word — which is what happened to
+"coarser is likelier to succeed" in that document, written three times in three
+wordings and retired in one of them. So: **a claim that other claims rest on is
+stated once, in a fixed phrase, and cited rather than restated.** The test of
+whether a load-bearing sentence is written well enough is whether one grep finds
+every place that leans on it.
+
 ### 51.7 What stands, and what this unit made more likely dirty
 
 | open | where |
@@ -16517,6 +16527,10 @@ written **before** the work, in the planning section, quoting an earlier unit.
 | **one pipe, two names, from an origin slid along its own line** | the half §51.9 did **not** close, because folding it needs a projection and a projection rounds. A cone's apex and a bend's centre cannot slide, so it is the pipe alone. Masked today — two solids on one pipe refuse at *a point inside a piece of a face* before a corner is named, identically whichever way it is spelled — and pinned so that lifting that refusal breaks the pin rather than quietly reopening this. **134 corpus files hold two slid spellings of one pipe and 9 hold them on faces that share a corner**, against 36 and **0** for the reversal, so the half left open is the half real files actually reach |
 | **`the_way_it_is_parametrised_about` is odd in the stored axis direction** | `validate.rs`, so a cap circle reads as running the other way under a reversed pipe. Not an identity question and the fold does not touch it, but it is the one place two spellings of one pipe are genuinely not interchangeable, and whoever moves the coincident-pipe wall meets it |
 | **`fuse(A, B)` and `fuse(B, A)` refuse with different provenance over placed solids** | one records `Exact`, the other a `Constructed` box `5.7e-14` wide, on solids built with `Isometry::translation` where the builder-built control records `Exact` both ways. Both refuse, so no wrong answer — but §17.4's bit-for-bit agreement is about answers and says nothing about records |
+| **`room_left_over` waves a walk through and records nothing** | `walk.rs:1170-1182`. Three production sites ask `Policy::wobble_is_acceptable`; two carry the signal — `policy.rs:333` resolves the record with `Cause::UndecidableResolved` and pushes it to the log, `walk.rs:667` returns the deviation as an `Approximation` — and this one takes a `&Policy`, **no log**, and hands back `Ok(None)`, which a caller cannot tell from a stretch that legitimately needed no interior points. CLAUDE.md records provenance on non-certified outcomes, so this is the rule unenforced at one site. It is also the route by which a **tolerant** caller gets an empty point list where a certified one is refused (`a_walk_that_came_back_with_no_points.rs`), and the STEP door is tolerant — so it is how a real file reaches a starved polyline with nothing said about it |
+| **what the mesher does with an empty walk list on a *closed* edge** | unknown, and a different question from the winding one that file is about. A closed edge's one corner sits at both ends of its polyline, so an empty list makes a wire of a single point. Raised by rscene assembling three separately-correct rules; not reproduced here |
+| **the pointed cone refuses at 1e-3 of its own size with meshes either side** | `RanOutOfRoomBeforeMeetingTheDeflection` on `cones::a_pointed_cone(1.0, 2.0)`, a shape the kernel builds itself: 6 refusals interleaved with 9 finer successes across `1e-4 … 1e-2`. Its own doc calls it a refinement-geometry accident. **Refusals are therefore not monotone in deflection**, which no amount of extra rungs repairs, and `whether_a_coarser_deflection_always_meshes.rs` pins the case list so a new one fails rather than passing quietly |
+| **an oblique plane cutting a cylinder** | the ellipse's semi-major axis is `r/cos θ`, so past roughly 60° of tilt a boundary side costs more than the whole deflection and `BoundarySideStraysFurtherThanTheDeflection` fires. Curved-against-flat, so outside what §51.7's deviation measurement covered. Expected to be a **gap** — refining the ellipse against its own reach rather than the cylinder's radius looks like a one-line change in what `walk` is handed — but nobody has built the case. A bar fused against a steeply tilted block is the shape |
 | **a mis-signed shell reaching `nest_the_shells`** | both families that flip the sign refuse earlier in the arrangement. Neither barrier is principled — the rod's union answered at `1e-6` and `1e-7` — so it is unproven in both directions. The fix removes the question rather than settling it |
 | **`how_much_space_a_curved_solid_encloses`** | in `validate.rs`, still compares refinements against a rounded `f64`. The sign it reads is now exact; the comparison is not audited |
 | **the fuzz decoder draws 3 of 5 kinds** | §51.3. Wants the corpus re-minimised with it |
