@@ -16513,7 +16513,10 @@ written **before** the work, in the planning section, quoting an earlier unit.
 | open | where |
 |---|---|
 | **`three_surfaces.rs` wants two flat surfaces** | the new wall for `AFrustumAgainstABar`, 96 of 96, pinned with its reason. §50.6 kept it out |
-| **one pipe, two names, from an axis written either way** | `Cylinder::new(Axis::z(), 2.0)` and `Cylinder::new(Axis::z().reversed(), 2.0)` are one surface whose names differ in three of nine numbers. `three_planes_faced_the_one_way` canonicalises this for planes and hands any triple with a curved surface over untouched — deliberately, with a reason about a plane's reversal that is **silent about a curved surface's axis**. Same "one surface, two names" class as §51.2 item 2, different mechanism, unfixed |
+| ~~**one pipe, two names, from an axis written either way**~~ | **closed by §51.9.** The geometry key folds a pipe's, a cone's and a bend's axis direction as it already folded a plane's facing |
+| **one pipe, two names, from an origin slid along its own line** | the half §51.9 did **not** close, because folding it needs a projection and a projection rounds. A cone's apex and a bend's centre cannot slide, so it is the pipe alone. Masked today — two solids on one pipe refuse at *a point inside a piece of a face* before a corner is named, identically whichever way it is spelled — and pinned so that lifting that refusal breaks the pin rather than quietly reopening this. **134 corpus files hold two slid spellings of one pipe and 9 hold them on faces that share a corner**, against 36 and **0** for the reversal, so the half left open is the half real files actually reach |
+| **`the_way_it_is_parametrised_about` is odd in the stored axis direction** | `validate.rs`, so a cap circle reads as running the other way under a reversed pipe. Not an identity question and the fold does not touch it, but it is the one place two spellings of one pipe are genuinely not interchangeable, and whoever moves the coincident-pipe wall meets it |
+| **`fuse(A, B)` and `fuse(B, A)` refuse with different provenance over placed solids** | one records `Exact`, the other a `Constructed` box `5.7e-14` wide, on solids built with `Isometry::translation` where the builder-built control records `Exact` both ways. Both refuse, so no wrong answer — but §17.4's bit-for-bit agreement is about answers and says nothing about records |
 | **a mis-signed shell reaching `nest_the_shells`** | both families that flip the sign refuse earlier in the arrangement. Neither barrier is principled — the rod's union answered at `1e-6` and `1e-7` — so it is unproven in both directions. The fix removes the question rather than settling it |
 | **`how_much_space_a_curved_solid_encloses`** | in `validate.rs`, still compares refinements against a rounded `f64`. The sign it reads is now exact; the comparison is not audited |
 | **the fuzz decoder draws 3 of 5 kinds** | §51.3. Wants the corpus re-minimised with it |
@@ -16539,3 +16542,62 @@ written **before** the work, in the planning section, quoting an earlier unit.
   brief said commit as you go; had it been killed, all of it was lost. Worth a
   hook rather than another sentence in a brief, on §50.8's reasoning that
   recording a rule has been tried.
+
+### 51.9 One pipe, one name — the reversal folded, the slide left open
+
+Run after §51 was written, on the row §51.7 listed second.
+
+**The false sentence is the finding.** `name_of_the_surface_either_way_round` —
+the helper written for exactly this problem, which already folded a plane's
+facing — ended its doc with *"A ball and a pipe have no reversed form at all and
+are their own key."* A ball genuinely has none: its centre and its radius are all
+it holds and neither has a sign to turn round. **A pipe has one, and so do a cone
+and a bend.** `Axis::reversed` keeps the origin and negates the direction, so
+`Cylinder::new(Axis::z(), 2.0)` and `Cylinder::new(Axis::z().reversed(), 2.0)`
+are one surface holding different numbers in three of nine slots. A cone is
+double-napped and a bend's centre cannot move, so turning either round is the
+same point set too. **A §16.10 negative claim, carried as a paragraph, inside the
+function whose whole job was this class** — the seventh sentence of §51.4's shape
+and the one that had been load-bearing longest.
+
+**Turning a stored axis round moves no corner, and it is measured.** 72 curved
+surfaces against 153 plane pairs plus 36 same-bend curved pairs against 18
+planes, every subset of the axes turned round: **12 960 comparisons, 7 584 of
+them placing corners, 0 differences** — same points, same order, bit for bit,
+refusals matching refusals. The instrument is live: swapping the reversal for an
+origin *slide* of 0.1 gives **587 of 12 960 differing**.
+
+**It renumbers no `which`, for a structural reason.** `which` counts along the
+line the **two planes** cross in; `how_it_sorts_against` compares the kind first
+and two of three must be flat to be solved at all, so a curved surface is always
+the third row and the line is fixed by the other two. `three_planes_faced_the_one_way`'s
+stated reason for handing curved triples over untouched — *"turning a plane round
+turns that line round"* — is about a **plane**, and does not carry to an axis.
+
+**The fold went in the geometry key and nowhere else.**
+`name_of_the_surface_either_way_round` and `names_of_the_three_surfaces` fold the
+axis direction the way they fold a plane's facing. **Not**
+`how_it_sorts_against` or `name_of_surface_bits`: their job is a total order on
+stored numbers, folding there makes two distinct bit patterns compare *equal*,
+and `canonical_cut_surfaces` then dedups on a tie broken by whichever face handed
+its cuts in first — reintroducing the order dependence the fixed order exists to
+remove. And no curved analogue of `three_planes_faced_the_one_way`, because the
+sweep says the solve was already neutral and there is nothing for one to do.
+
+**No fuse-level test passes, and the wall is demonstrated rather than asserted.**
+Two spellings of one pipe need two solids carrying that pipe, i.e. coincident
+cylindrical faces, and the fuse refuses that first — `Undecidable`, *a point
+inside a piece of a face*, enclosure `inf`, identically for one spelling and for
+two, found independently by both lanes. So the fuse-level row is a **pin in
+§51.1's shape**: it asserts the refusal is the same whichever way the pipe is
+written, and fails the day the wall moves.
+
+**A fifth spelling freedom does not exist**, and that is counted rather than
+asserted: stored numbers against real degrees of freedom are plane 4/3, ball 4/4,
+pipe 7/5, cone 7/6, torus 8/7, and every leftover is the direction's length, its
+sign, or the pipe's slide. A negative radius or a negative slope is refused, not
+folded; a torus with its radii swapped is a different surface; a cone's apex and
+a torus's centre are determined points. **Why the slide is a pipe's alone**: a
+plane stores one offset number where a pipe stores a whole three-number origin of
+which only the part across the axis matters, so two in-plane points either round
+to one offset or make two planes a rounding apart — never two names for one.
