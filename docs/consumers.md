@@ -10,6 +10,32 @@ build for it, and what rcad asks in return. It does **not** restate the
 consumer's own reasoning — where a consumer keeps that text, this file points at
 it, because the side that changes more often should own it and two copies drift.
 
+### One exception to *a fact rcad measures gets no second answer downstream*
+
+The rule is about **numbers**. A bound or a rate copied downstream is a second
+thing to keep right, and a copy restated in the copier's own words can be wrong
+and internally consistent, which is the case you never find out about.
+
+A downstream assertion that carries **no number** is not that. rscene asserts
+that rcad's five surfaces do not all cross their two coordinates the same way —
+never which surface is which — so a change to any one chart's winding moves
+rcad's table test and leaves rscene's untouched, and the two cannot drift apart
+in the way this rule guards against.
+
+What makes it worth keeping rather than merely harmless is **what its failure
+would mean**, and it is a category worth having a name for:
+
+> **A test whose failure is news that you can delete something.** If rcad's five
+> charts ever became uniform, every normal rscene draws would still be correct
+> and rscene would simply be carrying gradient machinery it no longer needs. Its
+> assertion failing does not say *rscene is broken*; it says *rscene is
+> over-engineered*.
+
+A design that survives only because of a fact about somebody else's code should
+hear when that fact changes, and nothing in either tree would otherwise say it.
+Both sides keeping a test is right here for the same reason it is usually wrong:
+these two answer different questions, and only one of them has a number in it.
+
 ## rscene
 
 A scene layer over rcad: takes a `Model`, draws it, and answers *what did I
