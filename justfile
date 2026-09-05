@@ -1,5 +1,16 @@
 default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks lint test deny
 
+# The STEP corpus lives outside the tree, because it is other people's CAD files
+# and this repo has no business carrying them. Four tests in `rcad-step` skip
+# without it, so `just default` quietly runs four tests short.
+#
+# Derived rather than hardcoded so that every worktree gets the same answer:
+# `--git-common-dir` points at the *main* repo's `.git` from inside a worktree,
+# so two `parent_directory` calls land beside the repo wherever it is run from.
+# Before this, lanes exported it by hand — 412 times on 2026-09-05 — and the
+# ones that forgot got four silent skips rather than a failure.
+export RCAD_STEP_CORPUS := env_var_or_default("RCAD_STEP_CORPUS", parent_directory(parent_directory(`git rev-parse --path-format=absolute --git-common-dir`)) / "rcad-step-corpus")
+
 check:
     cargo check --workspace --all-targets
 
@@ -263,9 +274,11 @@ test-ignored:
 #
 # It is in `default` because the hook fails in the direction that is hard to
 # notice: a pattern that stops matching lets the thing through silently, which
-# is the same failure mode the hook exists to prevent. Two of its eleven cases
-# are drafts of itself that were wrong — a commit message describing the rule,
-# and a recipe whose own body writes .rs fixtures.
+# is the same failure mode the hook exists to prevent. Two of its cases are
+# drafts of itself that were wrong — a commit message describing the rule, and
+# a recipe whose own body writes .rs fixtures — and five more came from the
+# 2026-09-05 session review: three shapes it let through, two it wrongly
+# refused in the scratchpad.
 check-hooks:
     @.claude/hooks/check-patching-hook.sh
 
@@ -280,6 +293,20 @@ check-enums:
 test:
     cargo nextest run --workspace
     cargo test --workspace --doc
+
+# One test, or a few, with the corpus and the build cache already in place.
+#
+# `just test` is the whole workspace and takes minutes, so a lane wanting a
+# single test reached past `just` for `mise exec -- cargo nextest run ...` and
+# hand-typed the corpus path with it. On 2026-09-05 that was 456 targeted runs
+# against 104 full ones, which makes the fast path the common one and the one
+# worth making correct. Everything after the recipe name goes to nextest:
+#
+#     just t how_often_a_fuse_with_a_cone_refuses
+#     just t -p rcad-geom
+#     just t -E 'test(/walk/)'
+t *args:
+    cargo nextest run {{ args }}
 
 lint:
     cargo fmt --all -- --check

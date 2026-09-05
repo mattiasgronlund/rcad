@@ -58,11 +58,20 @@ These are the ones that are expensive to notice late.
 (`cargo-nextest`, `cargo-deny`, `taplo`, `just`). Run things through
 `just` — the same recipes CI runs. Never install a tool ad hoc.
 
+**`just t <args>` runs one test or a few.** Everything after the name goes to
+nextest: `just t how_often_a_fuse_with_a_cone_refuses`, `just t -p rcad-geom`,
+`just t -E 'test(/walk/)'`. Reaching past `just` for a bare `cargo nextest run`
+is what makes a lane hand-type `RCAD_STEP_CORPUS`; the recipe already has it,
+and the four corpus tests skip in silence when it is missing.
+
 ## Editing files
 
-`Read` first, then `Edit` or `Write`. **Never patch a source file through a shell
+`Read` first, then `Edit` or `Write`. **Never patch a tracked file through a shell
 heredoc** — no `python3 - <<'PY'` string replacement, no `sed -i` on a `.rs` file,
-no `cat > file.rs <<'EOF'`.
+no `cat > file.rs <<'EOF'`. This covers `.rs`, `.toml` and `.md` alike: a
+`docs/` rewrite that silently matches nothing is the same bug as a `src/` one.
+Writing under `/tmp` or the scratchpad is untouched — a throwaway probe crate is
+what Bash is kept for.
 
 This is a cost rule, not a style one. In the M5 run (2026-09-02) the lanes patched
 files with Python heredocs 233 times at ~620 tokens a call: 145k tokens, a sixth

@@ -25,6 +25,21 @@
     "command": "echo 'fn sneaky() {}' >> crates/rcad-mesh/src/lib.rs"
   },
   {
+    "expect": "deny",
+    "why": "the 2026-09-05 shape: an interpreter rewriting a tracked doc",
+    "command": "python3 - <<'PY'\nimport pathlib\np = pathlib.Path('docs/roadmap.md')\ns = p.read_text()\np.write_text(s.replace('old', 'new'))\nPY"
+  },
+  {
+    "expect": "deny",
+    "why": "a tracked manifest is not a scratch file",
+    "command": "cat > mise.toml <<'EOF'\n[settings]\nlockfile = true\nEOF"
+  },
+  {
+    "expect": "deny",
+    "why": "sed in place on a tracked doc",
+    "command": "sed -i 's/§51/§52/' docs/decisions.md"
+  },
+  {
     "expect": "allow",
     "why": "sed -n reads, it does not write",
     "command": "sed -n '170,190p' crates/rcad-geom/src/intersect.rs"
@@ -53,5 +68,30 @@
     "expect": "allow",
     "why": "writing a shell script, not Rust",
     "command": "cat > /tmp/measure.sh <<'SH'\necho hi\nSH"
+  },
+  {
+    "expect": "allow",
+    "why": "a throwaway probe crate under /tmp is what Bash is kept for",
+    "command": "cat > /tmp/claude-1000/scratchpad/zeroprobe/src/main.rs <<'EOF'\nfn main() {}\nEOF"
+  },
+  {
+    "expect": "allow",
+    "why": "a probe crate's manifest is scratch too",
+    "command": "cat > /tmp/claude-1000/scratchpad/zeroprobe/Cargo.toml <<'EOF'\n[package]\nname = \"zeroprobe\"\nEOF"
+  },
+  {
+    "expect": "allow",
+    "why": "fixing up a scratch probe in place harms nothing the tree keeps",
+    "command": "sed -i 's/\\.low()/.lo()/g' /tmp/claude-1000/scratchpad/zeroprobe/src/main.rs"
+  },
+  {
+    "expect": "allow",
+    "why": "a measurement report written to the scratchpad",
+    "command": "python3 - <<'PY'\nopen('/tmp/claude-1000/scratchpad/sweep.md', 'w').write(report)\nPY"
+  },
+  {
+    "expect": "allow",
+    "why": "redirecting a read of a tracked file into a scratch file",
+    "command": "sed -n '1,50p' docs/decisions.md > /tmp/head.txt"
   }
 ]
