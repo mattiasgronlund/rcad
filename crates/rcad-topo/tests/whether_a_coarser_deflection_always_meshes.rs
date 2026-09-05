@@ -642,6 +642,51 @@ fn the_pointed_cones_refusals_are_interleaved_with_meshes_rather_than_one_band()
     }
 }
 
+/// The one refusal a relative ladder cannot reach, reached with an absolute
+/// deflection instead — because otherwise this file would report it as absent
+/// and mean two different things by that.
+///
+/// [`Error::DeflectionBelowWhatAMeshCanReach`] is the refusal that is
+/// unambiguously about the deflection, and it never appeared in the sweep above.
+/// That is not because the sweep could not provoke it: it is because the floor
+/// is set by how far a point rounds where the solid sits, which for a ball one
+/// unit across a thousand units out is around `1e-13` — eight decades below the
+/// finest rung a consumer would ever call "relative". A file that reported it as
+/// never happening, alongside a cone whose refusal is a real hole, would be
+/// putting two very different absences under one word.
+///
+/// So: the same solid the family holds, asked for `1e-16` of a unit and then for
+/// a ten-thousandth of its size. Refused, then meshed — the monotone shape, and
+/// the contrast the cone is measured against.
+#[test]
+fn the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves() {
+    let mut model = a_model(1000.0);
+    let ball = model
+        .add_ball(
+            1.0,
+            &Isometry::translation(Vector::new(1000.0, 0.0, 0.0)).expect("a finite placement"),
+        )
+        .expect("a ball a thousand units out");
+    let shape = Shape {
+        what: "ball of radius 1 a thousand units out".to_owned(),
+        model,
+        solid: ball,
+        size: 1.0,
+    };
+
+    assert_eq!(
+        how_a_mesh_answered(&shape, 1e-16),
+        Rung::Refused("the deflection is under the floor".to_owned()),
+        "a ten-thousandth of a femtometre on a solid a thousand units out is \
+         under what the arithmetic can place a point to"
+    );
+    assert!(
+        how_a_mesh_answered(&shape, HOW_COARSE[0] * shape.size).meshed(),
+        "the finest rung of the relative ladder is far above that floor, which \
+         is why the sweep never saw this refusal"
+    );
+}
+
 /// Every refusal kind that appeared, with whether the same solid ever meshed at
 /// some other rung.
 ///
