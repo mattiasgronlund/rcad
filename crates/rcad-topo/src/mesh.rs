@@ -744,11 +744,13 @@ impl BuildingAMesh {
     ///
     /// **Which of the two poles the face reaches is read off the loop's own
     /// direction and costs no arithmetic.** A face keeps its material on the
-    /// left of its wire, and a surface's two coordinates are right-handed about
+    /// left of its wire, and a **ball's** two coordinates are right-handed about
     /// its outward normal — `∂u × ∂v` is `R² cos v` times it, and `cos v` is
     /// positive everywhere but the poles — so the left of "longitude
     /// increasing" is "latitude increasing". A loop running that way is the
-    /// boundary of the piece **above** it.
+    /// boundary of the piece **above** it. Said of a ball rather than of a
+    /// surface: a torus crosses its coordinates the other way, and this reads a
+    /// sign off the handedness (`every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`).
     ///
     /// `None` when the surface does not pinch to a point. A cylindrical face
     /// bounded by one curve right round it is half an endless tube, which is not
@@ -1462,12 +1464,19 @@ fn how_far_round(around: &WalkedLoop) -> f64 {
 /// **positive when the face's material is inside the loop** and negative when it
 /// is outside.
 ///
-/// A surface's two coordinates are right-handed about its outward normal —
-/// `∂u × ∂v` is `R² cos v` times it on a ball — and a wire keeps its face's
-/// material on its left, so a loop with the material inside it runs
+/// A **pinching** surface's two coordinates are right-handed about its outward
+/// normal — `∂u × ∂v` is `R² cos v` times it on a ball — and a wire keeps its
+/// face's material on its left, so a loop with the material inside it runs
 /// anticlockwise in `(u, v)` and the shoelace sum comes out positive. The number
 /// itself is not used, only its sign, and it is an area in radians squared
 /// rather than a size in space.
+///
+/// **Right-handed is not true of every surface, and the caller is what makes
+/// that safe.** A torus crosses its two coordinates *into* the material, so the
+/// sign of this sum would read backwards there. It never gets the chance: the
+/// only call site whose sign matters is guarded by `where_this_surface_pinches`,
+/// and a torus pinches nowhere. `every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
+/// in `rcad-geom` is the measurement, over all five surfaces.
 fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
     let corners = &around.corners;
     let mut twice_the_area = 0.0;

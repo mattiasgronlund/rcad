@@ -17051,3 +17051,30 @@ difference is not rigour but direction: the second one can be run.
 A consumer hit the same shape twice in one week from opposite directions, and
 reported it; that it was found independently outside this repo is why it is
 recorded as a shape rather than as one more row.
+
+**A partial justification is the dangerous case, not an absent one.** Applied as
+a sweep at the consumer's end the same afternoon, the rule caught a false claim
+on its first pass, and the way it had survived is the part worth keeping: the
+claim covered **two of four** cases and gave a good reason for those two, so it
+read as *more* thorough than a claim covering none — and therefore deterred the
+checking that an obviously bare assertion would have invited. A missing reason
+advertises itself. A reason that is sound about half its subject does not, and it
+is the half nobody looks at that is load-bearing.
+
+So when a negative claim covers several cases, the number it covers is part of
+the claim: *none of these four is reachable* wants four citations or an argument
+that visibly ranges over all four, and anything less is written as covering what
+it actually covers.
+
+**And the way an unchecked fact gets in is that nobody thinks it is a claim.**
+The restated measurement in `docs/consumers.md` that §52.11's handedness row
+sends a lane to replace did not arrive as a demand or a specification. It arrived
+as a courtesy — one side telling the other something it had noticed, offered
+rather than filed — and an offered observation does not feel like it needs a
+citation to the person offering it, nor like it needs checking to the person
+merging it. It becomes a claim the moment it lands in the other side's file, and
+by then both of the people who could have doubted it have already decided it was
+not that kind of sentence.
+
+> **A fact about rcad written down in rcad's tree is a claim, whatever the tone
+> it arrived in.** The test is where it ends up, not how it was offered.
