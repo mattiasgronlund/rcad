@@ -317,7 +317,8 @@ decision resting on it in either direction.
   act on. A consumer that only wants to hear about numbers big enough to matter
   trains the producer to filter, and **the producer's filter is invisible to the
   consumer by construction** — the consumer cannot see what it was not told, so it
-  never finds out the threshold exists. rscene argued this after being told about
+  never finds out the threshold exists. **A silence cannot be audited**, and that is
+  the whole argument. rscene argued this after being told about
   an understatement of `2.4e-5` that changed nothing it runs, and it is right: the
   useful half of that message was not the size but that the term is charged against
   corners a face can outrun, which is what will matter when somebody meshes
