@@ -430,16 +430,17 @@ fn the_axis_written_the_one_way(bits: &mut [u64; 9], direction: Vector) {
 /// same nine slots wide. Two such pipes fold together exactly when they are one
 /// line, because the two coordinates left over are compared as stored.
 ///
-/// That is not a lucky special case, it is the case real files hold. A stored
-/// direction is scaled to length one by [`Axis::new`], and no unit
-/// vector with two non-zero dyadic components exists — the rational points of
-/// the unit circle with a power-of-two denominator are the four on the axes — so
-/// a slanted axis stores a direction that is only nearly unit, `t·w` is then a
+/// That is not a lucky special case, it is the case real files hold. Every
+/// `f64` is a dyadic rational, and the only unit vector all of whose components
+/// are dyadic is one along a coordinate axis — `m² + n² + p² = 4^k` forces `m`,
+/// `n` and `p` all even and descends to `1 = 1 + 0 + 0`. So [`Axis::new`] can
+/// scale a slanted direction to length one only approximately, `t·w` is then a
 /// rounded product, and `p + t·w` rarely lands back on the line. Over all **367
-/// corpus files**, taking every distinct `CYLINDRICAL_SURFACE` spelling built
-/// the way `rcad-step`'s `geometry.rs` builds one (8 357 of them) and every pair
-/// within one file that shares its radius bits, its folded direction bits and
-/// lies inside `1e-9` of the other's axis — **10 773 pairs, of which 9 379 are
+/// corpus files**, taking every `CYLINDRICAL_SURFACE` spelling built the way
+/// `rcad-step`'s `geometry.rs` builds one and counted once per file it appears
+/// in (8 357 of them), and every pair inside one file that shares its radius
+/// bits and its folded direction bits, holds different origin bits, and sits
+/// within `1e-9` of the other's axis — **10 773 pairs, of which 9 379 are
 /// exactly one line and 1 394 are a rounding apart**. Split by direction:
 /// axis-aligned **9 379 exact against 16 a rounding apart**, slanted **0 exact
 /// against 1 378**. This fold joins **9 379 of the 9 379** and joins nothing
