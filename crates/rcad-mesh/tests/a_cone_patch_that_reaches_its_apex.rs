@@ -101,18 +101,18 @@ fn a_cone_cut_up_to_its_apex_meshes_at_every_deflection_over_the_stretch() {
 /// The one triangle the old bound could not see, on its own.
 ///
 /// A patch cut up to the apex has the apex at two longitudes, so some triangle
-/// has both of them. Its third corner sits `v` up the cone, and the deflection
-/// here is set **far under** what the old bound charged that triangle —
-/// `t·v/√(1 + t²)`, which for this cone and a third corner anywhere in the patch
-/// is at least a tenth of the cone's height. So a mesh coming back at all is the
-/// claim: under the old bound this refused with
-/// `RanOutOfRoomBeforeMeetingTheDeflection` however many points went in, because
-/// the triangle it was chasing lies on a ruling and never strays at all.
+/// has both of them. In 3D it is a ruling and strays by nothing; the old bound
+/// charged it `t·v/√(1 + t²)` for its third corner's height `v`, and refused
+/// this very deflection with `RanOutOfRoomBeforeMeetingTheDeflection` after
+/// fanning that corner down towards the apex until the packing floor stopped it.
+///
+/// The share is the finest of [`the_stretch_that_was_ragged`] that this patch
+/// refused at before, so a mesh coming back at all is the claim.
 #[test]
 fn the_triangle_with_two_corners_on_the_apex_is_not_charged_for_a_quarter_turn() {
     let cone = Cone::new(Axis::z(), SLOPE).expect("a positive slope");
     let surface = Surface::from(cone);
-    let asked = 1e-3 * FAR;
+    let asked = the_stretch_that_was_ragged()[3] * FAR;
 
     let domain = a_quarter_of_a_pointed_cones_face(surface, asked);
     let patch = triangulate(&domain).expect("a quarter of a pointed cone's face meshes");
