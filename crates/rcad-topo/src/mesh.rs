@@ -2989,6 +2989,100 @@ mod tests {
         }
     }
 
+    /// **The half of §51.7 the public suite cannot see: what the *wall* beside
+    /// an emptied closed edge does.**
+    ///
+    /// `tests/what_the_mesher_does_with_an_empty_walk_on_a_closed_edge.rs`
+    /// builds the same bar and puts the same question to [`SolidView::mesh`],
+    /// and what comes back is the **cap's** refusal — one closed edge is the
+    /// whole of a cap's wire, so its loop has one corner and
+    /// [`Loop::through`](rcad_mesh::Loop::through) turns it away. A solid's
+    /// faces are cut up in stored order and a bar's caps come first, so the wall
+    /// is never reached from up there.
+    ///
+    /// The wall's wire is **not** one corner — it is the bottom circle's points,
+    /// the seam corner twice and the top corner twice — so nothing about a count
+    /// of three covers it, and whether a rectangle whose top side collapsed to
+    /// one point is quietly filled with triangles has to be asked of
+    /// [`BuildingAMesh::cut_up`] directly. It is not: the walk goes right round
+    /// the bottom, up the seam, and then has only the one top corner to come
+    /// back along, so it never returns to the longitude it set off from and
+    /// [`WalkingAWire::finish`] refuses it.
+    ///
+    /// So **both** faces along an emptied closed edge refuse, by two different
+    /// names, and neither of them meshes anything.
+    ///
+    /// It also pins the thing the public test can only infer: the list really is
+    /// empty, and it is empty for exactly one of the bar's two closed edges. A
+    /// run where both walked to nothing, or neither did, is a run that proves
+    /// nothing.
+    #[test]
+    fn the_wall_beside_a_closed_edge_that_walked_to_nothing_is_refused_as_well() {
+        const LEAN: f64 = 2e9;
+        let policy = Policy::tolerant(50.0 * LEAN);
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let flat = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the z axis is a unit normal");
+        let leaning =
+            Plane::from_point_and_normal(Point::new(1.0, 0.0, 0.5), Vector::new(LEAN, 0.0, 1.0))
+                .expect("a direction with length");
+        let bar = model
+            .add_bar_cut_off_by(
+                1.0,
+                [flat, leaning],
+                &Isometry::identity(),
+                &policy,
+                &mut log,
+            )
+            .expect("a leaning plane cuts an ellipse right round a pipe");
+
+        let solid = model.solid(bar);
+        let asked = Deflection::of(5e-4).expect("a positive length");
+        let deflection = solid
+            .room_a_mesh_has_to_work_in(asked, &policy)
+            .expect("a bar this size has a floor far under a two-thousandth");
+        let mut building = BuildingAMesh::new(deflection, solid.surfaces_along_each_edge());
+        for face in solid.faces() {
+            building
+                .walk_the_edges_this_face_can_place(face, &policy, &mut log)
+                .expect("a tolerant caller is handed an empty list rather than refused");
+        }
+
+        let mut walked_to_nothing = 0;
+        let mut walked_into_points = 0;
+        for edge in solid
+            .faces()
+            .flat_map(FaceView::wires)
+            .flat_map(WireView::coedges)
+            .map(|coedge| coedge.edge())
+            .filter(|edge| edge.is_closed().expect("a cap circle knows it is closed"))
+        {
+            if building.along_edge[&edge.key()].is_empty() {
+                walked_to_nothing += 1;
+            } else {
+                walked_into_points += 1;
+            }
+        }
+        assert!(
+            walked_to_nothing > 0 && walked_into_points > 0,
+            "{walked_to_nothing} of this bar's closed edges walked to nothing and \
+             {walked_into_points} walked into points, and the test needs one of each"
+        );
+
+        let wall = solid
+            .faces()
+            .find(|face| face.surface().as_plane().is_none())
+            .expect("a bar has one curved face");
+        let refusal = building
+            .cut_up(wall, &mut log)
+            .expect_err("a wall whose top side collapsed to one point is not a patch");
+        assert!(
+            matches!(refusal, Error::AWireWillNotLieFlatOnItsFace { .. }),
+            "the wall beside an emptied closed edge came back {refusal:?}"
+        );
+    }
+
     /// The other way a wire will not lie flat: a pole on a face that does not
     /// pinch to one.
     ///
