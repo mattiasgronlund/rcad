@@ -21,9 +21,8 @@ design doc is its own `docs/roadmap.md`; **§8 there owns the demand text** — 
 signatures, the code that needs them, and what rscene does if refused. Read that
 rather than trusting a summary here.
 
-**No rev is pinned yet.** rscene starts its pin from a rev after the measurement
-below, so that the version it pins already has what it needs rather than growing
-it underneath.
+**No rev is pinned yet**, and pinning needs no ceremony: rscene pins a sha once
+what it needs is merged here.
 
 ### What rcad has agreed to build for it
 
@@ -63,16 +62,35 @@ being the named consumer.
   both (`mesh.rs:360-361`) and `finish` drops them. The reverse index is
   display-side and stays downstream.
 
-  **Gated on a measurement, not on scheduling.** `mesh.rs:406` skips an edge
-  already walked, and the walk takes the face and its budget
-  `deflection − how_far_moving_this_face_rounds(face)`. So an edge shared by two
-  faces is polylined once, to the budget of whichever face reached it first in
-  the solid's stored order. Both faces then use that list, so the mesh is
-  *consistent* — but it is not yet established whether a fine face handed a
-  coarse neighbour's boundary can exceed what `Mesh::deviation()` publishes. If
-  it can, that is an rcad bug and it is fixed before the getter ships, because
-  the consumer draws those points and republishes the deviation as the bound on
-  what is on screen.
+  **A shared edge is polylined once, and that was measured before the getter was
+  agreed to.** `mesh.rs:406` skips an edge already walked, so an edge between two
+  faces gets one point list, built by whichever face reached it first in the
+  solid's stored order, and both faces then use it. The worry was that a tightly
+  bending face could inherit a slack neighbour's boundary and exceed what
+  `Mesh::deviation()` publishes — which would have been an rcad bug, since the
+  consumer draws those points and republishes that number as the bound on what is
+  on screen.
+
+  **It cannot, and the worry rested on a misreading.** `room = deflection −
+  how_far_moving_this_face_rounds(face)` (`mesh.rs:402`) looks like a per-face
+  budget; `how_far_moving_this_face_rounds` (`mesh.rs:2046`) is what *placing*
+  that face rounds and says nothing about how tightly it bends. There is no
+  curvature-adaptive per-face budget in this mesher, so both faces hand
+  `rcad_geom::walk` the same number and there is no slack budget to inherit.
+  Measured over three lenses between overlapping balls at curvature ratios 20x,
+  200x and 100x, meshed at three deflections: the published bound holds in all
+  nine, closest approach 50.5% of it, and reversing the stored face order gives
+  the same points, the same triangles and the same deviation **bit for bit**.
+  `crates/rcad-topo/tests/whether_a_fine_face_is_handed_a_coarse_neighbours_edge.rs`
+  is the demonstration.
+
+  Do not read that as a general guarantee. It is safe for sphere against sphere
+  because a circle drawn on a ball never has a radius larger than the ball's, so
+  the boundary chord stays inside the half-budget reserved for it. Where that
+  fails the triangulator **refuses** —
+  `CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection`
+  (`rcad-mesh/src/triangulate.rs:175-186`) checks every boundary side before
+  refining — so the failure mode is loud, not a quiet coarse patch.
 
   When it ships, the published order is the **edge's** stored direction. Today
   that convention is private knowledge at `mesh.rs:1102-1112`, where the caller
