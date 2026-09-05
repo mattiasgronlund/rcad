@@ -2106,7 +2106,7 @@ mod tests {
     use super::{Decision, as_coarse_as_a_mesh_gets, winding_of, winding_round};
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
-    use crate::model::{ShellData, ShellUse, SolidData, VertexData, WireStep};
+    use crate::model::{FaceUse, ShellData, ShellUse, SolidData, VertexData, WireStep};
     use crate::{Error, FaceView, Invalid, Model, SolidView, WireView};
 
     fn an_empty_model() -> Model {
@@ -2425,6 +2425,45 @@ mod tests {
             .expect("a cube has a shell");
         let again = model.data().shells[shell].faces[0];
         model.data_mut().shells[shell].faces.push(again);
+
+        assert_eq!(
+            refusal(&model),
+            Invalid::UsedMoreThanOnce {
+                entity: "face",
+                count: 2
+            }
+        );
+    }
+
+    /// The wider half of the same counter: two different shells, not one
+    /// shell listing a face twice.
+    ///
+    /// `check_faces` counts face uses with `for shell in
+    /// self.data().shells.values()`, so the count is global across shells,
+    /// not per shell. The test above only exercises one shell listing a face
+    /// twice; this is the shape a consumer actually meets — a face arriving
+    /// with two placements because two shells both claim it, which
+    /// downstream is a wrong picture drawn confidently.
+    #[test]
+    fn two_shells_that_both_list_one_face_are_caught() {
+        let mut model = a_cube();
+        let first_shell = model
+            .data()
+            .shells
+            .keys()
+            .next()
+            .expect("a cube has a shell");
+        let shared = model.data().shells[first_shell].faces[0];
+
+        let second_placement = FaceUse {
+            face: shared.face,
+            loc: Isometry::translation(Vector::new(1.0, 0.0, 0.0))
+                .expect("a step off the x axis is a translation"),
+            orient: shared.orient,
+        };
+        model.data_mut().shells.insert(ShellData {
+            faces: vec![second_placement],
+        });
 
         assert_eq!(
             refusal(&model),
