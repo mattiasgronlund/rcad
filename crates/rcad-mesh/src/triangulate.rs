@@ -167,7 +167,7 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
     if step <= 0.0 {
         return Err(CannotTriangulate::NoMeshCanGetThatCloseToTheSurface {
             deflection,
-            closest: how_far_a_flat_piece_strays(surface, whole_patch, [0.0; 2], slop),
+            closest: how_far_a_flat_piece_strays(surface, whole_patch, &[], slop),
         });
     }
     // Size first and the loops after, because how many triangles the deflection
@@ -175,9 +175,9 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
     // are fine enough is a question about both.
     refuse_a_patch_too_big_to_hold(domain, (across, along), step)?;
     for (from, to) in every_side(domain) {
-        let across = the_range_of_each_coordinate(&[corners[from], corners[to]]);
-        let chords = chords_across_the_curve(surface, across, corners[from], corners[to]);
-        let strays = how_far_a_flat_piece_strays(surface, across, chords, slop);
+        let side = [corners[from], corners[to]];
+        let across = the_range_of_each_coordinate(&side);
+        let strays = how_far_a_flat_piece_strays(surface, across, &side, slop);
         if strays > deflection {
             return Err(
                 CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection {
@@ -477,10 +477,17 @@ const HOW_FAR_THE_EVALUATOR_ROUNDS: f64 = 8.0 * f64::EPSILON;
 /// its long side would refine it for no reason. For a plane it is zero, and the
 /// zero says there is nothing here to bound.
 ///
+/// **A cone is not here**, and that is deliberate: its bound is charged against
+/// each corner's own radius, which is exactly what collapsing a pair of corners
+/// into one length throws away. [`how_far_a_flat_piece_of_a_cone_strays`] says
+/// why, and it is the only arm of [`how_far_a_flat_piece_strays`] that never
+/// asks for a chord.
+///
 /// # Panics
 ///
 /// On a surface this crate has not been taught — see
-/// [`how_far_a_point_lands_off_its_surface`].
+/// [`how_far_a_point_lands_off_its_surface`] — and on a cone, which nothing
+/// routes here.
 fn chords_across_the_curve(
     surface: &Surface,
     across: [[f64; 2]; 2],
@@ -500,16 +507,14 @@ fn chords_across_the_curve(
             2.0 * pipe.radius() * ((from[0] - to[0]) / 2.0).sin().abs(),
             0.0,
         ],
-        // A cone is flat along its rulings too, so this is the pipe's chord
-        // measured on the widest circle the piece touches. **Measured there and
-        // not at either end**, because that is the radius
-        // [`how_far_a_flat_piece_strays`] divides by, and a chord read at a
-        // smaller radius than the one it is charged against is a bound on
-        // nothing.
-        Surface::Cone(cone) => [
-            2.0 * how_wide_a_cone_is_over(cone, across[1]) * ((from[0] - to[0]) / 2.0).sin().abs(),
-            0.0,
-        ],
+        // A cone is charged against each corner's own radius, which is exactly
+        // what one length between two corners has thrown away, so nothing routes
+        // one here and a cone arriving is a broken invariant of this file.
+        Surface::Cone(_) => {
+            panic!(
+                "a cone is charged by how_far_a_flat_piece_of_a_cone_strays and never by a chord"
+            )
+        }
         // **A torus curves two ways by two different amounts, so it has two
         // chords and this is the longer.** Round the ring the chord is measured
         // on the outer equator, which is the widest circle the surface has —
@@ -552,43 +557,8 @@ fn chords_across_the_curve(
 /// distance, which is why `L` there is a chord of the cross-section and a
 /// triangle stretched along the pipe is bounded by nothing at all.
 ///
-/// # A cone gets `L²/(2R)` and its own derivation, because a sphere's does not
-/// transfer
-///
-/// A cone's radius of curvature is not one number: it shrinks to nothing at the
-/// apex, so there is no `r` to put in the sphere's sum. What is true instead is
-/// this. Write the cone about its apex, `x = v·(ŵ + t·ê(u))`, so a point of it
-/// at `v` sits `r = t·v` off the axis and the distance from any point `p` inside
-/// the nappe to the cone is `(t·p_∥ − ‖p_⊥‖)/√(1 + t²)`.
-///
-/// A flat piece `p = Σλᵢvᵢ` with its corners on the cone has
-/// `t·p_∥ = Σλᵢrᵢ` and `p_⊥ = Σλᵢ rᵢê(uᵢ)`, so
-///
-/// ```text
-/// (t·p_∥ − ‖p_⊥‖)  ≤  Σλᵢ rᵢ(1 − cos(uᵢ − u_k))  ≤  maxᵢ rᵢ(1 − cos(uᵢ − u_k))
-/// ```
-///
-/// for any fixed `k` — the first step because `‖Σ‖ ≥ Σ·ê(u_k)`, the second
-/// because a convex combination is at most its largest term. Take `k` to be the
-/// corner with the **largest** radius, `R_c = maxᵢ rᵢ`. Measuring every chord on
-/// the circle of that radius — which is what
-/// [`chords_across_the_curve`] does for a cone — gives
-/// `C² = 2R_c²(1 − cos Δ)`, so `rᵢ(1 − cos Δ) = rᵢC²/(2R_c²) ≤ C²/(2R_c)`, and
-///
-/// ```text
-/// how far the piece strays  ≤  C² / (2 · R_c · √(1 + t²))  =  C² / (2R)
-/// ```
-///
-/// with `R = R_c√(1 + t²)` the cone's radius of normal curvature at the widest
-/// corner. That is the `share = 2` arm below, and unlike the sphere's it stays
-/// finite **at the apex**: a triangle with a corner on the apex is charged
-/// against its two other corners' radius, which is exactly where its chords were
-/// measured.
-///
-/// It is loose by about a factor of four against a drawn case, the same way the
-/// sphere's `L²/(3r)` is loose against a two-corner side, and
-/// `how_far_a_flat_piece_of_a_cone_really_strays_stays_under_the_published_bound`
-/// is the search §15.6 asks for.
+/// A cone is not here at all: it is charged corner by corner rather than by a
+/// chord, and [`how_far_a_flat_piece_of_a_cone_strays`] carries that derivation.
 ///
 /// # A torus gets `C²·(1/(3r) + 1/(2S))`, in two halves that are the two ways it
 /// bends
@@ -647,8 +617,8 @@ fn chords_across_the_curve(
 /// spans in each of the two coordinates, and three places round the tube
 /// including the **inner** equator, where a torus bends the other way and where
 /// a bound derived on the outer one is likeliest to be wrong. The worst uses
-/// **59.2%** of the bound — tighter than the cone's 39.4%, because the two
-/// halves of this one are added rather than one covering both.
+/// **59.2%** of the bound, because the two halves of this one are added rather
+/// than one covering both.
 ///
 /// A boundary side is a piece with two corners rather than three, and the same
 /// sum gives it `L²/(4r)`. It is measured with `L²/(3r)` anyway, because what
@@ -666,9 +636,13 @@ fn chords_across_the_curve(
 fn how_far_a_flat_piece_strays(
     surface: &Surface,
     across: [[f64; 2]; 2],
-    longest_chords: [f64; 2],
+    corners: &[[f64; 2]],
     slop: f64,
 ) -> f64 {
+    if let Surface::Cone(cone) = surface {
+        return how_far_a_flat_piece_of_a_cone_strays(cone, across, corners, slop);
+    }
+    let longest_chords = the_longest_chords(surface, across, corners);
     // **A torus is charged on both of its chords and every other surface on
     // one**, which is what the two-term derivation above needs and what
     // collapsing it into a single `chord²/ρ` cannot give: the two terms are
@@ -683,39 +657,117 @@ fn how_far_a_flat_piece_strays(
         let [over, around] = longest_chords.map(|chord| chord + 2.0 * slop);
         return over * over / (3.0 * ring.tube_radius()) + around * around / (2.0 * widest) + slop;
     }
-    let longest_chord = longest_chords[0];
-    let (radius, share) = match surface {
+    let radius = match surface {
         Surface::Plane(_) => return 0.0,
-        Surface::Sphere(ball) => (ball.radius(), 3.0),
-        Surface::Cylinder(pipe) => (pipe.radius(), 3.0),
-        Surface::Cone(cone) => (
-            how_wide_a_cone_is_over(cone, across[1]) * cone.slope().hypot(1.0),
-            2.0,
-        ),
-        // Answered above, because it is charged on two chords rather than one.
-        other @ Surface::Torus(_) | other => {
+        Surface::Sphere(ball) => ball.radius(),
+        Surface::Cylinder(pipe) => pipe.radius(),
+        // Both answered above, each on its own terms.
+        other @ (Surface::Torus(_) | Surface::Cone(_)) | other => {
             panic!("this crate cannot say how far a flat piece of {other:?} strays")
         }
     };
-    // **A patch spanning both nappes is bounded by nothing**, and infinity in
-    // the denominator would say the opposite — `chord²/(share·∞)` is no stray at
-    // all. `how_wide_a_cone_is_over` is where the infinity comes from and says
-    // why it is the right answer *there*.
-    if !radius.is_finite() {
+    let chord = longest_chords[0] + 2.0 * slop;
+    chord * chord / (3.0 * radius) + slop
+}
+
+/// How far a flat piece with its corners on a cone can stray from it —
+/// `maxᵢ rᵢ(1 − cos(uᵢ − u_k)) / √(1 + t²)`, one term per **corner**.
+///
+/// A cone's radius of curvature is not one number: it shrinks to nothing at the
+/// apex, so there is no `r` to put in the sphere's sum. What is true instead is
+/// this. Write the cone about its apex, `x = v·(ŵ + t·ê(u))`, so a point of it
+/// at `v` sits `r = t·v` off the axis and the distance from any point `p` inside
+/// the nappe to the cone is `(t·p_∥ − ‖p_⊥‖)/√(1 + t²)`.
+///
+/// A flat piece `p = Σλᵢvᵢ` with its corners on the cone has
+/// `t·p_∥ = Σλᵢrᵢ` and `p_⊥ = Σλᵢ rᵢê(uᵢ)`, so
+///
+/// ```text
+/// (t·p_∥ − ‖p_⊥‖)  ≤  Σλᵢ rᵢ(1 − cos(uᵢ − u_k))  ≤  maxᵢ rᵢ(1 − cos(uᵢ − u_k))
+/// ```
+///
+/// for any fixed `k` — the first step because `‖Σ‖ ≥ Σ·ê(u_k)`, the second
+/// because a convex combination is at most its largest term. `k` here is the
+/// corner furthest up the cone, which is the choice that makes the widest turns
+/// cheapest.
+///
+/// # Why it stops there, and does not go on to a chord
+///
+/// It used to. Taking `R_c = maxᵢ rᵢ`, measuring every chord on the circle of
+/// that radius gives `C² = 2R_c²(1 − cos Δ)`, so `rᵢ(1 − cos Δ) ≤ C²/(2R_c)` and
+/// the whole piece comes down to one number, `C²/(2·R_c·√(1 + t²))`.
+///
+/// **That last step throws away the one thing a cone's bound turns on.** It
+/// replaces every corner's own radius by the largest, and a corner *at the apex*
+/// has no radius at all. The shape where that bites is not exotic: cutting a
+/// pointed cone's face up to its apex leaves a patch with the apex at two
+/// longitudes a quarter turn apart (`cut_a_cap_up_to_its_pole` in `rcad-topo`),
+/// so every triangulation of it has one triangle with **two corners on the
+/// apex**. In 3D that triangle is the segment from the apex to its third corner
+/// — a *ruling*, which lies exactly on the cone and strays by nothing. The
+/// collapsed bound charged it `t·v/√(1 + t²)`, a fifth of the way down the cone,
+/// and the refinement then chased a deflection it could never meet by fanning
+/// ever-thinner triangles at the apex until the packing floor in
+/// [`refine_the_inside`] declined the next point. That is where §51.7's
+/// `RanOutOfRoomBeforeMeetingTheDeflection` came from, and why a coarser
+/// deflection could refuse where a finer one worked: the answer existed and the
+/// bound could not see it (`docs/decisions.md` §16.10).
+///
+/// So the corners stay corners. Nothing else about the derivation moves, and the
+/// bound is never larger than the collapsed one — `rᵢ ≤ R_c` for every `i`.
+///
+/// **A patch spanning both nappes is bounded by nothing**, because
+/// `t·p_∥ = Σλᵢrᵢ` is false there. [`how_wide_a_cone_is_over`] is where the
+/// infinity comes from and says why it is the right answer.
+///
+/// A piece whose every corner is on the apex is one 3D point, and every term
+/// above is zero, so what comes back is `slop` — which is the truth, since the
+/// apex is on the cone.
+///
+/// The corners are not exactly on the surface: one off by `slop` moves every
+/// point of the piece by at most `slop` and its radius by at most `slop`, which
+/// is what the two `slop` terms are doing.
+///
+/// `how_far_a_flat_piece_of_a_cone_really_strays_stays_under_the_published_bound`
+/// is the search §15.6 asks for.
+fn how_far_a_flat_piece_of_a_cone_strays(
+    cone: &Cone,
+    across: [[f64; 2]; 2],
+    corners: &[[f64; 2]],
+    slop: f64,
+) -> f64 {
+    if !how_wide_a_cone_is_over(cone, across[1]).is_finite() {
         return f64::INFINITY;
     }
-    // **A piece whose every corner is on the apex, which a cone has and no other
-    // surface here does.** Cutting a cone's cap up to its apex leaves a side
-    // running from the apex to the apex — one 3D point at two longitudes — and
-    // the derivation above divides by the radius the chord was measured at,
-    // which there is nothing at all. The answer is not the infinity that falls
-    // out of the arithmetic: every corner of such a piece is within `slop` of
-    // the apex, so every point of it is, and the apex is on the cone.
-    if radius == 0.0 {
+    let Some(furthest_up) = corners
+        .iter()
+        .max_by(|one, other| one[1].abs().total_cmp(&other[1].abs()))
+    else {
         return slop;
+    };
+    let mut strays = 0.0_f64;
+    for corner in corners {
+        let radius = cone.radius_at(corner[1].abs()) + slop;
+        let half_a_turn_away = (corner[0] - furthest_up[0]) / 2.0;
+        strays = strays.max(2.0 * radius * half_a_turn_away.sin().powi(2));
     }
-    let chord = longest_chord + 2.0 * slop;
-    chord * chord / (share * radius) + slop
+    strays / cone.slope().hypot(1.0) + slop
+}
+
+/// The longest chord of each of the two ways a surface bends, over every pair of
+/// corners a flat piece has.
+///
+/// Zero when there is no pair, which is what [`triangulate`] asks for when it
+/// wants how close a mesh of no size at all can get.
+fn the_longest_chords(surface: &Surface, across: [[f64; 2]; 2], corners: &[[f64; 2]]) -> [f64; 2] {
+    let mut longest = [0.0_f64; 2];
+    for (which, corner) in corners.iter().enumerate() {
+        for other in &corners[(which + 1)..] {
+            let chords = chords_across_the_curve(surface, across, *corner, *other);
+            longest = [longest[0].max(chords[0]), longest[1].max(chords[1])];
+        }
+    }
+    longest
 }
 
 /// The one radius a torus's chord bound divides by, `6rS / (2S + 3r)` for
@@ -878,21 +930,14 @@ fn refine_the_inside(
             // **The reach comes first and over the whole triangle**, because it
             // is the radius every one of the three chords below is charged
             // against — see [`chords_across_the_curve`].
-            let across = the_range_of_each_coordinate(
-                &face
-                    .vertices()
-                    .map(|vertex| corners[corner_of[vertex.index()] as usize]),
-            );
-            let mut longest_chords = [f64::NEG_INFINITY; 2];
+            let at = face
+                .vertices()
+                .map(|vertex| corners[corner_of[vertex.index()] as usize]);
+            let across = the_range_of_each_coordinate(&at);
             let mut to_split: Option<(f64, [f64; 2], [f64; 2])> = None;
             for edge in face.adjacent_edges() {
                 let from = corners[corner_of[edge.from().index()] as usize];
                 let to = corners[corner_of[edge.to().index()] as usize];
-                let chords = chords_across_the_curve(aim.surface, across, from, to);
-                longest_chords = [
-                    longest_chords[0].max(chords[0]),
-                    longest_chords[1].max(chords[1]),
-                ];
                 if edge.is_constraint_edge() {
                     continue;
                 }
@@ -904,7 +949,7 @@ fn refine_the_inside(
                 }
             }
 
-            let strays = how_far_a_flat_piece_strays(aim.surface, across, longest_chords, aim.slop);
+            let strays = how_far_a_flat_piece_strays(aim.surface, across, &at, aim.slop);
             furthest = furthest.max(strays);
             if strays <= aim.deflection {
                 continue;
@@ -1294,15 +1339,7 @@ mod tests {
                         let corners = at.map(|[u, v]| ring.point_at(u, v));
 
                         let across = the_range_of_each_coordinate(&at);
-                        let mut longest = [0.0_f64; 2];
-                        for one in 0..3 {
-                            for other in (one + 1)..3 {
-                                let chords =
-                                    chords_across_the_curve(&surface, across, at[one], at[other]);
-                                longest = [longest[0].max(chords[0]), longest[1].max(chords[1])];
-                            }
-                        }
-                        let bound = how_far_a_flat_piece_strays(&surface, across, longest, 0.0);
+                        let bound = how_far_a_flat_piece_strays(&surface, across, &at, 0.0);
                         assert!(
                             bound.is_finite() && bound > 0.0,
                             "a torus is always bounded"
@@ -1387,15 +1424,7 @@ mod tests {
                     let corners = at.map(|[round, along]| cone.point_at(round, along));
 
                     let across = the_range_of_each_coordinate(&at);
-                    let mut longest = 0.0_f64;
-                    for one in 0..3 {
-                        for other in (one + 1)..3 {
-                            longest = longest.max(
-                                chords_across_the_curve(&surface, across, at[one], at[other])[0],
-                            );
-                        }
-                    }
-                    let bound = how_far_a_flat_piece_strays(&surface, across, [longest, 0.0], 0.0);
+                    let bound = how_far_a_flat_piece_strays(&surface, across, &at, 0.0);
                     if bound == 0.0 {
                         continue;
                     }
@@ -1441,7 +1470,7 @@ mod tests {
             how_far_a_flat_piece_strays(
                 &Surface::from(cone),
                 the_range_of_each_coordinate(&both_nappes),
-                [1.0, 0.0],
+                &both_nappes,
                 0.0
             ),
             f64::INFINITY

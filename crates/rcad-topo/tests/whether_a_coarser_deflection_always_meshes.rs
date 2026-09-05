@@ -16,22 +16,35 @@
 //! Either answer is worth having, so a non-monotone case here is this file
 //! working and not this file failing.
 //!
-//! # What came out, and it is the second one
+//! # What came out, and it took a fix to get there
 //!
-//! **A coarser deflection does not always mesh.** Twenty solids over six rungs,
-//! and one of them — a pointed cone of slope one up to two — meshes at a
-//! ten-thousandth of its size, refuses at a thousandth, and meshes again at a
-//! hundredth. Swept twenty-one deflections over that same stretch it is worse
-//! than a band: six refuse, nine meshes sit *finer* than the coarsest of them,
-//! and the answer changes six times going up. So the consumer's rule cannot be
-//! rescued by more rungs, and "it meshed at 1e-1" is evidence about 1e-1 alone.
+//! **It was the second one, and the case that said so was a bug.** This file
+//! first found a pointed cone of slope one up to two that meshed at a
+//! ten-thousandth of its size, refused at a thousandth, and meshed again at a
+//! hundredth — six refusals over twenty-one deflections in that stretch, with
+//! nine meshes sitting *finer* than the coarsest of them. That is
+//! `docs/decisions.md` §51.7, and the refusal was
+//! [`CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection`] every time.
 //!
-//! The refusal is
-//! [`CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection`] every time: the
-//! refinement had nowhere left to put the point that would have cut a triangle
-//! in half. Whether that is a defect is not this lane's to settle — it is
-//! reported and nothing under `src/` is touched — but it is plainly not a
-//! property of the *shape*, since the same shape meshes on both sides of it.
+//! It was a **gap and not a limit** (§16.10). Cutting a cone's face up to its
+//! apex leaves the apex in the patch at two longitudes a quarter turn apart, so
+//! every triangulation of it has a triangle with two corners on the apex — in 3D
+//! a ruling, which lies exactly on the cone and strays by nothing.
+//! `rcad-mesh`'s bound had collapsed the piece into one chord measured on the
+//! circle of its widest corner, which charged those apex corners as though they
+//! sat out there too, and the refinement chased a deflection it could never meet
+//! until the packing floor stopped it.
+//! `how_far_a_flat_piece_of_a_cone_strays` keeps each corner's own radius now,
+//! and `rcad-mesh`'s `a_cone_patch_that_reaches_its_apex.rs` measures the mesh
+//! that comes back against the cone's own closed-form distance.
+//!
+//! **So on this family nothing refuses at any rung**, and every ladder is
+//! upward-closed. That is not the same as "a coarser deflection always meshes":
+//! it is twenty solids over six rungs with no counter-example in them, which is
+//! what §16.10 lets this file say and no more.
+//! [`the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves`] is
+//! what keeps the silence worth something — it reaches a refusal on purpose, so
+//! a sweep that saw none is a sweep that could have.
 //!
 //! [`CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection`]:
 //!     rcad_mesh::CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection
@@ -385,35 +398,37 @@ fn a_rung_that_refused_above_one_that_worked(pattern: &[Rung]) -> Option<usize> 
 
 /// Every solid whose ladder is **not** upward-closed, by name.
 ///
-/// One, and this is it. A pointed cone of slope one up to two meshes at a
-/// ten-thousandth of its size, refuses at a thousandth, and meshes again at a
-/// hundredth — so on this family a coarser deflection does **not** always mesh,
-/// and "it meshed at 1e-1" is not evidence about 1e-2.
+/// **None, since the cone bound was fixed.** The one entry that used to be here
+/// was a pointed cone of slope one up to two, meshing at a ten-thousandth of its
+/// size, refusing at a thousandth, and meshing again at a hundredth — the §51.7
+/// case, and a gap in `rcad-mesh`'s cone bound rather than a fact about the
+/// shape. The module doc says what it was and where the fix is.
 ///
 /// Pinned as a list rather than as a count, because §15.10 says a number that
-/// moves is reported with the cases that moved it: a second solid joining this
-/// list, or this one leaving it, both fail here and both are news.
-const THE_ONES_THAT_ARE_NOT_UPWARD_CLOSED: [&str; 1] = [
-    "pointed cone of slope 1 up to 2: the triangulator refused a face: the refinement ran out \
-     of room before meeting the deflection at 0.001 of its size, although 0.0001 of its size \
-     meshed",
-];
+/// moves is reported with the cases that moved it: a solid joining this list
+/// fails here, and so does the old entry coming back.
+const THE_ONES_THAT_ARE_NOT_UPWARD_CLOSED: [&str; 0] = [];
 
 /// The whole sweep, printed rung by rung and then judged.
 ///
 /// Nothing here is asserted about *which* rungs work. What is asserted is that
-/// the ladder straddled something — that both answers happened, and happened on
-/// curved shapes rather than only on the two cubes — and then the pattern of
-/// every solid is checked and the ones that are not upward-closed have to be
-/// exactly [`THE_ONES_THAT_ARE_NOT_UPWARD_CLOSED`].
+/// enough of them worked for there to be a question at all, that no mesh came
+/// back empty, and then that the ones whose ladder is not upward-closed are
+/// exactly [`THE_ONES_THAT_ARE_NOT_UPWARD_CLOSED`] — which is now none of them.
+///
+/// **There is no longer an assertion that something refused here**, because
+/// after the §51.7 fix nothing on this family does, at any of these rungs. The
+/// job that assertion was doing — stopping a silent sweep from reading as a
+/// result — is done by
+/// [`the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves`],
+/// which reaches a refusal on purpose and shows it healing when the deflection
+/// is loosened.
 #[test]
 fn the_verdict_is_scoped_to_the_family_that_was_swept() {
     let family = the_family();
     let mut report = String::new();
     let mut not_monotone = Vec::new();
-    let mut solids_that_ever_refused = 0;
     let mut solids_that_ever_meshed = 0;
-    let mut curved_solids_that_ever_refused = 0;
     let mut empty_meshes = Vec::new();
 
     for shape in &family {
@@ -434,12 +449,6 @@ fn the_verdict_is_scoped_to_the_family_that_was_swept() {
             rungs.join("\n    ")
         ));
 
-        if pattern.iter().any(|answer| !answer.meshed()) {
-            solids_that_ever_refused += 1;
-            if !shape.what.starts_with("cube") {
-                curved_solids_that_ever_refused += 1;
-            }
-        }
         if pattern.iter().any(|answer| answer.meshed()) {
             solids_that_ever_meshed += 1;
         }
@@ -481,12 +490,6 @@ fn the_verdict_is_scoped_to_the_family_that_was_swept() {
         "if hardly anything meshed there is no monotonicity to test: only \
          {solids_that_ever_meshed} of {} ever did",
         family.len()
-    );
-    assert!(
-        solids_that_ever_refused > 0 && curved_solids_that_ever_refused > 0,
-        "if nothing ever refused this sweep never went near the question: \
-         {solids_that_ever_refused} solids refused somewhere, {curved_solids_that_ever_refused} \
-         of them curved"
     );
     let expected: Vec<String> = THE_ONES_THAT_ARE_NOT_UPWARD_CLOSED
         .iter()
@@ -548,28 +551,28 @@ fn a_success_with_a_refusal_above_it_is_what_this_is_looking_for() {
     );
 }
 
-/// The one non-monotone solid, at twenty-one deflections instead of the three
-/// [`HOW_COARSE`] puts in the same stretch — and the hole is not one hole.
+/// The stretch that used to be ragged, at twenty-one deflections instead of the
+/// three [`HOW_COARSE`] puts in it — and every one of them meshes now.
 ///
 /// A pointed cone of slope one up to two, swept a tenth of a decade at a time
-/// from a ten-thousandth of its size to a hundredth, which is the stretch
-/// between the two rungs of [`HOW_COARSE`] that meshed either side of the one
-/// that did not. What comes out is not a band with meshes on both sides of it:
-/// it is refusals and meshes **interleaved**, so "coarser than the last refusal"
-/// is not a thing a consumer can compute either.
+/// from a ten-thousandth of its size to a hundredth. What used to come out was
+/// not a band with meshes on both sides of it but refusals and meshes
+/// **interleaved** — six refusals, nine meshes finer than the coarsest of them,
+/// and the answer changing six times going up — so no consumer could compute
+/// "coarser than the last refusal" either.
 ///
-/// That matters more than a band would. A band could be climbed over by one big
-/// enough step; a ragged edge cannot be climbed over reliably at all, and no
-/// number of rungs makes the ladder safe — the consumer's three rungs happen to
-/// land two meshes and one refusal here, and a consumer that had picked 4e-4,
-/// 1e-3 and 2.5e-3 instead would have got three refusals in a row on a solid
-/// that meshes fine at both ends of that stretch.
+/// That was `rcad-mesh`'s cone bound charging a triangle with two corners on the
+/// apex for a quarter turn it does not take; the module doc has the mechanism
+/// and `a_cone_patch_that_reaches_its_apex.rs` in `rcad-mesh` has the
+/// measurement. What is left here is the same twenty-one deflections asserted to
+/// all mesh, on the shape that was the counter-example, so the ragged edge
+/// coming back fails loudly and at the deflections it came back at.
 ///
-/// **Reported, not fixed.** This lane owns one test file and nothing under
-/// `src/`. What the refusal is called is asserted below rather than described,
-/// so a change in the mechanism fails here.
+/// The triangle counts are printed and not asserted. A finer deflection giving
+/// more triangles is what the mesher is for, but it is not a claim this file
+/// establishes and §16.10 says an unmeasured claim does not go in a test.
 #[test]
-fn the_pointed_cones_refusals_are_interleaved_with_meshes_rather_than_one_band() {
+fn the_stretch_the_pointed_cone_used_to_refuse_in_meshes_all_the_way_through() {
     let mut model = a_model(2.0);
     let cone = cones::a_pointed_cone(&mut model, 1.0, 2.0);
     let shape = Shape {
@@ -587,33 +590,17 @@ fn the_pointed_cones_refusals_are_interleaved_with_meshes_rather_than_one_band()
         .map(|share| how_a_mesh_answered(&shape, share * shape.size))
         .collect();
 
-    let refused: Vec<(f64, String)> = ladder
+    let refused: Vec<String> = ladder
         .iter()
         .zip(&pattern)
         .filter_map(|(share, answer)| match answer {
-            Rung::Refused(kind) => Some((*share, kind.clone())),
+            Rung::Refused(kind) => Some(format!("{share:.6} -> {kind}")),
             Rung::Meshed(_) => None,
         })
         .collect();
-    let coarsest_refusal = refused
-        .last()
-        .map(|(share, _)| *share)
-        .expect("the case list above says this cone refuses somewhere in here");
-    let meshed_finer_than_that = ladder
-        .iter()
-        .zip(&pattern)
-        .filter(|(share, answer)| **share < coarsest_refusal && answer.meshed())
-        .count();
-    let switches = pattern
-        .windows(2)
-        .filter(|pair| pair[0].meshed() != pair[1].meshed())
-        .count();
 
     println!(
-        "{} of {} deflections refused; {meshed_finer_than_that} finer ones meshed anyway; \
-         the ladder changes its mind {switches} times\n{:#?}",
-        refused.len(),
-        ladder.len(),
+        "{:#?}",
         ladder
             .iter()
             .zip(&pattern)
@@ -621,25 +608,12 @@ fn the_pointed_cones_refusals_are_interleaved_with_meshes_rather_than_one_band()
             .collect::<Vec<_>>()
     );
 
-    assert!(
-        meshed_finer_than_that > 0,
-        "with nothing meshing below the coarsest refusal this is a floor and not \
-         a hole, and the whole file's finding would be wrong"
+    assert_eq!(
+        refused,
+        Vec::<String>::new(),
+        "these six deflections used to refuse and the whole stretch meshes now, so \
+         a refusal here is the §51.7 ragged edge coming back"
     );
-    assert!(
-        switches >= 3,
-        "one switch is a floor and two is a single band; {switches} is what says \
-         the refusals and the meshes are interleaved"
-    );
-    for (share, kind) in &refused {
-        assert_eq!(
-            kind,
-            "the triangulator refused a face: the refinement ran out of room before \
-             meeting the deflection",
-            "every refusal in this stretch is the one kind, and {share} of the \
-             cone's size was not"
-        );
-    }
 }
 
 /// The one refusal a relative ladder cannot reach, reached with an absolute
@@ -690,18 +664,15 @@ fn the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves() {
 /// Every refusal kind that appeared, with whether the same solid ever meshed at
 /// some other rung.
 ///
-/// One kind, and it healed. So on this family **no** refusal is one a consumer
-/// can be told not to retry: every refusal that happened was on a solid that
-/// meshed at another deflection. That is a narrow answer and it is the honest
-/// one — `ACurvedFaceGoesRightRoundWithNoSeam` and
+/// **None, since the §51.7 fix.** The one kind that used to be here was the
+/// triangulator running out of room, and it healed at another rung of the same
+/// solid. So this family reaches no refusal a consumer could be told not to
+/// retry, and it reaches no refusal at all. That is a narrow answer and it is
+/// the honest one — `ACurvedFaceGoesRightRoundWithNoSeam` and
 /// `AnEdgeWithoutTwoFacesAlongItCannotBeWalked` plainly cannot care what
-/// deflection they were asked at, but nothing here reached either of them, and
+/// deflection they were asked at, but nothing here reaches either of them, and
 /// §16.10 says a family that was not swept is not a family that was measured.
-const WHAT_EVERY_REFUSAL_HERE_LOOKED_LIKE: [(&str, bool); 1] = [(
-    "the triangulator refused a face: the refinement ran out of room before meeting \
-     the deflection",
-    true,
-)];
+const WHAT_EVERY_REFUSAL_HERE_LOOKED_LIKE: [(&str, bool); 0] = [];
 
 /// A refusal that comes back at every rung is one no consumer should retry, and
 /// this measures which of them those are rather than reasoning about it.
