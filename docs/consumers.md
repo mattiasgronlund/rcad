@@ -21,8 +21,10 @@ design doc is its own `docs/roadmap.md`; **§8 there owns the demand text** — 
 signatures, the code that needs them, and what rscene does if refused. Read that
 rather than trusting a summary here.
 
-**No rev is pinned yet**, and pinning needs no ceremony: rscene pins a sha once
-what it needs is merged here.
+**Pinned at `22a163a`** — `main` as it stood when rscene took the pin, which is
+this file's own last commit. Not the first sha carrying the two demands below;
+those landed earlier, and rscene had no reason to reach back past them. Pinning
+needed no ceremony, as arranged: rscene pinned it, and rcad does not bump it.
 
 ### What rcad built for it
 
@@ -117,6 +119,104 @@ A third demand — a display-edge polyline API — was **withdrawn by rscene** o
 own inspection, because display edges should be built from mesh points and a more
 accurate kernel curve would be worse. It is recorded because the withdrawal is
 the behaviour this arrangement depends on.
+
+### What rscene now leans on, said before it leaned on it
+
+The rule two sections down — *say so before you depend on a claim* — as it
+applies to the pin above. None of this is a request. It is a list of sentences
+that have just become expensive for rcad to be wrong about, published so that
+somebody with a reason to be adversarial reads them.
+
+Each is now a test in rscene's `crates/rscene-core/src/kernel.rs`, in
+`mod facts_this_design_rests_on`, so a pin bump that falsifies one fails
+rscene's build rather than rotting quietly in its prose. rscene's own
+`docs/roadmap.md` §3 and §7 carry the reasoning; this is the list.
+
+- **A cube's `points_along_edge` is empty for all twelve edges.** A flat face
+  contributes nothing, so rscene's edge path meets the empty case on the
+  commonest solid there is.
+- **`points_along_edge` of another solid's edge is `&[]`, not an error**, and
+  `point_at_vertex` of another solid's vertex is `None`. rscene depends on the
+  asymmetry: the slice cannot tell a foreign edge from a straight one, which is
+  what makes `Model::which_model_this_is()` a guard rather than a nicety.
+- **A closed edge's two ends are one vertex**, so an assembled polyline starts
+  and ends at the same point and rscene closes it explicitly.
+- **A full circle is cut into at least four segments however coarse the
+  deflection.** Measured at rscene's end: exactly four at a deflection a hundred
+  times the bar's diameter, against twenty-three at the deflection a viewport
+  asks for. rscene asserts the segment count rather than the point count,
+  because four segments is what the quarter-turn cap promises.
+- **`Mesh::triangles()` hands back faces in the solid's stored order**, so each
+  face's triangles arrive together. rscene lays its shaded buffer out one
+  contiguous span a face — that is how a per-face colour override becomes a draw
+  range rather than a face id on every vertex — and it now takes that
+  contiguity from this sentence rather than manufacturing it. It had a stable
+  sort for it, which was the identity permutation on every mesh it ever saw;
+  code that cannot be told from its absence went, and the promise it was
+  guarding against is asserted instead. Checked on a fused solid as well as on
+  primitives, because a boolean is where a face list is built rather than
+  declared.
+- **The model identity is distinct per model, stable across mutation and fresh
+  on clone.** The fourth property, fresh after a serde round trip, is *not*
+  asserted at rscene's end: rcad measures it, rscene never deserializes a
+  `Model`, and two answers that can disagree is worse than one.
+
+**One correction, which is rscene's own and not rcad's.** rscene's §4.5 used to
+say that `Surface::coordinates_of` yields the true normal along with `(u, v)`.
+It does not, and rcad never said it did — only `Plane` has a `normal()`. This is
+not a demand: every surface publishes the parameters its normal follows from, so
+rscene differentiates the implicit form itself.
+
+Worth one sentence back, because it is a fact about rcad that a consumer nearly
+got wrong: **`∂u × ∂v` of `point_at` points out of the material for a sphere, a
+cylinder and a cone, and into it for a torus**, whose two coordinates are
+ordered tube-first so a bend of pipe charts like a straight bar. That ordering
+is right and rcad's rustdoc says why; the consequence for anyone reading a
+normal off the parameterization's handedness is that four surfaces agree and the
+fifth does not. rscene now takes gradients instead, and checks them against
+`SideOfSurface::side_of` and `Plane::side_of_point` — a step along a normal must
+land outside and a step back inside — which caught an inverted torus on the
+first sample.
+
+### Withdrawal notice: rscene's §8.3 exception for the unlogged walk
+
+`59f3e15` met the condition rscene's §8.3 had written against this site — *when
+it records like its siblings, this exception is deleted* — so it is deleted.
+rscene's retry ladder is the only exception left on that list. §8.3 owns the
+text; this is the notice §13 asks for, and the withdrawal is unconditional.
+
+Four things rcad may want from it:
+
+- **Nothing should be deleted on rscene's account.** `ROOM_LEFT_TO_REFINE_A_WALK`
+  has a named consumer as of now, and decision 44's report entry — an empty
+  point list where a polyline was expected — is explicitly *not* withdrawn. It
+  was written to outlive this fix and it does.
+- **rscene keys on the record's name, not its outcome variant.** The
+  `Undecidable`-with-no-`Approximation` filing is noted as rcad's open gap and
+  is not a demand; rscene simply does not depend on the half that is wrong.
+- **rscene keeps the starved-closed-edge branch**, unreachable or not, because
+  §52.11 is open. If that row closes as *no wire can hold a closed edge
+  alongside other coedges*, rscene would like to hear: that is the point at
+  which deleting the branch becomes right, and rscene will not delete it on the
+  strength of "no route rcad's suite can build".
+- **The wording will reach bug reports.** rscene's §4.8 report keeps an
+  unrecognised refusal's own debug text verbatim, so
+  `AWireDoesNotFanIntoALoopToMesh { TooFewCorners { count: 1 } }` will appear in
+  reports whose cause was a starved walk. That is already recorded as rcad's; it
+  is repeated here only as evidence of how far the wording travels.
+
+### The cone, and what rscene did with it
+
+rscene's §3 carried the pointed cone as *the* measurement that killed **coarser
+is likelier to succeed**. That sentence is withdrawn from §3 and replaced with
+the honest position — one family swept, no other, nothing known either way —
+rather than with the opposite claim.
+
+**The retry ladder did not move.** When the original reason failed, §4.8 was
+re-argued from *cost* rather than patched, so the evidence being withdrawn a
+second time changes nothing about the design. rcad may find that worth knowing
+before spending effort on whether the general claim holds: rscene has no
+decision resting on it in either direction.
 
 ### How a demand is raised, decided and landed
 
