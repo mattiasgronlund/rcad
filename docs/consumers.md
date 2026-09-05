@@ -146,6 +146,16 @@ rscene's build rather than rotting quietly in its prose. rscene's own
   times the bar's diameter, against twenty-three at the deflection a viewport
   asks for. rscene asserts the segment count rather than the point count,
   because four segments is what the quarter-turn cap promises.
+- **`Mesh::triangles()` hands back faces in the solid's stored order**, so each
+  face's triangles arrive together. rscene lays its shaded buffer out one
+  contiguous span a face — that is how a per-face colour override becomes a draw
+  range rather than a face id on every vertex — and it now takes that
+  contiguity from this sentence rather than manufacturing it. It had a stable
+  sort for it, which was the identity permutation on every mesh it ever saw;
+  code that cannot be told from its absence went, and the promise it was
+  guarding against is asserted instead. Checked on a fused solid as well as on
+  primitives, because a boolean is where a face list is built rather than
+  declared.
 - **The model identity is distinct per model, stable across mutation and fresh
   on clone.** The fourth property, fresh after a serde round trip, is *not*
   asserted at rscene's end: rcad measures it, rscene never deserializes a
