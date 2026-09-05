@@ -21,8 +21,10 @@ design doc is its own `docs/roadmap.md`; **§8 there owns the demand text** — 
 signatures, the code that needs them, and what rscene does if refused. Read that
 rather than trusting a summary here.
 
-**No rev is pinned yet**, and pinning needs no ceremony: rscene pins a sha once
-what it needs is merged here.
+**Pinned at `22a163a`** — `main` as it stood when rscene took the pin, which is
+this file's own last commit. Not the first sha carrying the two demands below;
+those landed earlier, and rscene had no reason to reach back past them. Pinning
+needed no ceremony, as arranged: rscene pinned it, and rcad does not bump it.
 
 ### What rcad built for it
 
@@ -117,6 +119,54 @@ A third demand — a display-edge polyline API — was **withdrawn by rscene** o
 own inspection, because display edges should be built from mesh points and a more
 accurate kernel curve would be worse. It is recorded because the withdrawal is
 the behaviour this arrangement depends on.
+
+### What rscene now leans on, said before it leaned on it
+
+The rule two sections down — *say so before you depend on a claim* — as it
+applies to the pin above. None of this is a request. It is a list of sentences
+that have just become expensive for rcad to be wrong about, published so that
+somebody with a reason to be adversarial reads them.
+
+Each is now a test in rscene's `crates/rscene-core/src/kernel.rs`, in
+`mod facts_this_design_rests_on`, so a pin bump that falsifies one fails
+rscene's build rather than rotting quietly in its prose. rscene's own
+`docs/roadmap.md` §3 and §7 carry the reasoning; this is the list.
+
+- **A cube's `points_along_edge` is empty for all twelve edges.** A flat face
+  contributes nothing, so rscene's edge path meets the empty case on the
+  commonest solid there is.
+- **`points_along_edge` of another solid's edge is `&[]`, not an error**, and
+  `point_at_vertex` of another solid's vertex is `None`. rscene depends on the
+  asymmetry: the slice cannot tell a foreign edge from a straight one, which is
+  what makes `Model::which_model_this_is()` a guard rather than a nicety.
+- **A closed edge's two ends are one vertex**, so an assembled polyline starts
+  and ends at the same point and rscene closes it explicitly.
+- **A full circle is cut into at least four segments however coarse the
+  deflection.** Measured at rscene's end: exactly four at a deflection a hundred
+  times the bar's diameter, against twenty-three at the deflection a viewport
+  asks for. rscene asserts the segment count rather than the point count,
+  because four segments is what the quarter-turn cap promises.
+- **The model identity is distinct per model, stable across mutation and fresh
+  on clone.** The fourth property, fresh after a serde round trip, is *not*
+  asserted at rscene's end: rcad measures it, rscene never deserializes a
+  `Model`, and two answers that can disagree is worse than one.
+
+**One correction, which is rscene's own and not rcad's.** rscene's §4.5 used to
+say that `Surface::coordinates_of` yields the true normal along with `(u, v)`.
+It does not, and rcad never said it did — only `Plane` has a `normal()`. This is
+not a demand: every surface publishes the parameters its normal follows from, so
+rscene differentiates the implicit form itself.
+
+Worth one sentence back, because it is a fact about rcad that a consumer nearly
+got wrong: **`∂u × ∂v` of `point_at` points out of the material for a sphere, a
+cylinder and a cone, and into it for a torus**, whose two coordinates are
+ordered tube-first so a bend of pipe charts like a straight bar. That ordering
+is right and rcad's rustdoc says why; the consequence for anyone reading a
+normal off the parameterization's handedness is that four surfaces agree and the
+fifth does not. rscene now takes gradients instead, and checks them against
+`SideOfSurface::side_of` and `Plane::side_of_point` — a step along a normal must
+land outside and a step back inside — which caught an inverted torus on the
+first sample.
 
 ### How a demand is raised, decided and landed
 
