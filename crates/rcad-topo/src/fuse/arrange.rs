@@ -330,9 +330,9 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 9] {
     bits
 }
 
-/// The numbers a surface stores, with a plane's turned round where that makes
-/// them smaller: a key for the surface's **geometry** and not for which way it
-/// faces.
+/// The numbers a surface stores, with a plane turned to face one way and a
+/// pipe, cone or bend's axis written pointing one way: a key for the surface's
+/// **geometry** and not for how it happens to be spelled.
 ///
 /// §31.3 splits "is it one surface", which is geometry, from "does it face the
 /// same way", which is topology. This is the first half on its own, and the
@@ -347,26 +347,74 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 9] {
 /// *different* `f64` and would leave the two spellings of one plane still
 /// telling apart. Every zero is turned back the right way up, and adding zero
 /// is what does it, the same fold
-/// [`Plane::reversed`](rcad_geom::Plane::reversed) does for a real plane. A
-/// ball and a pipe have no reversed form at all and are their own key.
+/// [`Plane::reversed`](rcad_geom::Plane::reversed) does for a real plane.
+///
+/// **A pipe, a cone and a bend have a reversed form too**, and it is the same
+/// hazard one shape along: [`Axis::reversed`](rcad_geom::Axis) keeps the origin
+/// and negates the direction, so `Cylinder::new(Axis::z(), 2.0)` and
+/// `Cylinder::new(Axis::z().reversed(), 2.0)` are one pipe holding different
+/// numbers in three of nine slots. A cone is double-napped and a bend's centre
+/// cannot move, so turning either round is the same point set as well. All
+/// three write their axis direction into the same three slots, and all three
+/// are folded the same way the plane is.
+///
+/// **The reversal is folded and the slide is not.** A pipe's axis origin may
+/// also sit anywhere along its own line, and `Cylinder::new(Axis::new(p, w), r)`
+/// and `Cylinder::new(Axis::new(p + t·w, w), r)` are one pipe as well. Folding
+/// that needs a projection, which rounds, so it is left open — the class this
+/// closes is the reversal, not the whole of "one pipe, two names".
+///
+/// A ball genuinely has no reversed form: its centre and its radius are all it
+/// holds, and neither has a sign to turn round.
 pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 9] {
-    let Surface::Plane(flat) = surface else {
-        return name_of_surface_bits(surface);
-    };
-    let written = flat.coefficients();
-    let backwards = written
-        .iter()
-        .find(|coefficient| **coefficient != 0.0)
-        .is_some_and(|coefficient| *coefficient < 0.0);
-    let facing = written.map(|coefficient| {
-        let turned = if backwards { -coefficient } else { coefficient };
-        turned + 0.0
-    });
-    let mut bits = [0u64; 9];
-    for (slot, number) in facing.iter().enumerate() {
-        bits[slot + 1] = in_the_order_a_float_compares(*number);
+    let mut bits = name_of_surface_bits(surface);
+    match surface {
+        Surface::Plane(flat) => {
+            for (slot, number) in written_the_one_way(flat.coefficients()).iter().enumerate() {
+                bits[slot + 1] = in_the_order_a_float_compares(*number);
+            }
+        }
+        // Slot 0 is the kind and slots 1 to 3 are the point each of the three
+        // sits at — a pipe's axis origin, a cone's apex, a bend's centre — so
+        // the direction is at 4, 5 and 6 whichever of the three it is.
+        Surface::Cylinder(pipe) => {
+            the_axis_written_the_one_way(&mut bits, pipe.axis().direction());
+        }
+        Surface::Cone(cone) => the_axis_written_the_one_way(&mut bits, cone.axis().direction()),
+        Surface::Torus(ring) => the_axis_written_the_one_way(&mut bits, ring.axis().direction()),
+        Surface::Sphere(_) | _ => {}
     }
     bits
+}
+
+/// One of the two spellings of an axis direction, written into the three slots
+/// [`name_of_surface_bits`] puts it in.
+fn the_axis_written_the_one_way(bits: &mut [u64; 9], direction: Vector) {
+    for (slot, number) in written_the_one_way(direction.components())
+        .iter()
+        .enumerate()
+    {
+        bits[slot + 4] = in_the_order_a_float_compares(*number);
+    }
+}
+
+/// Numbers with every sign turned round where the leading one is negative, and
+/// every zero turned back the right way up.
+///
+/// Adding zero is the fold: `-0.0 + 0.0` is `0.0` and `x + 0.0` is `x` for every
+/// other finite `x`, so nothing here rounds and nothing moves.
+fn written_the_one_way<const N: usize>(written: [f64; N]) -> [f64; N] {
+    let backwards = written
+        .iter()
+        .find(|number| **number != 0.0)
+        .is_some_and(|number| *number < 0.0);
+    written.map(|number| {
+        if backwards {
+            -number + 0.0
+        } else {
+            number + 0.0
+        }
+    })
 }
 
 /// Three planes turned to face the one way, so that where they meet is a fact
@@ -406,12 +454,24 @@ pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 9
 /// demonstration — the second for a zero a caller handed in rather than one a
 /// reversal made.
 ///
-/// A triple with anything curved in it is handed over untouched. There, `which`
+/// A triple with anything curved in it is handed over untouched, **and that is
+/// about the planes in it and not about the curved surface**. There, `which`
 /// numbers the meeting points along the line the two planes cross in and turning
 /// a plane round turns that line round, so the same point would be `which: 0`
 /// under one spelling and `which: 1` under the other —
 /// `assemble::names_of_the_three_surfaces` is the other half of this and says
 /// the same.
+///
+/// **Turning a pipe, a cone or a bend round needs no canonical form here**, and
+/// that is measured rather than argued: a curved surface sorts after every
+/// plane, two of the three must be flat to be solved at all, so the curved one
+/// is always the third row and the line is fixed by the other two.
+/// `turning_a_stored_axis_round_moves_no_corner_and_renumbers_none` sweeps
+/// 12 960 triples of pipes, cones and bends with every stored axis turned round
+/// and gets the same points in the same order, bit for bit. So the two spellings
+/// of one pipe differ only in the *name* the corner gets, which
+/// [`name_of_the_surface_either_way_round`] folds, and there is nothing for this
+/// function to do about them.
 fn three_planes_faced_the_one_way(surfaces: [Surface; 3]) -> [Surface; 3] {
     if !surfaces.iter().all(|surface| surface.as_plane().is_some()) {
         return surfaces;
@@ -6452,7 +6512,8 @@ mod how_often_cutting_a_curved_face_refuses {
 #[cfg(test)]
 mod naming_a_surface {
     use rcad_geom::{
-        Axis, Cylinder, MeetOfThree, Plane, Point, Sphere, Surface, Vector, meet_of_three_surfaces,
+        Axis, Cone, Cylinder, MeetOfThree, Plane, Point, Sphere, Surface, Torus, Vector,
+        meet_of_three_surfaces,
     };
     use rcad_predicates::{Policy, ProvenanceLog};
 
@@ -6460,7 +6521,7 @@ mod naming_a_surface {
 
     use super::{
         as_exact_as_it_is, in_the_order_a_float_compares, name_of_surface_bits,
-        three_planes_faced_the_one_way,
+        name_of_the_surface_either_way_round, three_planes_faced_the_one_way,
     };
 
     /// The key a corner is named by has to order surfaces the way `rcad-geom`
@@ -6630,6 +6691,104 @@ mod naming_a_surface {
         assert_eq!(
             corner(as_the_step_reader_hands_it_over),
             corner(as_the_other_solid_holds_it)
+        );
+    }
+
+    /// A pipe, a cone and a bend written with the axis pointing the other way
+    /// are one surface, and the geometry key says so.
+    ///
+    /// [`Axis::reversed`] keeps the origin and negates the direction, so the two
+    /// spellings differ in three of the nine numbers the key holds. Two solids
+    /// pressed together on one pipe hold it both ways, and keyed on the stored
+    /// numbers the circle they share is two edges with one face along each,
+    /// which is not a solid.
+    ///
+    /// A ball has no reversed form to fold, and stays its own key.
+    #[test]
+    fn a_pipe_a_cone_and_a_bend_are_one_surface_written_either_way_round() {
+        let leaning = Axis::new(Point::new(1.0, 2.0, 3.0), Vector::new(1.0, -2.0, 2.0))
+            .expect("a direction with length");
+        let written_both_ways: [(Surface, Surface); 4] = [
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a radius")),
+                Surface::Cylinder(Cylinder::new(Axis::z().reversed(), 2.0).expect("a radius")),
+            ),
+            (
+                Surface::Cylinder(Cylinder::new(leaning, 2.0).expect("a radius")),
+                Surface::Cylinder(Cylinder::new(leaning.reversed(), 2.0).expect("a radius")),
+            ),
+            (
+                Surface::Cone(Cone::new(leaning, 0.5).expect("a slope")),
+                Surface::Cone(Cone::new(leaning.reversed(), 0.5).expect("a slope")),
+            ),
+            (
+                Surface::Torus(Torus::new(leaning, 3.0, 1.0).expect("a ring and a tube")),
+                Surface::Torus(
+                    Torus::new(leaning.reversed(), 3.0, 1.0).expect("a ring and a tube"),
+                ),
+            ),
+        ];
+
+        for (written, turned) in written_both_ways {
+            assert_ne!(
+                name_of_surface_bits(&written),
+                name_of_surface_bits(&turned),
+                "{written:?} turned round is different numbers, which is the difficulty"
+            );
+            assert_eq!(
+                name_of_the_surface_either_way_round(&written),
+                name_of_the_surface_either_way_round(&turned),
+                "{written:?} and the same surface written the other way round are two names"
+            );
+        }
+
+        let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 2.0, 3.0), 5.0).expect("a radius"));
+        assert_eq!(
+            name_of_the_surface_either_way_round(&ball),
+            name_of_surface_bits(&ball),
+            "a ball holds a centre and a radius and has no reversed form to fold"
+        );
+    }
+
+    /// The fold picks one of the two spellings and never a third thing.
+    ///
+    /// Negating a stored `0.0` gives `-0.0`, which is the same number and
+    /// different bits — the trap §51.2 item 2 records three surfaces falling
+    /// into. A pipe about `z` has two zero components, so a fold that did not
+    /// turn them back the right way up would leave the two spellings telling
+    /// apart in exactly the case that matters most.
+    #[test]
+    fn folding_a_pipe_written_either_way_round_lands_on_the_spelling_that_faces_forward() {
+        let up = Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a radius"));
+        let down = Surface::Cylinder(Cylinder::new(Axis::z().reversed(), 2.0).expect("a radius"));
+        assert_eq!(
+            name_of_the_surface_either_way_round(&down),
+            name_of_surface_bits(&up),
+            "the fold lands on a spelling the kernel really stores"
+        );
+    }
+
+    /// A pipe's axis origin sliding along its own line is **not** folded, and
+    /// saying so is the point of the test.
+    ///
+    /// `Cylinder::new(Axis::new(p, w), r)` and
+    /// `Cylinder::new(Axis::new(p + t·w, w), r)` are also one pipe. Folding that
+    /// takes a projection, which rounds, so it is left open — and a reader who
+    /// assumed "one pipe, two names" was closed here would be wrong.
+    #[test]
+    fn a_pipes_axis_origin_slid_along_its_own_line_is_still_a_second_name() {
+        let here = Cylinder::new(Axis::z(), 2.0).expect("a radius");
+        let further_up = Cylinder::new(
+            Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a direction with length"),
+            2.0,
+        )
+        .expect("a radius");
+
+        assert_ne!(
+            name_of_the_surface_either_way_round(&Surface::Cylinder(here)),
+            name_of_the_surface_either_way_round(&Surface::Cylinder(further_up)),
+            "the slide is a second name this fold does not reach"
         );
     }
 }
