@@ -61,9 +61,9 @@
 use core::cmp::Ordering;
 
 use rcad_geom::{
-    Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF,
-    Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Vector,
-    how_a_plane_leans_against_a_cone, intersect, meet_of_three_surfaces,
+    Axis, Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation,
+    POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
+    SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, intersect, meet_of_three_surfaces,
     where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
     which_comes_first_round_a_crossing,
 };
@@ -365,11 +365,13 @@ pub(crate) fn name_of_surface_bits(surface: &Surface) -> [u64; 9] {
 /// three write their axis direction into the same three slots, and all three
 /// are folded the same way the plane is.
 ///
-/// **The reversal is folded and the slide is not.** A pipe's axis origin may
-/// also sit anywhere along its own line, and `Cylinder::new(Axis::new(p, w), r)`
-/// and `Cylinder::new(Axis::new(p + t·w, w), r)` are one pipe as well. Folding
-/// that needs a projection, which rounds, so it is left open — the class this
-/// closes is the reversal, not the whole of "one pipe, two names".
+/// **A pipe's origin slides as well as its direction turning round**, and that
+/// half is folded where it can be folded exactly and left alone where it cannot.
+/// `Cylinder::new(Axis::new(p, w), r)` and
+/// `Cylinder::new(Axis::new(p + t·w, w), r)` are one pipe too, and a cone's apex
+/// and a bend's centre are determined points that cannot move, so this is the
+/// pipe alone. [`the_axis_origin_slid_the_one_way`] does it, and says there what
+/// stays open and why that is a limit and not a gap.
 ///
 /// A ball genuinely has no reversed form: its centre and its radius are all it
 /// holds, and neither has a sign to turn round.
@@ -386,6 +388,7 @@ pub(crate) fn name_of_the_surface_either_way_round(surface: &Surface) -> [u64; 9
         // the direction is at 4, 5 and 6 whichever of the three it is.
         Surface::Cylinder(pipe) => {
             the_axis_written_the_one_way(&mut bits, pipe.axis().direction());
+            the_axis_origin_slid_the_one_way(&mut bits, &pipe.axis());
         }
         Surface::Cone(cone) => the_axis_written_the_one_way(&mut bits, cone.axis().direction()),
         Surface::Torus(ring) => the_axis_written_the_one_way(&mut bits, ring.axis().direction()),
@@ -403,6 +406,42 @@ fn the_axis_written_the_one_way(bits: &mut [u64; 9], direction: Vector) {
     {
         bits[slot + 4] = in_the_order_a_float_compares(*number);
     }
+}
+
+/// A pipe's axis origin slid to the one point of its own line that can be named
+/// without rounding, written into the three slots [`name_of_surface_bits`] puts
+/// it in. `false`, and the bits left exactly as the pipe stores them, when it
+/// cannot be.
+///
+/// PLACEHOLDER
+fn the_axis_origin_slid_the_one_way(bits: &mut [u64; 9], axis: &Axis) -> bool {
+    let Some(runs_along) = the_one_coordinate_axis_it_runs_along(axis.direction()) else {
+        return false;
+    };
+    let mut origin = axis.origin().coordinates();
+    origin[runs_along] = 0.0;
+    for (slot, number) in origin.iter().enumerate() {
+        bits[slot + 1] = in_the_order_a_float_compares(*number);
+    }
+    true
+}
+
+/// Which coordinate axis a direction runs along, when it runs along one.
+///
+/// `None` for a slanted direction, which is every direction with more than one
+/// non-zero component, and for a direction with none at all — an axis with no
+/// length is not a line to slide an origin along.
+fn the_one_coordinate_axis_it_runs_along(direction: Vector) -> Option<usize> {
+    let mut only = None;
+    for (which, component) in direction.components().iter().enumerate() {
+        if *component != 0.0 {
+            if only.is_some() {
+                return None;
+            }
+            only = Some(which);
+        }
+    }
+    only
 }
 
 /// Numbers with every sign turned round where the leading one is negative, and
@@ -6522,13 +6561,17 @@ mod naming_a_surface {
         Axis, Cone, Cylinder, MeetOfThree, Plane, Point, Sphere, Surface, Torus, Vector,
         meet_of_three_surfaces,
     };
-    use rcad_predicates::{Policy, ProvenanceLog};
+    use rcad_predicates::expansion::{
+        expansion_sign, expansion_sum, product_is_exact, two_product,
+    };
+    use rcad_predicates::{Decision, Policy, ProvenanceLog};
 
     use crate::fuse::middle_of;
 
     use super::{
         as_exact_as_it_is, in_the_order_a_float_compares, name_of_surface_bits,
-        name_of_the_surface_either_way_round, three_planes_faced_the_one_way,
+        name_of_the_surface_either_way_round, the_axis_origin_slid_the_one_way,
+        three_planes_faced_the_one_way,
     };
 
     /// The key a corner is named by has to order surfaces the way `rcad-geom`
@@ -6775,27 +6818,454 @@ mod naming_a_surface {
         );
     }
 
-    /// A pipe's axis origin sliding along its own line is **not** folded, and
-    /// saying so is the point of the test.
+    /// A pipe whose axis origin is written at another point of the same
+    /// coordinate-axis line is one name.
     ///
     /// `Cylinder::new(Axis::new(p, w), r)` and
-    /// `Cylinder::new(Axis::new(p + t·w, w), r)` are also one pipe. Folding that
-    /// takes a projection, which rounds, so it is left open — and a reader who
-    /// assumed "one pipe, two names" was closed here would be wrong.
+    /// `Cylinder::new(Axis::new(p + t·w, w), r)` are one pipe. Along a
+    /// coordinate axis every point of the line shares the other two coordinates
+    /// exactly, so writing `0.0` into the third picks one of them and rounds
+    /// nothing — and the spread of the slide does not matter, which is what the
+    /// far-apart pair is here for.
     #[test]
-    fn a_pipes_axis_origin_slid_along_its_own_line_is_still_a_second_name() {
-        let here = Cylinder::new(Axis::z(), 2.0).expect("a radius");
-        let further_up = Cylinder::new(
-            Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+    fn a_pipes_axis_origin_slid_along_a_coordinate_axis_is_one_name() {
+        let mut folded = 0;
+        for (which, along) in the_three_coordinate_axes().into_iter().enumerate() {
+            for spelling in a_line_written_at_many_of_its_own_points(which, along) {
+                for (place, first) in spelling.iter().enumerate() {
+                    for other in &spelling[place + 1..] {
+                        assert!(
+                            two_pipes_are_provably_along_one_line(&first.axis(), &other.axis()),
+                            "{first:?} and {other:?} were meant to be one line"
+                        );
+                        assert_ne!(
+                            name_of_surface_bits(&Surface::Cylinder(*first)),
+                            name_of_surface_bits(&Surface::Cylinder(*other)),
+                            "{first:?} and {other:?} must store different numbers or there is \
+                             nothing here"
+                        );
+                        assert_eq!(
+                            name_of_the_surface_either_way_round(&Surface::Cylinder(*first)),
+                            name_of_the_surface_either_way_round(&Surface::Cylinder(*other)),
+                            "{first:?} and {other:?} are one pipe written at two of its own points"
+                        );
+                        folded += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(folded, 225, "the sweep changed size");
+    }
+
+    /// The fold lands on a point the kernel really stores, and not on a third
+    /// thing.
+    ///
+    /// The same demand
+    /// [`folding_a_pipe_written_either_way_round_lands_on_the_spelling_that_faces_forward`]
+    /// makes of the reversal: a key that is not any real spelling is a key no
+    /// reader can check by hand, and one that held `-0.0` would tell two
+    /// spellings apart in the case that matters most.
+    #[test]
+    fn folding_a_slid_pipe_lands_on_the_spelling_that_crosses_the_origins_plane() {
+        let up_at_four = Cylinder::new(
+            Axis::new(Point::new(1.0, 2.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a direction with length"),
+            2.0,
+        )
+        .expect("a radius");
+        let at_zero = Cylinder::new(
+            Axis::new(Point::new(1.0, 2.0, 0.0), Vector::new(0.0, 0.0, 1.0))
                 .expect("a direction with length"),
             2.0,
         )
         .expect("a radius");
 
-        assert_ne!(
-            name_of_the_surface_either_way_round(&Surface::Cylinder(here)),
-            name_of_the_surface_either_way_round(&Surface::Cylinder(further_up)),
-            "the slide is a second name this fold does not reach"
+        assert_eq!(
+            name_of_the_surface_either_way_round(&Surface::Cylinder(up_at_four)),
+            name_of_surface_bits(&Surface::Cylinder(at_zero)),
+            "the fold lands on a pipe the kernel really stores"
         );
+    }
+
+    /// The fold claims a slide and nothing else.
+    ///
+    /// Three ways two pipes can be near each other and still be two surfaces: a
+    /// line beside the first one, a radius an ulp bigger, and a direction an ulp
+    /// off. **The last two are the holes in the spike's instrument** — it paired
+    /// cylinders only when their radius bits were equal and their folded
+    /// direction bits identical, so neither pair was ever compared. Nothing an
+    /// origin fold does could join them, and this is that said from evidence.
+    #[test]
+    fn a_pipe_a_line_a_radius_or_a_direction_away_keeps_its_own_name() {
+        let up = |at: Point, radius: f64| {
+            Surface::Cylinder(
+                Cylinder::new(
+                    Axis::new(at, Vector::new(0.0, 0.0, 1.0)).expect("a direction with length"),
+                    radius,
+                )
+                .expect("a radius"),
+            )
+        };
+        let plain = up(Point::new(1.0, 2.0, 3.0), 2.0);
+
+        assert_ne!(
+            name_of_the_surface_either_way_round(&plain),
+            name_of_the_surface_either_way_round(&up(Point::new(1.0, 2.0f64.next_up(), 9.0), 2.0)),
+            "a parallel line one ulp across is another pipe, wherever its origin is written"
+        );
+        assert_ne!(
+            name_of_the_surface_either_way_round(&plain),
+            name_of_the_surface_either_way_round(&up(Point::new(1.0, 2.0, 9.0), 2.0f64.next_up())),
+            "one ulp of radius is another pipe about the same line"
+        );
+
+        let leaning = |components: Vector, at: Point| {
+            Surface::Cylinder(
+                Cylinder::new(
+                    Axis::new(at, components).expect("a direction with length"),
+                    2.0,
+                )
+                .expect("a radius"),
+            )
+        };
+        let slanted = Vector::new(1.0, 2.0, 3.0);
+        let a_hair_off = Vector::new(1.0, 2.0, 3.0f64.next_up());
+        let stored = |direction| {
+            Axis::new(Point::origin(), direction)
+                .expect("a direction with length")
+                .direction()
+                .components()
+        };
+        assert_ne!(
+            stored(slanted),
+            stored(a_hair_off),
+            "the two directions must store different numbers or there is nothing here"
+        );
+        assert_ne!(
+            name_of_the_surface_either_way_round(&leaning(slanted, Point::origin())),
+            name_of_the_surface_either_way_round(&leaning(a_hair_off, Point::origin())),
+            "a direction one ulp off is another pipe through the same point"
+        );
+    }
+
+    /// A slanted pipe's origin is left exactly where the pipe put it.
+    ///
+    /// The other half of the fold, and the one the doc calls a §16.10 limit:
+    /// [`the_axis_origin_slid_the_one_way`] says `false` and writes nothing, so
+    /// the key is [`name_of_surface_bits`] in the three slots the origin sits in
+    /// and the reversal fold in the three the direction sits in.
+    #[test]
+    fn a_slanted_pipes_origin_is_left_exactly_where_the_pipe_put_it() {
+        let leaning = Axis::new(Point::new(1.0, 2.0, 3.0), Vector::new(1.0, -2.0, 2.0))
+            .expect("a direction with length");
+        let pipe = Cylinder::new(leaning, 2.0).expect("a radius");
+
+        let mut bits = name_of_surface_bits(&Surface::Cylinder(pipe));
+        let stored = bits;
+        assert!(
+            !the_axis_origin_slid_the_one_way(&mut bits, &leaning),
+            "a slanted origin cannot be slid without rounding"
+        );
+        assert_eq!(bits, stored, "a refused slide must leave the bits alone");
+
+        let named = name_of_the_surface_either_way_round(&Surface::Cylinder(pipe));
+        assert_eq!(
+            named[1..4],
+            stored[1..4],
+            "the key holds the origin the pipe stores"
+        );
+    }
+
+    /// **No way of naming a slanted line folds the slides a caller can reach**,
+    /// and the family is measured rather than argued (§16.10).
+    ///
+    /// Three maps that produce a point of the line, tried against every slide in
+    /// the sweep below that lands *exactly* back on the line it started from —
+    /// `Axis::closest_point` from the world origin, sliding until the coordinate
+    /// the direction leans on hardest reads zero, and the exact Plücker moment
+    /// rounded back to one `f64` a component. Each fails for the same reason:
+    /// the scalar that says how far to slide is a rounded division, the slide
+    /// itself is a rounded product, and an expansion is not a canonical
+    /// representation of the value it sums to.
+    ///
+    /// The counts are the point and are asserted exactly, so a fourth candidate
+    /// that did better would have to move them.
+    #[test]
+    fn no_way_of_naming_a_slanted_line_folds_the_slides_a_caller_can_reach() {
+        let mut tried = 0;
+        let mut exactly_one_line = 0;
+        let mut by_the_foot_from_the_origin = 0;
+        let mut by_zeroing_the_leaning_coordinate = 0;
+        let mut by_the_rounded_moment = 0;
+
+        for along in slanted_directions() {
+            for start in origins_a_caller_could_write() {
+                let first = Axis::new(start, along).expect("a direction with length");
+                for slid in a_slanted_line_written_at_many_points(first) {
+                    tried += 1;
+                    if !two_pipes_are_provably_along_one_line(&first, &slid) {
+                        continue;
+                    }
+                    exactly_one_line += 1;
+                    by_the_foot_from_the_origin += usize::from(
+                        first.closest_point(Point::origin()).coordinates()
+                            == slid.closest_point(Point::origin()).coordinates(),
+                    );
+                    by_zeroing_the_leaning_coordinate += usize::from(
+                        slid_until_the_leaning_coordinate_reads_zero(&first)
+                            == slid_until_the_leaning_coordinate_reads_zero(&slid),
+                    );
+                    by_the_rounded_moment += usize::from(
+                        the_moment_of_the_line_rounded(&first)
+                            == the_moment_of_the_line_rounded(&slid),
+                    );
+                }
+            }
+        }
+
+        assert_eq!(
+            (
+                tried,
+                exactly_one_line,
+                by_the_foot_from_the_origin,
+                by_zeroing_the_leaning_coordinate,
+                by_the_rounded_moment
+            ),
+            (40_000, 9_028, 3_271, 7_509, 9_028),
+            "the sweep, or what the three candidates make of it, moved"
+        );
+    }
+
+    /// **The rounded key is worse than the defect it would close**, priced over
+    /// pipes that are provably two lines.
+    ///
+    /// A slanted direction with no zero component, and an origin nudged along
+    /// one coordinate axis: the nudge cannot be parallel to the direction, so
+    /// every pair here is two pipes, and the exact cross product proves it pair
+    /// by pair rather than the sentence claiming it. Rounding the exact moment
+    /// back to three `f64`s then names some of them as one, which is a corrupt
+    /// solid where the unfolded slide is only a duplicate name.
+    #[test]
+    fn a_moment_rounded_back_to_three_f64s_names_pipes_that_are_two_lines_as_one() {
+        let mut tried = 0;
+        let mut collided = 0;
+        let mut widest = 0.0f64;
+
+        for along in slanted_directions() {
+            if along.components().iter().any(|component| *component == 0.0) {
+                continue;
+            }
+            for start in origins_a_caller_could_write() {
+                // A nudged zero is a subnormal, and a subnormal times a
+                // direction underflows, which the exact cross product refuses
+                // to work with.
+                if start.coordinates().iter().any(|number| *number == 0.0) {
+                    continue;
+                }
+                for which in 0..3 {
+                    for ulps in 1..=8u32 {
+                        let mut nudged = start.coordinates();
+                        for _ in 0..ulps {
+                            nudged[which] = nudged[which].next_up();
+                        }
+                        let first = Axis::new(start, along).expect("a direction with length");
+                        let beside = Axis::new(Point::new(nudged[0], nudged[1], nudged[2]), along)
+                            .expect("a direction with length");
+                        assert!(
+                            !two_pipes_are_provably_along_one_line(&first, &beside),
+                            "a nudge across a fully slanted direction cannot stay on the line"
+                        );
+                        tried += 1;
+                        if the_moment_of_the_line_rounded(&first)
+                            == the_moment_of_the_line_rounded(&beside)
+                        {
+                            collided += 1;
+                            widest = widest.max(first.distance_to_point(beside.origin()));
+                        }
+                    }
+                }
+            }
+        }
+
+        assert_eq!(
+            (tried, collided, widest),
+            (1_344, 113, 3.938_227_581_713_538_7e-13),
+            "the sweep, or the price of the rounded key over it, moved"
+        );
+    }
+
+    /// One line written at many of its own points, along coordinate axis
+    /// `which`, at spreads a slide has to survive.
+    fn a_line_written_at_many_of_its_own_points(which: usize, along: Vector) -> Vec<Vec<Cylinder>> {
+        let across: [[f64; 2]; 5] = [
+            [0.0, 0.0],
+            [1.0, 2.0],
+            [-3.5, 0.25],
+            [1e17, 0.1],
+            [1e-17, -1e-17],
+        ];
+        let at = [0.0, 1e-17, 0.1, -4.0, 1e17, -1e17];
+        across
+            .into_iter()
+            .map(|[first, second]| {
+                at.into_iter()
+                    .map(|slid| {
+                        let mut coordinates = vec![first, second];
+                        coordinates.insert(which, slid);
+                        let [x, y, z] = coordinates[..] else {
+                            unreachable!("two coordinates with a third put back is three")
+                        };
+                        Cylinder::new(
+                            Axis::new(Point::new(x, y, z), along).expect("a direction with length"),
+                            2.0,
+                        )
+                        .expect("a radius")
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The three coordinate axes as directions.
+    fn the_three_coordinate_axes() -> [Vector; 3] {
+        [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+        ]
+    }
+
+    /// Directions that lean, as a caller would write them before `Axis::new`
+    /// scales them.
+    fn slanted_directions() -> Vec<Vector> {
+        [
+            [1.0, 2.0, 3.0],
+            [1.0, -2.0, 2.0],
+            [3.0, 4.0, 5.0],
+            [1.0, 1.0, 1.0],
+            [7.0, -3.0, 11.0],
+            [2.0, 5.0, -9.0],
+            [-1.0, 4.0, 6.0],
+            [13.0, 2.0, -5.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 3.0, 7.0],
+        ]
+        .into_iter()
+        .map(|[x, y, z]| Vector::new(x, y, z))
+        .collect()
+    }
+
+    /// Points a caller could name an axis at.
+    fn origins_a_caller_could_write() -> Vec<Point> {
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 2.0, 3.0],
+            [-4.5, 0.25, 7.75],
+            [100.0, -200.0, 300.0],
+            [0.001, 0.002, 0.003],
+            [1000.0, 1000.0, 1000.0],
+            [-7.125, 13.5, -0.5],
+            [1873.0, -1873.0, 1873.0],
+        ]
+        .into_iter()
+        .map(|[x, y, z]| Point::new(x, y, z))
+        .collect()
+    }
+
+    /// The same line written at many points along it, the way a caller writing
+    /// `p + t·w` writes it.
+    fn a_slanted_line_written_at_many_points(axis: Axis) -> Vec<Axis> {
+        let start = axis.origin().coordinates();
+        let along = axis.direction().components();
+        (1..=500)
+            .map(|step| {
+                let how_far = f64::from(step) * 0.125 - 31.25;
+                let slid = [0, 1, 2].map(|which| start[which] + how_far * along[which]);
+                Axis::new(Point::new(slid[0], slid[1], slid[2]), axis.direction())
+                    .expect("a direction with length")
+            })
+            .collect()
+    }
+
+    /// The origin slid until the coordinate the direction leans on hardest
+    /// reads zero — one of the family, and it rounds twice.
+    fn slid_until_the_leaning_coordinate_reads_zero(axis: &Axis) -> [f64; 3] {
+        let start = axis.origin().coordinates();
+        let along = axis.direction().components();
+        let mut hardest = 0;
+        for which in 1..3 {
+            if along[which].abs() > along[hardest].abs() {
+                hardest = which;
+            }
+        }
+        let how_far = -start[hardest] / along[hardest];
+        [0, 1, 2].map(|which| start[which] + how_far * along[which])
+    }
+
+    /// The line's Plücker moment, worked out exactly and then rounded back to
+    /// one `f64` a component — the last of the family.
+    fn the_moment_of_the_line_rounded(axis: &Axis) -> [f64; 3] {
+        let start = axis.origin().coordinates();
+        let along = axis.direction().components();
+        [0, 1, 2].map(|which| {
+            let mut terms = [0.0; 4];
+            let len = a_cross_product_component_exactly(start, along, which, &mut terms);
+            terms[..len].iter().sum()
+        })
+    }
+
+    /// Whether two axes run along one line, with no rounding anywhere in the
+    /// answer.
+    ///
+    /// The directions have to be the same stored numbers, which every pair the
+    /// sweeps build is, and then the lines coincide exactly when the two origins
+    /// have the same moment `p × w`. Both moments are exact expansions and their
+    /// difference is one more, so the sign is the sign and not an estimate.
+    fn two_pipes_are_provably_along_one_line(one: &Axis, other: &Axis) -> bool {
+        let along = one.direction().components();
+        if along != other.direction().components() {
+            return false;
+        }
+        (0..3).all(|which| {
+            let (mut mine, mut theirs) = ([0.0; 4], [0.0; 4]);
+            let mine = {
+                let len = a_cross_product_component_exactly(
+                    one.origin().coordinates(),
+                    along,
+                    which,
+                    &mut mine,
+                );
+                &mine[..len]
+            };
+            let taken_away: Vec<f64> = {
+                let len = a_cross_product_component_exactly(
+                    other.origin().coordinates(),
+                    along,
+                    which,
+                    &mut theirs,
+                );
+                theirs[..len].iter().map(|term| -term).collect()
+            };
+            let mut both = [0.0; 8];
+            let len = expansion_sum(mine, &taken_away, &mut both);
+            matches!(expansion_sign(&both[..len]), Decision::Zero)
+        })
+    }
+
+    /// One component of `a × b`, exactly, as a Shewchuk expansion.
+    fn a_cross_product_component_exactly(
+        a: [f64; 3],
+        b: [f64; 3],
+        which: usize,
+        out: &mut [f64; 4],
+    ) -> usize {
+        let (next, after) = ((which + 1) % 3, (which + 2) % 3);
+        assert!(
+            product_is_exact(a[next], b[after]) && product_is_exact(a[after], b[next]),
+            "the sweeps' numbers have to multiply without overflowing or underflowing"
+        );
+        let (high, low) = two_product(a[next], b[after]);
+        let (taken_high, taken_low) = two_product(a[after], b[next]);
+        expansion_sum(&[low, high], &[-taken_low, -taken_high], out)
     }
 }
