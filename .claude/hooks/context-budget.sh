@@ -7,9 +7,10 @@
 # and were the expensive half of the day: 1994 turns, 485M input tokens, 97% of
 # it cache reads, while writing almost no code.
 #
-# Measured against that day, capping a dispatcher at 300k would have removed
-# 96M input tokens — a fifth of all dispatcher cost. 250k removes 131M and hands
-# off more often; 400k removes 45M. The number is a dial, not a discovery.
+# Measured against that day, capping a dispatcher at 250k would have removed
+# 131M input tokens — 27% of all dispatcher cost. 300k removes 96M and 400k
+# removes 45M. The number is a dial, not a discovery; it started at 300k and was
+# turned down once the handoff was cheap enough to take more often.
 #
 # Fires once per session, on the two events where handing off is actually the
 # next thing that could happen: when the user submits new work, and when a turn
@@ -18,7 +19,7 @@
 set -uo pipefail
 
 payload=$(cat)
-budget=${CLAUDE_CONTEXT_BUDGET:-300000}
+budget=${CLAUDE_CONTEXT_BUDGET:-250000}
 
 # A lane has an agent_id; it is not the session this is about.
 [ -n "$(jq -r '.agent_id // empty' <<<"$payload")" ] && exit 0

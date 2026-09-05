@@ -97,6 +97,26 @@ where a representable answer is refused is that rule being used as cover.
 3. **Checked and sound** — which you tried hardest to break, and how.
 4. **Was this worth running?**
 
+### Numbering the findings
+
+**Label every finding, and use the label everywhere it is discussed afterwards.**
+A finding travels: it is reported, argued about, fixed in a commit, and answered
+by the user, often across sessions. Prose descriptions do not survive that trip —
+"the hole" and "the false claim" both meant something precise for about an hour.
+
+The label is a **letter and a number**:
+
+- **Run as a lane, use the lane's letter.** Lane K's findings are `K1`, `K2`,
+  `K3`, `K4`. That letter is the first thing asked about a finding, and it is
+  free.
+- **Run outside a lane, use `A`.** `A1`, `A2` — `A` for audit, so audit findings
+  never collide with a grilling round's `Q1`, `Q2` in the same conversation.
+
+A finding that needs the user to decide something also goes in the session's
+`open-questions.md` under the same label, one line, per `CLAUDE.md`. The status
+line reads the labels from there, so a finding you numbered is a finding the user
+can see is still open.
+
 ## Fixing what it finds
 
 A finding resolves one of two ways, and both are cheap:

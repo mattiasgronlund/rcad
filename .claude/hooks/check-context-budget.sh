@@ -51,6 +51,18 @@ if [ -z "$first" ] || [ -n "$second" ]; then
 	failed=$((failed + 1))
 fi
 
+# The shipped default, with nothing in the environment. 260k is over the 250k
+# this ships with and under the 300k it started at, so this case is the one that
+# notices the default silently drifting back.
+total=$((total + 1))
+usage 260000 >"$work/default.jsonl"
+shipped=$(jq -n --arg t "$work/default.jsonl" '{session_id:"default", transcript_path:$t, hook_event_name:"Stop"}' |
+	env -u CLAUDE_CONTEXT_BUDGET TMPDIR="$work" "$hook")
+if [ -z "$shipped" ]; then
+	echo "wanted the shipped default to warn at 260k tokens, got silence"
+	failed=$((failed + 1))
+fi
+
 # The number in the message is the one the transcript reports, not a guess.
 total=$((total + 1))
 said=$(jq -n --arg t "$work/big.jsonl" '{session_id:"number", transcript_path:$t, hook_event_name:"Stop"}' |

@@ -40,6 +40,16 @@ reject() {
 	fi
 }
 
+# The shipped default, with nothing in the environment. This is the case that
+# notices the two defaults — the hook's and the status line's — drifting apart.
+total=$((total + 1))
+shipped=$(jq -n --arg d "$work" '{model: {display_name: "Opus"}, context_window: {total_input_tokens: 125000}, workspace: {project_dir: $d}}' |
+	env -u CLAUDE_CONTEXT_BUDGET CLAUDE_QUESTIONS_FILE=/nowhere "$line" | sed -e 's/\x1b\[[0-9;]*m//g')
+if ! grep -qE '125k/250k .* 50%' <<<"$shipped"; then
+	printf 'wanted the shipped default to read 125k/250k at 50%%, got: %s\n' "$shipped"
+	failed=$((failed + 1))
+fi
+
 # --- line 1, which is the half the user reads most
 want "the budget line renders" 150000 /nowhere '150k/300k .* 50%'
 reject "under budget does not say hand off" 150000 /nowhere 'hand off'

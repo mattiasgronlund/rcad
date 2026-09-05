@@ -19,7 +19,7 @@
 set -uo pipefail
 
 payload=$(cat)
-budget=${CLAUDE_CONTEXT_BUDGET:-300000}
+budget=${CLAUDE_CONTEXT_BUDGET:-250000}
 
 get() { jq -r "$1 // empty" <<<"$payload" 2>/dev/null; }
 
