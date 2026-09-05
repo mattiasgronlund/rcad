@@ -97,7 +97,19 @@ check:
 # the refusing side. `same => same` in `Picker::side_of_point`
 # (`half_space.rs:441`) is **not** the precedent for it — there `Zero` and
 # `Undecidable` both genuinely mean "not on a side", and here they do not.
-wildcard_arms := "89"
+#
+#     a2d4df5  after the measurement lanes   85 direct + 5 composite = 90
+#
+# The one new point is a **test-only label mapper**, and it is the case where a
+# wildcard is right rather than tolerated: `what_the_refusal_was_called` in
+# `whether_a_coarser_deflection_always_meshes.rs` turns a refusal into a short
+# string for a report, and `rcad_topo::Error` has **64 variants it does not
+# name**. Naming all 64 to satisfy the letter of §40 would be worse code than the
+# wildcard, and the arm decides nothing — it returns "an unexpected refusal" and
+# the test's real assertions are on the refusal kinds it *does* name. §40's
+# hazard is a wildcard swallowing a variant that should have changed an answer;
+# nothing here answers anything.
+wildcard_arms := "90"
 
 check-wildcards:
     @find crates -name lib.rs -path '*/src/*' -exec touch {} +
