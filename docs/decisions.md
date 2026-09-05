@@ -16508,15 +16508,18 @@ written **before** the work, in the planning section, quoting an earlier unit.
 > naming the test or command that produced it.** A row that cannot name one is
 > quoted as prose, not as a bound.
 
-**A rule that operates on prose needs the prose written to be found**, and this
-half came from rscene's editor rather than from here. *Grep for the reason, not
-the conclusion* is useless when the reason was paraphrased three different ways
-and only one of them sat near the distinctive word — which is what happened to
-"coarser is likelier to succeed" in that document, written three times in three
-wordings and retired in one of them. So: **a claim that other claims rest on is
-stated once, in a fixed phrase, and cited rather than restated.** The test of
-whether a load-bearing sentence is written well enough is whether one grep finds
-every place that leans on it.
+**A claim that other claims rest on is stated once, in a fixed phrase, and cited
+rather than restated.** The test of whether a load-bearing sentence is written
+well enough is whether one grep finds every place that leans on it.
+
+That is the half the rule above was missing, and it has a demonstration rather
+than an argument behind it. *Grep for the reason, not the conclusion* is useless
+when the reason was paraphrased three different ways and only one of them sat
+near the distinctive word. It happened in `rscene`'s design doc, to the sentence
+"coarser is likelier to succeed": written three times in three wordings, killed
+by this unit's pointed cone, and retired in exactly the one place its editor
+happened to be working. The other two survived their own evidence, and were
+found by luck.
 
 ### 51.7 What stands, and what this unit made more likely dirty
 
