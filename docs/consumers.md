@@ -295,6 +295,42 @@ decision resting on it in either direction.
   blamed on a coarse deflection when the trigger is a tolerant policy, which no
   choice of deflection can dodge.
 
+- **A bound the consumer republishes and deliberately does not pin gets its move
+  announced before it lands.** `Mesh::deviation` is the one rcad number rscene
+  restates to its own readers as a statement about how wrong the picture may be,
+  and rscene keeps **no test asserting its value** — deliberately, by this file's
+  opening rule, because a fact rcad measures gets no second answer downstream. It
+  is not the exception recorded there either: that one is for a downstream
+  assertion carrying **no number**, and this is nothing but a number.
+  The cost of that choice is that a change here fails nothing downstream and
+  quietly changes what somebody else's documentation means, which is the worse of
+  the two failure modes and the one nothing in either tree would otherwise catch.
+
+  So this is a control and not a courtesy: **before a change to what
+  `Mesh::deviation` computes reaches `main`, rcad says the old number, the new
+  number, and which way it moved.** Downwards counts. A bound that got better still
+  leaves a published sentence overstating how wrong the picture may be, and that
+  sentence stopped being true the same as any other.
+
+  The half that is not rcad's: a raised floor arrives downstream as solids that
+  meshed before and now refuse, which is rscene's retry ladder climbing rungs, and
+  rscene's §4.8 owns telling a climb across many solids at once from a climb on
+  one. It is named here only because it is what the announcement above is *for* —
+  without it the first symptom of an rcad fix reads downstream as a difficult
+  model, and the afternoon goes on the wrong end.
+
+  Recorded at both ends on purpose. An arrangement written down on one side only
+  is indistinguishable from nobody having thought about it, and the next reader of
+  either function has no way to tell which it was.
+
+  **And the condition for ending it, promised in advance rather than remembered.**
+  If rscene stops republishing the number — the report grows its own bound, or the
+  doc stops making the claim — rcad hears, by the withdrawal rule two bullets up.
+  At that point the announcement is machinery with no named consumer and §13 would
+  rather delete it than carry it. It is written here beside the arrangement rather
+  than filed under withdrawals, because an arrangement whose ending condition lives
+  somewhere else is the same failure as one recorded at a single end.
+
 ### What rcad asks in return
 
 - **A visual oracle for the mesher, with the `Model` attached.** A triangle that
