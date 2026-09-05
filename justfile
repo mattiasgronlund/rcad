@@ -282,6 +282,7 @@ test-ignored:
 check-hooks:
     @.claude/hooks/check-patching-hook.sh
     @.claude/hooks/check-context-budget.sh
+    @.claude/hooks/check-statusline.sh
 
 check-enums:
     @! awk '/^$/ {ok = 0} \

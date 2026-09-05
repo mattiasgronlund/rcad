@@ -52,6 +52,23 @@ These are the ones that are expensive to notice late.
   arithmetic could not reach it — defer a limit, fix a gap. `docs/decisions.md`
   §16.10.
 
+## Asking the user a decision
+
+Ask in prose, numbered, batched — `Q11`, `Q12` — with the recommendation and the
+narrowing spelled out. That works: 51 user messages on 2026-09-05, one of which
+was a correction. Do not reach for `AskUserQuestion` for a design batch; it caps
+at four questions of four options and would split one message into seven.
+
+**Every question also goes in `docs/open-questions.md`, the same turn you ask
+it.** A question asked only in the terminal scrolls away, and recovering it costs
+a full-context turn — which happened, and is why the file exists. The status line
+shows the open count and the first three, so the user can read the index without
+`!cat`, which would add the file to the conversation and charge for it on every
+later turn.
+
+End any turn that asks for a decision with a `## Waiting on you` block, last,
+after the prose. Tick the box and append `→ answered: …` when the answer comes.
+
 ## Tooling
 
 `rust-toolchain.toml` pins the compiler. `mise.toml` pins everything else
