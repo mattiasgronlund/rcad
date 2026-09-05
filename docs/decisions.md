@@ -16957,6 +16957,9 @@ exists, and the floor cannot see it.
 | **the wave-through record says `Undecidable` for an event that chose to go ahead** | nothing was undecided; a policy accepted a wobble. `Cause::TolerantFallback` is the honest cause and `Record::resolve_to` is `pub(crate)` to `rcad-predicates`, so `rcad-geom` cannot write it. A **gap in the API**, not a design choice, and it has two consumers already — this site and `scale.rs:243-261`. The constructor asked for is `Record::an_operation_settled(operation, inputs, approximation, measures)`, which adds no `Cause` variant and so pays none of §25.8's renumbering cost |
 | **a wire holding a closed edge alongside other coedges** | §52.4's unreached route, and the one way an empty list could still reach a `Mesh`. Nobody established whether a builder or the deserialize door can make one |
 | **the `crowded`-only route to `RanOutOfRoomBeforeMeetingTheDeflection`** | reached by nothing. Tallied over the workspace: that refusal came back **once in 1694 tests**, with `crowded = 0, declined = 2`. Recorded on the variant's own doc |
+| ~~**`Mesh::triangles()` publishes two claims and guards one**~~ | **closed.** `mesh.rs:61-70` promises *faces in the solid's stored order* **and** run-to-run stability; only the second bit, because the nearest test collected `triangle.face()` into a **`HashSet`** (`meshing_a_curved_solid.rs:728-735`) which passes under any permutation, and `measure.rs:662` needs only that the order is *fixed*, not that it is the stored one — so a stable but different order kept every sum bit for bit and broke the promise silently. Both halves hold, and are now pinned as **two separately-named tests** in `what_order_the_mesher_hands_its_triangles_back_in.rs`, each shown failing under its own mutation: permuting whole face-blocks breaks stored order and leaves contiguity intact, which is what proves the two are independent. Raised by a consumer announcing it was about to depend on it — §51.10's third payment, again catching rcad's own gap |
+| **a test that walks the same iterator as the thing it tests** | not a defect, an averted one, and worth the row because it is §52.13's shape one level up. `Mesh` emits in `SolidView::faces()` order and "the solid's stored order" *is* `SolidView::faces()` — so a test comparing the two would have moved with the mesher and stayed green while the promise broke. The pinning tests therefore read arrival order off the **geometry** instead: a bar's blocks must be a plane facing `[0,0,-1]`, a plane facing `[0,0,1]`, then a face that is no plane at all; a cube's must be its six exact outward normals. Exact `f64`, no tolerance. **A test must not derive its expectation from the machinery under test**, and the cheap check is whether the expected value would change if the code did |
+| **two shells sharing one face slot is refused, and the test names a narrower case** | `validate.rs:427-433` counts face uses with `for shell in shells.values()`, so the count is **global across shells** and `Invalid::UsedMoreThanOnce { entity: "face" }` catches a slot two shells both list. The only test, `a_shell_that_lists_the_same_face_twice_is_caught` (`validate.rs:2418`), exercises **one** shell listing a face twice. The invariant is wider than the test that names it, and the wider half is the half a consumer met — a face arriving twice with two placements, which downstream is a wrong picture drawn confidently. The guarantee also holds only for a model that has been through `validate()`, which the deserialize door does but a hand-built `Model` need not |
 | **why the pointed cone's old ladder was ragged rather than one floor or one band** | each individual refusal is settled; the *pattern* was never worked out, and the file now says so rather than carrying the `√d`-against-`d` sentence that did not fit the data |
 | **the frustum tightening's own demonstration** | §52.7's new family covers it now, but only at the patch level. No solid-level test exercises a frustum band the way `a_cone_patch_that_reaches_its_apex.rs` covers a pointed cone |
 | **`three_surfaces.rs` wants two flat surfaces** | unchanged. Still the wall for `AFrustumAgainstABar`, 96 of 96 |
@@ -17006,3 +17009,45 @@ The countermeasure is cheap and it is already written down in two places this
 unit: a test earns its keep only if somebody has seen it fail for its own reason.
 `a_waved_through_walk_leaves_a_record.rs`'s anti-vacuity halves were mutation-checked
 and survived; the cone bound's §15.6 search was not, for years, and did not.
+
+**The three specimens have a sharper shape in common than "a weak test".** Not one
+of them is a weak assertion. Each is a *strong* assertion about something smaller
+than the doc above it promises:
+
+- a `HashSet` of faces, standing for an order (§52.11);
+- a triangle family sitting exactly where two formulas agree, standing for a
+  bound (§52.7);
+- `a_shell_that_lists_the_same_face_twice_is_caught`, standing for a counter that
+  runs over every shell (§52.11).
+
+So the thing to look for is not a test that asserts too little. It is a **test
+whose name describes a narrower case than the invariant it stands for**, which is
+findable by reading names against docs and needs no mutation to spot.
+
+### 52.14 A wrong unreachability claim is worse than none
+
+The rule in CLAUDE.md already says a claim that something cannot be reached needs
+a demonstration and not a paragraph. This unit adds the part about **which way the
+error points**, and it earns its own section because the two directions have
+opposite costs.
+
+`docs/decisions.md` §16.10's rule is symmetric in the claim and not in the
+consequence. A wrong claim that something *can* happen leaves dead code and wastes
+a reader's time. **A wrong claim that something cannot happen invites the deletion
+of live code, and hands the reader the argument for deleting it.** The comment is
+not merely wrong; it is an accomplice.
+
+This unit's own specimen is the spike's negative claim in §52.6 — *only a reach
+below `r` could cross the threshold* — which was argued rather than demonstrated,
+was backwards, and would have justified not writing the sweep that later measured
+159 110 boundary sides. The claim it replaced is a demonstration, and the
+difference is not rigour but direction: the second one can be run.
+
+> **An unreachability claim cites where the refusal actually happens** — the
+> file and the line that does the refusing — and not where the writer assumes it
+> does. Same discipline as citing a test rather than restating it, and for the
+> same reason: a cited refusal can be opened and checked, a remembered one cannot.
+
+A consumer hit the same shape twice in one week from opposite directions, and
+reported it; that it was found independently outside this repo is why it is
+recorded as a shape rather than as one more row.
