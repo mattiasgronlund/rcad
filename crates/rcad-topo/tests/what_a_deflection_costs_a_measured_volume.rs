@@ -515,6 +515,13 @@ fn how_far_the_corners_are_from_the_origin(face: FaceView<'_>) -> f64 {
 ///
 /// Nothing here is read back off the mesher. Every number comes off the shape
 /// the test built.
+///
+/// **The pipe and the cone lean on their corners for how far along the axis the
+/// face runs**, which is true of every face here — each is bounded by cap
+/// circles whose points all sit at one height — and is not claimed of a face
+/// this family does not build. [`how_short_the_corners_came`] asserts on every
+/// row that the mesh points stayed inside this, which is what would catch a
+/// shape where it does not hold.
 fn what_the_whole_face_can_reach(face: FaceView<'_>) -> f64 {
     let (placed_by, spread) = match face.surface() {
         Surface::Plane(_) => return 0.0,
