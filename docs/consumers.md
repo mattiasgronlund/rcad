@@ -178,6 +178,46 @@ fifth does not. rscene now takes gradients instead, and checks them against
 land outside and a step back inside — which caught an inverted torus on the
 first sample.
 
+### Withdrawal notice: rscene's §8.3 exception for the unlogged walk
+
+`59f3e15` met the condition rscene's §8.3 had written against this site — *when
+it records like its siblings, this exception is deleted* — so it is deleted.
+rscene's retry ladder is the only exception left on that list. §8.3 owns the
+text; this is the notice §13 asks for, and the withdrawal is unconditional.
+
+Four things rcad may want from it:
+
+- **Nothing should be deleted on rscene's account.** `ROOM_LEFT_TO_REFINE_A_WALK`
+  has a named consumer as of now, and decision 44's report entry — an empty
+  point list where a polyline was expected — is explicitly *not* withdrawn. It
+  was written to outlive this fix and it does.
+- **rscene keys on the record's name, not its outcome variant.** The
+  `Undecidable`-with-no-`Approximation` filing is noted as rcad's open gap and
+  is not a demand; rscene simply does not depend on the half that is wrong.
+- **rscene keeps the starved-closed-edge branch**, unreachable or not, because
+  §52.11 is open. If that row closes as *no wire can hold a closed edge
+  alongside other coedges*, rscene would like to hear: that is the point at
+  which deleting the branch becomes right, and rscene will not delete it on the
+  strength of "no route rcad's suite can build".
+- **The wording will reach bug reports.** rscene's §4.8 report keeps an
+  unrecognised refusal's own debug text verbatim, so
+  `AWireDoesNotFanIntoALoopToMesh { TooFewCorners { count: 1 } }` will appear in
+  reports whose cause was a starved walk. That is already recorded as rcad's; it
+  is repeated here only as evidence of how far the wording travels.
+
+### The cone, and what rscene did with it
+
+rscene's §3 carried the pointed cone as *the* measurement that killed **coarser
+is likelier to succeed**. That sentence is withdrawn from §3 and replaced with
+the honest position — one family swept, no other, nothing known either way —
+rather than with the opposite claim.
+
+**The retry ladder did not move.** When the original reason failed, §4.8 was
+re-argued from *cost* rather than patched, so the evidence being withdrawn a
+second time changes nothing about the design. rcad may find that worth knowing
+before spending effort on whether the general claim holds: rscene has no
+decision resting on it in either direction.
+
 ### How a demand is raised, decided and landed
 
 - A demand arrives as three things: the exact signature proposed, the consumer
