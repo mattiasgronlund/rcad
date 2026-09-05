@@ -413,7 +413,89 @@ fn the_axis_written_the_one_way(bits: &mut [u64; 9], direction: Vector) {
 /// it in. `false`, and the bits left exactly as the pipe stores them, when it
 /// cannot be.
 ///
-/// PLACEHOLDER
+/// A pipe's axis origin may sit anywhere along its own line, so
+/// `Cylinder::new(Axis::new(p, w), r)` and
+/// `Cylinder::new(Axis::new(p + t·w, w), r)` are one surface holding different
+/// numbers in three of nine slots. That is the slide half of §31.3's "one pipe,
+/// one name", and it is the pipe's alone: a cone's apex and a bend's centre are
+/// determined points with nowhere to slide to. §51.9 folded the reversal and
+/// left this open.
+///
+/// # Along a coordinate axis the fold is exact, and it is the whole of the case
+///
+/// When the direction has one non-zero component, every point of the line
+/// shares the other two coordinates *exactly* and differs only in the one the
+/// line runs along. Writing `0.0` into that slot therefore picks one point of
+/// the line without dividing, multiplying or rounding, and leaves the key the
+/// same nine slots wide. Two such pipes fold together exactly when they are one
+/// line, because the two coordinates left over are compared as stored.
+///
+/// That is not a lucky special case, it is the case real files hold. A stored
+/// direction is scaled to length one by [`Axis::new`], and no unit
+/// vector with two non-zero dyadic components exists — the rational points of
+/// the unit circle with a power-of-two denominator are the four on the axes — so
+/// a slanted axis stores a direction that is only nearly unit, `t·w` is then a
+/// rounded product, and `p + t·w` rarely lands back on the line. Over all **367
+/// corpus files**, taking every distinct `CYLINDRICAL_SURFACE` spelling built
+/// the way `rcad-step`'s `geometry.rs` builds one (8 357 of them) and every pair
+/// within one file that shares its radius bits, its folded direction bits and
+/// lies inside `1e-9` of the other's axis — **10 773 pairs, of which 9 379 are
+/// exactly one line and 1 394 are a rounding apart**. Split by direction:
+/// axis-aligned **9 379 exact against 16 a rounding apart**, slanted **0 exact
+/// against 1 378**. This fold joins **9 379 of the 9 379** and joins nothing
+/// that is not one line. 104 files hold an exactly-one-line pair.
+///
+/// # The slanted case is a limit and not a gap (§16.10)
+///
+/// A slanted origin is left where the pipe put it, and **no exact fixed-width
+/// bit key for a general line exists to put there instead**. With the direction
+/// already in the key the only freedom left is where along it the origin sits,
+/// and a key can kill that freedom in exactly two ways: name a *point* of the
+/// line, or name the line's *moment* `p × w`. That is the whole family, because
+/// a line in space is a direction with a point on it or a direction with a
+/// moment, and both were tried:
+///
+/// - **A point of the line.** Getting one needs a scalar saying how far to
+///   slide, `−(p·w)/(w·w)` or `−p[k]/w[k]`, which is a rounded division, and
+///   then `t·w`, a rounded product. Two spellings round differently and land on
+///   two points. Measured over **40 000 slides a caller can write through
+///   `Axis::new`, of which 9 028 land exactly back on the line they started
+///   from**: [`Axis::closest_point`](rcad_geom::Axis::closest_point) from the
+///   world origin folds **3 271**, sliding until the coordinate the direction
+///   leans on hardest reads zero folds **7 509**. Neither is a canonical form;
+///   both are a majority.
+/// - **The moment.** Its *value* is invariant — `(p + t·w) × w = p × w` — but an
+///   exact `p × w` is a Shewchuk expansion, not three `f64`s, and an expansion
+///   is not a canonical representation of the value it sums to. Rounded back to
+///   one `f64` a component it does fold all **9 028**, and that is the trap:
+///   over **1 344 pairs of pipes that are provably two lines** — a fully slanted
+///   direction and an origin nudged 1 to 8 ulp along a coordinate axis, which
+///   cannot stay on the line and which the exact cross product refuses pair by
+///   pair — the rounded moment names **113 of them, 8.4%, as one pipe**, the
+///   widest **3.9e-13 model units apart**. Nothing upstream refuses such a pair:
+///   `Cylinder::new` checks a finite axis and `radius > 0`, `Axis::new` checks
+///   finiteness and a length, and there is no proximity gate anywhere. Two
+///   surfaces named as one is a corrupt solid, which `CLAUDE.md`'s first rule
+///   ranks below a crash — so the rounded key is worse than the duplicate name
+///   it would remove.
+///
+/// `no_way_of_naming_a_slanted_line_folds_the_slides_a_caller_can_reach` and
+/// `a_moment_rounded_back_to_three_f64s_names_pipes_that_are_two_lines_as_one`
+/// are those two sweeps, and they assert the counts rather than the conclusion,
+/// so a fourth candidate that did better would have to move them.
+///
+/// **What would close it is not a key at all.** A `two_pipes_are_one_pipe`
+/// returning [`Decision`], sibling of [`two_pipes_run_along_one_line`] one step
+/// further — the axes parallel *and* `(p₂ − p₁) × w` proved zero — decides the
+/// slanted case exactly, because a predicate may spend an expansion where a
+/// fixed-width key may not. **It is not built** (§13): nothing calls it, and the
+/// case it would serve is the 0 of 1 378 slanted corpus pairs. The day a caller
+/// appears — a dedup that compares instead of hashing — that is its shape.
+///
+/// **Reachable, though, and so a real limit.** §16.10 forecloses "no caller hits
+/// this": the corpus never presents an exact slanted slide, but `Axis::new` and
+/// `Cylinder::new` are public and the sweep above reaches one **9 028 times in
+/// 40 000 tries**.
 fn the_axis_origin_slid_the_one_way(bits: &mut [u64; 9], axis: &Axis) -> bool {
     let Some(runs_along) = the_one_coordinate_axis_it_runs_along(axis.direction()) else {
         return false;
@@ -7052,14 +7134,14 @@ mod naming_a_surface {
         let mut widest = 0.0f64;
 
         for along in slanted_directions() {
-            if along.components().iter().any(|component| *component == 0.0) {
+            if along.components().contains(&0.0) {
                 continue;
             }
             for start in origins_a_caller_could_write() {
                 // A nudged zero is a subnormal, and a subnormal times a
                 // direction underflows, which the exact cross product refuses
                 // to work with.
-                if start.coordinates().iter().any(|number| *number == 0.0) {
+                if start.coordinates().contains(&0.0) {
                     continue;
                 }
                 for which in 0..3 {
