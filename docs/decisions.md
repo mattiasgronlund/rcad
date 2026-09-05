@@ -16396,10 +16396,18 @@ the brief it was given.
    Two measurements worth keeping. Normalization folds **none** of it and can
    **manufacture** a negative zero: a component small enough to underflow against
    the largest (`-5e-324` beside `1e300`) comes out `-0.0` where nothing in the
-   input was a zero. And the way in is not exotic — **93 corpus files hold a
-   `DIRECTION` with a `-0.` component**, spellings like
+   input was a zero. And the way in is not exotic — **335 of the 367 corpus
+   files hold a `DIRECTION` one of whose components is a negative zero, 16 770
+   entities of 283 349**, spellings like
    `DIRECTION('',(-0.0,-0.0000000001,-1.0))`, which `direction_at` puts straight
-   into `Vector::new` and `placement_at` hands to `Axis::new`.
+   into `Vector::new` and `placement_at` hands to `Axis::new`. The criterion is
+   *a component token beginning `-` that parses to `0.0`*, over `DIRECTION`
+   entities matched across line breaks. **This paragraph first said 93, and
+   §51.6's prediction fired on
+   §51 before the ink was dry**: 93 came from a lane report, was quoted here
+   without its criterion, and no criterion anybody tried reproduced it — four
+   different greps gave 340, 112, 359 and 335. Which is why the rule below is
+   about naming the command and not about trying harder.
 
 3. **A soak that reported 4.29 billion cases and ran 2049.** `MEASURED_CASES *
    factor` as a bare multiply, in five places across two crates. In release it
