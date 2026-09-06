@@ -19,10 +19,13 @@ use crate::units::what_the_file_declared;
 /// It takes every `MANIFOLD_SOLID_BREP` in the file, in file order, each as one
 /// solid. A STEP file holds much else — annotations, tolerances, styling,
 /// tessellated pictures, loose curves and surfaces — and none of that is a
-/// solid. **What is walked past is counted rather than forgotten**:
-/// [`Import::shapes_this_reader_did_not_take`] names every shape-carrying entity
-/// the file held that this reader is not the reader for, with how many of each.
-/// A `BREP_WITH_VOIDS` is *not* on that list: it is a solid, this kernel holds
+/// solid. **The shape-carrying rest of that list is counted rather than
+/// forgotten**: [`Import::shapes_this_reader_did_not_take`] names every
+/// shape-carrying entity the file held that this reader is not the reader for,
+/// with how many of each. Styling is not shape-carrying and is not on that
+/// list either — this reader parses none of it, counted or not, so a file
+/// full of colour and no geometry reports zero shapes walked past. A
+/// `BREP_WITH_VOIDS` is *not* on that list: it is a solid, this kernel holds
 /// one shell to a solid, and it is refused by name.
 ///
 /// # World coordinates, and no placement
@@ -184,6 +187,11 @@ impl Import {
     /// none of it a solid. An importer that quietly saw nothing in a file made
     /// entirely of them would be the silent drop §42.11 exists to avoid, so
     /// they are counted and handed back.
+    ///
+    /// **Does not count styling.** Colour, tolerance and annotation entities
+    /// carry no shape and never appear here, at any count — this reader does
+    /// not parse them, so their absence from this map says nothing about
+    /// whether the file had any.
     #[must_use]
     pub fn shapes_this_reader_did_not_take(&self) -> &BTreeMap<&'static str, usize> {
         &self.walked_past
