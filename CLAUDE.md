@@ -34,7 +34,7 @@ worktree like any lane.
 
 `just check-hub` fails when the hub has a branch checked out or work left in it,
 and it is in `just default`. A repository with one worktree is exempt, because a
-lone checkout is not a hub. `docs/decisions.md` §59.
+lone checkout is not a hub. `docs/decisions.md` §60.
 
 `docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
 `just decision 49` or `just decision 49.6`. Never guess a line range.

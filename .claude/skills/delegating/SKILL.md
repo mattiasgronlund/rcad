@@ -172,7 +172,7 @@ other session's HEAD underneath it.
 
 **And never the hub.** `main` is checked out in a worktree, locked like any lane, so
 the merge tree is one you made and hold. The hub cannot be locked, so merging there
-is merging where nobody can see you — `docs/decisions.md` §59, and `just check-hub`
+is merging where nobody can see you — `docs/decisions.md` §60, and `just check-hub`
 fails over it.
 
 **Reclaim the disk as you close, not when it runs out.** `just clean-targets` then

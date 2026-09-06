@@ -1205,7 +1205,7 @@ fmt:
 # right answer when it is run from the hub — run from a lane it landed on
 # `rcad-worktrees/rcad-worktrees`, found nothing there, and said *"there is
 # nothing here to clean"*, which reads exactly like a tidy machine. Now that
-# nobody works in the hub (§59) that was every run. The listing also reaches the
+# nobody works in the hub (§60) that was every run. The listing also reaches the
 # sibling trees the glob never covered and the hub's own `target/`, which was the
 # single largest at 14 GB.
 #
@@ -1343,7 +1343,7 @@ prune-worktrees:
 # main working tree, so no reason string can ever appear beside it and printing
 # `free` there would be a claim this command cannot make. It prints `hub`, leaves
 # it out of the count, and says so when it is not parked and clean —
-# `just check-hub` is the one that fails over it (docs/decisions.md §59).
+# `just check-hub` is the one that fails over it (docs/decisions.md §60).
 lanes dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1470,7 +1470,7 @@ check-lanes-selftest:
 # locked or unlocked"*, by path or by `.`, with no flag to override. This closes
 # that by deleting the case rather than by inventing a second record beside the
 # first — a tree nobody works in needs no owner, and `free` becomes the truth
-# about it instead of a guess (docs/decisions.md §59).
+# about it instead of a guess (docs/decisions.md §60).
 #
 # **The load-bearing half is that `main` is not checked out here.** Git refuses
 # to move a branch that is checked out somewhere else — *"refusing to fetch into
@@ -1520,7 +1520,13 @@ check-hub dir=".":
         echo "the hub has $(wc -l <<<"$dirt") path(s) of uncommitted work in it: $hub"
         head -n 10 <<<"$dirt" | sed 's/^/    /'
         [ "$(wc -l <<<"$dirt")" -gt 10 ] && echo "    ..."
-        echo "  move it into a worktree of your own and commit it there; nothing in the hub has an owner"
+        # The hub is shared, so this is usually somebody else's leftovers and the
+        # reader's first thought is that their own worktree is broken. Say whose
+        # it might be before saying what to do about it.
+        echo "  This is very likely not yours. The hub belongs to nobody, so anyone's"
+        echo "  leftovers fail this for everyone, and the tree you are working in is fine."
+        echo "  Whoever left it should commit it from a worktree of their own; \`just lanes\`"
+        echo "  will not name them, which is the reason for the rule rather than a gap in it."
         wrong=1
     fi
     if [ "$wrong" -ne 0 ]; then
@@ -1562,6 +1568,8 @@ check-hub-selftest:
     got=$(just check-hub "$dir/main" 2>&1) && fail "a hub with uncommitted work in it was accepted"
     grep -qF "1 path(s) of uncommitted work" <<<"$got" || fail "the dirt was not counted"
     grep -qF "?? untracked" <<<"$got" || fail "the dirt was not listed"
+    grep -qF "very likely not yours" <<<"$got" \
+        || fail "the failure does not say it is a shared condition, so it reads as the runner's fault"
 
     rm "$dir/main/untracked"
     got=$(just check-hub "$dir/main") || fail "a parked, clean hub was rejected"

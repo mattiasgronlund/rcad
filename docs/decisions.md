@@ -18414,9 +18414,16 @@ and that its test is in the table in §58.5.
    `TooManyPointsAlongOneCrossing` unreachable through `mesh`, which is a claim
    about the public API and wants its own demonstration.
 
-## 59. Nobody works in the hub, recorded 2026-09-06
+## 60. Nobody works in the hub, recorded 2026-09-06
 
-### 59.1 The tree the record cannot describe
+§59 belongs to `rcad-c4`, which had claimed it in a worktree rather than in this
+file. That is the same collision §55's preamble opens with and §57.8 built a
+check for, and it happened again while this section was being written — so this
+one moved rather than argue about it. The two sessions agreed by message, which
+is a record that dies with them; the number in the heading is the one that does
+not.
+
+### 60.1 The tree the record cannot describe
 
 §55 settled that a worktree's git lock is this repository's statement of who owns
 it, and §55.4 gave the reason: it is the only candidate that survives the session
@@ -18435,7 +18442,7 @@ The fix chosen is not a second record beside the lock. It is to delete the case:
 **nobody works in the hub.** A tree nobody works in needs no owner, and `free`
 becomes true about it rather than a guess.
 
-### 59.2 The demonstration
+### 60.2 The demonstration
 
 Three refusals, all measured on 2026-09-06 in a repository built for the purpose.
 The first is why the hub cannot be owned; the second and third are why `main`
@@ -18447,7 +18454,7 @@ cannot stay in it.
 | `git fetch . lane:main` from a lane, `main` checked out in the hub | `fatal: refusing to fetch into branch 'refs/heads/main' checked out at .../main` |
 | `git push . lane:main`, same shape | `! [remote rejected] lane -> main (branch is currently checked out)` |
 
-### 59.3 Why `main` leaving the hub is the load-bearing half
+### 60.3 Why `main` leaving the hub is the load-bearing half
 
 "Sessions use worktrees" on its own does not survive contact with a merge. Rows
 two and three above say a branch checked out in the hub cannot be moved from
@@ -18463,7 +18470,7 @@ out and locked in `rcad-worktrees/wave-1`, held by a peer session mid-merge, and
 the hub was detached. Somebody had reached the same design and not written it
 down, which is the failure mode §55 was itself about.
 
-### 59.4 What changed
+### 60.4 What changed
 
 | # | change | what proves it |
 |---|---|---|
@@ -18473,7 +18480,7 @@ down, which is the failure mode §55 was itself about.
 | 4 | `just clean-targets` asks git for the worktrees instead of guessing a path, and so reaches the sibling trees and the hub's own 14 GB | `check-clean-targets-selftest`, in `default`; asserts the hub's `target/` goes and that a locked tree's survives |
 | 5 | CLAUDE.md gains "Nobody works in the hub"; `delegating` gains never-merge-in-the-hub and a reclaim-and-re-park close | prose |
 
-### 59.5 A silent sweep that had been silent for a month
+### 60.5 A silent sweep that had been silent for a month
 
 Item 4 was meant to be a widening and turned out to be a bug fix. `clean-targets`
 built the string `$(dirname $(git rev-parse --show-toplevel))/rcad-worktrees`,
@@ -18485,7 +18492,7 @@ from a lane, so it would have been every run from here on.
 
 The disk was at 92% when this was found.
 
-### 59.6 The exemption, and why it is structural
+### 60.6 The exemption, and why it is structural
 
 `check-hub` passes when the repository has exactly one worktree, because then
 there is no hub and no lane, only a checkout, and no second session to collide
@@ -18498,7 +18505,7 @@ It is deliberately not an environment variable: an exemption that has to be set
 is an exemption that gets set, whereas this one lapses by itself the moment a
 second tree exists, which is the moment ownership starts being a question.
 
-### 59.7 What this does not close
+### 60.7 What this does not close
 
 **Nothing stops a session working in the hub.** The session-start hook is a
 notice and `check-hub` is a check; both can be ignored until the next `just
@@ -18513,3 +18520,35 @@ commit it was detached at, and it is a person or the closing gate that moves it
 forward. That is the safe direction to fail — a stale hub is harmless where a hub
 holding `main` is not — but §55.6's "an abandoned lock is rubbish only a person
 clears" now has a sibling.
+
+### 60.8 Untracked counts, and `fuzz/corpus/` is not ignored
+
+`rcad-c4` asked the two questions this section had answered only by implication,
+and both deserve the record rather than the implication.
+
+**Untracked-and-unignored is uncommitted work.** A check that looked only at
+tracked modifications would have passed the hub all evening while it held the
+single most valuable thing at risk: 1542 corpus entries a fuse campaign had
+earned and left there. When the campaign moved to a worktree it started from the
+tracked 1088, so those 1542 existed in exactly one place, and that place was the
+tree nobody owns. They are now committed — replaying takes the corpus from
+`cov: 13342 ft: 54505` to `cov: 14123 ft: 65660`, so they were coverage and not
+noise. A rule that ignored untracked files would have been silent about precisely
+the harm it exists to prevent.
+
+**`fuzz/corpus/` stays tracked.** The suggestion was to ignore it so that a fuzz
+run stops dirtying whatever tree it is in. That is backwards: 3999 corpus entries
+are committed on purpose, `fuzz/.gitignore` names `artifacts/`, `coverage/` and
+`target/` and pointedly not `corpus/`, and a seed corpus that is not shipped is a
+fuzzer that starts from nothing on every machine. The dirt a campaign leaves is
+not the problem; leaving it in the hub is. The remedy is the rule, not an
+exemption from it — and the exemption would have thrown away tonight's 1542.
+
+**What no check here can see.** The collision that sent this section from §59 to
+§60 was caught by one session telling another, not by `check-decisions`, which
+reads one file and so fires when the second branch *merges* rather than when the
+number is taken. §59.5 records that from the other side. It is the same fact as
+this section's: two sessions cannot see each other's work in progress, and the
+answer is a record that outlives the session — a lock, a heading, a commit — not
+a smarter check. Firing at publication is the right time; nothing above claims
+otherwise.
