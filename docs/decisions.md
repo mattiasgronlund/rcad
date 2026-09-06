@@ -17990,3 +17990,25 @@ whole point of the second argument — parsed the line number as the path and di
 on a file called `1`. It is `-nH` now. A fixture repo is what caught it, because
 the unfiltered searches that ran first all had more than one file and all
 passed.
+
+### 57.8 Two sections with one number, now caught
+
+§57.4 said a split would not have fixed the number collision. It did not say
+anything was catching it, and nothing was: `check-decisions` asked only whether
+a heading had the right *shape*, so two `## 56.` headings passed it cleanly, and
+`decision` stopped at the first of them. The second section was addressed by
+nothing at all, silently. That is the same failure as a search that matches
+nothing — an empty answer that reads like a clean one — and it is the third time
+this file has recorded that shape.
+
+It is not a typo's failure, which is why it is worth a check rather than care.
+Sections are appended at the tail by whoever finishes first, ten to thirty times
+a day, from as many as four concurrent sessions; two of them reaching for the
+same next number is the ordinary case. It cost one manual renumber to find, at
+merge time, by reading. `check-decisions` now names both offending lines and
+fails.
+
+The fixtures are duplicates rather than the real file, because the real file has
+no duplicate today and pinning it there would prove nothing. Before the check,
+the heading-shape grep found nothing wrong with a two-line file containing `## 1.`
+twice; that is what the check-in demonstration ran.

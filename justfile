@@ -456,14 +456,36 @@ decisions-find pattern:
 #
 # A heading hiding inside a code fence would fool the same match. None exists and
 # none ever has, so per §13 that check is not built until something needs it.
+#
+# **Two sections sharing a number is the second way to be unreachable**, and it
+# is the one that happens by itself. `decision` stops at the first heading whose
+# number matches, so the second §56 is addressed by nothing at all — and it is
+# not a typo that puts it there. Sections are appended at the tail by whoever
+# finishes first, ten to thirty times a day from as many as four concurrent
+# sessions, and two of them reaching for the same next number is the ordinary
+# case rather than the unlucky one. It happened while §57 was being written
+# (§57.4), and nothing in this file noticed; the collision was found by hand,
+# at merge time, which is the expensive place to find it.
 check-decisions:
-    @bad=$(grep -nE '^(## |### )' {{decisions_file}} \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bad=$(grep -nE '^(## |### )' "{{decisions_file}}" \
         | grep -vE '^[0-9]+:## [0-9]+\. ' \
-        | grep -vE '^[0-9]+:### [0-9]+\.[0-9]+ ' || true); \
-    if [ -n "$bad" ]; then \
-        echo "$bad"; \
-        echo "^ a decisions.md heading that 'just decision' cannot address"; \
-        exit 1; \
+        | grep -vE '^[0-9]+:### [0-9]+\.[0-9]+ ' || true)
+    if [ -n "$bad" ]; then
+        echo "$bad"
+        echo "^ a decisions.md heading that 'just decision' cannot address"
+        exit 1
+    fi
+
+    dupes=$(grep -oE '^(## [0-9]+|### [0-9]+\.[0-9]+)' "{{decisions_file}}" \
+        | awk '{ print $2 }' | sort | uniq -d)
+    if [ -n "$dupes" ]; then
+        for id in $dupes; do
+            grep -nE "^(## ${id//./\\.}\. |### ${id//./\\.} )" "{{decisions_file}}"
+        done
+        echo "^ these sections share a number, and 'just decision' reaches only the first"
+        exit 1
     fi
 
 # Pins the lookup against fixtures rather than against the real file, so it stays
@@ -542,6 +564,30 @@ check-decisions-selftest:
 
     if $j decisions-find "" >/dev/null 2>&1; then
         echo "decisions-find accepted the empty pattern"; exit 1
+    fi
+
+    # The duplicate-number check, against fixtures for the same reason: the real
+    # file has no duplicate today, so pinning it there would prove nothing.
+    $j check-decisions >/dev/null \
+        || { echo "the clean fixture failed check-decisions"; exit 1; }
+
+    cat > "$dir/twice.md" <<'MD'
+    ## 1. First
+    ## 1. First again
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/twice.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "two sections numbered 1 passed check-decisions"; exit 1
+    fi
+
+    cat > "$dir/twice-sub.md" <<'MD'
+    ## 1. First
+    ### 1.1 Alpha
+    ### 1.1 Alpha again
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/twice-sub.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "two subsections numbered 1.1 passed check-decisions"; exit 1
     fi
 
 # One item of Rust source, by its name, with its doc comment and attributes.
