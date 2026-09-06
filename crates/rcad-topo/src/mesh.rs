@@ -2797,8 +2797,7 @@ fn how_far_along_an_axis_a_crossing_with_this_surface_runs(
             let down_the_axis = normal.dot(straight_on).abs();
             let sideways = (1.0 - down_the_axis * down_the_axis).max(0.0).sqrt();
             let room = down_the_axis - slope * sideways;
-            (room > 0.0)
-                .then(|| (flat.signed_distance_to(origin).abs() + radius * sideways) / room)
+            (room > 0.0).then(|| (flat.signed_distance_to(origin).abs() + radius * sideways) / room)
         }
         Surface::Cylinder(pipe) => {
             let (its_origin, its_way) = a_unit_axis(&pipe.axis());

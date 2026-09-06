@@ -33,6 +33,12 @@
 //! [`shapes_whose_faces_run_past_their_own_corners`] — and prints both charges
 //! side by side on every row of both families, which is what says the second one
 //! can see what the first cannot.
+//!
+//! The mesher has since stopped charging the corners for a pipe and a cone, and
+//! charges how far along its axis a face's **edges** run instead. Every number
+//! this file prints is unchanged by that, which is the point: neither charge
+//! here is read off the kernel, so the two families still measure the same gap
+//! and this one is still the one that can see it.
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -456,13 +462,21 @@ fn the_bound_is_infinite_where_a_surface_bends_tighter_than_the_mesh_strays() {
 #[path = "cones/mod.rs"]
 mod cones;
 
-/// The reach the mesher charges a face for: the largest coordinate its **wire
-/// corners** have, plus the radius its surface bends at.
+/// The largest coordinate a face's **wire corners** have, plus the radius its
+/// surface bends at.
 ///
-/// A copy of `mesh::how_far_the_points_of_reach` at no movement, written out
-/// here rather than called. Calling it would make this test move with the thing
-/// it watches, which is §52.11's mistake and the whole reason this family
-/// exists.
+/// **What `mesh::how_far_the_points_of_reach` charged until the family below
+/// made the shortfall visible**, written out here rather than called. Calling it
+/// would make this test move with the thing it watches, which is §52.11's
+/// mistake and the whole reason this family exists — and the mesher has since
+/// moved: for a pipe and a cone it now charges how far along its axis the face's
+/// **edges** run, worked out from the surfaces either side of each of them.
+/// `what_a_leaning_cut_costs_the_floor_under_a_mesh.rs` is that change measured
+/// from the caller's side.
+///
+/// So this is now a record of a charge nothing computes, kept because the
+/// distance between it and [`what_the_whole_face_can_reach`] is what says this
+/// family can see a change to the reach at all.
 ///
 /// Flat faces are charged nothing: a plane's mesh is drawn through corners the
 /// model already holds.

@@ -64,8 +64,9 @@ fn the_floor_under_a_leaning_bar_follows_its_ellipse_and_not_its_corners() {
         let reaches = AT_THE_SEAM + 2.0 * lean * RADIUS;
         println!(
             "leaning {lean:e}: the ellipse reaches {reaches:e}, the floor is {floor:e}, \
-             {:e} of it, and a flat bar's floor is {flat:e}"
-        , floor / reaches);
+             {:e} of it, and a flat bar's floor is {flat:e}",
+            floor / reaches
+        );
         assert!(
             floor > flat * lean / 10.0,
             "a bar leaning {lean:e} was given a floor of {floor}, which is not far enough \
