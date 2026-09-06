@@ -436,9 +436,17 @@ pub fn walk(
 /// is. The other way in is this function itself, which is re-exported from
 /// `rcad` and which anyone may call.
 ///
-/// So a tolerant consumer that only draws what it imported does not sit on this;
-/// one that fuses does, and gets a certified answer whatever policy it asked
-/// for. That is the sentence to check yourself against rather than the census.
+/// So this is reached only by a caller that **fuses**, and it hands that caller a
+/// certified answer whatever policy it asked for. Check yourself against that
+/// rather than against the census.
+///
+/// **A display layer's own policy is not evidence about its application's.** The
+/// library that draws a `Model` is usually not the code that built it: rscene,
+/// for one, takes `&Model` and never mutates one, so its own tolerant policy is
+/// spent on meshing and never on arranging a crossing — the two sit on opposite
+/// sides of that seam by design. An application that fuses tolerantly *does* sit
+/// on this gap, and neither the kernel nor the drawing layer can see it, because
+/// the fuse happens before the model reaches either of them.
 pub fn where_a_closed_crossing_starts(
     run: &NamedRun,
     along: [&Surface; 2],
