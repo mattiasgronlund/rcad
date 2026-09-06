@@ -592,6 +592,15 @@ where both trees are green, both documents are internally consistent, and the
 disagreement lives only in what a sentence means. `rcad` cannot find it by
 running anything.
 
+**Two ways past that guard, not one.** The leaning-bars row above is the sharper
+half of the contrast, because it is a case the machinery *could* see and missed
+anyway: `4.848820560097969e-11` was present, announced, and correct to the digit
+— and wrong in its **dimension**, a floor per unit of the shape's reach written
+as though it were a length. So watching numbers fails twice over. It misses the
+sentence with no number in it, which is this section, and it passes a number that
+is right about its digits and wrong about what it is a number *of*. A figure is
+not checked by being announced.
+
 ### What rcad asks in return
 
 - **A visual oracle for the mesher, with the `Model` attached.** A triangle that
