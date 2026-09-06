@@ -353,6 +353,101 @@ decision resting on it in either direction.
   than filed under withdrawals, because an arrangement whose ending condition lives
   somewhere else is the same failure as one recorded at a single end.
 
+### Announcement: `Mesh::deviation` moved on a ball, and the floor under it moved 79×
+
+The bullet above, discharged for the first time. Two numbers a consumer reads
+change on the branch that makes the mesher pick a deflection `rcad_geom::walk`
+will accept, and this says what each was, what it is, and which way it went. No
+threshold was applied to either, because the bullet above says there is none.
+
+**Measured against the two trees, not read off a report.** `c9ff754` and the
+branch tip were extracted side by side, one probe binary built against each, and
+both run. It is worth saying that way round: the lane that made the change
+reported `Mesh::deviation` **bit-identical**, and that was true of the one shape
+it measured — a bar — and false on a ball, where the deviation follows the
+deflection almost exactly, so a move in the floor goes straight into the
+published number. A figure nobody re-ran is how the wrong half of that gets
+announced.
+
+**One. `Mesh::deviation` on a ball, upwards.** `add_ball(radius, translation(1e9,
+0, 0))`, `Deflection::of(1e-300)`, `Policy::tolerant(1e12)`:
+
+| ball | old (`c9ff754`) | new | which way |
+|---|---|---|---|
+| r = 0.25 | `7.993599754617626e-6` | `7.993623476198684e-6` | **up** `2.3721581e-11`, which is `2.97e-6` of itself |
+| r = 0.5 | `7.99360180936651e-6` | `7.99360180936651e-6` | unchanged, bit for bit |
+| r = 1 | `7.993605375215217e-6` | `7.993700080924048e-6` | **up** `9.4705709e-11`, which is `1.18e-5` of itself |
+
+Upwards is the direction that turns a citation into an understatement of how
+wrong the picture may be, which is the worse of the two ways for it to go stale.
+
+The point counts move where the number does not, and not all the same way:
+872 666 → 872 658 at r = 0.25, 3 640 342 → 3 640 278 at r = 1, and 2 235 566 →
+2 235 596 at r = 0.5, whose deviation does not move at all. A bar of radius one
+and height two, and balls of radius `0.05` and `0.1`, are identical in both
+trees — same deviation, same point count. That is the measurement the lane made,
+and it was right about it.
+
+**Where the number cannot have moved, run rather than argued.** A deflection at
+or above the floor takes an early return this branch does not touch, so nothing
+there should change — and the way to say so is a run. Two radii × four
+deflections from `1e-2` to `1e-5` × certified and tolerant × at the origin and at
+`x = 1e9`: twenty-four cells, all identical in both trees. So the move is
+confined to a deflection asked for **under** the floor and let through by a
+tolerant policy, which is exactly the case where `Mesh::deviation` is the only
+bound there is, because the deflection asked for bounds nothing.
+
+**Two. The floor itself, up seventy-nine times at the origin.**
+`Error::DeflectionBelowWhatAMeshCanReach` carries `closest` — *the closest a mesh
+of this solid can be* — and it now reports how fine a mesh can be **cut** where
+it used to report how close a point can be **placed**. Asked `1e-300` at the
+origin:
+
+| solid | old `closest` | new `closest` | which way |
+|---|---|---|---|
+| bar r = 1, h = 2 | `9.2148511043888e-13` | `7.273230840146953e-11` | **up**, ×78.93 |
+| unit ball | `6.143234069592533e-13` | `4.848820560097969e-11` | **up**, ×78.93 |
+| four bars whose cap leans `4e9` to `1e11` | `6.143234069592533e-13` | `4.848820560097969e-11` | **up**, ×78.93, and one answer for all four |
+
+**Far from the origin it barely moves**, which is the other half of the same
+measurement: at `x = 1e9` the placing term is eighty thousand times the added one
+and `closest` shifts in the eleventh decimal — a ball of radius one goes
+`3.996803498977168e-6` → `3.9968513728593615e-6`. The seventy-nine is what a
+solid at the origin sees, not a factor to carry about.
+
+It is arguably the better number now — the old one was a floor the mesher then
+did not work to. That is not the test this bullet sets. It is a number a consumer
+reads, it moved, and this is where that gets said rather than nowhere.
+
+**A refusal also changed its name where the floor bites.** At the origin, asked
+`1e-300` under `Policy::tolerant(100.0)` and `Policy::tolerant(1000.0)`, both the
+bar and the unit ball used to come back
+`TooManyPointsAlongOneCrossing { most: 1048576 }` and now come back
+`DeflectionBelowWhatAMeshCanReach`. Said here because the withdrawal notice above
+already establishes how far rcad's refusal wording travels: it reaches bug
+reports verbatim.
+
+**What rcad's own figures have stopped describing.** The second obligation in the
+bullet above, at the same time as the move. This is a list of rcad measurements
+that no longer describe what they described — **not** a list of what anybody
+should retire. Which of these is cited anywhere is not rcad's to know, and this
+file's opening rule is why rcad does not keep that list.
+
+- `9.2148511043888e-13` for a bar of radius one, and `6.143234069592533e-13` for
+  a unit ball, **as what the refusal carries** at the origin. Both still describe
+  where a point can be *placed*; neither is `closest` any more.
+- Any `Mesh::deviation` measured on a curved solid cut **under** the floor before
+  this branch. Three ball radii are tabled above; a radius rcad did not measure
+  is in the same position and rcad cannot say which way it went without running
+  it.
+- Any account of what a tolerant caller is refused with at the origin under a
+  deflection below the floor, which was `TooManyPointsAlongOneCrossing` and is
+  not now.
+
+Nothing else is withdrawn. Every figure at or above the floor stands, the bar and
+the two small balls stand, and the far-from-the-origin floor stands to the digits
+anyone was likely to quote.
+
 ### What rcad asks in return
 
 - **A visual oracle for the mesher, with the `Model` attached.** A triangle that
