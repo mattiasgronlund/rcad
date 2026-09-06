@@ -17836,6 +17836,18 @@ across 24 unrelated reasons, overwhelmingly `B_SPLINE_CURVE_WITH_KNOTS` on an
 edge; `CONICAL_SURFACE` itself maps fine. That day arrives when the B-spline edge
 blocker clears, not on any cone work.
 
+**Those four numbers are dated and nothing holds them.** They were taken at
+`30d735b` by a throwaway probe walking `RCAD_STEP_CORPUS`, importing under
+`Policy::certified()` and censusing `face.surface()` over `import.model().faces()`
+— spelling-independent, with the `CONICAL_SURFACE` count a byte scan of the file
+so it does not depend on the reader. The probe was deleted, and **no standing test
+holds any of it**, so nothing goes red on the day they stop being true. That day
+is a named event rather than a vague one: it is the day the B-spline edge blocker
+clears, which is the same sentence two paragraphs up. Whether this should be a
+standing test instead is §13's question and not settled here — the argument for it
+is not the census but the tripwire, and the argument against is that it would be a
+test whose subject is another milestone's blocker.
+
 **How this paragraph came to be wrong is the part worth keeping.** It first said
 "the public builder this suite goes through does not make one", which is a false
 claim about the public builder dressed as a true one about a test helper, and two
