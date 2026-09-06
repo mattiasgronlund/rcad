@@ -164,11 +164,22 @@ impl Mesh {
     ///
     /// **It is the gap under the middle of a triangle, not a distance the points
     /// were moved.** A chord cuts inside the arc it stands for, but the chord's
-    /// *ends* do not: a certified mesh's points sit on the surface, and
+    /// *ends* do not: where a part sits, a certified mesh's points sit on the
+    /// surface, and
     /// `a_certified_balls_mesh_points_sit_on_the_sphere_and_the_log_stays_empty`
-    /// is what says so rather than this paragraph. A caller who goes looking for
-    /// the points to have moved will find them where they belong and conclude
-    /// this number is wrong.
+    /// is what says so rather than this paragraph — over radii from `0.25` to
+    /// `10`, at the origin and ten thousand units out. A caller who goes looking
+    /// for the points to have moved will find them where they belong and
+    /// conclude this number is wrong.
+    ///
+    /// **Far enough out they cannot sit on it, and that is arithmetic rather
+    /// than a defect.** A ball smaller than the spacing of the `f64` grid it is
+    /// placed on has no representable point on its own surface at all, so the
+    /// points come off it by a share of the radius that grows with the distance.
+    /// This number still covers them —
+    /// `every_triangle_of_a_far_off_ball_stays_inside_the_deviation_the_mesh_reports`
+    /// is what says so, out to `1e13` — which is the reason to read it rather
+    /// than assume where the points went.
     ///
     /// It is also a **length and not a share of the shape**, which is the other
     /// half of the same surprise. On a ball whose radius is near the deflection
