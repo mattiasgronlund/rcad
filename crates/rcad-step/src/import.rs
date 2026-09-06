@@ -23,10 +23,14 @@ use crate::units::what_the_file_declared;
 /// forgotten**: [`Import::shapes_this_reader_did_not_take`] names every
 /// shape-carrying entity the file held that this reader is not the reader for,
 /// with how many of each. Styling is not shape-carrying and is not on that
-/// list either — this reader parses none of it, counted or not, so a file
-/// full of colour and no geometry reports zero shapes walked past. A
-/// `BREP_WITH_VOIDS` is *not* on that list: it is a solid, this kernel holds
-/// one shell to a solid, and it is refused by name.
+/// list either — this reader parses none of it, counted or not. A file that
+/// carries styling and no solid never reaches that map: it is **refused by
+/// name** before one is built — [`Refusal::TheFileHoldsNoSolid`], or
+/// [`Refusal::TheFileHasNoSize`] ahead of it when the file holds no corner to
+/// take a size from. A caller reading the map as "what did the importer drop"
+/// gets an `Err` and never an empty map. A `BREP_WITH_VOIDS` is *not* on that
+/// list: it is a solid, this kernel holds one shell to a solid, and it is
+/// refused by name.
 ///
 /// # World coordinates, and no placement
 ///
