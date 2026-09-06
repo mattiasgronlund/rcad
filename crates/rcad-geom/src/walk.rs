@@ -427,6 +427,18 @@ pub fn walk(
 /// test files call. Nothing measured reaches a picker through this door: the 31
 /// undecided half-spaces the STEP corpus leaves behind all come in through
 /// [`walk`], from `Model::validate` checking which way a flat face's wire winds.
+///
+/// **"Nothing measured" is a fact about the paths one corpus takes, not about
+/// this door, so here is the door itself.** Inside the kernel the only callers
+/// are in `rcad-topo`'s `fuse::arrange`, so a consumer reaches this by fusing.
+/// Importing and meshing do not pass through it — `Import::read` builds and
+/// validates, and `SolidView::mesh` never asks which piece of a crossing a run
+/// is. The other way in is this function itself, which is re-exported from
+/// `rcad` and which anyone may call.
+///
+/// So a tolerant consumer that only draws what it imported does not sit on this;
+/// one that fuses does, and gets a certified answer whatever policy it asked
+/// for. That is the sentence to check yourself against rather than the census.
 pub fn where_a_closed_crossing_starts(
     run: &NamedRun,
     along: [&Surface; 2],
