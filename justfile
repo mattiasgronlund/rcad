@@ -1537,8 +1537,12 @@ check-hub dir=".":
         if [ -z "$modified" ] && [ -n "$untracked" ] && [ -z "$landed" ]; then
             echo "  Every one of those is already committed on \`main\`, so nothing here is"
             echo "  lost work — the hub is just parked at an older commit. Re-park it:"
-            echo "      git -C $hub checkout --detach main"
-            echo "  Nothing moves the hub's HEAD on its own; the closing gate is meant to."
+            echo "      git -C $hub clean -fd && git -C $hub checkout --detach main"
+            echo "  The clean is not optional. Checkout refuses to overwrite an untracked"
+            echo "  file even when its content already matches the commit being moved to,"
+            echo "  so the removal has to come first; the checkout then restores every one"
+            echo "  of them byte-identical. Ignored files are left alone, so fuzz artifacts"
+            echo "  survive it. Nothing moves the hub's HEAD on its own."
         else
             # The hub is shared, so this is usually somebody else's leftovers and
             # the reader's first thought is that their own worktree is broken.
@@ -1611,3 +1615,20 @@ check-hub-selftest:
     if grep -qF "very likely not yours" <<<"$got"; then
         fail "the stale hub got the leftovers message as well as the stale one"
     fi
+
+    # Run what it printed. A remedy nobody executes is a claim without a test,
+    # and this one was wrong when it was first written: `checkout --detach` aborts
+    # over an untracked file even when the content already matches the commit
+    # being moved to, so a re-park with no `clean` in it leaves the hub where it
+    # was and the reader distrusting a check that had the diagnosis right.
+    remedy=$(grep -F 'clean -fd' <<<"$got" | sed 's/^ *//')
+    [ -n "$remedy" ] || fail "no runnable remedy line was printed"
+    bash -c "$remedy" >/dev/null 2>&1 || fail "the remedy the check prints does not run: $remedy"
+    [ "$(git -C "$dir/main" rev-parse HEAD)" = "$(git -C "$dir/main" rev-parse main)" ] \
+        || fail "the printed remedy ran but the hub did not move onto main"
+    [ -z "$(git -C "$dir/main" status --porcelain)" ] \
+        || fail "the hub is still dirty after its own remedy ran"
+    [ "$(cat "$dir/main/landed")" = "landed" ] \
+        || fail "the remedy did not restore the file it removed"
+    got=$(just check-hub "$dir/main") \
+        || fail "check-hub still fails after the reader did exactly what it said"

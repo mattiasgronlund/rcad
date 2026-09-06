@@ -18565,12 +18565,44 @@ merge that has already happened.
 
 They are told apart by asking git rather than by guessing: if nothing is modified
 and **every** untracked path is already in `ls-tree main`, the hub is behind, not
-dirty. `check-hub` then names the one command that fixes it,
-`git -C <hub> checkout --detach main`, and says that nothing moves the hub's HEAD
-on its own. `check-hub-selftest` builds that state — a file committed on `main`
-from a lane, present on disk in a hub whose HEAD predates it — and asserts both
-that the stale message appears and that the leftovers message does not.
+dirty. `check-hub` then names the command that fixes it and says that nothing
+moves the hub's HEAD on its own. `check-hub-selftest` builds that state — a file
+committed on `main` from a lane, present on disk in a hub whose HEAD predates it
+— and asserts both that the stale message appears and that the leftovers message
+does not.
 
-This is the whole of §60.7's second paragraph turning into a consumer inside an
-hour, which is §13 working rather than being bent: the part was not built until
-something needed it, and then something did.
+**The first remedy this section printed did not work.** It was
+`git -C <hub> checkout --detach main`, on the reasoning that files whose content
+already matches the target commit cannot be at risk. Git does not reason that
+way. It refuses on the paths alone:
+
+    error: The following untracked working tree files would be overwritten by checkout:
+            fuzz/corpus/aaa
+    Please move or remove them before you switch branches.
+
+Measured both ways in a throwaway repository: byte-identical content aborts, and
+differing content aborts with the same message, so the two are indistinguishable
+from the output. `git clean -fd` first, then the checkout, exits 0, restores
+every file byte-identical, and leaves `git status` empty. The published line is
+therefore `git -C <hub> clean -fd && git -C <hub> checkout --detach main`, and
+`clean` without `-x` leaves ignored files alone, so a campaign's crash artifacts
+survive it.
+
+So the files are deleted either way. "Re-parking makes them tracked rather than
+deleted" was argued between the two sessions and never reached this file, which
+is the only reason it is not a correction to a published paragraph. What survives
+of it is the *timing*: deleting at re-park time is safe because by then the
+content is on `main`, where deleting before the merge would have left
+`lane-hub-rule` as the only copy.
+
+**The selftest runs the line the check prints**, greps it back out of the output,
+executes it, and asserts the hub lands on `main`, that `status` comes back empty,
+that the removed file is restored, and that `check-hub` then passes. A remedy
+nobody executes is a claim without a test, which is §15.6's rule pointed at a
+string rather than at a bound. Restoring the old one-command version fails it
+with *"the remedy the check prints does not run"*.
+
+Found by `rcad-c4` running it rather than reading it — twice over, since §60.7's
+"harmless" is what pointed them at the case to begin with. Both defects were in
+prose that had been reviewed and neither was in code that had been tested, which
+is the argument for the paragraph above.
