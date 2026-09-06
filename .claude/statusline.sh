@@ -65,9 +65,9 @@ printf '%s\n' "$line1"
 # --- line 2: which questions are still open, by number
 # The transcript sits at <projects>/<slug>/<session>.jsonl and the scratchpad at
 # <tmp>/claude-<uid>/<slug>/<session>/scratchpad, so one names the other.
+session=$(get '.session_id')
 questions=${CLAUDE_QUESTIONS_FILE:-}
 if [ -z "$questions" ]; then
-	session=$(get '.session_id')
 	transcript=$(get '.transcript_path')
 	if [ -n "$session" ] && [ -n "$transcript" ]; then
 		slug=$(basename "$(dirname "$transcript")")
@@ -84,6 +84,12 @@ fi
 # The letter is kept because it is doing work — grilling numbers a round Q1, Q2,
 # and a wave numbers a lane's findings by the lane's own letter, so K1-K4 came
 # from "Lane K". Reading them as one undifferentiated series would lose that.
+#
+# One entry may carry several labels, `**Q7 / Q11** — …`, when one answer settles
+# both. Reading only the first is how Q11 and Q27 sat open all of 2026-09-06
+# while the status line showed thirteen of the fifteen and looked complete. A
+# question the file records and the line does not show is the one failure this
+# line cannot have, so the labels are walked until the run of them ends.
 numbers=$(awk '
 	/^[[:space:]]*```/ { fence = !fence; next }
 	fence { next }
@@ -91,10 +97,12 @@ numbers=$(awk '
 		line = $0
 		sub(/^- \[ \][[:space:]]*/, "", line)
 		sub(/^\*+/, "", line)
-		if (match(line, /^[A-Z]+[0-9]+/)) {
+		while (match(line, /^[A-Z]+[0-9]+/)) {
 			label = substr(line, 1, RLENGTH)
+			line = substr(line, RLENGTH + 1)
 			match(label, /[0-9]+/)
 			print substr(label, 1, RSTART - 1), substr(label, RSTART)
+			if (!sub(/^\**[[:space:]]*\/[[:space:]]*\**/, "", line)) break
 		}
 	}
 ' "$questions" | sort -k1,1 -k2,2n -u)
@@ -124,4 +132,9 @@ compact=$(awk '
 	}
 ' <<<"$numbers")
 
-printf '%s\n' "${yellow}❓${off} $compact"
+# The hash is the address `just question` takes, and it is here because nothing
+# else knows it: the file is named by the session id, which only the harness
+# has. Six characters, the same width `just lanes` prints a lane's ref in.
+tag=""
+[ -n "$session" ] && tag="${dim}${session:0:6}${off} "
+printf '%s\n' "${yellow}❓${off} $tag$compact"

@@ -162,6 +162,24 @@ impl Mesh {
     /// corner the model already held, and a flat triangle standing in for a flat
     /// surface stands in for nothing.
     ///
+    /// **It is the gap under the middle of a triangle, not a distance the points
+    /// were moved.** A chord cuts inside the arc it stands for, but the chord's
+    /// *ends* do not: a certified mesh's points sit on the surface, and
+    /// `a_certified_balls_mesh_points_sit_on_the_sphere_and_the_log_stays_empty`
+    /// is what says so rather than this paragraph. A caller who goes looking for
+    /// the points to have moved will find them where they belong and conclude
+    /// this number is wrong.
+    ///
+    /// It is also a **length and not a share of the shape**, which is the other
+    /// half of the same surprise. On a ball whose radius is near the deflection
+    /// asked for, a quarter of the radius of sag is an ordinary answer and not a
+    /// defect: `a_quarter_of_a_radius_of_sag_is_what_a_deflection_near_the_radius_buys`
+    /// pins it, and [`Deflection::for_scale`] is `nominal_size · 1e-3`, so a
+    /// default taken from a model a thousand times a small ball's radius lands
+    /// exactly there.
+    ///
+    /// [`Deflection::for_scale`]: rcad_geom::Deflection::for_scale
+    ///
     /// # What this costs a volume measured over the triangles
     ///
     /// Write `d` for this number, `skin` for the total area of the triangles and

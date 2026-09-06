@@ -41,6 +41,39 @@ code=$(awk '
 ' <<<"$command")
 bodies=$(comm -13 <(sort -u <<<"$code") <(sort -u <<<"$command") 2>/dev/null || true)
 
+# A scratch path held in a variable is still a scratch path, and this hook reads
+# the command as text. `S=/tmp/…/scratchpad; cat > "$S/fixture.md"` reached the
+# guard as `$S/fixture.md`, which matches neither `^/tmp/` nor `scratchpad`, so a
+# scratchpad write was refused with a message saying scratchpad writes are fine.
+# Failing closed is the right direction, but not while claiming otherwise.
+#
+# Only assignments in this same command can matter: the Bash tool carries a
+# working directory between calls and no shell state, so a variable set in an
+# earlier call does not exist here either. One left unresolved stays unresolved
+# and is still judged a tree file.
+expand_assignments() {
+	local text=$1 line name value known
+	declare -A seen=()
+	while IFS= read -r line; do
+		name=${line%%=*}
+		value=${line#*=}
+		value=${value#[\"\']}
+		value=${value%[\"\']}
+		for known in "${!seen[@]}"; do
+			value=${value//\$\{$known\}/${seen[$known]}}
+			value=${value//\$$known/${seen[$known]}}
+		done
+		seen[$name]=$value
+	done < <(grep -oE '(^|[[:space:];&|(])[A-Za-z_][A-Za-z0-9_]*=[^[:space:];|&)]+' <<<"$text" |
+		sed 's/^[[:space:];&|(]*//')
+	for known in "${!seen[@]}"; do
+		text=${text//\$\{$known\}/${seen[$known]}}
+		text=${text//\$$known/${seen[$known]}}
+	done
+	printf '%s' "$text"
+}
+code=$(expand_assignments "$code")
+
 guarded='[^[:space:];|&"'"'"'()<>]*\.(rs|toml|md)\b'
 redirect='>>?[[:space:]]*[^[:space:];|&]*\.(rs|toml|md)\b'
 scratch='^/(tmp|var/tmp)/|scratchpad|(^|/)target/'
