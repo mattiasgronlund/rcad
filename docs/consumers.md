@@ -601,6 +601,17 @@ sentence with no number in it, which is this section, and it passes a number tha
 is right about its digits and wrong about what it is a number *of*. A figure is
 not checked by being announced.
 
+**And that figure is itself dated, which is the third way past.** The reading
+above holds **as of `a8d4467`**. A change to how a ball's reach is charged is in
+review as this is written, and if it lands the constant halves to
+`2.4244102800489844e-11` — because the ball's reach was being read as `2` where
+the shape reaches `1`, so the per-reach figure absorbed the factor. Nothing
+about the two failures above changes; the number naming them does. A published
+figure offered as a fact about the tree wants the sha it was measured on, in the
+same way §15.6 makes a published bound want a test — and a sentence in a commit
+message wants it most of all, because that is the one artefact nobody can go
+back and amend.
+
 ### What rcad asks in return
 
 - **A visual oracle for the mesher, with the `Model` attached.** A triangle that
