@@ -947,15 +947,58 @@ fn the_floor_under_a_placed_ball_is_one_placements_worth_of_rounding_and_not_two
         assert!(
             (share - everything_but_the_placement).abs() <= room,
             "at {out} the floor has {share} in it over one placement's worth, against \
-             {everything_but_the_placement} at the nearest distance and {room} of room — a \
-             remainder that grows with the placement is a second placement term"
+             {everything_but_the_placement} at the nearest distance and {room} of room. \
+             {WHAT_A_MOVED_PLACEMENT_TERM_MEANS}"
         );
     }
     println!(
         "what the floor holds beyond the placement, the same at every distance: \
          {everything_but_the_placement}"
     );
+
+    // The slope of the floor against the distance the ball is placed at, taken
+    // off the two ends. Everything that does not move with the placement cancels,
+    // so this is the placement term's coefficient on its own and it does not
+    // depend on `one_placement` above having guessed the reach right.
+    //
+    // The difference carries at most one ulp of the larger floor, and dividing by
+    // a difference of two exactly-representable distances adds nothing, so the
+    // slope is good to about `f64::EPSILON` of itself.
+    let (near, near_floor, _) = rows[0];
+    let (far, far_floor, _) = rows[rows.len() - 1];
+    let per_unit_of_reach = (far_floor - near_floor) / (far - near);
+    println!(
+        "the floor rises {per_unit_of_reach} per unit the ball is placed out, which is {} \
+         of an Isometry::POINT_ROUNDOFF",
+        per_unit_of_reach / Isometry::POINT_ROUNDOFF
+    );
+    let room = 4.0 * f64::EPSILON * Isometry::POINT_ROUNDOFF;
+    assert!(
+        (per_unit_of_reach - Isometry::POINT_ROUNDOFF).abs() <= room,
+        "the floor rises {per_unit_of_reach} per unit of placement, which is {} \
+         Isometry::POINT_ROUNDOFFs rather than one, and {room} is all the room the \
+         arithmetic needs. {WHAT_A_MOVED_PLACEMENT_TERM_MEANS}",
+        per_unit_of_reach / Isometry::POINT_ROUNDOFF
+    );
 }
+
+/// **Two different changes move the numbers this test pins, and from outside the
+/// crate they look identical** — so whichever assertion fires says both, rather
+/// than naming the one that was on this author's mind.
+///
+/// Either the floor grew a second placement term, or
+/// `how_far_the_points_of_reach` stopped coming to `corners + radius` for a
+/// ball's face and the reach written here went stale. Both scale the placement
+/// term by a constant and neither can be told from the other by measuring floors.
+/// The §15.6 reach under-charge is a live change of the second kind, which is why
+/// this is spelled out rather than assumed.
+const WHAT_A_MOVED_PLACEMENT_TERM_MEANS: &str = "\
+    This means one of two things and they cannot be told apart from out here. \
+    Either the floor has grown a second placement term, which is the defect this \
+    test exists to catch — or how_far_the_points_of_reach no longer comes to \
+    corners + radius for a ball's face, in which case the reach this test writes \
+    down has gone stale and the fix is here rather than in the mesher. Read that \
+    function's Sphere arm to tell which.";
 
 /// §23.5's one job for the policy: what happens when the deviation cannot be
 /// *proven* under the deflection asked for. Certified refuses; tolerant tags.

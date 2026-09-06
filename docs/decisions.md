@@ -17712,6 +17712,21 @@ so it sees a radius-five ball at the origin wherever the solid sits. A
 distance-independent remainder is what pins the placement coefficient at one
 rather than merely bounding it under two.
 
+Said without leaning on the test having written the reach down right: the floor
+**rises `3.9968028886505635e-15` per unit the ball is placed out, which is one
+`Isometry::POINT_ROUNDOFF` to the last bit.** Taken as a slope off the two ends,
+everything that does not move with the placement cancels, so that is the placement
+term's coefficient on its own.
+
+**Two changes would move these numbers and from outside the crate they are the
+same shape.** A second placement term is one. The other is
+`how_far_the_points_of_reach` no longer coming to `corners + radius` for a ball's
+face — the §15.6 reach under-charge is a live change of exactly that kind — which
+would leave the mesher right and this test's arithmetic stale. Both scale the
+placement term by a constant, and no measurement of floors separates them. The
+assertions say so and name where to look, because the first reading is the
+alarming one and would otherwise be the only one offered.
+
 **The number the refusal carries changed while this was being measured, and the
 measurement did not move.** The deflection-floor unit landed in `8358620` between
 the first run and this one: `room_a_mesh_has_to_work_in` now lets a caller's own
