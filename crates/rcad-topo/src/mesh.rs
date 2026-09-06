@@ -20,8 +20,8 @@
 use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{
-    Deflection, Isometry, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Point,
-    SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector,
+    Deflection, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun,
+    POINT_ALONG_A_CROSSING_ROUNDOFF, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector,
 };
 use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate};
 use rcad_predicates::{
@@ -381,6 +381,30 @@ impl SolidView<'_> {
     /// already said how far out of place it will let a point be — gets a mesh as
     /// fine as the arithmetic reaches, with [`Mesh::deviation`] saying what that
     /// came to.
+    ///
+    /// # Two floors, and which one is read depends on who picked the number
+    ///
+    /// [`how_far_a_mesh_point_of_this_face_rounds`] is how close a point can be
+    /// *placed*, and it is what a **caller's own** deflection is let through
+    /// against. A caller who names a number gets it tried, and whatever the walk
+    /// or the triangulator then says about it — including
+    /// [`rcad_geom::Error::TooManyPointsAlongOneCrossing`] — is an answer about
+    /// the number that caller chose.
+    ///
+    /// [`the_finest_deflection_the_walk_will_take`] is how fine a mesh can be
+    /// *cut*, and it is what **this crate's own** number is measured against,
+    /// because here there is no caller to hand the refusal to: whatever comes
+    /// out of this line is walked without anyone else looking at it first. The
+    /// old code took the wave-through against the placing floor as licence to
+    /// use it for the cutting floor as well, and handed the walk twice a number
+    /// the walk refuses — a bar of radius one at the origin got
+    /// `TooManyPointsAlongOneCrossing` for a deflection this method had just
+    /// worked out itself.
+    ///
+    /// **The policy is asked about the number it will actually get**, which is
+    /// the second floor and not the first. Asking about the first and then
+    /// handing back the second would be telling a caller its budget was kept and
+    /// then straying seventy-nine times further than it allowed.
     fn room_a_mesh_has_to_work_in(self, asked: Deflection, policy: &Policy) -> Result<Deflection> {
         let closest = self
             .faces()
@@ -389,13 +413,17 @@ impl SolidView<'_> {
         if asked.length() >= closest {
             return Ok(asked);
         }
-        if !policy.wobble_is_acceptable(closest) {
+        let workable = self
+            .faces()
+            .map(the_finest_deflection_the_walk_will_take)
+            .fold(0.0, f64::max);
+        if !policy.wobble_is_acceptable(workable) {
             return Err(Error::DeflectionBelowWhatAMeshCanReach {
                 asked: asked.length(),
-                closest,
+                closest: workable,
             });
         }
-        Ok(Deflection::of(closest * ROOM_ABOVE_THE_FLOOR)?)
+        Ok(Deflection::of(workable * ROOM_ABOVE_THE_FLOOR)?)
     }
 }
 
@@ -405,6 +433,15 @@ impl SolidView<'_> {
 /// a triangle may have shrinks to nothing and the refinement has nothing it can
 /// do. Twice the floor leaves a chord of about `√(3 · radius · floor)`, which is
 /// small and is not zero.
+///
+/// **It is not what makes the walk accept what it is handed** — that is
+/// [`the_finest_deflection_the_walk_will_take`], which is the floor this is a
+/// multiple of, and no multiple of the *placing* floor would have done it. What
+/// the two buys on top of it is the last place or two: exactly at the floor the walk
+/// asks `acos` for an angle three millionths of a radian wide, where a rounding
+/// in `1 − room/reach` is amplified into the fifth digit of the answer, and a
+/// step count that lands one over the cap is a refusal. Twice the room is
+/// `√2` times the angle and 741 455 steps rather than 1 048 576.
 const ROOM_ABOVE_THE_FLOOR: f64 = 2.0;
 
 /// How many points one mesh will hold before this gives up on it.
@@ -2125,10 +2162,73 @@ const WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO: f64 = WHAT_THE_BOUNDARY_TAKES_OF_THE_B
 /// The evaluator's share is divided by [`WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO`],
 /// because that is the fraction of the deflection it is handed and it refuses a
 /// deflection it cannot place a point inside.
+///
+/// **This is where a point can be *placed*, and not where a mesh can be *cut*.**
+/// [`the_finest_deflection_the_walk_will_take`] is the second of those and is
+/// the larger — seventy-nine times larger on a bar of radius one at the origin.
+/// Which of the two answers a caller depends on who chose the deflection, and
+/// [`SolidView::room_a_mesh_has_to_work_in`] is where that is settled.
 fn how_far_a_mesh_point_of_this_face_rounds(face: FaceView<'_>) -> f64 {
     POINT_ALONG_A_CROSSING_ROUNDOFF / WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO
         * how_far_the_points_of_reach(face, &the_frame_this_face_is_meshed_in(face))
         + how_far_moving_this_face_rounds(face)
+}
+
+/// The finest deflection [`rcad_geom::walk`] will accept along a crossing of
+/// this face, which is the floor under a deflection **this crate** picks.
+///
+/// The walk will not put more than [`MOST_POINTS_ALONG_ONE_CROSSING`] points
+/// along one crossing, so the finest step it can be asked for is a whole turn
+/// divided by that cap — and the arc of a step that size stands off its own
+/// chord by [`how_far_a_step_at_the_cap_stands_off_its_chord`] of how far the
+/// crossing reaches. That room has to survive both of the cuts on the way down:
+/// [`how_far_moving_this_face_rounds`] comes off the deflection before the walk
+/// is called and [`WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO`] is the share of what is
+/// left that it is handed. So the two terms go in exactly where
+/// [`how_far_a_mesh_point_of_this_face_rounds`]'s do, which is what makes this
+/// that floor with one more thing added to it.
+///
+/// **It is the added term that decides.** Measured on a bar of radius one at
+/// the origin: where a point can be placed is `9.2148511043888e-13` and this is
+/// `7.273230840146953e-11`, seventy-nine times more. Asked for `1e-300` under
+/// `Policy::tolerant(100.0)`, the mesher used to hand the walk twice the first
+/// of those — `1.84297022087776e-12` — and get
+/// `Error::TooManyPointsAlongOneCrossing` back on the first cap circle.
+///
+/// [`SolidView::room_a_mesh_has_to_work_in`]: SolidView::room_a_mesh_has_to_work_in
+fn the_finest_deflection_the_walk_will_take(face: FaceView<'_>) -> f64 {
+    (POINT_ALONG_A_CROSSING_ROUNDOFF + how_far_a_step_at_the_cap_stands_off_its_chord())
+        / WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO
+        * how_far_the_points_of_reach(face, &the_frame_this_face_is_meshed_in(face))
+        + how_far_moving_this_face_rounds(face)
+}
+
+/// How far the arc of one step stands off its own chord when a whole turn is
+/// walked in as many steps as [`rcad_geom::walk`] allows, as a share of how far
+/// the crossing reaches.
+///
+/// `walk`'s own `how_many_steps` asks for a step of `2·acos(1 − room/reach)` and
+/// charges `turns_over` divided by that, so the cap it refuses past is
+///
+/// ```text
+/// turns_over / (2·acos(1 − room/reach)) ≤ MOST_POINTS_ALONG_ONE_CROSSING
+/// ```
+///
+/// which rearranges to `room ≥ reach · (1 − cos(turns_over / (2·cap)))`. **A
+/// whole turn is the worst case and it is the usual one**: every cap circle of
+/// every bar and every crossing circle a plane cuts a ball in goes right round,
+/// and those are the crossings this kernel builds most of. A crossing that
+/// covers less of a turn than that is held to a floor up to sixteen times
+/// higher than it needed — the room goes as the square of the turn — which is a
+/// mesh refused that could have been cut, and it is the safe way round: the
+/// other way is the walk refusing a deflection this said was reachable.
+///
+/// Written as `2·sin²(x/2)` rather than `1 − cos x`, because `cos` of three
+/// millionths of a radian is one to within a rounding and the subtraction keeps
+/// about five digits of what is left. The `sin` form keeps them all.
+fn how_far_a_step_at_the_cap_stands_off_its_chord() -> f64 {
+    let widest = core::f64::consts::TAU / MOST_POINTS_ALONG_ONE_CROSSING as f64;
+    2.0 * (widest / 4.0).sin().powi(2)
 }
 
 /// How far out of place a point of this face can be for reasons that have
