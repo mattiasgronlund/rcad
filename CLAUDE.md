@@ -97,16 +97,27 @@ at four questions of four options and would split one message into seven.
 **Every question also goes in `open-questions.md` in this session's scratchpad,
 the same turn you ask it.** A question asked only in the terminal scrolls away,
 and recovering it costs a full-context turn — which happened, and is why the file
-exists. One line each:
+exists. Write each one the way the `grilling` skill formats a round — a heading
+line, the body under it, the recommendation last:
 
 ```
-- [ ] **Q11** — Short question in one line? → *recommend (a), because …*
+- [ ] **Q11** — Short heading, in one line?
+
+  The body, as many paragraphs as it takes. Backticks, `§` refs and file:line
+  belong here; this is the argument, not a summary of it.
+
+  ➡️ *Recommend (a), because …*
 ```
 
-`- [x]` and `→ answered: …` when the answer comes. The status line reads the file
-and shows the open labels, collapsed — `❓ K1-K4, Q2, Q4-Q6`. The user can
-therefore read what is outstanding without `!cat`, which would add the file to
-the conversation and charge for it on every later turn.
+The checkbox line carries the label and the heading, and everything indented
+under it belongs to that question. `- [x]` and `→ answered: …` when the answer
+comes.
+
+**Read one back with `just question`, never with `!cat`.** The status line shows
+the open labels collapsed, after the session's hash — `❓ 766405 K1-K4, Q2,
+Q4-Q6` — and that hash is the address: `just question 766405` lists the headings,
+`just question 766405 Q11` prints that one entry in full. `!cat` puts all of them
+in the conversation instead, and charges for every line on every later turn.
 
 **A label is a letter and a number, and the letter carries meaning.** `Q` for a
 grilling round or any plain decision — that is what the `grilling` skill's format
@@ -115,6 +126,11 @@ already uses. A lane's findings take **the lane's own letter**, which is where
 from" is the first thing asked about a finding. The label goes straight after the
 checkbox; the status line reads it there and nowhere else, so a body is free to
 mention `M5` or `§52.11` without becoming a question.
+
+**One entry may carry two labels when one answer settles both** — `**Q7 / Q11**
+— …`, addressable as either. Both are counted and both are shown. Reading only
+the first is a bug that has been fixed once already: on 2026-09-06 the line
+showed thirteen of fifteen open questions and looked complete.
 
 **Never in the tree.** Four sessions were live across these two repos on
 2026-09-05; a tracked file would have had all four writing to it. Per session

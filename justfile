@@ -7,7 +7,7 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest lint test check-t-selftest deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Four tests in `rcad-step` skip
@@ -786,6 +786,181 @@ check-src-selftest:
 test:
     cargo nextest run --workspace
     cargo test --workspace --doc
+
+# Where the open questions live: one file per session, under the session's own
+# scratchpad and never in the tree. Overridable so the selftest can point at a
+# directory it builds itself, rather than at whatever sessions are live today.
+questions_root := env_var_or_default("CLAUDE_QUESTIONS_ROOT", env_var_or_default("TMPDIR", "/tmp") / ("claude-" + `id -u`))
+
+# One open question, in full, by the hash the status line prints beside it.
+#
+#     just question                 the sessions that have open questions
+#     just question 766405          that session's labels and headings
+#     just question 766405 Q19      that one question, body and all
+#
+# **The hash exists because nothing else knows the address.** The file is named
+# by the session id, which only the harness has, so reading one question meant
+# `!cat` on the whole file — fifteen entries put in front of you to read one,
+# and shell mode then charges the model for every line of it on every later
+# turn. That is the same arithmetic that put the status line here to begin with.
+#
+# **The middle form is also the format check.** It reads labels exactly as
+# `statusline.sh` does, so an entry the status line would silently drop shows up
+# here as missing. That is not hypothetical: an entry may carry two labels when
+# one answer settles both, `**Q7 / Q11**`, and reading only the first is how Q11
+# and Q27 stayed open and invisible through 2026-09-06.
+#
+# There is deliberately no recipe that *writes* a question. A body is paragraphs
+# of prose with backticks and `§` refs in it, so passing one as a shell argument
+# costs what `Edit` costs and echoes the whole thing back on top; and marking one
+# answered is a substitution, which is the quiet-failure shape §50.8 is about.
+question hash="" label="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+
+    root="{{questions_root}}"
+    files=("$root"/*/*/scratchpad/open-questions.md)
+    if [ ${#files[@]} -eq 0 ]; then
+        echo "no session under $root has an open-questions.md" >&2
+        exit 1
+    fi
+
+    # The labels of an entry, read the way statusline.sh reads them: the whole
+    # run right after the checkbox, so `**Q7 / Q11**` is two questions, not one.
+    # `rest` is left holding the heading text.
+    read_labels='
+        function labels_of(line,   out, lab) {
+            sub(/^- \[[ x]\][[:space:]]*/, "", line)
+            sub(/^\*+/, "", line)
+            out = ""
+            while (match(line, /^[A-Z]+[0-9]+/)) {
+                lab = substr(line, 1, RLENGTH)
+                line = substr(line, RLENGTH + 1)
+                out = (out == "" ? lab : out " " lab)
+                if (!sub(/^\**[[:space:]]*\/[[:space:]]*\**/, "", line)) break
+            }
+            sub(/^\**[[:space:]]*(—|-)?[[:space:]]*/, "", line)
+            rest = line
+            return out
+        }
+    '
+
+    session_of() { basename "$(dirname "$(dirname "$1")")"; }
+    open_count() { awk "$read_labels"'
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^- \[ \]/ { if (labels_of($0) != "") n += split(labels_of($0), a, " ") }
+        END { print n + 0 }' "$1"; }
+
+    hash="${1:-}"
+    if [ -z "$hash" ]; then
+        for f in "${files[@]}"; do
+            n=$(open_count "$f")
+            [ "$n" -gt 0 ] || continue
+            slug=$(basename "$(dirname "$(dirname "$(dirname "$f")")")")
+            printf '%s\t  %-6.6s %3d open  %s  %s\n' \
+                "$(stat -c %Y "$f")" "$(session_of "$f")" "$n" \
+                "$(date -d "@$(stat -c %Y "$f")" +%H:%M)" "${slug##*-}"
+        done | sort -rn | cut -f2-
+        exit 0
+    fi
+
+    # A prefix that matches two sessions is not a question anyone can answer, so
+    # it fails rather than picking the newer and looking like it worked.
+    matched=()
+    for f in "${files[@]}"; do
+        case "$(session_of "$f")" in "$hash"*) matched+=("$f") ;; esac
+    done
+    if [ ${#matched[@]} -eq 0 ]; then
+        echo "no session under $root starts with $hash — try 'just question'" >&2
+        exit 1
+    fi
+    if [ ${#matched[@]} -gt 1 ]; then
+        echo "$hash matches ${#matched[@]} sessions:" >&2
+        for f in "${matched[@]}"; do echo "  $(session_of "$f")" >&2; done
+        exit 2
+    fi
+    file="${matched[0]}"
+
+    label="${2:-}"
+    if [ -z "$label" ]; then
+        awk "$read_labels"'
+            /^[[:space:]]*```/ { fence = !fence; next }
+            fence { next }
+            /^- \[[ x]\]/ {
+                labels = labels_of($0)
+                if (labels == "") next
+                state = (substr($0, 4, 1) == "x") ? "done" : "open"
+                gsub(/ /, ", ", labels)
+                printf "  %-11s %-4s  %.66s\n", labels, state, rest
+            }' "$file"
+        exit 0
+    fi
+
+    # The body is every line up to the next entry, so an indented paragraph
+    # belongs to the question above it and a blank line does not end it.
+    got=$(awk -v want="$label" "$read_labels"'
+        /^- \[[ x]\]/ {
+            on = 0
+            n = split(labels_of($0), a, " ")
+            for (i = 1; i <= n; i++) if (a[i] == want) on = 1
+        }
+        on' "$file")
+    if [ -z "$got" ]; then
+        echo "$hash has no question labelled $label — try 'just question $hash'" >&2
+        exit 1
+    fi
+    printf '%s\n' "$got"
+
+# Pins `question` against a scratchpad it builds itself, so it stays proven on a
+# machine where no session happens to be live.
+#
+# The case worth having is the **paired label**: an entry addressed as both Q7
+# and Q11 must be reachable by either, and must count as two open questions and
+# not one. That is the bug this recipe was written next to.
+check-questions-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    mkdir -p "$dir/-slug-rcad/76640573-f351-4e74/scratchpad"
+    printf '%s\n' \
+        '- [ ] **Q7 / Q11** — a floor unit with no record' \
+        '' \
+        '  An indented body that belongs to Q7, mentioning M5 and Q99 in passing.' \
+        '' \
+        '- [x] **Q24** — settled, and must not be counted as open' \
+        '- [ ] **K1** — a lane keeps its own letter' \
+        > "$dir/-slug-rcad/76640573-f351-4e74/scratchpad/open-questions.md"
+    j="{{just_executable()}} --set questions_root $dir"
+
+    got=$($j question)
+    want="  766405   3 open  $(date -d "@$(stat -c %Y "$dir/-slug-rcad/76640573-f351-4e74/scratchpad/open-questions.md")" +%H:%M)  rcad"
+    [ "$got" = "$want" ] || { echo "the session list drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j question 766405 | awk '{ $1 = $1; print }')
+    want=$(printf '%s\n' "Q7, Q11 open a floor unit with no record" \
+        "Q24 done settled, and must not be counted as open" \
+        "K1 open a lane keeps its own letter")
+    [ "$got" = "$want" ] || { echo "the label listing drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    [ "$($j question 766405 Q7)" = "$($j question 766405 Q11)" ] \
+        || { echo "a paired label is not reachable by both of its names"; exit 1; }
+    $j question 766405 Q11 | grep -q 'indented body' \
+        || { echo "the body did not come back with the question"; exit 1; }
+    if $j question 766405 Q11 | grep -q 'Q24'; then
+        echo "the entry ran on into the one after it"; exit 1
+    fi
+
+    if $j question 766405 Q99 >/dev/null 2>&1; then
+        echo "a label mentioned in a body was addressable as a question"; exit 1
+    fi
+    if $j question zzzz >/dev/null 2>&1; then
+        echo "a hash matching no session was accepted"; exit 1
+    fi
 
 # One test, or a few, with the corpus and the build cache already in place.
 #
