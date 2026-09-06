@@ -2229,57 +2229,54 @@ fn how_far_a_mesh_point_of_this_face_rounds(
 /// [`how_far_a_mesh_point_of_this_face_rounds`]'s do, which is what makes this
 /// that floor with one more thing added to it.
 ///
-/// **It is the added term that decides.** Measured on a bar of radius one at
-/// the origin: where a point can be placed is `9.2148511043888e-13` and this is
-/// `7.273230840146953e-11`, seventy-nine times more. Asked for `1e-300` under
-/// `Policy::tolerant(100.0)`, the mesher used to hand the walk twice the first
-/// of those — `1.84297022087776e-12` — and get
+/// **It is the added term that decides.** Measured on a bar of radius one and
+/// two tall at the origin: where a point can be placed is `9.2148511043888e-13`
+/// and this is `7.273230840146953e-11`, seventy-nine times more. Asked for
+/// `1e-300` under `Policy::tolerant(100.0)`, the mesher used to hand the walk
+/// twice the first of those — `1.84297022087776e-12` — and get
 /// `Error::TooManyPointsAlongOneCrossing` back on the first cap circle.
 ///
-/// # The crossing's reach is not the face's reach, and a leaning cut is where
-/// the face's is smaller
+/// # The crossing's reach is not the face's reach, and both are worked out from
+/// the crossings now
 ///
 /// `walk`'s `how_many_steps` charges its room against `Conic::how_far_it_reaches`,
 /// the longer semi-axis of the crossing itself. This charges
-/// [`how_far_the_points_of_reach`], the face's corners plus its surface's own
-/// radius. **They are not the same number and this one is not always the
-/// bigger.** Measured on a bar of radius one cut by a plane leaning `lean` in x
-/// for every 1 in z: the ellipse is walked as an edge of the **wall** face — a
-/// plane reaches zero here and returns before any of this — so what is charged
-/// is the wall's reach, which is `2` at every lean, its corners a unit out and
-/// its radius one, and neither of them knows the plane leans. The conic's own
-/// reach is `9.999999999999999e8` at `lean = 1e9` and `1.9999999999999998e9` at
-/// `lean = 2e9`: an under-estimate of five hundred million times, then a
-/// billion, and it grows with the lean without bound.
+/// [`how_far_the_points_of_reach`], a box the whole face fits inside.
+/// **Different numbers, and no longer different questions**: a face on a pipe or
+/// a cone is held along its own axis by the pair of surfaces either side of each
+/// of its edges, which is where its crossings are, and only a surface that is
+/// bounded to start with — a ball, a ring — is still charged from its corners.
 ///
-/// **So this floor is too low on that face, and the promise it exists to keep
-/// does not hold there.** It holds wherever a crossing is a circle no wider than
-/// the surface it is cut on — every cap circle of a bar, every circle a plane
-/// cuts a ball in — and that is what the fix was for. What a leaning cap gets
-/// instead is not `TooManyPointsAlongOneCrossing` but the gate one step earlier:
-/// at `lean = 1e9` the crossing rounds by `5.6843418889229724e-5` where this
-/// picks `9.697641120195938e-11`, so `room_left_over` runs out long before the
-/// step cap is asked anything. Measured: a tolerant caller asking `1e-300` of a
-/// bar leaning `4e9` or `1e11` now gets `AWireDoesNotFanIntoALoopToMesh` with
-/// `TooFewCorners { count: 1 }`, where before this it got
-/// `TooManyPointsAlongOneCrossing`. **Neither is a mesh**, so on this family the
-/// fix moved which refusal arrives rather than earning an answer: what it picks
-/// is now a deflection the bar's own cap circles will take, and still not one
-/// the leaning ellipse will. `what_a_tolerant_policy_costs_a_mesh.rs` reaches
-/// the same refusal from the caller-named side.
+/// A bar cut off by a leaning plane is what that bought. The ellipse is walked
+/// as an edge of the **wall** face — a plane reaches zero here and returns
+/// before any of this — and the wall's reach used to be `2` at every lean, its
+/// corners a unit out and its radius one, neither of them knowing the plane
+/// leaned. Measured now, on a bar of radius one cut at its seam by a plane
+/// leaning `lean` in x for every 1 in z: `2000001.5` at `lean = 1e6` and
+/// `4000000001.5` at `lean = 2e9`. That is `2 · lean + 1.5`, which is how the
+/// ellipse itself climbs, and
+/// `what_a_leaning_cut_costs_the_floor_under_a_mesh.rs` is where the floor is
+/// read back off a refusal and divided by that oracle at four leans.
 ///
-/// **Three ways to close it, and only the third is free.** Charge the crossings
-/// instead of the corners, and every conic on the face has to be worked out
-/// before there is a deflection to walk one with — the walk's own job, done
-/// twice. Bound the ellipse from the pair of surfaces that cut it, and this
-/// stops being a question about one surface, which is what makes it cheap. Or
-/// keep the stand-in away from the numbers it is wrong about, which is what is
-/// claimed here: **not** that a face's reach covers its crossings', which is
-/// false, but that this floor is only ever read for a deflection this crate
-/// picks, and a caller-named one returns from
-/// [`SolidView::room_a_mesh_has_to_work_in`] above it. Extending this to a
-/// caller-named deflection would turn a floor that does not bind into a wrong
-/// answer.
+/// # Where the floor is still under the crossing's own rounding
+///
+/// [`how_far_along_its_axis_this_face_runs`] hands back `None` when nothing
+/// along an edge bounds where that edge runs, and then the corners are all there
+/// is again. **A cone crossed with a pipe on its own axis is such an edge**:
+/// nothing about a direction square to the shared axis says how far along the
+/// axis the crossing sits. One of them puts a whole face on that fallback, and
+/// the circles a needle cone is worked out from round against a standoff its
+/// corners know nothing about — so `room_left_over` empties the walk and the
+/// mesh is refused by name rather than cut.
+/// `what_the_mesher_does_with_an_empty_walk_on_a_closed_edge.rs` builds that
+/// shape on purpose.
+///
+/// **So the claim here is the narrow one and not the wide one**: **not** that a
+/// face's reach covers its crossings', which is still false on the fallback, but
+/// that this floor is only ever read for a deflection this crate picks, and a
+/// caller-named one returns from [`SolidView::room_a_mesh_has_to_work_in`] above
+/// it. Extending this to a caller-named deflection would turn a floor that does
+/// not bind into a wrong answer.
 ///
 /// [`SolidView::room_a_mesh_has_to_work_in`]: SolidView::room_a_mesh_has_to_work_in
 fn the_finest_deflection_the_walk_will_take(
@@ -2687,8 +2684,11 @@ fn how_far_the_points_of_reach(
 /// the only places this looks, which is right only where a corner is the
 /// furthest along the face gets. It is what [`how_far_the_points_of_reach`]
 /// falls back to when no pair of surfaces along an edge bounds where that edge
-/// runs, and `a_leaning_cut_is_charged_for_where_its_ellipse_really_runs` is
-/// what says a bar cut by a leaning plane is no longer one of those.
+/// runs. `the_floor_under_a_leaning_bar_follows_its_ellipse_and_not_its_corners`
+/// says a bar cut by a leaning plane is no longer one of those, and
+/// `what_the_mesher_does_with_an_empty_walk_on_a_closed_edge.rs` is a shape that
+/// still is: a cone met by a pipe on its own axis, where the fallback charges
+/// `2` against circles worked out from a standoff of sixteen million.
 fn how_far_out_this_face_is_where_its_corners_are(face: FaceView<'_>) -> f64 {
     match face.surface() {
         Surface::Cylinder(pipe) => pipe.radius(),

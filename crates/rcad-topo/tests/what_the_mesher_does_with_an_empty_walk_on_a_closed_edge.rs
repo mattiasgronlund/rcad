@@ -65,13 +65,17 @@
 //! unit above. Four faces, and the top one's whole wire is the circle where the
 //! lid cuts the cone.
 //!
-//! Both of the two circles worked out from that far-away apex round by roughly a
-//! millionth of a unit: the cone-and-pipe junction is worked out from the
-//! standoff `RADIUS / SLOPE`, and the lid's circle is worked out from the apex
-//! itself. Meanwhile the coaxial junction puts both curved faces on the
-//! fallback, so what they are charged is their corners — a unit out — plus a
-//! unit of radius, which is `2`. Eight million times under, and the slope is
-//! ours to choose.
+//! Both circles worked out from that far-away apex round by
+//! `9.5367431640625e-7` — the junction from the standoff `RADIUS / SLOPE`, the
+//! lid's circle from the apex itself — and the deflection below leaves only
+//! `1.8749999850119882e-7` of itself for the walk, which is the pair of numbers
+//! the certified test below is handed. Meanwhile the coaxial junction puts
+//! both curved faces on the fallback, so what they are charged is their corners,
+//! a unit out, plus a unit of radius: `2`. So the whole solid's floor is
+//! `4.848820849110196e-11` — a hair over what a plain bar of radius one and one
+//! tall gets, which is `4.848820560097969e-11` — against circles that round by
+//! twenty thousand times that. The slope is ours to choose and the gap has no
+//! bound.
 //!
 //! **Two barriers again, and the shell names the lid first.** The cone face
 //! beside the same junction circle cannot be meshed either — its wire is a
@@ -83,10 +87,12 @@
 //!
 //! The needle is far past anything a drawing holds — it flares by six hundredths
 //! of a micron over its whole unit of height. It is what the arithmetic needs to
-//! reach the case, which is why it is built rather than argued about, and a
-//! **fifth** doubling of the standoff is refused by `Model::validate` itself
-//! with `AClosedEdgeIsWalkedAgainstItsSurface`: the winding walk empties too, and
-//! that is §51.7's *other* question rather than this one.
+//! reach the case, which is why it is built rather than argued about, and there
+//! is a ceiling on it: halving the slope twice more still builds, and the
+//! **third** halving is refused by `SolidBuilder::build` itself with
+//! `AClosedEdgeIsWalkedAgainstItsSurface`. That is the winding walk emptying,
+//! which is §51.7's *other* question rather than this one, so the slope here sits
+//! two doublings clear of it.
 
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface,
