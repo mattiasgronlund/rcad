@@ -47,10 +47,17 @@ design doc is its own `docs/roadmap.md`; **§8 there owns the demand text** — 
 signatures, the code that needs them, and what rscene does if refused. Read that
 rather than trusting a summary here.
 
-**Pinned at `22a163a`** — `main` as it stood when rscene took the pin, which is
-this file's own last commit. Not the first sha carrying the two demands below;
-those landed earlier, and rscene had no reason to reach back past them. Pinning
-needed no ceremony, as arranged: rscene pinned it, and rcad does not bump it.
+**No rev is written down here, on purpose.** One was — `22a163a`, described as
+*`main` as it stood when rscene took the pin, which is this file's own last
+commit*. That sentence pinned this file to itself, and it stopped being true the
+next time anybody edited the file, which was immediately. It is **deleted rather
+than corrected**: rscene's own `main` is unpushed, so a rev written down today
+would name a commit nobody else can fetch, and a pin that cannot be resolved is
+worse than none — it reads as a fact and behaves as a dead end.
+
+The arrangement is unchanged and needs no ceremony: **rscene pins, and rcad never
+bumps it.** Which rev rscene is on is rscene's to know and rcad's to be told when
+it matters, which is what the announcements below are for.
 
 ### What rcad built for it
 
@@ -248,6 +255,41 @@ Four things rcad may want from it:
   reports whose cause was a starved walk. That is already recorded as rcad's; it
   is repeated here only as evidence of how far the wording travels.
 
+### Withdrawal notice: per-face colour out of STEP import
+
+`docs/decisions.md` §56.7 recorded this as *undecided, not refused* — a
+well-formed demand acknowledged twice in channel and written into no rcad file
+until that line. **It is now withdrawn, and withdrawn is not refused.** rcad did
+not decide against it. rscene searched its own history for the demand, found
+nothing raised, and confirmed it took the refused path long ago: it draws flat
+and reports colour unavailable, and it has no decision resting on the colour
+arriving. There is no consumer, so `docs/decisions.md` §13 closes it — a part
+with no named consumer is not built.
+
+**The four design inputs are kept here so that a later builder does not have to
+re-derive them.** They are the whole of what the demand ever specified, and they
+cost nothing to carry:
+
+1. `STYLED_ITEM` — what binds a style to a shape.
+2. `COLOUR_RGB` — the colour itself.
+3. `PRESENTATION_STYLE_ASSIGNMENT` — what gathers styles onto one item.
+4. `SURFACE_STYLE_*` — the surface side of that assignment.
+
+The shape it would take is a colour per `FaceKey` on `Import`, beside the solids
+rather than inside them. rscene's sink for it is built and tested, so adopting it
+later is source-side only and the withdrawal is cheap to reverse — which is
+exactly why it is recorded rather than forgotten.
+
+**Only the feature half is withdrawn.** §13 governs features and never
+correctness gaps, and there was a correctness gap next to this one: `Import`'s
+census read as complete while styling was walked past uncounted, so a consumer
+was about to publish a denominator saying the importer had dropped nothing while
+it had dropped every colour in the corpus. That is fixed and stays fixed —
+`Import::shapes_this_reader_did_not_take` now says out loud that it does not
+count styling, a file of styling and no solid gets an `Err` rather than an empty
+map, and `styling_is_never_among_the_shapes_walked_past` pins both halves over
+the real corpus. Withdrawing the colour does not reopen any of that.
+
 ### The cone, and what rscene did with it
 
 rscene's §3 carried the pointed cone as *the* measurement that killed **coarser
@@ -352,6 +394,44 @@ decision resting on it in either direction.
   rather delete it than carry it. It is written here beside the arrangement rather
   than filed under withdrawals, because an arrangement whose ending condition lives
   somewhere else is the same failure as one recorded at a single end.
+
+- **A second number under the same arrangement: the KiCad import rate.** rscene
+  quotes rcad's **`97 of 323`** — how many of the KiCad corpus's files rcad
+  imports — and asks to hear when it moves rather than meet the move in a sweep.
+  Same shape as the bullet above and the same rules: the old number, the new
+  number and which way it went, before the change reaches `main`; no threshold,
+  for the reason given above; and if the figure is being cited, rcad says at the
+  same time that the citation has stopped describing anything.
+
+  Four things this number has that `Mesh::deviation` does not, which is why it is
+  written out rather than folded into the bullet above.
+
+  **It is a ceiling and not a forecast.** It says what one corpus did at one
+  commit. It does not say that thirty per cent of the next batch of files will
+  import, and quoted about any other corpus it is a number about a different
+  question. A consumer sizing a retry ladder or a support burden off it is asking
+  it to carry something it cannot.
+
+  **It moves far more often than the deviation does.** Every import fix moves it,
+  and a lane is in flight as this is written that may move it, so this figure may
+  be stale before it is read. That is an argument for the announcement, not
+  against the number.
+
+  **rcad cannot move it quietly, and that was not always true.**
+  `how_often_a_real_file_imports` pins the **exact set** of files that import —
+  `KICAD_FILES_THAT_IMPORT`, ninety-seven names, pinned since `d23c700` — and
+  fails both ways: a pinned file that stops importing, and an unpinned one that
+  starts. So a fall is a red test rather than a silence. The caveat is the
+  corpus, which lives outside the tree: a run that cannot find it runs this test
+  short. `docs/decisions.md` §43.2's criterion 10 — *nothing asserts the
+  real-file rate*, and *if 46/323 fell to 1/323 the test would still pass* — was
+  true when it was written and is not true now.
+
+  **It is unverified by this lane.** `97 / 323 = 30.0%` is quoted from
+  `docs/decisions.md` §45.1, which measured it. What was checked here is that the
+  pinned list holds ninety-seven names — the numerator, not the rate. Said
+  plainly rather than left to look like a measurement, because a number this file
+  lends its confidence to is exactly the kind that gets cited.
 
 ### Announcement: `Mesh::deviation` moved on a ball, and the floor under it moved 79×
 
