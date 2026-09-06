@@ -11795,12 +11795,12 @@ The two `DeflectionBelowWhatAMeshCanReach` rows above — `18·ε·L` far from t
 origin, and `1.4444×` after a fuse — and the sentence just above them are all
 about **how close a mesh point can be placed**, which is the floor
 `SolidView::mesh` still lets a *caller's own* deflection through against, and all
-three read it out of `closest`. §54's unit broke that tie: `closest` now carries
+three read it out of `closest`. §58's unit broke that tie: `closest` now carries
 **how fine a mesh can be cut**, the floor under a deflection the mesher picks for
 itself, which is the placing floor with the walk's step cap added to it.
 
 Measured here, hunting for the placing floor through the public API and reading
-the walk floor out of the refusal (§54.4): at the origin a round bar of radius
+the walk floor out of the refusal (§58.4): at the origin a round bar of radius
 one gives `9.214851104388813e-13` against `7.273230840146953e-11` and a ball of
 radius one gives `6.143234069592546e-13` against `4.848820560097969e-11` —
 `78.929` times apart in both cases. **So `closest` at the origin over-reports the
@@ -11822,7 +11822,7 @@ which the refusal stops being the answer, which is what
 `the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away`
 does. That hunt terminates at the origin and **does not terminate far out**,
 where the first deflection above the floor is one the walk accepts and the mesh
-does not finish (§54.4). Any future measurement of the `18·ε·L` row needs a way
+does not finish (§58.4). Any future measurement of the `18·ε·L` row needs a way
 round that, and §56.5's slope — the floor's rise per unit of placement — is one,
 because it cancels everything that does not move with the placement.
 
@@ -17521,9 +17521,9 @@ advance from §53.4's own brief, which already orders B and C to follow every
 `f64`-returning call across file boundaries. A prediction its own plan half
 guarantees is not one.
 
-## 54. The floor a mesh publishes is one the walk will take, recorded 2026-09-06
+## 58. The floor a mesh publishes is one the walk will take, recorded 2026-09-06
 
-### 54.1 The unit, and why its record is late
+### 58.1 The unit, and why its record is late
 
 Ten commits, `c9ff754..8358620`, in three lanes — floor, tolerant and import —
 merged at `86b72c3` and closed with three documentation commits. It changed
@@ -17533,13 +17533,7 @@ across three files, and discharged `docs/consumers.md`'s announcement bullet for
 the first time. **It left no section here at all.** This is that section, written
 from the commits and from the tree rather than from anyone's report.
 
-A numbering collision comes with it. §55 opens *"§54 is left for §53's unit
-record"*, because a peer session had claimed the number in a handoff rather than
-in this file. This is the section that got written into the file, and §53's unit
-record wants a number of its own. §55 is the section about acknowledgements that
-live nowhere; its own number turned out to be one.
-
-### 54.2 One number doing two jobs, and only one of them was its job
+### 58.2 One number doing two jobs, and only one of them was its job
 
 `room_a_mesh_has_to_work_in` is asked two different questions and had one answer
 for both.
@@ -17569,7 +17563,7 @@ sixteenths of the deflection the walk is actually handed, which is `25.98`, and
 `walk`'s own deviation puts the crossover a little past twenty-six. The measured
 bracket either side of it is between sixteen and thirty-two.
 
-### 54.3 The fix: a second floor, and which one answers whom
+### 58.3 The fix: a second floor, and which one answers whom
 
 `the_finest_deflection_the_walk_will_take` is the placing floor with one term
 added — `how_far_a_step_at_the_cap_stands_off_its_chord`, what the arc of one
@@ -17593,7 +17587,7 @@ served: at the floor the walk asks `acos` for an angle three millionths of a
 radian wide, where the subtraction in `1 − room/reach` has few digits left, and a
 step count one over the cap is a refusal.
 
-### 54.4 What `closest` carries now, and the separation, measured here
+### 58.4 What `closest` carries now, and the separation, measured here
 
 `DeflectionBelowWhatAMeshCanReach`'s `closest` used to be the placing floor and
 is now the walk floor. That is a change to a published number and
@@ -17632,7 +17626,7 @@ that meshes at the new floor*. What this section did measure out there is the
 walk floor alone, `3.9968513728593615e-6` for a unit ball at `x = 1e9`, which is
 the figure `docs/consumers.md` announced.
 
-### 54.5 Every bound this unit publishes, against the test that carries it
+### 58.5 Every bound this unit publishes, against the test that carries it
 
 §15.6 says a published bound needs a test. Row by row, checked in the tree at
 `99d6458`, where the three `rcad-topo` binaries this unit touches run 31 tests
@@ -17670,7 +17664,7 @@ here — a test that hunts for both floors of one shape at the origin and assert
 the pair, which is cheap because both refusals are immediate. **This section does
 not make it**: this lane owns `docs/` only. It is recorded as owed.
 
-### 54.6 The new floor is too low on a leaning cut, and this unit did not close it
+### 58.6 The new floor is too low on a leaning cut, and this unit did not close it
 
 `walk` charges its room against `Conic::how_far_it_reaches`, the crossing's own
 longer semi-axis. Both floors charge `how_far_the_points_of_reach`, the face's
@@ -17699,7 +17693,7 @@ numbers it is wrong about, which is what is claimed today and is a claim about
 The third is free and the tree takes it. Extending this floor to a caller-named
 deflection would turn a floor that does not bind into a wrong answer.
 
-### 54.7 The step cap is a gap; the rounding under it is a limit
+### 58.7 The step cap is a gap; the rounding under it is a limit
 
 `DeflectionBelowWhatAMeshCanReach` now has two reasons behind one name and
 `error.rs` keeps them apart. The rounding half is a **limit**: no `f64` point
@@ -17709,7 +17703,7 @@ back. It is deferred because a mesh at the cap is already a million points along
 one circle and nobody has asked for two — §13, and the deferral is of a limit's
 *neighbour*, so it is written down as owed rather than as impossible.
 
-### 54.8 What a tolerant caller is told where the walk runs out of room
+### 58.8 What a tolerant caller is told where the walk runs out of room
 
 The tolerant lane measured a second thing and fixed none of it, which is the
 right order. Where `rcad_geom`'s `room_left_over` runs out, a certified caller is
@@ -17733,23 +17727,23 @@ now names all three: a solid that arrived from a file, a fuse that was wrong
 about a block corner on a ball's pole, and this — a tolerant policy on a solid
 nothing is wrong with.
 
-### 54.9 The import lane, and where it is recorded
+### 58.9 The import lane, and where it is recorded
 
 The third lane's finding — `Import`'s census reading as complete when styling is
 read past uncounted — is §56.6, written by a different session that found the
 same defect independently and dropped its own fix on finding this lane's. It is
 not restated here. What belongs here is only that the lane is part of this unit
-and that its test is in the table in §54.5.
+and that its test is in the table in §58.5.
 
-### 54.10 What this does not close
+### 58.10 What this does not close
 
-1. **The leaning cut**, §54.6. A gap, with its family of fixes named and none of
+1. **The leaning cut**, §58.6. A gap, with its family of fixes named and none of
    them taken.
-2. **The tolerant wave-through**, §54.8. Measured over twelve cells and not
+2. **The tolerant wave-through**, §58.8. Measured over twelve cells and not
    fixed. Any fix closes the window those twelve cells live in, and the file says
    so, so a red there would be the fix and not a regression.
-3. **Four published numbers with no test**, §54.5. Owed, and cheap.
-4. **The promise checked only from the refusal side**, §54.5. Whether the
+3. **Four published numbers with no test**, §58.5. Owed, and cheap.
+4. **The promise checked only from the refusal side**, §58.5. Whether the
    fallback should be held to a mesh that *finishes* as well as to one the walk
    accepts is a separate question, and no section has answered it.
 5. **A caller-named deflection is still held to the placing floor and no other**,
