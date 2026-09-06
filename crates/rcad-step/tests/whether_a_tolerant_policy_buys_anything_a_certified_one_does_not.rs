@@ -17,8 +17,10 @@
 //! looks like.** The corpus does leave undecided decisions behind — every one
 //! of them on a run that was refused — and on the widest budget here they sit
 //! four thousand million times inside it and are refused anyway.
-//! [`assert_the_budget_was_not_what_stopped_them`] is that measurement, and
-//! says where the policy stops being threaded.
+//! [`assert_the_budget_was_not_what_stopped_them`] is that measurement. It also
+//! says where the policy stops being threaded, and which of the three stages
+//! reaches that site: `Import::read` and not the sweep or the mesher, so what
+//! the gap costs is a tolerant **importer**, four named files' worth.
 //!
 //! # A null result is what a broken measurement gives too
 //!
@@ -354,7 +356,40 @@ fn no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses() {
 /// policy through. Only the third one can change anything, and it is outside
 /// this file to make.
 ///
-/// This assertion is what would go red when it is made, and that would be the
+/// # Who the gap actually costs
+///
+/// It is reached from `Import::read`, and from neither `Model::validate` nor
+/// `SolidView::mesh`. Measured by decomposing this corpus into those three
+/// stages, each with a fresh [`ProvenanceLog`] and a fresh `Import::read` so no
+/// stage could inherit another's: over the 97 kicad and 1 nist files that
+/// import, **every one of the three stages logs nothing**, and so does all
+/// three run into one log. Every record here comes from `Import::read` on a
+/// file that was **refused**, and from four of them:
+///
+/// - `Relay_1-Form-A_Schrack-RYII_RM5mm.step` — 10 records
+/// - `Relay_1-Form-B_Schrack-RYII_RM5mm.step` — 10 records
+/// - `Relay_1-Form-C_Schrack-RYII_RM3.2mm.step` — 10 records
+/// - `Relay_SPDT_Finder_34.51_Vertical.step` — 1 record, and it is the worst
+///   wobble this test reports
+///
+/// So the gap costs a **tolerant importer** four files it might have had, and
+/// costs a tolerant *mesher* nothing measurable. A viewport that only meshes
+/// what imported never walks into it, and this file should not be read as
+/// saying one is being silently mis-served today. It also explains why a
+/// downstream consumer counting records over the files it draws reports zero
+/// where this reports 31: both are right, and the population is the difference.
+///
+/// **Two things that are not measured, and are not claims.** This locates the
+/// site on *this corpus*, not in principle — `which_side_of` sits in the
+/// crossing walk and some other solid may well reach it from the mesher.
+/// And whether resolving those half-spaces would actually let the four relays
+/// through, rather than moving them to some later refusal, cannot be measured
+/// until the policy is threaded, because there is no way from here to ask what
+/// the rest of the build would have said. All four are refused with *what #15
+/// describes is not a solid this kernel can hold*, and that question belongs to
+/// whoever threads it.
+///
+/// This assertion is what would go red when that happens, and that would be the
 /// fix arriving rather than a regression.
 fn assert_the_budget_was_not_what_stopped_them(left_undecided: usize, worst_wobble: f64) {
     let budget = Policy::tolerant(BUDGETS[2].1).max_wobble();
