@@ -1519,14 +1519,35 @@ check-hub dir=".":
     if [ -n "$dirt" ]; then
         echo "the hub has $(wc -l <<<"$dirt") path(s) of uncommitted work in it: $hub"
         head -n 10 <<<"$dirt" | sed 's/^/    /'
-        [ "$(wc -l <<<"$dirt")" -gt 10 ] && echo "    ..."
-        # The hub is shared, so this is usually somebody else's leftovers and the
-        # reader's first thought is that their own worktree is broken. Say whose
-        # it might be before saying what to do about it.
-        echo "  This is very likely not yours. The hub belongs to nobody, so anyone's"
-        echo "  leftovers fail this for everyone, and the tree you are working in is fine."
-        echo "  Whoever left it should commit it from a worktree of their own; \`just lanes\`"
-        echo "  will not name them, which is the reason for the rule rather than a gap in it."
+        if [ "$(wc -l <<<"$dirt")" -gt 10 ]; then
+            echo "    ..."
+        fi
+        # A hub parked at an older commit shows work that has since landed as
+        # untracked, which is a *stale* hub and not leftovers. Same symptom,
+        # opposite fix: telling the reader to commit files that are already
+        # committed sends them to duplicate somebody's merge. The two are told
+        # apart by asking whether every path is already on `main`.
+        untracked=$(grep '^??' <<<"$dirt" | cut -c4- || true)
+        modified=$(grep -v '^??' <<<"$dirt" || true)
+        landed=""
+        if [ -z "$modified" ] && [ -n "$untracked" ]; then
+            on_main=$(git -C "$hub" ls-tree -r --name-only main 2>/dev/null || true)
+            landed=$(comm -23 <(sort <<<"$untracked") <(sort <<<"$on_main"))
+        fi
+        if [ -z "$modified" ] && [ -n "$untracked" ] && [ -z "$landed" ]; then
+            echo "  Every one of those is already committed on \`main\`, so nothing here is"
+            echo "  lost work — the hub is just parked at an older commit. Re-park it:"
+            echo "      git -C $hub checkout --detach main"
+            echo "  Nothing moves the hub's HEAD on its own; the closing gate is meant to."
+        else
+            # The hub is shared, so this is usually somebody else's leftovers and
+            # the reader's first thought is that their own worktree is broken.
+            # Say whose it might be before saying what to do about it.
+            echo "  This is very likely not yours. The hub belongs to nobody, so anyone's"
+            echo "  leftovers fail this for everyone, and the tree you are working in is fine."
+            echo "  Whoever left it should commit it from a worktree of their own; \`just lanes\`"
+            echo "  will not name them, which is the reason for the rule rather than a gap in it."
+        fi
         wrong=1
     fi
     if [ "$wrong" -ne 0 ]; then
@@ -1574,3 +1595,19 @@ check-hub-selftest:
     rm "$dir/main/untracked"
     got=$(just check-hub "$dir/main") || fail "a parked, clean hub was rejected"
     grep -qF "parked and clean" <<<"$got" || fail "the parked hub passed for the wrong reason"
+
+    # A hub left behind by a merge: the file is on `main` and the hub's own HEAD
+    # predates it, so `status` calls it untracked. Telling this reader to commit
+    # it would send them to duplicate a merge that has already happened.
+    echo landed >"$dir/lane/landed"
+    git -C "$dir/lane" add landed
+    git -C "$dir/lane" -c user.email=t@t -c user.name=t commit -q -m "landed"
+    git -C "$dir/main" branch -f main lane
+    echo landed >"$dir/main/landed"
+    got=$(just check-hub "$dir/main" 2>&1) && fail "a stale hub was accepted"
+    grep -qF "already committed on \`main\`" <<<"$got" \
+        || fail "a hub parked behind main was reported as somebody's leftovers"
+    grep -qF "checkout --detach main" <<<"$got" || fail "the re-park command was not given"
+    if grep -qF "very likely not yours" <<<"$got"; then
+        fail "the stale hub got the leftovers message as well as the stale one"
+    fi

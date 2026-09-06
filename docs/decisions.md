@@ -18552,3 +18552,25 @@ this section's: two sessions cannot see each other's work in progress, and the
 answer is a record that outlives the session — a lock, a heading, a commit — not
 a smarter check. Firing at publication is the right time; nothing above claims
 otherwise.
+
+### 60.9 A stale hub is not leftovers, and the message has to know which
+
+§60.7 called an un-re-parked hub harmless. It is harmless to the *repository* and
+it was not harmless to this check, which `rcad-c4` spotted before it bit anyone:
+a hub parked at an older commit shows every path that has landed since as
+untracked, indistinguishable by `status` from work somebody abandoned there. The
+symptom is one thing and the two causes want opposite fixes, so the message that
+says "commit this from a worktree of your own" sends a reader to duplicate a
+merge that has already happened.
+
+They are told apart by asking git rather than by guessing: if nothing is modified
+and **every** untracked path is already in `ls-tree main`, the hub is behind, not
+dirty. `check-hub` then names the one command that fixes it,
+`git -C <hub> checkout --detach main`, and says that nothing moves the hub's HEAD
+on its own. `check-hub-selftest` builds that state — a file committed on `main`
+from a lane, present on disk in a hub whose HEAD predates it — and asserts both
+that the stale message appears and that the leftovers message does not.
+
+This is the whole of §60.7's second paragraph turning into a consumer inside an
+hour, which is §13 working rather than being bent: the part was not built until
+something needed it, and then something did.
