@@ -1537,6 +1537,9 @@ check-hub dir=".":
         if [ -z "$modified" ] && [ -n "$untracked" ] && [ -z "$landed" ]; then
             echo "  Every one of those is already committed on \`main\`, so nothing here is"
             echo "  lost work — the hub is just parked at an older commit. Re-park it:"
+            # One line, because `check-hub-selftest` greps it back out and runs
+            # it. Wrapping it for width is caught rather than silent: the grep
+            # then hands bash a dangling `&&` and the selftest fails on it.
             echo "      git -C $hub clean -fd && git -C $hub checkout --detach main"
             echo "  The clean is not optional. Checkout refuses to overwrite an untracked"
             echo "  file even when its content already matches the commit being moved to,"
