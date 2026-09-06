@@ -2,14 +2,25 @@
 //!
 //! `docs/decisions.md` §25.3 says the number a mesh carries is *"the furthest
 //! any point of any triangle can be from the surface"*. §15.6 says a published
-//! bound needs a test. **Nothing held this one.** Every standing assertion on
+//! bound needs a test.
+//!
+//! `how_far_a_balls_mesh_points_really_sit_from_the_ball.rs` holds it **where a
+//! part sits**: four radii from 0.25 to 10, at the origin and ten thousand out,
+//! sampled 21 points to a triangle. This file holds the far end of the same
+//! claim — radii down to `1e-4`, placements out to `1e13`, and an exact worst
+//! rather than a sampled one — because the two ends fail differently, and that
+//! file's framing sentence, *"every mesh point of a ball is on the sphere by
+//! construction"*, is true at `1e4` and false by `1e11`. The points are off the
+//! sphere by 0.708% of the radius there and by 95% at `1e13`, which no chord sag
+//! explains: a ball smaller than the grid it sits on has no representable point
+//! on its own surface.
+//!
+//! Neither file's claim was held before them. Every older assertion on
 //! `deviation` checks the *ceiling above it* — `deviation <= the deflection
 //! asked for`, which is `meshing_a_curved_solid.rs:125` and
 //! `a_certified_mesh_never_strays_further_than_the_deflection_it_was_asked_for`
 //! — and never the claim itself. §23.4's oracle, the one every mesh test runs,
-//! is combinatorial and has no distance anywhere in it by design. So a mesh
-//! could stray a hundred times further from its surface than it said and the
-//! whole suite would stay green.
+//! is combinatorial and has no distance anywhere in it by design.
 //!
 //! # Where the question came from
 //!
