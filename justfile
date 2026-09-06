@@ -1,4 +1,4 @@
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks lint test deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest lint test deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Four tests in `rcad-step` skip
@@ -283,6 +283,7 @@ check-hooks:
     @.claude/hooks/check-patching-hook.sh
     @.claude/hooks/check-context-budget.sh
     @.claude/hooks/check-statusline.sh
+    @.claude/hooks/check-worktree-create.sh
 
 check-enums:
     @! awk '/^$/ {ok = 0} \
@@ -439,3 +440,119 @@ prune-worktrees:
     done
     git -C "$repo" worktree prune
     echo "$kept worktree(s) kept; their branches are untouched either way"
+
+# Who is working where, right now. Run this before you touch a shared tree.
+#
+# **A worktree's lock is this repo's record of who owns it**, and it is the only
+# record that survives the session that made it: it is a file in
+# `.git/worktrees/<name>/locked`, not session state, so a `/clear` cannot lose it
+# and a session that never dispatched the lane can still read it. `git worktree
+# lock --reason` writes it and `git worktree unlock` clears it. Locking blocks
+# only `worktree remove` and `worktree prune`, so it never gets in a lane's way.
+#
+# The alternative that was being used was `ps aux | grep claude`, and it cannot
+# work: a subagent runs inside its parent's process, so two agents colliding in
+# one worktree are one pid with one working directory, while every unrelated
+# session on the machine — other repositories included — shows up as a hit.
+#
+# **An empty answer is a failure here, not a pass.** A repository always has at
+# least its own worktree, so a listing that parses to nothing means the parse
+# broke, and this says so instead of printing a reassuring silence.
+lanes dir=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo=$(git -C "{{dir}}" rev-parse --show-toplevel)
+    listing=$(git -C "$repo" worktree list --porcelain)
+    if [ -z "$listing" ]; then
+        echo "git worktree list --porcelain printed nothing, so this counted no lanes"
+        exit 1
+    fi
+    total=0
+    held=0
+    tree=""
+    branch=""
+    locked=""
+    emit() {
+        [ -n "$tree" ] || return 0
+        total=$((total + 1))
+        state="free"
+        if [ -n "$locked" ]; then
+            state="HELD"
+            held=$((held + 1))
+        fi
+        if [ ! -d "$tree" ]; then
+            work="missing"
+        elif [ -n "$(git -C "$tree" status --porcelain 2>/dev/null)" ]; then
+            work="dirty"
+        else
+            work="clean"
+        fi
+        printf '%-4s %-7s %s [%s]\n' "$state" "$work" "$tree" "$branch"
+        if [ -n "$locked" ]; then
+            printf '         held by: %s\n' "$(why_it_is_held)"
+        fi
+    }
+    # Not from the porcelain listing, which C-quotes any reason holding a
+    # non-ASCII byte — a `·` comes back as `"\302\267"`. The lock file holds the
+    # reason as it was written, and a reason naming an agent is the whole point.
+    why_it_is_held() {
+        [ -d "$tree" ] || { echo "(locked; its directory is gone, so the reason cannot be read)"; return 0; }
+        note="$(git -C "$tree" rev-parse --git-dir)/locked"
+        if [ -s "$note" ]; then
+            tr '\n' ' ' <"$note" | sed 's/ *$//'
+        else
+            echo "(locked, no reason given)"
+        fi
+    }
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "worktree "*)
+                emit
+                tree=${line#worktree }
+                branch="(detached)"
+                locked=""
+                ;;
+            "branch "*) branch=${line#branch refs/heads/} ;;
+            "locked"*) locked="yes" ;;
+        esac
+    done <<<"$listing"
+    emit
+    if [ "$total" -eq 0 ]; then
+        echo "no worktree was parsed out of a non-empty listing, so the parse is broken"
+        exit 1
+    fi
+    echo "$held of $total worktree(s) held"
+
+# Pins `lanes` against a repository it builds itself, so it stays proven on a
+# tree where nothing real is locked.
+#
+# The three cases that matter are the three this builds: a **held** worktree
+# whose reason must come back verbatim, a **free** one that must not be reported
+# as held, and the **count** line, which is what stops a broken parse from
+# looking like a quiet tree. Reading the live repository instead would prove
+# nothing — it is unlocked almost all of the time, so a `lanes` that had lost the
+# ability to see a lock at all would pass every run.
+check-lanes-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'git -C "$dir/main" worktree unlock "$dir/held" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    git init -q -b main "$dir/main"
+    git -C "$dir/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "root"
+    git -C "$dir/main" worktree add -q "$dir/held" -b held
+    git -C "$dir/main" worktree add -q "$dir/free" -b free
+    git -C "$dir/main" worktree lock --reason "agent-abc · deliverable · 2026-09-06T00:00:00Z" "$dir/held"
+    got=$(just lanes "$dir/main")
+    fail() {
+        echo "lanes drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    grep -q "^HELD .* $dir/held \[held\]$" <<<"$got" \
+        || fail "the locked worktree is not reported as HELD"
+    grep -qF "held by: agent-abc · deliverable · 2026-09-06T00:00:00Z" <<<"$got" \
+        || fail "the lock reason did not come back verbatim"
+    grep -q "^free .* $dir/free \[free\]$" <<<"$got" \
+        || fail "the unlocked worktree is not reported as free"
+    grep -qx "1 of 3 worktree(s) held" <<<"$got" \
+        || fail "the count line is wrong, so an empty parse could pass as a quiet tree"
