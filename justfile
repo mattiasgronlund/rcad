@@ -1,4 +1,13 @@
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-decisions check-decisions-selftest lint test deny
+# `{{ args }}` interpolates a recipe's arguments into the shell *unquoted*, so a
+# variadic recipe that passes them on splits them again on whitespace and hands
+# the shell any punctuation they contain. That is not theoretical: `just t -E
+# 'test(/walk/)'`, the example this file and CLAUDE.md both give, died on
+# `Syntax error: "(" unexpected` from the day it was written, because `sh` saw
+# the parentheses. With this setting the arguments arrive as `"$@"` with their
+# original word boundaries, and `check-t-selftest` runs that exact example.
+set positional-arguments
+
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-decisions check-decisions-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Four tests in `rcad-step` skip
@@ -475,8 +484,154 @@ test:
 #     just t how_often_a_fuse_with_a_cone_refuses
 #     just t -p rcad-geom
 #     just t -E 'test(/walk/)'
+#
+# **The run is captured and digested rather than streamed**, because what a
+# reader needs from a test run is one line when it passes and the *first* panic
+# when it does not. The habit this replaces was `... 2>&1 | tail -40`, which is
+# backwards on both counts: on a pass it prints 40 lines of `PASS`, and on a
+# failure it prints the summary block and cuts off the panic that explains it.
+# The full log is always at `target/last-test.log`, so nothing is lost — reading
+# it back is one more call, and one that is only paid when it is wanted.
+#
+# `--no-capture` streams instead. It exists to watch output as it happens, and
+# it also changes nextest's format, so digesting it would defeat the flag and
+# misread it at the same time.
 t *args:
-    cargo nextest run {{ args }}
+    #!/usr/bin/env bash
+    set -uo pipefail
+    for arg in "$@"; do
+        case "$arg" in
+        --no-capture|--nocapture) exec cargo nextest run "$@" ;;
+        esac
+    done
+    mkdir -p target
+    log=target/last-test.log
+    CARGO_TERM_COLOR=never cargo nextest run "$@" > "$log" 2>&1
+    status=$?
+    {{ just_executable() }} _test-digest "$log" "$status"
+    exit $status
+
+# The digest itself, kept apart from the run so `check-t-selftest` can hold it
+# against logs whose answer is already known.
+_test-digest log status:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    log='{{ log }}'
+    if ! grep -qE '^ +Summary ' "$log"; then
+        echo "the run did not get as far as a summary — first 40 lines:"
+        head -40 "$log"
+        echo "full log: $log"
+        exit 0
+    fi
+    grep -E '^ +Summary ' "$log" | tail -1
+    if [ '{{ status }}' = "0" ]; then
+        exit 0
+    fi
+    awk '/^ +Summary /{s = 1} s && /^ +FAIL \[/' "$log"
+    echo
+    echo "--- the first failure in full ---"
+    awk '!started && /^ +FAIL \[/ { started = 1; print; next }
+         started && (/^ +(PASS|FAIL|SLOW|TRY|SKIP) \[/ || /^─/) { exit }
+         started' "$log"
+    failures=$(awk '/^ +Summary /{s = 1} s && /^ +FAIL \[/' "$log" | grep -c .)
+    if [ "$failures" -gt 1 ]; then
+        echo "$((failures - 1)) further failure(s) not shown."
+    fi
+    echo "full log: $log"
+
+# Holds the digest against three logs whose right answer is known, rather than
+# against whatever the suite happens to do today.
+#
+# The failing fixture carries a `PASS` line *between* its two failures on
+# purpose. That is the shape a real `--no-fail-fast` run has, and a digest that
+# printed "the first failure" by reading to the next `FAIL` would swallow the
+# passing test and the second failure's header along with it.
+#
+# The third fixture has no summary at all, which is what a compile error looks
+# like. It is the case where the head and not the tail is the useful end: rustc
+# reports the first error first, and every later one may be its consequence.
+check-t-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+
+    printf '%s\n' \
+        '────────────' \
+        '    Starting 2 tests across 125 binaries' \
+        '        PASS [   0.005s] (1/2) probe first' \
+        '        PASS [   0.006s] (2/2) probe second' \
+        '────────────' \
+        '     Summary [   0.007s] 2 tests run: 2 passed, 0 skipped' > "$dir/pass.log"
+
+    got=$({{ just_executable() }} _test-digest "$dir/pass.log" 0)
+    want='     Summary [   0.007s] 2 tests run: 2 passed, 0 skipped'
+    [ "$got" = "$want" ] || { echo "a passing run should be one line:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    printf '%s\n' \
+        '        FAIL [   0.005s] (1/3) probe alpha' \
+        '  stderr ───' \
+        '' \
+        "    thread 'alpha' panicked at src/lib.rs:9:9:" \
+        '    the first failure has a message' \
+        '' \
+        '        PASS [   0.006s] (2/3) probe gamma' \
+        '        FAIL [   0.007s] (3/3) probe beta' \
+        '  stderr ───' \
+        '' \
+        "    thread 'beta' panicked at src/lib.rs:14:9:" \
+        '    the second failure' \
+        '' \
+        '────────────' \
+        '     Summary [   0.010s] 3 tests run: 1 passed, 2 failed, 0 skipped' \
+        '        FAIL [   0.005s] (1/3) probe alpha' \
+        '        FAIL [   0.007s] (3/3) probe beta' \
+        'error: test run failed' > "$dir/fail.log"
+
+    got=$({{ just_executable() }} _test-digest "$dir/fail.log" 1)
+    want=$(printf '%s\n' \
+        '     Summary [   0.010s] 3 tests run: 1 passed, 2 failed, 0 skipped' \
+        '        FAIL [   0.005s] (1/3) probe alpha' \
+        '        FAIL [   0.007s] (3/3) probe beta' \
+        '' \
+        '--- the first failure in full ---' \
+        '        FAIL [   0.005s] (1/3) probe alpha' \
+        '  stderr ───' \
+        '' \
+        "    thread 'alpha' panicked at src/lib.rs:9:9:" \
+        '    the first failure has a message' \
+        '' \
+        '1 further failure(s) not shown.' \
+        "full log: $dir/fail.log")
+    [ "$got" = "$want" ] || { echo "the failing digest drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    printf '%s\n' \
+        '   Compiling rcad-geom v0.0.0' \
+        'error[E0425]: cannot find value `nope` in this scope' \
+        'error: could not compile `rcad-geom`' > "$dir/broken.log"
+
+    got=$({{ just_executable() }} _test-digest "$dir/broken.log" 101)
+    case "$got" in
+    *'did not get as far as a summary'*'cannot find value'*"full log: $dir/broken.log")
+        ;;
+    *)
+        echo "a run that never reached a summary lost its errors:"; echo "$got"; exit 1
+        ;;
+    esac
+
+    # The documented example, run for real, because it is the one that was broken.
+    # It is here rather than beside the fixtures because it needs the test
+    # binaries, which is why `default` runs this recipe after `test`.
+    got=$({{ just_executable() }} t -E 'test(/a_cube_comes_back_sound_and_measuring_the_same/)')
+    case "$got" in
+    *"1 test run: 1 passed"*)
+        ;;
+    *)
+        echo "a parenthesised filter did not survive the recipe:"; echo "$got"; exit 1
+        ;;
+    esac
 
 lint:
     cargo fmt --all -- --check
