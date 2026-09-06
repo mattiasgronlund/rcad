@@ -11,6 +11,31 @@ Always use the code-quality skill when coding. Big work goes to lanes in a
 worktree — the `delegating` skill has the mechanics, and only whoever is
 dispatching needs them.
 
+## Nobody works in the hub
+
+`/home/mattias/git/mattiasgronlund/rcad` is the **hub**. It owns `.git` and
+nothing else happens there. Every session gets a worktree of its own — call
+`EnterWorktree` first thing — and `main` lives checked out in a worktree too,
+never in the hub.
+
+This is not tidiness. `git worktree lock` is this repo's record of who owns a
+tree (§55), and it answers *"fatal: The main working tree cannot be locked or
+unlocked"* for the hub, with no flag to override. So the hub is the one tree
+whose owner cannot be written down, and it is the tree every session lands in by
+default. The rule deletes that case instead of inventing a second record beside
+the lock: a tree nobody works in needs no owner, and `just lanes` printing
+nothing beside it becomes true rather than a guess.
+
+`main` leaving the hub is the half that does the work. Git will not let a lane
+move a branch that is checked out elsewhere, so a hub holding `main` drags every
+merge back into the unlockable tree however carefully the lanes were dispatched.
+Parked on a detached HEAD, `main` is checkable out — and lockable — in a
+worktree like any lane.
+
+`just check-hub` fails when the hub has a branch checked out or work left in it,
+and it is in `just default`. A repository with one worktree is exempt, because a
+lone checkout is not a hub. `docs/decisions.md` §59.
+
 `docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
 `just decision 49` or `just decision 49.6`. Never guess a line range.
 

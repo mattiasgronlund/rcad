@@ -7,7 +7,7 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-decisions check-decisions-selftest check-src-selftest lint test check-t-selftest deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Four tests in `rcad-step` skip
@@ -305,6 +305,7 @@ check-hooks:
     @.claude/hooks/check-context-budget.sh
     @.claude/hooks/check-statusline.sh
     @.claude/hooks/check-worktree-create.sh
+    @.claude/hooks/check-session-start-hub.sh
 
 check-enums:
     @! awk '/^$/ {ok = 0} \
@@ -1015,25 +1016,94 @@ fmt:
     cargo fmt --all
     taplo fmt
 
-# Strip `target/` from every lane worktree. Always safe: kache holds the
-# compilation, so a cleaned worktree refills from the cache instead of
+# Strip `target/` from every worktree git knows about. Always safe: kache holds
+# the compilation, so a cleaned worktree refills from the cache instead of
 # rebuilding, and nothing a lane wrote can be lost this way.
 #
 # Separate from `prune-worktrees` on purpose (docs/decisions.md §50.8). That one
 # can only run once the work is merged; this one can run any time, and merging
 # the two would make the safe half inherit the unsafe half's ceremony until
 # nobody ran either. 38 worktrees held 166 GB of `target/` before this existed.
-clean-targets:
+#
+# **Asked git rather than guessed from a path.** This used to build the string
+# `$(dirname $(git rev-parse --show-toplevel))/rcad-worktrees`, which is only the
+# right answer when it is run from the hub — run from a lane it landed on
+# `rcad-worktrees/rcad-worktrees`, found nothing there, and said *"there is
+# nothing here to clean"*, which reads exactly like a tidy machine. Now that
+# nobody works in the hub (§59) that was every run. The listing also reaches the
+# sibling trees the glob never covered and the hub's own `target/`, which was the
+# single largest at 14 GB.
+#
+# Two are skipped, and both for the same reason as `prune-worktrees`: the tree
+# you are standing in, because you are using it, and any **locked** tree, because
+# a lock means an agent is working in there and deleting its `target/` mid-build
+# is exactly the interruption the lock exists to prevent.
+clean-targets dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
-    base="$(dirname "$(git rev-parse --show-toplevel)")/rcad-worktrees"
-    if [ ! -d "$base" ]; then
-        echo "no worktrees at $base, so there is nothing here to clean"
-        exit 0
-    fi
-    before=$(du -sh "$base" | cut -f1)
-    find "$base" -maxdepth 2 -type d -name target -prune -exec rm -rf {} +
-    echo "$base: $before -> $(du -sh "$base" | cut -f1)"
+    listing=$(git -C "{{dir}}" worktree list --porcelain)
+    here=$(git -C "{{dir}}" rev-parse --show-toplevel)
+    locked=$(awk '/^worktree /{tree = $2} /^locked/{print tree}' <<<"$listing")
+    reclaimed=0
+    kept=0
+    for tree in $(awk '/^worktree /{print $2}' <<<"$listing"); do
+        [ -d "$tree" ] || continue
+        if [ "$tree" = "$here" ]; then
+            echo "kept (you are standing in it): $tree"
+            kept=$((kept + 1))
+            continue
+        fi
+        if grep -qxF "$tree" <<<"$locked"; then
+            echo "kept (locked, an agent is using it): $tree"
+            kept=$((kept + 1))
+            continue
+        fi
+        targets=$(find "$tree" -maxdepth 2 -type d -name target -prune)
+        [ -n "$targets" ] || continue
+        size=$(du -sb --files0-from=<(tr '\n' '\0' <<<"$targets") --total | awk '/total$/{print $1}')
+        find "$tree" -maxdepth 2 -type d -name target -prune -exec rm -rf {} +
+        echo "swept $(numfmt --to=iec "$size"): $tree"
+        reclaimed=$((reclaimed + size))
+    done
+    echo "$(numfmt --to=iec "$reclaimed") reclaimed; $kept worktree(s) kept"
+
+# Pins the two trees `clean-targets` must not touch, and the one it used to miss.
+#
+# A sweep that deletes too much is noticed within the minute; a sweep that
+# deletes too little says "nothing to clean" and is believed for a month, which
+# is what happened. So the fixture puts a `target/` in all three trees and runs
+# the sweep from the lane: the **hub's** must go, because it is the biggest and
+# the old path glob never reached it, the **locked** one must survive, and the
+# tree the sweep is standing in must survive.
+check-clean-targets-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'git -C "$dir/main" worktree unlock "$dir/held" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    git init -q -b main "$dir/main"
+    git -C "$dir/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m root
+    git -C "$dir/main" worktree add -q "$dir/held" -b held
+    git -C "$dir/main" worktree add -q "$dir/free" -b free
+    git -C "$dir/main" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/held"
+    for tree in main held free; do
+        mkdir -p "$dir/$tree/target/debug"
+        head -c 4096 /dev/zero >"$dir/$tree/target/debug/artifact"
+    done
+    got=$(just clean-targets "$dir/free")
+    fail() {
+        echo "clean-targets drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    [ ! -d "$dir/main/target" ] || fail "the hub's target/ survived, which is the case the old path glob missed"
+    [ -d "$dir/held/target" ] || fail "a locked worktree was swept while an agent was working in it"
+    [ -d "$dir/free/target" ] || fail "the sweep deleted the target/ of the tree it was standing in"
+    grep -qF "kept (locked, an agent is using it): $dir/held" <<<"$got" \
+        || fail "the locked worktree was not reported as kept"
+    grep -qF "kept (you are standing in it): $dir/free" <<<"$got" \
+        || fail "the current worktree was not reported as kept"
+    grep -qE "^[0-9.]+K reclaimed; 2 worktree\(s\) kept$" <<<"$got" \
+        || fail "the tally is wrong, so a sweep that found nothing would read like a tidy machine"
 
 # Remove lane worktrees whose branch has landed on main.
 #
@@ -1093,6 +1163,12 @@ prune-worktrees:
 # **An empty answer is a failure here, not a pass.** A repository always has at
 # least its own worktree, so a listing that parses to nothing means the parse
 # broke, and this says so instead of printing a reassuring silence.
+#
+# **The first tree is the hub, and it is not a lane.** Git refuses to lock the
+# main working tree, so no reason string can ever appear beside it and printing
+# `free` there would be a claim this command cannot make. It prints `hub`, leaves
+# it out of the count, and says so when it is not parked and clean —
+# `just check-hub` is the one that fails over it (docs/decisions.md §59).
 lanes dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1104,23 +1180,33 @@ lanes dir=".":
     fi
     total=0
     held=0
+    seen=0
+    hub_warning=""
     tree=""
     branch=""
     locked=""
     emit() {
         [ -n "$tree" ] || return 0
-        total=$((total + 1))
-        state="free"
-        if [ -n "$locked" ]; then
-            state="HELD"
-            held=$((held + 1))
-        fi
+        seen=$((seen + 1))
         if [ ! -d "$tree" ]; then
             work="missing"
         elif [ -n "$(git -C "$tree" status --porcelain 2>/dev/null)" ]; then
             work="dirty"
         else
             work="clean"
+        fi
+        if [ "$seen" -eq 1 ]; then
+            printf '%-4s %-7s %s [%s]\n' "hub" "$work" "$tree" "$branch"
+            if [ "$branch" != "(detached)" ] || [ "$work" != "clean" ]; then
+                hub_warning="somebody is working in the hub, which is the one tree that cannot record an owner; \`just check-hub\` says what to do"
+            fi
+            return 0
+        fi
+        total=$((total + 1))
+        state="free"
+        if [ -n "$locked" ]; then
+            state="HELD"
+            held=$((held + 1))
         fi
         printf '%-4s %-7s %s [%s]\n' "$state" "$work" "$tree" "$branch"
         if [ -n "$locked" ]; then
@@ -1152,21 +1238,26 @@ lanes dir=".":
         esac
     done <<<"$listing"
     emit
-    if [ "$total" -eq 0 ]; then
+    if [ "$seen" -eq 0 ]; then
         echo "no worktree was parsed out of a non-empty listing, so the parse is broken"
         exit 1
     fi
-    echo "$held of $total worktree(s) held"
+    echo "$held of $total lane(s) held; the hub is not one of them, because git cannot lock it"
+    [ -z "$hub_warning" ] || echo "$hub_warning"
 
 # Pins `lanes` against a repository it builds itself, so it stays proven on a
 # tree where nothing real is locked.
 #
-# The three cases that matter are the three this builds: a **held** worktree
-# whose reason must come back verbatim, a **free** one that must not be reported
-# as held, and the **count** line, which is what stops a broken parse from
-# looking like a quiet tree. Reading the live repository instead would prove
-# nothing — it is unlocked almost all of the time, so a `lanes` that had lost the
-# ability to see a lock at all would pass every run.
+# The cases that matter are the ones this builds: a **held** worktree whose
+# reason must come back verbatim, a **free** one that must not be reported as
+# held, the **hub**, which must be labelled as such and left out of the count,
+# and the **count** line, which is what stops a broken parse from looking like a
+# quiet tree. Reading the live repository instead would prove nothing — it is
+# unlocked almost all of the time, so a `lanes` that had lost the ability to see
+# a lock at all would pass every run.
+#
+# The fixture's hub is deliberately left on a branch, which is the state
+# `check-hub` rejects, so the warning line is exercised here too.
 check-lanes-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1189,5 +1280,114 @@ check-lanes-selftest:
         || fail "the lock reason did not come back verbatim"
     grep -q "^free .* $dir/free \[free\]$" <<<"$got" \
         || fail "the unlocked worktree is not reported as free"
-    grep -qx "1 of 3 worktree(s) held" <<<"$got" \
+    grep -q "^hub .* $dir/main \[main\]$" <<<"$got" \
+        || fail "the main working tree is not reported as the hub"
+    grep -qx "1 of 2 lane(s) held; the hub is not one of them, because git cannot lock it" <<<"$got" \
         || fail "the count line is wrong, so an empty parse could pass as a quiet tree"
+    grep -qF "somebody is working in the hub" <<<"$got" \
+        || fail "a hub sitting on a branch drew no warning"
+
+# Nobody works in the main working tree. It owns `.git` and nothing else.
+#
+# §55 made a worktree's lock this repo's record of who owns it, and the one tree
+# that record structurally cannot describe is the tree every session lands in by
+# default: `git worktree lock` answers *"fatal: The main working tree cannot be
+# locked or unlocked"*, by path or by `.`, with no flag to override. This closes
+# that by deleting the case rather than by inventing a second record beside the
+# first — a tree nobody works in needs no owner, and `free` becomes the truth
+# about it instead of a guess (docs/decisions.md §59).
+#
+# **The load-bearing half is that `main` is not checked out here.** Git refuses
+# to move a branch that is checked out somewhere else — *"refusing to fetch into
+# branch 'refs/heads/main' checked out at ..."*, and *"! [remote rejected] lane
+# -> main (branch is currently checked out)"* — so a hub holding `main` drags
+# every merge back into the one tree whose owner cannot be recorded, however
+# carefully the lanes were dispatched. Parked on a detached HEAD, `main` is
+# checkable out, and therefore lockable, in a worktree like any lane.
+#
+# **A repository with one worktree is exempt**, because then there is no hub and
+# no lane, only a checkout, and no second session to collide with. That is a
+# fresh clone, and it is the shape a CI checkout has — CI runs `check`, `lint`,
+# `test` and `deny` rather than `default` today, so this never fires there, but
+# the exemption is what would keep it green if it did. The exemption is
+# structural rather than an environment variable on purpose: one that has to be
+# set is one that gets set, while this lapses by itself the moment a second tree
+# exists, which is the moment ownership starts being a question.
+check-hub dir=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    listing=$(git -C "{{dir}}" worktree list --porcelain)
+    if [ -z "$listing" ]; then
+        echo "git worktree list --porcelain printed nothing, so this checked no hub"
+        exit 1
+    fi
+    # Git documents the main working tree as the first entry of the listing.
+    hub=$(awk '/^worktree /{print $2; exit}' <<<"$listing")
+    trees=$(grep -c '^worktree ' <<<"$listing")
+    if [ -z "$hub" ]; then
+        echo "no worktree was parsed out of a non-empty listing, so the parse is broken"
+        exit 1
+    fi
+    if [ "$trees" -eq 1 ]; then
+        echo "$hub is the only worktree, so it is a checkout and not a hub"
+        exit 0
+    fi
+    wrong=0
+    branch=$(git -C "$hub" symbolic-ref --quiet --short HEAD || true)
+    if [ -n "$branch" ]; then
+        echo "the hub has the branch '$branch' checked out: $hub"
+        echo "    git -C $hub checkout --detach"
+        echo "  while a branch lives here, git will not let a lane move it, so every merge has to come back to the one tree it cannot lock"
+        wrong=1
+    fi
+    dirt=$(git -C "$hub" status --porcelain)
+    if [ -n "$dirt" ]; then
+        echo "the hub has $(wc -l <<<"$dirt") path(s) of uncommitted work in it: $hub"
+        head -n 10 <<<"$dirt" | sed 's/^/    /'
+        [ "$(wc -l <<<"$dirt")" -gt 10 ] && echo "    ..."
+        echo "  move it into a worktree of your own and commit it there; nothing in the hub has an owner"
+        wrong=1
+    fi
+    if [ "$wrong" -ne 0 ]; then
+        exit 1
+    fi
+    echo "the hub is parked and clean: $hub"
+
+# Pins `check-hub` against a repository it builds itself, walking a hub from the
+# state this repo was in on 2026-09-06 to the state the rule wants.
+#
+# Four cases, and the first is the one that would otherwise take CI down: a lone
+# checkout must **pass**, because there it is not a hub. Then a second worktree
+# appears and the same tree must start **failing** — on its branch, then on its
+# dirt, then not at all once it is parked and clean. Reading the live repository
+# instead would prove nothing: it is in exactly one of these states at a time,
+# and a `check-hub` that had lost the ability to fail would pass every run.
+check-hub-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    git init -q -b main "$dir/main"
+    git -C "$dir/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "root"
+    fail() {
+        echo "check-hub drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    got=$(just check-hub "$dir/main") \
+        || fail "a repository with one worktree is not exempt, so this would fail in CI"
+    grep -qF "the only worktree" <<<"$got" || fail "the lone checkout passed for the wrong reason"
+
+    git -C "$dir/main" worktree add -q "$dir/lane" -b lane
+    got=$(just check-hub "$dir/main" 2>&1) && fail "a hub holding a branch was accepted"
+    grep -qF "the branch 'main' checked out" <<<"$got" || fail "the branch was not named"
+
+    git -C "$dir/main" checkout -q --detach
+    echo loose >"$dir/main/untracked"
+    got=$(just check-hub "$dir/main" 2>&1) && fail "a hub with uncommitted work in it was accepted"
+    grep -qF "1 path(s) of uncommitted work" <<<"$got" || fail "the dirt was not counted"
+    grep -qF "?? untracked" <<<"$got" || fail "the dirt was not listed"
+
+    rm "$dir/main/untracked"
+    got=$(just check-hub "$dir/main") || fail "a parked, clean hub was rejected"
+    grep -qF "parked and clean" <<<"$got" || fail "the parked hub passed for the wrong reason"

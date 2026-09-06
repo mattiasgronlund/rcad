@@ -18379,3 +18379,103 @@ The fixtures are duplicates rather than the real file, because the real file has
 no duplicate today and pinning it there would prove nothing. Before the check,
 the heading-shape grep found nothing wrong with a two-line file containing `## 1.`
 twice; that is what the check-in demonstration ran.
+
+## 59. Nobody works in the hub, recorded 2026-09-06
+
+### 59.1 The tree the record cannot describe
+
+§55 settled that a worktree's git lock is this repository's statement of who owns
+it, and §55.4 gave the reason: it is the only candidate that survives the session
+that wrote it. The alarm here was raised by a session trying to use it for
+exactly that — announcing a ten-minute build before starting it — and finding
+that it could not.
+
+`git worktree lock` refuses the main working tree. There is no flag. So the one
+tree that the record structurally cannot describe is the tree every session lands
+in by default, and `just lanes` was printing `free` beside it whoever was
+building in it. That is not a gap in the tooling; it is `lanes` reporting the
+only thing git will tell it, which happens to be indistinguishable from an
+answer.
+
+The fix chosen is not a second record beside the lock. It is to delete the case:
+**nobody works in the hub.** A tree nobody works in needs no owner, and `free`
+becomes true about it rather than a guess.
+
+### 59.2 The demonstration
+
+Three refusals, all measured on 2026-09-06 in a repository built for the purpose.
+The first is why the hub cannot be owned; the second and third are why `main`
+cannot stay in it.
+
+| what was tried | what git said |
+|---|---|
+| `git worktree lock --reason "test" .`, and by absolute path | `fatal: The main working tree cannot be locked or unlocked` |
+| `git fetch . lane:main` from a lane, `main` checked out in the hub | `fatal: refusing to fetch into branch 'refs/heads/main' checked out at .../main` |
+| `git push . lane:main`, same shape | `! [remote rejected] lane -> main (branch is currently checked out)` |
+
+### 59.3 Why `main` leaving the hub is the load-bearing half
+
+"Sessions use worktrees" on its own does not survive contact with a merge. Rows
+two and three above say a branch checked out in the hub cannot be moved from
+anywhere else, so every merge has to be performed *in* the hub — which is the one
+moment when two sessions most need to know who is there, in the one tree that
+cannot say. A rule that holds until the interesting moment and then breaks is
+worse than none, because it is believed.
+
+Parked on a detached HEAD the hub holds no branch, `main` is checkable out in a
+worktree like any lane, and the merge tree is locked and named like any other.
+This was already the live state when the section was written — `main` was checked
+out and locked in `rcad-worktrees/wave-1`, held by a peer session mid-merge, and
+the hub was detached. Somebody had reached the same design and not written it
+down, which is the failure mode §55 was itself about.
+
+### 59.4 What changed
+
+| # | change | what proves it |
+|---|---|---|
+| 1 | `just check-hub` — fails when the hub has a branch checked out or uncommitted work in it; in `default` | `just check-hub-selftest`, in `default`; walks one fixture hub through lone-checkout, on-a-branch, dirty and parked, and asserts the middle two fail |
+| 2 | `just lanes` labels the first tree `hub`, leaves it out of the lane count, and warns when it is not parked | `check-lanes-selftest`, extended; its fixture hub sits on a branch, so the warning is exercised |
+| 3 | `.claude/hooks/session-start-hub.sh` tells a session that started in the hub to call `EnterWorktree` | `.claude/hooks/check-session-start-hub.sh`, in `check-hooks`; five cases, four of which assert *silence* |
+| 4 | `just clean-targets` asks git for the worktrees instead of guessing a path, and so reaches the sibling trees and the hub's own 14 GB | `check-clean-targets-selftest`, in `default`; asserts the hub's `target/` goes and that a locked tree's survives |
+| 5 | CLAUDE.md gains "Nobody works in the hub"; `delegating` gains never-merge-in-the-hub and a reclaim-and-re-park close | prose |
+
+### 59.5 A silent sweep that had been silent for a month
+
+Item 4 was meant to be a widening and turned out to be a bug fix. `clean-targets`
+built the string `$(dirname $(git rev-parse --show-toplevel))/rcad-worktrees`,
+which is the right answer only when it is run from the hub. Run from a lane it
+resolved to `rcad-worktrees/rcad-worktrees`, found nothing, and printed *"there is
+nothing here to clean"* — an empty answer wearing the clothes of a clean one, the
+same shape as §57.8's and §55's. The rule in this section makes every run a run
+from a lane, so it would have been every run from here on.
+
+The disk was at 92% when this was found.
+
+### 59.6 The exemption, and why it is structural
+
+`check-hub` passes when the repository has exactly one worktree, because then
+there is no hub and no lane, only a checkout, and no second session to collide
+with. That is a fresh clone, and it is the shape a CI checkout has. CI runs
+`check`, `lint`, `test` and `deny` rather than `default`, so the check does not
+fire there today and the exemption is not load-bearing for the build — it is
+what would keep it green if `default` ever moved into CI.
+
+It is deliberately not an environment variable: an exemption that has to be set
+is an exemption that gets set, whereas this one lapses by itself the moment a
+second tree exists, which is the moment ownership starts being a question.
+
+### 59.7 What this does not close
+
+**Nothing stops a session working in the hub.** The session-start hook is a
+notice and `check-hub` is a check; both can be ignored until the next `just
+default`. The mechanical version is a `PreToolUse` hook that refuses `Edit` and
+`Write` there — `no-in-place-rust-patching.sh` is the precedent — and it is
+deliberately not built: §13 wants the consumer named first, and it would also
+refuse Mattias's own `!` commands in the directory he starts in, which is a cost
+worth paying only once the cheap version is shown to leak.
+
+**Nothing re-parks the hub either.** After a merge the hub sits on whatever
+commit it was detached at, and it is a person or the closing gate that moves it
+forward. That is the safe direction to fail — a stale hub is harmless where a hub
+holding `main` is not — but §55.6's "an abandoned lock is rubbish only a person
+clears" now has a sibling.
