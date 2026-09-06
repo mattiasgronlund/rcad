@@ -1,67 +1,58 @@
-//! What a tolerant policy costs a mesh, where the walk runs out of room.
+//! What a tolerant policy costs a mesh on a hard-leaning bar: **nothing.**
 //!
-//! A tolerant caller is the escape hatch: it has said how far out of place it
-//! will let a point be, and in exchange it gets an answer where a certified
-//! caller gets a refusal. Everywhere `rcad-geom`'s `room_left_over` runs out of
-//! room, that trade does not happen. **Neither caller gets a mesh, and the
-//! tolerant one is told something untrue about why.**
+//! This file used to pin a defect. A tolerant caller asking for a mesh of a bar
+//! whose cap leans hard was handed `AWireDoesNotFanIntoALoopToMesh` with
+//! `TooFewCorners { count: 1 }` — the name for a *malformed solid* — while a
+//! certified caller at the same deflection on the same bar was told the truth by
+//! `CannotPlaceAPointThatCloseToACrossing`. Twelve cells, twelve of each, and
+//! the tolerant caller strictly worse off in every one: same absence of a mesh,
+//! worse account of why.
 //!
-//! - **Certified**: `CannotPlaceAPointThatCloseToACrossing { asked, closest }`.
-//!   It carries both numbers, and the two of them are the whole diagnosis: the
-//!   walk had `asked` of the deflection left and the crossing rounds by
-//!   `closest`, which is more.
-//! - **Tolerant**: `AWireDoesNotFanIntoALoopToMesh` with
-//!   `TooFewCorners { count: 1 }`. That is the name for a *malformed solid*, and
-//!   the solid is not malformed — see
-//!   [`every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for`]
-//!   below, which builds each of these bars under `Policy::certified()`, gets an
-//!   empty provenance log for it, and passes `Model::validate` certified too.
+//! The old file said out loud what would close that window:
 //!
-//! Twelve cells, twelve of each. The tolerant caller is strictly worse off in
-//! every one: same absence of a mesh, worse account of why.
+//! > If `SolidView::room_a_mesh_has_to_work_in` is ever changed to charge a
+//! > face's crossings rather than only its corners, the window these twelve
+//! > cells sit in closes and this file has to move — which would be the fix for
+//! > what it pins, not a regression.
 //!
-//! # The mechanism
+//! That is what happened, and this is the file moved. The mesher now charges a
+//! curved face for how far its **edges** run rather than for where its corners
+//! sit, so the floor under a leaning bar climbs with the ellipse the cap cuts.
+//! Every one of the twelve deflections below is under that floor, and both
+//! callers are turned away by [`Error::DeflectionBelowWhatAMeshCanReach`] before
+//! the walk is ever reached — **the same refusal, carrying the same two
+//! numbers**.
 //!
-//! `room_left_over` (`rcad-geom/src/walk.rs`) is one `if` with two arms. A
-//! certified caller takes the `Err` arm. A tolerant one is waved through with
-//! `Ok(None)`, and the walk hands back a crossing with **no points between its
-//! ends**. The leaning cap's only edge is a closed one, so its one corner then
-//! sits at both ends of a polyline of length one, and the mesher is offered a
-//! wire that fans into a single corner. Nothing between the wave-through and the
-//! refusal knows the two are the same event —
-//! [`the_walk_that_gave_up_is_the_one_the_log_names`] is what ties them.
+//! # What each test now holds down
 //!
-//! `docs/consumers.md` records a downstream consumer that keeps an unrecognised
-//! refusal's debug text verbatim in its bug reports. What that consumer files
-//! for this is [`the_text_a_tolerant_caller_is_left_holding`]: a corner count
-//! and a face key, and not one of the two numbers that say what happened.
+//! - [`a_tolerant_caller_is_told_exactly_what_a_certified_one_is_told`] — the
+//!   twelve cells, with the two refusals compared field by field.
+//! - [`the_floor_under_a_deflection_runs_away_with_the_lean_it_stands_for`] —
+//!   the floor is no longer stuck: it tracks the ellipse over a factor of
+//!   twenty-five of lean.
+//! - [`every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for`]
+//!   — unchanged, and still the reason none of this is about a broken solid.
+//! - [`nothing_is_waved_through_before_the_floor_turns_a_caller_away`] — the
+//!   provenance log of either run is empty, so nothing was approximated on the
+//!   way to the refusal. This is where `room left to refine a walk` used to be
+//!   recorded for the tolerant caller.
+//! - [`the_text_a_tolerant_caller_is_left_holding`] — `docs/consumers.md`'s
+//!   consumer keeps an unrecognised refusal's debug text verbatim, and the text
+//!   it now files carries both numbers instead of a corner count.
 //!
-//! # Why the bar has to lean so hard
+//! # Where the emptied walk went
 //!
-//! Reaching `room_left_over` on a closed edge needs the crossing's own rounding
-//! to beat the floor `SolidView::mesh` puts under a deflection, and for an
-//! ordinary bar those two are in step. They come apart when a cap plane leans:
-//! the crossing charges its rounding against the ellipse the plane cuts, whose
-//! semi-axis down the slope grows without bound as the plane lies down, while
-//! the mesher's floor charges the face's *corners*, and the seam corner of a bar
-//! cut this way stays where it always was.
-//!
-//! [`the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away`]
-//! measures both halves of that: over the four leans here the floor does not
-//! move off `6.143234069592533e-13` while the crossing's rounding runs from
-//! `2.3e-4` to `5.7e-3`.
-//!
-//! **So this test depends on where that floor is charged.** If
-//! `SolidView::room_a_mesh_has_to_work_in` is ever changed to charge a face's
-//! crossings rather than only its corners, the window these twelve cells sit in
-//! closes and this file has to move — which would be the fix for what it pins,
-//! not a regression. `what_the_mesher_does_with_an_empty_walk_on_a_closed_edge.rs`
-//! reaches the same site from the other side, on one cell.
+//! Reaching `rcad-geom`'s `room_left_over` on a closed edge needed the
+//! crossing's own rounding to beat the floor `SolidView::mesh` puts under a
+//! deflection. On a bar cut by a leaning plane those two now grow together, so
+//! this shape no longer reaches it. That is a statement about **this shape at
+//! these leans**, measured below, and not a claim that nothing reaches that site
+//! — `rcad-geom`'s own tests drive it directly, and a surface whose reach is
+//! still charged from its corners could reach it from here.
 
 use rcad_geom::{Deflection, Isometry, Plane, Point, Scale, Vector};
-use rcad_mesh::NotALoop;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, FaceKey, Model, SolidKey};
+use rcad_topo::{Error, Model, SolidKey};
 
 /// The radius of every bar in the table, and the seam is at `x = RADIUS, y = 0`.
 const RADIUS: f64 = 1.0;
@@ -73,37 +64,20 @@ const AT_THE_SEAM: f64 = 0.5;
 /// How far each top cap leans, as the ratio of its normal across the bar's axis
 /// to its normal along it.
 ///
-/// The crossing's rounding comes out at `lean · 5.7e-14` for these — measured,
-/// from the `closest` the certified refusal carries — and what it has to beat is
-/// three sixteenths of the deflection, which is the share of the budget a
-/// boundary side is refined to. Four leans spanning a factor of twenty-five, so
-/// that no cell below is the only one that works.
+/// Four leans spanning a factor of twenty-five, so that no cell below is the
+/// only one that works. The ellipse the cap cuts climbs to
+/// `AT_THE_SEAM + 2 · lean · RADIUS` up the bar's axis, and the floor climbs
+/// with it — from `0.19395282244028492` at the first of these to
+/// `4.848820560134335` at the last.
 const LEANS: [f64; 4] = [4e9, 1e10, 3e10, 1e11];
 
-/// Deflections coarse enough that the flat bottom cap and the wall are walked
-/// normally, and still far under every crossing rounding in [`LEANS`].
+/// Deflections a drawing would call fine, and every one of them under the floor
+/// of every bar in [`LEANS`].
 ///
-/// The floor `SolidView::room_a_mesh_has_to_work_in` puts under a bar of
-/// [`RADIUS`] at the origin measures `6.143234069592533e-13` — see
-/// [`the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away`],
-/// which hunts for it rather than taking anyone's word — so the coarsest of
-/// these is nine orders of magnitude clear of it and none is a deflection the
-/// mesher would refuse outright.
-///
-/// **That figure is not this bar's, and that is worth knowing.** It is the floor
-/// under any face whose reach — its corners plus its surface's radius — comes to
-/// two, and the leaning bar's wall face and a ball of radius one at the origin
-/// both do. So a number quoted about a ball and a number hunted for on a bar
-/// that looked like two measurements are one, and neither confirms the other.
-/// The last digit is load-bearing: `6.143234069592532e-13` is the `f64` below
-/// this one.
+/// The coarsest is a thousandth of a millimetre and the lowest floor in the
+/// table is `0.19395282244028492`, so the table clears it by two orders of
+/// magnitude with nothing near the edge.
 const DEFLECTIONS: [f64; 3] = [1e-4, 3e-4, 1e-3];
-
-/// How many times the hunt for the floor halves the range it has left.
-///
-/// A hundred geometric halvings take `1e-300 .. 1e-4` down to nothing, and the
-/// two tests that share this file run in well under a second together.
-const HALVINGS_TO_FIND_THE_FLOOR: usize = 100;
 
 /// The number of (lean, deflection) pairs, checked against what the sweep
 /// actually visits so a table trimmed by accident cannot pass quietly.
@@ -112,13 +86,27 @@ const CELLS: usize = LEANS.len() * DEFLECTIONS.len();
 /// The record `room_left_over` pushes when it waves a tolerant caller through.
 ///
 /// Written out rather than imported from `rcad_geom` so that the thing under
-/// test does not get to say what the test expects.
+/// test does not get to say what the test expects. Nothing here should push it
+/// any more, and [`nothing_is_waved_through_before_the_floor_turns_a_caller_away`]
+/// is what says so.
 const ROOM_LEFT_TO_REFINE_A_WALK: &str = "room left to refine a walk";
 
-/// Every cell: a certified caller is told what happened, a tolerant one is told
-/// its solid is malformed.
+/// How far apart the twelve floors are allowed to be once each is divided by
+/// the ellipse it stands for.
+///
+/// The four come out between `2.4244102800671675e-11` and
+/// `2.4244102805103595e-11` of their own ellipse, which is one part in five
+/// thousand million, so this is loose by a factor of fifty and still nowhere
+/// near the factor of twenty-five the old defect let through.
+const HOW_FAR_APART_THE_FOUR_RATIOS_MAY_BE: f64 = 1e-8;
+
+/// Every cell: the two callers are told the same thing, and it is the truth.
+///
+/// The refusal names the deflection that was asked for and the finest one this
+/// solid can be walked at. A tolerant policy buys nothing here and costs
+/// nothing either — which is the whole of what changed.
 #[test]
-fn a_tolerant_caller_is_refused_as_if_its_solid_were_broken_and_a_certified_one_is_not() {
+fn a_tolerant_caller_is_told_exactly_what_a_certified_one_is_told() {
     let mut visited = 0;
     for lean in LEANS {
         let (model, bar) = a_bar_cut_off_almost_along_its_own_axis(
@@ -133,42 +121,46 @@ fn a_tolerant_caller_is_refused_as_if_its_solid_were_broken_and_a_certified_one_
                 model
                     .solid(bar)
                     .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
-            let Err(Error::Geometry(rcad_geom::Error::CannotPlaceAPointThatCloseToACrossing {
-                asked: left_to_walk_it_in,
-                closest: rounds_by,
-            })) = certified
+            let Err(Error::DeflectionBelowWhatAMeshCanReach {
+                asked: certified_asked,
+                closest: certified_floor,
+            }) = certified
             else {
                 panic!(
                     "a bar leaning {lean:e} meshed at {asked:e} by a certified caller: \
                      {certified:?}"
                 );
             };
-            assert!(
-                rounds_by > left_to_walk_it_in,
-                "the crossing rounds by {rounds_by} and {left_to_walk_it_in} was left to walk it \
-                 in, so this cell is not one where the walk ran out of room"
-            );
 
             let tolerant =
                 model
                     .solid(bar)
                     .mesh(deflection, &a_tolerant_caller(), &mut ProvenanceLog::new());
-            let Err(Error::AWireDoesNotFanIntoALoopToMesh { face, why }) = tolerant else {
+            let Err(Error::DeflectionBelowWhatAMeshCanReach {
+                asked: tolerant_asked,
+                closest: tolerant_floor,
+            }) = tolerant
+            else {
                 panic!(
                     "a bar leaning {lean:e} meshed at {asked:e} by a tolerant caller: {tolerant:?}"
                 );
             };
+
             assert_eq!(
-                why,
-                NotALoop::TooFewCorners { count: 1 },
-                "a bar leaning {lean:e} at {asked:e}: the emptied circle's one corner is the \
-                 whole of its cap's wire"
+                (tolerant_asked, tolerant_floor),
+                (certified_asked, certified_floor),
+                "a bar leaning {lean:e} at {asked:e}: the tolerant caller is told \
+                 ({tolerant_asked}, {tolerant_floor}) where the certified one is told \
+                 ({certified_asked}, {certified_floor})"
             );
             assert_eq!(
-                face,
-                the_cap_that_leans(&model, bar),
-                "a bar leaning {lean:e} at {asked:e}: the face refused is the cap the emptied \
-                 ellipse bounds"
+                certified_asked, asked,
+                "the refusal quotes back {certified_asked} where {asked:e} was asked for"
+            );
+            assert!(
+                certified_floor > certified_asked,
+                "a bar leaning {lean:e}: the floor is {certified_floor} and {certified_asked} was \
+                 asked for, so this cell is not one the floor turns away"
             );
 
             visited += 1;
@@ -177,83 +169,67 @@ fn a_tolerant_caller_is_refused_as_if_its_solid_were_broken_and_a_certified_one_
     assert_eq!(visited, CELLS, "every cell of the table has to be walked");
 }
 
-/// The two numbers that are supposed to keep step, measured coming apart.
+/// The number that used to sit still, measured running.
 ///
-/// The mesher's floor is what a caller is told it may ask for; the crossing's
-/// rounding is what the walk can actually deliver. Lean the cap harder and the
-/// second grows in proportion while **the first does not move at all**. Every
-/// cell in the table lives in the gap that opens between them, which is why no
-/// deflection a caller is allowed to ask for can be walked.
+/// The floor was charged from the face's *corners*, and the seam corner of a bar
+/// cut this way stays where it always was however far the cap leans — so over
+/// these four leans the floor did not move off `6.143234069592533e-13` while the
+/// crossing it was supposed to stand for ran from `2.3e-4` to `5.7e-3`. It is
+/// charged from the face's *edges* now, and an edge of the leaning cap is the
+/// ellipse.
 ///
-/// Both numbers are read off the public API — the floor by hunting for where
-/// `DeflectionBelowWhatAMeshCanReach` stops being the answer, the rounding out
-/// of the `closest` the certified refusal carries. Neither is worked out from
-/// the arithmetic that produces it.
+/// The oracle is that ellipse: it climbs `AT_THE_SEAM + 2 · lean · RADIUS` up
+/// the bar's own axis, so the floor divided by that has to come to the same
+/// number at every lean. It does, to nine figures, over a factor of
+/// twenty-five.
+///
+/// The floor is read off the public refusal's `closest` and nothing else. It is
+/// not hunted for by bisection here, because a deflection this bar *would*
+/// accept is coarser than a whole millimetre and finer than the bar is long: a
+/// bisection that ever lands above the floor meshes a solid four thousand
+/// million units tall, which is not a thing to do in a test.
 #[test]
-fn the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away() {
+fn the_floor_under_a_deflection_runs_away_with_the_lean_it_stands_for() {
     let mut floors = Vec::new();
-    let mut roundings = Vec::new();
     for lean in LEANS {
         let (model, bar) = a_bar_cut_off_almost_along_its_own_axis(
             lean,
             &a_tolerant_caller(),
             &mut ProvenanceLog::new(),
         );
-
-        let mesh_it = |asked: f64| {
-            model.solid(bar).mesh(
-                Deflection::of(asked).expect("a positive length"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-        };
-        let (mut under, mut over): (f64, f64) = (1e-300, DEFLECTIONS[0]);
-        for _ in 0..HALVINGS_TO_FIND_THE_FLOOR {
-            let middle = (under * over).sqrt();
-            if matches!(
-                mesh_it(middle),
-                Err(Error::DeflectionBelowWhatAMeshCanReach { .. })
-            ) {
-                under = middle;
-            } else {
-                over = middle;
-            }
-        }
-        floors.push(over);
-
-        let refused = mesh_it(DEFLECTIONS[0]);
-        let Err(Error::Geometry(rcad_geom::Error::CannotPlaceAPointThatCloseToACrossing {
-            closest,
-            ..
-        })) = refused
-        else {
+        let refused = model.solid(bar).mesh(
+            Deflection::of(DEFLECTIONS[0]).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Err(Error::DeflectionBelowWhatAMeshCanReach { closest, .. }) = refused else {
             panic!("a bar leaning {lean:e} was refused with {refused:?}");
         };
-        roundings.push(closest);
+        println!("a bar leaning {lean:e} has a floor of {closest:e}");
+        floors.push(closest);
     }
 
-    for (lean, floor) in LEANS.iter().zip(&floors) {
-        assert_eq!(
-            *floor, floors[0],
-            "the floor under a bar leaning {lean:e} is {floor:e}, and under one leaning {:e} it \
-             is {:e} — if these ever differ the gap this file lives in has been closed",
-            LEANS[0], floors[0]
-        );
-    }
-    for pair in roundings.windows(2) {
+    for pair in floors.windows(2) {
         assert!(
             pair[1] > pair[0],
-            "leaning the cap harder took the crossing's rounding from {} to {}, so it is not the \
-             lean that opens the gap",
+            "leaning the cap harder left the floor at {} and then {}, so the floor is still not \
+             following the ellipse it stands for",
             pair[0],
             pair[1]
         );
     }
+
+    let ratios: Vec<f64> = LEANS
+        .iter()
+        .zip(&floors)
+        .map(|(lean, floor)| floor / (AT_THE_SEAM + 2.0 * lean * RADIUS))
+        .collect();
+    let smallest = ratios.iter().copied().fold(f64::INFINITY, f64::min);
+    let largest = ratios.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     assert!(
-        roundings[0] > floors[0] * 1e8,
-        "the crossing already rounds by {} against a floor of {}, so the gap is not a near thing",
-        roundings[0],
-        floors[0]
+        largest - smallest < smallest * HOW_FAR_APART_THE_FOUR_RATIOS_MAY_BE,
+        "the floor comes to between {smallest:e} and {largest:e} of the ellipse it stands for \
+         across these four leans, which is not one number"
     );
 }
 
@@ -280,13 +256,16 @@ fn every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for() {
     }
 }
 
-/// The refusal and the wave-through are the same event, and the log says so.
+/// The refusal arrives before anything has been approximated, for either
+/// caller.
 ///
-/// The tolerant run records `room left to refine a walk`; the certified run at
-/// the same deflection on the same bar records nothing, because it took the
-/// other arm of the same `if`.
+/// This is where the defect lived. The tolerant run used to be waved through
+/// `room_left_over` with `room left to refine a walk` in its log and an emptied
+/// crossing in its hands; the certified run took the other arm of the same `if`
+/// and recorded nothing. Now the floor turns both away first, so **both logs
+/// are empty** — an exact count, not an absence of one string.
 #[test]
-fn the_walk_that_gave_up_is_the_one_the_log_names() {
+fn nothing_is_waved_through_before_the_floor_turns_a_caller_away() {
     let (model, bar) = a_bar_cut_off_almost_along_its_own_axis(
         LEANS[0],
         &a_tolerant_caller(),
@@ -294,40 +273,38 @@ fn the_walk_that_gave_up_is_the_one_the_log_names() {
     );
     let deflection = Deflection::of(DEFLECTIONS[0]).expect("a positive length");
 
-    let mut waved_through = ProvenanceLog::new();
-    model
-        .solid(bar)
-        .mesh(deflection, &a_tolerant_caller(), &mut waved_through)
-        .expect_err("the leaning cap's ellipse cannot be walked this finely");
-    assert!(
-        waved_through
-            .records()
-            .iter()
-            .any(|record| record.predicate() == ROOM_LEFT_TO_REFINE_A_WALK),
-        "a tolerant caller's walk was emptied somewhere else than the site this file is about"
-    );
-
-    let mut refused = ProvenanceLog::new();
-    model
-        .solid(bar)
-        .mesh(deflection, &Policy::certified(), &mut refused)
-        .expect_err("a certified caller is never handed a walk it could not place");
-    assert!(
-        !refused
-            .records()
-            .iter()
-            .any(|record| record.predicate() == ROOM_LEFT_TO_REFINE_A_WALK),
-        "a certified caller was waved through the site it is supposed to be refused at"
-    );
+    for (who, policy) in [
+        ("a tolerant caller", a_tolerant_caller()),
+        ("a certified caller", Policy::certified()),
+    ] {
+        let mut log = ProvenanceLog::new();
+        let refused = model.solid(bar).mesh(deflection, &policy, &mut log);
+        assert!(
+            matches!(refused, Err(Error::DeflectionBelowWhatAMeshCanReach { .. })),
+            "{who} asking below the floor was refused with {refused:?}"
+        );
+        assert_eq!(
+            log.len(),
+            0,
+            "{who} left {} provenance records on the way to the floor's refusal, the first of \
+             them {:?}",
+            log.len(),
+            log.records().first().map(|record| record.predicate())
+        );
+        assert!(
+            !log.records()
+                .iter()
+                .any(|record| record.predicate() == ROOM_LEFT_TO_REFINE_A_WALK),
+            "{who} was waved through the walk this file used to be about"
+        );
+    }
 }
 
 /// What a consumer that keeps an unrecognised refusal verbatim ends up filing.
 ///
-/// `docs/consumers.md` records one that does exactly that. The certified
-/// refusal's two field names are `asked` and `closest`, and the text a tolerant
-/// caller is left holding has neither in it — so a report built from it cannot
-/// say how fine a mesh was asked for or how close a point could be placed, which
-/// is the whole of the cause.
+/// `docs/consumers.md` records one that does exactly that. It used to file a
+/// corner count and a face key — neither of the two numbers that say what
+/// happened. It now files both of them, under the names the variant gives them.
 #[test]
 fn the_text_a_tolerant_caller_is_left_holding() {
     let (model, bar) = a_bar_cut_off_almost_along_its_own_axis(
@@ -343,26 +320,26 @@ fn the_text_a_tolerant_caller_is_left_holding() {
             &a_tolerant_caller(),
             &mut ProvenanceLog::new(),
         )
-        .expect_err("the leaning cap's ellipse cannot be walked this finely");
+        .expect_err("this deflection is under the floor of a bar leaning this hard");
     let filed = format!("{tolerant:?}");
 
     assert!(
-        filed.contains("TooFewCorners"),
-        "the refusal a consumer copies is {filed}"
+        filed.contains("asked") && filed.contains("closest"),
+        "the refusal a consumer copies is {filed}, which does not carry the cause"
     );
     assert!(
-        !filed.contains("asked") && !filed.contains("closest"),
-        "{filed} carries a number the certified refusal carries, so a report built from it is \
-         not missing the cause after all"
+        !filed.contains("TooFewCorners"),
+        "{filed} still blames the shape of a wire for a deflection that was too fine"
     );
 }
 
 /// A working size that accepts the wobble the widest leaning ellipse carries.
 ///
 /// `Policy::tolerant(s)` accepts a wobble up to `64 · f64::EPSILON · s`, and the
-/// widest crossing in [`LEANS`] rounds by about `5.7e-3` — measured, from the
-/// `closest` the certified refusal carries — so this has to be a few times the
-/// widest lean and it is fifty.
+/// widest cap in [`LEANS`] is cut from numbers a hundred thousand million times
+/// the bar's radius, so this has to be a few times the widest lean and it is
+/// fifty. It is the policy the bars are *built* under; what the mesh calls do
+/// with it is the subject of this file.
 fn a_tolerant_caller() -> Policy {
     Policy::tolerant(50.0 * 1e11)
 }
@@ -370,8 +347,8 @@ fn a_tolerant_caller() -> Policy {
 /// A bar whose top cap leans so far that its ellipse is worked out from numbers
 /// billions of times the bar's own radius.
 ///
-/// The bottom is an ordinary flat cap and stays walkable, which is what makes
-/// the two closed edges of one solid answer differently.
+/// The bottom is an ordinary flat cap, so the two closed edges of one solid are
+/// charged very differently — and it is the leaning one that sets the floor.
 fn a_bar_cut_off_almost_along_its_own_axis(
     lean: f64,
     building: &Policy,
@@ -396,24 +373,4 @@ fn a_bar_cut_off_almost_along_its_own_axis(
         )
         .expect("a leaning plane cuts an ellipse right round a pipe");
     (model, bar)
-}
-
-/// The cap face whose plane leans, which is the one every refusal here names.
-///
-/// It is the flat face whose own corner sits higher up the seam, because the
-/// other one is the bar's bottom.
-fn the_cap_that_leans(model: &Model, bar: SolidKey) -> FaceKey {
-    let how_high = |face: &rcad_topo::FaceView<'_>| {
-        face.wires()
-            .flat_map(|wire| wire.points())
-            .map(|corner| corner.z())
-            .fold(f64::MIN, f64::max)
-    };
-    model
-        .solid(bar)
-        .faces()
-        .filter(|face| face.surface().as_plane().is_some())
-        .max_by(|one, other| how_high(one).total_cmp(&how_high(other)))
-        .expect("a bar has two flat caps")
-        .key()
 }
