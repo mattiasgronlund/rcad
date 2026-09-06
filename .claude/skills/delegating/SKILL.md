@@ -54,6 +54,12 @@ Concurrency comes from putting several Agent calls in a **single** assistant mes
 One call per message runs them one after another no matter how independent they are.
 Minimum three unless the table says otherwise.
 
+This is the rule that gets broken by habit rather than by reasoning. M5 got **1.07x
+out of 16 subagents** — 9.2 agent-hours inside 9.6 wall hours — because the lanes
+were dispatched one at a time when nothing in the write-set table said they had to
+be. Lanes conflict only when their *write* sets overlap; a file two lanes merely
+read is not a conflict.
+
 Pick the model per lane: a mechanical sweep or an audit is Sonnet work; a lane that
 has to reason about the arithmetic is Opus.
 
@@ -85,6 +91,18 @@ or the other lanes' briefs — anything you leave out, it will invent.
 A test-only lane gets **no write access to `src/`** and reports defects instead. A
 metamorphic suite that is allowed to edit the kernel until it goes green is worthless.
 
+Do not tell a lane to read CLAUDE.md. It is injected into every subagent's context
+already — verified by a probe subagent that quoted it back with zero tool calls — so
+the instruction buys nothing and cost 8 KB a lane across 16 lanes on 2026-09-05. If
+one rule is load-bearing for that lane, quote the rule in the brief.
+
+The 45 minutes is not a scheduling preference. **A long lane is slow twice**: M5's two
+longest ran at **380k average context per request**, and every turn pays that context
+again. A lane that wants more is two lanes — commit what is done, report what is left,
+hand it back. Against that, a fresh lane costs ~20k tokens to start (system prompt,
+tool schemas, CLAUDE.md, memory), so splitting is worth it well before the second
+lane's own context reaches the first's.
+
 ## While they run
 
 Stay small. The dispatcher's job is to receive reports and dispatch the next batch,
@@ -99,11 +117,22 @@ dispatcher read that answer as the end, and a second agent went into the same
 worktree 100 seconds later — while the first woke to question two. Nothing about
 the report said which of the three it was.
 
+**The dispatcher has a budget too, and it is 250k tokens.** The lane cap works — 51
+lanes on 2026-09-05, median 17 minutes, none over 45. The dispatchers had no cap and
+spent 485M input tokens over 1994 turns, 97% of it re-reading context, while writing
+almost no code. `.claude/hooks/context-budget.sh` says so once when the line is
+crossed; call the `handoff` skill then, rather than at the end of the next unit.
+Raise it for a session with `CLAUDE_CONTEXT_BUDGET`.
+
 ## Closing
 
 Run `mise exec -- just default` yourself after every batch, more than once. Then one
 gate agent that re-derives every load-bearing number in the lane reports from the
 tree, and only then the merge.
+
+**Not the lane's own word for any number.** M5's gate caught an unclosed §19 violation
+and a 5.4x reported as 20x, both of which all five lanes had missed. A lane reporting
+its own result is reporting what it believes.
 
 **Run it in a tree that is yours alone**, and not one where anybody else has `main`
 checked out. On 2026-09-05 the merge tree was shared with a live session: a "green
