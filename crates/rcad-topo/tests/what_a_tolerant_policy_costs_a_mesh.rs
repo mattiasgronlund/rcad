@@ -48,8 +48,8 @@
 //!
 //! [`the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away`]
 //! measures both halves of that: over the four leans here the floor does not
-//! move off `6.14e-13` while the crossing's rounding runs from `2.3e-4` to
-//! `5.7e-3`.
+//! move off `6.143234069592533e-13` while the crossing's rounding runs from
+//! `2.3e-4` to `5.7e-3`.
 //!
 //! **So this test depends on where that floor is charged.** If
 //! `SolidView::room_a_mesh_has_to_work_in` is ever changed to charge a face's
@@ -84,11 +84,19 @@ const LEANS: [f64; 4] = [4e9, 1e10, 3e10, 1e11];
 /// normally, and still far under every crossing rounding in [`LEANS`].
 ///
 /// The floor `SolidView::room_a_mesh_has_to_work_in` puts under a bar of
-/// [`RADIUS`] at the origin measures `6.14e-13` — see
+/// [`RADIUS`] at the origin measures `6.143234069592533e-13` — see
 /// [`the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away`],
 /// which hunts for it rather than taking anyone's word — so the coarsest of
 /// these is nine orders of magnitude clear of it and none is a deflection the
 /// mesher would refuse outright.
+///
+/// **That figure is not this bar's, and that is worth knowing.** It is the floor
+/// under any face whose reach — its corners plus its surface's radius — comes to
+/// two, and the leaning bar's wall face and a ball of radius one at the origin
+/// both do. So a number quoted about a ball and a number hunted for on a bar
+/// that looked like two measurements are one, and neither confirms the other.
+/// The last digit is load-bearing: `6.143234069592532e-13` is the `f64` below
+/// this one.
 const DEFLECTIONS: [f64; 3] = [1e-4, 3e-4, 1e-3];
 
 /// How many times the hunt for the floor halves the range it has left.

@@ -225,13 +225,36 @@ pub enum Error {
     /// neighbouring `f64`s by reordering the arithmetic, by rescaling it, or by
     /// summing it exactly, so the family of fixes is empty rather than
     /// unexamined.
+    ///
+    /// # Two reasons under one name, and only the first is a limit
+    ///
+    /// Everything above is about *rounding*, and it is a limit. The second
+    /// reason is the **step cap**: `rcad_geom::walk` will not put more than
+    /// `MOST_POINTS_ALONG_ONE_CROSSING` points along one crossing, so there is a
+    /// finest deflection it will take whatever the rounding allows, and it is
+    /// the larger of the two. That one is a §16.10 **gap and not a limit** — the
+    /// answer exists, `f64` reaches it, and a bigger cap would hand it back. It
+    /// is deferred because the mesh at the cap is already a million points along
+    /// one circle and nobody has asked for two.
+    ///
+    /// **`closest` carries the second of those.** It is the finest deflection
+    /// the walk will take along this solid's crossings, and not the finest a
+    /// point of it can be placed to — because this is refused only where the
+    /// mesher was picking the number itself, and what it picks goes straight to
+    /// the walk with no-one else to look at it. The two floors are 78.93 times
+    /// apart for a curved solid at the origin: a ball of radius one there has a
+    /// point placed to `6.143234069592533e-13` and walked to
+    /// `4.848820560097969e-11`. A caller who names a number between them is not
+    /// refused here — a number a caller chose is that caller's to answer for.
     #[error(
         "no mesh of this solid gets closer than {closest} to it, and the deflection asks {asked}"
     )]
     DeflectionBelowWhatAMeshCanReach {
         /// What was asked for, in the model's own unit.
         asked: f64,
-        /// The closest a mesh of this solid can be, in the same unit.
+        /// The finest deflection [`rcad_geom::walk`] will take along this
+        /// solid's crossings, in the same unit — not the closest one of its mesh
+        /// points can be placed, which is smaller.
         closest: f64,
     },
 

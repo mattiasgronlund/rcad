@@ -298,7 +298,9 @@ impl SolidView<'_> {
     /// # Errors
     ///
     /// [`Error::DeflectionBelowWhatAMeshCanReach`] when the deflection asks for
-    /// a closer fit than a point can be placed to, and
+    /// a closer fit than a point can be placed to and the policy will not take
+    /// the coarser one this would pick instead — the number it carries is that
+    /// picked one, which is the larger of the two floors. And
     /// [`Error::MoreMeshPointsThanASolidWillHold`] when it asks for more points
     /// than one mesh holds. [`Error::CannotMeshAFace`] when the triangulator
     /// refuses a face, carrying what it said. [`Error::Undecidable`] when a
@@ -306,11 +308,24 @@ impl SolidView<'_> {
     /// [`Error::AWireWillNotLieFlatOnItsFace`],
     /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`],
     /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] and
-    /// [`Error::AWireDoesNotFanIntoALoopToMesh`] for a shape no builder here
-    /// makes, which is **usually** a solid that arrived from a file and was once
-    /// wrongly said to be only that: a fuse reached the first of the four with a
-    /// block corner on a ball's pole, and it was the mesher that was wrong (see
-    /// [`WalkingAWire::finish`]). A wall face storing a
+    /// [`Error::AWireDoesNotFanIntoALoopToMesh`] all name a malformed shape, and
+    /// **only one of the three ways to reach them is one**. A solid that arrived
+    /// from a file is that one. A fuse is the second: one reached
+    /// `AWireWillNotLieFlatOnItsFace` with a block corner on a ball's pole, and
+    /// it was the mesher that was wrong (see [`WalkingAWire::finish`]). **This
+    /// call under a tolerant policy is the third**, and it is neither a file nor
+    /// a bug. Where [`rcad_geom::walk`] cannot place a point as close to a
+    /// crossing as it was asked to, a certified caller is refused with
+    /// `CannotPlaceAPointThatCloseToACrossing` and its two numbers, and a
+    /// tolerant one is waved through with a walk that has no points between its
+    /// ends — so a closed edge's one corner becomes the whole of its wire, and
+    /// `AWireDoesNotFanIntoALoopToMesh` arrives instead, naming the solid where
+    /// the arithmetic is what gave up.
+    /// [`Model::add_bar_cut_off_by`](crate::Model::add_bar_cut_off_by) makes
+    /// such a solid under `Policy::certified()` with an empty provenance log, and
+    /// [`Model::validate`](crate::Model::validate) passes it certified;
+    /// `what_a_tolerant_policy_costs_a_mesh.rs` measures both answers over
+    /// twelve lean-and-deflection cells. A wall face storing a
     /// [`Plane`](rcad_geom::Plane) where its own
     /// [`Cylinder`](rcad_geom::Cylinder) belongs fans a four-step wire into
     /// one corner in the plane's own two coordinates. All four are refusals
@@ -2194,6 +2209,51 @@ fn how_far_a_mesh_point_of_this_face_rounds(face: FaceView<'_>) -> f64 {
 /// `Policy::tolerant(100.0)`, the mesher used to hand the walk twice the first
 /// of those — `1.84297022087776e-12` — and get
 /// `Error::TooManyPointsAlongOneCrossing` back on the first cap circle.
+///
+/// # The crossing's reach is not the face's reach, and a leaning cut is where
+/// the face's is smaller
+///
+/// `walk`'s `how_many_steps` charges its room against `Conic::how_far_it_reaches`,
+/// the longer semi-axis of the crossing itself. This charges
+/// [`how_far_the_points_of_reach`], the face's corners plus its surface's own
+/// radius. **They are not the same number and this one is not always the
+/// bigger.** Measured on a bar of radius one cut by a plane leaning `lean` in x
+/// for every 1 in z: the ellipse is walked as an edge of the **wall** face — a
+/// plane reaches zero here and returns before any of this — so what is charged
+/// is the wall's reach, which is `2` at every lean, its corners a unit out and
+/// its radius one, and neither of them knows the plane leans. The conic's own
+/// reach is `9.999999999999999e8` at `lean = 1e9` and `1.9999999999999998e9` at
+/// `lean = 2e9`: an under-estimate of five hundred million times, then a
+/// billion, and it grows with the lean without bound.
+///
+/// **So this floor is too low on that face, and the promise it exists to keep
+/// does not hold there.** It holds wherever a crossing is a circle no wider than
+/// the surface it is cut on — every cap circle of a bar, every circle a plane
+/// cuts a ball in — and that is what the fix was for. What a leaning cap gets
+/// instead is not `TooManyPointsAlongOneCrossing` but the gate one step earlier:
+/// at `lean = 1e9` the crossing rounds by `5.6843418889229724e-5` where this
+/// picks `9.697641120195938e-11`, so `room_left_over` runs out long before the
+/// step cap is asked anything. Measured: a tolerant caller asking `1e-300` of a
+/// bar leaning `4e9` or `1e11` now gets `AWireDoesNotFanIntoALoopToMesh` with
+/// `TooFewCorners { count: 1 }`, where before this it got
+/// `TooManyPointsAlongOneCrossing`. **Neither is a mesh**, so on this family the
+/// fix moved which refusal arrives rather than earning an answer: what it picks
+/// is now a deflection the bar's own cap circles will take, and still not one
+/// the leaning ellipse will. `what_a_tolerant_policy_costs_a_mesh.rs` reaches
+/// the same refusal from the caller-named side.
+///
+/// **Three ways to close it, and only the third is free.** Charge the crossings
+/// instead of the corners, and every conic on the face has to be worked out
+/// before there is a deflection to walk one with — the walk's own job, done
+/// twice. Bound the ellipse from the pair of surfaces that cut it, and this
+/// stops being a question about one surface, which is what makes it cheap. Or
+/// keep the stand-in away from the numbers it is wrong about, which is what is
+/// claimed here: **not** that a face's reach covers its crossings', which is
+/// false, but that this floor is only ever read for a deflection this crate
+/// picks, and a caller-named one returns from
+/// [`SolidView::room_a_mesh_has_to_work_in`] above it. Extending this to a
+/// caller-named deflection would turn a floor that does not bind into a wrong
+/// answer.
 ///
 /// [`SolidView::room_a_mesh_has_to_work_in`]: SolidView::room_a_mesh_has_to_work_in
 fn the_finest_deflection_the_walk_will_take(face: FaceView<'_>) -> f64 {

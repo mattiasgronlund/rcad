@@ -28,20 +28,30 @@
 //!
 //! Taking `walk`'s `how_many_steps` on its own — the cap circle reaches one and
 //! goes right round — staying under the cap needs
-//! `room ≥ 1 − cos(π / 1048576)`, which is `4.4875e-12`. That is **4.87 times**
-//! that floor, not twenty-six, and the rest of the way is that the deflection
-//! is cut twice more before `how_many_steps` sees it:
+//! `room ≥ 1 − cos(π / 1048576)`, which is `4.488176455689416e-12` as the code
+//! works it out and `4.488187599349658e-12` if the subtraction is written out
+//! instead — the same number to five digits, and neither of them the
+//! `4.4875e-12` this file published before it was measured. That is **4.8706
+//! times** that floor, not twenty-six, and the rest of the way is that the
+//! deflection is cut twice more before `how_many_steps` sees it:
 //!
 //! 1. `BuildingAMesh::walk_the_edges_this_face_can_place` takes
-//!    `how_far_moving_this_face_rounds` off it — which is **nothing at all**
-//!    here, because the bar is at the origin and is not placed, and
-//! 2. it then hands `walk` only `WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO` of what is
+//!    `how_far_moving_this_face_rounds` off it. **Only half of that is nothing
+//!    at all.** The shifting half is, because a bar at the origin is meshed in
+//!    the frame it is stored in; the placing half is
+//!    `Isometry::POINT_ROUNDOFF · 3` — `1.199040866595169e-14`, **1.30%** of
+//!    the floor — and it never looks at the placement, because a mesh point is
+//!    carried out of the meshing frame whether or not the solid was put
+//!    anywhere. `256·ε / 0.1875 · 3` alone is `9.094947017729282e-13` and the
+//!    floor is `9.2148511043888e-13`; the floor this file publishes cannot be
+//!    reproduced without the term it used to call nothing.
+//! 2. It then hands `walk` only `WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO` of what is
 //!    left — three sixteenths — because the triangulator is going to spend the
 //!    rest.
 //!
-//! So the second cut is the whole of it: `4.87 / 0.1875` is `25.97`, and
-//! `walk`'s own `room_left_over` takes its deviation off on top, which puts the
-//! crossover a little past twenty-six. That sits inside the measured `16x`-`32x`
+//! So the second cut is nearly the whole of it: `4.8706 / 0.1875` is `25.98`,
+//! and `walk`'s own `room_left_over` takes its deviation off on top, which puts
+//! the crossover a little past twenty-six. That sits inside the measured `16x`-`32x`
 //! bracket. **Nothing about a lean is involved** — this is a bar the builder
 //! makes in one call, with no cap plane named and no placement on it.
 //!
@@ -136,10 +146,28 @@ fn a_tolerant_caller_is_refused_by_the_floor_and_not_by_the_walk() {
 /// that with no threshold on it. The floor moved from `3.996804715633573e-6` to
 /// `3.9969483372801546e-6` — up, by thirty-six millionths of itself — and the
 /// mesh that comes back is the same 5134 points with the same
-/// `5.99402529715387e-6` of deviation, bit for bit. `Mesh::deviation` is a max
-/// over what the walk and the triangulator each say, and at a billion units out
-/// the movement into place is larger than either, so a deflection that moved in
-/// the sixth digit does not reach it.
+/// `5.99402529715387e-6` of deviation, bit for bit.
+///
+/// **That is true of this bar and it is not true of every solid.** A ball of
+/// radius a quarter at the same billion units out, asked the same thing, came
+/// back with 872 666 points and `7.993599754617626e-6` of deviation before the
+/// change and 872 658 points and `7.993623476198684e-6` after it — a mesh that
+/// worked before and is not the same mesh now. So the claim here is bit
+/// identity **on this bar**, not "nothing that meshed before changes".
+///
+/// The two behave differently, and it is not that one is a bar:
+/// `Mesh::deviation` is a max over what the walk and the triangulator each say
+/// plus the movement into place, and the movement into place does not depend on
+/// the deflection at all. What the triangulator strays does, but only in steps,
+/// because it subdivides an integer number of times. This bar's floor moved by
+/// thirty-six parts in a million and no count in a 5134-point mesh moved with
+/// it; the ball's floor moved by only three parts in a million —
+/// `3.996803041232215e-6` to `3.996815009702763e-6` — and counts in an
+/// 872 000-point mesh did. **Points, not digits, is what decides it.** The ball
+/// then strays 99.99992% of the whole deflection it was handed — the budget is
+/// spent, so where the budget goes the published number goes — while this bar
+/// spends 74.99% of its own and pays the rest to a movement no deflection
+/// reaches.
 #[test]
 fn the_fallback_a_bar_a_billion_units_out_already_had_says_the_same_thing() {
     let (model, bar) = a_bar(1.0, 5.0, 1e9);
