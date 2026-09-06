@@ -18536,6 +18536,17 @@ so the collision this section's own numbering came close to repeating cannot
 happen silently any more — §58 was taken between the number being chosen and the
 section being written.
 
+**It catches the collision at merge, which is later than it is made.** The check
+reads one file, so it cannot see a number taken on a branch that has not landed.
+On 2026-09-06 this section and "Nobody works in the hub" were both written as
+§59, on two unmerged branches, and the duplicate was found by the other session
+saying so — not by the check, which would have fired only when the second of them
+merged. Four instances in one day, for a shape unnoticed across the fifty-seven
+sections before it: one near-miss on 56, §58 taken mid-write, this collision, and
+the renumber that settled it. Nothing watches the branches, and nothing is
+proposed here that should: the check fires before anything is published, which is
+the point at which being wrong costs something.
+
 A heading deleted with its body left behind still can. The orphaned lines join
 the section above, `decisions-toc` counts them there, and nothing says so. No
 check is built for it, and no claim is made here that none is needed: it has not
