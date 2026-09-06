@@ -398,6 +398,55 @@ decision want:
         ;;
     esac
 
+# Which sections mention this? A text search that answers in section numbers.
+#
+#     just decisions-find 'refusal rate'
+#
+# gives the subsections whose text matches, so the next call is `just decision
+# 41.13`. A plain grep answers `16820:` instead, and a line number is the one
+# thing CLAUDE.md says never to address a decision by — walking back up 17 000
+# lines to the heading above the hit was the step that had no recipe.
+#
+# **The match is case-insensitive.** Of 886 grep commands measured across one
+# day's sessions, 97 matched nothing at all, and a search that misses `Refusal`
+# because the caller typed `refusal` fails in exactly that silent way. A caller
+# who wants the distinction writes the bracket themselves.
+#
+# **No match fails rather than printing nothing**, for the same reason `decision`
+# fails on a number that does not exist: an empty answer here reads as "the
+# decisions say nothing about this", and that is a claim a typo can forge.
+decisions-find pattern:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "$1" ]; then
+        echo "find what? an empty pattern matches every line" >&2
+        exit 2
+    fi
+    hits=$(mktemp)
+    trap 'rm -f "$hits"' EXIT
+    if ! grep -inE -- "$1" "{{decisions_file}}" | cut -d: -f1 > "$hits"; then
+        echo "no line in {{decisions_file}} matches $1" >&2
+        exit 1
+    fi
+    awk -v hits="$hits" '
+        BEGIN {
+            while ((getline ln < hits) > 0) wanted[ln + 0] = 1
+            id = "(preamble)"
+        }
+        /^## |^### / {
+            rest = $0; sub(/^#+ /, "", rest)
+            p = index(rest, " "); id = substr(rest, 1, p - 1); sub(/\.$/, "", id)
+            title = substr(rest, p + 1)
+        }
+        wanted[FNR] {
+            if (!(id in count)) { order[++k] = id; name[id] = title }
+            count[id]++
+        }
+        END {
+            for (i = 1; i <= k; i++)
+                printf "  %-7s %-54s %4d hits\n", order[i], name[order[i]], count[order[i]]
+        }' "{{decisions_file}}"
+
 # `decision` finds a section by the number its heading starts with, so a heading
 # that does not start with one is a section the lookup cannot reach — and it
 # fails as silence, which reads as "nothing was decided about this".
@@ -467,6 +516,32 @@ check-decisions-selftest:
 
     if $j decision 9 >/dev/null 2>&1; then
         echo "decision 9 found a section that does not exist"; exit 1
+    fi
+
+    # `decision 1` above pins the column widths, so what is left to pin here is
+    # the attribution: which section a hit is reported under, and how many.
+    squashed() { $j decisions-find "$1" | awk '{ $1 = $1; print }'; }
+
+    got=$(squashed ALPHA)
+    want=$(printf '%s\n' "1.1 Alpha 3 hits")
+    [ "$got" = "$want" ] || { echo "decisions-find ALPHA drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$(squashed intro)
+    want=$(printf '%s\n' "1 First 1 hits" "2 Second 1 hits")
+    [ "$got" = "$want" ] || { echo "decisions-find intro drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$(squashed decisions)
+    [ "$got" = "(preamble) 1 hits" ] || { \
+        echo "a hit above the first heading was reported as '$got'"; exit 1; }
+
+    if $j decisions-find zzzz >/dev/null 2>&1; then
+        echo "decisions-find said nothing about a pattern nothing matches"; exit 1
+    fi
+
+    if $j decisions-find "" >/dev/null 2>&1; then
+        echo "decisions-find accepted the empty pattern"; exit 1
     fi
 
 test:

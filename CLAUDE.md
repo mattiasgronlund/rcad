@@ -14,6 +14,11 @@ dispatching needs them.
 `docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
 `just decision 49` or `just decision 49.6`. Never guess a line range.
 
+**Search it with `just decisions-find 'refusal rate'`, not with `grep`.** Grep
+answers in line numbers, which is the one address this file does not take, so
+every hit then costs a walk back up to the heading above it. `decisions-find`
+answers in section numbers, which is what `just decision` wants next.
+
 ## Rules that come from the design
 
 These are the ones that are expensive to notice late.
