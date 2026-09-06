@@ -78,15 +78,18 @@
 //! bound.
 //!
 //! **Two barriers again, and the shell names the lid first.** The cone face
-//! beside the same junction circle cannot be meshed either — its wire is a
-//! rectangle whose top and bottom sides are each drawn through one point — and
-//! `SolidView::mesh` walks the shell's faces in the order the shell holds them,
-//! so the refusal that comes out is the lid's. That is the same shape of answer
-//! the leaning bar gave before it: neither face meshes an emptied closed edge,
-//! and which name arrives is which face is asked first.
+//! beside the same junction circle cannot be meshed either: its wire is a
+//! rectangle whose top and bottom sides are each drawn through one point, and
+//! put first in the shell instead it comes back `CannotMeshAFace` with
+//! `NotALoop::CornersCoincide { position: 1 }` — measured, by swapping the two
+//! entries in [`SolidBuilder::add_shell`] below and reading the panic. So
+//! neither face meshes an emptied closed edge, the two say so for reasons that
+//! have nothing to do with each other, and which name arrives is which face
+//! `SolidView::mesh` asks first — which is the order the shell holds them in.
 //!
-//! The needle is far past anything a drawing holds — it flares by six hundredths
-//! of a micron over its whole unit of height. It is what the arithmetic needs to
+//! The needle is far past anything a drawing holds — it flares by
+//! `5.960464477539063e-8` over its whole unit of height, on a radius of one. It
+//! is what the arithmetic needs to
 //! reach the case, which is why it is built rather than argued about, and there
 //! is a ceiling on it: halving the slope twice more still builds, and the
 //! **third** halving is refused by `SolidBuilder::build` itself with
