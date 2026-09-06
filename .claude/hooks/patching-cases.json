@@ -98,5 +98,30 @@
     "expect": "allow",
     "why": "redirecting a read of a tracked file into a scratch file",
     "command": "sed -n '1,50p' docs/decisions.md > /tmp/head.txt"
+  },
+  {
+    "expect": "allow",
+    "why": "a scratch path held in a variable is still a scratch path",
+    "command": "S=/tmp/claude-1000/proj/abc/scratchpad\ncat > \"$S/fixture-questions.md\" <<'MD'\n- [ ] **Q7 / Q11** a fixture\nMD"
+  },
+  {
+    "expect": "allow",
+    "why": "the braced form of the same variable",
+    "command": "S=/tmp/claude-1000/proj/abc/scratchpad; printf x > ${S}/note.md"
+  },
+  {
+    "expect": "allow",
+    "why": "a variable built out of an earlier variable",
+    "command": "D=/tmp/probe; F=$D/src/main.rs; printf x > $F"
+  },
+  {
+    "expect": "deny",
+    "why": "a variable holding a tree path is still a tree path",
+    "command": "W=crates/rcad-geom/src\ncat > \"$W/lib.rs\" <<'RS'\npub fn x() {}\nRS"
+  },
+  {
+    "expect": "deny",
+    "why": "a variable this command never set stays unresolved, and unresolved is a tree file",
+    "command": "printf x > \"$SET_IN_SOME_OTHER_CALL/lib.rs\""
   }
 ]
