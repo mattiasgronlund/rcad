@@ -362,12 +362,15 @@ pub use rcad_geom::{HalfSpace, Picker, SIDE_OF_A_HALF_SPACE};
 /// costs nothing, and quadric intersection with certified results and an
 /// explicit `Undecidable` has users who are not kernel users. The `along`
 /// bookkeeping — which input edges a piece of a crossing runs along — stays
-/// inside `rcad-topo`, because those name keys.
+/// inside `rcad-topo`, because those name keys. [`ROOM_LEFT_TO_REFINE_A_WALK`]
+/// is [`walk`]'s own provenance name, out here for the same reason as the
+/// `SIDE_OF_*` names below (§15.6): a caller reading its own log needs the
+/// name, not a copy of the string.
 pub use rcad_geom::{
     MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF, PointsAlongACrossing,
-    WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
-    WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS, WHERE_TWO_PLANES_CROSS, intersect, walk,
-    where_a_closed_crossing_starts,
+    ROOM_LEFT_TO_REFINE_A_WALK, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS,
+    WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS,
+    WHERE_TWO_PLANES_CROSS, intersect, walk, where_a_closed_crossing_starts,
 };
 
 /// Where three surfaces meet, how many points that is, and which of two points
