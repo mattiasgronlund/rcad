@@ -35,6 +35,36 @@ write sets genuinely do not overlap; it needs the `git add <path>` discipline be
 Serialising is the third option and the worst one. Take it only when lane B needs
 lane A's *output*, not merely its file.
 
+### It branches from the primary worktree's HEAD, not from `main`
+
+`isolation: "worktree"` gives the lane the branch **the primary worktree happens to
+have checked out**, and that is routinely somebody's work in flight rather than
+`main`. There is no argument to pass a base, so the only fix is in the brief.
+
+**Name the base sha in every brief, and make the first two commands of every lane:**
+
+```
+git log --oneline -1
+git checkout -B <lane-branch> <base sha>
+```
+
+**and require the lane to report both shas back.** Not one — both. The sha it landed
+on is the diagnosis; the sha it checked out is the fix.
+
+On 2026-09-06 three lanes went out without this. All three branched from a docs
+branch that was two units behind `main`. One lane's every measurement was void. The
+worst was the second: it was measuring whether a defect was still present, on a tree
+where **the fix for that defect had not landed yet** — so a green run would have read
+as "already fixed" when the truth was the exact inverse. Nothing in a lane's own
+output says which tree it ran on.
+
+It was caught by **one mismatched test count** in a third lane's report — 1709 where
+`main` said 1717. That is the entire evidence chain, and it only existed because the
+lanes happened to report a total. Do not rely on noticing it twice.
+
+The same rule covers the reverse case: a lane rebasing another lane's finished branch
+needs the base named too, or it silently re-lands work `main` already has.
+
 ## Never dispatch into a worktree somebody holds
 
 `just lanes` before you dispatch. A worktree reported `HELD` has an owner named in
