@@ -129,7 +129,19 @@ check:
 # the test's real assertions are on the refusal kinds it *does* name. §40's
 # hazard is a wildcard swallowing a variant that should have changed an answer;
 # nothing here answers anything.
-wildcard_arms := "90"
+#
+#     b51b39d  after the reach fix            86 direct + 5 composite = 91
+#
+# The one new point is `how_far_along_the_axis_the_other_surface_reaches` in
+# `mesh.rs`. It asks the surface on the other side of a crossing how far along
+# our own axis a point on both of them can be, and it names all five `Surface`
+# variants there are — the `_` is only there because `#[non_exhaustive]` forces
+# it. It answers `None`, which the caller reads as "the corners are all there
+# is": a floor that is too low on a surface kind nobody has taught it yet, which
+# is what every surface got before this function existed. A `panic!` there would
+# refuse to mesh a shape the kernel could have cut, and that is the worse of the
+# two.
+wildcard_arms := "91"
 
 check-wildcards:
     @find crates -name lib.rs -path '*/src/*' -exec touch {} +
