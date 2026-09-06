@@ -42,7 +42,7 @@
 //! the ratio is asserted **equal between the two**, and not merely near 78.93
 //! twice.
 
-use rcad_geom::{Deflection, Isometry, Scale};
+use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Mesh, Model, SolidKey};
 
@@ -65,6 +65,18 @@ const A_BALL_PLACES_A_POINT_TO: f64 = 3.0716170347962663e-13;
 
 /// How fine a mesh of that ball can be cut, halved for the same reason.
 const A_BALL_IS_CUT_TO: f64 = 2.4244102800489844e-11;
+
+/// How far out the ball in [`A_BALL_FAR_OUT_IS_CUT_TO`] sits.
+const A_THOUSAND_MILLION: f64 = 1e9;
+
+/// How fine a mesh of that ball can be cut when it sits [`A_THOUSAND_MILLION`]
+/// units out along `x`.
+///
+/// Published by `docs/consumers.md` and by §58 with no test behind either, and
+/// this is that test. It moves with the pair above but not in step with them:
+/// out here the placing term is eighty thousand times the added one, so halving
+/// what the ball is charged moves the fifth figure rather than the first.
+const A_BALL_FAR_OUT_IS_CUT_TO: f64 = 3.996827132753364e-6;
 
 /// The number both of them come to when the second is divided by the first.
 ///
@@ -96,6 +108,25 @@ fn a_unit_ball_at_the_origin_places_a_point_a_thousand_times_closer_than_it_can_
     assert_eq!(
         how_close_it_places_a_point(&model, ball),
         A_BALL_PLACES_A_POINT_TO
+    );
+}
+
+/// The cutting floor of the same ball a thousand million units out.
+///
+/// `docs/consumers.md` and §58 both publish this one and neither had a test for
+/// it. Only the **cutting** floor is readable out here: the placing floor is
+/// hunted for, and the module doc above says why that hunt does not come back
+/// far from the origin.
+///
+/// It moves with the pair at the origin, and by much less than they do — out
+/// here the placing term is the one that dominates, so halving what the ball is
+/// charged shifts the answer in the fifth figure rather than halving it.
+#[test]
+fn a_unit_ball_a_thousand_million_units_out_is_cut_to_what_the_docs_announce() {
+    let (model, ball) = a_unit_ball_a_thousand_million_out();
+    assert_eq!(
+        how_fine_a_mesh_of_it_is_cut(&model, ball),
+        A_BALL_FAR_OUT_IS_CUT_TO
     );
 }
 
@@ -246,5 +277,17 @@ fn a_unit_ball() -> (Model, SolidKey) {
     let ball = model
         .add_ball(1.0, &Isometry::identity())
         .expect("a ball of radius one");
+    (model, ball)
+}
+
+fn a_unit_ball_a_thousand_million_out() -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let ball = model
+        .add_ball(
+            1.0,
+            &Isometry::translation(Vector::new(A_THOUSAND_MILLION, 0.0, 0.0))
+                .expect("a shift along x is a placement"),
+        )
+        .expect("a ball of radius one, placed out along x");
     (model, ball)
 }

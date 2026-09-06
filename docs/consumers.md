@@ -502,7 +502,7 @@ origin:
 | solid | old `closest` | new `closest` | which way |
 |---|---|---|---|
 | bar r = 1, h = 2 | `9.2148511043888e-13` | `7.273230840146953e-11` | **up**, ×78.93 |
-| unit ball | `6.143234069592533e-13` | `4.848820560097969e-11` | **up**, ×78.93 |
+| unit ball | `3.0716170347962663e-13` | `2.4244102800489844e-11` | **up**, ×78.93 |
 | four bars whose cap leans `4e9` to `1e11` | not re-measured — see below | `0.19395282244028492`, `0.484882056046163`, `1.4546461680657568`, `4.848820560134335` | **up**, and **four different answers**, the widest lean's `24.9999999955` times the narrowest's |
 
 **That last row used to carry the unit ball's two numbers and the words *one
@@ -515,17 +515,34 @@ different sizes.
 `4.848820560097969e-11` is not a stray, though. Divide each of the four floors by
 its own lean and the same constant comes back to ten digits —
 `4.848820561007123e-11`, `4.8488205604616304e-11`, `4.848820560219189e-11`,
-`4.848820560134335e-11` — and the bar of radius one and height two,
-`7.273230840146953e-11`, is exactly `1.5` times it. So it is a floor **per unit
-of the shape's reach**, and the row stated it as though it were a length. The old
-column is left unfilled because rcad has not re-measured these four bars on the
-pre-move tree; what stood there was the row above's figure, copied.
+`4.848820560134335e-11`. So it is a floor **per unit of what the shape is
+charged**, and the row stated it as though it were a length. The old column is
+left unfilled because rcad has not re-measured these four bars on the pre-move
+tree; what stood there was the row above's figure, copied.
+
+**The unit that constant is per was itself wrong, and the ball row above is what
+moved.** The figure was first written down as *per unit of the shape's reach*,
+which read `4.848820560097969e-11` off a unit ball — and a unit ball was being
+charged `2` for a face that reaches `1`. Charged from its centre it is now cut to
+`2.4244102800489844e-11`, and that is the constant: the bar of radius one and
+height two is exactly `3` times it, a leaning bar is `2 · lean` times it, and the
+ball is `1` times it, all three exact in `f64`. The bars did not move; only the
+ball, and only because what it was charged did. A figure per unit of a quantity
+is wrong in two independent ways, and this one had the second: the digits were
+right and the unit was not.
 
 **Far from the origin it barely moves**, which is the other half of the same
 measurement: at `x = 1e9` the placing term is eighty thousand times the added one
 and `closest` shifts in the eleventh decimal — a ball of radius one goes
-`3.996803498977168e-6` → `3.9968513728593615e-6`. The seventy-nine is what a
+`3.996803498977168e-6` → `3.996827132753364e-6`. The seventy-nine is what a
 solid at the origin sees, not a factor to carry about.
+
+That second figure is the ball charged from its centre, measured and pinned by
+`a_unit_ball_a_thousand_million_units_out_is_cut_to_what_the_docs_announce`. It
+was announced as `3.9968513728593615e-6` before that change. Note how little it
+moved where the pair at the origin halved: out here the placing term is eighty
+thousand times the added one, so what the ball is charged reaches only the fifth
+figure.
 
 It is arguably the better number now — the old one was a floor the mesher then
 did not work to. That is not the test this bullet sets. It is a number a consumer
@@ -547,7 +564,9 @@ file's opening rule is why rcad does not keep that list.
 
 - `9.2148511043888e-13` for a bar of radius one, and `6.143234069592533e-13` for
   a unit ball, **as what the refusal carries** at the origin. Both still describe
-  where a point can be *placed*; neither is `closest` any more.
+  where a point can be *placed*; neither is `closest` any more. The ball's has
+  since halved again, to `3.0716170347962663e-13`, for the separate reason in the
+  row above — so that one is withdrawn twice over.
 - Any `Mesh::deviation` measured on a curved solid cut **under** the floor before
   this branch. Three ball radii are tabled above; a radius rcad did not measure
   is in the same position and rcad cannot say which way it went without running
@@ -601,16 +620,22 @@ sentence with no number in it, which is this section, and it passes a number tha
 is right about its digits and wrong about what it is a number *of*. A figure is
 not checked by being announced.
 
-**And that figure is itself dated, which is the third way past.** The reading
-above holds **as of `a8d4467`**. A change to how a ball's reach is charged is in
-review as this is written, and if it lands the constant halves to
-`2.4244102800489844e-11` — because the ball's reach was being read as `2` where
-the shape reaches `1`, so the per-reach figure absorbed the factor. Nothing
-about the two failures above changes; the number naming them does. A published
-figure offered as a fact about the tree wants the sha it was measured on, in the
-same way §15.6 makes a published bound want a test — and a sentence in a commit
-message wants it most of all, because that is the one artefact nobody can go
-back and amend.
+**And that figure was itself dated, which is the third way past — and the date
+earned itself within the hour.** The reading held as of `a8d4467`; the change to
+how a ball is charged landed immediately after, and the constant is now
+`2.4244102800489844e-11` per unit of what a shape is charged. The ball's reach
+was being read as `2` where the shape reaches `1`, so the figure absorbed the
+factor. Nothing about the two failures above changes; the number naming them
+did.
+
+A published figure offered as a fact about the tree wants the sha it was
+measured on, in the same way §15.6 makes a published bound want a test — and a
+sentence in a commit message wants it most of all, because that is the one
+artefact nobody can go back and amend. `251c27a` is the standing example: it
+publishes `4.848820560097969e-11` as a floor per unit of reach, undated, and it
+is now wrong by a factor of two in a place that cannot be edited. §59.2 is the
+sibling case, and the difference between them is the useful part — that one was
+never right, this one was right and was moved.
 
 ### What rcad asks in return
 

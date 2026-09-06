@@ -11907,6 +11907,12 @@ radius one gives `6.143234069592546e-13` against `4.848820560097969e-11` —
 `78.929` times apart in both cases. **So `closest` at the origin over-reports the
 floor these rows name by seventy-nine times.**
 
+The ball's two readings here are as of `fdf5e58`'s parent. Both have since
+halved, to `3.0716170347962663e-13` and `2.4244102800489844e-11`, because a ball
+is now charged from its centre rather than from its poles — §58.11. The
+seventy-nine did not move, and neither did the bar's pair, which is the point
+the sentence above is making.
+
 The rows themselves stand, and the reason is the shape of the two formulas rather
 than a second measurement: the added term is a constant share of how far the face
 reaches and does not grow with the placement, while `how_far_moving_this_face_rounds`
@@ -18236,6 +18242,10 @@ makes, and neither number is worked out from the arithmetic that produces it.
 | round bar, radius 1, height 2, at the origin | `9.214851104388813e-13` | `7.273230840146953e-11` | `78.92944506377196` |
 | ball, radius 1, at the origin | `6.143234069592546e-13` | `4.848820560097969e-11` | `78.92944506377192` |
 
+The ball's row is as measured for this section and is **superseded**: §58.11
+halves both of its floors to `3.0716170347962663e-13` and
+`2.4244102800489844e-11`. The bar's row and both ratios stand.
+
 **The seventy-nine is a fact about the added term and not about either shape.**
 Two solids that share no face agree on it to fifteen digits, because at the
 origin `how_far_moving_this_face_rounds` is zero and the ratio collapses to
@@ -18253,7 +18263,12 @@ probe meshes for real and does not finish — the wall
 `whether_the_floor_predicts_the_step_cap.rs` names in *why there is no test here
 that meshes at the new floor*. What this section did measure out there is the
 walk floor alone, `3.9968513728593615e-6` for a unit ball at `x = 1e9`, which is
-the figure `docs/consumers.md` announced.
+the figure `docs/consumers.md` announced. That one is **superseded by §58.11**
+too, at `3.996827132753364e-6` — and it moved in the fifth figure where the pair
+at the origin halved, because out there the placing term is eighty thousand times
+the added one. It now has a test,
+`a_unit_ball_a_thousand_million_units_out_is_cut_to_what_the_docs_announce`,
+which it did not when this section was written.
 
 ### 58.5 Every bound this unit publishes, against the test that carries it
 
@@ -18270,9 +18285,9 @@ and the `rcad-step` one runs 2, and all 33 pass.
 | those bars are not the thing that is wrong: built certified, empty provenance log, `validate` passes certified | `every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for` | **yes** |
 | the mesher's floor stays put over four leans while the crossing's rounding runs away from it | `the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away` | **yes, as a shape** — no value asserted |
 | styling is never a key in `shapes_this_reader_did_not_take`, and a styling-only file gets an `Err` rather than an empty map | `styling_is_never_among_the_shapes_walked_past`, over the real corpus | **yes** |
-| `9.2148511043888e-13` and `7.273230840146953e-11`, the two floors of a bar of radius one at the origin (`mesh.rs`) | nothing | **no test** |
-| `6.143234069592533e-13`, `4.848820560097969e-11` and *78.93 times apart* for a ball at the origin (`error.rs`) | nothing — the hunt above is in one test's prose, and that test asserts only that four leans agree | **no test** |
-| `741 455` steps at twice the floor against `1 048 576` at it (`ROOM_ABOVE_THE_FLOOR`) | nothing | **no test** |
+| `9.2148511043888e-13` and `7.273230840146953e-11`, the two floors of a bar of radius one at the origin (`mesh.rs`) | `a_round_bar_at_the_origin_places_a_point_a_thousand_times_closer_than_it_can_be_cut` | **yes**, since this section was written |
+| `6.143234069592533e-13`, `4.848820560097969e-11` and *78.93 times apart* for a ball at the origin (`error.rs`) | `a_unit_ball_at_the_origin_places_a_point_a_thousand_times_closer_than_it_can_be_cut`, and the ratio on both shapes at once | **yes**, and the two floors are **superseded** by §58.11 — `3.0716170347962663e-13` and `2.4244102800489844e-11`. The ratio stands |
+| `741 455` steps at twice the floor against `1 048 576` at it (`ROOM_ABOVE_THE_FLOOR`) | `what_twice_the_room_buys_a_walk_at_its_step_cap.rs`, which also pins the one-step margin and the design room the count belongs to | **yes**, since this section was written |
 | the leaning-cap figures: a conic reach of `9.999999999999999e8` at `lean = 1e9`, a crossing rounding of `5.6843418889229724e-5`, a floor of `9.697641120195938e-11` (`mesh.rs`) | nothing, and nothing is owed — `f9d54e0` deleted the doc block that held all three | **withdrawn** |
 
 **The first row is the one worth reading twice.** The test asserts
