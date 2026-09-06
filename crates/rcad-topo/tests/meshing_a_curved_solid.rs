@@ -839,6 +839,124 @@ fn a_ball_a_long_way_out_cannot_be_meshed_as_finely_as_one_at_the_origin() {
     assert!(mesh.deviation().magnitude() <= asked);
 }
 
+/// The floor's **value**, and not only that there is one.
+///
+/// The test above brackets the floor of a ball a billion units out between the
+/// deflection it refused and one whole unit, which is a factor of a thousand
+/// wide. That was enough to say the floor moves with the placement and not
+/// enough to say what it *is* — and `Error::DeflectionBelowWhatAMeshCanReach`
+/// hands `closest` to callers, so it is a published number with nothing checking
+/// it (§15.6).
+///
+/// # What is actually in doubt, and it is a factor of two
+///
+/// A consumer bisecting the floor of a ball at `1e14` cannot tell
+/// `18 · f64::EPSILON · L` from `36 · f64::EPSILON · L` by trying deflections a
+/// decade apart, and both readings have been written down. The second comes from
+/// reading `the_surface_this_face_is_meshed_on`'s doc as though its `36 · ε · L`
+/// were a term in the floor. It is not: that paragraph is the cost of a round
+/// trip the mesher **does not make**, and it is why a placed face's surface is
+/// read out of the arena instead. The floor charges one movement, of a mesh
+/// *point*, in `how_far_placing_this_face_rounds` — so
+/// `Isometry::POINT_ROUNDOFF` once, times how far the placed ball reaches.
+///
+/// # Which of the two floors this reads
+///
+/// `room_a_mesh_has_to_work_in` holds two numbers, and they are different jobs.
+/// A deflection a caller named is let through against
+/// `how_far_a_mesh_point_of_this_face_rounds`; the number *reported* on the
+/// refusal, and the one a tolerant caller is cut at, is
+/// `the_finest_deflection_the_walk_will_take`, which adds what a step at the
+/// walk's own cap stands off its chord. Asking for `1e-30` is under both, so
+/// what comes back here is the second — the one a caller ever sees.
+///
+/// **Both carry the same `how_far_moving_this_face_rounds`**, so the claim below
+/// is about a term the two share, and moving the evaluator's end of it does not
+/// move this. That is why the oracle is a closed form and not a recorded number:
+/// the walk's share was re-derived and grew by about eighty, and none of the
+/// assertions here had to change.
+///
+/// # The oracle
+///
+/// `one_placement` here is written the same way
+/// `how_far_placing_this_face_rounds` writes it, over the same reach — the
+/// ball's corners are its two poles, so the largest coordinate is `out` and the
+/// radius goes on top — which makes it the same `f64` and lets the subtraction
+/// below recover what is left.
+///
+/// **What is left is everything that is not the placement, and it is the same
+/// number at every distance.** It is charged against how far the ball reaches in
+/// the frame it is *meshed* in, and a placed ball is meshed in its own
+/// placement's inverse — so it sees a ball of radius five at the origin however
+/// far out the solid sits. A floor with a second placement term in it could not
+/// have a distance-independent remainder, so this pins the coefficient at one
+/// rather than merely bounding it under two.
+///
+/// # Not vacuous
+///
+/// The remainder is asserted to be **above zero**, which is the other side of
+/// §15.6: a bound checked only from above passes if the term it is bounding
+/// vanished. And every row has to have been refused at all — a distance where
+/// the ball meshed at `1e-30` would hand back no floor and panic in
+/// [`the_finest_mesh_this_solid_can_be_asked_for`].
+#[test]
+fn the_floor_under_a_placed_ball_is_one_placements_worth_of_rounding_and_not_two() {
+    const RADIUS_OF_THE_BALL: f64 = 5.0;
+    let mut model = a_model();
+
+    let mut rows = Vec::new();
+    for out in [1e6, 1e10, 1e12, 1e14] {
+        let ball = model
+            .add_ball(
+                RADIUS_OF_THE_BALL,
+                &Isometry::translation(Vector::new(out, 0.0, 0.0)).expect("a long way"),
+            )
+            .expect("a ball a long way out");
+        let closest = the_finest_mesh_this_solid_can_be_asked_for(&model, ball);
+        let one_placement = Isometry::POINT_ROUNDOFF * (out + RADIUS_OF_THE_BALL);
+        println!(
+            "a ball of radius {RADIUS_OF_THE_BALL} at {out}: floor {closest}, one placement's \
+             worth of rounding {one_placement}, ratio {}",
+            closest / one_placement
+        );
+        assert!(
+            closest > one_placement,
+            "a floor of {closest} at {out} is under the {one_placement} carrying a mesh point \
+             out there costs, so something has stopped charging for the placement"
+        );
+        assert!(
+            closest < 2.0 * one_placement,
+            "a floor of {closest} at {out} is two placements' worth or more of the \
+             {one_placement} one costs — the mesher is charging for a movement it does not make"
+        );
+        rows.push((out, closest, closest - one_placement));
+    }
+
+    let (_, nearest_floor, everything_but_the_placement) = rows[0];
+    assert!(
+        everything_but_the_placement > 0.0,
+        "the floor is exactly one placement's worth and the walk's own share is nothing, \
+         which would mean the term this subtracts against has gone"
+    );
+    for &(out, closest, share) in &rows {
+        // Both sides of the subtraction are within a factor of two of each
+        // other, so it is exact by Sterbenz's condition and the only error in
+        // `share` is the rounding `closest` already carried when the mesher
+        // added its two terms together — half an ulp of `closest`.
+        let room = f64::EPSILON * (closest + nearest_floor);
+        assert!(
+            (share - everything_but_the_placement).abs() <= room,
+            "at {out} the floor has {share} in it over one placement's worth, against \
+             {everything_but_the_placement} at the nearest distance and {room} of room — a \
+             remainder that grows with the placement is a second placement term"
+        );
+    }
+    println!(
+        "what the floor holds beyond the placement, the same at every distance: \
+         {everything_but_the_placement}"
+    );
+}
+
 /// §23.5's one job for the policy: what happens when the deviation cannot be
 /// *proven* under the deflection asked for. Certified refuses; tolerant tags.
 ///
