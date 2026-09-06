@@ -3474,6 +3474,14 @@ mod tests {
     /// empty, and it is empty for exactly one of the bar's two closed edges. A
     /// run where both walked to nothing, or neither did, is a run that proves
     /// nothing.
+    ///
+    /// **The deflection is handed to [`BuildingAMesh`] and not asked of
+    /// [`SolidView::room_a_mesh_has_to_work_in`].** This is about what `cut_up`
+    /// does with an emptied list, and the floor is a different question that is
+    /// asked in its own file. It used to come from the floor, and once the floor
+    /// learned that a leaning cut makes a face big it refuses this deflection
+    /// outright — an honest refusal, and one that would leave this test
+    /// measuring the floor rather than `cut_up`.
     #[test]
     fn the_wall_beside_a_closed_edge_that_walked_to_nothing_is_refused_as_well() {
         const LEAN: f64 = 2e9;
@@ -3496,12 +3504,8 @@ mod tests {
             .expect("a leaning plane cuts an ellipse right round a pipe");
 
         let solid = model.solid(bar);
-        let asked = Deflection::of(5e-3).expect("a positive length");
-        let along_each_edge = solid.surfaces_along_each_edge();
-        let deflection = solid
-            .room_a_mesh_has_to_work_in(asked, &policy, &along_each_edge)
-            .expect("a bar this size has a floor far under a two-thousandth");
-        let mut building = BuildingAMesh::new(deflection, along_each_edge);
+        let deflection = Deflection::of(5e-4).expect("a positive length");
+        let mut building = BuildingAMesh::new(deflection, solid.surfaces_along_each_edge());
         for face in solid.faces() {
             building
                 .walk_the_edges_this_face_can_place(face, &policy, &mut log)
