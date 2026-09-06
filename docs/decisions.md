@@ -17635,7 +17635,8 @@ the figure `docs/consumers.md` announced.
 ### 54.5 Every bound this unit publishes, against the test that carries it
 
 §15.6 says a published bound needs a test. Row by row, checked in the tree at
-`99d6458`, where the three test binaries run 31 tests and all 31 pass.
+`99d6458`, where the three `rcad-topo` binaries this unit touches run 31 tests
+and the `rcad-step` one runs 2, and all 33 pass.
 
 | what is published, and where | carried by | holds? |
 |---|---|---|
