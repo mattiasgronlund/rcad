@@ -243,9 +243,15 @@ pub enum Error {
     /// mesher was picking the number itself, and what it picks goes straight to
     /// the walk with no-one else to look at it. The two floors are 78.93 times
     /// apart for a curved solid at the origin: a ball of radius one there has a
-    /// point placed to `6.143234069592533e-13` and walked to
-    /// `4.848820560097969e-11`. A caller who names a number between them is not
+    /// point placed to `3.0716170347962663e-13` and walked to
+    /// `2.4244102800489844e-11`. A caller who names a number between them is not
     /// refused here — a number a caller chose is that caller's to answer for.
+    ///
+    /// Both halved when a ball stopped being charged from its poles and started
+    /// being charged from its centre; the 78.93 between them did not move,
+    /// because it belongs to the term the walk adds and not to either shape.
+    /// `how_far_apart_the_two_floors_under_a_mesh_are.rs` is the test under all
+    /// three.
     #[error(
         "no mesh of this solid gets closer than {closest} to it, and the deflection asks {asked}"
     )]

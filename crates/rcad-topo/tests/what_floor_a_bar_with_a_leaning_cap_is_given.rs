@@ -25,12 +25,27 @@
 //! **The number in that row is not a stray, though, and it is worth knowing what
 //! it is.** Divide each of the four floors by its own lean and the same constant
 //! comes back to ten digits — `4.848820561007123e-11`, `4.848820560461630e-11`,
-//! `4.848820560219189e-11`, `4.848820560134335e-11` — and that is the unit
-//! ball's floor. The bar of radius one and height two is `7.273230840146953e-11`,
-//! exactly `1.5` times the same constant. So `4.848820560097969e-11` is a floor
-//! **per unit of the shape's reach**, and the row states it as though it were a
-//! length. Sharing leading digits with the widest lean's floor eleven decades up
-//! is that constant showing through, not two numbers that got confused.
+//! `4.848820560219189e-11`, `4.848820560134335e-11`. So
+//! `4.848820560097969e-11` is a floor **per unit of something**, and the row
+//! states it as though it were a length. Sharing leading digits with the widest
+//! lean's floor eleven decades up is that constant showing through, not two
+//! numbers that got confused.
+//!
+//! **What the something is took a second correction to get right, and that is
+//! the more useful half.** It was first written down as *per unit of the shape's
+//! reach*, read off a unit ball whose floor was then `4.848820560097969e-11` —
+//! and a unit ball was being charged `2` for a face that reaches `1`. Charged
+//! from its centre it is cut to `2.4244102800489844e-11`, and against that
+//! constant every reach is a whole number and exact in `f64`: the ball is `1`,
+//! the bar of radius one and height two is `3`, and a leaning bar is `2 · lean`.
+//! None of the four floors above moved; only the ball did, and only because what
+//! it was charged did.
+//!
+//! The lesson is not about balls. A figure published *per unit of* something can
+//! be wrong in two independent places, and the digits being right says nothing
+//! about the unit being right. `251c27a`'s commit message has the first version
+//! of this paragraph in it and cannot be amended; `docs/consumers.md` carries the
+//! standing correction.
 
 use rcad_geom::{Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
