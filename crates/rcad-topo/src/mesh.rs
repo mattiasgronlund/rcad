@@ -637,7 +637,7 @@ impl BuildingAMesh {
         self.worst = self
             .worst
             .max(along_it.deviation().magnitude() + how_far_moving_this_face_rounds(face));
-        let there = the_frame_this_face_is_meshed_in(face).inverse();
+        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         Ok(points
             .into_iter()
             .map(|along| {
@@ -830,7 +830,7 @@ impl BuildingAMesh {
             [0, 1, 2, 3].map(|step| from + way * f64::from(step) * whole_turn / 4.0);
         let along = quarters.map(|at| nearest_longitude(cap, at));
 
-        let there = the_frame_this_face_is_meshed_in(face).inverse();
+        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         let at_the_pole = stored.point_at(from, towards);
         if !at_the_pole.is_finite() {
             return Ok(None);
@@ -1030,7 +1030,7 @@ impl BuildingAMesh {
                 most: MOST_POINTS_A_MESH_WILL_HOLD,
             });
         }
-        let there = the_frame_this_face_is_meshed_in(face).inverse();
+        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         let mut along = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
@@ -1093,7 +1093,7 @@ impl BuildingAMesh {
             });
         }
 
-        let there = the_frame_this_face_is_meshed_in(face).inverse();
+        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         let mut along_the_cut = WalkedLoop {
             corners: Vec::with_capacity(steps - 1),
             points: Vec::with_capacity(steps - 1),
@@ -1153,7 +1153,7 @@ impl BuildingAMesh {
         // Everything past the corners this patch handed over is a point the
         // refinement put strictly inside it, so it belongs to this patch alone
         // and nothing else will ever name it (§25.1).
-        let there = the_frame_this_face_is_meshed_in(face).inverse();
+        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         for corner in &cut.corners()[corner_is.len()..] {
             let inside = stored.point_at(corner[0], corner[1]);
             corner_is.push(self.remember(there.apply_to_point(inside)));
@@ -2351,6 +2351,46 @@ fn the_surface_this_face_is_meshed_on(face: FaceView<'_>) -> Surface {
     }
     face.surface()
         .transformed(&the_frame_this_face_is_meshed_in(face))
+}
+
+/// The movement that carries a point worked out in the frame this face is
+/// meshed in back to where the solid sits.
+///
+/// **Not [`the_frame_this_face_is_meshed_in`] inverted, and the difference is a
+/// whole ulp on an ordinary placement.** A placed face is meshed in its
+/// placement's own inverse, so inverting that to get back out inverts the
+/// placement twice — and [`Isometry::inverse`] is not an involution bit for bit.
+/// It conjugates the quaternion, which only flips signs, but it replaces the
+/// shift with `−R⁻¹t`, which turns a vector and rounds; inverting again turns it
+/// back and rounds again. A pure shift survives that and so does a pure turn,
+/// whose shift is zero and stays zero. A turn **with** a shift on it is the case
+/// with nothing protecting it, and it is the ordinary case — it is what
+/// [`Model::place_solid`](crate::Model::place_solid) is for and what an assembly
+/// out of a file is made of. The placement itself is the exact inverse of the
+/// frame, so it is what a point rides out on.
+///
+/// **What that ulp costs is a wrong answer and not a coarse one.** A cone's apex
+/// is the one point of it with no normal, so a consumer shading a cone has to
+/// find the apex among the mesh points to know not to ask — and it can only
+/// find it by exact equality, because a mesh point a whisker off the apex sits
+/// on a genuine ruling whose normal is a genuine answer, and handing that one
+/// back for the apex would be confidently wrong rather than refused. Inverted
+/// twice, a placed cone's apex point misses [`Cone::apex`](rcad_geom::Cone::apex)
+/// read through a located [`FaceView`] by one ulp and the consumer shades the tip
+/// with a radial direction. `a_placed_cones_mesh_holds_a_point_exactly_on_the_apex_its_face_reports`
+/// is the demonstration, and it fails on `[3, 5, 7]` after a turn.
+///
+/// It also makes [`how_far_placing_this_face_rounds`] tell the truth: that term
+/// charges one [`Isometry::POINT_ROUNDOFF`] for carrying a mesh point out to
+/// where the solid sits, which is one movement, and this is now one movement.
+///
+/// A face at no placement at all rides out on the shift undone, which is a
+/// negation and exact either way.
+fn back_out_of_the_frame_this_face_is_meshed_in(face: FaceView<'_>) -> Isometry {
+    if face.location() != Isometry::identity() {
+        return face.location();
+    }
+    the_frame_this_face_is_meshed_in(face).inverse()
 }
 
 /// The frame this face's own geometry is worked out in.
