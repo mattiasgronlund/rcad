@@ -7,7 +7,12 @@
 5. **Validate your hypotheses.**: If you suspect a given cause for a bug, validate it and provide incontrovertible evidence. NEVER make unearned assumptions.
 6. **Follow the decisions.** `docs/decisions.md` records what was settled and why. `docs/roadmap.md` is the long-range plan, **not** a description of this codebase — where the two disagree, the disagreement is deliberate and `docs/decisions.md` §1 says why. Do not "fix" the code back to match the roadmap. If you think a decision is wrong, argue it and change the record; don't route around it.
 
-Always use the code-quality skill when coding.
+Always use the code-quality skill when coding. Big work goes to lanes in a
+worktree — the `delegating` skill has the mechanics, and only whoever is
+dispatching needs them.
+
+`docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
+`just decision 49` or `just decision 49.6`. Never guess a line range.
 
 ## Rules that come from the design
 
@@ -115,12 +120,9 @@ no `cat > file.rs <<'EOF'`. This covers `.rs`, `.toml` and `.md` alike: a
 Writing under `/tmp` or the scratchpad is untouched — a throwaway probe crate is
 what Bash is kept for.
 
-This is a cost rule, not a style one. In the M5 run (2026-09-02) the lanes patched
-files with Python heredocs 233 times at ~620 tokens a call: 145k tokens, a sixth
-of everything the run generated, and roughly 70 minutes spent retyping code that
-`Edit` takes two strings for. The heredoc re-emits its `def patch(path, pairs)`
-scaffold every call, and a pattern that does not match fails quietly where `Edit`
-errors.
+This is a cost rule, not a style one: in M5 it cost 145k tokens and ~70 minutes of
+retyping, and a heredoc whose pattern does not match fails quietly where `Edit`
+errors. `docs/decisions.md` §50.8 has the arithmetic and a hook enforces the rule.
 
 If `Edit` refuses with "file has not been read yet", the answer is `Read`. That
 message asks for one cheap call; it is not a reason to reach for a shell.
@@ -133,30 +135,6 @@ Bash tool ... make file changes with sed, heredocs, or short scripts". That text
 an A/B experiment (`tengu_thrifty_sonic`, Opus 5 in auto permission mode);
 `.claude/settings.json` sets `CLAUDE_CODE_THRIFTY_SONIC=false` to switch it off.
 If it appears anyway, this section wins.
-
-## Delegating to subagents
-
-Big work goes to lanes in a worktree. Three numbers govern it; the mechanics are in
-the `delegating` skill.
-
-- **At least three lanes run at once.** Lanes conflict only when their *write* sets
-  overlap — a file two lanes merely read is not a conflict. Name the files each lane
-  may write before any lane starts, then dispatch every lane that fits. M5 got 1.07x
-  out of 16 subagents, 9.2 agent-hours inside 9.6 wall hours, because lanes were
-  dispatched one at a time out of habit and not dependency.
-- **A lane is one deliverable and stops at about 45 minutes.** A lane that wants more
-  is two lanes: commit what is done, report what is left, hand it back. Long lanes
-  are slow twice — M5's two longest ran at 380k average context per request, and
-  every turn pays that context again.
-- **A closing gate agent re-derives every load-bearing number.** Not the lane's own
-  word for it. M5's gate caught an unclosed §19 violation and a 5.4x reported as 20x
-  that all five lanes had missed.
-- **The dispatcher has a budget too, and it is 250k tokens.** The lane cap works —
-  51 lanes on 2026-09-05, median 17 minutes, none over 45. The dispatchers had no
-  cap and spent 485M input tokens over 1994 turns, 97% of it re-reading context,
-  while writing almost no code. `.claude/hooks/context-budget.sh` says so once when
-  the line is crossed; call the `handoff` skill then rather than at the end of the
-  next unit. Raise it for a session with `CLAUDE_CONTEXT_BUDGET`.
 
 ## Always use plain language instead of complex jargon
 

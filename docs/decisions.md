@@ -16171,6 +16171,15 @@ each one is cheap now and expensive during a wave.
   stated risk is that *a pattern that does not match fails quietly*, and quiet
   failure is what a gate reading a diff is worst at catching.
 
+  What it costs, measured over M5: the lanes patched files with Python heredocs
+  **233 times at ~620 tokens a call — 145k tokens, a sixth of everything the run
+  generated**, and roughly **70 minutes** spent retyping code that `Edit` takes
+  two strings for. The heredoc re-emits its `def patch(path, pairs)` scaffold on
+  every call; `Edit` takes an old string and a new one. CLAUDE.md carries the
+  rule and cites this paragraph rather than repeating the arithmetic, because the
+  rule is what every agent needs in context and the arithmetic is what the record
+  is for.
+
 ### 50.9 What the two unmerged branches were worth, audited rather than assumed
 
 §50.2 item 5 settled `m5-predicates-scaling`: already in main, byte for byte.

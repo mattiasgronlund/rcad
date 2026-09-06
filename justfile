@@ -1,4 +1,4 @@
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest lint test deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-decisions check-decisions-selftest lint test deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Four tests in `rcad-step` skip
@@ -292,6 +292,173 @@ check-enums:
             /^[ \t]*pub enum/ {if (!ok) print FILENAME ":" FNR ": " $0; ok = 0}' \
             $(find crates -path '*/src/*' -name '*.rs') | grep . \
         || (echo "^ a public enum that neither grows nor says why not (docs/decisions.md §40)"; exit 1)
+
+# Where `decisions-toc` and `decision` read from. A variable so the selftest
+# below can point them at fixtures rather than at whatever the real file happens
+# to say today.
+decisions_file := "docs/decisions.md"
+
+# The map of docs/decisions.md: every top-level section, and what it costs to
+# read.
+#
+# 17 000 lines under 487 headings, so the file is not a thing anyone holds at
+# once, and the way it was being read was `sed -n '15690,15900p'` — a guessed
+# line range, ~5 000 tokens a guess, landing beside the section about as often
+# as on it. On 2026-09-05 that cost 123 calls and ~180 000 tokens in one day,
+# more than any other file in the project.
+#
+# **The line count is the column that earns its place**, because it is the one
+# thing the section number does not already tell you: it says whether `just
+# decision 49` is 40 lines or 400 before you pay for it. There are deliberately
+# no line *offsets* here. The sections are numbered, `just decision 49.6`
+# addresses one by its number, and an offset would be a second address for the
+# same section that goes stale the moment anybody inserts a paragraph.
+decisions-toc:
+    @awk '/^## [0-9]/ { \
+             if (num != "") printf "  %-5s %-56s %4d lines\n", num, title, n; \
+             rest = substr($0, 4); p = index(rest, " "); \
+             num = substr(rest, 1, p - 1); sub(/\.$/, "", num); \
+             title = substr(rest, p + 1); n = 0; next \
+         } \
+         num != "" { n++ } \
+         END { if (num != "") printf "  %-5s %-56s %4d lines\n", num, title, n }' \
+        {{decisions_file}}
+
+# One section of docs/decisions.md, by its number.
+#
+# `just decision 49` gives §49's own prose and then the list of its subsections,
+# which is the cheap way in; `just decision 49.6` gives §49.6 in full. A leading
+# section sign is accepted so a citation can be pasted as it is written.
+#
+# **A number that does not exist fails rather than printing nothing.** Silence
+# reads as "the decisions say nothing about this", which is the opposite of what
+# an unknown number means, and it is the same failure `check-ignored` above
+# guards against: an empty selection looks exactly like a clean pass.
+decision want:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    want=$(printf '%s' '{{want}}' | sed 's/^§//; s/\.$//')
+    if [ -z "$want" ]; then
+        echo "which section? try 'just decisions-toc' for the map" >&2
+        exit 2
+    fi
+    case "$want" in
+    *.*)
+        awk -v want="$want" '
+            /^## |^### / {
+                if (on) exit
+                rest = $0; sub(/^#+ /, "", rest)
+                p = index(rest, " "); id = substr(rest, 1, p - 1); sub(/\.$/, "", id)
+                if (id == want) { on = 1; found = 1 }
+            }
+            on { print }
+            END { exit(found ? 0 : 3) }' "{{decisions_file}}" || {
+            echo "docs/decisions.md has no section $want" >&2
+            exit 3
+        }
+        ;;
+    *)
+        awk -v want="$want" '
+            /^## / {
+                if (on) exit
+                rest = substr($0, 4); p = index(rest, " ")
+                id = substr(rest, 1, p - 1); sub(/\.$/, "", id)
+                if (id == want) { on = 1; found = 1 }
+            }
+            /^### / { if (on) exit }
+            on { print }
+            END { exit(found ? 0 : 3) }' "{{decisions_file}}" || {
+            echo "docs/decisions.md has no section $want" >&2
+            exit 3
+        }
+        awk -v want="$want" '
+            function flush() {
+                if (num != "") printf "  %-7s %-54s %4d lines\n", num, title, n
+                num = ""
+            }
+            /^### / {
+                flush()
+                rest = substr($0, 5); p = index(rest, " ")
+                id = substr(rest, 1, p - 1)
+                if (index(id, want ".") == 1) { num = id; title = substr(rest, p + 1); n = 0 }
+                next
+            }
+            /^## / { flush(); next }
+            num != "" { n++ }
+            END { flush() }' "{{decisions_file}}"
+        ;;
+    esac
+
+# `decision` finds a section by the number its heading starts with, so a heading
+# that does not start with one is a section the lookup cannot reach — and it
+# fails as silence, which reads as "nothing was decided about this".
+#
+# All 487 headings are numbered today, `## N.` and `### N.M`. `####` headings are
+# free text on purpose: they sit inside a subsection and are never addressed.
+#
+# A heading hiding inside a code fence would fool the same match. None exists and
+# none ever has, so per §13 that check is not built until something needs it.
+check-decisions:
+    @bad=$(grep -nE '^(## |### )' {{decisions_file}} \
+        | grep -vE '^[0-9]+:## [0-9]+\. ' \
+        | grep -vE '^[0-9]+:### [0-9]+\.[0-9]+ ' || true); \
+    if [ -n "$bad" ]; then \
+        echo "$bad"; \
+        echo "^ a decisions.md heading that 'just decision' cannot address"; \
+        exit 1; \
+    fi
+
+# Pins the lookup against fixtures rather than against the real file, so it stays
+# proven on a tree where the real §1.1 has been rewritten.
+#
+# `#### ` inside the fixture is the case worth having: it is a heading, and a
+# lookup that stops at any heading would cut §1.1 in half without saying so.
+check-decisions-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    cat > "$dir/fixture.md" <<'MD'
+    # Design decisions
+    ## 1. First
+    intro to one
+    ### 1.1 Alpha
+    alpha body
+    #### A fourth-level heading that must not end the section
+    still alpha
+    ### 1.2 Beta
+    beta body
+    ## 2. Second
+    intro to two
+    MD
+    j="{{just_executable()}} --set decisions_file $dir/fixture.md"
+
+    got=$($j decision 1.1)
+    want=$(printf '%s\n' "### 1.1 Alpha" "alpha body" \
+        "#### A fourth-level heading that must not end the section" "still alpha")
+    [ "$got" = "$want" ] || { echo "decision 1.1 drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j decision 1)
+    want=$(printf '%s\n' "## 1. First" "intro to one" \
+        "  1.1     Alpha                                                     3 lines" \
+        "  1.2     Beta                                                      1 lines")
+    [ "$got" = "$want" ] || { echo "decision 1 drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j decisions-toc)
+    want=$(printf '%s\n' \
+        "  1     First                                                       7 lines" \
+        "  2     Second                                                      1 lines")
+    [ "$got" = "$want" ] || { echo "decisions-toc drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j decision §1.1)
+    [ "$got" = "$($j decision 1.1)" ] || { echo "a pasted § was not accepted"; exit 1; }
+
+    if $j decision 9 >/dev/null 2>&1; then
+        echo "decision 9 found a section that does not exist"; exit 1
+    fi
 
 test:
     cargo nextest run --workspace
