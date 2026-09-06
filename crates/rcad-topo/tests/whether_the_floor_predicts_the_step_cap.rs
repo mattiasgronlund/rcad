@@ -145,8 +145,23 @@ fn a_tolerant_caller_is_refused_by_the_floor_and_not_by_the_walk() {
 /// **Measured either side of the change**, because `docs/consumers.md` asks for
 /// that with no threshold on it. The floor moved from `3.996804715633573e-6` to
 /// `3.9969483372801546e-6` — up, by thirty-six millionths of itself — and the
-/// mesh that comes back is the same 5134 points with the same
+/// mesh that came back was the same 5134 points with the same
 /// `5.99402529715387e-6` of deviation, bit for bit.
+///
+/// **Both of those second numbers have since moved again, and the bit identity
+/// is gone.** Charging a curved face for where its *edges* run rather than for
+/// where its *corners* sit raised what this bar reaches, and the reach stands in
+/// the movement charge as much as it stands in the floor. The floor is now
+/// `3.996948353267366e-6` and the deviation `5.994025313141081e-6` — the point
+/// count still 5134.
+///
+/// **The deviation did not move because the floor did**, and the demonstration
+/// is that meshing this bar at exactly twice the *old* floor,
+/// `7.993896674560309e-6`, gives `5.994025313141081e-6` as well: the deflection
+/// nobody changed gets the new answer. The two moved by the very same
+/// `1.5987211554602254e-14`, which is what a solid a billion units out looks
+/// like — out here the floor is the movement charge and the deviation carries
+/// that same charge, so raising the reach raises both by one number.
 ///
 /// **That is true of this bar and it is not true of every solid.** A ball of
 /// radius a quarter at the same billion units out, asked the same thing, came
@@ -163,11 +178,13 @@ fn a_tolerant_caller_is_refused_by_the_floor_and_not_by_the_walk() {
 /// thirty-six parts in a million and no count in a 5134-point mesh moved with
 /// it; the ball's floor moved by only three parts in a million —
 /// `3.996803041232215e-6` to `3.996815009702763e-6` — and counts in an
-/// 872 000-point mesh did. **Points, not digits, is what decides it.** The ball
-/// then strays 99.99992% of the whole deflection it was handed — the budget is
-/// spent, so where the budget goes the published number goes — while this bar
-/// spends 74.99% of its own and pays the rest to a movement no deflection
-/// reaches.
+/// 872 000-point mesh did. **Points, not digits, is what decides the half of
+/// the deviation the deflection reaches** — and only that half, which is what
+/// the reach change above then walked in through: it moved the other half, so
+/// this bar's digits moved with no count moving at all. The ball strays
+/// 99.99992% of the whole deflection it was handed — the budget is spent, so
+/// where the budget goes the published number goes — while this bar spends
+/// 74.98% of its own and pays the rest to a movement no deflection reaches.
 #[test]
 fn the_fallback_a_bar_a_billion_units_out_already_had_says_the_same_thing() {
     let (model, bar) = a_bar(1.0, 5.0, 1e9);
@@ -181,5 +198,5 @@ fn the_fallback_a_bar_a_billion_units_out_already_had_says_the_same_thing() {
         .expect("a tolerant caller gets as fine a mesh as the arithmetic reaches");
 
     assert_eq!(mesh.points().len(), 5134);
-    assert_eq!(mesh.deviation().magnitude(), 5.99402529715387e-6);
+    assert_eq!(mesh.deviation().magnitude(), 5.994025313141081e-6);
 }
