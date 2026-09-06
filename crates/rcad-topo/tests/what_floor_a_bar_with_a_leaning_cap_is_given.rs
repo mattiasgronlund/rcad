@@ -19,10 +19,18 @@
 //! not what they give. They give four different answers spanning a factor of
 //! twenty-five, because the floor now follows the ellipse the cap cuts and the
 //! four ellipses are four different sizes — which is the very change that row is
-//! reporting. The `4.848820560097969e-11` in it is the **unit ball's** floor; the
-//! last of these four is `4.848820560134335`, the same leading digits eleven
-//! decades up, which is how the two came to be confused. So this file asserts
-//! that the four are distinct as well as what each one is.
+//! reporting. So this file asserts that the four are distinct as well as what
+//! each one is.
+//!
+//! **The number in that row is not a stray, though, and it is worth knowing what
+//! it is.** Divide each of the four floors by its own lean and the same constant
+//! comes back to ten digits — `4.848820561007123e-11`, `4.848820560461630e-11`,
+//! `4.848820560219189e-11`, `4.848820560134335e-11` — and that is the unit
+//! ball's floor. The bar of radius one and height two is `7.273230840146953e-11`,
+//! exactly `1.5` times the same constant. So `4.848820560097969e-11` is a floor
+//! **per unit of the shape's reach**, and the row states it as though it were a
+//! length. Sharing leading digits with the widest lean's floor eleven decades up
+//! is that constant showing through, not two numbers that got confused.
 
 use rcad_geom::{Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
