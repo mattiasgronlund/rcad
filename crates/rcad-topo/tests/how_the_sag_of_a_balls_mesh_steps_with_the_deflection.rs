@@ -18,16 +18,27 @@
 //!    keep a patch inside a quarter turn — is walked in. That is
 //!    `how_many_steps`' `ceil`, and it drops from 4 to 3 at `π² / (1.5 · 3²)`.
 //! 3. Whether the triangulator has to put a point back **in the middle of a
-//!    cell**. A cell of the latitude-by-longitude grid strays by
-//!    `chord² / (3 · radius)` across its diagonal, and when that is over the
-//!    deflection a point goes in the middle of it.
+//!    cell**. A cell of the latitude-by-longitude grid is **charged**
+//!    `chord² / (3 · radius)` across its diagonal, and when that charge is over
+//!    the deflection a point goes in the middle of it.
+//!
+//! **That third one is a charge and not a measurement, and the difference is a
+//! factor of two.** The equatorial cell below is charged `2.5 / 3 = 0.8333` of
+//! the radius. What it really strays is `0.3876`: its four corners
+//! `(±30°, 0°)` and `(±30°, 90°)` are coplanar — they all satisfy
+//! `x + y = cos 30°` — that plane is `cos 30° / √2 = 0.6124` from the centre,
+//! and `1 − 0.6124` is what the surface bulges past it. So the repair fires
+//! `2.15` times earlier than the geometry alone would ask, and the thresholds
+//! below are where the *charge* crosses the deflection, which is what the code
+//! tests and therefore what the mesh does.
 //!
 //! (1) and (2) are within 0.017 of each other but not equal, so there is a
 //! window where the seam is cut into 3 and the cuts are still cut into 4. Worse,
-//! (2) firing makes each cell **taller**, its diagonal longer, and its own stray
-//! larger — large enough to trip (3), which then puts four points back. That is
-//! the whole of the wrinkle: coarsening the grid by one row made the cells miss
-//! their own deflection, and the repair overshoots what the finer grid gave.
+//! (2) firing makes each cell **taller**, its diagonal longer, and its own
+//! charge larger — large enough to trip (3), which then puts four points back.
+//! That is the whole of the wrinkle: coarsening the grid by one row made the
+//! cells miss their own charge, and the repair overshoots what the finer grid
+//! gave.
 //!
 //! **This test is written to fail the day the row count changes.** It pins a
 //! wrinkle, not a promise. If the steps are ironed out — the grid sized so that
