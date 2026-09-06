@@ -17800,5 +17800,50 @@ measurement named above rather than here.
 
 **The apex census sweeps placements, not cones.** One cone shape, 105 placements.
 A cone whose stored apex is not at the origin would exercise
-`a_shift_that_loses_nothing` on the unplaced path as well, and the public builder
-this suite goes through does not make one.
+`a_shift_that_loses_nothing` on the unplaced path as well, and nothing here makes
+one — but that is the **helper's** limit and not the kernel's. The suite goes
+through `a_pointed_cone(model, slope, base_height)`, whose signature pins the apex
+at the origin. `SolidBuilder::add_face` is public, is re-exported from `rcad`, and
+takes an arbitrary `Surface`, so a caller puts the apex wherever it likes in one
+line; `rcad-step`'s `cone_from` builds one from any file's placement. Unexercised,
+then, and not unreachable.
+
+**But the sweep that would exercise it cannot fail, and that is worth more than
+the sweep.** `a_shift_that_loses_nothing` builds its run from the face's corners
+*and* `placed_by`, which for a cone is `cone.apex()` itself. Each coordinate is
+then either shifted by `low` — where Sterbenz makes `apex − low` exact, and adding
+`low` back lands on a representable `apex` — or not shifted at all. There is no
+third branch, so the apex comes back bit-for-bit for **any** stored apex, however
+far out and however wide the spread. rscene measured one instance of that through
+its own facade and got bit-equality; it had measured an identity.
+
+So a census over stored apexes would be a green run over a theorem: an absence
+that could not have been a presence proves nothing, which is the same reason
+§42.12's tenth criterion makes the import rate carry a control. Written at all, it
+needs the doubled inversion of §56.1 as its positive control, the way the 105
+placements are the control on the placed side. **What deserves a test is one layer
+down** — that the point the mesh emits
+is a member of the run the shift is computed over. That is the invariant doing the
+work, and it does not transfer: for a sphere `placed_by` is `ball.centre()`, which
+the mesh never emits at all. Whether a ball's pole is exact for some other reason
+is unmeasured and unasked.
+
+**Nobody ships against any of this today, and the blocker is not the cone.** No
+corpus file yields a cone face: 41 name `CONICAL_SURFACE` and none import, and a
+census reading `FaceView::surface()` over the 98 files that do import finds 32 094
+planes, 945 cylinders, one sphere and no cone. The 41 die upstream of the cone
+across 24 unrelated reasons, overwhelmingly `B_SPLINE_CURVE_WITH_KNOTS` on an
+edge; `CONICAL_SURFACE` itself maps fine. That day arrives when the B-spline edge
+blocker clears, not on any cone work.
+
+**How this paragraph came to be wrong is the part worth keeping.** It first said
+"the public builder this suite goes through does not make one", which is a false
+claim about the public builder dressed as a true one about a test helper, and two
+readers took it for unreachability and planned around it. The correction then
+overreached the other way — that an off-origin apex is "the normal case for
+anything imported" — which was an unmeasured consequence asserted inside a
+paragraph whose subject was a claim never checked against the public API. The same
+shape twice in one thread, in both directions, caught both times by a consumer
+reading it back rather than by anything in this tree. §51.10 is the control that
+worked; the rule it enforces is CLAUDE.md's, that "no caller hits this" is checked
+against the public API and not against today's callers.
