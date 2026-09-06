@@ -503,7 +503,23 @@ origin:
 |---|---|---|---|
 | bar r = 1, h = 2 | `9.2148511043888e-13` | `7.273230840146953e-11` | **up**, ×78.93 |
 | unit ball | `6.143234069592533e-13` | `4.848820560097969e-11` | **up**, ×78.93 |
-| four bars whose cap leans `4e9` to `1e11` | `6.143234069592533e-13` | `4.848820560097969e-11` | **up**, ×78.93, and one answer for all four |
+| four bars whose cap leans `4e9` to `1e11` | not re-measured — see below | `0.19395282244028492`, `0.484882056046163`, `1.4546461680657568`, `4.848820560134335` | **up**, and **four different answers**, the widest lean's `24.9999999955` times the narrowest's |
+
+**That last row used to carry the unit ball's two numbers and the words *one
+answer for all four*, and both halves were wrong.** The four bars give four
+floors spanning a factor of twenty-five, pinned to the last digit by
+`crates/rcad-topo/tests/what_floor_a_bar_with_a_leaning_cap_is_given.rs`, because
+the floor follows the ellipse the cap cuts and the four ellipses are four
+different sizes.
+
+`4.848820560097969e-11` is not a stray, though. Divide each of the four floors by
+its own lean and the same constant comes back to ten digits —
+`4.848820561007123e-11`, `4.8488205604616304e-11`, `4.848820560219189e-11`,
+`4.848820560134335e-11` — and the bar of radius one and height two,
+`7.273230840146953e-11`, is exactly `1.5` times it. So it is a floor **per unit
+of the shape's reach**, and the row stated it as though it were a length. The old
+column is left unfilled because rcad has not re-measured these four bars on the
+pre-move tree; what stood there was the row above's figure, copied.
 
 **Far from the origin it barely moves**, which is the other half of the same
 measurement: at `x = 1e9` the placing term is eighty thousand times the added one
