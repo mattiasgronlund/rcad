@@ -14,6 +14,11 @@ dispatching needs them.
 `docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
 `just decision 49` or `just decision 49.6`. Never guess a line range.
 
+**Search it with `just decisions-find 'refusal rate'`, not with `grep`.** Grep
+answers in line numbers, which is the one address this file does not take, so
+every hit then costs a walk back up to the heading above it. `decisions-find`
+answers in section numbers, which is what `just decision` wants next.
+
 ## Rules that come from the design
 
 These are the ones that are expensive to notice late.
@@ -110,6 +115,13 @@ nextest: `just t how_often_a_fuse_with_a_cone_refuses`, `just t -p rcad-geom`,
 `just t -E 'test(/walk/)'`. Reaching past `just` for a bare `cargo nextest run`
 is what makes a lane hand-type `RCAD_STEP_CORPUS`; the recipe already has it,
 and the four corpus tests skip in silence when it is missing.
+
+**`just src <name>` prints one item of Rust source**, with its doc comment and
+attributes, from wherever it is defined: `just src Decision`, or `just src new
+crates/rcad-geom` when the name has 43 definitions. A name defined more than
+once lists the places rather than printing all of them. Reach for it instead of
+grepping for a definition and then guessing a `Read` offset and limit — in
+`arrange.rs`, 330 509 characters, the mean item comes back in 1 961.
 
 ## Editing files
 

@@ -7,7 +7,7 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-decisions check-decisions-selftest lint test check-t-selftest deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-decisions check-decisions-selftest check-src-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Four tests in `rcad-step` skip
@@ -410,6 +410,55 @@ decision want:
         ;;
     esac
 
+# Which sections mention this? A text search that answers in section numbers.
+#
+#     just decisions-find 'refusal rate'
+#
+# gives the subsections whose text matches, so the next call is `just decision
+# 41.13`. A plain grep answers `16820:` instead, and a line number is the one
+# thing CLAUDE.md says never to address a decision by — walking back up 17 000
+# lines to the heading above the hit was the step that had no recipe.
+#
+# **The match is case-insensitive.** Of 886 grep commands measured across one
+# day's sessions, 97 matched nothing at all, and a search that misses `Refusal`
+# because the caller typed `refusal` fails in exactly that silent way. A caller
+# who wants the distinction writes the bracket themselves.
+#
+# **No match fails rather than printing nothing**, for the same reason `decision`
+# fails on a number that does not exist: an empty answer here reads as "the
+# decisions say nothing about this", and that is a claim a typo can forge.
+decisions-find pattern:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "$1" ]; then
+        echo "find what? an empty pattern matches every line" >&2
+        exit 2
+    fi
+    hits=$(mktemp)
+    trap 'rm -f "$hits"' EXIT
+    if ! grep -inE -- "$1" "{{decisions_file}}" | cut -d: -f1 > "$hits"; then
+        echo "no line in {{decisions_file}} matches $1" >&2
+        exit 1
+    fi
+    awk -v hits="$hits" '
+        BEGIN {
+            while ((getline ln < hits) > 0) wanted[ln + 0] = 1
+            id = "(preamble)"
+        }
+        /^## |^### / {
+            rest = $0; sub(/^#+ /, "", rest)
+            p = index(rest, " "); id = substr(rest, 1, p - 1); sub(/\.$/, "", id)
+            title = substr(rest, p + 1)
+        }
+        wanted[FNR] {
+            if (!(id in count)) { order[++k] = id; name[id] = title }
+            count[id]++
+        }
+        END {
+            for (i = 1; i <= k; i++)
+                printf "  %-7s %-54s %4d hits\n", order[i], name[order[i]], count[order[i]]
+        }' "{{decisions_file}}"
+
 # `decision` finds a section by the number its heading starts with, so a heading
 # that does not start with one is a section the lookup cannot reach — and it
 # fails as silence, which reads as "nothing was decided about this".
@@ -419,14 +468,36 @@ decision want:
 #
 # A heading hiding inside a code fence would fool the same match. None exists and
 # none ever has, so per §13 that check is not built until something needs it.
+#
+# **Two sections sharing a number is the second way to be unreachable**, and it
+# is the one that happens by itself. `decision` stops at the first heading whose
+# number matches, so the second §56 is addressed by nothing at all — and it is
+# not a typo that puts it there. Sections are appended at the tail by whoever
+# finishes first, ten to thirty times a day from as many as four concurrent
+# sessions, and two of them reaching for the same next number is the ordinary
+# case rather than the unlucky one. It happened while §57 was being written
+# (§57.4), and nothing in this file noticed; the collision was found by hand,
+# at merge time, which is the expensive place to find it.
 check-decisions:
-    @bad=$(grep -nE '^(## |### )' {{decisions_file}} \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bad=$(grep -nE '^(## |### )' "{{decisions_file}}" \
         | grep -vE '^[0-9]+:## [0-9]+\. ' \
-        | grep -vE '^[0-9]+:### [0-9]+\.[0-9]+ ' || true); \
-    if [ -n "$bad" ]; then \
-        echo "$bad"; \
-        echo "^ a decisions.md heading that 'just decision' cannot address"; \
-        exit 1; \
+        | grep -vE '^[0-9]+:### [0-9]+\.[0-9]+ ' || true)
+    if [ -n "$bad" ]; then
+        echo "$bad"
+        echo "^ a decisions.md heading that 'just decision' cannot address"
+        exit 1
+    fi
+
+    dupes=$(grep -oE '^(## [0-9]+|### [0-9]+\.[0-9]+)' "{{decisions_file}}" \
+        | awk '{ print $2 }' | sort | uniq -d)
+    if [ -n "$dupes" ]; then
+        for id in $dupes; do
+            grep -nE "^(## ${id//./\\.}\. |### ${id//./\\.} )" "{{decisions_file}}"
+        done
+        echo "^ these sections share a number, and 'just decision' reaches only the first"
+        exit 1
     fi
 
 # Pins the lookup against fixtures rather than against the real file, so it stays
@@ -479,6 +550,236 @@ check-decisions-selftest:
 
     if $j decision 9 >/dev/null 2>&1; then
         echo "decision 9 found a section that does not exist"; exit 1
+    fi
+
+    # `decision 1` above pins the column widths, so what is left to pin here is
+    # the attribution: which section a hit is reported under, and how many.
+    squashed() { $j decisions-find "$1" | awk '{ $1 = $1; print }'; }
+
+    got=$(squashed ALPHA)
+    want=$(printf '%s\n' "1.1 Alpha 3 hits")
+    [ "$got" = "$want" ] || { echo "decisions-find ALPHA drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$(squashed intro)
+    want=$(printf '%s\n' "1 First 1 hits" "2 Second 1 hits")
+    [ "$got" = "$want" ] || { echo "decisions-find intro drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$(squashed decisions)
+    [ "$got" = "(preamble) 1 hits" ] || { \
+        echo "a hit above the first heading was reported as '$got'"; exit 1; }
+
+    if $j decisions-find zzzz >/dev/null 2>&1; then
+        echo "decisions-find said nothing about a pattern nothing matches"; exit 1
+    fi
+
+    if $j decisions-find "" >/dev/null 2>&1; then
+        echo "decisions-find accepted the empty pattern"; exit 1
+    fi
+
+    # The duplicate-number check, against fixtures for the same reason: the real
+    # file has no duplicate today, so pinning it there would prove nothing.
+    $j check-decisions >/dev/null \
+        || { echo "the clean fixture failed check-decisions"; exit 1; }
+
+    cat > "$dir/twice.md" <<'MD'
+    ## 1. First
+    ## 1. First again
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/twice.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "two sections numbered 1 passed check-decisions"; exit 1
+    fi
+
+    cat > "$dir/twice-sub.md" <<'MD'
+    ## 1. First
+    ### 1.1 Alpha
+    ### 1.1 Alpha again
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/twice-sub.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "two subsections numbered 1.1 passed check-decisions"; exit 1
+    fi
+
+# One item of Rust source, by its name, with its doc comment and attributes.
+#
+#     just src arrange_faces
+#     just src new crates/rcad-geom
+#
+# The habit this replaces is `grep -n 'fn arrange_faces'` followed by a `Read`
+# with a hand-guessed `offset` and `limit` — two calls, and the guess either
+# cuts the item in half or pays for the next one as well. Measured across 64
+# transcripts, `.rs` files are 33% of every character `Read` has delivered in
+# this repo, and 0.31 M of those arrived through calls that passed no `limit`
+# at all. §57.6 left this recipe open rather than refused; this is it.
+#
+# **A name defined in more than one place lists the places instead of printing
+# all of them**, because printing every `fn new` in the workspace is the cost
+# the recipe exists to avoid. The second argument narrows the search to a path.
+#
+# The extent of an item is read off rustfmt's layout rather than parsed: back to
+# the blank line above it, forward to the first `}` at the item's own
+# indentation. `just fmt` is what makes that exact. **When the closing brace is
+# not where rustfmt would put it this fails and says so**, rather than printing
+# to the end of the file — an item that runs on for 7 000 lines is the failure
+# this whole recipe is against.
+src want filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    want="$1"
+    case "$want" in
+    "")
+        echo "which name? try 'just src arrange_faces'" >&2
+        exit 2
+        ;;
+    *[!A-Za-z0-9_]*)
+        echo "'$want' is not the name of a Rust item" >&2
+        exit 2
+        ;;
+    esac
+
+    root=$(git rev-parse --show-toplevel)
+    filter="${2:-}"
+    if [ -n "$filter" ]; then
+        files=$(git -C "$root" ls-files -- "$filter" | grep '\.rs$' || true)
+    else
+        files=$(git -C "$root" ls-files -- '*.rs' || true)
+    fi
+    if [ -z "$files" ]; then
+        echo "no Rust files are tracked${filter:+ under $filter}" >&2
+        exit 1
+    fi
+
+    kw='fn|struct|enum|trait|type|union|mod|static'
+    lead='^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?(default[[:space:]]+)?((const|async|unsafe)[[:space:]]+)*(extern[[:space:]]+"[^"]*"[[:space:]]+)?'
+    hits=$(cd "$root" && grep -nHE \
+        "$lead(($kw)[[:space:]]+$want\b|const[[:space:]]+$want[[:space:]]*:|macro_rules![[:space:]]*$want\b)" \
+        -- $files || true)
+
+    if [ -z "$hits" ]; then
+        echo "no Rust item named $want${filter:+ under $filter}" >&2
+        exit 1
+    fi
+
+    if [ "$(printf '%s\n' "$hits" | wc -l)" -gt 1 ]; then
+        printf '%s\n' "$hits" | awk '{
+            p = index($0, ":"); file = substr($0, 1, p - 1); rest = substr($0, p + 1)
+            q = index(rest, ":"); ln = substr(rest, 1, q - 1); code = substr(rest, q + 1)
+            sub(/^[ \t]+/, "", code)
+            printf "  %-52s %s\n", file ":" ln, code
+        }'
+        exit 0
+    fi
+
+    file=${hits%%:*}
+    rest=${hits#*:}
+    awk -v L="${rest%%:*}" -v path="$file" '
+        { a[NR] = $0 }
+        END {
+            def = a[L]
+            indent = match(def, /[^ ]/) - 1
+            pad = substr(def, 1, indent)
+
+            start = L
+            while (start > 1) {
+                t = a[start - 1]
+                sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+                if (t == "" || t ~ /\{$/ || t ~ /^\}/) break
+                start--
+            }
+
+            trimmed = def; sub(/[ \t]+$/, "", trimmed)
+            if (trimmed ~ /;$/ || (index(def, "{") > 0 && trimmed ~ /\}$/)) {
+                end = L
+            } else {
+                for (i = L + 1; i <= NR; i++)
+                    if (substr(a[i], 1, indent + 1) == pad "}") { end = i; break }
+            }
+            if (end == 0) {
+                print path ":" L " opens an item that has no closing brace at its own" \
+                    " indentation — run just fmt, or read it by hand" > "/dev/stderr"
+                exit 1
+            }
+
+            print path ":" L
+            for (i = start; i <= end; i++) print a[i]
+        }' "$root/$file"
+
+# Pins the extraction against a fixture repo rather than against the tree, so it
+# stays proven on a day the real `arrange_faces` is rewritten. `git ls-files` is
+# what the recipe searches, so the fixture is a real index — `git add` with no
+# commit is enough for that, and needs no identity configured.
+check-src-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    mkdir -p "$dir/repo/src"
+    cat > "$dir/repo/src/a.rs" <<'RS'
+    /// Doc for alpha.
+    #[derive(Debug)]
+    pub struct Alpha {
+        pub x: f64,
+    }
+
+    pub fn shared() -> u8 {
+        1
+    }
+
+    const LIMIT: usize = 3;
+
+    impl Alpha {
+        /// Doc for the method.
+        pub fn beta(
+            &self,
+        ) -> f64 {
+            self.x
+        }
+    }
+    RS
+    cat > "$dir/repo/src/b.rs" <<'RS'
+    pub fn shared() -> u8 {
+        2
+    }
+    RS
+    git -C "$dir/repo" init -q
+    git -C "$dir/repo" add -A
+    j="{{just_executable()}} --justfile {{justfile()}} --working-directory $dir/repo"
+
+    got=$($j src Alpha)
+    want=$(printf '%s\n' "src/a.rs:3" "/// Doc for alpha." "#[derive(Debug)]" \
+        "pub struct Alpha {" "    pub x: f64," "}")
+    [ "$got" = "$want" ] || { echo "src Alpha drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j src beta)
+    want=$(printf '%s\n' "src/a.rs:15" "    /// Doc for the method." "    pub fn beta(" \
+        "        &self," "    ) -> f64 {" "        self.x" "    }")
+    [ "$got" = "$want" ] || { echo "src beta drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j src LIMIT)
+    want=$(printf '%s\n' "src/a.rs:11" "const LIMIT: usize = 3;")
+    [ "$got" = "$want" ] || { echo "src LIMIT drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j src shared | awk '{ $1 = $1; print }')
+    want=$(printf '%s\n' "src/a.rs:7 pub fn shared() -> u8 {" "src/b.rs:1 pub fn shared() -> u8 {")
+    [ "$got" = "$want" ] || { echo "a name defined twice did not list both:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j src shared src/b.rs)
+    want=$(printf '%s\n' "src/b.rs:1" "pub fn shared() -> u8 {" "    2" "}")
+    [ "$got" = "$want" ] || { echo "the path filter did not narrow to one:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    if $j src no_such_item >/dev/null 2>&1; then
+        echo "src found an item that does not exist"; exit 1
+    fi
+
+    if $j src 'fn beta' >/dev/null 2>&1; then
+        echo "src accepted something that is not an item name"; exit 1
     fi
 
 test:
