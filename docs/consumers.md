@@ -303,6 +303,22 @@ second time changes nothing about the design. rcad may find that worth knowing
 before spending effort on whether the general claim holds: rscene has no
 decision resting on it in either direction.
 
+**Correction, 2026-09-06: *"the guard holds"* is in circulation and is no longer
+true.** The sentence said of rscene's near-apex guard that no defect is
+demonstrated and the guard holds, on a worst case of `14.177` against a ball of
+`16`. rscene has since measured a plain `translation((3,3,3)) ∘ rotation` at
+`18.245` against that same `16`, which is over budget. Their account of the cause
+is that the guard spends a budget written for three coordinates on
+`max_element`, and `(3,3,3)` hands it the full √3 between the largest coordinate
+and the true magnitude.
+
+**This is rscene's bug with an rscene fix, and this file does not claim
+otherwise.** Both numbers and the cause are rscene's own; **this side has not
+re-taken the measurement and none of it is verified here.** It is written down
+for two reasons and no third: the *guard holds* sentence travelled and is now
+false wherever it landed, and it bears on when rscene's apex work is safe to lean
+on. Nothing in rcad changes on it.
+
 ### How a demand is raised, decided and landed
 
 - A demand arrives as three things: the exact signature proposed, the consumer
