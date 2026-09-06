@@ -705,6 +705,7 @@ slips, it slips there.
 | `rayon` inside the library | M2 | §7.3 — tessellation is the first real need |
 | `ProvenanceSink` streaming | On demand | §5 — no caller yet |
 | Branded lifetimes for cross-model keys | Indefinitely | Debug-checked model id is the pragmatic fix |
+| A `&Policy` on `where_a_closed_crossing_starts` | A consumer that fuses tolerantly | §13 — the gap is real and nothing named is standing on it |
 
 **Amended 2026-08-30.** §1.7 inserts M2.5, and the planar fuse is where scratch
 allocation first becomes measurable — candidate pair lists, split pieces, image
@@ -727,6 +728,52 @@ exists to stop. M4 is where the consumer appears — a fuse over curved
 intersections, run over the many-tool batches roadmap §7.2 is written for, is
 the first scratch big enough for §1.4's "measure rather than assume" to come
 back with a number instead of noise.
+
+**Amended 2026-09-06: `where_a_closed_crossing_starts` keeps handing a certified
+answer to a tolerant caller, and that is deferred rather than fixed.**
+
+`rcad_geom::walk::where_a_closed_crossing_starts` is `pub`, is re-exported from
+`rcad`, and takes no `&Policy`. It builds a `Policy::certified()` of its own and
+asks the half-spaces under it, so a caller who asked for tolerance gets a
+certified refusal on the tie and never learns its budget was not spent. The
+function's own doc comment carries the reasoning and was narrowed twice on
+2026-09-06 by rscene reading it back; this section records the decision, not a
+second version of the argument, and where the two differ the doc comment is the
+one that was checked.
+
+**It is a gap and not a limit** (§16.10): the answer exists and the arithmetic
+reaches it — the same half-spaces decide it under a tolerant policy when `walk`
+hands one down — so nothing here is being called impossible. What is missing is a
+policy argument.
+
+**Why it is deferred, and this is §13 and not a claim that nobody can get
+there.** Reachability was checked against the public API rather than against
+today's callers, which is the check §16.10 asks for, and it came back *reachable*:
+the function is re-exported and anyone may call it. Inside the kernel the only
+callers are in `rcad-topo`'s `fuse::arrange`, so importing and meshing do not
+reach it — `Import::read` builds and validates, and `SolidView::mesh` never asks
+which piece of a crossing a run is. A backtrace census over the STEP corpus found
+every undecided half-space arriving through `walk`, from `Model::validate`
+checking which way a flat face's wire winds, and none through this door. **This
+lane took no census and re-measured nothing**; the count and the paths are the
+doc comment's, which publishes 31 undecided half-spaces, all through `walk`.
+
+**The honest residual, which the deferral does not make go away.** A census is a
+fact about the paths one corpus took, not about the door. An application that
+fuses tolerantly *does* sit on this gap, and neither the kernel nor a drawing
+layer can see that it does, because the fuse happens before the model reaches
+either of them. A display layer's own policy is not evidence about its
+application's: rscene takes `&Model` and never mutates one, so its tolerance is
+spent on meshing and never on arranging a crossing, and that says nothing about
+whatever built the model.
+
+**What would make it worth building: a named consumer that fuses tolerantly.**
+That is the trigger and there is no other. Until then the cost is not the policy
+argument, it is that closing it changes a `pub` signature that `fuse::arrange`
+and half a dozen test files call, for a caller nobody has named — which is
+exactly the trade §13 exists to settle. The doc comment tells such a caller to
+check itself against the door rather than against the census, and that sentence
+is the deferral's mitigation.
 
 ---
 
