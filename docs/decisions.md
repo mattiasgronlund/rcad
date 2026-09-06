@@ -17594,3 +17594,196 @@ Every item above stands on the other rows of §55.2, none of which depend on it.
 The claim is cheap to settle — dispatch a long `isolation: "worktree"` agent,
 `/clear`, and watch whether its transcript keeps growing — and it is left open
 rather than assumed, in either direction.
+
+## 56. A cone's apex after a turn and a shift, recorded 2026-09-06
+
+Three things a consumer raised in a channel overnight, none of which was in any
+rcad file when this session started. That is §55's defect, and the answer to it
+is this section rather than another reply.
+
+One was a defect that gave a consumer a confidently wrong answer, found by asking
+and fixed here. One was a number nobody had measured, and measuring it says the
+prediction was wrong by a factor of two — in rcad's favour, and for a reason worth
+writing down. The third was fixed by the import lane in `8358620` while this was
+being written; §56.6 says what that cost and what caught it.
+
+### 56.1 The demand: exact equality against `Cone::apex()`
+
+rscene shades a cone by asking the surface for a normal, and **a cone has no
+normal at its apex.** So its apex triangle is special-cased on *exact* equality
+against `Cone::apex()`, deliberately and not for want of a tolerance. A tolerance
+there is worse than nothing: a mesh point a whisker off the apex sits on a
+genuine ruling whose normal is a genuine answer, so widening the test hands the
+wedge middle back for a point that had a right answer available. What the exact
+test buys is that a miss is *visible* — the special case does not fire, and the
+consumer can say so.
+
+**A miss was therefore a wrong normal and not a refusal**, which is the failure
+mode this kernel exists to avoid. rscene could not test it end to end: no
+cone-faced solid can be built at their pin. So the equality was rcad's to
+demonstrate or to deny, and nothing had checked it.
+
+### 56.2 It was wrong, and only for a face that is both turned and shifted
+
+The two numbers arrive by different routes, and the routes were not the same
+movement.
+
+- **The apex a consumer reads** is `FaceView::surface`, placement composed in:
+  `Cone::transformed` carries the axis origin through `Isometry::apply_to_point`,
+  once.
+- **The apex the mesh emits** is worked out where the face is stored — §17.1's
+  frame — because `the_surface_this_face_is_meshed_on` reads a placed face's
+  surface out of the arena rather than moving it into the meshing frame and back.
+  `Cone::point_at(u, 0)` there is the stored apex exactly: both terms it adds are
+  zero vectors. That point was then carried out on
+  `the_frame_this_face_is_meshed_in(face).inverse()` — and a placed face is meshed
+  in its placement's own inverse, so the movement it rode was **the placement
+  inverted twice**.
+
+`Isometry::inverse` is not a bit-for-bit involution. It conjugates the
+quaternion, which only flips signs, but it replaces the shift with `−R⁻¹t`, which
+turns a vector and rounds; inverting again turns it back and rounds again. A pure
+shift survives that — the turn is the identity and Rodrigues' form adds nothing —
+and so does a pure turn about an axis through the origin, whose shift is zero and
+stays zero. **A turn with a shift on it has nothing protecting it**, and that is
+the ordinary case: it is what `Model::place_solid` is for and what an assembly is
+made of.
+
+### 56.3 The demonstration, and it is a census rather than one example
+
+`a_placed_cones_apex_and_the_point_the_mesh_puts_there`, four tests over 105
+placements of a pointed cone of slope a half and height eight.
+
+| family | placements | the doubled inversion moves the apex on | apex missed, before the fix |
+|---|---|---|---|
+| no placement at all | 1 | 0 | 0 |
+| a shift alone | 4 | 0 | 0 |
+| a turn about an axis through the origin | 20 | 0 | 0 |
+| a turn and then a shift | 80 | 50 | 50 |
+
+The two right-hand columns are the same 50 placements. That correspondence is
+what makes this a diagnosis rather than an observation: the misses are exactly
+the placements the doubled inversion moves, and no others.
+
+The third column is also what stops the suite passing for the wrong reason. Each
+family measures what inverting its own placements twice *would* have cost, and
+asserts the count against the sentences above — no pure shift, no pure turn, a
+real share of the turns with shifts. Without it the file could go green over a
+family that never exercised the bug and look identical.
+
+Worst miss found: one ulp, `[3, 5, 7]` read as `[2.9999999999999996, 5, 7]`.
+
+### 56.4 The fix
+
+`back_out_of_the_frame_this_face_is_meshed_in` rides a placed point out on the
+placement **itself**, which is the meshing frame's exact inverse, and falls back
+to inverting the frame for an unplaced face — where the frame is
+`a_shift_that_loses_nothing`, a negation, and exact either way. Five call sites in
+`mesh.rs` took it.
+
+It also makes an existing charge honest. `how_far_placing_this_face_rounds` bills
+one `Isometry::POINT_ROUNDOFF` for carrying a mesh point out to where the solid
+sits — one movement — and it is now one movement.
+
+### 56.5 The floor at a distance is `18 · ε · L`, measured, and not `36 · ε · L`
+
+rscene's rungs bracketed the floor of a radius-five ball at `1e14` only to
+`(0.1732051, 1.7320508]`, and a prediction of **0.79936** had been written down
+against it. Nothing had measured it, and `Error::DeflectionBelowWhatAMeshCanReach`
+hands `closest` to callers — a published number with nothing checking it (§15.6).
+
+Measured by `the_floor_under_a_placed_ball_is_one_placements_worth_of_rounding_and_not_two`,
+at `1f7b75c`:
+
+| the ball is out at | the floor | one placement's worth | ratio |
+|---|---|---|---|
+| `1e6` | `4.239223932641019e-9` | `3.996822872665007e-9` | 1.0606484 |
+| `1e10` | `3.996827130754963e-5` | `3.996802890648965e-5` | 1.0000061 |
+| `1e12` | `0.003996803131071608` | `0.0039968028886705476` | 1.000000061 |
+| `1e14` | **`0.3996802891074774`** | `0.39968028886507634` | 1.0000000006 |
+
+**So the floor at `1e14` is 0.39968, half the prediction.** It sits inside
+rscene's bracket, which is why their ladder could not tell the two apart.
+
+The remainder over one placement's worth is `2.4240105997601184e-10` at *every*
+distance — the walk's own share, charged against how far the ball reaches in the
+frame it is meshed in, and a placed ball is meshed in its own placement's inverse
+so it sees a radius-five ball at the origin wherever the solid sits. A
+distance-independent remainder is what pins the placement coefficient at one
+rather than merely bounding it under two.
+
+**The number the refusal carries changed while this was being measured, and the
+measurement did not move.** The deflection-floor unit landed in `8358620` between
+the first run and this one: `room_a_mesh_has_to_work_in` now lets a caller's own
+deflection through against `how_far_a_mesh_point_of_this_face_rounds` and
+*reports* `the_finest_deflection_the_walk_will_take`, which adds what a step at
+the walk's cap stands off its chord. That grew the remainder above by about eighty
+— the first run read `3.031649005909485e-12` — and moved no ratio in the table,
+because both numbers carry the same `how_far_moving_this_face_rounds` and the
+placement term lives there. A test written against a recorded floor would have
+gone red for a change that does not touch what it claims. This one is a closed
+form and did not.
+
+**Where 0.79936 came from, and it is not a defect in any doc comment.** It was
+read out of `the_surface_this_face_is_meshed_on`, whose doc derives `36 · ε · L`
+for a surface's movement round trip. That paragraph is the cost of a round trip
+the mesher **does not make** — it is the argument for reading a placed face's
+surface out of the arena — and it is demonstrated where it stands, by
+`a_turned_curved_face_is_not_charged_for_a_round_trip_it_does_not_make`. Taking it
+for a term in the floor is the misreading, not the sentence. The floor's terms are
+the walk's and `how_far_placing_this_face_rounds`, and for an unplaced face
+stored far out, `how_far_shifting_this_face_rounds` at
+`SURFACE_AFTER_SHIFTING_ROUNDOFF = 8 · ε` — the 1.44 factor
+`a_boolean_that_cuts_nothing_off_a_bar_does_not_make_it_much_coarser_to_mesh`
+already measures.
+
+A tolerant caller at `1e14` is cut at `ROOM_ABOVE_THE_FLOOR` times the floor,
+which *is* 0.79936 as the floor stood at `c9ff754`. The number was right about the
+wrong quantity.
+
+### 56.6 The import census and colour — closed by another lane, and closed wider
+
+The third channel item was `Import`'s doc saying **"what is walked past is counted
+rather than forgotten"** in the same paragraph that lists styling among what is
+walked past, with only the next clause narrowing the counting to shape-carrying
+entities. `SHAPES_THIS_READER_DOES_NOT_TAKE` holds seven keywords and no styling,
+so a `STYLED_ITEM` is read past and nothing on `Import` said so. A consumer read
+the first sentence, took the census for a complete one, and was about to publish a
+denominator saying the importer had dropped nothing out of 367 files — while it
+had dropped every colour in all of them. §52.14's shape: a list sound about most
+of its subject reading as complete.
+
+**It is fixed in `8358620`, by the import lane and not here.** This session had
+written the same fix independently and dropped it on finding the lane's, which is
+wider in the part that matters: it also names what happens to a file that carries
+styling and *no* solid. That file never reaches the map at all — `Import::read`
+returns `TheFileHoldsNoSolid`, or `TheFileHasNoSize` ahead of it — so a caller
+using the map as "what did the importer drop" gets an `Err` and never the empty
+map it would have branched on. `styling_is_never_among_the_shapes_walked_past`
+pins both halves over the real corpus, including the one NIST file with 272
+`STYLED_ITEM`s and no solid.
+
+Recorded here because the finding and the fix were two different sessions, and
+§55 is about acknowledgements that live nowhere: the duplicate cost one test and
+one doc edit, both thrown away, and finding the overlap took one `git diff`.
+
+### 56.7 What this does not close
+
+**Per-face colour out of STEP import is undecided, not refused.** rscene's §8.2
+demand is well-formed — `STYLED_ITEM` / `COLOUR_RGB` /
+`PRESENTATION_STYLE_ASSIGNMENT` / `SURFACE_STYLE_*` parsed, and a colour per
+`FaceKey` on `Import` — and it was acknowledged twice in channel and written into
+no rcad file until this line. It is recorded here as outstanding and nothing
+more. rscene is **not blocked**: it took the refused path, draws flat and reports
+colour unavailable, and its sink is built and tested, so adopting later is
+source-side only.
+
+**§56.5 measures a *placed* solid.** A solid whose stored numbers are far from the
+origin — what a fuse bakes and what an importer writes — pays
+`how_far_shifting_this_face_rounds` as well, and that case is pinned by the 1.44
+measurement named above rather than here.
+
+**The apex census sweeps placements, not cones.** One cone shape, 105 placements.
+A cone whose stored apex is not at the origin would exercise
+`a_shift_that_loses_nothing` on the unplaced path as well, and the public builder
+this suite goes through does not make one.
