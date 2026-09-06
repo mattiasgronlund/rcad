@@ -11790,6 +11790,42 @@ because §41.6's cap and §41.5's rotation are two new rows with no test between
 them. **It falls to six now**: both of those are closed and both left a test
 behind (§41.12).
 
+**`closest` is no longer the floor these rows are about, recorded 2026-09-06.**
+The two `DeflectionBelowWhatAMeshCanReach` rows above — `18·ε·L` far from the
+origin, and `1.4444×` after a fuse — and the sentence just above them are all
+about **how close a mesh point can be placed**, which is the floor
+`SolidView::mesh` still lets a *caller's own* deflection through against, and all
+three read it out of `closest`. §54's unit broke that tie: `closest` now carries
+**how fine a mesh can be cut**, the floor under a deflection the mesher picks for
+itself, which is the placing floor with the walk's step cap added to it.
+
+Measured here, hunting for the placing floor through the public API and reading
+the walk floor out of the refusal (§54.4): at the origin a round bar of radius
+one gives `9.214851104388813e-13` against `7.273230840146953e-11` and a ball of
+radius one gives `6.143234069592546e-13` against `4.848820560097969e-11` —
+`78.929` times apart in both cases. **So `closest` at the origin over-reports the
+floor these rows name by seventy-nine times.**
+
+The rows themselves stand, and the reason is the shape of the two formulas rather
+than a second measurement: the added term is a constant share of how far the face
+reaches and does not grow with the placement, while `how_far_moving_this_face_rounds`
+is in both floors and does. So the separation is at its widest at the origin and
+shrinks with distance, which is why §56.5's ratios did not move when this landed,
+and why `a_ball_a_long_way_out_cannot_be_meshed_as_finely_as_one_at_the_origin` is
+still green — it brackets `closest` between `1e-3` and `1.0` at `x = 1e12`, and
+both floors are inside that bracket.
+
+What has to be said differently is the *method*. `closest` is no longer **the only
+way a caller can learn where the floor is**, and for the placing floor it is no
+longer a way at all: the reading is now a hunt, bisecting for the deflection at
+which the refusal stops being the answer, which is what
+`the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away`
+does. That hunt terminates at the origin and **does not terminate far out**,
+where the first deflection above the floor is one the walk accepts and the mesh
+does not finish (§54.4). Any future measurement of the `18·ε·L` row needs a way
+round that, and §56.5's slope — the floor's rise per unit of placement — is one,
+because it cancels everything that does not move with the placement.
+
 ### 41.8 What the lanes flagged and did not build
 
 Five items, each with a demonstration and none of them a live crash.
