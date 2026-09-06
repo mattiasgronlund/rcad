@@ -13,14 +13,15 @@
 //! costs the caller a worse account of a refusal it gets anyway. This file asks
 //! it of files nobody here wrote.
 //!
-//! **The answer is that it buys nothing, and the reason is not the one it
-//! looks like.** The corpus does leave undecided decisions behind — every one
-//! of them on a run that was refused — and on the widest budget here they sit
-//! four thousand million times inside it and are refused anyway.
-//! [`assert_the_budget_was_not_what_stopped_them`] is that measurement. It also
-//! says where the policy stops being threaded, and which of the three stages
-//! reaches that site: `Import::read` and not the sweep or the mesher, so what
-//! the gap costs is a tolerant **importer**, four named files' worth.
+//! **The answer is that it buys an account of a refusal and not a file.** The
+//! corpus leaves undecided decisions behind — every one of them on a run that
+//! was refused — and a budget wide enough now resolves every one of them,
+//! because the crossing walk hands its caller's policy to the half-spaces that
+//! say which piece of a crossing a run is. Not one file's outcome moves for it.
+//! [`assert_the_budget_is_spent_and_that_it_refused_nothing`] is that
+//! measurement. It also says which of the three stages reaches the site:
+//! `Import::read` and not the sweep or the mesher, so who this serves is a
+//! tolerant **importer**, four named files' worth of account.
 //!
 //! # A null result is what a broken measurement gives too
 //!
@@ -237,13 +238,23 @@ fn a_shape_whose_corners_f64_cannot_place() {
 
 /// The measurement: every file in both corpora, under a certified policy and
 /// under three tolerant budgets, compared whole.
+///
+/// Two lists come out of it and they say different things. A run whose
+/// **outcome** moved is a file a tolerant policy read that a certified one
+/// refused, and there are none. A run whose **records** moved is a decision the
+/// budget was spent on, and there are some — which is the half of this that
+/// would go quiet if the walk stopped handing its policy to the half-spaces on
+/// a run.
 #[test]
 fn no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses() {
     let root = corpus();
-    let mut differences: Vec<String> = Vec::new();
+    let mut outcomes_that_moved: Vec<String> = Vec::new();
+    let mut records_that_moved: Vec<String> = Vec::new();
     let mut compared = 0;
     let mut records_seen_on_the_corpus = 0;
     let mut left_undecided_on_the_widest_budget = 0;
+    let mut resolved_on_the_widest_budget = 0;
+    let mut resolved_on_the_narrowest_budget = 0;
     let mut worst_wobble_on_the_widest_budget = 0.0_f64;
 
     for source in ["nist", "kicad"] {
@@ -266,10 +277,16 @@ fn no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses() {
                 }
                 tolerant.entry(what).or_default().add(&loose);
                 if let Some(said) = how_they_differ(&strict, &loose) {
-                    differences.push(format!(
+                    let said = format!(
                         "{source}/{} under tolerant({working_size}, {what}): {said}",
                         name_of(path)
-                    ));
+                    );
+                    if strict.outcome == loose.outcome {
+                        records_that_moved
+                            .push(format!("{said}; both came to {:?}", strict.outcome));
+                    } else {
+                        outcomes_that_moved.push(said);
+                    }
                 }
                 compared += 1;
             }
@@ -303,12 +320,16 @@ fn no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses() {
 
         let widest = &tolerant[BUDGETS[2].0];
         left_undecided_on_the_widest_budget += widest.records_on_a_refusal.values().sum::<usize>();
+        resolved_on_the_widest_budget += widest.resolved();
+        resolved_on_the_narrowest_budget += tolerant[BUDGETS[0].0].resolved();
         worst_wobble_on_the_widest_budget =
             worst_wobble_on_the_widest_budget.max(widest.worst_wobble);
     }
 
-    assert_the_budget_was_not_what_stopped_them(
+    assert_the_budget_is_spent_and_that_it_refused_nothing(
         left_undecided_on_the_widest_budget,
+        resolved_on_the_widest_budget,
+        resolved_on_the_narrowest_budget,
         worst_wobble_on_the_widest_budget,
     );
     assert!(
@@ -323,43 +344,53 @@ fn no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses() {
          budgets"
     );
     println!(
-        "{compared} pairs of runs compared, {} different",
-        differences.len()
+        "{compared} pairs of runs compared, {} whose outcome moved, {} whose records moved",
+        outcomes_that_moved.len(),
+        records_that_moved.len()
     );
     assert!(
-        differences.is_empty(),
-        "{} of {compared} corpus runs came out differently under a tolerant policy: \
-         {differences:#?}",
-        differences.len()
+        outcomes_that_moved.is_empty(),
+        "{} of {compared} corpus runs read, swept or meshed differently under a tolerant \
+         policy: {outcomes_that_moved:#?}",
+        outcomes_that_moved.len()
     );
+    assert!(
+        !records_that_moved.is_empty(),
+        "not one of {compared} corpus runs was told anything different under a tolerant policy, \
+         so the budget reached no decision on a real file: {records_that_moved:#?}"
+    );
+    println!("what a tolerant budget bought on a real file: {records_that_moved:#?}");
 }
 
-/// **Why tolerance bought nothing here is not that the budget was too small.**
+/// **The budget is spent on every decision the corpus leaves undecided, and
+/// not one of those decisions was what refused the file.**
 ///
 /// The corpus leaves records behind, all of them on runs that were refused, and
 /// on the widest budget every one of them has a wobble the budget covers many
-/// times over. A tolerant caller who has said it will accept a point a
-/// hundredth of a millimetre out of place is refused over a decision worth
-/// picometres, and the record it gets carries no approximation — nothing
-/// resolved it, and the outcome is the same one the certified run got.
+/// times over. Those are the half-spaces that say which piece of a crossing a
+/// run is, and `rcad-geom`'s `which_side_of` hands each of them to
+/// `resolve_under_policy` — so a tolerant caller's decision comes back
+/// [`Cause::UndecidableResolved`] with the wobble it accepted written on it,
+/// where a certified caller's is left undecided and unresolved.
 ///
-/// **A gap and not a limit** (`docs/decisions.md` §16.10): the answer is inside
-/// `f64`, inside the budget, and the arithmetic did not reach it. The reason is
-/// in the signature of `which_side_of` in `rcad-geom/src/walk.rs`, which pushes
-/// its own [`Record`](rcad_predicates::Record) and hands back
-/// `Decision::Undecidable` without taking a `&Policy` at all — so
-/// `resolve_under_policy`, the one place a budget is ever spent, is never
-/// reached from there. The families of fix considered: a wider budget (measured
-/// here across a ten-thousand-millionfold range, and none of them changed a
-/// single outcome), a better filter (would move which decisions are undecided,
-/// not what a policy does with the ones that are left), and threading the
-/// policy through. Only the third one can change anything, and it is outside
-/// this file to make.
+/// **And the file is refused either way.** `every_half_space_holds` rules a
+/// piece of a crossing out on `Decision::Neg` and on nothing else, so a
+/// half-space that could not tell already held the piece and one resolved to
+/// `Decision::Zero` holds it too. Resolving these moved the account and not the
+/// answer, which is why the sweep above still finds no run whose outcome
+/// changed. `crates/rcad-geom/tests/whether_a_tolerant_policy_reaches_the_half_spaces_on_a_run.rs`
+/// is that one decision built by hand, where it can be read.
 ///
-/// # Who the gap actually costs
+/// The narrowest budget here is the third thing asserted, and it is what keeps
+/// the other two honest: at a working size of 100 mm the budget is 1.4e-12 mm
+/// and the worst wobble on the corpus is 3.8e-12 mm, so nothing is resolved
+/// under it. A run that resolved decisions under every budget would be a policy
+/// waving them through rather than judging them.
 ///
-/// It is reached from `Import::read`, and from neither `Model::validate` nor
-/// `SolidView::mesh`. Measured by decomposing this corpus into those three
+/// # Who this serves
+///
+/// The site is reached from `Import::read`, and from neither `Model::validate`
+/// nor `SolidView::mesh`. Measured by decomposing this corpus into those three
 /// stages, each with a fresh [`ProvenanceLog`] and a fresh `Import::read` so no
 /// stage could inherit another's: over the 97 kicad and 1 nist files that
 /// import, **every one of the three stages logs nothing**, and so does all
@@ -372,41 +403,59 @@ fn no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses() {
 /// - `Relay_SPDT_Finder_34.51_Vertical.step` — 1 record, and it is the worst
 ///   wobble this test reports
 ///
-/// So the gap costs a **tolerant importer** four files it might have had, and
-/// costs a tolerant *mesher* nothing measurable. A viewport that only meshes
-/// what imported never walks into it, and this file should not be read as
-/// saying one is being silently mis-served today. It also explains why a
-/// downstream consumer counting records over the files it draws reports zero
-/// where this reports 31: both are right, and the population is the difference.
+/// So a **tolerant importer** is the one served, and a tolerant *mesher*
+/// measurably nobody. It also explains why a downstream consumer counting
+/// records over the files it draws reports zero where this reports 31: both are
+/// right, and the population is the difference.
 ///
-/// **Two things that are not measured, and are not claims.** This locates the
-/// site on *this corpus*, not in principle — `which_side_of` sits in the
+/// **The open question this file used to carry is now answered.** Whether
+/// resolving those half-spaces would let the four relays through or only move
+/// them to a later refusal could not be measured until the policy was threaded.
+/// It is threaded, and the answer is neither: all four are refused with the
+/// same *what #15 describes is not a solid this kernel can hold* they were
+/// refused with before, because the decision the budget resolved was never what
+/// refused them. The ceiling did not move.
+///
+/// **One thing that is still not measured, and is not a claim.** This locates
+/// the site on *this corpus*, not in principle — `which_side_of` sits in the
 /// crossing walk and some other solid may well reach it from the mesher.
-/// And whether resolving those half-spaces would actually let the four relays
-/// through, rather than moving them to some later refusal, cannot be measured
-/// until the policy is threaded, because there is no way from here to ask what
-/// the rest of the build would have said. All four are refused with *what #15
-/// describes is not a solid this kernel can hold*, and that question belongs to
-/// whoever threads it.
-///
-/// This assertion is what would go red when that happens, and that would be the
-/// fix arriving rather than a regression.
-fn assert_the_budget_was_not_what_stopped_them(left_undecided: usize, worst_wobble: f64) {
+fn assert_the_budget_is_spent_and_that_it_refused_nothing(
+    left_undecided: usize,
+    resolved_on_the_widest: usize,
+    resolved_on_the_narrowest: usize,
+    worst_wobble: f64,
+) {
     let budget = Policy::tolerant(BUDGETS[2].1).max_wobble();
     assert!(
         left_undecided > 0,
         "no decision anywhere in either corpus was left undecided, so this says nothing about \
-         why a budget did not settle one"
+         what a budget does with one"
     );
     assert!(
         worst_wobble > 0.0 && worst_wobble < budget,
         "{left_undecided} decisions were left undecided on a budget of {budget:e} mm and the \
-         worst of them was only {worst_wobble:e} mm out of place, or it was not: the whole \
-         point of this measurement is that the budget covers them and they were refused anyway"
+         worst of them was {worst_wobble:e} mm out of place, or it was not: this measurement \
+         needs a budget that covers them"
+    );
+    assert_eq!(
+        resolved_on_the_widest, left_undecided,
+        "the widest budget covers every one of those {left_undecided} decisions, so every one \
+         of them has to come back resolved, and {resolved_on_the_widest} did"
+    );
+    let narrowest = Policy::tolerant(BUDGETS[0].1).max_wobble();
+    assert!(
+        narrowest < worst_wobble,
+        "this measurement needs a budget of {narrowest:e} mm that does not cover the worst \
+         wobble of {worst_wobble:e} mm, and it does"
+    );
+    assert_eq!(
+        resolved_on_the_narrowest, 0,
+        "a budget of {narrowest:e} mm does not cover a wobble of {worst_wobble:e} mm, so it may \
+         resolve nothing, and it resolved {resolved_on_the_narrowest}"
     );
     println!(
-        "{left_undecided} decisions refused on a {budget:e} mm budget, worst {worst_wobble:e} mm \
-         — a factor of {:.0} inside it",
+        "{left_undecided} decisions resolved on a {budget:e} mm budget, worst {worst_wobble:e} \
+         mm — a factor of {:.0} inside it — and none resolved on a {narrowest:e} mm one",
         budget / worst_wobble
     );
 }
@@ -573,6 +622,22 @@ impl WhatACorpusCameTo {
     fn records(&self) -> usize {
         self.records_coming_through.values().sum::<usize>()
             + self.records_on_a_refusal.values().sum::<usize>()
+    }
+
+    /// How many of those records are of a decision the policy's budget was
+    /// spent on, rather than one nothing could settle.
+    ///
+    /// Keyed on the cause the record itself carries, so a record filed under a
+    /// cause this file has never heard of counts as unresolved rather than
+    /// being quietly counted as resolved.
+    fn resolved(&self) -> usize {
+        let under_a_budget = format!("{:?}", Cause::UndecidableResolved);
+        self.records_coming_through
+            .iter()
+            .chain(&self.records_on_a_refusal)
+            .filter(|((_, cause), _)| *cause == under_a_budget)
+            .map(|(_, count)| count)
+            .sum()
     }
 }
 
