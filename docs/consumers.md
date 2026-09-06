@@ -560,6 +560,47 @@ Nothing else is withdrawn. Every figure at or above the floor stands, the bar an
 the two small balls stand, and the far-from-the-origin floor stands to the digits
 anyone was likely to quote.
 
+### A sentence downstream that only a defect up here made true
+
+The announcement machinery above watches **numbers**: a bound or a rate rcad
+publishes moves, and the move gets announced whether or not anyone thinks it
+matters. That catches the case it was built for and misses a second one, which
+this section is here to name:
+
+> **A downstream sentence whose truth rests on an rcad defect existing.** Fixing
+> the defect makes it false. No number moves, no line of code changes on either
+> side, and nothing in either tree says so.
+
+The worked instance is §56's apex fix. rscene's near-apex report tells callers,
+in a public doc comment, that a face appearing in it says something about the
+kernel — that the apex a placed cone's surface names and the one its mesher
+emits arrived by two routes. That was true, and it was rcad's defect that made it
+true. After the fix a placed cone face cannot separate the two spellings at all,
+so the sentence is not merely stale: the same report now means the opposite
+thing, that rscene's own tolerance swallowed a good point. A caller acting on the
+old wording files a bug against rcad for something rcad did not do. rscene owns
+that text and is rewriting it; the wording is theirs and is not restated here.
+
+**What rcad owes is the trigger, not the rewrite.** The side that fixes a defect
+is the only side that knows the moment it stopped existing, and a consumer cannot
+watch for it — there is nothing to watch. So a fix that closes a defect a
+consumer has *described* is an announcement here, in the same way a moved number
+is, and the bullet the announcements sit under should be read as covering both.
+
+The reason this is worth a category rather than a note: it is the failure mode
+where both trees are green, both documents are internally consistent, and the
+disagreement lives only in what a sentence means. `rcad` cannot find it by
+running anything.
+
+**Two ways past that guard, not one.** The leaning-bars row above is the sharper
+half of the contrast, because it is a case the machinery *could* see and missed
+anyway: `4.848820560097969e-11` was present, announced, and correct to the digit
+— and wrong in its **dimension**, a floor per unit of the shape's reach written
+as though it were a length. So watching numbers fails twice over. It misses the
+sentence with no number in it, which is this section, and it passes a number that
+is right about its digits and wrong about what it is a number *of*. A figure is
+not checked by being announced.
+
 ### What rcad asks in return
 
 - **A visual oracle for the mesher, with the `Model` attached.** A triangle that
