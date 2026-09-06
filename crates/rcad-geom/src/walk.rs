@@ -32,7 +32,7 @@ use core::cmp::Ordering;
 
 use rcad_predicates::{
     Approximation, Cause, Decision, Interval, Level, Measures, Point as PredicatePoint, Policy,
-    ProvenanceLog, Record,
+    ProvenanceLog, Record, resolve_under_policy,
 };
 
 use crate::exact::Exact;
@@ -333,7 +333,7 @@ pub fn walk(
     }
 
     let pair = the_two_surfaces_it_runs_between(run, along);
-    let conic = match what_a_run_between_these_two_lies_on(pair, run, log)? {
+    let conic = match what_a_run_between_these_two_lies_on(pair, run, policy, log)? {
         WhatARunLiesOn::StraightLine => return Ok(nothing_between_the_ends()),
         WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
             return follow_the_quartic(run, pair, seeds, deflection, policy, log);
@@ -362,7 +362,7 @@ pub fn walk(
         });
     };
 
-    let (from, to) = conic.the_stretch_this_run_covers(run, deviation, log)?;
+    let (from, to) = conic.the_stretch_this_run_covers(run, deviation, policy, log)?;
     let steps = how_many_steps(&conic, to - from, room)?;
     let points = (1..steps)
         .map(|step| conic.at(from + (to - from) * (step as f64) / (steps as f64)))
@@ -414,16 +414,30 @@ pub fn walk(
 /// for the straight lines above and for the same reason: a curve that runs on
 /// for ever has no one place a vertex has to go. A plane through the apex
 /// crosses the cone in straight lines and gets it too.
+///
+/// # It takes no policy, so it asks the half-spaces under a certified one
+///
+/// [`walk`] hands its caller's policy down to the half-spaces that say which
+/// piece of a crossing a run is, so a tolerant caller's budget is spent there.
+/// This does not, because it has no policy to hand down, and a picker it cannot
+/// decide leaves it with the same tie a certified caller gets.
+///
+/// **That is a gap and not a limit**, and the reason it is still here is that
+/// closing it changes a `pub` signature that `rcad-topo`'s fuse and half a dozen
+/// test files call. Nothing measured reaches a picker through this door: the 31
+/// undecided half-spaces the STEP corpus leaves behind all come in through
+/// [`walk`], from `Model::validate` checking which way a flat face's wire winds.
 pub fn where_a_closed_crossing_starts(
     run: &NamedRun,
     along: [&Surface; 2],
     log: &mut ProvenanceLog,
 ) -> Result<Point> {
+    let certified = Policy::certified();
     let pair = the_two_surfaces_it_runs_between(run, along);
-    match what_a_run_between_these_two_lies_on(pair, run, log)? {
+    match what_a_run_between_these_two_lies_on(pair, run, &certified, log)? {
         WhatARunLiesOn::StraightLine => Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
         WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
-            the_seed_this_run_is_picked_up_at(run, &pair, seeds, log)
+            the_seed_this_run_is_picked_up_at(run, &pair, seeds, &certified, log)
         }
         WhatARunLiesOn::Parabola(_) | WhatARunLiesOn::OneBranchOfAHyperbola(_) => {
             Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed)
@@ -518,6 +532,7 @@ enum WhatARunLiesOn {
 fn what_a_run_between_these_two_lies_on(
     pair: [Surface; 2],
     run: &NamedRun,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<WhatARunLiesOn> {
     match pair {
@@ -544,14 +559,14 @@ fn what_a_run_between_these_two_lies_on(
         // this is is the picker's to say.
         [Surface::Plane(flat), Surface::Cone(cone)]
         | [Surface::Cone(cone), Surface::Plane(flat)] => {
-            where_a_plane_cuts_a_cone(&flat, &cone, run, log)
+            where_a_plane_cuts_a_cone(&flat, &cone, run, policy, log)
         }
         // A plane cuts a torus in **two** circles as often as in one, and which
         // of them this run is is the picker's to say — which is why this is the
         // one arm here that reads the run rather than only the pair.
         [Surface::Plane(flat), Surface::Torus(ring)]
         | [Surface::Torus(ring), Surface::Plane(flat)] => {
-            where_a_plane_cuts_a_torus(&flat, &ring, run, log).map(WhatARunLiesOn::Conic)
+            where_a_plane_cuts_a_torus(&flat, &ring, run, policy, log).map(WhatARunLiesOn::Conic)
         }
         // **In a fixed order, and it is not tidiness.** `where_two_balls_cut`
         // builds the radical plane through the gap between the two centres, so
@@ -611,7 +626,8 @@ fn what_a_run_between_these_two_lies_on(
         // two circles it is, is the picker's to say.
         [Surface::Cone(cone), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Cone(cone)] => {
-            where_a_coaxial_cone_and_pipe_cut(&cone, &pipe, run, log).map(WhatARunLiesOn::Conic)
+            where_a_coaxial_cone_and_pipe_cut(&cone, &pipe, run, policy, log)
+                .map(WhatARunLiesOn::Conic)
         }
         [Surface::Cone(_), Surface::Sphere(_) | Surface::Cone(_)]
         | [Surface::Sphere(_), Surface::Cone(_)] => {
@@ -673,7 +689,7 @@ fn follow_the_quartic(
 ) -> Result<PointsAlongACrossing> {
     let half_the_budget = deflection.length() / 2.0;
     let surfaces = [&pair[0], &pair[1]];
-    let seed = the_seed_this_run_is_picked_up_at(run, &pair, seeds, log)?;
+    let seed = the_seed_this_run_is_picked_up_at(run, &pair, seeds, policy, log)?;
 
     let walked = march(
         surfaces,
@@ -710,6 +726,7 @@ fn the_seed_this_run_is_picked_up_at(
     run: &NamedRun,
     pair: &[Surface; 2],
     seeds: [Point; 2],
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Point> {
     let surfaces = [&pair[0], &pair[1]];
@@ -721,7 +738,7 @@ fn the_seed_this_run_is_picked_up_at(
     let mut settled_seeds = Vec::new();
     for seed in seeds {
         let (settled, off) = settled_with_a_bound(surfaces, seed)?;
-        if picked_by.is_empty() || every_half_space_holds(picked_by, settled, off, log) {
+        if picked_by.is_empty() || every_half_space_holds(picked_by, settled, off, policy, log) {
             settled_seeds.push(settled);
         }
     }
@@ -1150,12 +1167,13 @@ fn every_half_space_holds(
     picked_by: &[Picker],
     at: Point,
     deviation: f64,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> bool {
     let at = somewhere_within(at, deviation);
     let mut on_or_outside = true;
     for picker in picked_by {
-        if which_side_of(picker, at, log) == Decision::Neg {
+        if which_side_of(picker, at, policy, log) == Decision::Neg {
             on_or_outside = false;
         }
     }
@@ -1363,6 +1381,7 @@ impl Conic {
         &self,
         run: &NamedRun,
         deviation: f64,
+        policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<(f64, f64)> {
         let ends = run.ends().map(|end| {
@@ -1391,7 +1410,7 @@ impl Conic {
         let backwards = from + wrapped(to - from) - core::f64::consts::TAU;
         let mut picked: Vec<(f64, f64)> = Vec::new();
         for end in [onwards, backwards] {
-            if self.picked_by_all(picked_by, (from + end) / 2.0, deviation, log) {
+            if self.picked_by_all(picked_by, (from + end) / 2.0, deviation, policy, log) {
                 picked.push((from, end));
             }
         }
@@ -1408,20 +1427,39 @@ impl Conic {
         picked_by: &[Picker],
         middle: f64,
         deviation: f64,
+        policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> bool {
-        every_half_space_holds(picked_by, self.at(middle), deviation, log)
+        every_half_space_holds(picked_by, self.at(middle), deviation, policy, log)
     }
 }
 
-/// Which side of a half-space the box `at` is on, recording the answer when
-/// nothing could tell.
+/// Which side of a half-space the box `at` is on, spending the policy's budget
+/// on the answer when nothing could tell and recording it either way.
 ///
 /// A half-space that could not tell rules out neither piece, so both come back
 /// picked and the caller is refused rather than handed a coin toss. It is
 /// recorded because it happened, and because the refusal that follows says
 /// nothing about which half-space gave up.
-fn which_side_of(picker: &Picker, at: PredicatePoint, log: &mut ProvenanceLog) -> Decision {
+///
+/// **A tolerant caller is not refused before its budget is looked at.** The box
+/// handed in is `deviation` wide on every side, so "undecided" here means the
+/// box straddles the surface — and a caller that has already said it will accept
+/// a point that far out of place has said it will accept this. So the record
+/// goes through [`resolve_under_policy`], which reads the enclosure as
+/// [`Decision::Zero`] when the budget covers it and leaves it undecided when it
+/// does not. A certified policy is unmoved: it takes the `Certified` arm there,
+/// which hands back the same `Undecidable` and pushes the same record this used
+/// to push by hand.
+///
+/// `Decision::Zero` is the picker holding the piece, exactly as a certified zero
+/// is: only [`Decision::Neg`] rules a piece out.
+fn which_side_of(
+    picker: &Picker,
+    at: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Decision {
     let decision = picker.side_of_point(at);
     let named = picker.predicate_name();
     let measures = match picker {
@@ -1431,17 +1469,14 @@ fn which_side_of(picker: &Picker, at: PredicatePoint, log: &mut ProvenanceLog) -
         }
     };
     match decision {
-        Decision::Pos | Decision::Zero | Decision::Neg => (),
-        Decision::Undecidable { .. } => log.push(Record::new(
-            named,
-            &[at],
-            Level::Interval,
-            decision,
-            measures,
-        )),
+        Decision::Pos | Decision::Zero | Decision::Neg => decision,
+        Decision::Undecidable { .. } => resolve_under_policy(
+            Record::new(named, &[at], Level::Interval, decision, measures),
+            policy,
+            log,
+        ),
         other => panic!("a half-space came back with a decision nothing knows: {other:?}"),
     }
-    decision
 }
 
 /// The circle where a plane cuts a ball.
@@ -1615,6 +1650,7 @@ fn where_a_plane_cuts_a_cone(
     flat: &Plane,
     cone: &Cone,
     run: &NamedRun,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<WhatARunLiesOn> {
     let normal = flat.normal().components();
@@ -1689,6 +1725,7 @@ fn where_a_plane_cuts_a_cone(
             [apex, centre],
             [across, and],
             run,
+            policy,
             log,
         );
     }
@@ -1757,6 +1794,7 @@ fn which_branch_of_a_hyperbola_this_run_is(
     places: [Point; 2],
     directions: [Vector; 2],
     run: &NamedRun,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<WhatARunLiesOn> {
     let [towards, sideways_reach, standing_off] = spread;
@@ -1777,7 +1815,7 @@ fn which_branch_of_a_hyperbola_this_run_is(
             size,
         };
         let deviation = POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * size;
-        if every_half_space_holds(picked_by, branch.at(0.0), deviation, log) {
+        if every_half_space_holds(picked_by, branch.at(0.0), deviation, policy, log) {
             held.push(branch);
         }
     }
@@ -1950,6 +1988,7 @@ fn where_a_plane_cuts_a_torus(
     flat: &Plane,
     ring: &Torus,
     run: &NamedRun,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Conic> {
     let candidates = if flat.normal().cross(ring.axis().direction()) == Vector::zero() {
@@ -1957,7 +1996,7 @@ fn where_a_plane_cuts_a_torus(
     } else {
         the_two_meridian_circles(flat, ring)
     };
-    which_of_these_circles_this_run_is(candidates, run, log)
+    which_of_these_circles_this_run_is(candidates, run, policy, log)
 }
 
 /// The circles a plane square to a torus's axis cuts, outer first.
@@ -2054,12 +2093,18 @@ fn where_a_coaxial_cone_and_pipe_cut(
     cone: &Cone,
     pipe: &Cylinder,
     run: &NamedRun,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Conic> {
     if whether_a_cone_and_a_pipe_share_an_axis(cone, pipe) != Decision::Zero {
         return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
     }
-    which_of_these_circles_this_run_is(the_two_circles_a_cone_and_a_pipe_cut(cone, pipe), run, log)
+    which_of_these_circles_this_run_is(
+        the_two_circles_a_cone_and_a_pipe_cut(cone, pipe),
+        run,
+        policy,
+        log,
+    )
 }
 
 /// The two circles a cone and a pipe on one axis cross in, the one the axis
@@ -2107,6 +2152,7 @@ fn the_two_circles_a_cone_and_a_pipe_cut(cone: &Cone, pipe: &Cylinder) -> Vec<Co
 fn which_of_these_circles_this_run_is(
     candidates: Vec<Conic>,
     run: &NamedRun,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Conic> {
     if candidates.iter().any(|circle| {
@@ -2134,7 +2180,7 @@ fn which_of_these_circles_this_run_is(
             .all(|end| circle.how_far_off_it(*end) <= deviation);
         if holds_every_end
             && (picked_by.is_empty()
-                || every_half_space_holds(picked_by, circle.at(0.0), deviation, log))
+                || every_half_space_holds(picked_by, circle.at(0.0), deviation, policy, log))
         {
             held.push(circle);
         }
@@ -2426,6 +2472,7 @@ mod tests {
                 what_a_run_between_these_two_lies_on(
                     [one, other],
                     &whole,
+                    &Policy::certified(),
                     &mut ProvenanceLog::new()
                 ),
                 Ok(WhatARunLiesOn::QuarticPickedUpAt(_))
