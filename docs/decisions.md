@@ -13482,8 +13482,8 @@ and one was never started.
 | 6 | the file's unit reaches `Scale::unit`; an unknown unit is refused | **met** | `a_file_written_in_inches_comes_back_in_inches` measures one cubic inch and not 16.387 of anything, and `a_unit_the_kernel_does_not_have_is_refused_rather_than_scaled`. No length conversion happens anywhere: §3.5 says a unit is a label, so `CONVERSION_BASED_UNIT` is matched against an exact table of eight `(factor, base)` pairs and a factor outside it is refused with the number printed |
 | 7 | a file asking for more precision than its numbers carry says so | **met, and vacuous on the corpus** | `a_file_declaring_more_precision_than_its_numbers_carry_says_so`, one comparison of two numbers the file wrote. **0 of 367 real files reach it** — every one declares something around `1e-7` on a part tens of millimetres across, about `10^9` coordinate spacings and comfortably keepable. The check is real and the corpus does not exercise it |
 | 8 | two solids that occupy the same space are not called a valid model | **unmet** | Nothing was built. The tree pins the opposite: `two_solids_described_at_the_same_place_are_still_called_a_valid_model` builds a cube, describes the same cube again through `SolidBuilder`, and the certified sweep returns `Ok(())`. A grep for a public interference pass over `crates/*/src` returns nothing. §42.10's lane 4 never ran. The test fails the day the criterion is met, which is §19's shape and the right way to leave it |
-| 9 | every solid the corpus yields validates, or the refusal names one | **met, under another name** | Not `every_solid_in_the_corpus_validates_or_the_refusal_names_one` but the harness's own `.expect("and every imported model validates under a certified policy")` inside `how_often_a_real_file_imports.rs`, run over all 46 KiCad imports and all 88 control files. **No imported model has ever failed the sweep**, and structurally none can: `SolidBuilder::build` writes into a throwaway model, runs the real sweep over that, and only writes into the caller's model if the sweep is happy |
-| 10 | the import rate, family by family and never blended, with a control at 100% | **met in part** | `how_often_a_real_file_imports` measures and publishes three families — control **88/88**, KiCad **46/323 = 14.2%**, NIST **0/44** — with per-family refusal breakdowns and a corner-miss distribution. The control's 88 is asserted and one refusal there is one failure. **But nothing asserts the real-file rate.** If 46/323 fell to 1/323 the test would still pass. And the whole measurement is behind `RCAD_STEP_CORPUS`: `mise exec -- just default` is green at 1427 tests with the variable unset, so the headline is not in the suite CI runs |
+| 9 | every solid the corpus yields validates, or the refusal names one | **met, under another name** | Not `every_solid_in_the_corpus_validates_or_the_refusal_names_one` but the harness's own `.expect("and every imported model validates under a certified policy")` inside `how_often_a_real_file_imports.rs`, run over every KiCad import — 46 when this was written, 97 measured today — and all 88 control files. **No imported model has ever failed the sweep**, and structurally none can: `SolidBuilder::build` writes into a throwaway model, runs the real sweep over that, and only writes into the caller's model if the sweep is happy |
+| 10 | the import rate, family by family and never blended, with a control at 100% | **met in part** | `how_often_a_real_file_imports` measures and publishes three families — control **88/88**, KiCad **97/323 = 30.0%**, NIST **1/44 = 2.3%** — with per-family refusal breakdowns and a corner-miss distribution. The control's 88 is asserted and one refusal there is one failure. **The real-file rate is asserted too, by name and not by rate.** `d23c700` pinned the KiCad set as `KICAD_FILES_THAT_IMPORT`, and `assert_pinned_kicad_imports` compares it against what imported as a *set*, so it fails **both ways**: a file that starts importing fails it exactly as a file that stops does, and the message names which files moved rather than handing back a count (§44.10). What is still missing is only that the whole measurement sits behind `RCAD_STEP_CORPUS`, so it is not in the suite a run without that variable covers. Row rates re-measured 2026-09-06 with `mise exec -- just t how_often_a_real_file_imports --no-capture`; the row said `46/323 = 14.2%` and `0/44`, which is the tree at `d23c700` and before the lanes that moved both — `KICAD_FILES_THAT_IMPORT`'s own doc comment accounts for the fifty and then the one |
 | 11 | `add_extrusion` bakes its lift | **unmet** | `crates/rcad-topo/src/build.rs:571` still writes `ShellUse { shell, loc: *placement, .. }`. No test of that name exists anywhere. §41.13's §19 violation is untouched |
 | 12 | the mesher reads a placed face's stored surface instead of round-tripping it | **unmet** | `crates/rcad-topo/src/fuse/select.rs:1045` still charges `Surface::ROUND_TRIP_ROUNDOFF`, which is `256 · f64::EPSILON`. §41.11 item 19 is untouched |
 | 13 | `Approximation` gets the boundary guard `Scale` has | **unmet** | `Approximation` still derives a plain `Deserialize` with no `try_from` in `crates/rcad-predicates/src/provenance.rs`. `rcad-predicates` is at **0 files changed for the whole milestone** |
@@ -17745,7 +17745,7 @@ and the `rcad-step` one runs 2, and all 33 pass.
 | `9.2148511043888e-13` and `7.273230840146953e-11`, the two floors of a bar of radius one at the origin (`mesh.rs`) | nothing | **no test** |
 | `6.143234069592533e-13`, `4.848820560097969e-11` and *78.93 times apart* for a ball at the origin (`error.rs`) | nothing — the hunt above is in one test's prose, and that test asserts only that four leans agree | **no test** |
 | `741 455` steps at twice the floor against `1 048 576` at it (`ROOM_ABOVE_THE_FLOOR`) | nothing | **no test** |
-| the leaning-cap figures: a conic reach of `9.999999999999999e8` at `lean = 1e9`, a crossing rounding of `5.6843418889229724e-5`, a floor of `9.697641120195938e-11` (`mesh.rs`) | nothing — the lean sweep that exists uses `4e9`…`1e11` and asserts no value | **no test** |
+| the leaning-cap figures: a conic reach of `9.999999999999999e8` at `lean = 1e9`, a crossing rounding of `5.6843418889229724e-5`, a floor of `9.697641120195938e-11` (`mesh.rs`) | nothing, and nothing is owed — `f9d54e0` deleted the doc block that held all three | **withdrawn** |
 
 **The first row is the one worth reading twice.** The test asserts
 `closest > 1 − cos(π / MOST_POINTS_ALONG_ONE_CROSSING)` on a bar of radius one at
@@ -17758,12 +17758,31 @@ and a half million boundary points and the triangulator was still running after
 two minutes. So the promise is checked from the refusal side and not from the
 mesh side, and that is a gap this section names rather than one it hides.
 
-**Four rows say *no test*, and three of them are the same species**: a floor's
-value written into a doc comment because somebody measured it once. §56.5 made
-exactly this repair for the floor at a distance, and the same repair is available
-here — a test that hunts for both floors of one shape at the origin and asserts
-the pair, which is cheap because both refusals are immediate. **This section does
-not make it**: this lane owns `docs/` only. It is recorded as owed.
+**Three rows say *no test*, and they are one species**: a floor's value written
+into a doc comment because somebody measured it once. §56.5 made exactly this
+repair for the floor at a distance, and the same repair is available here — a
+test that hunts for both floors of one shape at the origin and asserts the pair,
+which is cheap because both refusals are immediate. **This section does not make
+it**: this lane owns `docs/` only. It is recorded as owed.
+
+**The fourth row is not owed, because the bound it asks for a test on no longer
+exists.** It was written as a fourth *no test* and it is a **withdrawn** bound.
+`f9d54e0` rewrote `the_finest_deflection_the_walk_will_take`'s doc block and
+deleted all three numbers with it — the conic reach, the crossing rounding and
+the floor — and that commit sits inside the reach under-charge unit, merged as
+`74c14c7` immediately before this section was written. So the census read a tree
+that had already moved under it and asked for a test on a number nothing
+publishes any more. Deleting the row would hide that; a row that says *withdrawn*
+and names the commit does not.
+
+What the block says now is a different claim about a different tree. The wall's
+reach is no longer `2` at every lean: `mesh.rs` records `2000001.5` at
+`lean = 1e6` and `4000000001.5` at `lean = 2e9`, which is `2 · lean + 1.5`, the
+way the ellipse itself climbs. Those two are a *shape* under test rather than two
+asserted values — `what_a_leaning_cut_costs_the_floor_under_a_mesh.rs` divides
+the floor by that oracle at four leans and asserts the four shares agree — and
+the floors that come out of it are asserted to the last digit by
+`what_floor_a_bar_with_a_leaning_cap_is_given.rs`.
 
 ### 58.6 The new floor is too low on a leaning cut, and this unit did not close it
 
@@ -17793,6 +17812,18 @@ numbers it is wrong about, which is what is claimed today and is a claim about
 **who chose the deflection**, not about a face's reach covering its crossings'.
 The third is free and the tree takes it. Extending this floor to a caller-named
 deflection would turn a floor that does not bind into a wrong answer.
+
+**Everything above this line is the tree as it was, and the gap has since been
+closed by the second of those three and not the third.** The reach under-charge
+unit, merged as `74c14c7`, made `how_far_the_points_of_reach` bound a pipe's or a
+cone's face along its own axis from the pair of surfaces either side of each of
+its edges. `f9d54e0` inside it rewrote the doc block this section is reading, so
+"whose reach is `2` at every lean" is no longer true of anything: the wall now
+reaches `2 · lean + 1.5`. What survives is the narrow claim — a face's reach
+still does not cover its crossings' where nothing along an edge bounds where that
+edge runs, a cone met by a pipe on its own axis being such an edge. Only the
+`Cylinder` and `Cone` arms moved: a ball and a ring are bounded surfaces, so
+`Sphere` and `Torus` are still charged from their corners.
 
 ### 58.7 The step cap is a gap; the rounding under it is a limit
 
