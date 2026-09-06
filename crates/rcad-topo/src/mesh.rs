@@ -2262,8 +2262,9 @@ fn how_far_a_mesh_point_of_this_face_rounds(
 /// [`how_far_the_points_of_reach`], a box the whole face fits inside.
 /// **Different numbers, and no longer different questions**: a face on a pipe or
 /// a cone is held along its own axis by the pair of surfaces either side of each
-/// of its edges, which is where its crossings are, and only a surface that is
-/// bounded to start with — a ball, a ring — is still charged from its corners.
+/// of its edges, which is where its crossings are, and a surface that is bounded
+/// to start with — a ball, a ring — is held by its own centre and its own reach
+/// out of it.
 ///
 /// A bar cut off by a leaning plane is what that bought. The ellipse is walked
 /// as an edge of the **wall** face — a plane reaches zero here and returns
@@ -2625,13 +2626,34 @@ fn how_far_placing_this_face_rounds(
 ///
 /// Zero for a flat face, for the reason above.
 ///
-/// # Where the corners are enough, and where they are not
+/// # No surface here is charged from a corner
 ///
-/// A **ball** and a **ring** are bounded surfaces: every point of one is within
-/// `radius`, or within `R + r`, of a corner that is itself on the surface, so
-/// the corners plus that number hold the face wherever it is trimmed to.
+/// A **ball** and a **ring** are bounded surfaces, so the point they are
+/// measured from is their own **centre**: nothing on a ball is further than
+/// `radius` from it and nothing on a ring is further than `R + r`, whatever the
+/// face is trimmed to. Both used to be charged `corner + radius` instead, from
+/// whichever corner had the largest coordinate, and a corner is a place on the
+/// surface and not the middle of it.
 ///
-/// A **pipe** and a **cone** are not. They run on for ever along their own axis,
+/// **That could read too low, and by at most two.** Any two points of a bounded
+/// surface are within `2 · radius` of each other in every coordinate, so a face
+/// reaches at most `corner + 2 · radius` while it was charged `corner + radius`,
+/// and the ratio between those is worst when `corner` is zero.
+///
+/// **No solid this crate can build reaches that**, and both of the ones it can
+/// read too *high* instead. A ball's poles sit at `centre ± radius · axis`, so
+/// one of the two has a largest coordinate of at least the centre's; a bend's
+/// two corners sit `R − r` from the centre along each of two square directions,
+/// so between them the same holds. Either way `corner + radius` is already at
+/// or above `|centre| + radius`, which holds the whole surface — a unit ball at
+/// the origin was charged `2` for a face reaching `1`, and a bend of ring four
+/// and tube one `8` for one reaching `5`. Reading it too low wants a face whose
+/// corners **all** sit nearer the origin than its centre does, which takes a
+/// trimmed ball or a trimmed ring; a fuse and a hand-written solid are the two
+/// doors to one. `where_a_ball_and_a_ring_are_measured_from.rs` measures both
+/// over-charges and says the same thing at more length.
+///
+/// A **pipe** and a **cone** are not bounded. They run on for ever along their own axis,
 /// and how far along a face runs is not something the face's *corners* say — it
 /// is what its **edges** say, and an edge is a curve with a middle. A bar of
 /// radius one cut by a plane leaning `L` in x for every 1 in z has both its
@@ -2664,15 +2686,26 @@ fn how_far_the_points_of_reach(
                 .largest_coordinate_magnitude()
         })
         .fold(0.0, f64::max);
+    // A ball and a ring are held by their own centre and their own reach out of
+    // it, whichever way a face on one wraps — and a face on a ring can wrap
+    // **both** ways, so nothing about the trimming would help even if it were
+    // read.
+    let held_from = |centre: Point, out: f64| {
+        corners.max(
+            through
+                .apply_to_point(centre)
+                .largest_coordinate_magnitude()
+                + out,
+        )
+    };
     // A pipe is `radius` out all the way along; a cone's axis origin is its apex
     // and it is `slope · along` out there. One pair of numbers covers both.
     let (axis, radius, slope) = match face.surface() {
         Surface::Plane(_) => return 0.0,
-        Surface::Sphere(ball) => return corners + ball.radius(),
-        // A ring reaches `R + r` from its centre whichever way a face on it
-        // wraps, and a face on it can wrap **both** ways — so its corners settle
-        // nothing about which way and the whole surface is what is charged.
-        Surface::Torus(ring) => return corners + ring.ring_radius() + ring.tube_radius(),
+        Surface::Sphere(ball) => return held_from(ball.centre(), ball.radius()),
+        Surface::Torus(ring) => {
+            return held_from(ring.centre(), ring.ring_radius() + ring.tube_radius());
+        }
         Surface::Cylinder(pipe) => (pipe.axis(), pipe.radius(), 0.0),
         Surface::Cone(cone) => (cone.axis(), 0.0, cone.slope()),
         other => panic!("this crate cannot say how far {other:?} reaches"),
