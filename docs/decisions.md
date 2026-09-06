@@ -17869,12 +17869,15 @@ and that its test is in the table in §58.5.
 
 ### 58.10 What this does not close
 
-1. **The leaning cut**, §58.6. A gap, with its family of fixes named and none of
-   them taken.
+1. **The leaning cut**, §58.6. A gap when this was written, with its family of
+   fixes named and none of them taken. The reach under-charge unit, `74c14c7`,
+   has since taken the second of them; what is left open is the fallback the
+   closing paragraph of §58.6 names.
 2. **The tolerant wave-through**, §58.8. Measured over twelve cells and not
    fixed. Any fix closes the window those twelve cells live in, and the file says
    so, so a red there would be the fix and not a regression.
-3. **Four published numbers with no test**, §58.5. Owed, and cheap.
+3. **Three published numbers with no test**, §58.5. Owed, and cheap. A fourth row
+   was counted here and is withdrawn rather than owed.
 4. **The promise checked only from the refusal side**, §58.5. Whether the
    fallback should be held to a mesh that *finishes* as well as to one the walk
    accepts is a separate question, and no section has answered it.
