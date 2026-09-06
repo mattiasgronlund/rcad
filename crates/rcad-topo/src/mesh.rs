@@ -20,7 +20,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{
-    Deflection, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun,
+    Axis, Deflection, EdgeRun, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector,
 };
 use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate};
@@ -341,8 +341,9 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Mesh> {
-        let deflection = self.room_a_mesh_has_to_work_in(deflection, policy)?;
-        let mut building = BuildingAMesh::new(deflection, self.surfaces_along_each_edge());
+        let along_each_edge = self.surfaces_along_each_edge();
+        let deflection = self.room_a_mesh_has_to_work_in(deflection, policy, &along_each_edge)?;
+        let mut building = BuildingAMesh::new(deflection, along_each_edge);
         for face in self.faces() {
             building.walk_the_edges_this_face_can_place(face, policy, log)?;
         }
@@ -420,17 +421,22 @@ impl SolidView<'_> {
     /// the second floor and not the first. Asking about the first and then
     /// handing back the second would be telling a caller its budget was kept and
     /// then straying seventy-nine times further than it allowed.
-    fn room_a_mesh_has_to_work_in(self, asked: Deflection, policy: &Policy) -> Result<Deflection> {
+    fn room_a_mesh_has_to_work_in(
+        self,
+        asked: Deflection,
+        policy: &Policy,
+        along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+    ) -> Result<Deflection> {
         let closest = self
             .faces()
-            .map(how_far_a_mesh_point_of_this_face_rounds)
+            .map(|face| how_far_a_mesh_point_of_this_face_rounds(face, along_each_edge))
             .fold(0.0, f64::max);
         if asked.length() >= closest {
             return Ok(asked);
         }
         let workable = self
             .faces()
-            .map(the_finest_deflection_the_walk_will_take)
+            .map(|face| the_finest_deflection_the_walk_will_take(face, along_each_edge))
             .fold(0.0, f64::max);
         if !policy.wobble_is_acceptable(workable) {
             return Err(Error::DeflectionBelowWhatAMeshCanReach {
@@ -534,7 +540,8 @@ impl BuildingAMesh {
         if stored.as_plane().is_some() {
             return Ok(());
         }
-        let room = self.deflection.length() - how_far_moving_this_face_rounds(face);
+        let room =
+            self.deflection.length() - how_far_moving_this_face_rounds(face, &self.along_each_edge);
         for wire in face.wires() {
             for coedge in wire.coedges() {
                 let edge = coedge.edge();
@@ -634,9 +641,8 @@ impl BuildingAMesh {
             }
         }
 
-        self.worst = self
-            .worst
-            .max(along_it.deviation().magnitude() + how_far_moving_this_face_rounds(face));
+        let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
+        self.worst = self.worst.max(along_it.deviation().magnitude() + moving);
         let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         Ok(points
             .into_iter()
@@ -650,7 +656,8 @@ impl BuildingAMesh {
     /// Cut one face into triangles and put them in the solid's own table.
     fn cut_up(&mut self, face: FaceView<'_>, log: &mut ProvenanceLog) -> Result<()> {
         let stored = the_surface_this_face_is_meshed_on(face);
-        let room = self.deflection.length() - how_far_moving_this_face_rounds(face);
+        let room =
+            self.deflection.length() - how_far_moving_this_face_rounds(face, &self.along_each_edge);
 
         let mut walked = Vec::with_capacity(face.wire_count());
         for wire in face.wires() {
@@ -1180,9 +1187,8 @@ impl BuildingAMesh {
                 face: face.key(),
             });
         }
-        self.worst = self
-            .worst
-            .max(cut.deviation().magnitude() + how_far_moving_this_face_rounds(face));
+        let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
+        self.worst = self.worst.max(cut.deviation().magnitude() + moving);
         Ok(())
     }
 
@@ -1946,6 +1952,19 @@ impl SurfaceAlongAnEdge {
     /// differently placed shells along it. No builder makes one and
     /// [`Model`](crate::Model) is `Deserialize`, so it is composed rather than
     /// asserted against (§16.10).
+    /// The surface where the solid really has it, with the placement composed in
+    /// and nothing taken back out.
+    ///
+    /// A face at no placement is stored where it is used, and reading it out
+    /// rather than moving it by the identity keeps it bit for bit — the same
+    /// reason [`the_surface_this_face_is_meshed_on`] reads rather than moves.
+    fn where_it_really_is(&self) -> Surface {
+        if self.placed_at == Isometry::identity() {
+            return self.stored;
+        }
+        self.stored.transformed(&self.placed_at)
+    }
+
     fn in_the_frame(&self, back: &Isometry) -> Surface {
         if self.placed_at == Isometry::identity() {
             return self.stored.transformed(back);
@@ -2183,10 +2202,17 @@ const WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO: f64 = WHAT_THE_BOUNDARY_TAKES_OF_THE_B
 /// the larger — seventy-nine times larger on a bar of radius one at the origin.
 /// Which of the two answers a caller depends on who chose the deflection, and
 /// [`SolidView::room_a_mesh_has_to_work_in`] is where that is settled.
-fn how_far_a_mesh_point_of_this_face_rounds(face: FaceView<'_>) -> f64 {
+fn how_far_a_mesh_point_of_this_face_rounds(
+    face: FaceView<'_>,
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+) -> f64 {
     POINT_ALONG_A_CROSSING_ROUNDOFF / WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO
-        * how_far_the_points_of_reach(face, &the_frame_this_face_is_meshed_in(face))
-        + how_far_moving_this_face_rounds(face)
+        * how_far_the_points_of_reach(
+            face,
+            &the_frame_this_face_is_meshed_in(face),
+            along_each_edge,
+        )
+        + how_far_moving_this_face_rounds(face, along_each_edge)
 }
 
 /// The finest deflection [`rcad_geom::walk`] will accept along a crossing of
@@ -2256,11 +2282,18 @@ fn how_far_a_mesh_point_of_this_face_rounds(face: FaceView<'_>) -> f64 {
 /// answer.
 ///
 /// [`SolidView::room_a_mesh_has_to_work_in`]: SolidView::room_a_mesh_has_to_work_in
-fn the_finest_deflection_the_walk_will_take(face: FaceView<'_>) -> f64 {
+fn the_finest_deflection_the_walk_will_take(
+    face: FaceView<'_>,
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+) -> f64 {
     (POINT_ALONG_A_CROSSING_ROUNDOFF + how_far_a_step_at_the_cap_stands_off_its_chord())
         / WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO
-        * how_far_the_points_of_reach(face, &the_frame_this_face_is_meshed_in(face))
-        + how_far_moving_this_face_rounds(face)
+        * how_far_the_points_of_reach(
+            face,
+            &the_frame_this_face_is_meshed_in(face),
+            along_each_edge,
+        )
+        + how_far_moving_this_face_rounds(face, along_each_edge)
 }
 
 /// How far the arc of one step stands off its own chord when a whole turn is
@@ -2297,9 +2330,16 @@ fn how_far_a_step_at_the_cap_stands_off_its_chord() -> f64 {
 ///
 /// This is what a deflection loses before any curve is refined, so it comes off
 /// the budget a boundary is refined against as well as standing in the floor.
-fn how_far_moving_this_face_rounds(face: FaceView<'_>) -> f64 {
-    how_far_placing_this_face_rounds(face)
-        + how_far_shifting_this_face_rounds(face, &the_frame_this_face_is_meshed_in(face))
+fn how_far_moving_this_face_rounds(
+    face: FaceView<'_>,
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+) -> f64 {
+    how_far_placing_this_face_rounds(face, along_each_edge)
+        + how_far_shifting_this_face_rounds(
+            face,
+            &the_frame_this_face_is_meshed_in(face),
+            along_each_edge,
+        )
 }
 
 /// This face's surface, in the frame the face is meshed in.
@@ -2537,11 +2577,16 @@ fn how_far_one_coordinate_can_be_shifted_for_nothing(low: f64, high: f64) -> f64
 /// wide in the *world's* numbers, fifty-seven times this, so nothing this can
 /// get wrong was decided then either — but it was refused rather than answered,
 /// and that difference is real.
-fn how_far_shifting_this_face_rounds(face: FaceView<'_>, meshed_in: &Isometry) -> f64 {
+fn how_far_shifting_this_face_rounds(
+    face: FaceView<'_>,
+    meshed_in: &Isometry,
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+) -> f64 {
     if *meshed_in == face.location().inverse() {
         return 0.0;
     }
-    SURFACE_AFTER_SHIFTING_ROUNDOFF * how_far_the_points_of_reach(face, &Isometry::identity())
+    SURFACE_AFTER_SHIFTING_ROUNDOFF
+        * how_far_the_points_of_reach(face, &Isometry::identity(), along_each_edge)
 }
 
 /// How far moving this face's points from the frame it is stored in to where the
@@ -2552,42 +2597,49 @@ fn how_far_shifting_this_face_rounds(face: FaceView<'_>, meshed_in: &Isometry) -
 /// bar's *cap* is drawn through were made on the wall beside it, and the wall
 /// charges for them — [`Mesh::deviation`] is the worst over every face, so the
 /// number that comes out still covers them.
-fn how_far_placing_this_face_rounds(face: FaceView<'_>) -> f64 {
-    Isometry::POINT_ROUNDOFF * how_far_the_points_of_reach(face, &Isometry::identity())
+fn how_far_placing_this_face_rounds(
+    face: FaceView<'_>,
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+) -> f64 {
+    Isometry::POINT_ROUNDOFF
+        * how_far_the_points_of_reach(face, &Isometry::identity(), along_each_edge)
 }
 
 /// The largest coordinate any point of this face can have, seen `through` a
 /// movement.
 ///
-/// Its corners, plus the radius of the surface it sits on — because a face
-/// bulges away from its own corners, which is the whole of what
-/// [`SolidView::box_around_its_corners`] stopped being able to say (§25.9).
 /// Zero for a flat face, for the reason above.
+///
+/// # Where the corners are enough, and where they are not
+///
+/// A **ball** and a **ring** are bounded surfaces: every point of one is within
+/// `radius`, or within `R + r`, of a corner that is itself on the surface, so
+/// the corners plus that number hold the face wherever it is trimmed to.
+///
+/// A **pipe** and a **cone** are not. They run on for ever along their own axis,
+/// and how far along a face runs is not something the face's *corners* say — it
+/// is what its **edges** say, and an edge is a curve with a middle. A bar of
+/// radius one cut by a plane leaning `L` in x for every 1 in z has both its
+/// corners on the seam and neither of them out of the ordinary, while the
+/// ellipse those corners sit on climbs `L` up the far side. The corner charge
+/// was `2` at every lean, against a face reaching `L`; §52.7 is the same
+/// mistake one level up and `what_a_deflection_costs_a_measured_volume.rs` is
+/// where the two charges are printed side by side.
+///
+/// So for those two the axis is charged from the **crossings**, which is what
+/// [`how_far_along_its_axis_this_face_runs`] works out from the surfaces either
+/// side of each edge. When it cannot — a crossing that runs on for ever on both
+/// surfaces at once — this falls back to the corner charge, which is where the
+/// under-estimate still lives, and says so there.
 ///
 /// # Panics
 ///
 /// On a surface this has not been taught — see [`how_far_the_longitude_wraps`].
-fn how_far_the_points_of_reach(face: FaceView<'_>, through: &Isometry) -> f64 {
-    let radius = match face.surface() {
-        Surface::Plane(_) => return 0.0,
-        Surface::Sphere(ball) => ball.radius(),
-        Surface::Cylinder(pipe) => pipe.radius(),
-        // A cone has no radius of its own; how far it bulges past its corners is
-        // how far out it is where they are, and that is settled by the corners
-        // for the same reason a pipe's reach along its axis is.
-        Surface::Cone(cone) => {
-            let along = cone.axis().direction();
-            face.wires()
-                .flat_map(WireView::points)
-                .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
-                .fold(0.0, f64::max)
-        }
-        // A torus reaches `R + r` from its centre whichever way a face on it
-        // wraps, and a face on it can wrap **both** ways — so unlike a pipe's,
-        // its corners settle nothing and the whole surface is what is charged.
-        Surface::Torus(ring) => ring.ring_radius() + ring.tube_radius(),
-        other => panic!("this crate cannot say how far {other:?} reaches"),
-    };
+fn how_far_the_points_of_reach(
+    face: FaceView<'_>,
+    through: &Isometry,
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+) -> f64 {
     let corners = face
         .wires()
         .flat_map(WireView::points)
@@ -2597,7 +2649,204 @@ fn how_far_the_points_of_reach(face: FaceView<'_>, through: &Isometry) -> f64 {
                 .largest_coordinate_magnitude()
         })
         .fold(0.0, f64::max);
-    corners + radius
+    // A pipe is `radius` out all the way along; a cone's axis origin is its apex
+    // and it is `slope · along` out there. One pair of numbers covers both.
+    let (axis, radius, slope) = match face.surface() {
+        Surface::Plane(_) => return 0.0,
+        Surface::Sphere(ball) => return corners + ball.radius(),
+        // A ring reaches `R + r` from its centre whichever way a face on it
+        // wraps, and a face on it can wrap **both** ways — so its corners settle
+        // nothing about which way and the whole surface is what is charged.
+        Surface::Torus(ring) => return corners + ring.ring_radius() + ring.tube_radius(),
+        Surface::Cylinder(pipe) => (pipe.axis(), pipe.radius(), 0.0),
+        Surface::Cone(cone) => (cone.axis(), 0.0, cone.slope()),
+        other => panic!("this crate cannot say how far {other:?} reaches"),
+    };
+    let Some(along) =
+        how_far_along_its_axis_this_face_runs(face, &axis, radius, slope, along_each_edge)
+    else {
+        return corners + how_far_out_this_face_is_where_its_corners_are(face);
+    };
+    // Every point of the face is `along` up the axis at most and `radius +
+    // slope · along` out from it, so it is inside a box that far from the point
+    // the axis is placed by — and a movement carries that whole box.
+    let out = radius + slope * along;
+    corners.max(
+        through
+            .apply_to_point(axis.origin())
+            .largest_coordinate_magnitude()
+            + along
+            + out,
+    )
+}
+
+/// How far out from its own axis this face gets, judged from its corners alone.
+///
+/// **The under-estimate this is named after.** A pipe is its radius out
+/// everywhere, which is right; a cone is `slope · along` out and the corners are
+/// the only places this looks, which is right only where a corner is the
+/// furthest along the face gets. It is what [`how_far_the_points_of_reach`]
+/// falls back to when no pair of surfaces along an edge bounds where that edge
+/// runs, and `a_leaning_cut_is_charged_for_where_its_ellipse_really_runs` is
+/// what says a bar cut by a leaning plane is no longer one of those.
+fn how_far_out_this_face_is_where_its_corners_are(face: FaceView<'_>) -> f64 {
+    match face.surface() {
+        Surface::Cylinder(pipe) => pipe.radius(),
+        Surface::Cone(cone) => {
+            let along = cone.axis().direction();
+            face.wires()
+                .flat_map(WireView::points)
+                .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
+                .fold(0.0, f64::max)
+        }
+        other => panic!("only a pipe and a cone run on along an axis, not {other:?}"),
+    }
+}
+
+/// How far along `axis` from its origin a point of this face can be, or `None`
+/// when nothing here bounds it.
+///
+/// The axis coordinate grows steadily over a pipe and over a cone, so it has no
+/// high spot in the middle of a face and reaches its own furthest on the
+/// **boundary** — which is edges and not corners. A straight edge is the two
+/// ends the model already holds. Every other edge is a piece of where this
+/// face's surface crosses the one on the other side of it, and either of the two
+/// surfaces named along that edge may be the one that bounds it, so the smaller
+/// answer is taken.
+fn how_far_along_its_axis_this_face_runs(
+    face: FaceView<'_>,
+    axis: &Axis,
+    radius: f64,
+    slope: f64,
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+) -> Option<f64> {
+    let straight_on = axis.direction() * axis.direction().length().recip();
+    let how_far_along = |point: Point| straight_on.dot(point - axis.origin()).abs();
+    let mut furthest: f64 = 0.0;
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        if *edge.stored_run() == EdgeRun::Straight {
+            furthest = furthest
+                .max(how_far_along(edge.start().point()))
+                .max(how_far_along(edge.end().point()));
+            continue;
+        }
+        let mut others: SmallVec<[Surface; 3]> = along_each_edge
+            .get(&edge.key())
+            .map(SmallVec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(SurfaceAlongAnEdge::where_it_really_is)
+            .collect();
+        // A seam has this face's own surface on both sides of it, and a surface
+        // crossed with itself names nothing; the run carries the second surface
+        // for exactly that reason.
+        if let EdgeRun::PartOfWhereItCrosses { and, .. } = edge.run() {
+            others.push(and);
+        }
+        let bounded = others
+            .into_iter()
+            .filter_map(|other| {
+                how_far_along_an_axis_a_crossing_with_this_surface_runs(
+                    axis.origin(),
+                    straight_on,
+                    radius,
+                    slope,
+                    &other,
+                )
+            })
+            .fold(f64::INFINITY, f64::min);
+        if !bounded.is_finite() {
+            return None;
+        }
+        furthest = furthest.max(bounded);
+    }
+    Some(furthest)
+}
+
+/// How far along `straight_on` from `origin` a point can be that is on both a
+/// surface `radius + slope · along` out from that axis and on `other`, or `None`
+/// where no such bound exists.
+///
+/// Write a point of the crossing as `origin + t · straight_on + w`, with `w`
+/// square to the axis and `|w| = radius + slope · |t|`. Each arm below puts that
+/// into what `other` says about the same point and solves for `|t|`; every
+/// inequality in them is a triangle inequality or a Cauchy–Schwarz, so each is a
+/// bound and not an estimate. The three that can fail to bound do so exactly
+/// when the crossing really does run on for ever — a plane holding the axis
+/// direction cuts a pipe in two rulings, and a ruling is straight, which the
+/// caller has already dealt with.
+fn how_far_along_an_axis_a_crossing_with_this_surface_runs(
+    origin: Point,
+    straight_on: Vector,
+    radius: f64,
+    slope: f64,
+    other: &Surface,
+) -> Option<f64> {
+    match other {
+        // A ball holds the crossing inside itself, so its own shadow on the axis
+        // is the answer and the shape of our surface does not come into it.
+        Surface::Sphere(ball) => {
+            Some(straight_on.dot(ball.centre() - origin).abs() + ball.radius())
+        }
+        Surface::Torus(ring) => Some(
+            straight_on.dot(ring.centre() - origin).abs() + ring.ring_radius() + ring.tube_radius(),
+        ),
+        Surface::Plane(flat) => {
+            let normal = flat.normal();
+            let down_the_axis = normal.dot(straight_on).abs();
+            let sideways = (1.0 - down_the_axis * down_the_axis).max(0.0).sqrt();
+            let room = down_the_axis - slope * sideways;
+            (room > 0.0)
+                .then(|| (flat.signed_distance_to(origin).abs() + radius * sideways) / room)
+        }
+        Surface::Cylinder(pipe) => {
+            let (its_origin, its_way) = a_unit_axis(&pipe.axis());
+            let room = square_to(straight_on, its_way).length() - slope;
+            (room > 0.0).then(|| {
+                (pipe.radius() + square_to(origin - its_origin, its_way).length() + radius) / room
+            })
+        }
+        Surface::Cone(cone) => {
+            let (apex, its_way) = a_unit_axis(&cone.axis());
+            let leaning = square_to(straight_on, its_way).length();
+            let room = leaning
+                - cone.slope() * straight_on.dot(its_way).abs()
+                - cone.slope() * slope * leaning
+                - slope;
+            (room > 0.0).then(|| {
+                let out = origin - apex;
+                (cone.slope() * its_way.dot(out).abs()
+                    + cone.slope() * radius * leaning
+                    + square_to(out, its_way).length()
+                    + radius)
+                    / room
+            })
+        }
+        // A surface kind this has not been taught bounds nothing, which the
+        // caller reads as "the corners are all there is" rather than as a stop:
+        // a mesh refused for a shape it could have cut is worse than a floor
+        // that is too low on it, and the floor was too low on every one of them
+        // before this existed.
+        _ => None,
+    }
+}
+
+/// An axis's origin and its direction scaled to length one.
+///
+/// A turned axis is no longer a unit direction — a quarter turn about `(1, 2, 3)`
+/// takes `(0, 0, 1)` to `(−1.1e−16, 0, 1 + 2ε)` — and every bound above divides
+/// by the length of a component of this, so it has to be one.
+fn a_unit_axis(axis: &Axis) -> (Point, Vector) {
+    (
+        axis.origin(),
+        axis.direction() * axis.direction().length().recip(),
+    )
+}
+
+/// The part of `vector` square to the unit direction `way`.
+fn square_to(vector: Vector, way: Vector) -> Vector {
+    vector - way * way.dot(vector)
 }
 
 /// What to hand back when the triangulator refuses a face.
@@ -3247,11 +3496,12 @@ mod tests {
             .expect("a leaning plane cuts an ellipse right round a pipe");
 
         let solid = model.solid(bar);
-        let asked = Deflection::of(5e-4).expect("a positive length");
+        let asked = Deflection::of(5e-3).expect("a positive length");
+        let along_each_edge = solid.surfaces_along_each_edge();
         let deflection = solid
-            .room_a_mesh_has_to_work_in(asked, &policy)
+            .room_a_mesh_has_to_work_in(asked, &policy, &along_each_edge)
             .expect("a bar this size has a floor far under a two-thousandth");
-        let mut building = BuildingAMesh::new(deflection, solid.surfaces_along_each_edge());
+        let mut building = BuildingAMesh::new(deflection, along_each_edge);
         for face in solid.faces() {
             building
                 .walk_the_edges_this_face_can_place(face, &policy, &mut log)
@@ -3447,6 +3697,7 @@ mod tests {
                             let reach = how_far_the_points_of_reach(
                                 face,
                                 &the_frame_this_face_is_meshed_in(face),
+                                &model.solid(solid).surfaces_along_each_edge(),
                             );
                             let stray =
                                 how_far_apart(&face.stored_surface(), &round_tripped, reach);
