@@ -17961,4 +17961,32 @@ Nothing here says the Rust third is cheap. It is 0.85 Mchars, 33% of everything
 `limit` at all. What is settled is only that rust-analyzer is the wrong
 instrument for it — 26× the tokens on the common query. A `just` recipe that
 addresses a source file by symbol rather than by line range is the same fix
-`decision` was, has not been built, and is not refused here.
+`decision` was, and is not refused here. It is §57.7.
+
+### 57.7 `just src`, and what validated it
+
+`just src Decision` prints that enum with its doc comment and attributes, from
+wherever in the workspace it is defined, and `just src new crates/rcad-geom`
+narrows a name that is defined 43 times. **One definition prints the item; more
+than one prints the places**, because printing every `fn new` in the workspace
+is the cost the recipe exists to avoid.
+
+The extent is read off rustfmt's layout rather than parsed: back to the blank
+line above the definition, forward to the first `}` at the definition's own
+indentation. That is a real assumption and it is why `just fmt` matters here,
+so **it fails and says so when that brace is not there**, rather than printing
+to the end of the file. An item that runs on for 7 000 lines is the failure the
+recipe is against; producing one silently would be worse than not having it.
+
+Across the 32 top-level functions of `arrange.rs` — 330 509 characters, the
+largest file in the tree — every extraction ends on a brace at column 0, and the
+mean extraction is 1 961 characters against the 6 541 of the largest. Across 149
+items in four more large files, none was cut wrong; the single item the check
+flagged was the check's own bug, since a tuple struct has no braces to balance.
+
+The selftest earned its place immediately. With one file to search, `grep -n`
+omits the filename, so `just src shared src/b.rs` — the narrowing case, the
+whole point of the second argument — parsed the line number as the path and died
+on a file called `1`. It is `-nH` now. A fixture repo is what caught it, because
+the unfiltered searches that ran first all had more than one file and all
+passed.

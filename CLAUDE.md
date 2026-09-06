@@ -116,6 +116,13 @@ nextest: `just t how_often_a_fuse_with_a_cone_refuses`, `just t -p rcad-geom`,
 is what makes a lane hand-type `RCAD_STEP_CORPUS`; the recipe already has it,
 and the four corpus tests skip in silence when it is missing.
 
+**`just src <name>` prints one item of Rust source**, with its doc comment and
+attributes, from wherever it is defined: `just src Decision`, or `just src new
+crates/rcad-geom` when the name has 43 definitions. A name defined more than
+once lists the places rather than printing all of them. Reach for it instead of
+grepping for a definition and then guessing a `Read` offset and limit — in
+`arrange.rs`, 330 509 characters, the mean item comes back in 1 961.
+
 ## Editing files
 
 `Read` first, then `Edit` or `Write`. **Never patch a tracked file through a shell
