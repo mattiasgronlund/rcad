@@ -65,7 +65,11 @@ fn a_unit_ball_sags_less_at_a_deflection_of_three_quarters_than_at_seven_tenths(
             sag <= stated && stated <= asked,
             "a unit ball asked for {asked} said {stated} and sagged {sag}"
         );
-        assert_close(100.0 * sag, was, &format!("the sag at a deflection of {asked}"));
+        assert_close(
+            100.0 * sag,
+            was,
+            &format!("the sag at a deflection of {asked}"),
+        );
         sag
     });
 
@@ -150,8 +154,16 @@ fn every_change_of_shape_a_unit_balls_mesh_makes_between_two_fifths_and_a_whole_
             got.0,
             want.0
         );
-        assert_close(got.4, want.4, &format!("the sag at a deflection of {:.3}", got.0));
-        assert_close(got.5, want.5, &format!("the deviation at a deflection of {:.3}", got.0));
+        assert_close(
+            got.4,
+            want.4,
+            &format!("the sag at a deflection of {:.3}", got.0),
+        );
+        assert_close(
+            got.5,
+            want.5,
+            &format!("the deviation at a deflection of {:.3}", got.0),
+        );
     }
 }
 
@@ -171,14 +183,29 @@ fn every_change_of_shape_a_unit_balls_mesh_makes_between_two_fifths_and_a_whole_
 fn the_two_ceilings_that_put_the_grid_changes_where_they_are() {
     let a_seam_of_this_many_steps =
         |m: f64| (1.0 - (core::f64::consts::PI / (2.0 * m)).cos()) / 0.1875;
-    let a_cut_of_this_many_steps =
-        |n: f64| core::f64::consts::PI.powi(2) / (3.0 * 0.5 * n.powi(2));
+    let a_cut_of_this_many_steps = |n: f64| core::f64::consts::PI.powi(2) / (3.0 * 0.5 * n.powi(2));
 
     for (which, first_seen_at, worked_out) in [
-        ("the seam drops to 4 steps", 0.406, a_seam_of_this_many_steps(4.0)),
-        ("a cut drops to 4 steps", 0.412, a_cut_of_this_many_steps(4.0)),
-        ("the seam drops to 3 steps", 0.715, a_seam_of_this_many_steps(3.0)),
-        ("a cut drops to 3 steps", 0.732, a_cut_of_this_many_steps(3.0)),
+        (
+            "the seam drops to 4 steps",
+            0.406,
+            a_seam_of_this_many_steps(4.0),
+        ),
+        (
+            "a cut drops to 4 steps",
+            0.412,
+            a_cut_of_this_many_steps(4.0),
+        ),
+        (
+            "the seam drops to 3 steps",
+            0.715,
+            a_seam_of_this_many_steps(3.0),
+        ),
+        (
+            "a cut drops to 3 steps",
+            0.732,
+            a_cut_of_this_many_steps(3.0),
+        ),
     ] {
         println!("{which}: first seen at {first_seen_at:.3}, worked out as {worked_out:.6}");
         assert!(
@@ -205,7 +232,11 @@ fn the_coarser_grid_needs_a_point_back_in_the_middle_of_every_cell_round_the_equ
     let across = latitude_and_longitude(30.0_f64.to_radians(), core::f64::consts::FRAC_PI_2);
     let how_far_the_cell_strays = below.distance_to(across).powi(2) / 3.0;
     println!("the diagonal of one cell of a 3-by-4 grid strays {how_far_the_cell_strays:.6}");
-    assert_close(how_far_the_cell_strays, 5.0 / 6.0, "the stray across a cell diagonal");
+    assert_close(
+        how_far_the_cell_strays,
+        5.0 / 6.0,
+        "the stray across a cell diagonal",
+    );
     assert!(
         0.750 < how_far_the_cell_strays && how_far_the_cell_strays < 0.900,
         "the cell diagonal no longer straddles the two deflections this test compares"
