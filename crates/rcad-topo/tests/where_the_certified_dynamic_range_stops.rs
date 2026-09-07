@@ -73,18 +73,19 @@
 //!
 //! # The door this knocks on
 //!
-//! [`SolidBuilder::build`] describes the solid into a scratch model and runs
+//! `SolidBuilder::build` describes the solid into a scratch model and runs
 //! [`Model::validate`] over it, so a refusal here *is* the sweep's refusal —
 //! this is the whole sweep and not one function, and it is the door an importer
-//! comes through. The frustum is described face by face rather than borrowed
-//! from `tests/cones/mod.rs`, which builds under a hardwired
-//! [`Policy::certified`] and turns the refusal this test is about into a panic.
+//! comes through. The frustum is `tests/cones/mod.rs`'s, taken through
+//! `a_frustum_under` and not `a_frustum`: the second hardwires
+//! [`Policy::certified`] and `expect`s the build, which would turn the refusal
+//! this test is about into a panic.
 
-use rcad_geom::{
-    Axis, Cone, DynamicRange, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector,
-};
+mod cones;
+
+use rcad_geom::{DynamicRange, Scale};
 use rcad_predicates::{Policy, ProvenanceLog, Severity};
-use rcad_topo::{DraftStep, Error, Invalid, Model, Result, SolidBuilder, SolidKey};
+use rcad_topo::{Error, Invalid, Model, Result, SolidKey};
 
 /// The widest spread a certified caller is allowed, copied out of
 /// [`DynamicRange::LARGEST_SUPPORTED_RATIO`]'s doc comment.
@@ -287,17 +288,25 @@ fn a_working_size(far: f64) -> Scale {
     Scale::millimetres(far).expect("a frustum's height is a positive length")
 }
 
-/// A frustum about `+z` whose near cap circle has radius `rim`, described face
-/// by face and built under `policy`.
+/// A frustum about `+z` whose near cap circle has radius `rim`, built under
+/// `policy`.
 ///
-/// The same shape `tests/cones/mod.rs` builds, and the same way, with the one
-/// difference this file needs: the refusal comes back as an [`Err`] instead of
-/// being `expect`ed away, because the refusal is what is being measured.
+/// The shape is `tests/cones/mod.rs`'s, described the same way; all this adds is
+/// the height that puts the near cap's circle at `rim`, and the check that it
+/// really did.
 ///
 /// # Errors
 ///
-/// Whatever [`SolidBuilder::build`] makes of the description, which for a rim
-/// this thin is [`Invalid::DynamicRangeTooWide`].
+/// Whatever `SolidBuilder::build` makes of the description, which for a rim this
+/// thin is [`Invalid::DynamicRangeTooWide`]. It comes back as an [`Err`] rather
+/// than being `expect`ed away, because the refusal is what is being measured.
+///
+/// # Panics
+///
+/// If the rim asked for is not the rim described. The bisection walks the rim
+/// and reads the frontier off the value it asked for, so a rim that rounded on
+/// the way into the cap's height would report a frontier belonging to a
+/// different shape.
 fn a_frustum_with_this_rim(
     model: &mut Model,
     far: f64,
@@ -306,87 +315,6 @@ fn a_frustum_with_this_rim(
     log: &mut ProvenanceLog,
 ) -> Result<SolidKey> {
     let near = rim / SLOPE;
-    assert!(0.0 < near && near < far, "a frustum has two different ends");
     assert_eq!(SLOPE * near, rim, "the rim asked for is the rim described");
-
-    let skin = Cone::new(Axis::z(), SLOPE).expect("a positive slope");
-    let mut builder = SolidBuilder::new();
-
-    let bottom_corner = builder
-        .add_vertex(Point::new(rim, 0.0, near))
-        .expect("a finite point");
-    let top_corner = builder
-        .add_vertex(Point::new(SLOPE * far, 0.0, far))
-        .expect("a finite point");
-    let seam = builder
-        .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
-        .expect("a ruling of a cone is straight, which is the whole of what a seam here is");
-    let bottom_circle = builder
-        .add_edge(
-            bottom_corner,
-            bottom_corner,
-            EdgeRun::RightRoundWhereItsFacesCross,
-        )
-        .expect("the cap plane cuts the cone in one closed curve");
-    let top_circle = builder
-        .add_edge(
-            top_corner,
-            top_corner,
-            EdgeRun::RightRoundWhereItsFacesCross,
-        )
-        .expect("the cap plane cuts the cone in one closed curve");
-
-    let cap = |builder: &mut SolidBuilder, at: f64, outward: f64, edge, turn| {
-        let plane =
-            Plane::from_point_and_normal(Point::new(0.0, 0.0, at), Vector::new(0.0, 0.0, outward))
-                .expect("the z axis is a unit normal");
-        let coedge = builder
-            .add_coedge(edge, turn)
-            .expect("an edge of this build");
-        let wire = builder
-            .add_wire(&[DraftStep::Along(coedge)])
-            .expect("one closed edge is a wire");
-        builder
-            .add_face(Surface::Plane(plane), &[wire])
-            .expect("a cap is a plane trimmed by its circle")
-    };
-    let bottom = cap(
-        &mut builder,
-        near,
-        -1.0,
-        bottom_circle,
-        Orientation::Reversed,
-    );
-    let top = cap(&mut builder, far, 1.0, top_circle, Orientation::Forward);
-
-    let round_the_wall: Vec<DraftStep> = [
-        (bottom_circle, Orientation::Forward),
-        (seam, Orientation::Forward),
-        (top_circle, Orientation::Reversed),
-        (seam, Orientation::Reversed),
-    ]
-    .into_iter()
-    .map(|(edge, turn)| {
-        DraftStep::Along(
-            builder
-                .add_coedge(edge, turn)
-                .expect("an edge of this build"),
-        )
-    })
-    .collect();
-    let wire = builder
-        .add_wire(&round_the_wall)
-        .expect("round the bottom, up the seam, back round the top, down the seam");
-    let side = builder
-        .add_face(Surface::Cone(skin), &[wire])
-        .expect("a face on the cone");
-
-    builder
-        .add_shell(&[
-            (bottom, Orientation::Forward),
-            (top, Orientation::Forward),
-            (side, Orientation::Forward),
-        ])
-        .expect("three faces close");
-    builder.build(model, policy, log)
+    cones::a_frustum_under(model, SLOPE, near, far, policy, log)
 }
