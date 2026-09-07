@@ -150,13 +150,22 @@ after the prose.
 
 `rust-toolchain.toml` pins the compiler. `mise.toml` pins everything else
 (`cargo-nextest`, `cargo-deny`, `taplo`, `just`). Run things through
-`just` — the same recipes CI runs. Never install a tool ad hoc.
+`just`. Never install a tool ad hoc.
+
+**CI runs four of these recipes and `just default` runs eighteen**, so the
+fourteen `check-*` recipes gate your run and nothing else — a CI green would not
+cover them. It has not had to: as of 2026-09-07 CI has never passed, ten
+consecutive failures, every one in the tool install and none reaching a check.
+Until that changes, every green in this repo is one person having run
+`just default` locally and reported it honestly. There is no second opinion.
 
 **`just t <args>` runs one test or a few.** Everything after the name goes to
 nextest: `just t how_often_a_fuse_with_a_cone_refuses`, `just t -p rcad-geom`,
 `just t -E 'test(/walk/)'`. Reaching past `just` for a bare `cargo nextest run`
-is what makes a lane hand-type `RCAD_STEP_CORPUS`; the recipe already has it,
-and the four corpus tests skip in silence when it is missing.
+is what makes a lane hand-type `RCAD_STEP_CORPUS`; the recipe already has it.
+Seven test files in `rcad-step` read that variable and **fail** rather than skip
+when the corpus is missing (§44.10), so the bare command costs you seven
+failures that `just` would not have shown you.
 
 **`just src <name>` prints one item of Rust source**, with its doc comment and
 attributes, from wherever it is defined: `just src Decision`, or `just src new

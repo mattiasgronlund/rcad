@@ -10,8 +10,16 @@ set positional-arguments
 default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
-# and this repo has no business carrying them. Four tests in `rcad-step` skip
-# without it, so `just default` quietly runs four tests short.
+# and this repo has no business carrying them. Seven test files in `rcad-step`
+# read this variable and **fail** rather than skip when the corpus is not there
+# (§44.10): a green has to mean the corpus was read.
+#
+# Because this file defaults the variable, nothing that runs through `just` ever
+# reaches those tests' "not set" panic — it trips their `root.is_dir()` assertion
+# one line later, naming a path that looks plausible and is not there. A bare
+# `cargo nextest run` gets the panic instead. Both are failures, which is the
+# point; they just name different things, and the plausible path is the one that
+# wastes an afternoon.
 #
 # Derived rather than hardcoded so that every worktree gets the same answer:
 # `--git-common-dir` points at the *main* repo's `.git` from inside a worktree,
