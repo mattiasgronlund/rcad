@@ -19319,7 +19319,7 @@ a measurement that was in hand.
 So this is a **gap and not a limit** in §16.10's terms — the answer exists, and
 the code reached past it.
 
-### 64.3 The other one in the same function, which nothing has hit yet
+### 64.3 The other one in the same function, and it is reachable
 
 Twelve lines up:
 
@@ -19332,18 +19332,34 @@ Decision::Zero => match lies_between(from, corners[next], point) {
 ```
 
 `along` is bound to `Decision::Zero` by the arm it is in, so this call **cannot**
-be given anything but a certified outcome: reaching it panics every time. It is
-not reachable with an exact point — `lies_between` compares a box against a
-segment's span along one axis, and a zero-width box always answers `Some` — so it
-wants a `PredicatePoint` that really is a box. Whether the fuse can present one
-here was not demonstrated and is not claimed either way.
+be given anything but a certified outcome: reaching it panics every time.
 
-It also needs a different fix from line 322's. Nothing was undecided by a
-predicate there: every `orient3d` was certified, and what could not be settled
-is the *ordering* of a box against the ends of a segment. There is no
-`orient3d` record to name, so the honest record is about the ordering, with the
-box's overhang as its enclosure — or the refusal carries no record at all. That
-is a design question for whoever owns `holds.rs`, not a rename.
+**It is reachable, and the demonstration is a test rather than a paragraph**
+(§16.10). `SolidView::classify_uncertain_point` is public and takes a
+`rcad_predicates::Point`, whose `Constructed([Interval; 3])` variant is public
+and whose `Interval::new` is public — so *any* box is a caller's to hand over,
+and no fuse, no fuzzer and no spread is needed to get one here.
+`a_refusal_no_predicate_made_must_not_be_recorded_as_one` is that box: it lies
+along the outline's first side with its `y` and `z` exact, so every `orient3d`
+about it certifies and `along` is exactly `Zero`, and it runs a millimetre past
+the corner at the far end, so the ordering cannot be settled. It panicked on
+`314b453` under `Policy::certified()`.
+
+The first note here said the reachability "was not demonstrated and is not
+claimed either way", which was the right thing to write and the wrong thing to
+leave. §16.10 asks the question of the **public API** rather than of today's
+callers, and the public API answers it in one line.
+
+**The fix is a different constructor, not a different argument.** Nothing was
+undecided by a predicate: what could not be settled is the *ordering* of a box
+against the ends of a side, which §17.4 answers by comparing one axis and asks
+no predicate at all. So `gave_up_ordering_along_a_side` records the ordering
+under its own name, at `Level::Interval`, with the overhang as its enclosure and
+`Measures::Length` as its units — and `lies_between` now hands that overhang back
+(`Result<bool, f64>`) instead of throwing away the only measurement of the
+refusal there is. Filing it as an `orient3d` of `Measures::Volume` would have put
+a width in units nothing on this path worked in, which is §15.3's mistake with
+the degree wrong instead of the level.
 
 ### 64.4 Why the signature admits the mistake
 
@@ -19358,8 +19374,13 @@ to compile time, because neither call site can produce an `f64` it does not have
 That is the shape of the fix worth taking, and it is deliberately **not** taken
 here: it changes every call site in `rcad-topo` and `rcad-geom`, which is a unit
 of work rather than a bug fix, and §13's rule is that it waits for the consumer
-that names it. The consumer is the `holds.rs` fix; whoever makes that fix should
-decide whether to make it a type change instead.
+that names it.
+
+**The consumer has now arrived** — it is the `holds.rs` fix in §64.1 and §64.3,
+and it is the reason this paragraph is an argument for the change rather than a
+note that nothing needs it. It still did not happen in this lane, because the
+call sites it touches run through files another lane held open at the time. It is
+its own unit, and this section is its case.
 
 ### 64.5 The other fifteen, and the one held up by a distant invariant
 
@@ -19396,15 +19417,57 @@ the file says so. Same shape as line 322: a `Decision` whose certifiedness is
 argued at a distance rather than destructured on the spot. §64.4's narrowing
 would settle this one too.
 
-### 64.6 What this lane did not do
+**No guard was added there**, and that is the decision rather than an omission.
+There is no bug at line 372 today; a guard would defend against one that does
+not exist and would put a second, quieter copy of the invariant beside the real
+one. What the hazard needs is to be *written down*, which is this paragraph, and
+to be settled by the type — which is §64.4. The name to look it up by: **a
+certifiedness argued in another function**.
 
-No code changed. The fault is entirely in `crates/rcad-topo/src/holds.rs`, which
-this lane did not own, and the two remedies are:
+### 64.6 What it took to reproduce this without a fuzzer
 
-- **line 322** — hand `gave_up_turning_a_corner` whichever of `sides[index]` and
-  `sides[next]` is the undecidable one, rather than always the first.
-- **line 315** — decide what a refusal that no predicate refused should record,
-  per §64.3.
+The fuzzer needed a model whose coordinates ran from `4.2e-314` to `2.4e21`, and
+neither test here needs a spread at all. Two things stood between a hand-built
+model and the walk, and both are worth knowing before writing the next test that
+has to reach it.
 
-Widening the assert in `provenance.rs` is not on that list and is the thing this
-section exists to forbid.
+**A box on a spoke grazes both of its neighbours.** The walk is only asked about
+a point already on the face's plane, and the way a polygon says so is one of the
+triangles fanned from its first corner reporting that the ray starts on it. Every
+fan triangle beside a spoke has that spoke for an edge, so a box sitting on a
+spoke makes both of them refuse and neither can report anything — the walk is
+never entered and the crash never happens. What fixes it is a **corner that
+points back into the outline**: the fan then overlaps itself, and a spoke runs
+through the middle of a triangle that is not beside it. That triangle answers.
+`OUTLINE`'s `[6, 0]` is that corner, and it does the same work in both tests.
+
+**A certified policy cannot get past the first corner.** The spoke from the first
+corner to itself is a determinant with two equal rows — exactly zero, and interval
+arithmetic cannot see that it is zero, because it does not know the two rows are
+the same. So a *constructed* point refuses there and the walk stops having named
+the undecided corner correctly, which is not the bug. The fuzzer's point was
+`Exact`, which is why it got past. A hand-built box gets past instead by being
+resolved: under `Policy::tolerant` a narrow enough enclosure reads as `Zero`.
+
+That turns the test into an arithmetic problem with a real window. The budget is
+`64 · ε · working_size`, which is `1.42e-12` at 100 mm, and a volume's enclosure
+converts to a wobble as `enclosure / working_size²` (§15.3) — so the first
+corner's enclosure has to come in at or under `1.42e-8` and the spoke's has to
+come in over it. Both are linear in the width of the box, so shrinking the box
+moves them together and separates nothing. What separates them is **moving one
+corner and not the other**, because a spoke's enclosure grows with how far out
+its corner sits: `[160, -80]` is ten times out, and the two enclosures measure
+
+```
+first corner  9.600000794307562e-9     resolves    (wobble 9.6e-13 ≤ 1.42e-12)
+spoke         2.560002485552104e-7     does not    (wobble 2.56e-11)
+```
+
+a factor of about 27, with the budget between them. In plain terms: a fifth of a
+nanometre of doubt about a point on a 160 mm part — an ordinary amount for a
+constructed point to carry — and one corner of the outline far enough away that
+the same doubt is twenty-seven times too much when asked about *that* corner.
+
+Both numbers were measured. The first was also predicted, by scaling an earlier
+probe, and the prediction was wrong by a factor of four — which is why the
+measured pair is what is written here.
