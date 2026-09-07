@@ -579,13 +579,14 @@ Nothing else is withdrawn. Every figure at or above the floor stands, the bar an
 the two small balls stand, and the far-from-the-origin floor stands to the digits
 anyone was likely to quote.
 
-### Three ways a downstream sentence stops meaning what it meant
+### Four ways a downstream sentence stops meaning what it meant
 
 The announcement machinery above watches **numbers**: a bound or a rate rcad
 publishes moves, and the move gets announced whether or not anyone thinks it
-matters. That catches the case it was built for and misses three others. All
-three turned up on one day, 2026-09-06, and they are **not** the same failure —
-which is why they are three names here rather than one category with a
+matters. That catches the case it was built for and misses four others. The
+first three turned up on one day, 2026-09-06; the fourth was written the next
+day and comes at it from the other side. They are **not** the same failure —
+which is why they are four names here rather than one category with a
 definition stretched far enough to cover all of them:
 
 > **A downstream sentence whose truth rests on an rcad defect existing.** Fixing
@@ -600,6 +601,20 @@ definition stretched far enough to cover all of them:
 > asked for is already there. It landed for a reason that had nothing to do with
 > the ask, nobody joined the two, and the way you find out is by going to send
 > the demand.
+
+> **A sweep whose sample set could only ever return one of the two answers.** The
+> run completes, the samples are real, every assertion passes — and the finding
+> was settled before the first sample was drawn, because the sample set could not
+> have produced the other one.
+
+What holds the four together is one sentence, and it is worth having in front of
+the four:
+
+> The artefact stayed internally consistent while the world it described moved,
+> or was never fully sampled — and review checks consistency.
+
+The first three are the *moved* half. The fourth is the *never fully sampled*
+half, and it is the one that explains why a reading pass catches none of them.
 
 **The first** is the one this section was written for, and its worked instance
 is §56's apex fix. rscene's near-apex report tells callers, in a public doc
@@ -684,7 +699,7 @@ and nobody knew it had a second one waiting. Granting an ask in advance is not
 the same as answering it, because answering it would have left a record.
 
 **Watching numbers fails twice over as well, and this is a separate count from
-the three above.** The leaning-bars row above is the sharper half of the
+the four arms.** The leaning-bars row above is the sharper half of the
 contrast, because it is a case the machinery *could* see and missed anyway:
 `4.848820560097969e-11` was present, announced, and correct to the digit — and
 wrong in its **dimension**, a floor per unit of the shape's reach written as
@@ -710,28 +725,93 @@ is now wrong by a factor of two in a place that cannot be edited. §59.2 is the
 sibling case, and the difference between them is the useful part — that one was
 never right, this one was right and was moved.
 
-**Each of the three was found by acting on the sentence, and not one by reviewing
+**The fourth was found by somebody sampling the axis a sweep had held still**,
+and it is the arm where nothing was wrong except the sample set.
+`crates/rcad-geom/tests/what_the_dynamic_range_check_is_a_margin_against.rs`
+asks how small a wedge's feature can get against its coordinates before the apex
+rounds onto the base, and it swept the coordinate at `1`, `2^10`, `2^20` and
+`2^40`. Checked here at `b4e698f`: every one of those four has a mantissa of
+exactly zero. A feature of half an ulp puts the apex exactly halfway between two
+doubles, a zero mantissa is the even side of every such tie, and so all four
+coordinates round the same way. One cliff was the only shape of answer the
+sample set could return. It returned one, and it looked complete returning it.
+
+The truth is not a cliff. Another lane sampled every representable placement
+across a whole binade and found the law is `radius / ulp(centre)`: above a half
+a solid meshes wherever it stands, below a half it refuses wherever it stands,
+and at exactly a half round-half-to-even decides on the last bit of the centre's
+mantissa — so the answer alternates from one representable placement to the
+next. Their census, 32 meshed and 32 refused over 64 consecutive placements, is
+**their** measurement and lives in
+`crates/rcad-topo/tests/how_far_out_a_ball_can_sit_and_still_mesh.rs`. What was
+re-run here is that file: 13 tests, 13 passed at `b4e698f`.
+
+**Nothing the sweep asserted was false and the code under it was not buggy**,
+which is worth saying plainly because it is what makes the arm hard to see. Both
+measurements are right. The sweep's own verdict — that the spread the kernel
+publishes as supported sits far below where a written feature dies — is
+untouched; re-measured here at `b4e698f` the feature survives to a spread of
+`2^52` at worst and `2^53` at best, and one extra binade of head-room on half
+the coordinates does not move that verdict at all. The failure is that the run
+*looked complete*.
+
+**What makes this a category and not carelessness is rcad-51's sentence, and the
+wording is theirs.** The `COORDINATES` doc comment reasoned explicitly about its
+sampling and still missed the axis, **because powers of two are simultaneously
+the natural thing to sweep and the one family with no mantissa to be odd**. The
+obvious choice and the blind choice were the same choice. A more thoughtful
+comment was not the missing ingredient — the thoughtful comment had been
+written, and was read, and did not help.
+
+**The rule to apply to a sweep before writing it**: a sweep is blind exactly
+when its sample set has fewer degrees of freedom than the answer does. So name
+what the answer can turn on, and for each of those name two samples in the set
+that differ on it and agree elsewhere. Anything with no such pair is a
+*constant* of the run rather than a variable, and whatever the run reports is a
+statement about that constant. The trap is that the family reached for by
+convention is usually the family with the fewest degrees of freedom — powers of
+two being the canonical case, since they are what anyone would pick to span a
+range and they are constant in the one bit this answer turned on. The cheap
+standing form is a **balance assertion**: make the sweep insist that both
+answers actually occurred, so a sample set that goes one-sided again goes red
+instead of quiet. `docs/decisions.md` §62 has the full argument and what the
+rule costs.
+
+**Each of the four was found by acting on the sentence, and not one by reviewing
 it.** The stale doc comment turned up when somebody read it in order to use it;
 the demonstration turned up when somebody went to reach the defect it names; the
-granted ask turned up when somebody went to paste the demand and send it. That
-is an argument against review as the safeguard for this family, and it is not
-a comfortable thing to write down in a repository that keeps a `claim-audit`
-skill. A pass of that kind reads a sentence and asks whether it is consistent and
-whether it names something real. All three of these were both. The comfortable
-conclusion — *review harder next time* — is the one that would have changed
-nothing, so it is not the conclusion recorded here. **Send the demand. Run the
-demonstration against the thing it demonstrates. Use the sentence.** What is
-never acted on is never checked, whoever reads it.
+granted ask turned up when somebody went to paste the demand and send it; the
+blind sweep turned up when somebody went and sampled, one representable
+placement at a time, the axis it had held still. That is an argument against
+review as the safeguard for this family, and it is not a comfortable thing to
+write down in a repository that keeps a `claim-audit` skill. **That skill would
+have caught none of the four, and the fourth is the proof.** A pass of that kind
+reads a sentence and asks whether it is consistent and whether it names
+something real. All four were both — and the fourth had already had exactly that
+pass, in writing, in its own doc comment, and came out of it blind. The
+comfortable conclusion — *review harder next time* — is the one that would have
+changed nothing, so it is not the conclusion recorded here. **Send the demand.
+Run the demonstration against the thing it demonstrates. Use the sentence. Make
+the sweep prove it saw both answers.** What is never acted on is never checked,
+whoever reads it.
 
-**Two of the three are rscene's, and so is the third arm's name.** rscene found
-the demonstration and the granted ask in the last hour of its own session, and
-*an ask that gets answered by something no one connected to it* is rscene's
+**Two of the first three are rscene's, and so is the third arm's name.** rscene
+found the demonstration and the granted ask in the last hour of its own session,
+and *an ask that gets answered by something no one connected to it* is rscene's
 wording, kept because it is better than the one this side had. Written
 2026-09-07 against `b3a21da`, which is the tree the `crates/rcad/src/lib.rs`
 lines above were read on. rscene's own state as it reported it at that handoff —
 `main` at `79083c6` on `origin`, green at 172 tests and 5 goldens, pinned at
 `3a69d79` — is rscene's report and is **not** verified here, by the dating rule
 three paragraphs up, which this section is subject to like anything else.
+
+**The fourth arm is rcad-51's finding and rcad-51's framing**, and the sentence
+about the obvious choice being the blind choice is quoted from them rather than
+rewritten. It was added 2026-09-07 against `b4e698f`, which is the tree the
+mantissas and the two test runs above were measured on; the binade census it
+rests on is another lane's and is cited as theirs. The one-sentence statement
+holding all four together is rcad's, at rscene's request — rscene is carrying
+the same sentence in its own record.
 
 ### What rcad asks in return
 

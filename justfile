@@ -7,11 +7,19 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest lint test check-t-selftest deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
-# and this repo has no business carrying them. Four tests in `rcad-step` skip
-# without it, so `just default` quietly runs four tests short.
+# and this repo has no business carrying them. Seven test files in `rcad-step`
+# read this variable and **fail** rather than skip when the corpus is not there
+# (§44.10): a green has to mean the corpus was read.
+#
+# Because this file defaults the variable, nothing that runs through `just` ever
+# reaches those tests' "not set" panic — it trips their `root.is_dir()` assertion
+# one line later, naming a path that looks plausible and is not there. A bare
+# `cargo nextest run` gets the panic instead. Both are failures, which is the
+# point; they just name different things, and the plausible path is the one that
+# wastes an afternoon.
 #
 # Derived rather than hardcoded so that every worktree gets the same answer:
 # `--git-common-dir` points at the *main* repo's `.git` from inside a worktree,
@@ -336,6 +344,50 @@ check-kache-off-on-ci:
     if [ "$off" != "kache" ]; then \
         echo "off CI, RUSTC_WRAPPER is '$off' and should be kache"; \
         echo "the build cache is now off for everyone, which is not what was wanted"; \
+        exit 1; \
+    fi
+
+# `default` runs the four recipes CI runs and every `check-*` there is, which is
+# what CLAUDE.md publishes and so is a claim that wants a test (§15.6).
+#
+# The failure it is really for is the other direction: a `check-*` recipe
+# written, committed and never wired into `default` is a check nobody runs, and
+# nothing else in this tree would notice. That has never happened, which is not
+# the same as being prevented.
+#
+# The count is pinned rather than left to the comparison, and that is the whole
+# design. Both sides are parsed out of this one file, so an extraction that
+# stops matching empties both at once and two empty sets compare equal — the
+# recipe would pass having compared nothing, and an empty diff prints nothing,
+# which reads exactly like success. `check-ignored` says the same thing about
+# itself a hundred lines up. It is not hypothetical: renaming `default`, which
+# is under discussion, breaks the anchor on the second line below.
+#
+# So bumping the number is how a new `check-*` recipe gets added, deliberately,
+# in the commit that adds it.
+check-default-runs-every-check:
+    @defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
+    listed=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
+    others=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
+    n=$(printf '%s\n' "$defined" | grep -c .); \
+    if [ "$n" != "16" ]; then \
+        echo "found $n check-* recipes, expected 16"; \
+        echo "if you added or removed one, change the number here in the same commit"; \
+        echo "if you found none, the parse broke and this recipe just compared nothing"; \
+        exit 1; \
+    fi; \
+    if [ "$defined" != "$listed" ]; then \
+        echo "these check-* recipes are defined but not run by default:"; \
+        printf '%s\n' "$defined" | while read -r r; do \
+            printf '%s\n' "$listed" | grep -qx "$r" || echo "  $r"; \
+        done; \
+        echo "a check nobody runs is not a check"; \
+        exit 1; \
+    fi; \
+    if [ "$others" != "check deny lint test " ]; then \
+        echo "default's non-check-* recipes are '$others', expected 'check deny lint test '"; \
+        echo "CLAUDE.md says default runs the four CI runs and every check-* besides"; \
+        echo "change that sentence in the same commit, or this is now false"; \
         exit 1; \
     fi
 
