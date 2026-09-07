@@ -156,11 +156,17 @@ after the prose.
 those four and every `check-*` besides, so the `check-*` recipes gate your run
 and nothing else; a CI green would not cover them.
 
-It has never had to. **No CI run has ever succeeded**, and every one has died in
-the tool install without reaching a check. Check that rather than believe it —
-`gh run list --repo mattiasgronlund/rcad` — because a failure count written here
-would be false on the next push, while "never succeeded" can only be falsified
-by a fix. On 2026-09-07 it was 26 runs and 26 failures.
+It has never had to. **No CI run has ever succeeded.** Check that rather than
+believe it — `gh run list --repo mattiasgronlund/rcad` — because a failure count
+written here would be false on the next push, while "never succeeded" can only
+be falsified by a fix. On 2026-09-07 that was 26 runs and 26 failures.
+
+What stops it is **not** the tool install, though every push to `main` dies
+there. PR #1 (`ci-kache-bootstrap`, 2026-09-05) fixed the install and got
+through: `just check` passed, `just lint` passed, and `just test` ran 925 of
+1582 tests with all 925 passing before the run was cancelled by the one that
+failed — `RCAD_STEP_CORPUS is not set`. **The corpus is the blocker. The install
+is only what a push to `main` hits first.**
 
 Until that changes, every green in this repo is one person having run
 `just default` locally and reported it honestly. There is no second opinion.
