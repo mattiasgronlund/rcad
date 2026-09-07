@@ -13,8 +13,9 @@
 # So: if you change what this file does, change this header in the same commit,
 # and re-derive anything numeric rather than copying it forward.
 #
-# Three faults, in the order a run meets them. Two are fixed and the third is
-# the whole remaining problem.
+# Three faults, in the order a run meets them. All three now have a fix in this
+# file; whether the third one works on a runner is a question this header must
+# not answer from hope. If no run has yet gone green, say so here.
 #
 # **1. A rustup component race, fixed below by `rustup show`.** mise installs
 # the six `[tools]` in parallel and each one triggers rustup to materialise the
@@ -56,16 +57,27 @@
 # variable, so a runner does not reach the "not set" message — it fails a line
 # later on a path that does not exist.
 #
-# That failure is the mechanism working, not a bug to route around. The corpus
-# is 375 MB of third-party files and is deliberately not in this tree, so a
-# runner has to fetch or cache it, and **no fetching mechanism is built here**.
-# How it should get one is an open question with Mattias, not something for a
-# passing lane to decide.
+# That failure is the mechanism working, not a bug to route around. The fix is
+# `corpus/fetch.sh`, which rebuilds the corpus from upstream — NIST pinned by
+# zip checksum, KiCad pinned by commit — and is run above behind the Actions
+# cache. `corpus/sources.md` is the evidence that a fresh download is the same
+# bytes; `corpus/manifest.sha256` pins all 367 files; `just check-corpus`
+# compares a corpus against it and runs here on a cache hit as well as a miss.
+#
+# **The size figure in this header used to say 375 MB and that was misleading.**
+# 375 MB is the corpus directory on disk, companion CATPart, SLDPRT, pdf and jpg
+# files included. The tests open `.stp` and `.step` and nothing else, so what a
+# runner needs is **367 files and 133.4 MiB**, fetched in about 119 MiB.
+# Measured, not copied: `find "$RCAD_STEP_CORPUS" -type f \( -iname '*.stp' -o
+# -iname '*.step' \) -printf '%s\n' | awk '{s+=$1} END {print s}'`.
 #
 # Note also that this runs `just test` rather than `just default`, so
-# `check-enums`, `check-wildcards` and `check-wildcards-selftest` are not
-# enforced here even though they gate every local run. That predates the corpus
-# question and wants settling at the same time.
+# `check-enums`, `check-wildcards` and the other `check-*` recipes are not
+# enforced here even though they gate every local run. That is deliberate for
+# exactly one green: Mattias settled it on 2026-09-07 as "switch to `just
+# default`, but after the first green", so that a first failure has one
+# candidate cause rather than two. `check-corpus` is run explicitly above
+# because it is the one that proves the fetch above it did its job.
 
 name: CI
 
@@ -83,6 +95,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The corpus lives outside the checkout on purpose: 367 fetched files
+      # inside the working tree would read as untracked to everything that looks
+      # at `git status`, and the corpus is deliberately not this repo's to carry.
+      #
+      # Set in a step rather than in the `env:` block above, because `runner` is
+      # not one of the contexts a workflow-level `env` may name — only `github`,
+      # `inputs` and `vars` are. Writing `${{ runner.temp }}` up there is not a
+      # value that comes out empty; it makes the whole workflow file invalid, and
+      # the run then fails in 0 s having never started a job.
+      - run: echo "RCAD_STEP_CORPUS=$RUNNER_TEMP/rcad-step-corpus" >> "$GITHUB_ENV"
       # mise installs the `cargo:` tools in parallel, and each one triggers
       # rustup to materialise the toolchain pinned in `rust-toolchain.toml`.
       # They race over the same `.partial` file in ~/.rustup/downloads and all
@@ -93,6 +115,19 @@ jobs:
         with:
           experimental: true
       - uses: Swatinem/rust-cache@v2
+      # Keyed on the manifest and the script together: change either what the
+      # corpus is or how it is built, and the cached copy stops being the one
+      # this commit means.
+      - uses: actions/cache@v4
+        id: step-corpus
+        with:
+          path: ${{ runner.temp }}/rcad-step-corpus
+          key: step-corpus-${{ hashFiles('corpus/manifest.sha256', 'corpus/fetch.sh') }}
+      - if: steps.step-corpus.outputs.cache-hit != 'true'
+        run: ./corpus/fetch.sh "$RCAD_STEP_CORPUS"
+      # Runs on a cache hit too, and that is the point: the fetch checks what it
+      # built, but a restored cache is bytes nobody looked at this run. 0.15 s.
+      - run: mise exec -- just check-corpus
       - run: mise exec -- just check
       - run: mise exec -- just lint
       - run: mise exec -- just test
