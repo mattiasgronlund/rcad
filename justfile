@@ -7,7 +7,7 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest lint test check-t-selftest deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Four tests in `rcad-step` skip
@@ -313,6 +313,31 @@ check-hooks:
     @.claude/hooks/check-statusline.sh
     @.claude/hooks/check-worktree-create.sh
     @.claude/hooks/check-session-start-hub.sh
+
+# kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
+#
+# Both halves are asserted, because each one alone passes for the wrong reason.
+# Checking only the CI half passes if somebody deletes the variable outright,
+# which would turn the cache off for every human as well. Checking only the
+# local half passes on the state that kept CI red for ten pushes.
+#
+# It reads `mise env` rather than the file, because the file is a template and
+# what breaks CI is the value mise computes, not the text. That also means this
+# fails if the template stops parsing, which the eye does not catch.
+check-kache-off-on-ci:
+    @on=$(CI=true mise env | sed -n 's/^export RUSTC_WRAPPER=//p' | tr -d "\"'"); \
+    off=$(env -u CI mise env | sed -n 's/^export RUSTC_WRAPPER=//p' | tr -d "\"'"); \
+    if [ -n "$on" ]; then \
+        echo "with CI set, RUSTC_WRAPPER is '$on' and should be empty"; \
+        echo "mise applies [env] while installing [tools], so cargo would be asked"; \
+        echo "to run kache in order to build kache, and every install fails"; \
+        exit 1; \
+    fi; \
+    if [ "$off" != "kache" ]; then \
+        echo "off CI, RUSTC_WRAPPER is '$off' and should be kache"; \
+        echo "the build cache is now off for everyone, which is not what was wanted"; \
+        exit 1; \
+    fi
 
 check-enums:
     @! awk '/^$/ {ok = 0} \
