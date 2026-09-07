@@ -141,7 +141,14 @@ check:
 # is what every surface got before this function existed. A `panic!` there would
 # refuse to mesh a shape the kernel could have cut, and that is the worse of the
 # two.
-wildcard_arms := "91"
+#     lane-non-monotone  after the placement pin  87 direct + 5 composite = 92
+#
+# The one new point is `what_it_refused` in
+# `how_far_out_a_ball_can_sit_and_still_mesh.rs`, and it is the same case as the
+# one at 90: a test-only label mapper over `rcad_topo::Error`, naming the five
+# refusals that file has actually seen and answering "an unexpected refusal" for
+# the rest. Reaching the arm is the finding, not the pass.
+wildcard_arms := "92"
 
 check-wildcards:
     @find crates -name lib.rs -path '*/src/*' -exec touch {} +
