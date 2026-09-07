@@ -155,7 +155,10 @@ impl Model {
     /// answer encloses no space, or when the answer's own shortest edge is too
     /// small to resolve beside its own coordinates — which is
     /// [`Invalid::DynamicRangeTooWide`] about a feature the inputs did not have
-    /// and the fuse built (see `Assembly::check_dynamic_range`).
+    /// and the fuse built (see `Assembly::check_dynamic_range`), or when cutting
+    /// a face left a piece bounded by two straight sides, which enclose no area
+    /// and so describe no face — [`Invalid::WireTooShort`], and §67 for why that
+    /// is the input's fault and not the splitter's.
     ///
     /// # Panics
     ///
