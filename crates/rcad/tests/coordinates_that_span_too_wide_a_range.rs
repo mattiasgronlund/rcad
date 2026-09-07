@@ -1,11 +1,16 @@
 //! The dynamic-range check (`docs/decisions.md` §3.5, M0 exit criterion 9).
 //!
-//! Past about `1e11` the biggest coordinate in a model and the smallest feature
-//! it is asked to resolve no longer fit in an `f64` together: the feature is
-//! narrower than the gap between neighbouring numbers at that coordinate, and
-//! every predicate near it is answering a question about numbers that have
-//! already lost the detail. Roadmap §2.2 names this as the case to detect and
-//! report rather than quietly degrade on.
+//! A model's spread is its biggest coordinate over the smallest feature it is
+//! asked to resolve, and past [`DynamicRange::LARGEST_SUPPORTED_RATIO`] the
+//! kernel stops working in it. Roadmap §2.2 names a spread too wide for `f64`
+//! as the case to detect and report rather than quietly degrade on.
+//!
+//! **That bound is a margin and not the edge of anything**, which this file used
+//! to say the opposite of: the sentence here claimed the feature is narrower
+//! than the gap between neighbouring numbers at that coordinate, and it is not —
+//! that happens at `2^53`, four and a half decades further out.
+//! `crates/rcad-geom/tests/what_the_dynamic_range_check_is_a_margin_against.rs`
+//! measures where things really go wrong and what the margin buys.
 //!
 //! How loud to be is [`Policy`]'s to say, and the two constructors disagree on
 //! purpose: [`Policy::certified`] fails, [`Policy::tolerant`] warns. Both
@@ -16,9 +21,22 @@ use rcad::{
     Error, Invalid, Isometry, Model, Policy, Profile, ProfileBuilder, ProvenanceLog, Scale,
     Severity, TopologyError,
 };
+// The one thing here the facade cannot hand over. `DynamicRange` is not
+// re-exported, so a consumer wanting to know the bound it is being judged
+// against has nothing to import and has to copy the digits — which is what this
+// file did, and what left the fixture free to drift away from the kernel.
+use rcad_geom::DynamicRange;
 
-/// The ratio above which `f64` has run out of digits.
-const WIDEST_THAT_STILL_WORKS: f64 = 1e11;
+/// The widest spread the kernel will work at, read off the kernel rather than
+/// copied out of it.
+///
+/// It was `1e11` written out here, and a literal is right until the constant
+/// moves. Measured, with the bound moved to `2e12`: the copy does not hide the
+/// move, it misreports it — the fixtures stop straddling a boundary they still
+/// think is at `1e11`, and the file fails saying a warning was not recorded.
+/// Read off the kernel it fails at the assertion above the sweep instead, which
+/// says the true thing: this model is no longer on the far side of the bound.
+const WIDEST_THAT_STILL_WORKS: f64 = DynamicRange::LARGEST_SUPPORTED_RATIO;
 
 #[test]
 fn a_model_with_a_feature_a_million_times_finer_than_the_part_is_fine() {
