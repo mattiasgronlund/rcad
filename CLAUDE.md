@@ -174,24 +174,30 @@ after the prose.
 (`cargo-nextest`, `cargo-deny`, `taplo`, `just`). Run things through
 `just`. Never install a tool ad hoc.
 
-**CI runs four recipes — `check`, `lint`, `test`, `deny`.** `just default` runs
-those four and every `check-*` besides, so the `check-*` recipes gate your run
-and nothing else; a CI green would not cover them.
+**CI runs `just default` — the same command you run.** One gate step since
+2026-09-07, so every `check-*` recipe is enforced on the runner too and a CI
+green covers what a local green covers. Before that it ran four recipes and the
+`check-*` ones gated nothing but your own machine.
 
-It has never had to. **No CI run has ever succeeded.** Check that rather than
-believe it — `gh run list --repo mattiasgronlund/rcad` — because a failure count
-written here would be false on the next push, while "never succeeded" can only
-be falsified by a fix. On 2026-09-07 that was 26 runs and 26 failures.
+**CI is green, and the commit it was green on matters more than the word.**
+Check rather than believe — `gh run list --repo mattiasgronlund/rcad --status
+success` — because the empty answer that command used to give is what this
+paragraph said before. On 2026-09-07 it returned two of 34 runs, and they are
+not interchangeable: one pull request build containing almost none of the work
+queued behind it, and `34155345448`, the push that ran the seventeen commits
+which landed and reported **1787 tests run, 1787 passed, 0 skipped** — the same
+three numbers as the local gate on the same tree.
 
-What stops it is **not** the tool install, though every push to `main` dies
-there. PR #1 (`ci-kache-bootstrap`, 2026-09-05) fixed the install and got
-through: `just check` passed, `just lint` passed, and `just test` ran 925 of
-1582 tests with all 925 passing before the run was cancelled by the one that
-failed — `RCAD_STEP_CORPUS is not set`. **The corpus is the blocker. The install
-is only what a push to `main` hits first.**
+For a day "CI is green" was true and "the work is covered" was false, of the
+same repository at the same moment. Say which commit.
 
-Until that changes, every green in this repo is one person having run
-`just default` locally and reported it honestly. There is no second opinion.
+Three faults kept every earlier run red — the tool install, a rustup race, and
+the missing STEP corpus, cleared in that order, the last by `corpus/fetch.sh`.
+`.github/workflows/ci.yml` carries all three and the evidence for each fix.
+
+So there is a second opinion now, and it agreed the first time it could. That is
+not licence to skip `just default` before handing work over: the runner only
+sees what was pushed, and a merge you have not made is not in it.
 
 **`just t <args>` runs one test or a few.** Everything after the name goes to
 nextest: `just t how_often_a_fuse_with_a_cone_refuses`, `just t -p rcad-geom`,

@@ -347,8 +347,12 @@ check-kache-off-on-ci:
         exit 1; \
     fi
 
-# `default` runs the four recipes CI runs and every `check-*` there is, which is
-# what CLAUDE.md publishes and so is a claim that wants a test (§15.6).
+# `default` runs `check`, `lint`, `test`, `deny` and every `check-*` there is,
+# which is what CLAUDE.md publishes and so is a claim that wants a test (§15.6).
+#
+# Since 2026-09-07 CI runs `default` itself rather than those four separately,
+# which makes this recipe the thing that carries a new `check-*` onto the runner:
+# wire one into `default` and it is enforced there with no edit to `ci.yml`.
 #
 # The failure it is really for is the other direction: a `check-*` recipe
 # written, committed and never wired into `default` is a check nobody runs, and
@@ -386,7 +390,7 @@ check-default-runs-every-check:
     fi; \
     if [ "$others" != "check deny lint test " ]; then \
         echo "default's non-check-* recipes are '$others', expected 'check deny lint test '"; \
-        echo "CLAUDE.md says default runs the four CI runs and every check-* besides"; \
+        echo "CLAUDE.md says default runs these four and every check-* besides"; \
         echo "change that sentence in the same commit, or this is now false"; \
         exit 1; \
     fi
