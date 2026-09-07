@@ -1,0 +1,17 @@
+[
+  {
+    "expect": "allow",
+    "why": "a recipe whose own body writes .rs fixtures to a temp dir",
+    "command": "mise exec -- just check-wildcards-selftest"
+  },
+  {
+    "expect": "deny",
+    "why": "sed in place on this repo's own 17 000-line decisions file",
+    "command": "sed -i 's/§51/§52/' docs/decisions.md"
+  },
+  {
+    "expect": "deny",
+    "why": "a variable holding a crate path in this repo's layout",
+    "command": "W=crates/rcad-geom/src\ncat > \"$W/lib.rs\" <<'RS'\npub fn x() {}\nRS"
+  }
+]
