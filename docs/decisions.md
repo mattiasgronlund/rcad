@@ -19321,3 +19321,33 @@ its push, `4726416`, carried a workflow file GitHub could not schedule a job
 from — and there is nothing to annotate. A 0 s failure and a failing step want
 reading differently, and the trap under both is the same one: the evidence that
 would tell them apart is missing in exactly the case you need it.
+
+### 62.10 A verification that inherited the claim's own blind spot
+
+This crate's own name is spelled two ways — `rcad_geom` in code, `rcad-geom` in
+prose about paths and dependencies — and `CLAUDE.md` says so in words. The trap
+was already named. Two sessions walked into it anyway, from opposite
+directions, inside a day.
+
+Re-derived at `de7a932` (branch `facade-range-check-pairing`): `grep -rn
+"rcad_geom" crates/rcad/tests crates/rcad/benches` gives 3; `grep -rnE
+"rcad_geom|rcad-geom" crates/rcad/tests crates/rcad/benches` gives 7, across 5
+files. Of the 7, 4 spell it with a hyphen and are invisible to the narrower
+grep.
+
+**Not the same shape as §62.1/§62.2.** Those were a sweep whose sample set
+could not reach the answer it needed. Here a number had already been checked
+once: a stale claim of "prose in five places" was re-measured down to 3, and
+that re-measurement is what `de7a932`'s own commit message publishes. The
+grep behind it was `rcad_geom` alone — the same underscore-only blind spot the
+claim it was correcting already had. **Checking a number is supposed to be the
+activity that catches this, and the check inherited the error instead of
+catching it.** `rcad-51` caught it only by reproducing the grep rather than
+reading the commit — a third pass, and the only one of the three that
+recomputed instead of trusting the pass before it.
+
+The chain is a claim, a verification that repeats the claim's own error, and a
+third pass that catches it only because it recomputed. That is the sharper
+finding: a verification is not exempt from the sample-set question just
+because it is a verification. "Did the check see both spellings" has to be
+asked again at every hop, including the hop whose job is to ask it.
