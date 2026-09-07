@@ -7,7 +7,7 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest lint test check-t-selftest deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -370,8 +370,8 @@ check-default-runs-every-check:
     listed=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "16" ]; then \
-        echo "found $n check-* recipes, expected 16"; \
+    if [ "$n" != "17" ]; then \
+        echo "found $n check-* recipes, expected 17"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -1205,6 +1205,76 @@ check-t-selftest:
         echo "a parenthesised filter did not survive the recipe:"; echo "$got"; exit 1
         ;;
     esac
+
+# CI is about to fetch the STEP corpus (see `RCAD_STEP_CORPUS` above) from
+# upstream instead of having it on disk, so "CI is green" and "my machine is
+# green" need to mean the same corpus. `corpus/manifest.sha256` pins the
+# sha256 of every `.stp`/`.step` file the test suite reads (`files_under` in
+# `crates/rcad-step/tests/every_file_in_the_corpus_reads.rs` — the walk that
+# picks those two extensions, case-insensitively, and nothing else); this
+# recipe is what checks a corpus against it.
+#
+# `sha256sum --check` already tells missing and altered apart in its own
+# output — a listed file it could not open ends its line "FAILED open or
+# read", one it read but that hashed wrong just ends "FAILED" — so this reads
+# that rather than re-implementing it. What it cannot tell us is a `.stp`/
+# `.step` file on disk the manifest never heard of, which means the corpus
+# grew since the manifest was made; that half is a plain `find` against the
+# manifest's own path list.
+#
+# Checks the STEP corpus on this machine against `corpus/manifest.sha256`.
+check-corpus manifest="corpus/manifest.sha256":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$RCAD_STEP_CORPUS"
+    if [ ! -d "$root" ]; then
+        echo "RCAD_STEP_CORPUS points at $root, which is not a directory"
+        exit 1
+    fi
+    if [ ! -f "{{manifest}}" ]; then
+        echo "{{manifest}} does not exist"
+        exit 1
+    fi
+    manifest_abs=$(readlink -f "{{manifest}}")
+
+    set +e
+    out=$(cd "$root" && sha256sum --check --quiet "$manifest_abs" 2>&1)
+    rc=$?
+    set -e
+
+    missing=$(grep ': FAILED open or read$' <<<"$out" | sed 's/: FAILED open or read$//' || true)
+    mismatched=$(grep -v ': FAILED open or read$' <<<"$out" | grep ': FAILED$' | sed 's/: FAILED$//' || true)
+
+    manifest_paths=$(cut -c67- "$manifest_abs" | sort)
+    disk_paths=$(cd "$root" && find . -type f \( -iname '*.stp' -o -iname '*.step' \) -printf '%P\n' | sort)
+    extra=$(comm -13 <(echo "$manifest_paths") <(echo "$disk_paths"))
+
+    ok=1
+    if [ -n "$missing" ]; then
+        ok=0
+        echo "named in {{manifest}} but not on disk under $root:"
+        sed 's/^/  /' <<<"$missing"
+    fi
+    if [ -n "$mismatched" ]; then
+        ok=0
+        echo "on disk under $root but the contents do not match {{manifest}}:"
+        sed 's/^/  /' <<<"$mismatched"
+    fi
+    if [ -n "$extra" ]; then
+        ok=0
+        echo "STEP files on disk under $root that {{manifest}} does not name:"
+        sed 's/^/  /' <<<"$extra"
+        echo "the corpus grew; regenerate {{manifest}} to cover the new files"
+    fi
+    if [ "$ok" -eq 1 ] && [ "$rc" -ne 0 ]; then
+        echo "sha256sum --check failed in a way this recipe does not parse:"
+        sed 's/^/  /' <<<"$out"
+        exit 1
+    fi
+    if [ "$ok" -eq 0 ]; then
+        exit 1
+    fi
+    echo "corpus matches {{manifest}}: $(wc -l <"$manifest_abs") files, $root"
 
 lint:
     cargo fmt --all -- --check
