@@ -26,7 +26,7 @@
 
 mod cones;
 
-use rcad_geom::{DynamicRange, Scale, DYNAMIC_RANGE_CHECK};
+use rcad_geom::{DYNAMIC_RANGE_CHECK, DynamicRange, Scale};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, Severity};
 use rcad_topo::{Error, Invalid, Model};
 
@@ -53,21 +53,18 @@ const THE_SPREAD: f64 = FAR / (SLOPE * NEAR);
 /// says the check measured the shape that was described and not some other one.
 #[test]
 fn a_certified_caller_is_refused_a_frustum_whose_near_cap_is_a_speck() {
-    assert!(
-        THE_SPREAD > DynamicRange::LARGEST_SUPPORTED_RATIO,
-        "this frustum has to spread wider than the kernel supports for there to be a refusal at all"
-    );
+    const {
+        assert!(
+            THE_SPREAD > DynamicRange::LARGEST_SUPPORTED_RATIO,
+            "this frustum has to spread wider than the kernel supports for there to be a refusal \
+             at all"
+        );
+    }
 
     let mut model = Model::new(a_working_size());
     let mut log = ProvenanceLog::new();
-    let refusal = cones::a_frustum_under(
-        &mut model,
-        SLOPE,
-        NEAR,
-        FAR,
-        &Policy::certified(),
-        &mut log,
-    );
+    let refusal =
+        cones::a_frustum_under(&mut model, SLOPE, NEAR, FAR, &Policy::certified(), &mut log);
 
     match refusal {
         Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => assert_eq!(
