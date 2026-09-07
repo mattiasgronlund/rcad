@@ -1377,6 +1377,35 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 /// answer back with it, and two spellings of one question is how those two come
 /// to disagree (§23.8).
 ///
+/// # One reference direction was not enough, and the second one finishes it
+///
+/// Swapping the two faces negates `outward[0] × outward[1]` and leaves the
+/// longitude alone, so the two get opposite answers — while the dot is not zero.
+/// A ball poking a whisker through the side of a cube made it zero: write the dot
+/// out with `n` the plane's normal, `r` the radius vector at the corner, `R` the
+/// radius and `ẑ` the ball's axis and it is `(n·ẑ)R² − (n·r)(r·ẑ)`, so a plane
+/// parallel to the axis kills the first term and a corner on the equator the
+/// second. `> 0.0` was then `false` both ways round and the fuse wrote a solid
+/// whose one closed edge was walked twice the same way.
+///
+/// The direction the wire runs is a fact there — the circle is an honest crossing
+/// and `outward[0] × outward[1]` is a whole `2.4e-06` long — so this is a gap and
+/// not a limit (§16.10), and what it wants is a reference the wire cannot be
+/// square to. **The surface's own frame at the corner has three legs**, `∇C`, the
+/// longitude `ẑ × ∇C`, and the latitude `∇C × (ẑ × ∇C)`, mutually square and
+/// spanning. The wire is square to `∇C`, because it is a cross product with it,
+/// so it lives in the plane the other two span and, unless it has no length at
+/// all, cannot be square to both. Read
+/// the longitude first and keep every answer the rule gave before; read the
+/// latitude only where the longitude says exactly nothing, which is where the
+/// wire runs straight up the axis and the old rule guessed.
+///
+/// Zero against both leaves the wire with no length at all — it is square to `∇C`
+/// by construction, so being square to the longitude and the latitude too leaves
+/// it nothing to be but the zero vector — which is the two surfaces touching
+/// rather than crossing at `at` and has no direction to name, so it refuses the
+/// way a pole does.
+///
 /// # Errors
 ///
 /// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] if neither surface is curved. Two
@@ -1407,7 +1436,8 @@ pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     let Some(curved) = the_curved_one_of(&[*pair[0], *pair[1]]) else {
         return Err(Invalid::ClosedEdgeBetweenTwoFlatFaces.into());
     };
-    let longitude = the_way_it_is_parametrised_about(&curved, at).cross(gradient_of(&curved, at));
+    let gradient = gradient_of(&curved, at);
+    let longitude = the_way_it_is_parametrised_about(&curved, at).cross(gradient);
     // **At a pole there is no longitude to compare against** (§38.3). Every
     // longitude runs through the one point there, so `ẑ × ∇C` is exactly the
     // zero vector and the sign of a dot with it is not a fact about the shape.
@@ -1417,7 +1447,17 @@ pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     if longitude == Vector::zero() {
         return Ok(None);
     }
-    let runs_along_stored = outward[0].cross(outward[1]).dot(longitude) > 0.0;
+    let walked = outward[0].cross(outward[1]);
+    let along_the_longitude = walked.dot(longitude);
+    let against_the_frame = if along_the_longitude == 0.0 {
+        walked.dot(gradient.cross(longitude))
+    } else {
+        along_the_longitude
+    };
+    if against_the_frame == 0.0 {
+        return Ok(None);
+    }
+    let runs_along_stored = against_the_frame > 0.0;
     Ok(Some(match material_side {
         Decision::Neg => runs_along_stored,
         Decision::Pos => !runs_along_stored,
@@ -2264,7 +2304,10 @@ mod tests {
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
-    use super::{Decision, as_coarse_as_a_mesh_gets, winding_of, winding_round};
+    use super::{
+        Decision, a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets,
+        gradient_of, winding_of, winding_round,
+    };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
     use crate::model::{FaceUse, ShellData, ShellUse, SolidData, VertexData, WireStep};
@@ -3241,6 +3284,53 @@ mod tests {
         let model = Model::from_parts(model.data().clone());
 
         assert_eq!(refusal(&model), Invalid::ClosedEdgeBetweenTwoFlatFaces);
+    }
+
+    /// The two faces along a closed crossing must disagree about which way it
+    /// runs even where the longitude has nothing to say.
+    ///
+    /// A ball of radius one at the origin, cut by `x = 0.6`, with the corner put
+    /// at `(0.6, 0.8, 0)`: every one of those is exact in `f64` and the point is
+    /// on the ball to the last bit. The plane is parallel to the ball's axis and
+    /// the corner is on its equator, which is the pair of coincidences that makes
+    /// `(∇S × ∇T) · (ẑ × ∇C)` exactly zero — asserted below, so this test cannot
+    /// stop exercising the second reference without saying so.
+    ///
+    /// `tests/a_ball_poking_through_a_cubes_side.rs` is the same coincidence
+    /// arriving from a fuzzer and going all the way through `Model::fuse`. This
+    /// one is the rule on its own, which is where the bug was.
+    #[test]
+    fn a_ball_cut_by_a_plane_along_its_axis_is_still_walked_two_ways() {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::origin(), 1.0).expect("a ball of radius one at the origin"),
+        );
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.6, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .expect("the plane x = 0.6"),
+        );
+        let corner = Point::new(0.6, 0.8, 0.0);
+
+        let round = gradient_of(&ball, corner);
+        let straight = gradient_of(&flat, corner);
+        assert_eq!(
+            straight
+                .cross(round)
+                .dot(Vector::new(0.0, 0.0, 1.0).cross(round)),
+            0.0,
+            "the longitude is square to the wire here, which is what this test is about"
+        );
+
+        let walked = |pair: [&Surface; 2], outward: [Vector; 2]| {
+            a_closed_crossing_is_walked_the_way_it_is_stored(pair, outward, corner, Decision::Neg)
+                .expect("one of the two is curved")
+                .expect("neither a pole nor a touch")
+        };
+
+        assert_ne!(
+            walked([&flat, &ball], [straight, round]),
+            walked([&ball, &flat], [round, straight]),
+            "the flat face and the cap have to walk their shared circle opposite ways"
+        );
     }
 
     /// §23.9's first gap, closed. A round cap's wire has one corner and no

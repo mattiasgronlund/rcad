@@ -2025,20 +2025,49 @@ impl SurfaceAlongAnEdge {
 /// Nothing read the direction, so nothing failed — until something needs it, and
 /// [`how_much_of_the_chart_this_loop_encloses`] does.
 ///
+/// **The longitude alone is not enough, and the latitude finishes it.** Written
+/// out with `n` the plane's normal, `r` the radius vector at the corner, `R` the
+/// radius and `ẑ` the ball's axis, `(∇S × ∇T) · (ẑ × ∇C)` is
+/// `(n·ẑ)R² − (n·r)(r·ẑ)`: a plane parallel to the ball's axis kills the first
+/// term and a corner on the ball's equator the second, so a ball cut by a plane
+/// along its axis — an everyday shape — leaves the dot exactly `0.0`. The
+/// direction is a fact there all the same, so this is a gap and not a limit
+/// (§16.10), and what it wants is a reference the wire cannot be square to.
+///
+/// The curved surface's frame at the corner has three legs — `∇C`, the longitude
+/// `ẑ × ∇C` and the latitude `∇C × (ẑ × ∇C)` — mutually square and spanning.
+/// `∇S × ∇T` is square to `∇C` because it is a cross product with it, so it lies
+/// in the plane the other two span and, unless it has no length at all, cannot be
+/// square to both. Read the
+/// longitude first, which keeps every answer this rule gave before, and the
+/// latitude only where the longitude says exactly nothing. This is the same two
+/// references, read in the same order, as
+/// [`a_closed_crossing_is_walked_the_way_it_is_stored`]; two spellings of one
+/// question is how the fuse and `Model::validate` come to disagree (§23.8).
+///
 /// `None` when neither sign is a fact: neither surface is curved, so there is no
 /// longitude at all; the two are tangent here, so there is no crossing
 /// direction; or the corner is at a pole, where every longitude runs through the
-/// one point and `axis × ∇S` is exactly zero (§38.3).
+/// one point and `axis × ∇S` is exactly zero (§38.3). Zero against both legs of
+/// the frame leaves the wire with no length at all — it is square to `∇C` by
+/// construction, so being square to the longitude and the latitude too leaves it
+/// nothing to be but the zero vector — which is the two surfaces touching rather
+/// than crossing and has no direction to name.
 fn the_way_a_closed_edge_is_stored_running(along: &[Surface; 2], at: Point) -> Option<Vector> {
     let reference = the_curved_surface_that_names_a_closed_edge(along)?;
     let forward = gradient_of(&along[0], at).cross(gradient_of(&along[1], at));
-    let longitude =
-        the_way_it_is_parametrised_about(&reference, at).cross(gradient_of(&reference, at));
+    let gradient = gradient_of(&reference, at);
+    let longitude = the_way_it_is_parametrised_about(&reference, at).cross(gradient);
     let with_the_longitude = forward.dot(longitude);
-    if with_the_longitude == 0.0 {
+    let against_the_frame = if with_the_longitude == 0.0 {
+        forward.dot(gradient.cross(longitude))
+    } else {
+        with_the_longitude
+    };
+    if against_the_frame == 0.0 {
         return None;
     }
-    Some(if with_the_longitude > 0.0 {
+    Some(if against_the_frame > 0.0 {
         forward
     } else {
         -forward
@@ -2946,6 +2975,8 @@ fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceL
 mod tests {
     use rcad_geom::{Axis, EdgeRun, Orientation, Plane, Scale, Sphere, Vector};
     use rcad_predicates::{Decision, Interval};
+
+    use crate::validate::a_closed_crossing_is_walked_the_way_it_is_stored;
 
     use super::*;
     use crate::Model;
@@ -4485,5 +4516,61 @@ mod tests {
             strays > room,
             "the side that was refused strays {strays}, which is inside the deflection"
         );
+    }
+
+    /// A ball cut by a plane along its own axis is walked one definite way
+    /// round, and it is the way `Model::validate` reads the same edge.
+    ///
+    /// A unit ball at the origin cut by `x = -0.6`, with the one corner of the
+    /// crossing circle at `(-0.6, ±0.8, 0)`: `0.36 + 0.64 == 1.0` exactly in
+    /// `f64`, so the corner is on the ball to the last bit, the plane is
+    /// parallel to the ball's axis and the corner is on its equator. That is
+    /// the pair of coincidences that makes the longitude reference
+    /// `(∇S × ∇T) · (ẑ × ∇C)` exactly zero — asserted below, so this test
+    /// cannot stop exercising the second reference without saying so.
+    ///
+    /// **The two corners are the point.** They are the same circle read half a
+    /// turn apart, and the direction is read *at the corner*, so a rule that
+    /// answers at all has to answer differently at the two. Before the second
+    /// reference this hands back `None` at both, and `walk` leaves the points in
+    /// whichever order the walker produced — which is the same order at both
+    /// corners, so half of these caps come out walked backwards.
+    #[test]
+    fn a_ball_cut_along_its_axis_does_not_mesh_its_cap_backwards() {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::origin(), 1.0).expect("a ball of radius one at the origin"),
+        );
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(-0.6, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .expect("the plane x = -0.6"),
+        );
+        let along = [flat, ball];
+
+        for corner in [Point::new(-0.6, 0.8, 0.0), Point::new(-0.6, -0.8, 0.0)] {
+            let round = gradient_of(&ball, corner);
+            let straight = gradient_of(&flat, corner);
+            let forward = straight.cross(round);
+            assert_eq!(
+                forward.dot(Vector::new(0.0, 0.0, 1.0).cross(round)),
+                0.0,
+                "the longitude is square to the wire here, which is what this test is about"
+            );
+
+            let stored = the_way_a_closed_edge_is_stored_running(&along, corner)
+                .expect("neither a pole nor a touch");
+            let runs_along_stored = a_closed_crossing_is_walked_the_way_it_is_stored(
+                [&flat, &ball],
+                [straight, round],
+                corner,
+                Decision::Neg,
+            )
+            .expect("one of the two is curved")
+            .expect("neither a pole nor a touch");
+            assert_eq!(
+                stored,
+                if runs_along_stored { forward } else { -forward },
+                "the mesher and the sweep have to spell one question one way (§23.8)"
+            );
+        }
     }
 }
