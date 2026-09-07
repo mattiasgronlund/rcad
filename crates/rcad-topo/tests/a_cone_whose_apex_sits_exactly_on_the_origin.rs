@@ -277,8 +277,8 @@ fn the_placements_that_keep_the_apex_at_zero_are_the_ones_the_old_route_could_no
          sixteen that stay put"
     );
     println!(
-        "13 placements keep the apex at zero and none of them could have moved it; \
-         {the_old_route_would_have_moved_it} shifted ones would have, worst {worst:e}"
+        "{kept_the_apex_at_zero} placements keep the apex at zero and none of them could have \
+         moved it; {the_old_route_would_have_moved_it} shifted ones would have, worst {worst:e}"
     );
 }
 
