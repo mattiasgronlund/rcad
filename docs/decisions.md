@@ -19817,6 +19817,85 @@ refusal is correct; none of them is this bug. A hand-built pair that differs fro
 the failing one in a way nobody noticed is the `fuse-debugging` skill's own named
 trap, and the bytes are the one description that cannot drift.
 
+### 67.6 §70 took the driver away, and three corrections to what is above
+
+§67.4 filed *"nothing compares a baked corner with the corner the model stored"*
+and *"whether `allowed_wobble` should scale with a number the model declares
+about itself at all"* as owed work. §70 took the second half: the allowance is
+now the smaller of what the model declares and what its own corners show. The
+consequence for this section is that **its own test lost its driver.** The corpus
+entry no longer gets past the sweep, so nothing here reaches the walk any more.
+
+The refusal in `wire_from` is unchanged and still right. What changed is that
+today it is guarded by a refusal upstream rather than by a test that drives it,
+and the test file now says that in as many words instead of quietly passing.
+
+**Correction one: three walls are out, not two.** §67.1 counts twenty and ten.
+Measured on `2d84b9b`, the worst corner of each wall that is off its own plane
+is `20`, `10` and `0.3593845367340691` — three walls. The third was missed
+because it is small enough to read as noise beside the other two and is not.
+
+**Correction two: the number in the refusal is a witness, not a maximum.** The
+sweep returns `VertexOffItsFacePlane { distance: 9.536734069115482e-6 }` on these
+bytes, which is *none of those three walls*. `check_flat_face` returns on the
+first corner it finds outside the allowance, walking faces in stored order, so
+the distance it carries is whichever corner it happened to reach first. Reading
+it as "how bad is the worst" is wrong, and `the_sweep_names_a_witness_and_not_the_worst_wall`
+now pins both halves. The allowance these are measured against is
+`1e-9 × 10.359375 = 1.0359375e-8`, the largest coordinate the model actually has.
+
+**Correction three: §67.5's census is softer than it reads.**
+`Plane::from_coefficients` takes `a * x + b * y + c * z + d = 0`, so its fourth
+number is *minus* the offset — and every hand-built reconstruction in §67.5 fed
+it the offset. Those solids were the wrong shape, and the old `allowed_wobble`
+was wide enough to let them through the builder without saying so. So of the four
+refusals §67.5 lists, an unknown share were refusing a mistake rather than
+refusing this bug. The conclusion §67.5 drew from them — carry the bytes — was
+right for a different reason than the one given: the bytes cannot drift, and a
+reconstruction that is silently ten units wrong is exactly the drift.
+
+### 67.7 What can still reach the walk, and what is only a census
+
+With the sign fixed, a solid whose wall carries a hair of lean **builds and
+passes the tightened sweep**: normal `(-1e-100, 1, 0)` on a wall at `y = 5` puts
+that wall's own corners `1e-99` off it, which is nothing beside a coordinate of
+ten. So the ingredient the two-sided walk needs is still legal, and
+`two_walls_a_hair_apart_are_caught_before_the_walk_gets_a_two_sided_piece` builds
+it: two knives whose far walls sit at `y = 5`, one plain and one leaned, cutting
+one face in two lines that meet at `x = 0` and are `1e-99` apart at `x = 10`.
+
+It does not reach the walk. Under `Policy::tolerant` it is
+`TwoCurvesTouchWithoutCrossing`; under `Policy::certified` it is
+`Error::Undecidable` on the two planes. Both are correct, and both are upstream.
+
+**This is a census, not a demonstration, and the difference matters here more
+than usual.** Nine shapes have now been tried across §67 and this section — four
+in §67.5, five here — against six distinct refusals. That is evidence the walk is
+hard to reach. It is not the demonstration §16.10 asks for before writing *this
+cannot happen*, and §67 is the section that made §16.10's point about the
+original assert, so it is the last place to weaken it. What can be said exactly:
+
+> The walk needs two crossings that are two different lines sharing both nodes.
+> `crossing_like` folds same-line partners, so the two lines are genuinely
+> different and meet at one point; the second shared node exists only because the
+> arrangement could not tell two points apart. Every construction tried that
+> produces two planes that near is stopped by `TwoCurvesTouchWithoutCrossing`,
+> `CannotTellTheCellsOfAFaceApart` or an undecided plane crossing first.
+
+Nothing rules out a fourth arrangement of those same ingredients that slips
+between all three. So the refusal stays, unweakened, and the file that used to
+drive it now guards §70's cap instead — which is the other thing §67 asked for.
+
+### 67.8 One more §16.10-shaped doc claim, next door
+
+`bake.rs:535-538` says the stored corner is what picks between multiple meet
+points when a triple of surfaces has more than one. The code consults no stored
+corner: `let [only] = places.as_slice() else { continue; }` passes over every
+multi-place triple without looking. That is a filter described and not written,
+in the same function §67.1 blames for never comparing a baked corner with a
+stored one — and the two are the same gap seen twice. Not fixed here; `bake.rs`
+is not this lane's file.
+
 ---
 
 ## 68. Sixteen answers only the policy that built them calls valid, recorded 2026-09-07
