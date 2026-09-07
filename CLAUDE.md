@@ -11,6 +11,48 @@ Always use the code-quality skill when coding. Big work goes to lanes in a
 worktree — the `delegating` skill has the mechanics, and only whoever is
 dispatching needs them.
 
+## Three plugins, and what this repo keeps
+
+`.claude/` used to hold the hooks, the shared skills and a copy of the questions
+parser. All three moved into the `mattiasgronlund-local` marketplace, shared with
+`rscene`, because a copy in each repo is a copy that goes stale — and one did:
+`rscene`'s parser still dropped the second label of a paired entry months after
+the fix landed here.
+
+```
+/plugin marketplace add ~/git/mattiasgronlund/claude-questions
+/plugin install questions@mattiasgronlund-local
+/plugin install guardrails@mattiasgronlund-local
+/plugin install practices@mattiasgronlund-local
+```
+
+- **`questions`** — the parser, the status line, and the `asking-questions` skill.
+- **`guardrails`** — the two hooks: no in-place shell patching, and the context
+  budget that asks for a handoff.
+- **`practices`** — the nine shared skills, `code-quality` and `delegating`
+  among them.
+
+`just check-plugins` fails, first thing in `just default`, when one is missing,
+and names the command that installs it. **A missing `guardrails` means the
+patching hook is not running at all** — the rule in "Editing files" below is
+then only prose, and it was written because prose alone did not hold.
+
+What stays here is what is this repo's alone: the hub and worktree-create hooks,
+the status line **wrapper** (a plugin cannot supply a `statusLine`; only
+`settings.json` can, and it names a path), and
+`.claude/patching-cases.local.json` — the patching cases that name `rcad`
+crates, `docs/decisions.md`, and a `just` recipe of ours. `just check-hooks`
+appends that overlay to the plugin's own cases and fails loudly if it is named
+and missing.
+
+**Recipes the shared skills refer to.** `delegating` and `handoff` are written
+against this repo and say so; these are the commands they name. `just lanes`
+lists the worktrees and who holds each. `just default` is the full gate. `just
+check-hub` is the hub rule. `just clean-targets` then `just prune-worktrees`
+reclaims disk, in that order. The compile cache is wired through mise's `[env]`
+as `RUSTC_WRAPPER = "kache"`, which a non-interactive shell does not inherit —
+so every `cargo` and `just` in a lane's brief needs a `mise exec --` prefix.
+
 ## Nobody works in the hub
 
 `/home/mattias/git/mattiasgronlund/rcad` is the **hub**. It owns `.git` and
@@ -134,6 +176,11 @@ listing without spelling them out.
 Nothing is ever dropped: an entry whose label does not parse is listed as `??`
 with its line number, and shows in the status line as `??×1`. The `asking-questions`
 skill has the full grammar and the shapes that break it.
+
+**The parser and that skill are not in this repo.** They live in the `questions`
+plugin, because a copy in each repo is a copy that goes stale — `rscene` carried
+one that still dropped the second label of a paired entry months after the fix
+landed here. So do the hooks and the shared skills; see "Three plugins" below.
 
 **Read one back with `just question`, never with `!cat`.** The status line shows
 the open labels collapsed, after the session's hash — `❓ 766405 K1-K4, Q2,
