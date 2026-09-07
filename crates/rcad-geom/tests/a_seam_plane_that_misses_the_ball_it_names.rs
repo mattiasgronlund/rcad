@@ -34,11 +34,9 @@ use smallvec::smallvec;
 ///
 /// The two ends are the ball's own poles, which is where a real seam's ends are.
 fn a_seam_cut_by(meridian: Surface, centre: [f64; 3], radius: f64) -> NamedRun {
-    let facing_x = HalfSpace::through_a_point_facing(
-        Point::from(centre),
-        Vector::new(1.0, 0.0, 0.0),
-    )
-    .expect("the x axis has length");
+    let facing_x =
+        HalfSpace::through_a_point_facing(Point::from(centre), Vector::new(1.0, 0.0, 0.0))
+            .expect("the x axis has length");
     NamedRun::new(
         EdgeRun::PartOfWhereItCrosses {
             and: meridian,

@@ -680,15 +680,24 @@ fn what_a_run_between_these_two_lies_on(
     }?;
 
     // A conic builder is handed the pair the caller's run *says* it lies on,
-    // and a stranger's model says whatever it likes: a seam plane 512 away
-    // from the ball it claims to cut leaves `where_a_plane_cuts_a_ball` a
-    // negative discriminant, which clamps to a radius of zero. Every road out
-    // of a conic that shrank to a point runs through `NaN`, so it is stopped
-    // here, once, rather than at each of them.
-    if let WhatARunLiesOn::Conic(conic) = &lies_on {
-        if !conic.has_an_angle_round_it() {
-            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
-        }
+    // and a stranger's model says whatever it likes: a seam plane 512 away from
+    // the ball it claims to cut leaves `where_a_plane_cuts_a_ball` a negative
+    // discriminant, which clamps to a radius of zero. Every road out of a conic
+    // that shrank to a point runs through `NaN`, so it is stopped here, once,
+    // rather than at each of them.
+    //
+    // **Asked only of a conic whose size is a number**, because a conic too big
+    // to put a bound on arrives here looking exactly like one that shrank: an
+    // overflowed semi-axis length times a direction with a zero in it is `NaN`
+    // in that coordinate, so no length of it is > 0. That one already has a name
+    // one step later in `walk` and it is a different one —
+    // `CannotWorkOutHowBigACrossingIs`, a gap rather than a limit, because the
+    // same pair written smaller is walked without complaint.
+    if let WhatARunLiesOn::Conic(conic) = &lies_on
+        && conic.the_size_it_was_worked_out_from().is_finite()
+        && !conic.has_an_angle_round_it()
+    {
+        return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
     }
     Ok(lies_on)
 }
@@ -1383,20 +1392,32 @@ impl Conic {
     /// squared length, so a semi-axis of zero hands back `0/0`, and then
     /// [`Conic::at`] builds a corner out of that angle, [`somewhere_within`]
     /// builds a box out of that corner, and the box is `NaN` on both sides.
-    /// A semi-axis out of `f64`'s range takes the same road by the other end —
-    /// `∞/∞` — and one carrying a `NaN` already fails `> 0.0` here.
+    /// A semi-axis carrying a `NaN` already fails `> 0.0` here.
     ///
-    /// So this is asked of the whole conic and not only of its radius: a centre
-    /// that is not a point puts the same `NaN` into every corner
+    /// **The centre is asked about too, because a size that is a number is no
+    /// promise the centre is a point.** [`how_big_this_is`] folds through
+    /// [`f64::max`], which drops a `NaN` rather than spreading it, so a centre of
+    /// `(NaN, ∞, NaN)` — which is what `normal * ∞` makes of a normal with a zero
+    /// in it — leaves a perfectly finite size and a `NaN` in every corner
     /// [`Conic::at`] places.
+    ///
+    /// **Only the caller knows whether a semi-axis that is not a length means
+    /// "no curve" or "too big to measure"**, which is why this asks neither
+    /// about infinity nor about `NaN` by name and the one call site checks the
+    /// size first.
+    ///
+    /// **[`Vector::length`] and not `length_squared`, and that is the whole
+    /// difference between this refusal and §39's.** A bar of radius `1e-200` has
+    /// a cap circle whose squared semi-axis is `1e-400` and underflows to zero,
+    /// and that circle *is* a curve — the same bar written larger is walked, so
+    /// what ran out is `f64`'s exponent and the answer is
+    /// [`Error::CannotWorkOutHowBigACrossingIs`], a gap
+    /// (`a_bar_too_thin_for_its_own_squares_is_refused_rather_than_asserted_against`).
+    /// [`Vector::length`] scales the squares back into range and answers
+    /// `1e-200`, so asking it here tells that bar apart from a circle whose
+    /// radius really is zero, which no scaling rescues.
     fn has_an_angle_round_it(&self) -> bool {
-        let a_semi_axis_of_some_length = |axis: Vector| {
-            let squared = axis.length_squared();
-            squared > 0.0 && squared.is_finite()
-        };
-        self.centre.is_finite()
-            && a_semi_axis_of_some_length(self.across)
-            && a_semi_axis_of_some_length(self.and)
+        self.centre.is_finite() && self.across.length() > 0.0 && self.and.length() > 0.0
     }
 
     /// The point at `angle` radians round, measured from
