@@ -129,6 +129,27 @@ FILE
 want "a fenced example is not a question" 1000 "$file" '❓ Q1$'
 reject "the fenced number does not leak" 1000 "$file" 'Q99'
 
+# An entry the reader cannot name is still an entry. Dropping it is how a
+# question goes missing while the line looks complete, which is the one failure
+# this line cannot have.
+cat >"$file" <<'FILE'
+- [ ] **Q1** — a real one?
+- [ ] **handoff Q2** — a label the reader cannot parse
+FILE
+want "an unparsable label is counted, not dropped" 1000 "$file" '❓ Q1, \?\?×1$'
+
+cat >"$file" <<'FILE'
+# Open questions
+
+- [ ] **Q1** — before the heading?
+
+## A section, which belongs to the document
+
+- [ ] **Q2** — after it?
+FILE
+want "document headings do not disturb the count" 1000 "$file" '❓ Q1, Q2$'
+reject "a heading is not a question" 1000 "$file" 'section'
+
 if [ "$failed" -gt 0 ]; then
 	echo "$failed of $total cases came out wrong"
 	exit 1

@@ -106,12 +106,34 @@ line, the body under it, the recommendation last:
   The body, as many paragraphs as it takes. Backticks, `§` refs and file:line
   belong here; this is the argument, not a summary of it.
 
+  - **(a)** the first option, on a line of its own
+  - **(b)** the second
+
   ➡️ *Recommend (a), because …*
 ```
 
 The checkbox line carries the label and the heading, and everything indented
 under it belongs to that question. `- [x]` and `→ answered: …` when the answer
 comes.
+
+**Options go on their own lines, lettered from `(a)` with no gaps.** Nothing can
+lift out of prose an option that was never marked, and until 2026-09-07 nothing
+was: 17 of 227 entries offered options and not one of them wrote the options as
+lines, which is why finding what `(a)` meant took reading the paragraph it was
+buried in. The heading, the option lines and the `➡️` line are the grammar; the
+body between them is free prose that no tool interprets.
+
+**`just question-check <hash>` names every violation, and it is your own file you
+run it on.** There is no list of grandfathered sessions: `/tmp` is swept at 30
+days, so a list of session ids would dangle within a month, and it would be a
+second record beside the thing itself (§60). A dead session's file cannot be
+fixed, so nothing judges it; yours can, so run this in the turn you write a
+question. `just question <hash>` announces a count of violations under the
+listing without spelling them out.
+
+Nothing is ever dropped: an entry whose label does not parse is listed as `??`
+with its line number, and shows in the status line as `??×1`. The `asking-questions`
+skill has the full grammar and the shapes that break it.
 
 **Read one back with `just question`, never with `!cat`.** The status line shows
 the open labels collapsed, after the session's hash — `❓ 766405 K1-K4, Q2,
