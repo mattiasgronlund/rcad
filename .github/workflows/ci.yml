@@ -89,16 +89,22 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Outside the checkout on purpose. 367 fetched files inside the working tree
-  # would show up as untracked to everything that reads `git status`, and the
-  # corpus is deliberately not this repo's to carry.
-  RCAD_STEP_CORPUS: ${{ runner.temp }}/rcad-step-corpus
 
 jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The corpus lives outside the checkout on purpose: 367 fetched files
+      # inside the working tree would read as untracked to everything that looks
+      # at `git status`, and the corpus is deliberately not this repo's to carry.
+      #
+      # Set in a step rather than in the `env:` block above, because `runner` is
+      # not one of the contexts a workflow-level `env` may name — only `github`,
+      # `inputs` and `vars` are. Writing `${{ runner.temp }}` up there is not a
+      # value that comes out empty; it makes the whole workflow file invalid, and
+      # the run then fails in 0 s having never started a job.
+      - run: echo "RCAD_STEP_CORPUS=$RUNNER_TEMP/rcad-step-corpus" >> "$GITHUB_ENV"
       # mise installs the `cargo:` tools in parallel, and each one triggers
       # rustup to materialise the toolchain pinned in `rust-toolchain.toml`.
       # They race over the same `.partial` file in ~/.rustup/downloads and all
