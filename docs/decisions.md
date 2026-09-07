@@ -363,10 +363,23 @@ margin against.** This paragraph named the number and deferred to the roadmap fo
 why, and the roadmap is a plan rather than a description of this codebase (§1),
 so the number was published and unheld — §15.6 with the test missing.
 `what_the_dynamic_range_check_is_a_margin_against.rs` now measures it. A feature
-written straight into the coordinates survives to a spread of `2^52` and is gone
-at `2^53`, about `9.0e15`; a constructed point, which is the first thing to
-actually fail, stops being decidable at `2^49`. Both are far above 1e11, so
+written straight into the coordinates is gone somewhere between a spread of
+`2^53` and `2^54`, around `1e16`; a constructed point, which is the first thing
+to actually fail, stops being decidable at `2^49`. Both are far above 1e11, so
 nothing goes wrong at the number itself.
+
+**Which of `2^53` and `2^54` is one bit of the coordinate**, and the first
+version of that file got this wrong in a way worth recording. At `2^53` the
+feature is exactly half an ulp, so `c + feature` is a tie and rounds to even: a
+coordinate with its last mantissa bit clear swallows the feature, one with it set
+keeps it a binade longer. The file swept `1`, `2^10`, `2^20` and `2^40` — all
+powers of two, all mantissa zero, **all four on the even side of the tie** — so
+it could not reach the answer that survives. It reported a single cliff and
+looked complete doing it. That is a sampling choice making one of the two
+outcomes unreachable, which is a different failure from a wrong measurement or a
+wrong claim, and powers of two are both the natural thing to sweep and the one
+family with no mantissa to be odd. Found by `rcad [a57470]`'s lane reading the
+file rather than by the file failing.
 
 What the margin buys is **conditioning, which a ratio cannot see** — §16.11's
 blindness with a quantity on it. A construction of conditioning `t` divides the

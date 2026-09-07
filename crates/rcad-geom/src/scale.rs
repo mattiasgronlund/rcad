@@ -133,19 +133,26 @@ impl From<Scale> for (Unit, f64) {
 /// report rather than quietly degrade on, and it costs one division.
 ///
 /// **`1e11` is a margin and not the edge of anything.** Nothing goes wrong
-/// there. A feature written straight into the coordinates survives to a spread
-/// of `2^52` and is gone at `2^53`, about `9.0e15`; the first thing that
+/// there. A feature written straight into the coordinates is gone somewhere
+/// between a spread of `2^53` and `2^54`, around `1e16`; the first thing that
 /// actually fails is a constructed point, which stops being decidable at
 /// `2^49`, and that is still 2 800 times the widest spread this allows.
 /// `what_the_dynamic_range_check_is_a_margin_against.rs` measures all three.
 ///
+/// Which of `2^53` and `2^54` is one bit of the coordinate: at `2^53` the
+/// feature is exactly half an ulp, so `c + feature` is a tie and rounds to
+/// even. A coordinate with its last mantissa bit clear swallows the feature
+/// there; one with it set keeps it a binade longer. Quote `2^53` when it has to
+/// be a single number, because it is the worse of the two.
+///
 /// **What the margin is for is conditioning, which a ratio cannot see.** A
 /// construction of conditioning `t` divides the feature by `t` inside its own
 /// intermediates, so the spread that decides the answer is `spread / t` and the
-/// feature dies once that reaches `2^52` — exactly, at every spread measured. At
-/// `1e11` that covers constructions conditioned down to about `2.2e-5` and no
-/// further. §16.11 says this check is blind to what a ratio cannot express;
-/// `2.2e-5` is how blind.
+/// feature dies once that reaches the same tie — exactly, at every spread and
+/// both parities measured. At `1e11` that covers constructions conditioned down
+/// to about `2.2e-5` and no further, taking the worse side of the tie. §16.11
+/// says this check is blind to what a ratio cannot express; `2.2e-5` is how
+/// blind.
 ///
 /// Past the cliff the kernel does not refuse. The offset rounds away, the points
 /// really are coplanar, and a predicate answers about them correctly and about a
@@ -163,10 +170,11 @@ pub struct DynamicRange {
 impl DynamicRange {
     /// The widest spread this kernel will work at.
     ///
-    /// Not the widest `f64` can carry — that is `2^53`, four and a half decades
-    /// further out, and [`DynamicRange`]'s own doc says what the gap between the
-    /// two is for. Moving this number is moving a safety margin, so move it
-    /// against a measurement.
+    /// Not the widest `f64` can carry — that is `2^53` or `2^54` depending on a
+    /// bit of the coordinate, four and a half decades further out, and
+    /// [`DynamicRange`]'s own doc says what the gap between the two is for.
+    /// Moving this number is moving a safety margin, so move it against a
+    /// measurement.
     pub const LARGEST_SUPPORTED_RATIO: f64 = 1e11;
 
     /// The spread of a model whose coordinates reach
