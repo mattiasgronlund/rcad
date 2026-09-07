@@ -60,7 +60,7 @@
 //! 2. **Placed, reaching the apex.** The apex reads zero only if the placement
 //!    carries it to zero, and with a stored apex on the origin that means a
 //!    translation of exactly zero — a pure turn about an axis through the
-//!    origin. [`the_turns`] sweeps twelve of them.
+//!    origin. [`the_turns`] sweeps fifteen of them.
 //! 3. **Not reaching the apex at all**, which is a frustum. There is no apex
 //!    point to find and the exact test correctly finds none. That is the
 //!    *other* end of the ball's problem — a rim standing on a real ruling being
@@ -89,7 +89,16 @@ const SLOPE: f64 = 0.5;
 
 /// How far up its axis each cone's base cap sits. Nine decades, because the
 /// floor's whole point is that it grows with this while the apex does not move.
-const THE_SIZES: [f64; 5] = [1.0, 8.0, 1e3, 1e6, 1e9];
+///
+/// **The apex is exactly zero on purpose and everything else here is not.** A
+/// sweep whose other coordinates are all powers of two samples only the
+/// zero-mantissa side of every rounding tie and can report a clean answer it has
+/// not earned, which happened twice in this repository's neighbourhood on
+/// 2026-09-06. So `1` and `8` have company: `1e3`, `1e6` and `1e9` are not
+/// powers of two, and `2731.409382746502` fills its mantissa. The slope has to
+/// stay a power of two — `cones/mod.rs` says why — and the rim corner is
+/// `slope · far`, which is exact for every one of these.
+const THE_SIZES: [f64; 6] = [1.0, 8.0, 1e3, 2731.409382746502, 1e6, 1e9];
 
 /// The exact test a consumer makes, and the ball it would fall back on.
 ///
@@ -146,7 +155,7 @@ fn the_mesh_lands_bit_for_bit_on_an_apex_that_reads_exactly_zero() {
             rows += 1;
         }
     }
-    assert_eq!(rows, 65, "the sweep is supposed to be 13 turns by 5 sizes");
+    assert_eq!(rows, 96, "the sweep is supposed to be 16 turns by 6 sizes");
 }
 
 /// The half that says the test above is unfunded.
@@ -257,15 +266,15 @@ fn the_placements_that_keep_the_apex_at_zero_are_the_ones_the_old_route_could_no
     }
 
     assert_eq!(
-        kept_the_apex_at_zero, 13,
-        "the thirteen placements the other tests sweep are supposed to be the whole of what keeps \
+        kept_the_apex_at_zero, 16,
+        "the sixteen placements the other tests sweep are supposed to be the whole of what keeps \
          an apex at zero"
     );
     assert!(
         the_old_route_would_have_moved_it > 20,
         "only {the_old_route_would_have_moved_it} shifted placements would have moved the apex on \
          the doubled inversion, so this measurement is not sharp enough to be a control on the \
-         thirteen that stay put"
+         sixteen that stay put"
     );
     println!(
         "13 placements keep the apex at zero and none of them could have moved it; \
@@ -273,7 +282,7 @@ fn the_placements_that_keep_the_apex_at_zero_are_the_ones_the_old_route_could_no
     );
 }
 
-/// The identity and twelve turns about axes through the origin, which are the
+/// The identity and fifteen turns about axes through the origin, which are the
 /// placements that leave an apex stored at the origin reading exactly zero.
 fn the_turns() -> Vec<(String, Isometry)> {
     let mut turns = vec![("no placement at all".to_owned(), Isometry::identity())];
@@ -282,6 +291,12 @@ fn the_turns() -> Vec<(String, Isometry)> {
         Vector::new(0.0, 1.0, 0.0),
         Vector::new(1.0, 2.0, 3.0),
         Vector::new(-3.0, 1.0, 1.0),
+        // Full mantissas in all three, for the reason [`THE_SIZES`] gives.
+        Vector::new(
+            0.427_183_059_624_719_3,
+            -0.731_827_364_918_274_6,
+            1.209_384_756_102_938_4,
+        ),
     ] {
         let axis = Axis::new(Point::origin(), direction).expect("a non-zero direction");
         for angle in [0.37, 1.9, 2.8] {
@@ -300,7 +315,12 @@ fn the_shifts() -> [Isometry; 4] {
         Isometry::identity(),
         Isometry::translation(Vector::new(3.0, 5.0, 7.0)).expect("a shift"),
         Isometry::translation(Vector::new(-1.5, 0.25, 11.0)).expect("a shift"),
-        Isometry::translation(Vector::new(0.0, 0.0, 1e6)).expect("a shift"),
+        Isometry::translation(Vector::new(
+            0.0,
+            2.930_471_528_364_917,
+            1_000_000.483_920_175,
+        ))
+        .expect("a shift"),
     ]
 }
 
