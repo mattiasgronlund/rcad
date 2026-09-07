@@ -1610,17 +1610,31 @@ check-hub dir=".":
         # untracked, which is a *stale* hub and not leftovers. Same symptom,
         # opposite fix: telling the reader to commit files that are already
         # committed sends them to duplicate somebody's merge. The two are told
-        # apart by asking whether every path is already on `main`.
+        # apart by asking whether every path is already on `main`, which has to
+        # mean the same bytes and not the same name. A name-only answer sends a
+        # reader to delete a file whose content is on `main` under that name but
+        # is not the content in front of them (docs/decisions.md §60.10).
         untracked=$(grep '^??' <<<"$dirt" | cut -c4- || true)
         modified=$(grep -v '^??' <<<"$dirt" || true)
-        landed=""
+        unmatched=""
         if [ -z "$modified" ] && [ -n "$untracked" ]; then
-            on_main=$(git -C "$hub" ls-tree -r --name-only main 2>/dev/null || true)
-            landed=$(comm -23 <(sort <<<"$untracked") <(sort <<<"$on_main"))
+            # Enumerated rather than read off `status`, which reports an
+            # untracked directory as one entry and quotes an awkward name. Every
+            # file the `clean` would take is hashed; an empty directory is the
+            # only thing it takes that this does not see, and it holds nothing.
+            while IFS= read -r -d '' path; do
+                on_main=$(git -C "$hub" rev-parse --verify --quiet "main:$path" || true)
+                if [ -n "$on_main" ] \
+                    && [ "$on_main" = "$(git -C "$hub" hash-object -- "$hub/$path")" ]; then
+                    continue
+                fi
+                unmatched="$unmatched$path"$'\n'
+            done < <(git -C "$hub" ls-files --others --exclude-standard -z)
         fi
-        if [ -z "$modified" ] && [ -n "$untracked" ] && [ -z "$landed" ]; then
-            echo "  Every one of those is already committed on \`main\`, so nothing here is"
-            echo "  lost work — the hub is just parked at an older commit. Re-park it:"
+        if [ -z "$modified" ] && [ -n "$untracked" ] && [ -z "$unmatched" ]; then
+            echo "  Every one of those is already committed on \`main\`, byte for byte —"
+            echo "  compared by content, not by name — so nothing here is lost work; the"
+            echo "  hub is just parked at an older commit. Re-park it:"
             # One line, because `check-hub-selftest` greps it back out and runs
             # it. Wrapping it for width is caught rather than silent: the grep
             # then hands bash a dangling `&&` and the selftest fails on it.
@@ -1719,3 +1733,20 @@ check-hub-selftest:
         || fail "the remedy did not restore the file it removed"
     got=$(just check-hub "$dir/main") \
         || fail "check-hub still fails after the reader did exactly what it said"
+
+    # The same name on `main`, different bytes in the hub. Everything above this
+    # point passes with a name-only comparison, because the fixture writes the
+    # same content on both sides — so the fixture has to differ for the check to
+    # be able to fail. Here the hub holds work that is in no commit anywhere, and
+    # calling it "already committed on `main`" sends the reader to delete it with
+    # the `clean -fd` the same message prints (docs/decisions.md §60.10).
+    git -C "$dir/main" checkout -q --detach "main^"
+    printf 'work nobody has committed\n' >"$dir/main/landed"
+    got=$(just check-hub "$dir/main" 2>&1) && fail "a hub holding uncommitted work was accepted"
+    if grep -qF "already committed on \`main\`" <<<"$got"; then
+        fail "content that is on no branch was called committed, and the remedy deletes it"
+    fi
+    grep -qF "very likely not yours" <<<"$got" \
+        || fail "differing content got neither the stale message nor the leftovers one"
+    [ "$(cat "$dir/main/landed")" = "work nobody has committed" ] \
+        || fail "the check itself changed the file it was asked about"
