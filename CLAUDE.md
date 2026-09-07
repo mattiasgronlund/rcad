@@ -152,10 +152,16 @@ after the prose.
 (`cargo-nextest`, `cargo-deny`, `taplo`, `just`). Run things through
 `just`. Never install a tool ad hoc.
 
-**CI runs four of these recipes and `just default` runs eighteen**, so the
-fourteen `check-*` recipes gate your run and nothing else — a CI green would not
-cover them. It has not had to: as of 2026-09-07 CI has never passed, ten
-consecutive failures, every one in the tool install and none reaching a check.
+**CI runs four recipes — `check`, `lint`, `test`, `deny`.** `just default` runs
+those four and every `check-*` besides, so the `check-*` recipes gate your run
+and nothing else; a CI green would not cover them.
+
+It has never had to. **No CI run has ever succeeded**, and every one has died in
+the tool install without reaching a check. Check that rather than believe it —
+`gh run list --repo mattiasgronlund/rcad` — because a failure count written here
+would be false on the next push, while "never succeeded" can only be falsified
+by a fix. On 2026-09-07 it was 26 runs and 26 failures.
+
 Until that changes, every green in this repo is one person having run
 `just default` locally and reported it honestly. There is no second opinion.
 
