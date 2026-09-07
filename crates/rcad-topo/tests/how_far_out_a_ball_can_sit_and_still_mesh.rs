@@ -65,6 +65,36 @@
 //! bug report. What is worth writing down is that the two are interleaved, and
 //! that the thing they interleave on is not distance.
 //!
+//! # The same edge, and why a sweep by doubling reports it as a cliff
+//!
+//! `crates/rcad-geom/tests/what_the_dynamic_range_check_is_a_margin_against.rs`
+//! — added on `main` in `f98ef8f`, after this branch's base — reaches the same
+//! `2^53` from the other side. It puts a wedge at `c` with an edge `c + f` and
+//! sweeps `f = c / 2^s`: the feature survives to `s = 52` and is gone from
+//! `s = 53`. That is this file's band start, said as a spread instead of as a
+//! ratio, because `f = c / 2^53` **is** half an ulp of `c`.
+//!
+//! **It reports a cliff, and this file reports an alternation, and both
+//! measurements are right.** Its four coordinates are `1`, `2^10`, `2^20` and
+//! `2^40` — every one a power of two, so every one has a mantissa of zero. All
+//! four fall on the *even* side of the tie, where the feature rounds inward and
+//! is indeed gone. A coordinate with an odd mantissa keeps it a whole binade
+//! longer, which
+//! [`a_coordinate_with_an_odd_mantissa_keeps_a_feature_a_binade_longer`]
+//! measures in plain `f64` with no kernel in the way.
+//!
+//! Nothing there needs correcting. Its verdict is that `1e11` is an enormous
+//! margin against a cliff at `9.0e15`, and one more binade of head-room on half
+//! the coordinates does not touch that. What is worth keeping is only that
+//! "gone above `2^53`" is a statement about even mantissas, and a consumer that
+//! reads it as a distance will be surprised by a solid that meshes further out
+//! than one that did not.
+//!
+//! **And a threshold cannot produce the reported pair at all.** Both placements
+//! are above `2^53`, so a cliff there predicts both refuse; what happened is
+//! that the lower one refuses and the higher one meshes. That inversion is the
+//! finding, and it is the tie-break and not the threshold that makes it.
+//!
 //! # What is not claimed
 //!
 //! §16.10 scopes a verdict to the family swept. This is balls, placed along one
@@ -142,6 +172,67 @@ fn the_ulp_sets_up_the_tie_and_the_last_bit_of_the_placement_breaks_it() {
         "so the near pole rounds a whole ulp in"
     );
     assert_eq!(ODD + 1.0, ODD + 2.0, "and the far pole a whole ulp out");
+}
+
+/// The `2^53` spread where a written feature disappears is where it disappears
+/// *from an even mantissa*. An odd one keeps it to `2^54`.
+///
+/// The same arithmetic as the test above, done the way
+/// `what_the_dynamic_range_check_is_a_margin_against.rs` on `main` sets it up —
+/// a feature `c / 2^s` written into a coordinate — so that the two can be laid
+/// side by side. That file sweeps `c` over `1`, `2^10`, `2^20` and `2^40`, and
+/// the point here is that all four have a mantissa of zero: `c + c / 2^53` is a
+/// tie that rounds inward at every one of them, so the sweep sees a clean cliff
+/// at `2^53` and could not have seen anything else.
+///
+/// Set the last bit of `c` and the tie rounds outward instead. The feature is
+/// still there at `2^53` and only gone at `2^54`. Checked at four coordinates a
+/// decade apart so it is not one place on the number line, and in plain `f64`
+/// with nothing of this workspace in the way.
+///
+/// `c / 2^53` is *just over* half an ulp when `c` is not a power of two, so on
+/// its own that pair of lines would also pass under plain round-to-nearest with
+/// no tie-break at all. The exact half-ulp is therefore checked as well, and
+/// that one only goes the way it does because ties round to even.
+///
+/// **This does not move that file's verdict** — `1e11` is still four and a half
+/// decades below the nearer of the two cliffs. It is only that "gone above
+/// `2^53`" is about half the coordinates and not all of them, which is the same
+/// fact as this file's alternating band.
+#[test]
+fn a_coordinate_with_an_odd_mantissa_keeps_a_feature_a_binade_longer() {
+    for even in [1.0f64, 1024.0, 1_048_576.0, 1_099_511_627_776.0] {
+        assert_eq!(even.to_bits() % 2, 0, "{even} is a power of two");
+        let odd = f64::from_bits(even.to_bits() | 1);
+
+        assert_eq!(
+            even + even / two_to_the(53),
+            even,
+            "half an ulp on {even} rounds back down, so the feature is gone"
+        );
+        assert_ne!(
+            odd + odd / two_to_the(53),
+            odd,
+            "the same half ulp on {odd} rounds up, so the feature is still there"
+        );
+        assert_eq!(
+            odd + odd / two_to_the(54),
+            odd,
+            "a quarter ulp is under the tie and no last bit saves it"
+        );
+
+        assert_eq!(
+            even + ulp_of(even) / 2.0,
+            even,
+            "and the tie exactly, which is the mechanism rather than the shape \
+             the other file writes it in: an even mantissa rounds it inward"
+        );
+        assert_eq!(
+            odd + ulp_of(odd) / 2.0,
+            odd + ulp_of(odd),
+            "and an odd one rounds the same tie outward"
+        );
+    }
 }
 
 /// The refusal is [`rcad_mesh::CannotTriangulate::CornersCoincide`], which is
@@ -531,4 +622,11 @@ fn what_it_refused(why: &Error) -> String {
 /// How far apart two neighbouring doubles are at `x`.
 fn ulp_of(x: f64) -> f64 {
     f64::from_bits(x.to_bits() + 1) - x
+}
+
+/// `2^exponent`, built from the bits so that no rounding of its own enters a
+/// measurement about rounding.
+fn two_to_the(exponent: u64) -> f64 {
+    assert!(exponent <= 1023, "2^{exponent} is not a normal f64");
+    f64::from_bits((1023 + exponent) << 52)
 }
