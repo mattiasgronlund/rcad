@@ -55,10 +55,10 @@ mod rings;
 fn how_far_off_the_surface(surface: &Surface, point: Point) -> f64 {
     let (u, v) = surface.coordinates_of(point);
     let straight_in = surface.point_at(u, v).distance_to(point);
-    match surface {
-        Surface::Cone(cone) => straight_in / cone.slope().hypot(1.0),
-        _ => straight_in,
+    if let Surface::Cone(cone) = surface {
+        return straight_in / cone.slope().hypot(1.0);
     }
+    straight_in
 }
 
 /// The furthest any point of any triangle of `mesh` sits from the face it was
@@ -79,7 +79,9 @@ fn how_far_inside_a_triangle_it_strays(model: &Model, solid: SolidKey, mesh: &Me
         if surface.as_plane().is_some() {
             continue;
         }
-        let at = triangle.corners().map(|corner| mesh.points()[corner as usize]);
+        let at = triangle
+            .corners()
+            .map(|corner| mesh.points()[corner as usize]);
         for one in 0..=ROWS_ACROSS_A_TRIANGLE {
             for other in 0..=(ROWS_ACROSS_A_TRIANGLE - one) {
                 let weights = [
@@ -88,11 +90,10 @@ fn how_far_inside_a_triangle_it_strays(model: &Model, solid: SolidKey, mesh: &Me
                     f64::from(other),
                 ]
                 .map(|weight| weight / f64::from(ROWS_ACROSS_A_TRIANGLE));
-                let inside = Point::origin()
-                    + (0..3)
-                        .map(|which| (at[which] - Point::origin()) * weights[which])
-                        .fold(Vector::zero(), |sum, part| sum + part);
-                worst = worst.max(how_far_off_the_surface(surface, inside));
+                let mixed = (0..3)
+                    .map(|which| (at[which] - Point::origin()) * weights[which])
+                    .fold(Vector::zero(), |sum, part| sum + part);
+                worst = worst.max(how_far_off_the_surface(surface, Point::origin() + mixed));
             }
         }
     }
