@@ -19286,9 +19286,14 @@ with the one difference that it **keeps** the fuse's answer instead of doing
   halves reached the fuse, 1 060 answered `Ok`, and **0** of those fail
   `Model::validate` *under the policy the fuse itself ran under*.
 - The same 1 060, validated a second time under `Policy::certified()`: **16**
-  fail, all sixteen fused under `Policy::tolerant`, thirteen of them under
-  `Rule::Difference`, ten with a span of `inf`. The complaint is always
-  `Invalid::DynamicRangeTooWide`.
+  fail, all sixteen fused under `Policy::tolerant`, **fifteen under
+  `Rule::Difference` and one under `Rule::Union`**, ten with a span of `inf`.
+  The complaint is always `Invalid::DynamicRangeTooWide`.
+
+  The rule count was first written here as thirteen, which was wrong. The rule
+  is the input's first byte mod 3 (`fuzz_targets/two_solids_fused_by_a_stranger.rs:97`),
+  and fifteen of the sixteen carry `0xb9` against `2fb467fc`'s `0x84` — counted
+  off the bytes, twice, by two people who did not share a harness.
 
 **Those 16 are not a release-build hole, and saying so is the point of measuring
 them.** They were carried as an unexplained residue — sixteen wrong answers on
