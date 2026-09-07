@@ -876,6 +876,18 @@ test:
 # directory it builds itself, rather than at whatever sessions are live today.
 questions_root := env_var_or_default("CLAUDE_QUESTIONS_ROOT", env_var_or_default("TMPDIR", "/tmp") / ("claude-" + `id -u`))
 
+# The parser lives in the `questions` plugin and not in this repo, because a
+# copy in each repo is a copy that goes stale: `rscene` carried one that still
+# dropped the second label of a paired entry months after the fix landed here.
+#
+# `$HOME`-relative and overridable rather than absolute, so a clone somewhere
+# else still resolves. A **directory**-source marketplace is what makes this
+# path stable at all — a github source installs under
+# `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`, and a recipe
+# naming that breaks on the next version bump in the direction of "no questions
+# found", which is the failure this whole apparatus exists to prevent.
+questions_plugin := env_var_or_default("CLAUDE_QUESTIONS_PLUGIN", home_directory() / "git/mattiasgronlund/claude-questions/plugins/questions")
+
 # One open question, in full, by the hash the status line prints beside it.
 #
 #     just question                 the sessions that have open questions
@@ -906,7 +918,7 @@ questions_root := env_var_or_default("CLAUDE_QUESTIONS_ROOT", env_var_or_default
 question hash="" label="":
     #!/usr/bin/env bash
     set -euo pipefail
-    q="{{justfile_directory()}}/.claude/questions.py"
+    q="{{questions_plugin}}/bin/questions.py"
 
     if [ -z "{{hash}}" ]; then
         exec python3 "$q" sessions "{{questions_root}}"
@@ -937,133 +949,66 @@ question hash="" label="":
 question-check hash:
     #!/usr/bin/env bash
     set -euo pipefail
-    q="{{justfile_directory()}}/.claude/questions.py"
+    q="{{questions_plugin}}/bin/questions.py"
     file=$(python3 "$q" find "{{questions_root}}" "{{hash}}")
     exec python3 "$q" check "$file"
 
-# Pins `question` and `question-check` against a scratchpad they build
-# themselves, so they stay proven on a machine where no session happens to be
-# live.
+# The grammar's own 20 cases live with the parser, in the `questions` plugin.
+# What is left here is the seam: that the plugin is where this repo thinks it
+# is, and that `just question` — which is this repo's recipe, not the plugin's —
+# still reads a file end to end and still announces a violation under the
+# listing. The footer is rcad's, so rcad tests it.
 #
-# Four of these cases are bugs that were live in this tree on 2026-09-07, and
-# each is here because nothing else would have noticed it:
-#
-#   - a **paired label**, `**Q7 / Q11**`, counted as one question and hid Q11;
-#   - a **fenced example** in a body truncated the body at the fence, which the
-#     format's own documentation is written as;
-#   - a **`##` section heading** was swallowed into the entry above it;
-#   - an entry whose **label does not parse** vanished from the count and the
-#     listing alike, which is the one thing this must never do.
+# Keeping the recipe's name is deliberate: `check-default-runs-every-check`
+# counts `check-*` recipes and this one moving out of that set would be a
+# silent change to a number that exists to be loud.
 check-questions-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
+    plugin="{{questions_plugin}}"
+    if [ ! -x "$plugin/bin/selftest.sh" ]; then
+        echo "the questions plugin is not where this repo expects it:"
+        echo "  $plugin"
+        echo "install it with:"
+        echo "  /plugin marketplace add ~/git/mattiasgronlund/claude-questions"
+        echo "  /plugin install questions@mattiasgronlund-local"
+        echo "or point CLAUDE_QUESTIONS_PLUGIN at your checkout"
+        exit 1
+    fi
+    "$plugin/bin/selftest.sh"
+
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
     scratch="$dir/-slug-rcad/76640573-f351-4e74/scratchpad"
     mkdir -p "$scratch"
-    fence='```'
     printf '%s\n' \
-        '# Open questions' \
-        '' \
         '- [ ] **Q7 / Q11** — a floor unit with no record' \
         '' \
-        '  An indented body that belongs to Q7, mentioning M5 and Q99 in passing.' \
+        '  An indented body, mentioning M5 in passing.' \
         '' \
-        "$fence" \
-        '- [ ] **Q99** — documentation of the format, not a question' \
-        "$fence" \
-        '' \
-        '  BODY-CONTINUES-PAST-THE-FENCE' \
-        '' \
-        '## A section heading, which belongs to the document' \
-        '' \
-        '- [x] **Q24** — settled, and must not be counted as open' \
-        '- [ ] **handoff Q1** — a label the reader cannot parse' \
-        '- [ ] **K1** — a lane keeps its own letter' \
+        '- [ ] **Q1** — options in prose, so the footer has something to count: (a) or (b)?' \
         > "$scratch/open-questions.md"
     j="{{just_executable()}} --set questions_root $dir"
 
     got=$($j question)
-    want="  766405   4 open  $(date -d "@$(stat -c %Y "$scratch/open-questions.md")" +%H:%M)  rcad"
+    want="  766405   3 open  $(date -d "@$(stat -c %Y "$scratch/open-questions.md")" +%H:%M)  rcad"
     [ "$got" = "$want" ] || { echo "the session list drifted:"; \
         echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
 
-    got=$($j question 766405 | grep -v '⚠' | grep . | awk '{ $1 = $1; print }')
-    want=$(printf '%s\n' "Q7, Q11 open a floor unit with no record" \
-        "Q24 done settled, and must not be counted as open" \
-        "?? open line 16: **handoff Q1** — a label the reader cannot parse" \
-        "K1 open a lane keeps its own letter")
-    [ "$got" = "$want" ] || { echo "the label listing drifted:"; \
-        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
-
-    # The listing announces violations without spelling them out; a wall of
-    # grammar notes under the thing you came to read is how a footer gets
-    # ignored.
-    $j question 766405 | grep -q '⚠ 1 grammar violation' \
+    # Captured before it is matched: `grep -q` closes the pipe on its first
+    # hit, and under `pipefail` that SIGPIPE reads exactly like the listing
+    # having failed.
+    listing=$($j question 766405)
+    grep -q 'Q7, Q11' <<<"$listing" \
+        || { echo "the listing did not reach the plugin's parser"; exit 1; }
+    grep -q '⚠ 1 grammar violation' <<<"$listing" \
         || { echo "the listing did not announce the violation it found"; exit 1; }
-
-    [ "$($j question 766405 Q7)" = "$($j question 766405 Q11)" ] \
-        || { echo "a paired label is not reachable by both of its names"; exit 1; }
-    $j question 766405 Q11 | grep -q 'indented body' \
-        || { echo "the body did not come back with the question"; exit 1; }
-    $j question 766405 Q11 | grep -q 'BODY-CONTINUES-PAST-THE-FENCE' \
-        || { echo "a fenced example truncated the body"; exit 1; }
-    if $j question 766405 Q11 | grep -q 'A section heading'; then
-        echo "a document heading was swallowed into the entry above it"; exit 1
-    fi
-    if $j question 766405 Q11 | grep -q 'Q24'; then
-        echo "the entry ran on into the one after it"; exit 1
-    fi
-
-    if $j question 766405 Q99 >/dev/null 2>&1; then
-        echo "a label inside a fence was addressable as a question"; exit 1
-    fi
+    entry=$($j question 766405 Q11)
+    grep -q 'indented body' <<<"$entry" \
+        || { echo "an entry did not come back in full"; exit 1; }
     if $j question zzzz >/dev/null 2>&1; then
         echo "a hash matching no session was accepted"; exit 1
     fi
-
-    # The grammar, checked only against the caller's own file. Each rule gets a
-    # file that breaks exactly it, because a checker that fires for the wrong
-    # reason is as bad as one that does not fire.
-    # The output is captured before it is matched: `question-check` exits
-    # non-zero by design, and under `pipefail` that turns a matching grep into
-    # a failing pipeline, which reads exactly like the checker having missed.
-    breaks() {
-        printf '%s\n' "$2" > "$scratch/open-questions.md"
-        local out status=0
-        out=$($j question-check 766405 2>/dev/null) || status=$?
-        [ "$status" -ne 0 ] || { echo "the checker passed a file that breaks: $1"; exit 1; }
-        grep -q "$3" <<<"$out" || { echo "the checker missed: $1"; exit 1; }
-    }
-    breaks "options in prose, not marked" \
-        '- [ ] **Q1** — pick one? Either (a) do it now or (b) do it later.' \
-        'stated in prose but not marked'
-    breaks "an option set that skips a letter" \
-        "$(printf '%s\n' '- [ ] **Q1** — pick one?' '' '  - **(a)** now' '  - **(c)** later' '' '  ➡️ *Recommend (a).*')" \
-        'must run from .a. with no gaps'
-    breaks "options offered with no recommendation" \
-        "$(printf '%s\n' '- [ ] **Q1** — pick one?' '' '  - **(a)** now' '  - **(b)** later')" \
-        'offers options but recommends none'
-    breaks "the old recommendation spelling" \
-        "$(printf '%s\n' '- [ ] **Q1** — pick one?' '' '  - **(a)** now' '  - **(b)** later' '' '  → *recommend (a)*')" \
-        'write .➡️'
-    breaks "a label that does not parse" \
-        '- [ ] **handoff Q1** — no label here' \
-        'no label the reader can parse'
-    breaks "a heading separator that is not an em dash" \
-        '- [ ] **Q1** - a hyphen is not the separator' \
-        'must be an em dash'
-
-    printf '%s\n' \
-        '- [ ] **Q1** — a well-formed entry, which must raise nothing' \
-        '' \
-        '  - **(a)** do it now' \
-        '  - **(b)** do it later' \
-        '' \
-        '  ➡️ *Recommend (a), because the body may say anything at all.*' \
-        > "$scratch/open-questions.md"
-    $j question-check 766405 \
-        || { echo "the checker fired on an entry that follows the grammar"; exit 1; }
 
 # One test, or a few, with the corpus and the build cache already in place.
 #

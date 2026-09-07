@@ -89,7 +89,12 @@ fi
 #
 # One process rather than the four this used to fork, which is also why it got
 # faster: 27.8 ms to 15.6 ms, measured, on a line that redraws every 5 seconds.
-compact=$(python3 "$(dirname "$(readlink -f "$0")")/questions.py" compact "$questions")
+#
+# `$HOME`-relative and overridable, never absolute: a tracked file naming
+# `/home/mattias` breaks for anyone who clones this. `CLAUDE_QUESTIONS_PLUGIN`
+# is the same variable the justfile reads, so there is one place to move.
+plugin=${CLAUDE_QUESTIONS_PLUGIN:-$HOME/git/mattiasgronlund/claude-questions/plugins/questions}
+compact=$(python3 "$plugin/bin/questions.py" compact "$questions")
 
 if [ -z "$compact" ]; then
 	printf '%s\n' "${green}✓${off} ${dim}no open questions${off}"

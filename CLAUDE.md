@@ -135,6 +135,19 @@ Nothing is ever dropped: an entry whose label does not parse is listed as `??`
 with its line number, and shows in the status line as `??×1`. The `asking-questions`
 skill has the full grammar and the shapes that break it.
 
+**The parser and that skill are not in this repo.** They live in the `questions`
+plugin, because a copy in each repo is a copy that goes stale — `rscene` carried
+one that still dropped the second label of a paired entry months after the fix
+landed here. `just question` and `.claude/statusline.sh` both resolve it through
+`CLAUDE_QUESTIONS_PLUGIN`, defaulting to
+`~/git/mattiasgronlund/claude-questions/plugins/questions`. If a recipe says the
+plugin is missing:
+
+```
+/plugin marketplace add ~/git/mattiasgronlund/claude-questions
+/plugin install questions@mattiasgronlund-local
+```
+
 **Read one back with `just question`, never with `!cat`.** The status line shows
 the open labels collapsed, after the session's hash — `❓ 766405 K1-K4, Q2,
 Q4-Q6` — and that hash is the address: `just question 766405` lists the headings,
