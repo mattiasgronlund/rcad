@@ -310,16 +310,21 @@ fn walk_one_outline(
         let along = decide(from, corners[next], target, point, policy, log);
         match along {
             Decision::Zero => match lies_between(from, corners[next], point) {
-                Some(true) => return Ok(None),
-                Some(false) => (),
-                None => return Err(gave_up_turning_a_corner(point, along)),
+                Ok(true) => return Ok(None),
+                Ok(false) => (),
+                Err(overhang) => return Err(gave_up_ordering_along_a_side(point, overhang)),
             },
             Decision::Pos | Decision::Neg => (),
             other => return Err(gave_up_turning_a_corner(point, other)),
         }
         match crossing(sides[index], sides[next], along) {
             Some(count) => winding += count,
-            None => return Err(gave_up_turning_a_corner(point, sides[index])),
+            None => {
+                return Err(gave_up_turning_a_corner(
+                    point,
+                    whichever_of_them_was_not_read(sides[index], sides[next]),
+                ));
+            }
         }
     }
     Ok(Some(winding))
@@ -549,12 +554,18 @@ pub(crate) fn the_side_this_face_lies_on(
 }
 
 /// Whether `point`, already shown to be on the line through `from` and `to`, is
-/// on the piece between them. `None` when its box straddles an end.
+/// on the piece between them. `Err` when its box reaches past an end, carrying
+/// how far past.
 ///
 /// The comparison runs along whichever axis the side reaches furthest, which is
 /// `docs/decisions.md` §17.4's rule for ordering points along a line and needs
 /// no predicate of its own.
-fn lies_between(from: Point, to: Point, point: PredicatePoint) -> Option<bool> {
+///
+/// **The overhang is handed back rather than thrown away** because it is the
+/// only measurement of this refusal there is. Nothing was decided badly here —
+/// every `orient3d` certified — so the caller has no predicate's enclosure to
+/// report, and §69.3 is what happened when it reported one anyway.
+fn lies_between(from: Point, to: Point, point: PredicatePoint) -> Result<bool, f64> {
     let (from, to) = (from.coordinates(), to.coordinates());
     let axis = (0..3)
         .max_by(|&one, &other| {
@@ -566,11 +577,11 @@ fn lies_between(from: Point, to: Point, point: PredicatePoint) -> Option<bool> {
     let (low, high) = (from[axis].min(to[axis]), from[axis].max(to[axis]));
     let span = point.enclosure()[axis];
     if span.lo() >= low && span.hi() <= high {
-        Some(true)
+        Ok(true)
     } else if span.hi() < low || span.lo() > high {
-        Some(false)
+        Ok(false)
     } else {
-        None
+        Err((low - span.lo()).max(span.hi() - high).max(0.0))
     }
 }
 
@@ -605,6 +616,28 @@ fn above_the_line(side: Decision) -> Option<bool> {
     }
 }
 
+/// Which of a side's two ends is the one [`crossing`] could not read.
+///
+/// The refusal has to name that one and not its neighbour. Both are in hand and
+/// only one of them was measured: a certified sign has no enclosure, so a record
+/// made about it would have to invent the number a reader of the refusal came
+/// for. Naming the neighbour is what §69 records, and it panicked rather than
+/// lying, which is the only reason it was ever found.
+///
+/// [`crossing`] gives up only through [`above_the_line`], which reads every
+/// certified sign, so one of the two really is undecided and the assert below
+/// has nothing to fall back to.
+fn whichever_of_them_was_not_read(from_side: Decision, to_side: Decision) -> Decision {
+    if let Decision::Undecidable { .. } = from_side {
+        return from_side;
+    }
+    assert!(
+        matches!(to_side, Decision::Undecidable { .. }),
+        "the crossing count was refused with both of its ends decided: {from_side:?} and {to_side:?}"
+    );
+    to_side
+}
+
 /// What to hand back when the side of a surface could not be settled.
 ///
 /// **The name and the units are the sweep's**, not a second set: `check_curved_face`
@@ -617,7 +650,13 @@ fn above_the_line(side: Decision) -> Option<bool> {
 /// one face tries the next target — and emptying their log on the way past would
 /// take the records of every decision that *was* settled with it.
 fn gave_up_on_a_side(surface: &Surface, point: PredicatePoint, decision: Decision) -> Error {
-    gave_up(name_of_surface(surface), point, decision, Measures::Area)
+    gave_up(
+        name_of_surface(surface),
+        point,
+        Level::Exact,
+        decision,
+        Measures::Area,
+    )
 }
 
 /// The same, for an `orient3d` in the outline walk.
@@ -626,23 +665,48 @@ fn gave_up_on_a_side(surface: &Surface, point: PredicatePoint, decision: Decisio
 /// past (`orient3d_tolerantly` does that for every level it could not settle),
 /// so what this adds is which *question* the walk was asking when it stopped.
 fn gave_up_turning_a_corner(point: PredicatePoint, decision: Decision) -> Error {
-    gave_up(ORIENT3D, point, decision, Measures::Volume)
+    gave_up(ORIENT3D, point, Level::Exact, decision, Measures::Volume)
+}
+
+/// The name the ordering of a point along a side goes by in provenance records.
+const BETWEEN_TWO_CORNERS: &str = "between_two_corners";
+
+/// What to hand back when the point is on a side's line and its box reaches
+/// `overhang` past an end of it.
+///
+/// **Not [`gave_up_turning_a_corner`]**, and the difference is what is being
+/// refused rather than how it is worded. No predicate gave up here: every
+/// `orient3d` certified, and `along` came back [`Decision::Zero`] because the
+/// point really is on the line through the two corners. What could not be
+/// settled is where it sits *along* that line, which §17.4 answers by comparing
+/// a box against the ends on one axis and asks no predicate at all.
+///
+/// So the record names the ordering, and its enclosure is the overhang — **a
+/// length**, which is what that comparison measures. Reaching for `orient3d`
+/// and [`Measures::Volume`] here would file a refusal under a predicate that
+/// decided, with a width in units nothing here worked in, and §15.3 is why a
+/// number whose units cannot be recovered is worse than no number.
+fn gave_up_ordering_along_a_side(point: PredicatePoint, overhang: f64) -> Error {
+    gave_up(
+        BETWEEN_TWO_CORNERS,
+        point,
+        Level::Interval,
+        Decision::Undecidable {
+            enclosure: overhang,
+        },
+        Measures::Length,
+    )
 }
 
 fn gave_up(
     named: &'static str,
     point: PredicatePoint,
+    level: Level,
     decision: Decision,
     measures: Measures,
 ) -> Error {
     let mut records = ProvenanceLog::new();
-    records.push(Record::new(
-        named,
-        &[point],
-        Level::Exact,
-        decision,
-        measures,
-    ));
+    records.push(Record::new(named, &[point], level, decision, measures));
     Error::Undecidable { records }
 }
 
