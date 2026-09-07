@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rcad_geom::{
     Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun, Orientation,
     Plane, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS,
-    Surface, Vector,
+    Scale, Surface, Vector,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -1017,8 +1017,24 @@ impl Model {
     ///
     /// **Only the second half is allowed against a plane an edge is merely
     /// *named* by** — see that function.
+    ///
+    /// # The first half takes the smaller of what the model says and what it is
+    ///
+    /// [`Scale`] arrives with the file, so a tolerance read off it alone lets
+    /// the file decide how closely the file will be checked. Bytes declaring a
+    /// part `1.8446744073709552e21` mm across — two hundred light-years — bought
+    /// `1.8e12` mm of room and walked two ten-millimetre blocks whose walls sat
+    /// twenty and ten millimetres off their own planes straight through here.
+    /// `docs/decisions.md` §70.
+    ///
+    /// [`Model::largest_coordinate`] is measured rather than declared, and a
+    /// part that really is that big has corners to match, so taking the smaller
+    /// of the two costs a legitimate large model nothing and leaves a model that
+    /// overstates itself with the tolerance its own corners earn.
     fn allowed_wobble(&self) -> f64 {
-        self.scale().default_linear_tolerance() + self.what_writing_a_plane_down_costs()
+        let what_the_model_says = self.scale().default_linear_tolerance();
+        let what_its_corners_show = Scale::RELATIVE_LINEAR_TOLERANCE * self.largest_coordinate();
+        what_the_model_says.min(what_its_corners_show) + self.what_writing_a_plane_down_costs()
     }
 
     /// How far off a plane a point exactly on it can read, purely because the
