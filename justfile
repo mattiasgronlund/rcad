@@ -7,7 +7,7 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus lint test check-t-selftest deny
+default: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -315,10 +315,15 @@ test-ignored:
 # a recipe whose own body writes .rs fixtures — and five more came from the
 # 2026-09-05 session review: three shapes it let through, two it wrongly
 # refused in the scratchpad.
+#
+# The hook and most of its cases now live in the `guardrails` plugin, shared
+# with `rscene`. What stayed here is `patching-cases.local.json`: the cases that
+# name *this* repo — a `crates/rcad-*` path, `docs/decisions.md`, a `just`
+# recipe of ours. The plugin's runner appends it and fails loudly if the file is
+# named and missing, because a repo's own cases quietly not running is exactly
+# the drift the plugin was made to end.
 check-hooks:
-    @.claude/hooks/check-patching-hook.sh
-    @.claude/hooks/check-context-budget.sh
-    @.claude/hooks/check-statusline.sh
+    @{{guardrails_plugin}}/bin/selftest.sh .claude/patching-cases.local.json
     @.claude/hooks/check-worktree-create.sh
     @.claude/hooks/check-session-start-hub.sh
 
@@ -370,8 +375,8 @@ check-default-runs-every-check:
     listed=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "17" ]; then \
-        echo "found $n check-* recipes, expected 17"; \
+    if [ "$n" != "18" ]; then \
+        echo "found $n check-* recipes, expected 18"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -876,9 +881,10 @@ test:
 # directory it builds itself, rather than at whatever sessions are live today.
 questions_root := env_var_or_default("CLAUDE_QUESTIONS_ROOT", env_var_or_default("TMPDIR", "/tmp") / ("claude-" + `id -u`))
 
-# The parser lives in the `questions` plugin and not in this repo, because a
-# copy in each repo is a copy that goes stale: `rscene` carried one that still
-# dropped the second label of a paired entry months after the fix landed here.
+# The parser, the hooks and the shared skills live in plugins and not in this
+# repo, because a copy in each repo is a copy that goes stale: `rscene` carried
+# a parser that still dropped the second label of a paired entry months after
+# the fix landed here.
 #
 # `$HOME`-relative and overridable rather than absolute, so a clone somewhere
 # else still resolves. A **directory**-source marketplace is what makes this
@@ -886,7 +892,9 @@ questions_root := env_var_or_default("CLAUDE_QUESTIONS_ROOT", env_var_or_default
 # `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`, and a recipe
 # naming that breaks on the next version bump in the direction of "no questions
 # found", which is the failure this whole apparatus exists to prevent.
-questions_plugin := env_var_or_default("CLAUDE_QUESTIONS_PLUGIN", home_directory() / "git/mattiasgronlund/claude-questions/plugins/questions")
+plugins_root := env_var_or_default("CLAUDE_PLUGINS_ROOT", home_directory() / "git/mattiasgronlund/claude-questions/plugins")
+questions_plugin := env_var_or_default("CLAUDE_QUESTIONS_PLUGIN", plugins_root / "questions")
+guardrails_plugin := env_var_or_default("CLAUDE_GUARDRAILS_PLUGIN", plugins_root / "guardrails")
 
 # One open question, in full, by the hash the status line prints beside it.
 #
@@ -963,19 +971,39 @@ question-check hash:
 # counts `check-*` recipes and this one moving out of that set would be a
 # silent change to a number that exists to be loud.
 check-questions-selftest:
+    @{{questions_plugin}}/bin/selftest.sh
+
+# The three plugins this repo's `.claude/` was emptied into, checked for being
+# where the recipes above think they are.
+#
+# It is its own recipe rather than a guard inside each caller because the answer
+# is the same for all of them and it is four lines of install instructions. It
+# runs early in `default` so a missing plugin says so once, in words, instead of
+# three times as "no such file or directory".
+#
+# `practices` ships only skills, so nothing here runs it — its directory
+# existing is the whole check. A skill that fails to load fails visibly, in the
+# session, which is not true of a hook or a parser.
+check-plugins:
     #!/usr/bin/env bash
     set -euo pipefail
-    plugin="{{questions_plugin}}"
-    if [ ! -x "$plugin/bin/selftest.sh" ]; then
-        echo "the questions plugin is not where this repo expects it:"
-        echo "  $plugin"
-        echo "install it with:"
+    missing=0
+    for p in "{{questions_plugin}}" "{{guardrails_plugin}}" "{{plugins_root}}/practices"; do
+        [ -d "$p" ] && continue
+        echo "not where this repo expects it: $p"
+        missing=1
+    done
+    if [ "$missing" -eq 1 ]; then
+        echo
+        echo "install them with:"
         echo "  /plugin marketplace add ~/git/mattiasgronlund/claude-questions"
         echo "  /plugin install questions@mattiasgronlund-local"
-        echo "or point CLAUDE_QUESTIONS_PLUGIN at your checkout"
+        echo "  /plugin install guardrails@mattiasgronlund-local"
+        echo "  /plugin install practices@mattiasgronlund-local"
+        echo "or point CLAUDE_PLUGINS_ROOT at your checkout's plugins directory"
         exit 1
     fi
-    "$plugin/bin/selftest.sh"
+    echo "3 plugins, all where this repo expects them"
 
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
