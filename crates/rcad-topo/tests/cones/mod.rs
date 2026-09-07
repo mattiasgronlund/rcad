@@ -39,12 +39,50 @@ use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey};
 
 /// A frustum about `+z`: apex at the origin, `slope` out per unit up, with its
-/// two cap circles at `near` and `far` up the axis.
+/// two cap circles at `near` and `far` up the axis, built certified.
+///
+/// # Panics
+///
+/// If the kernel refuses the solid. Reach for [`a_frustum_under`] instead when
+/// the refusal is the thing being tested — a shape whose ends are far enough
+/// apart is refused for its dynamic range, and that is a result and not a bug.
+pub fn a_frustum(model: &mut Model, slope: f64, near: f64, far: f64) -> SolidKey {
+    a_frustum_under(
+        model,
+        slope,
+        near,
+        far,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a frustum described this way is a solid")
+}
+
+/// The same frustum, built under `policy`, handing back whatever the kernel
+/// made of it.
 ///
 /// Described face by face through [`SolidBuilder`], which is the door an
 /// importer comes through — so this is §42.12 criterion 1 for a surface kind
 /// that did not exist when that criterion was written.
-pub fn a_frustum(model: &mut Model, slope: f64, near: f64, far: f64) -> SolidKey {
+///
+/// # Errors
+///
+/// Whatever [`SolidBuilder::build`] makes of the description. A frustum whose
+/// near cap is tiny beside its height spreads too wide for `f64` and comes back
+/// as [`rcad_topo::Invalid::DynamicRangeTooWide`].
+///
+/// # Panics
+///
+/// If `near` and `far` do not describe two different ends of a frustum. That is
+/// a caller writing down a shape that is not one, not a kernel refusal.
+pub fn a_frustum_under(
+    model: &mut Model,
+    slope: f64,
+    near: f64,
+    far: f64,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> rcad_topo::Result<SolidKey> {
     assert!(0.0 < near && near < far, "a frustum has two different ends");
     let skin = Cone::new(Axis::z(), slope).expect("a positive slope");
     let mut builder = SolidBuilder::new();
@@ -125,9 +163,7 @@ pub fn a_frustum(model: &mut Model, slope: f64, near: f64, far: f64) -> SolidKey
             (side, Orientation::Forward),
         ])
         .expect("three faces close");
-    builder
-        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a frustum described this way is a solid")
+    builder.build(model, policy, log)
 }
 
 /// A cone that ends in a point: a base cap at `far` up the axis, and one face on
