@@ -358,6 +358,28 @@ A validity check computes `max coordinate magnitude / smallest feature size` and
 **fails loudly** above roughly 1e11. The roadmap §2.2 names this as the case to
 detect and report rather than silently degrade on, and it costs almost nothing.
 
+**1e11 is a margin, and until 2026-09-07 nothing said so or said what it is a
+margin against.** This paragraph named the number and deferred to the roadmap for
+why, and the roadmap is a plan rather than a description of this codebase (§1),
+so the number was published and unheld — §15.6 with the test missing.
+`what_the_dynamic_range_check_is_a_margin_against.rs` now measures it. A feature
+written straight into the coordinates survives to a spread of `2^52` and is gone
+at `2^53`, about `9.0e15`; a constructed point, which is the first thing to
+actually fail, stops being decidable at `2^49`. Both are far above 1e11, so
+nothing goes wrong at the number itself.
+
+What the margin buys is **conditioning, which a ratio cannot see** — §16.11's
+blindness with a quantity on it. A construction of conditioning `t` divides the
+feature by `t` inside its own intermediates, so the spread that decides the
+answer is `spread / t`, and the feature dies once that reaches `2^52`, exactly,
+at every spread measured. At 1e11 that covers constructions conditioned down to
+about `2.2e-5` and no further.
+
+The margin is wanted rather than merely tidy because **past the cliff the kernel
+does not refuse.** The offset rounds away, the points really are coplanar, and
+the predicate answers about them correctly and about a model that is not the one
+asked for. A refusal would be safe; a confident wrong sign is not.
+
 Rejected: typed quantities (`uom`) — heavy, poor `nalgebra` interop, infects every
 signature. Rejected: unit-agnostic `f64` plus a doc comment — OCCT's mistake.
 
