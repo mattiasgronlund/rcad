@@ -129,11 +129,28 @@ impl From<Scale> for (Unit, f64) {
 /// The spread between the biggest coordinate in a model and the smallest
 /// feature it is asked to resolve.
 ///
-/// Past about `1e11` the two no longer fit in an `f64` together: the feature is
-/// smaller than the rounding error on the coordinate, and every predicate near
-/// it is answering a question about numbers that have already lost the detail.
-/// The roadmap §2.2 names this as the case to detect and report rather than
-/// quietly degrade on, and it costs one division.
+/// The roadmap §2.2 names a spread too wide for `f64` as the case to detect and
+/// report rather than quietly degrade on, and it costs one division.
+///
+/// **`1e11` is a margin and not the edge of anything.** Nothing goes wrong
+/// there. A feature written straight into the coordinates survives to a spread
+/// of `2^52` and is gone at `2^53`, about `9.0e15`; the first thing that
+/// actually fails is a constructed point, which stops being decidable at
+/// `2^49`, and that is still 2 800 times the widest spread this allows.
+/// `what_the_dynamic_range_check_is_a_margin_against.rs` measures all three.
+///
+/// **What the margin is for is conditioning, which a ratio cannot see.** A
+/// construction of conditioning `t` divides the feature by `t` inside its own
+/// intermediates, so the spread that decides the answer is `spread / t` and the
+/// feature dies once that reaches `2^52` — exactly, at every spread measured. At
+/// `1e11` that covers constructions conditioned down to about `2.2e-5` and no
+/// further. §16.11 says this check is blind to what a ratio cannot express;
+/// `2.2e-5` is how blind.
+///
+/// Past the cliff the kernel does not refuse. The offset rounds away, the points
+/// really are coplanar, and a predicate answers about them correctly and about a
+/// model that is not the one asked for. A refusal would be safe and this is not,
+/// which is why the number is a margin rather than a tight bound.
 ///
 /// [`DynamicRange::check`] fails on its own. [`DynamicRange::check_under_policy`]
 /// is the same test with [`Policy::dynamic_range_check`] deciding how loud to be.
@@ -144,8 +161,12 @@ pub struct DynamicRange {
 }
 
 impl DynamicRange {
-    /// The widest spread `f64` can carry before small features stop being
-    /// resolvable at all.
+    /// The widest spread this kernel will work at.
+    ///
+    /// Not the widest `f64` can carry — that is `2^53`, four and a half decades
+    /// further out, and [`DynamicRange`]'s own doc says what the gap between the
+    /// two is for. Moving this number is moving a safety margin, so move it
+    /// against a measurement.
     pub const LARGEST_SUPPORTED_RATIO: f64 = 1e11;
 
     /// The spread of a model whose coordinates reach
