@@ -18780,6 +18780,77 @@ Found by `rcad-c4` running it rather than reading it — twice over, since §60.
 prose that had been reviewed and neither was in code that had been tested, which
 is the argument for the paragraph above.
 
+### 60.10 The same name is not the same file
+
+§60.9's test for "the hub is only behind" was **every untracked path is already
+in `ls-tree main`**. That compares names. It stood in front of a `clean -fd` that
+deletes those same paths, so a file in the hub whose name is on `main` but whose
+bytes are not was told it was safe and then removed.
+
+Demonstrated in a throwaway repository rather than argued. A hub parked one
+commit back, holding `notes.txt`:
+
+    hub blob:  3efd841a4fa917602af4c8547eb46d369b94a4d1
+    main blob: 56985387e75729cd805934b2322e7d79ff9bd594
+
+`check-hub` answered *"Every one of those is already committed on `main`, so
+nothing here is lost work"* and printed its remedy. Running that remedy: the file
+afterwards holds `main`'s version, and the hub's content is reachable from no ref
+at all. It was never in a commit; there was nothing to recover it from.
+
+**It could not have bitten on 2026-09-06, and that is luck rather than design.**
+The 1542 were libfuzzer corpus entries, which are named by the hash of their
+contents, so for them a matching name *did* imply matching bytes. `check-hub`
+does not know that, and nothing restricts it to `fuzz/corpus/`. A hub parked
+behind `main` with a half-written `docs/notes.md` in it, while a lane lands a
+different `docs/notes.md`, is the same shape with a person's work in it.
+
+The check now hashes each path and compares against `main:<path>`. It enumerates
+with `ls-files --others --exclude-standard -z` rather than reading `status`,
+which reports an untracked directory as a single entry and quotes awkward names.
+The one thing `clean -fd` removes that this does not hash is an empty directory,
+which holds nothing to lose.
+
+**The old fixture could not fail.** It wrote `landed` with the same content on
+both sides, so a name-only comparison and a content comparison agreed on it —
+the test passed for a reason weaker than the one it was believed to prove. The
+new case writes different bytes under the same name and asserts the "already
+committed" sentence does *not* appear. Put the name-only comparison back and it
+fails with *"content that is on no branch was called committed, and the remedy
+deletes it"*.
+
+**Two more things measured during the re-park, both about the same remedy.**
+
+`checkout --detach main` does **not** restore a tracked file deleted in the
+working tree when that file is identical in the old commit and the new one.
+Checkout writes only what differs between the two, so the deletion survives it —
+and checkout *prints* `D <path>` while doing nothing about it, which is the one
+line a reader would scan for reassurance. A separate `git restore -- <path>` is
+required. This bit a real file: a `crash-*` sweep had deleted
+`fuzz/corpus/no_model_makes_the_writer_panic/crash-a54b24c9…`, a tracked seed
+from `ce2dbf2` that is named like an artifact but is not one, and the re-park's
+own assertion is what caught that the checkout had left it deleted.
+
+`git clean -fd` will not remove a nested linked worktree — measured on **git
+2.43.0**, with `.git` confirmed to be a file rather than a directory, `clean -nd`
+listing it as no candidate at all. `git clean -ffd` removes it, taking
+uncommitted work with it and leaving the registration `prunable`, which `just
+lanes` then reports as `missing`. So the protection is a property of `clean`
+stopped at one `-f`, not of `clean`; the published remedy must never gain a
+second. The version is part of the claim because `rust-toolchain.toml` pins the
+compiler and `mise.toml` pins the tooling, and nothing here pins git — §15.6 for
+why a bound without its conditions is not a bound, and `dc650e7` for what
+happens to a "the guard holds" sentence that travels without them.
+
+**A worktree made from the hub lands inside the hub.** `git worktree add
+rcad-worktrees/<name>` run with the hub as the working directory creates
+`<hub>/rcad-worktrees/<name>`, not the sibling directory of the same name. An
+empty `rcad-worktrees/` had been sitting in the hub since 2026-09-06 08:42 from
+exactly that slip, and it went silently into the re-park's delete set — noticed
+only because a dry run counted 1543 where 1542 had been verified. `rcad-c4` then
+made the identical mistake while opening the lane for this section, which is the
+evidence that it is easy rather than careless. Absolute paths in `worktree add`.
+
 ## 61. A wall of a box turned round, recorded 2026-09-07
 
 `just fuzz-fuse` found ten crashes in 600 s. All ten are one bug, none of them
