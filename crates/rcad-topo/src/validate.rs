@@ -1394,14 +1394,17 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 /// square to. **The surface's own frame at the corner has three legs**, `∇C`, the
 /// longitude `ẑ × ∇C`, and the latitude `∇C × (ẑ × ∇C)`, mutually square and
 /// spanning. The wire is square to `∇C`, because it is a cross product with it,
-/// so it lives in the plane the other two span and cannot be square to both. Read
+/// so it lives in the plane the other two span and, unless it has no length at
+/// all, cannot be square to both. Read
 /// the longitude first and keep every answer the rule gave before; read the
 /// latitude only where the longitude says exactly nothing, which is where the
 /// wire runs straight up the axis and the old rule guessed.
 ///
-/// Zero against both leaves the wire along `∇C` itself, which is the two surfaces
-/// touching rather than crossing at `at` and has no direction to name, so it
-/// refuses the way a pole does.
+/// Zero against both leaves the wire with no length at all — it is square to `∇C`
+/// by construction, so being square to the longitude and the latitude too leaves
+/// it nothing to be but the zero vector — which is the two surfaces touching
+/// rather than crossing at `at` and has no direction to name, so it refuses the
+/// way a pole does.
 ///
 /// # Errors
 ///

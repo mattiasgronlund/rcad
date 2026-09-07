@@ -2037,7 +2037,8 @@ impl SurfaceAlongAnEdge {
 /// The curved surface's frame at the corner has three legs — `∇C`, the longitude
 /// `ẑ × ∇C` and the latitude `∇C × (ẑ × ∇C)` — mutually square and spanning.
 /// `∇S × ∇T` is square to `∇C` because it is a cross product with it, so it lies
-/// in the plane the other two span and cannot be square to both. Read the
+/// in the plane the other two span and, unless it has no length at all, cannot be
+/// square to both. Read the
 /// longitude first, which keeps every answer this rule gave before, and the
 /// latitude only where the longitude says exactly nothing. This is the same two
 /// references, read in the same order, as
@@ -2048,8 +2049,10 @@ impl SurfaceAlongAnEdge {
 /// longitude at all; the two are tangent here, so there is no crossing
 /// direction; or the corner is at a pole, where every longitude runs through the
 /// one point and `axis × ∇S` is exactly zero (§38.3). Zero against both legs of
-/// the frame leaves the wire along `∇C` itself, which is the two surfaces
-/// touching rather than crossing and has no direction to name.
+/// the frame leaves the wire with no length at all — it is square to `∇C` by
+/// construction, so being square to the longitude and the latitude too leaves it
+/// nothing to be but the zero vector — which is the two surfaces touching rather
+/// than crossing and has no direction to name.
 fn the_way_a_closed_edge_is_stored_running(along: &[Surface; 2], at: Point) -> Option<Vector> {
     let reference = the_curved_surface_that_names_a_closed_edge(along)?;
     let forward = gradient_of(&along[0], at).cross(gradient_of(&along[1], at));
