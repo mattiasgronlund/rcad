@@ -579,26 +579,38 @@ Nothing else is withdrawn. Every figure at or above the floor stands, the bar an
 the two small balls stand, and the far-from-the-origin floor stands to the digits
 anyone was likely to quote.
 
-### A sentence downstream that only a defect up here made true
+### Three ways a downstream sentence stops meaning what it meant
 
 The announcement machinery above watches **numbers**: a bound or a rate rcad
 publishes moves, and the move gets announced whether or not anyone thinks it
-matters. That catches the case it was built for and misses a second one, which
-this section is here to name:
+matters. That catches the case it was built for and misses three others. All
+three turned up on one day, 2026-09-06, and they are **not** the same failure —
+which is why they are three names here rather than one category with a
+definition stretched far enough to cover all of them:
 
 > **A downstream sentence whose truth rests on an rcad defect existing.** Fixing
 > the defect makes it false. No number moves, no line of code changes on either
 > side, and nothing in either tree says so.
 
-The worked instance is §56's apex fix. rscene's near-apex report tells callers,
-in a public doc comment, that a face appearing in it says something about the
-kernel — that the apex a placed cone's surface names and the one its mesher
-emits arrived by two routes. That was true, and it was rcad's defect that made it
-true. After the fix a placed cone face cannot separate the two spellings at all,
-so the sentence is not merely stale: the same report now means the opposite
-thing, that rscene's own tolerance swallowed a good point. A caller acting on the
-old wording files a bug against rcad for something rcad did not do. rscene owns
-that text and is rewriting it; the wording is theirs and is not restated here.
+> **A demonstration that quietly stops demonstrating.** The defect it was built
+> to reach is still there, and the construction no longer reaches it. The test
+> goes on passing, and passing has stopped being an answer to anything.
+
+> **An ask that gets answered by something no one connected to it.** The thing
+> asked for is already there. It landed for a reason that had nothing to do with
+> the ask, nobody joined the two, and the way you find out is by going to send
+> the demand.
+
+**The first** is the one this section was written for, and its worked instance
+is §56's apex fix. rscene's near-apex report tells callers, in a public doc
+comment, that a face appearing in it says something about the kernel — that the
+apex a placed cone's surface names and the one its mesher emits arrived by two
+routes. That was true, and it was rcad's defect that made it true. After the fix
+a placed cone face cannot separate the two spellings at all, so the sentence is
+not merely stale: the same report now means the opposite thing, that rscene's
+own tolerance swallowed a good point. A caller acting on the old wording files a
+bug against rcad for something rcad did not do. rscene owns that text and is
+rewriting it; the wording is theirs and is not restated here.
 
 **What rcad owes is the trigger, not the rewrite.** The side that fixes a defect
 is the only side that knows the moment it stopped existing, and a consumer cannot
@@ -606,19 +618,80 @@ watch for it — there is nothing to watch. So a fix that closes a defect a
 consumer has *described* is an announcement here, in the same way a moved number
 is, and the bullet the announcements sit under should be read as covering both.
 
-The reason this is worth a category rather than a note: it is the failure mode
-where both trees are green, both documents are internally consistent, and the
-disagreement lives only in what a sentence means. `rcad` cannot find it by
+The reason the first is worth a category rather than a note: it is the failure
+mode where both trees are green, both documents are internally consistent, and
+the disagreement lives only in what a sentence means. `rcad` cannot find it by
 running anything.
 
-**Two ways past that guard, not one.** The leaning-bars row above is the sharper
-half of the contrast, because it is a case the machinery *could* see and missed
-anyway: `4.848820560097969e-11` was present, announced, and correct to the digit
-— and wrong in its **dimension**, a floor per unit of the shape's reach written
-as though it were a length. So watching numbers fails twice over. It misses the
-sentence with no number in it, which is this section, and it passes a number that
-is right about its digits and wrong about what it is a number *of*. A figure is
-not checked by being announced.
+**The second was found by nothing, and that is the difference that matters.**
+rscene had a test that reached a live defect up here: a cone placed so that its
+apex reads exactly zero, where the nearest mesh point then sat outside a ball of
+zero width. **The ball is zero wide because there is nothing to size it with.** A
+cone has no normal at its apex, so a consumer shading one has to find the apex
+among the mesh points in order to know not to ask, and its only handle is exact
+equality against `Cone::apex()` with a small ball behind it for the case where
+rcad's arithmetic moved the point. The one length available to size that ball is
+the apex's own coordinates, so it comes out as some multiple of `ε · |apex|` —
+and an apex on the origin makes it exactly zero, for every multiple, while rcad's
+floor under the same solid does not go to zero at all. Measured in this tree at
+`b3a21da` under a certified policy with the apex reading `[0, 0, 0]`: a cone
+reaching `1` is floored at `3.6366154200734765e-11` and one reaching `1e9` at
+`3.636615420073477e-2`. Nine decades of floor against a backstop that stays
+exactly zero, so the backstop vanishes precisely where it was asked to work.
+
+§56's fix moved the mesh point onto the apex, which closed **the route from that
+defect to a wrong answer and not the defect** — it is still there and still one
+builder call away. That is what makes this the second arm and not the first.
+rscene's account of what its own test used to see is rscene's; this side has not
+re-taken those figures and nothing in rcad changes on them.
+
+The first arm is caught by somebody reading the sentence, and somebody did read
+the near-apex doc comment. This one has no sentence to read. The test file says
+what it always said, the run is green, and it would have stayed green for ever
+while proving nothing. **A test that has lost its subject looks exactly like a
+test that still has it.**
+
+There is no rcad-side trigger available for it, and saying so is worth more than
+proposing one. The bullet above fires when rcad **closes** a defect a consumer
+has described; §56 closed no defect here, only the route to it, so nothing was
+owed and an announcement would not have helped. What rcad would need in order to
+see it is which of a consumer's tests reaches which of rcad's defects, and that
+is a fact about rscene's tree that rcad does not hold and has no way to acquire.
+The control that does exist is downstream and rcad has already argued for it in
+a neighbouring case: `docs/decisions.md` §56.7 says an absence that could not
+have been a presence proves nothing, and asks a sweep to carry a positive
+control. **A
+demonstration wants the same thing** — an assertion that it still reaches the
+thing it demonstrates — and it wants it for exactly the reason this instance
+shows, that the day it stops reaching is the day nothing says so.
+
+**The third was found by going to paste the text.** rscene wrote a demand asking
+rcad to re-export a provenance name past `rcad-geom`, so that a consumer reading
+its own log has the name rather than a copy of the string. The demand was never
+sent. At `3a69d79` — the pin rscene took for an unrelated reason — `rcad`'s
+facade already re-exported `ROOM_LEFT_TO_REFINE_A_WALK`, and the doc comment over
+that list already gives the reason the demand was about to give: *a caller
+reading its own log needs the name, not a copy of the string*. Checked here
+rather than taken on trust: the re-export is at `crates/rcad/src/lib.rs:369` at
+`b3a21da`, its doc comment ends on line 368 with that sentence, and the same name
+is in the same list at `3a69d79`.
+
+The wasted demand cost a paste, and that is not the expensive half. **A demand is
+how §13 learns that a part has a consumer**, and a demand that never gets sent
+because it was already granted leaves the part looking unconsumed — the
+withdrawal notice above records that same constant as having a named consumer,
+and nobody knew it had a second one waiting. Granting an ask in advance is not
+the same as answering it, because answering it would have left a record.
+
+**Watching numbers fails twice over as well, and this is a separate count from
+the three above.** The leaning-bars row above is the sharper half of the
+contrast, because it is a case the machinery *could* see and missed anyway:
+`4.848820560097969e-11` was present, announced, and correct to the digit — and
+wrong in its **dimension**, a floor per unit of the shape's reach written as
+though it were a length. So watching numbers fails twice over. It misses the
+sentence with no number in it, which is the first arm above, and it passes a
+number that is right about its digits and wrong about what it is a number *of*.
+A figure is not checked by being announced.
 
 **And that figure was itself dated, which is the third way past — and the date
 earned itself within the hour.** The reading held as of `a8d4467`; the change to
@@ -636,6 +709,29 @@ publishes `4.848820560097969e-11` as a floor per unit of reach, undated, and it
 is now wrong by a factor of two in a place that cannot be edited. §59.2 is the
 sibling case, and the difference between them is the useful part — that one was
 never right, this one was right and was moved.
+
+**Each of the three was found by acting on the sentence, and not one by reviewing
+it.** The stale doc comment turned up when somebody read it in order to use it;
+the demonstration turned up when somebody went to reach the defect it names; the
+granted ask turned up when somebody went to paste the demand and send it. That
+is an argument against review as the safeguard for this family, and it is not
+a comfortable thing to write down in a repository that keeps a `claim-audit`
+skill. A pass of that kind reads a sentence and asks whether it is consistent and
+whether it names something real. All three of these were both. The comfortable
+conclusion — *review harder next time* — is the one that would have changed
+nothing, so it is not the conclusion recorded here. **Send the demand. Run the
+demonstration against the thing it demonstrates. Use the sentence.** What is
+never acted on is never checked, whoever reads it.
+
+**Two of the three are rscene's, and so is the third arm's name.** rscene found
+the demonstration and the granted ask in the last hour of its own session, and
+*an ask that gets answered by something no one connected to it* is rscene's
+wording, kept because it is better than the one this side had. Written
+2026-09-07 against `b3a21da`, which is the tree the `crates/rcad/src/lib.rs`
+lines above were read on. rscene's own state as it reported it at that handoff —
+`main` at `79083c6` on `origin`, green at 172 tests and 5 goldens, pinned at
+`3a69d79` — is rscene's report and is **not** verified here, by the dating rule
+three paragraphs up, which this section is subject to like anything else.
 
 ### What rcad asks in return
 
