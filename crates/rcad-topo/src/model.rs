@@ -1311,24 +1311,73 @@ mod tests {
         }
     }
 
+    /// **This used to be `a_location_on_a_shell_and_one_on_a_face_compose`**,
+    /// which put a shift on every face use and checked the two composed. They
+    /// do, and the composition is still there in [`SolidView::faces`]; what has
+    /// gone is any way to reach it, because a face use that carries a placement
+    /// is now [`Invalid::AFaceUseCarriesAPlacement`] and this is the same shift
+    /// asked for as a file.
+    ///
+    /// The shell half of §3.2's composition is what a caller actually has, and
+    /// `a_face_reached_through_a_placed_solid_comes_back_already_moved` above is
+    /// where that lives.
     #[test]
-    fn a_location_on_a_shell_and_one_on_a_face_compose() {
-        let (mut model, cube) = a_cube();
-        let on_the_face =
+    fn a_file_that_shifts_one_face_off_its_shell_never_becomes_a_model() {
+        let (mut model, _) = a_cube();
+        assert!(
+            postcard::from_bytes::<Model>(
+                &postcard::to_allocvec(&model).expect("a model writes out")
+            )
+            .is_ok(),
+            "the same cube with nothing shifted reads back"
+        );
+
+        let shell = model
+            .data
+            .shells
+            .keys()
+            .next()
+            .expect("a cube has one shell");
+        model.data.shells[shell].faces[0].loc =
             rcad_geom::Isometry::translation(Vector::new(5.0, -2.0, 1.0)).expect("a finite shift");
-        for shell in model.data.shells.values_mut() {
-            for used in &mut shell.faces {
-                used.loc = on_the_face;
-            }
-        }
-        let stored: Vec<_> = model.faces().map(crate::FaceView::plane).collect();
 
-        let on_the_shell = a_movement();
-        model.place_solid(cube, &on_the_shell);
+        assert_eq!(
+            postcard::from_bytes::<Model>(
+                &postcard::to_allocvec(&model).expect("a model writes out")
+            )
+            .expect_err("a face placed off its shell is refused"),
+            postcard::Error::SerdeDeCustom
+        );
+    }
 
-        let both = on_the_shell.compose(&on_the_face);
-        for (before, face) in stored.iter().zip(model.solid(cube).faces()) {
-            assert_eq!(face.plane(), before.transformed(&both));
+    /// The nudge, which is the half nothing else could ever have seen.
+    ///
+    /// A quarter of a unit leaves every corner of the model where it was — the
+    /// mesher names a corner by its vertex, and both faces along the edge name
+    /// the same vertex — so the mesh closes and the volume is right and the skin
+    /// is torn all the same. A thousand units is no different in kind and only
+    /// easier to notice by eye.
+    #[test]
+    fn a_face_nudged_off_its_shell_is_caught_as_surely_as_one_thrown_across_the_room() {
+        for shift in [0.25, 1000.0] {
+            let (mut model, _) = a_cube();
+            let shell = model
+                .data
+                .shells
+                .keys()
+                .next()
+                .expect("a cube has one shell");
+            model.data.shells[shell].faces[0].loc =
+                rcad_geom::Isometry::translation(Vector::new(shift, 0.0, 0.0))
+                    .expect("a finite shift");
+
+            let refused = model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect_err("a face placed off its shell is not a model");
+            assert!(
+                matches!(refused, Error::Invalid(Invalid::AFaceUseCarriesAPlacement)),
+                "a shift of {shift} gave {refused:?}"
+            );
         }
     }
 
@@ -1362,13 +1411,30 @@ mod tests {
     /// The number in the refusal is the one `validate` gives for the same
     /// bytes, which is what makes the two answers comparable rather than
     /// merely both being errors.
+    ///
+    /// **The inside-out cube is written the way a file has to write one**: every
+    /// plane turned round, and every wire walked the other way so that it still
+    /// winds with the normal it is given. Turning the six *face uses* round
+    /// instead is the same solid to look at and is no longer a file at all — a
+    /// plane welds "which surface" to "which way", so a plane that faces the
+    /// other way is stored turned round and
+    /// [`Model::check_no_flat_face_is_used_reversed`] refuses those bytes at the
+    /// door. Written this way the sweep has nothing to say about any one face
+    /// and the volume is the only thing left that can notice, which is what this
+    /// test is for; `a_flat_face_used_reversed_is_caught` in `validate.rs`
+    /// covers the other spelling.
     #[test]
     fn measuring_a_solid_read_back_inside_out_is_refused_rather_than_crashing() {
         let (mut model, _) = a_cube();
-        for shell in model.data.shells.values_mut() {
-            for used in &mut shell.faces {
-                used.orient = used.orient.reversed();
-            }
+        for face in model.data.faces.values_mut() {
+            let flat = face.surface.as_plane().expect("a cube is six planes");
+            face.surface = rcad_geom::Surface::Plane(flat.reversed());
+        }
+        for coedge in model.data.coedges.values_mut() {
+            coedge.orientation = coedge.orientation.reversed();
+        }
+        for wire in model.data.wires.values_mut() {
+            wire.steps.reverse();
         }
         let bytes = postcard::to_allocvec(&model).expect("a model writes out");
         let read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");

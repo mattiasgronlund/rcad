@@ -865,6 +865,51 @@ pub enum Invalid {
     #[error("both coedges of an edge run the same way round")]
     CoedgesRunTheSameWay,
 
+    /// A face that sits on a plane is used reversed.
+    ///
+    /// A plane welds "which surface" to "which way", so a plane that faces the
+    /// other way is stored turned round and is then used forwards; only a curved
+    /// surface, which has no turned-round form, is ever used reversed
+    /// (`docs/decisions.md` §31.3, §36.24). Both the fuse and the STEP reader
+    /// write that table; until this refusal existed, nothing read it back.
+    ///
+    /// What a reversed flat face is, is a wall of the solid facing inwards, and
+    /// nothing else in the sweep can see one. Reversing a face turns its normal
+    /// *and* walks its wire the other way, so the face's own winding is
+    /// unchanged and every coedge in the model is exactly where it was; the
+    /// volume stays positive, because flipping one wall of a `10³` box leaves
+    /// the divergence sum at `333.3`. The skin is torn all the same.
+    #[error(
+        "a face on a plane is used reversed; a plane that faces the other way is stored \
+             turned round instead"
+    )]
+    AFlatFaceIsUsedReversed,
+
+    /// A shell places one of its faces somewhere other than where that face is
+    /// stored.
+    ///
+    /// **Placement lives on the shell**, which is where every builder in the
+    /// kernel writes it and where [`Model::place_solid`](crate::Model::place_solid)
+    /// composes onto (`docs/decisions.md` §44.8). Every site that builds a face
+    /// use writes an identity, so nothing but a file can carry one — and a
+    /// face is used by exactly one shell, so there is no sharing for a per-use
+    /// placement to serve either (§42.7 makes that argument about shells and
+    /// `Invalid::UsedMoreThanOnce` makes it about faces).
+    ///
+    /// What one does instead is tear the skin without moving a single corner. A
+    /// face's surface is read at the placement the face use carries and its
+    /// corners are read at the same one, so the face stays self-consistent and
+    /// every check that looks at one face passes; what changes is that the two
+    /// faces along an edge now put that edge in two different places. The mesh
+    /// cannot see it either, because the mesher names a corner by its vertex and
+    /// both faces name the same vertex — a wall moved a thousand units away and
+    /// a wall nudged a quarter of one both used to validate.
+    #[error(
+        "a shell places one of its faces away from where that face is stored; a placement \
+             belongs on the shell"
+    )]
+    AFaceUseCarriesAPlacement,
+
     /// A closed edge — one whose [`EdgeRun`](crate::model::EdgeRun) says it
     /// goes right round where its two faces cross — sits between two flat
     /// faces.

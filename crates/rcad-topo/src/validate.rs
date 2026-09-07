@@ -53,6 +53,11 @@ impl Model {
     ///   ([`winding_of`]),
     /// - nothing is orphaned and nothing is used twice where it may only be
     ///   used once,
+    /// - no face sitting on a plane is used reversed — a plane that faces the
+    ///   other way is stored turned round instead — which is what says a wall
+    ///   turned round does not tear the skin,
+    /// - no shell places a face anywhere but where that face is stored, which is
+    ///   what says the two faces along an edge agree where that edge is,
     /// - every solid encloses a positive amount of space, which is what says
     ///   its faces point outwards — over its own fan when it is a polyhedron,
     ///   and over a coarse mesh when it is not,
@@ -92,6 +97,8 @@ impl Model {
         self.check_faces(policy, log)?;
         self.check_which_side_of_its_trimming_each_curved_face_lies_on()?;
         self.check_closed_edges_are_walked_the_way_their_surfaces_wind()?;
+        self.check_no_flat_face_is_used_reversed()?;
+        self.check_no_face_use_carries_a_placement()?;
         self.check_shells_and_solids(policy, log)?;
         self.check_approximation_ordering()?;
         self.check_dynamic_range(policy, log)
@@ -147,12 +154,24 @@ impl Model {
     /// this of. [`ModelData::check_nothing_is_used_more_than_once`] runs beside
     /// `check_keys_resolve` instead, and says why there.
     ///
+    /// **[`Invalid::AFlatFaceIsUsedReversed`] and
+    /// [`Invalid::AFaceUseCarriesAPlacement`] are the rule's next two members**,
+    /// and they qualify for the same three reasons: one pass over the face uses,
+    /// an `Orientation` or an `Isometry` compared against a constant, and
+    /// nothing about a pair. Both are ways for a shell to describe a skin that
+    /// does not close, neither is a solid at any strictness, and what is
+    /// downstream of both is a panic rather than a wrong answer — `Model::fuse`
+    /// walks the skin and trips `Model::check_touched_edge`, which is exactly
+    /// what "a public method is entitled to take this for granted" means.
+    ///
     /// # Errors
     ///
     /// [`Invalid::VertexNotFinite`], [`Invalid::FaceHasNoWires`],
     /// [`Invalid::WireTooShort`], [`Invalid::WireDoesNotClose`],
-    /// [`Invalid::EdgeCoedgeCount`] or [`Invalid::CoedgesRunTheSameWay`],
-    /// naming the first one that does not hold.
+    /// [`Invalid::EdgeCoedgeCount`], [`Invalid::CoedgesRunTheSameWay`],
+    /// [`Invalid::AFlatFaceIsUsedReversed`] or
+    /// [`Invalid::AFaceUseCarriesAPlacement`], naming the first one that does
+    /// not hold.
     pub(crate) fn check_shape_is_possible(&self) -> Result<()> {
         for vertex in self.data().vertices.values() {
             if !vertex.point.is_finite() {
@@ -170,7 +189,8 @@ impl Model {
         for slot in self.data().edges.keys() {
             self.check_edge_is_walked_by_two_opposite_coedges(slot)?;
         }
-        Ok(())
+        self.check_no_flat_face_is_used_reversed()?;
+        self.check_no_face_use_carries_a_placement()
     }
 
     fn check_vertices(&self) -> Result<()> {
@@ -605,6 +625,147 @@ impl Model {
                     {
                         return Err(Invalid::AClosedEdgeIsWalkedAgainstItsSurface.into());
                     }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// No face that sits on a plane is used reversed.
+    ///
+    /// **This is the table two production sites already keep, read back for the
+    /// first time.** `Assembly::write_into` writes it as
+    ///
+    /// ```text
+    /// (Some(flat), true)         => (Surface::Plane(flat.reversed()), Forward)
+    /// (Some(_) | None, false)    => (piece.surface,                   Forward)
+    /// (None, true)               => (piece.surface,                   Reversed)
+    /// ```
+    ///
+    /// and `rcad-step`'s `describe_the_face` writes the same three rows for a
+    /// STEP `same_sense`. A plane welds "which surface" to "which way", so a
+    /// plane that faces the other way is [`Plane::reversed`] and is then used
+    /// forwards; a curved surface has no turned-round form — a sphere is a
+    /// sphere — so it is stored as it is and the shell says
+    /// [`Orientation::Reversed`] (`docs/decisions.md` §31.3, §36.24).
+    ///
+    /// **What it costs to leave the rule unread is a torn skin that every other
+    /// check passes.** Turning one wall of a box round changes no coedge in the
+    /// model, so
+    /// [`Model::check_edge_is_walked_by_two_opposite_coedges`] — which reads the
+    /// turns as stored — sees nothing; the wall's own winding is unchanged too,
+    /// because reversing a face turns its normal *and* walks its wire the other
+    /// way (`WireView::coedges`), and `check_flat_face` reads the raw face at
+    /// [`Isometry::identity`] and never sees how a shell uses it at all. What is
+    /// left is the volume, and flipping one wall of a `10³` box leaves the
+    /// divergence sum at `333.3` — still positive, still no complaint. The fuse
+    /// then walks the model and trips `Model::check_touched_edge`, which is an
+    /// assert where a refusal belonged (§38.2), and in a release build not even
+    /// that: `check_touched_edge` returns early and `assemble`'s post-write
+    /// sweep is `debug_assertions`-gated, so a release fuse of two boxes with
+    /// one wall turned round **answers and commits a model that does not
+    /// validate**.
+    ///
+    /// **Reachable through the public API and not only through a file**, which
+    /// is what makes it §16.11's kind rather than a hardening exercise:
+    /// [`SolidBuilder::add_shell`](crate::SolidBuilder::add_shell) takes an
+    /// [`Orientation`] per face and documents `Reversed` as a STEP
+    /// `same_sense = false`, and its own door reads the stored turns too, so a
+    /// box described face by face with any one wall turned round used to build
+    /// and validate.
+    ///
+    /// # Why this and not a count over the skin
+    ///
+    /// The tempting check is that the two faces along an edge walk it opposite
+    /// ways *as their shell uses them*, and it is wrong: a curved face turned
+    /// round is the same surface with its wire stored walked the other way, so a
+    /// bar's wall used reversed walks its open edges the same way as the planes
+    /// notching it and is perfectly sound. `a_washer`'s hole says the same thing
+    /// about closed edges. Only a plane is welded to a direction, so only a
+    /// plane can be asked this without arithmetic.
+    ///
+    /// # Composed, because a shell can be used reversed too
+    ///
+    /// Every site in this crate that builds a `ShellUse` writes
+    /// [`Orientation::Forward`], but `Deserialize` will read a reversed one, and
+    /// it turns every face of that shell round including the flat ones. So the
+    /// turn asked about is the one the *solid* ends up using, not the one
+    /// written on the face.
+    ///
+    /// A shell no solid uses is not walked here. That is
+    /// [`Invalid::Orphan`]'s to refuse, it is refused in the sweep, and a face
+    /// no solid reaches is a face no operation can be handed.
+    ///
+    /// # Panics
+    ///
+    /// If a solid names a shell that is not there, or a shell a face that is
+    /// not — `ModelData::check_keys_resolve` runs ahead of this on both paths
+    /// into it, so a key that does not resolve here is this crate having broken
+    /// its own arena.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::AFlatFaceIsUsedReversed`].
+    fn check_no_flat_face_is_used_reversed(&self) -> Result<()> {
+        for solid in self.data().solids.values() {
+            for used in &solid.shells {
+                for face in &self.data().shells[used.shell].faces {
+                    if face.orient.composed_with(used.orient) == Orientation::Reversed
+                        && self.data().faces[face.face].surface.as_plane().is_some()
+                    {
+                        return Err(Invalid::AFlatFaceIsUsedReversed.into());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// No shell places a face anywhere but where that face is stored.
+    ///
+    /// **The placement a solid carries lives on its shells**, which is where
+    /// every builder writes it (§44.8) and what [`Model::place_solid`] composes
+    /// onto. Every site in this crate that builds a `FaceUse` writes
+    /// [`Isometry::identity`], so only a file can carry anything else, and there
+    /// is nothing for one to serve: a face is used by exactly one shell
+    /// ([`Invalid::UsedMoreThanOnce`]), so the sharing that a per-use placement
+    /// exists for elsewhere is the sharing §42.7 says this data model does not
+    /// have.
+    ///
+    /// **What one does is tear the skin without moving a corner.** [`FaceView`]
+    /// hands its own location down to its wires, so a displaced face reads its
+    /// surface *and* its corners at the same place and stays perfectly
+    /// self-consistent — `check_flat_face` has no complaint, the wire still
+    /// winds the right way, the volume still comes out positive. What is no
+    /// longer true is that the two faces along an edge agree where that edge is.
+    /// The mesh cannot see it either: the mesher names a corner by its vertex,
+    /// and both faces name the same vertex, so a wall moved a thousand units
+    /// away and a wall nudged a quarter of one both used to validate.
+    ///
+    /// # Why the placement is refused rather than the disagreement measured
+    ///
+    /// The other shape this could take is to check that the faces along each
+    /// edge place it identically, which is what a check would have to do if a
+    /// per-face placement were a thing this kernel meant to hold. It does not:
+    /// nothing writes one, nothing reads one, and §13's rule is that a part with
+    /// no named consumer is not built. Refusing the placement is one comparison
+    /// per face use and needs no arithmetic; measuring the disagreement needs a
+    /// pass over pairs and a decision about how near is near enough, which is a
+    /// tolerance this kernel exists to avoid.
+    ///
+    /// The third shape is to take the field away. That is a change to the file
+    /// format and to §3.2's composition, and it is not needed to close this: an
+    /// identity that must stay an identity costs one comparison and says the
+    /// same thing out loud.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::AFaceUseCarriesAPlacement`].
+    fn check_no_face_use_carries_a_placement(&self) -> Result<()> {
+        for shell in self.data().shells.values() {
+            for used in &shell.faces {
+                if used.loc != Isometry::identity() {
+                    return Err(Invalid::AFaceUseCarriesAPlacement.into());
                 }
             }
         }
@@ -2455,10 +2616,12 @@ mod tests {
             .expect("a cube has a shell");
         let shared = model.data().shells[first_shell].faces[0];
 
+        // Identity, because the placement is not what is on trial here and a
+        // shift of its own is `Invalid::AFaceUseCarriesAPlacement` now — which
+        // would make this test pass under a name it is not about.
         let second_placement = FaceUse {
             face: shared.face,
-            loc: Isometry::translation(Vector::new(1.0, 0.0, 0.0))
-                .expect("a step off the x axis is a translation"),
+            loc: Isometry::identity(),
             orient: shared.orient,
         };
         model.data_mut().shells.insert(ShellData {
@@ -2814,19 +2977,110 @@ mod tests {
         assert_eq!(refusal(&model), Invalid::OuterWireWindsAgainstTheNormal);
     }
 
+    /// A cube turned inside out the way a file has to write one: every plane
+    /// turned round, and every wire walked the other way so that it still winds
+    /// with the normal it is given.
+    ///
+    /// **Turning the six face *uses* round instead is a different refusal now**
+    /// and is `a_flat_face_used_reversed_is_caught` below. Written that way no
+    /// single face is wrong and neither is any single wire, so the volume was
+    /// the only thing that could notice; written this way it still is, which is
+    /// what this test is here to say.
     #[test]
     fn a_solid_turned_inside_out_is_caught() {
         let mut model = a_cube();
-        for shell in model.data_mut().shells.values_mut() {
-            for used in &mut shell.faces {
-                used.orient = used.orient.reversed();
-            }
+        for face in model.data_mut().faces.values_mut() {
+            let plane = *face
+                .surface
+                .as_plane()
+                .expect("a cube's faces sit on planes");
+            face.surface = Surface::Plane(plane.reversed());
+        }
+        for coedge in model.data_mut().coedges.values_mut() {
+            coedge.orientation = coedge.orientation.reversed();
+        }
+        for wire in model.data_mut().wires.values_mut() {
+            wire.steps.reverse();
         }
 
         assert!(matches!(
             refusal(&model),
             Invalid::VolumeIsNotPositive { .. }
         ));
+    }
+
+    /// One wall of a box turned round, which is the shape ten fuzz crashes came
+    /// in as (`two_solids_fused_by_a_stranger`, 2026-09-06).
+    ///
+    /// **Every other check passes it**, and that is the whole point: the stored
+    /// turns are untouched, so
+    /// [`Model::check_edge_is_walked_by_two_opposite_coedges`] sees nothing; the
+    /// wall's own winding is unchanged, because reversing a face turns its normal
+    /// *and* walks its wire the other way; and a `10³` box with one wall turned
+    /// round still sums to `333.3` of enclosed space, so the volume has no
+    /// complaint either. What used to notice was `Model::check_touched_edge`,
+    /// from inside the fuse, in a debug build only.
+    ///
+    /// The control is the same box left alone, which validates.
+    #[test]
+    fn a_flat_face_used_reversed_is_caught() {
+        let sound = a_cube();
+        assert!(
+            sound
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .is_ok(),
+            "the control has to pass, or the refusal below says nothing"
+        );
+
+        for turned in 0..6 {
+            let mut model = a_cube();
+            let shell = model
+                .data()
+                .shells
+                .keys()
+                .next()
+                .expect("a cube has one shell");
+            let used = &mut model.data_mut().shells[shell].faces[turned];
+            used.orient = used.orient.reversed();
+
+            assert_eq!(refusal(&model), Invalid::AFlatFaceIsUsedReversed);
+        }
+    }
+
+    /// The same bytes, refused one step earlier: at the door `Deserialize` runs,
+    /// rather than in the sweep a caller has to ask for.
+    ///
+    /// `Model::fuse` does not validate its arguments — a sweep per operation is
+    /// what §4.3 keeps the suite from paying — so a model read off a wire and
+    /// handed straight to the fuse is exactly the shape the fuzzer found, and the
+    /// door is the only thing between the two.
+    #[test]
+    fn a_file_with_a_wall_turned_round_never_becomes_a_model() {
+        let mut model = a_cube();
+        assert!(
+            postcard::from_bytes::<Model>(
+                &postcard::to_allocvec(&model).expect("a model writes out")
+            )
+            .is_ok(),
+            "the same box with nothing turned round reads back"
+        );
+
+        let shell = model
+            .data()
+            .shells
+            .keys()
+            .next()
+            .expect("a cube has one shell");
+        let used = &mut model.data_mut().shells[shell].faces[0];
+        used.orient = used.orient.reversed();
+
+        assert_eq!(
+            postcard::from_bytes::<Model>(
+                &postcard::to_allocvec(&model).expect("a model writes out")
+            )
+            .expect_err("a wall turned round is refused"),
+            postcard::Error::SerdeDeCustom
+        );
     }
 
     /// §23.9's second gap, closed. A curved solid has no fan, so nothing used to
