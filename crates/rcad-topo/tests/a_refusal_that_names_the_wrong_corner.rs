@@ -79,10 +79,11 @@ fn a_walk_that_cannot_read_one_corner_must_not_report_the_one_beside_it() {
     let on_the_spoke = a_flat_box([3.0, 3.0], [-1.5 - 2e-10, -1.5 + 2e-10], HEIGHT);
 
     let mut log = ProvenanceLog::new();
-    let answer =
-        model
-            .solid(prism)
-            .classify_uncertain_point(on_the_spoke, &Policy::tolerant(100.0), &mut log);
+    let answer = model.solid(prism).classify_uncertain_point(
+        on_the_spoke,
+        &Policy::tolerant(100.0),
+        &mut log,
+    );
 
     let Containment::Undecidable { enclosure } = answer else {
         panic!("a point on a spoke nobody can read is not placeable, and got {answer:?}");
@@ -148,10 +149,11 @@ fn the_first_corner_resolves_and_the_spoke_does_not() {
     let far_corner = PredicatePoint::Exact([160.0, -80.0, HEIGHT]);
 
     let enclosure_of = |corner| {
-        match orient3d_of_points(corner, first_corner, off_the_plane, on_the_spoke) {
-            Decision::Undecidable { enclosure } => enclosure,
-            settled => panic!("this is the pair the walk cannot read, and got {settled:?}"),
-        }
+        let outcome = orient3d_of_points(corner, first_corner, off_the_plane, on_the_spoke);
+        let Decision::Undecidable { enclosure } = outcome else {
+            panic!("this is the pair the walk cannot read, and got {outcome:?}");
+        };
+        enclosure
     };
 
     let at_the_first_corner = Measures::Volume.wobble_of(enclosure_of(first_corner), 100.0);
