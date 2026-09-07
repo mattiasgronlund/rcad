@@ -19037,6 +19037,30 @@ that happens to be constant in whatever the next answer turns on. *"Sample
 more"* is useless and, here, wrong — the fix went from four coordinates to
 eight and did not go one step finer in magnitude.
 
+**A second instance, and it is rcad-51's own, committed within the hour of
+writing the argument above.** Asking which files under `crates/rcad/tests`
+mention `rcad_geom`, it grepped for `rcad_geom` and not for the hyphenated
+`rcad-geom` that prose uses. The natural spelling and the blind spelling were
+the same choice, one level down from the powers of two.
+
+**Its own qualification, which goes in with it.** The load-bearing claim — which
+files *import* `rcad_geom` — was never at risk, because a Rust import can only be
+spelled with the underscore, so the narrow pattern found every import there was.
+What the sample set could not reach was the claim actually written down, which
+was about **mentions**. Re-measured here at `b4e698f`:
+`grep -rn "rcad_geom\|rcad-geom" crates/rcad/tests crates/rcad/benches` gives six
+hits across four files, `grep -rn "rcad_geom::" …` gives one, and there is no
+`crates/rcad/examples`. So five of the six are prose, and a grep for the
+underscore alone sees one of six while answering a question about all six.
+
+That makes it the muddier illustration: it is two arms at once, a blind sample
+set **and** a sentence that drifted off its evidence, and only the first of those
+is this section. Where it is genuinely the stronger one is that its blind sample
+set was **a spelling a person chose**. Nothing about binary floating point is
+available to explain it away, which is rcad-51's point and their framing: the
+fourth arm is about the **sampler, not the sampled**, and a sampler is as blind
+in a grep pattern as in a `COORDINATES` array.
+
 ### 62.4 The rule, sharp enough to use before writing a sweep
 
 **A sweep is blind exactly when its sample set has fewer degrees of freedom than
@@ -19094,21 +19118,32 @@ It is also §15.6's rule pointed at a sample set rather than at a bound. A
 published bound wants a test; a published finding wants a test that the sample
 set could have contradicted it.
 
-### 62.6 The `testing` skill already had this, one level up
+### 62.6 The `testing` skill already had this, and what it does not reach
 
 *"Vary what the family cannot vary, not just more of what it can"* is in the
-skill already, and it was written about **shapes** — the notched star whose
-corners never give two edges overlapping bounding boxes, which is why
-`a_simple_polygon` exists beside it. This arm is that same rule applied to **one
-bit of a float**, and the reason it did not transfer on its own is that "the
-family" reads as *the shapes generated* and nobody hears it as *the coordinates
-they are placed at*.
+skill already, under **"A second family for what the first cannot draw"**. Read
+in full rather than skimmed to its examples, it goes further than those examples
+suggest: its two worked cases are shapes — the notched star whose corners never
+give two edges overlapping bounding boxes, and `a_simple_polygon` beside it —
+but its closing clause is *"the knots in the spline families are not all small
+whole numbers for the same reason"*, and a knot value is a number. **"Not all
+small whole numbers" is already a warning against a degenerate numeric sample
+set.** So the rule covers a family's parameters, numbers included, and asking it
+to say "this is about numbers too" would be redundant with a clause it already
+has. Saying so explicitly here, because a section about sample sets that only
+sampled the two shape examples would be its own subject matter.
 
-So the addition to make is not a new rule. It is that the existing one covers
-the numbers a family is drawn with as much as the shapes it draws, and that the
-degrees-of-freedom check in §62.4 is how to apply it to a number. That is a
-change to `.claude/skills/testing/SKILL.md`, and this lane does not own that
-file; it is reported rather than made.
+**What the rule does not reach is the coordinates a family is *placed at*.**
+Those are not parameters of the family. Nothing in the family generates them,
+shrinking never touches them, and a family drawn entirely correctly can be
+evaluated at one placement for its whole life. They are the arithmetic context
+the family runs in — and they are the axis both defects behind this section were
+blind on.
+
+So the sentence that is missing is: **a family's placement is part of its sample
+set**, with §62.4's degrees-of-freedom check as how to apply it. That is a change
+to `.claude/skills/testing/SKILL.md`, and this lane does not own that file; it is
+reported rather than made.
 
 ### 62.7 The uncomfortable half
 
