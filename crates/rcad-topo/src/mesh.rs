@@ -4294,4 +4294,196 @@ mod tests {
             .filter(|corner| seen.insert(corner.key()))
             .collect()
     }
+
+    /// The four-cornered cell two of [`how_many_steps`]'s steps make, and what
+    /// the triangulator charges it when nothing is allowed to refine it.
+    ///
+    /// A cell is the two steps sanctioned for the two edges leaving one corner,
+    /// closed off into a rectangle in the surface's own two coordinates. The
+    /// deflection handed to the triangulator is enormous on purpose: it stops
+    /// the refinement before it starts, so what comes back is the charge on the
+    /// cell as the walk drew it and not on whatever the triangulator would have
+    /// cut it into.
+    fn what_a_cell_of_two_steps_is_charged(stored: &Surface, at: [f64; 2], room: f64) -> f64 {
+        let quarter = core::f64::consts::TAU / 4.0;
+        let across = how_many_steps(stored, at, [at[0] + quarter, at[1]], room);
+        let up = how_many_steps(stored, at, [at[0], at[1] + A_LONG_RULING], room);
+        let cell = vec![
+            [at[0], at[1]],
+            [at[0] + quarter / across as f64, at[1]],
+            [
+                at[0] + quarter / across as f64,
+                at[1] + A_LONG_RULING / up as f64,
+            ],
+            [at[0], at[1] + A_LONG_RULING / up as f64],
+        ];
+        let domain = TrimmedDomain::new(
+            *stored,
+            Loop::through(cell).expect("four corners of a rectangle"),
+            Vec::new(),
+            Deflection::of(1e9).expect("a length"),
+        );
+        triangulate(&domain)
+            .expect("a rectangle of one cell")
+            .deviation()
+            .magnitude()
+    }
+
+    /// How far up a cone the cells below reach, and how far along every other
+    /// surface's second coordinate they run.
+    ///
+    /// Forty, which on the cone of slope a half below is a frustum from two up
+    /// to forty-two — twenty times as wide at the top as at the bottom. Nothing
+    /// exotic: `cones::a_frustum` in this crate's tests builds one from one to
+    /// three, and stretching that is the only thing this number does.
+    const A_LONG_RULING: f64 = 40.0;
+
+    /// A ball and a ring are handed cells that fit, and a cone is handed one
+    /// charged eight times over.
+    ///
+    /// [`how_many_steps`] is asked for one edge at a time and never for the cell
+    /// two of its steps close off, so the question is what the cell costs when
+    /// the two answers are put together.
+    ///
+    /// **On a ball the cell fits, and it only just fits.** Both sides come back
+    /// under `√(share · radius · room / 2)`, so a square one has a diagonal `√2`
+    /// longer, which strays twice as far — and
+    /// [`WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET`] being a half is exactly that
+    /// factor of two. The ball measured here uses **98.1%** of the deflection
+    /// and nothing left over, so that constant is not a spare margin that could
+    /// be spent elsewhere: raise it and the walk starts handing over cells that
+    /// are already past the deflection before a triangle is cut. At `0.8` this
+    /// test fails with the ball's cell charged `1.4640`.
+    ///
+    /// **A ring fits with room to spare, and the reason is not slack in the
+    /// budget.** Its two terms `C_v²/(3r)` and `C_u²/(2S)` are *added*, and the
+    /// one radius `how_many_steps` gives a torus is
+    /// `1/(1/(3r) + 1/(2S))` — so the two directions **split** the half rather
+    /// than each taking it. `0.481` and `0.435` for the outer and inner equators
+    /// of a ring of four and one are that split, not headroom.
+    ///
+    /// **The pipe here is coverage and not evidence, and the difference is worth
+    /// saying.** A cylinder is flat along its axis, so the step up one comes back
+    /// as a single step and contributes nothing to what the cell is charged. Its
+    /// `0.486` is one chord measured against half a budget — the same number a
+    /// lone side would give. It says nothing about a diagonal, so it is checked
+    /// on its own below rather than counted among the cells that carry the
+    /// finding.
+    ///
+    /// **On a cone it does not fit, and by a factor that grows with the
+    /// frustum.** A cone is flat along its rulings, so a step up one is charged
+    /// `round.abs() == 0` and comes back a single step however long the frustum
+    /// is; the step *round* it is then sized at the radius of the end it leaves
+    /// from, while the cell it closes off reaches the radius at the other end.
+    /// The frustum here is twenty times as wide at the top, and the cell is
+    /// charged eight times the deflection.
+    ///
+    /// **A cell like that is refused and never meshed, which is the point of
+    /// the second half of this test.** Handed to the triangulator at the
+    /// deflection it was sized against it comes back
+    /// `BoundarySideStraysFurtherThanTheDeflection`, straying `0.0801` against a
+    /// deflection of `0.01`.
+    ///
+    /// **The diagonal never gets a say, and naming where the refusal comes from
+    /// matters.** `triangulate` sweeps every boundary side against the whole
+    /// deflection *before* it refines anything — `crates/rcad-mesh/src/
+    /// triangulate.rs:181-188` — and the side that fails is the one at
+    /// `v = 42` carrying the bottom rim's width round. It is over budget on its
+    /// own, as a side, so the sweep refuses the patch and `refine_the_inside` is
+    /// never called. (It is separately true that a boundary side is the one
+    /// thing the refinement may not cut, `triangulate.rs:933`. That is not what
+    /// stopped this cell.)
+    ///
+    /// # Why the walk's sizing cannot make a mesh stray, whatever it hands over
+    ///
+    /// Not an argument about which cells the walk happens to draw — that is a
+    /// statement about today's callers, which §16.10 says is the wrong shape of
+    /// claim. It is structural, and it is three links long.
+    ///
+    /// [`SolidView::mesh`] is the only function anywhere that returns a [`Mesh`].
+    /// Its only feed is the [`triangulate`] call in [`BuildingAMesh::hand_over`].
+    /// And `triangulate` returns `Ok` only when every triangle inside the domain
+    /// satisfies `how_far_a_flat_piece_strays(...) <= deflection` — the boundary
+    /// sweep above, and then `refine_the_inside` cutting until nothing misses or
+    /// refusing when it cannot.
+    ///
+    /// So what the walk's sizing decides is **whether a mesh comes back at all**
+    /// and **how many triangles it costs**. It cannot decide whether the answer
+    /// is inside the deflection, because nothing that misses is ever returned.
+    /// A cell charged eight times over is a refusal or a pile of extra
+    /// triangles, never a mesh that strays.
+    ///
+    /// `how_far_inside_a_triangle_a_mesh_really_strays.rs` is the other end of
+    /// that: it takes the triangles that do come back out of solids the builder
+    /// makes and measures them against each surface's own closed-form distance,
+    /// rather than reading the triangulator's bound back.
+    #[test]
+    fn the_cell_two_steps_close_off_fits_on_a_ball_and_is_eight_times_over_on_a_cone() {
+        use rcad_geom::{Cone, Cylinder, Torus};
+
+        let room = 1e-2;
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a ball"));
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a pipe"));
+        let ring = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a ring"));
+        let cone = Surface::Cone(Cone::new(Axis::z(), 0.5).expect("a cone"));
+
+        let a_pipes_cell = what_a_cell_of_two_steps_is_charged(&pipe, [0.0, 0.0], room) / room;
+        assert!(
+            a_pipes_cell <= 1.0,
+            "a pipe's cell is charged {a_pipes_cell} of the deflection"
+        );
+
+        let fits = [
+            ("a ball of radius one", ball, [0.0, 0.0]),
+            ("a ring of four and one", ring, [0.0, 0.0]),
+            (
+                "the inner equator of that ring",
+                ring,
+                [core::f64::consts::PI, 0.0],
+            ),
+        ];
+        for (what, stored, at) in fits {
+            let share = what_a_cell_of_two_steps_is_charged(&stored, at, room) / room;
+            assert!(
+                share <= 1.0,
+                "the cell the walk draws on {what} is charged {share} of the deflection"
+            );
+        }
+
+        let ball_uses = what_a_cell_of_two_steps_is_charged(&ball, [0.0, 0.0], room) / room;
+        assert!(
+            (0.97..=1.0).contains(&ball_uses),
+            "a ball's cell used {ball_uses} of the deflection, and the whole of it was spent"
+        );
+
+        let cone_uses = what_a_cell_of_two_steps_is_charged(&cone, [0.0, 2.0], room) / room;
+        assert!(
+            cone_uses > 8.0,
+            "a cone's cell used {cone_uses} of the deflection"
+        );
+
+        let quarter = core::f64::consts::TAU / 4.0;
+        let across = how_many_steps(&cone, [0.0, 2.0], [quarter, 2.0], room);
+        let cell = vec![
+            [0.0, 2.0],
+            [quarter / across as f64, 2.0],
+            [quarter / across as f64, 2.0 + A_LONG_RULING],
+            [0.0, 2.0 + A_LONG_RULING],
+        ];
+        let refusal = triangulate(&TrimmedDomain::new(
+            cone,
+            Loop::through(cell).expect("four corners of a rectangle"),
+            Vec::new(),
+            Deflection::of(room).expect("a length"),
+        ))
+        .expect_err("a cell charged eight times over is not meshed");
+        let CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection { strays, .. } = refusal
+        else {
+            panic!("a cell charged {cone_uses} of the deflection was refused for {refusal:?}");
+        };
+        assert!(
+            strays > room,
+            "the side that was refused strays {strays}, which is inside the deflection"
+        );
+    }
 }
