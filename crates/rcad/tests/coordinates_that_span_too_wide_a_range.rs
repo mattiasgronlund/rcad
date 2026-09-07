@@ -18,14 +18,14 @@
 //! warning is a [`Record`] in the [`ProvenanceLog`] the sweep is handed.
 
 use rcad::{
-    Error, Invalid, Isometry, Model, Policy, Profile, ProfileBuilder, ProvenanceLog, Scale,
-    Severity, TopologyError,
+    DynamicRange, Error, Invalid, Isometry, Model, Policy, Profile, ProfileBuilder, ProvenanceLog,
+    Scale, Severity, TopologyError,
 };
-// The one thing here the facade cannot hand over. `DynamicRange` is not
-// re-exported, so a consumer wanting to know the bound it is being judged
-// against has nothing to import and has to copy the digits — which is what this
-// file did, and what left the fixture free to drift away from the kernel.
-use rcad_geom::DynamicRange;
+// `DynamicRange` used to be the one thing here the facade could not hand over,
+// so this file reached past it into `rcad_geom` — the only test under
+// `crates/rcad` that did. The facade re-exports it now, and this import is what
+// makes that true rather than merely intended: it does not compile without the
+// re-export, so the two halves cannot drift apart quietly.
 
 /// The widest spread the kernel will work at, read off the kernel rather than
 /// copied out of it.
@@ -87,6 +87,12 @@ fn a_tolerant_policy_carries_on_and_says_how_much_slop_it_accepted() {
     // between neighbouring `f64` at its largest coordinate.
     // The range check already reports a distance, so reading it as one is the
     // identity and the working size passed here does not enter into it.
+    //
+    // This reads the whole log rather than the record named `DYNAMIC_RANGE_CHECK`,
+    // and the assertion above is what makes that safe: a second record of any
+    // name fails there, before anything is read off the wrong one. Naming the
+    // record is `what_the_facade_can_say_about_the_range_check.rs`'s subject, not
+    // this file's — here the point is that exactly one thing was recorded.
     assert_eq!(
         log.worst_wobble(1.0),
         largest_coordinate_of(&model) * f64::EPSILON
