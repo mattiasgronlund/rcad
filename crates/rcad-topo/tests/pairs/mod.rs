@@ -72,9 +72,11 @@
 #![allow(dead_code)]
 
 use proptest::prelude::*;
-use rcad_geom::{Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Model, ProfileBuilder, SolidBuilder, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, SolidKey};
+
+use crate::cones::a_frustum;
 
 /// Roughly how big a generated configuration is, for [`Scale`].
 pub const WORKING_SIZE: f64 = 100.0;
@@ -1579,98 +1581,6 @@ pub fn a_frustum_and_a_block() -> impl Strategy<Value = FrustumAndBlock> {
                     }
                 })
         })
-}
-
-/// A frustum about `+z` — apex at the origin, `slope` out per unit up, cap
-/// circles at `near` and `far` up the axis — described face by face through
-/// [`SolidBuilder`].
-///
-/// Lifted from `tests/cones/mod.rs`, which the binaries that include this file
-/// do not include. There is no `Model::add_cone` to call instead.
-fn a_frustum(model: &mut Model, slope: f64, near: f64, far: f64) -> SolidKey {
-    assert!(0.0 < near && near < far, "a frustum has two different ends");
-    let skin = Cone::new(Axis::z(), slope).expect("a positive slope");
-    let mut builder = SolidBuilder::new();
-
-    let bottom_corner = builder
-        .add_vertex(Point::new(slope * near, 0.0, near))
-        .expect("a finite point");
-    let top_corner = builder
-        .add_vertex(Point::new(slope * far, 0.0, far))
-        .expect("a finite point");
-    let seam = builder
-        .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
-        .expect("a ruling of a cone is straight, which is the whole of what a seam here is");
-    let bottom_circle = builder
-        .add_edge(
-            bottom_corner,
-            bottom_corner,
-            EdgeRun::RightRoundWhereItsFacesCross,
-        )
-        .expect("the cap plane cuts the cone in one closed curve");
-    let top_circle = builder
-        .add_edge(
-            top_corner,
-            top_corner,
-            EdgeRun::RightRoundWhereItsFacesCross,
-        )
-        .expect("the cap plane cuts the cone in one closed curve");
-
-    let cap = |builder: &mut SolidBuilder, at: f64, outward: f64, edge, turn| {
-        let plane =
-            Plane::from_point_and_normal(Point::new(0.0, 0.0, at), Vector::new(0.0, 0.0, outward))
-                .expect("the z axis is a unit normal");
-        let coedge = builder
-            .add_coedge(edge, turn)
-            .expect("an edge of this build");
-        let wire = builder
-            .add_wire(&[DraftStep::Along(coedge)])
-            .expect("one closed edge is a wire");
-        builder
-            .add_face(Surface::Plane(plane), &[wire])
-            .expect("a cap is a plane trimmed by its circle")
-    };
-    let bottom = cap(
-        &mut builder,
-        near,
-        -1.0,
-        bottom_circle,
-        Orientation::Reversed,
-    );
-    let top = cap(&mut builder, far, 1.0, top_circle, Orientation::Forward);
-
-    let round_the_wall: Vec<DraftStep> = [
-        (bottom_circle, Orientation::Forward),
-        (seam, Orientation::Forward),
-        (top_circle, Orientation::Reversed),
-        (seam, Orientation::Reversed),
-    ]
-    .into_iter()
-    .map(|(edge, turn)| {
-        DraftStep::Along(
-            builder
-                .add_coedge(edge, turn)
-                .expect("an edge of this build"),
-        )
-    })
-    .collect();
-    let wire = builder
-        .add_wire(&round_the_wall)
-        .expect("round the bottom, up the seam, back round the top, down the seam");
-    let side = builder
-        .add_face(Surface::Cone(skin), &[wire])
-        .expect("a face on the cone");
-
-    builder
-        .add_shell(&[
-            (bottom, Orientation::Forward),
-            (top, Orientation::Forward),
-            (side, Orientation::Forward),
-        ])
-        .expect("three faces close");
-    builder
-        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a frustum described this way is a solid")
 }
 
 /// Where the second solid of a degenerate pair sits along one axis.
