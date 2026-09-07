@@ -20,15 +20,33 @@
 //! the very solid that shades wrong — so both directions are pinned, and pinned
 //! at the edge rather than in the comfortable middle.
 //!
-//! # What was already pinned, and what was not
+//! # What `what_the_dynamic_range_check_is_a_margin_against.rs` covers
 //!
-//! `scale.rs`'s own unit tests accept a spread of `1e11` and refuse one of
-//! `1e12`. Everything between is free: the bound could be moved to `5e11` —
-//! five times the spread handed to a certified caller — with the whole suite
-//! green. `crates/rcad/tests/coordinates_that_span_too_wide_a_range.rs` is
-//! wider still, accepting a spread of about one and refusing one of about
-//! `1e12`. Neither says where the frontier actually is, and neither goes near a
-//! cone.
+//! That file landed the same day, after the same rscene sentence, and answers
+//! the *other* question: **why** the number is `1e11`. It is a margin, and the
+//! thresholds it is a margin against are measured there — a written feature
+//! surviving to `2^52`, a constructed point giving up at `2^49`, and the
+//! conditioning law that explains the gap. None of that is repeated here.
+//!
+//! What it holds the constant to are three inequalities against those
+//! thresholds, and the tightest of them — a conditioning figure required to
+//! land in `1e-6..1e-4` — leaves the bound free to sit anywhere between about
+//! `4.5e9` and `4.5e11`. Measured: with the constant moved to `2e11`, twice the
+//! spread handed to a certified caller, all three of its tests pass.
+//!
+//! It is also predicates from end to end. Nothing in it builds a solid, names a
+//! [`Policy`], or calls `check`, `check_under_policy` or
+//! `is_within_supported_range`, so nothing in it can see the accept/refuse edge
+//! move. Measured: drop the `Surface::Cone` arm of `Model::check_dynamic_range`
+//! — so that a certified sweep stops seeing a truncated cone's rim at all,
+//! which is the rscene exposure exactly — and every other test in the suite
+//! stays green.
+//!
+//! The older pins are looser still. `scale.rs`'s own unit tests accept a spread
+//! of `1e11` and refuse one of `1e12`, and
+//! `crates/rcad/tests/coordinates_that_span_too_wide_a_range.rs` accepts a
+//! spread of about one and refuses one of about `1e12`. Neither says where the
+//! frontier is, and neither goes near a cone.
 //!
 //! # The oracle
 //!
@@ -42,6 +60,16 @@
 //! the refused one. Two adjacent `f64` are a relative `2⁻⁵²` apart and the
 //! spread is one division away from the rim, so a frontier in the published
 //! place puts that spread a couple of ulps above the bound and no further.
+//!
+//! # The frontier is in the same place whatever the coordinates round like
+//!
+//! A power of two has no mantissa, so a boundary decided by rounding can look
+//! sharp at one and be blunt everywhere else; a sweep that samples only tidy
+//! binary values reports a cliff because the other answer was never in it. Two
+//! measurements today had that shape, so this one is taken at four heights —
+//! `2^3`, `2^20`, `τ` and `e·2^18` — and the frontier lands within two ulps of
+//! the published bound at all four. Rounding does not move it, and that is a
+//! finding rather than an assumption.
 //!
 //! # The door this knocks on
 //!
@@ -101,10 +129,26 @@ fn a_spread_of_exactly_the_published_bound_is_the_last_one_accepted() {
 ///
 /// This is the rscene shape and the rscene question: how thin may a truncated
 /// cone's rim get before the kernel refuses the solid rather than handing it to
-/// a certified caller? The frustum's coordinates reach
-/// [`HOW_FAR_UP_THE_FAR_CAP_SITS`] and its smallest feature is the near cap's
-/// circle, so its spread is that height over that radius, and thinning the rim
-/// walks it across the frontier.
+/// a certified caller? The frustum's coordinates reach its own height and its
+/// smallest feature is the near cap's circle, so its spread is that height over
+/// that radius, and thinning the rim walks it across the frontier.
+///
+/// # Both kinds of coordinate, on purpose
+///
+/// "Just inside" and "just outside" are decided by rounding, and a power of two
+/// has no mantissa to round. A frontier sampled only at tidy binary heights
+/// could be sharp for those and blunt everywhere else, and pass forever while
+/// the real edge moved. [`TALL_COORDINATES`] therefore carries two heights with
+/// zero mantissa and two with every mantissa bit in use, and the frontier is
+/// found separately at each.
+///
+/// # What it goes red for, measured
+///
+/// The bound at `2e11` reports a first refused spread of `200000000000.00003`
+/// and the bound at `1e10` reports one of `10000000000.000002`, both against a
+/// published `1e11`. Dropping the `Surface::Cone` arm of
+/// `Model::check_dynamic_range` leaves no rim thin enough to be refused and the
+/// opening bracket never closes.
 #[test]
 fn the_thinnest_rim_a_certified_frustum_may_have_is_the_published_bound() {
     assert_eq!(
@@ -113,99 +157,88 @@ fn the_thinnest_rim_a_certified_frustum_may_have_is_the_published_bound() {
         "a certified caller is who this boundary protects"
     );
 
-    let mut accepted = A_RIM_WELL_INSIDE_THE_BOUND;
-    let mut refused = A_RIM_WELL_PAST_THE_BOUND;
+    for (what_kind_of_number, far) in TALL_COORDINATES {
+        let (refused, accepted) = the_rims_either_side_of_the_frontier(far);
+
+        let spread = the_spread_a_frustum_is_refused_for(far, refused)
+            .expect("the refused side of a closed bracket is still refused");
+        println!(
+            "a frustum {far} tall, {what_kind_of_number}: the frontier is between rims {refused} \
+             and {accepted}, and the first refused spread is {spread} against a published \
+             {THE_PUBLISHED_SPREAD}"
+        );
+
+        assert!(
+            spread > THE_PUBLISHED_SPREAD,
+            "a frustum {far} tall is refused at a spread of {spread}, which the bound allows — the \
+             kernel is refusing what it published as supported"
+        );
+        // Neighbouring `f64` are a relative `2⁻⁵²` apart and the spread is one
+        // division away from the rim, so the first refused spread cannot clear
+        // the bound by more than a few of those unless the frontier has moved.
+        let no_further_than = THE_PUBLISHED_SPREAD * (1.0 + 8.0 * f64::EPSILON);
+        assert!(
+            spread <= no_further_than,
+            "a frustum {far} tall is first refused at a spread of {spread}, past the \
+             {no_further_than} that is one rim's worth of rounding above the published \
+             {THE_PUBLISHED_SPREAD} — the frontier has moved"
+        );
+
+        the_frustum_on_the_accepted_side_is_a_solid_that_certifies_clean(far, accepted);
+    }
+}
+
+/// How far up the axis the frustum's wide end sits, which is also its largest
+/// coordinate, and what kind of number that is.
+///
+/// Two with a zero mantissa and two with every bit of one in use. τ and e
+/// scaled by a power of two, so the mantissa is full and the exponent is still
+/// somewhere ordinary.
+const TALL_COORDINATES: [(&str, f64); 4] = [
+    ("two to the third", 8.0),
+    ("two to the twentieth", 1048576.0),
+    ("τ, a full mantissa", core::f64::consts::TAU),
+    (
+        "e times 2^18, a full mantissa",
+        core::f64::consts::E * 262144.0,
+    ),
+];
+
+/// Out per unit up. A power of two, so `slope * height` is exact whatever the
+/// height's mantissa is and every corner is certified on its own cone —
+/// `tests/cones/mod.rs` says why that matters. Keeping this tidy is what lets
+/// the *height* be untidy without changing which frontier is being walked.
+const SLOPE: f64 = 0.5;
+
+/// The two neighbouring rim radii the accept/refuse frontier lies between, for
+/// a frustum `far` tall: the thickest rim refused, then the thinnest accepted.
+///
+/// # Panics
+///
+/// If the opening bracket does not straddle the frontier, which means the
+/// bisection would be walking something else.
+fn the_rims_either_side_of_the_frontier(far: f64) -> (f64, f64) {
+    let mut accepted = far / 1e9;
+    let mut refused = far / 1e13;
     assert!(
-        the_spread_a_frustum_with_this_rim_is_refused_for(accepted).is_none(),
-        "a rim of {accepted} has to be accepted for this to be a bracket"
+        the_spread_a_frustum_is_refused_for(far, accepted).is_none(),
+        "a frustum {far} tall with a rim of {accepted} has to be accepted for this to be a bracket"
     );
     assert!(
-        the_spread_a_frustum_with_this_rim_is_refused_for(refused).is_some(),
-        "a rim of {refused} has to be refused for this to be a bracket"
+        the_spread_a_frustum_is_refused_for(far, refused).is_some(),
+        "a frustum {far} tall with a rim of {refused} has to be refused for this to be a bracket"
     );
 
     while accepted.to_bits() - refused.to_bits() > 1 {
         let between = f64::from_bits(refused.to_bits().midpoint(accepted.to_bits()));
-        if the_spread_a_frustum_with_this_rim_is_refused_for(between).is_some() {
+        if the_spread_a_frustum_is_refused_for(far, between).is_some() {
             refused = between;
         } else {
             accepted = between;
         }
     }
-
-    let spread = the_spread_a_frustum_with_this_rim_is_refused_for(refused)
-        .expect("the refused side of a closed bracket is still refused");
-    println!(
-        "the frontier is between rims {refused} and {accepted}; the first refused spread is \
-         {spread} against a published {THE_PUBLISHED_SPREAD}, over by {} ulps of the bound",
-        (spread - THE_PUBLISHED_SPREAD) / (THE_PUBLISHED_SPREAD.next_up() - THE_PUBLISHED_SPREAD)
-    );
-
-    assert!(
-        spread > THE_PUBLISHED_SPREAD,
-        "a refusal at a spread the bound allows is the kernel refusing what it published as \
-         supported"
-    );
-    // Neighbouring `f64` are a relative `2⁻⁵²` apart and the spread is one
-    // division away from the rim, so the first refused spread cannot clear the
-    // bound by more than a few of those unless the frontier has moved.
-    let no_further_than = THE_PUBLISHED_SPREAD * (1.0 + 8.0 * f64::EPSILON);
-    assert!(
-        spread <= no_further_than,
-        "the first spread a certified build refuses is {spread}, past the {no_further_than} that \
-         is one rim's worth of rounding above the published {THE_PUBLISHED_SPREAD} — the frontier \
-         has moved"
-    );
+    (refused, accepted)
 }
-
-/// The frustum one bit inside the frontier is a solid a certified caller can go
-/// on to use, and it needed nothing approximated.
-///
-/// Without this the test above would still pass if the accepted side were
-/// accepted by the range check and then refused by something else, which is a
-/// different frontier wearing this one's clothes.
-#[test]
-fn the_last_rim_the_bound_allows_builds_a_solid_that_certifies_clean() {
-    let rim = THE_THINNEST_RIM_THE_BOUND_ALLOWS;
-    let mut model = Model::new(a_working_size());
-    let mut log = ProvenanceLog::new();
-    let solid = a_frustum_with_this_rim(&mut model, rim, &Policy::certified(), &mut log)
-        .expect("a rim on the bound is a rim the bound allows");
-    assert!(log.is_empty(), "certified outcomes are not recorded");
-
-    model
-        .validate(&Policy::certified(), &mut log)
-        .expect("and the sweep says the same about it a second time");
-    assert!(log.is_empty(), "still nothing approximated");
-    assert_eq!(model.solid(solid).faces().count(), 3, "two caps and a wall");
-
-    assert!(
-        the_spread_a_frustum_with_this_rim_is_refused_for(rim.next_down()).is_some(),
-        "and one bit thinner is refused, which is what makes {rim} the last one"
-    );
-}
-
-/// How far up the axis the frustum's wide end sits, which is also its largest
-/// coordinate.
-const HOW_FAR_UP_THE_FAR_CAP_SITS: f64 = 8.0;
-
-/// Out per unit up. A power of two, so `slope * height` is exact and every
-/// corner is certified on its own cone — `tests/cones/mod.rs` says why that
-/// matters.
-const SLOPE: f64 = 0.5;
-
-/// A rim a hundred times thicker than the frontier, to open the bracket with.
-const A_RIM_WELL_INSIDE_THE_BOUND: f64 = 1e-8;
-
-/// A rim eighty times thinner than the frontier, to close it with.
-const A_RIM_WELL_PAST_THE_BOUND: f64 = 1e-12;
-
-/// [`HOW_FAR_UP_THE_FAR_CAP_SITS`] over [`THE_PUBLISHED_SPREAD`], which is the
-/// thinnest rim the published bound leaves room for.
-///
-/// Both are powers of two times a small integer, so the division is exact and
-/// this is the frontier itself rather than a number near it.
-const THE_THINNEST_RIM_THE_BOUND_ALLOWS: f64 = HOW_FAR_UP_THE_FAR_CAP_SITS / THE_PUBLISHED_SPREAD;
 
 /// The spread a certified build refused a frustum of this rim radius for, or
 /// `None` if it accepted the solid.
@@ -215,22 +248,43 @@ const THE_THINNEST_RIM_THE_BOUND_ALLOWS: f64 = HOW_FAR_UP_THE_FAR_CAP_SITS / THE
 /// If the build refuses for any other reason. Every frustum here is a sound
 /// solid, so a refusal about anything but its spread would mean the bisection
 /// is walking a different frontier.
-fn the_spread_a_frustum_with_this_rim_is_refused_for(rim: f64) -> Option<f64> {
-    let mut model = Model::new(a_working_size());
+fn the_spread_a_frustum_is_refused_for(far: f64, rim: f64) -> Option<f64> {
+    let mut model = Model::new(a_working_size(far));
     match a_frustum_with_this_rim(
         &mut model,
+        far,
         rim,
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     ) {
         Ok(_) => None,
         Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => Some(ratio),
-        Err(other) => panic!("a frustum with a rim of {rim} is a sound solid, but {other:?}"),
+        Err(other) => panic!("a frustum {far} tall with a rim of {rim} is a solid, but {other:?}"),
     }
 }
 
-fn a_working_size() -> Scale {
-    Scale::millimetres(HOW_FAR_UP_THE_FAR_CAP_SITS).expect("eight millimetres is a working size")
+/// The frustum on the accepted side of the frontier is one a certified caller
+/// can go on to use, and it needed nothing approximated.
+///
+/// Without this the frontier would still be found if the accepted side were let
+/// through the range check and then refused by something else, which is a
+/// different frontier wearing this one's clothes.
+fn the_frustum_on_the_accepted_side_is_a_solid_that_certifies_clean(far: f64, rim: f64) {
+    let mut model = Model::new(a_working_size(far));
+    let mut log = ProvenanceLog::new();
+    let solid = a_frustum_with_this_rim(&mut model, far, rim, &Policy::certified(), &mut log)
+        .expect("the accepted side of the frontier is accepted");
+    assert!(log.is_empty(), "certified outcomes are not recorded");
+
+    model
+        .validate(&Policy::certified(), &mut log)
+        .expect("and the sweep says the same about it a second time");
+    assert!(log.is_empty(), "still nothing approximated");
+    assert_eq!(model.solid(solid).faces().count(), 3, "two caps and a wall");
+}
+
+fn a_working_size(far: f64) -> Scale {
+    Scale::millimetres(far).expect("a frustum's height is a positive length")
 }
 
 /// A frustum about `+z` whose near cap circle has radius `rim`, described face
@@ -246,12 +300,12 @@ fn a_working_size() -> Scale {
 /// this thin is [`Invalid::DynamicRangeTooWide`].
 fn a_frustum_with_this_rim(
     model: &mut Model,
+    far: f64,
     rim: f64,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<SolidKey> {
     let near = rim / SLOPE;
-    let far = HOW_FAR_UP_THE_FAR_CAP_SITS;
     assert!(0.0 < near && near < far, "a frustum has two different ends");
     assert_eq!(SLOPE * near, rim, "the rim asked for is the rim described");
 
