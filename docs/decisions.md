@@ -446,6 +446,14 @@ The roadmap says "never panic, return `EvalError`" (§4.5). `CLAUDE.md` says
 | Broken internal invariant — edge with three coedges, key resolving to a freed slot, approximation grew | **panic** | It is a bug; emitting a corrupt solid is worse than dying |
 | Cannot decide | `Decision::Undecidable` | It is a result, not a failure |
 
+**The middle row is amended by §66.** It still holds in a debug build. In a
+release build the response is a panic only where the operation has already
+written into the caller's model and cannot take it back; where the check can be
+made *before* the write, the response is an `Err` that says "this kernel has a
+bug", which is a third door and not `Error::Undecidable`. What the row must
+never mean is what a release build actually does today — neither of the two,
+because the check does not run at all (§66.1).
+
 ### 4.2 Error types
 
 `thiserror` enums per crate. No `anyhow` in library code. A `#[non_exhaustive]
@@ -464,6 +472,10 @@ O(n²) and the suite stops being runnable long before M4.
 
 - **After every mutation, in debug**: cheap checks on *touched entities only* —
   keys resolve, coedge count, orientation agrees, approximation did not grow.
+  **Amended by §66: "in debug" is withdrawn and they run always.** The O(n²)
+  above is the full sweep's and was never measured for these; measured, they cost
+  50–65 ns per face of the solid they are handed and the full sweep costs 3.4–4.4
+  µs per face of the whole model (§66.2).
 - **At test and import boundaries**: full `Model::validate()`, public API, called
   by `proptest` and by anyone importing untrusted data.
 - **Always, including release**: the approximation-growth check. One comparison,
