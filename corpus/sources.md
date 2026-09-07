@@ -270,11 +270,14 @@ $ compare each of the 323 by sha256 against $RCAD_STEP_CORPUS/kicad/
 identical: 323   different: 0   not-found-upstream: 0
 ```
 
-A single file, shown in full so the shape of the check is visible:
+A single file, shown in full so the shape of the check is visible. Note the
+commit sha in the URL where a copied-out example would carry `master`: fetching
+this file from `master` would work today and would stop proving anything the
+day upstream re-exports it.
 
 ```console
 $ curl -sSL -o Fuse_0402_1005Metric.step \
-    "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master/Fuse.3dshapes/Fuse_0402_1005Metric.step"
+    "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/e62ed1fc7862da83f789bd562671b5e4b82afcdf/Fuse.3dshapes/Fuse_0402_1005Metric.step"
 $ sha256sum Fuse_0402_1005Metric.step "$RCAD_STEP_CORPUS/kicad/Fuse_0402_1005Metric.step"
 c18cb5f8977e59e7f62917f145c9ee7efeeaf96ed4a69b0ffb965911153f2608  Fuse_0402_1005Metric.step
 c18cb5f8977e59e7f62917f145c9ee7efeeaf96ed4a69b0ffb965911153f2608  .../kicad/Fuse_0402_1005Metric.step
@@ -282,6 +285,11 @@ c18cb5f8977e59e7f62917f145c9ee7efeeaf96ed4a69b0ffb965911153f2608  .../kicad/Fuse
 
 Line endings, headers and export timestamps are all identical. Nothing was
 touched on the way in.
+
+That digest is reachable three ways, which is why it is worth writing down: the
+file on disk hashes to it (`corpus/manifest.sha256`, first row), a fresh
+download at the pinned commit hashes to it, and the two were produced by
+different people at different times without consulting each other.
 
 ### The pin
 
