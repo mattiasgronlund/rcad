@@ -7,11 +7,19 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest lint test check-t-selftest deny
+default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
-# and this repo has no business carrying them. Four tests in `rcad-step` skip
-# without it, so `just default` quietly runs four tests short.
+# and this repo has no business carrying them. Seven test files in `rcad-step`
+# read this variable and **fail** rather than skip when the corpus is not there
+# (§44.10): a green has to mean the corpus was read.
+#
+# Because this file defaults the variable, nothing that runs through `just` ever
+# reaches those tests' "not set" panic — it trips their `root.is_dir()` assertion
+# one line later, naming a path that looks plausible and is not there. A bare
+# `cargo nextest run` gets the panic instead. Both are failures, which is the
+# point; they just name different things, and the plausible path is the one that
+# wastes an afternoon.
 #
 # Derived rather than hardcoded so that every worktree gets the same answer:
 # `--git-common-dir` points at the *main* repo's `.git` from inside a worktree,
@@ -336,6 +344,50 @@ check-kache-off-on-ci:
     if [ "$off" != "kache" ]; then \
         echo "off CI, RUSTC_WRAPPER is '$off' and should be kache"; \
         echo "the build cache is now off for everyone, which is not what was wanted"; \
+        exit 1; \
+    fi
+
+# `default` runs the four recipes CI runs and every `check-*` there is, which is
+# what CLAUDE.md publishes and so is a claim that wants a test (§15.6).
+#
+# The failure it is really for is the other direction: a `check-*` recipe
+# written, committed and never wired into `default` is a check nobody runs, and
+# nothing else in this tree would notice. That has never happened, which is not
+# the same as being prevented.
+#
+# The count is pinned rather than left to the comparison, and that is the whole
+# design. Both sides are parsed out of this one file, so an extraction that
+# stops matching empties both at once and two empty sets compare equal — the
+# recipe would pass having compared nothing, and an empty diff prints nothing,
+# which reads exactly like success. `check-ignored` says the same thing about
+# itself a hundred lines up. It is not hypothetical: renaming `default`, which
+# is under discussion, breaks the anchor on the second line below.
+#
+# So bumping the number is how a new `check-*` recipe gets added, deliberately,
+# in the commit that adds it.
+check-default-runs-every-check:
+    @defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
+    listed=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
+    others=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
+    n=$(printf '%s\n' "$defined" | grep -c .); \
+    if [ "$n" != "17" ]; then \
+        echo "found $n check-* recipes, expected 17"; \
+        echo "if you added or removed one, change the number here in the same commit"; \
+        echo "if you found none, the parse broke and this recipe just compared nothing"; \
+        exit 1; \
+    fi; \
+    if [ "$defined" != "$listed" ]; then \
+        echo "these check-* recipes are defined but not run by default:"; \
+        printf '%s\n' "$defined" | while read -r r; do \
+            printf '%s\n' "$listed" | grep -qx "$r" || echo "  $r"; \
+        done; \
+        echo "a check nobody runs is not a check"; \
+        exit 1; \
+    fi; \
+    if [ "$others" != "check deny lint test " ]; then \
+        echo "default's non-check-* recipes are '$others', expected 'check deny lint test '"; \
+        echo "CLAUDE.md says default runs the four CI runs and every check-* besides"; \
+        echo "change that sentence in the same commit, or this is now false"; \
         exit 1; \
     fi
 
@@ -1154,6 +1206,76 @@ check-t-selftest:
         ;;
     esac
 
+# CI is about to fetch the STEP corpus (see `RCAD_STEP_CORPUS` above) from
+# upstream instead of having it on disk, so "CI is green" and "my machine is
+# green" need to mean the same corpus. `corpus/manifest.sha256` pins the
+# sha256 of every `.stp`/`.step` file the test suite reads (`files_under` in
+# `crates/rcad-step/tests/every_file_in_the_corpus_reads.rs` — the walk that
+# picks those two extensions, case-insensitively, and nothing else); this
+# recipe is what checks a corpus against it.
+#
+# `sha256sum --check` already tells missing and altered apart in its own
+# output — a listed file it could not open ends its line "FAILED open or
+# read", one it read but that hashed wrong just ends "FAILED" — so this reads
+# that rather than re-implementing it. What it cannot tell us is a `.stp`/
+# `.step` file on disk the manifest never heard of, which means the corpus
+# grew since the manifest was made; that half is a plain `find` against the
+# manifest's own path list.
+#
+# Checks the STEP corpus on this machine against `corpus/manifest.sha256`.
+check-corpus manifest="corpus/manifest.sha256":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$RCAD_STEP_CORPUS"
+    if [ ! -d "$root" ]; then
+        echo "RCAD_STEP_CORPUS points at $root, which is not a directory"
+        exit 1
+    fi
+    if [ ! -f "{{manifest}}" ]; then
+        echo "{{manifest}} does not exist"
+        exit 1
+    fi
+    manifest_abs=$(readlink -f "{{manifest}}")
+
+    set +e
+    out=$(cd "$root" && sha256sum --check --quiet "$manifest_abs" 2>&1)
+    rc=$?
+    set -e
+
+    missing=$(grep ': FAILED open or read$' <<<"$out" | sed 's/: FAILED open or read$//' || true)
+    mismatched=$(grep -v ': FAILED open or read$' <<<"$out" | grep ': FAILED$' | sed 's/: FAILED$//' || true)
+
+    manifest_paths=$(cut -c67- "$manifest_abs" | sort)
+    disk_paths=$(cd "$root" && find . -type f \( -iname '*.stp' -o -iname '*.step' \) -printf '%P\n' | sort)
+    extra=$(comm -13 <(echo "$manifest_paths") <(echo "$disk_paths"))
+
+    ok=1
+    if [ -n "$missing" ]; then
+        ok=0
+        echo "named in {{manifest}} but not on disk under $root:"
+        sed 's/^/  /' <<<"$missing"
+    fi
+    if [ -n "$mismatched" ]; then
+        ok=0
+        echo "on disk under $root but the contents do not match {{manifest}}:"
+        sed 's/^/  /' <<<"$mismatched"
+    fi
+    if [ -n "$extra" ]; then
+        ok=0
+        echo "STEP files on disk under $root that {{manifest}} does not name:"
+        sed 's/^/  /' <<<"$extra"
+        echo "the corpus grew; regenerate {{manifest}} to cover the new files"
+    fi
+    if [ "$ok" -eq 1 ] && [ "$rc" -ne 0 ]; then
+        echo "sha256sum --check failed in a way this recipe does not parse:"
+        sed 's/^/  /' <<<"$out"
+        exit 1
+    fi
+    if [ "$ok" -eq 0 ]; then
+        exit 1
+    fi
+    echo "corpus matches {{manifest}}: $(wc -l <"$manifest_abs") files, $root"
+
 lint:
     cargo fmt --all -- --check
     taplo fmt --check
@@ -1558,17 +1680,31 @@ check-hub dir=".":
         # untracked, which is a *stale* hub and not leftovers. Same symptom,
         # opposite fix: telling the reader to commit files that are already
         # committed sends them to duplicate somebody's merge. The two are told
-        # apart by asking whether every path is already on `main`.
+        # apart by asking whether every path is already on `main`, which has to
+        # mean the same bytes and not the same name. A name-only answer sends a
+        # reader to delete a file whose content is on `main` under that name but
+        # is not the content in front of them (docs/decisions.md §60.10).
         untracked=$(grep '^??' <<<"$dirt" | cut -c4- || true)
         modified=$(grep -v '^??' <<<"$dirt" || true)
-        landed=""
+        unmatched=""
         if [ -z "$modified" ] && [ -n "$untracked" ]; then
-            on_main=$(git -C "$hub" ls-tree -r --name-only main 2>/dev/null || true)
-            landed=$(comm -23 <(sort <<<"$untracked") <(sort <<<"$on_main"))
+            # Enumerated rather than read off `status`, which reports an
+            # untracked directory as one entry and quotes an awkward name. Every
+            # file the `clean` would take is hashed; an empty directory is the
+            # only thing it takes that this does not see, and it holds nothing.
+            while IFS= read -r -d '' path; do
+                on_main=$(git -C "$hub" rev-parse --verify --quiet "main:$path" || true)
+                if [ -n "$on_main" ] \
+                    && [ "$on_main" = "$(git -C "$hub" hash-object -- "$hub/$path")" ]; then
+                    continue
+                fi
+                unmatched="$unmatched$path"$'\n'
+            done < <(git -C "$hub" ls-files --others --exclude-standard -z)
         fi
-        if [ -z "$modified" ] && [ -n "$untracked" ] && [ -z "$landed" ]; then
-            echo "  Every one of those is already committed on \`main\`, so nothing here is"
-            echo "  lost work — the hub is just parked at an older commit. Re-park it:"
+        if [ -z "$modified" ] && [ -n "$untracked" ] && [ -z "$unmatched" ]; then
+            echo "  Every one of those is already committed on \`main\`, byte for byte —"
+            echo "  compared by content, not by name — so nothing here is lost work; the"
+            echo "  hub is just parked at an older commit. Re-park it:"
             # One line, because `check-hub-selftest` greps it back out and runs
             # it. Wrapping it for width is caught rather than silent: the grep
             # then hands bash a dangling `&&` and the selftest fails on it.
@@ -1667,3 +1803,20 @@ check-hub-selftest:
         || fail "the remedy did not restore the file it removed"
     got=$(just check-hub "$dir/main") \
         || fail "check-hub still fails after the reader did exactly what it said"
+
+    # The same name on `main`, different bytes in the hub. Everything above this
+    # point passes with a name-only comparison, because the fixture writes the
+    # same content on both sides — so the fixture has to differ for the check to
+    # be able to fail. Here the hub holds work that is in no commit anywhere, and
+    # calling it "already committed on `main`" sends the reader to delete it with
+    # the `clean -fd` the same message prints (docs/decisions.md §60.10).
+    git -C "$dir/main" checkout -q --detach "main^"
+    printf 'work nobody has committed\n' >"$dir/main/landed"
+    got=$(just check-hub "$dir/main" 2>&1) && fail "a hub holding uncommitted work was accepted"
+    if grep -qF "already committed on \`main\`" <<<"$got"; then
+        fail "content that is on no branch was called committed, and the remedy deletes it"
+    fi
+    grep -qF "very likely not yours" <<<"$got" \
+        || fail "differing content got neither the stale message nor the leftovers one"
+    [ "$(cat "$dir/main/landed")" = "work nobody has committed" ] \
+        || fail "the check itself changed the file it was asked about"

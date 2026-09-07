@@ -446,14 +446,6 @@ The roadmap says "never panic, return `EvalError`" (§4.5). `CLAUDE.md` says
 | Broken internal invariant — edge with three coedges, key resolving to a freed slot, approximation grew | **panic** | It is a bug; emitting a corrupt solid is worse than dying |
 | Cannot decide | `Decision::Undecidable` | It is a result, not a failure |
 
-**The middle row is amended by §62.** It still holds in a debug build. In a
-release build the response is a panic only where the operation has already
-written into the caller's model and cannot take it back; where the check can be
-made *before* the write, the response is an `Err` that says "this kernel has a
-bug", which is a third door and not `Error::Undecidable`. What the row must
-never mean is what a release build actually does today — neither of the two,
-because the check does not run at all (§62.1).
-
 ### 4.2 Error types
 
 `thiserror` enums per crate. No `anyhow` in library code. A `#[non_exhaustive]
@@ -472,10 +464,6 @@ O(n²) and the suite stops being runnable long before M4.
 
 - **After every mutation, in debug**: cheap checks on *touched entities only* —
   keys resolve, coedge count, orientation agrees, approximation did not grow.
-  **Amended by §62: "in debug" is withdrawn and they run always.** The O(n²)
-  above is the full sweep's and was never measured for these; measured, they cost
-  50–65 ns per face of the solid they are handed and the full sweep costs 3.4–4.4
-  µs per face of the whole model (§62.2).
 - **At test and import boundaries**: full `Model::validate()`, public API, called
   by `proptest` and by anyone importing untrusted data.
 - **Always, including release**: the approximation-growth check. One comparison,
@@ -18792,6 +18780,77 @@ Found by `rcad-c4` running it rather than reading it — twice over, since §60.
 prose that had been reviewed and neither was in code that had been tested, which
 is the argument for the paragraph above.
 
+### 60.10 The same name is not the same file
+
+§60.9's test for "the hub is only behind" was **every untracked path is already
+in `ls-tree main`**. That compares names. It stood in front of a `clean -fd` that
+deletes those same paths, so a file in the hub whose name is on `main` but whose
+bytes are not was told it was safe and then removed.
+
+Demonstrated in a throwaway repository rather than argued. A hub parked one
+commit back, holding `notes.txt`:
+
+    hub blob:  3efd841a4fa917602af4c8547eb46d369b94a4d1
+    main blob: 56985387e75729cd805934b2322e7d79ff9bd594
+
+`check-hub` answered *"Every one of those is already committed on `main`, so
+nothing here is lost work"* and printed its remedy. Running that remedy: the file
+afterwards holds `main`'s version, and the hub's content is reachable from no ref
+at all. It was never in a commit; there was nothing to recover it from.
+
+**It could not have bitten on 2026-09-06, and that is luck rather than design.**
+The 1542 were libfuzzer corpus entries, which are named by the hash of their
+contents, so for them a matching name *did* imply matching bytes. `check-hub`
+does not know that, and nothing restricts it to `fuzz/corpus/`. A hub parked
+behind `main` with a half-written `docs/notes.md` in it, while a lane lands a
+different `docs/notes.md`, is the same shape with a person's work in it.
+
+The check now hashes each path and compares against `main:<path>`. It enumerates
+with `ls-files --others --exclude-standard -z` rather than reading `status`,
+which reports an untracked directory as a single entry and quotes awkward names.
+The one thing `clean -fd` removes that this does not hash is an empty directory,
+which holds nothing to lose.
+
+**The old fixture could not fail.** It wrote `landed` with the same content on
+both sides, so a name-only comparison and a content comparison agreed on it —
+the test passed for a reason weaker than the one it was believed to prove. The
+new case writes different bytes under the same name and asserts the "already
+committed" sentence does *not* appear. Put the name-only comparison back and it
+fails with *"content that is on no branch was called committed, and the remedy
+deletes it"*.
+
+**Two more things measured during the re-park, both about the same remedy.**
+
+`checkout --detach main` does **not** restore a tracked file deleted in the
+working tree when that file is identical in the old commit and the new one.
+Checkout writes only what differs between the two, so the deletion survives it —
+and checkout *prints* `D <path>` while doing nothing about it, which is the one
+line a reader would scan for reassurance. A separate `git restore -- <path>` is
+required. This bit a real file: a `crash-*` sweep had deleted
+`fuzz/corpus/no_model_makes_the_writer_panic/crash-a54b24c9…`, a tracked seed
+from `ce2dbf2` that is named like an artifact but is not one, and the re-park's
+own assertion is what caught that the checkout had left it deleted.
+
+`git clean -fd` will not remove a nested linked worktree — measured on **git
+2.43.0**, with `.git` confirmed to be a file rather than a directory, `clean -nd`
+listing it as no candidate at all. `git clean -ffd` removes it, taking
+uncommitted work with it and leaving the registration `prunable`, which `just
+lanes` then reports as `missing`. So the protection is a property of `clean`
+stopped at one `-f`, not of `clean`; the published remedy must never gain a
+second. The version is part of the claim because `rust-toolchain.toml` pins the
+compiler and `mise.toml` pins the tooling, and nothing here pins git — §15.6 for
+why a bound without its conditions is not a bound, and `dc650e7` for what
+happens to a "the guard holds" sentence that travels without them.
+
+**A worktree made from the hub lands inside the hub.** `git worktree add
+rcad-worktrees/<name>` run with the hub as the working directory creates
+`<hub>/rcad-worktrees/<name>`, not the sibling directory of the same name. An
+empty `rcad-worktrees/` had been sitting in the hub since 2026-09-06 08:42 from
+exactly that slip, and it went silently into the re-park's delete set — noticed
+only because a dry run counted 1543 where 1542 had been verified. `rcad-c4` then
+made the identical mistake while opening the lane for this section, which is the
+evidence that it is easy rather than careless. Absolute paths in `worktree add`.
+
 ## 61. A wall of a box turned round, recorded 2026-09-07
 
 `just fuzz-fuse` found ten crashes in 600 s. All ten are one bug, none of them
@@ -18955,9 +19014,226 @@ writes one and nothing reads one for anything but composition. It is caught here
 only through what it composes onto a flat face; a solid of nothing but curved
 faces with its shell used reversed is left to the volume.
 
+## 62. A sweep that could only ever return one answer, recorded 2026-09-07
+
+A fourth way a written-down finding stops being worth what it looked worth, and
+it is not the three in `docs/consumers.md` — those are all *the world moved under
+a true sentence*, and this one is *the sentence was never able to be true*. The
+shape:
+
+> **A sweep whose sample set could only ever return one of the two answers.** The
+> run completes, the samples are real, every assertion passes — and the finding
+> was settled before the first sample was drawn, because the sample set could not
+> have produced the other one.
+
+§16.11 is the nearest neighbour and is a different failure: there a check was
+right about what it caught and every sentence citing it was reasoning about the
+other half. Here the measurement is right, the sentences about it are right, and
+the *sample set* is the thing that was never able to say the other thing.
+
+The unifying statement across all four, which `docs/consumers.md` also carries
+and which rscene asked be credited to this side:
+
+> The artefact stayed internally consistent while the world it described moved,
+> or was never fully sampled — and review checks consistency.
+
+The first three arms are the *moved* half. This is the *never fully sampled*
+half, and it is the one that says why a reading pass catches none of them.
+
+### 62.1 The instance, and nothing in it was wrong
+
+`crates/rcad-geom/tests/what_the_dynamic_range_check_is_a_margin_against.rs`
+asks how small a wedge's feature can get against its coordinates before the apex
+rounds onto the base and `orient3d` answers `Zero` about a model nobody built.
+As first written it swept the coordinate at `1`, `2^10`, `2^20` and `2^40`.
+
+Measured here at `b4e698f` by reading the bit patterns: all four have a mantissa
+of exactly zero. That is the whole defect. A feature of exactly half an ulp puts
+the apex exactly halfway between two doubles, round-half-to-even then decides,
+and a zero mantissa is the even side of every such tie — so all four coordinates
+round the same way, and a **cliff** was the only shape of answer the sample set
+could return. It returned one, and it looked complete returning it.
+
+**Nothing it asserted was false and the code under it was not buggy.** Worth
+saying plainly, because it is what makes the arm hard to see: the run was green
+for the right reason, on real samples, about real arithmetic. Its verdict — that
+the spread the kernel publishes as supported sits far below where a written
+feature dies — stands untouched, and one binade of head-room on half the
+coordinates does not move it. The failure is that the run *looked complete*.
+
+### 62.2 What the axis it held still actually does
+
+Another lane sampled every representable placement across a whole binade and
+found the law, in `rcad-topo`'s
+`tests/how_far_out_a_ball_can_sit_and_still_mesh.rs`: refusal is **not monotone
+in where a solid stands**. For a ball of radius `r` centred at `c` everything is
+`r / ulp(c)`:
+
+- above a half, the poles land in different ulp buckets and it meshes wherever
+  it stands;
+- below a half, both poles round back onto `c` and it refuses wherever it
+  stands — and this does not depend on `c` at all;
+- at exactly a half the poles sit on a tie, and round-half-to-even decides on
+  the last bit of `c`'s mantissa. Even rounds inward and refuses; odd rounds
+  outward and meshes.
+
+`ulp` is constant across a binade, so the third case is not a knife edge: it
+holds for a whole factor-of-two stretch, and the answer flips at every
+representable placement in it. That lane's census — **32 meshed and 32 refused
+over 64 consecutive placements** — is **their** measurement, not one re-taken
+here. What was re-run here at `b4e698f` is the file itself: 13 tests, 13 passed.
+
+A cliff cannot produce that. It cannot even produce the report that started it:
+two placements, the lower refusing and the higher meshing, which is the one pair
+a threshold of any height is forbidden to explain.
+
+### 62.3 Why this is a category and not carelessness
+
+**rcad-51's sentence, kept as they wrote it, because it is the section:**
+
+> The `COORDINATES` doc comment reasoned explicitly about its sampling and still
+> missed the axis, **because powers of two are simultaneously the natural thing
+> to sweep and the one family with no mantissa to be odd**.
+
+The obvious choice and the blind choice were the same choice. That is what earns
+this a name of its own. A thoughtful comment was not the missing ingredient —
+the thoughtful comment had been written, and read, and it argued about the
+sampling and came out blind anyway, because the argument was about spanning the
+range and the blindness was one bit below where it was looking.
+
+It also rules out the two repairs that suggest themselves. *"Never sample only
+powers of two"* is too narrow: powers of two are the right sample for a question
+about magnitude, and the next instance of this will be some other convention
+that happens to be constant in whatever the next answer turns on. *"Sample
+more"* is useless and, here, wrong — the fix went from four coordinates to
+eight and did not go one step finer in magnitude.
+
+**A second instance, and it is rcad-51's own, committed within the hour of
+writing the argument above.** Asking which files under `crates/rcad/tests`
+mention `rcad_geom`, it grepped for `rcad_geom` and not for the hyphenated
+`rcad-geom` that prose uses. The natural spelling and the blind spelling were
+the same choice, one level down from the powers of two.
+
+**Its own qualification, which goes in with it.** The load-bearing claim — which
+files *import* `rcad_geom` — was never at risk, because a Rust import can only be
+spelled with the underscore, so the narrow pattern found every import there was.
+What the sample set could not reach was the claim actually written down, which
+was about **mentions**. Re-measured here at `b4e698f`:
+`grep -rn "rcad_geom\|rcad-geom" crates/rcad/tests crates/rcad/benches` gives six
+hits across four files, `grep -rn "rcad_geom::" …` gives one, and there is no
+`crates/rcad/examples`. So five of the six are prose, and a grep for the
+underscore alone sees one of six while answering a question about all six.
+
+That makes it the muddier illustration: it is two arms at once, a blind sample
+set **and** a sentence that drifted off its evidence, and only the first of those
+is this section. Where it is genuinely the stronger one is that its blind sample
+set was **a spelling a person chose**. Nothing about binary floating point is
+available to explain it away, which is rcad-51's point and their framing: the
+fourth arm is about the **sampler, not the sampled**, and a sampler is as blind
+in a grep pattern as in a `COORDINATES` array.
+
+### 62.4 The rule, sharp enough to use before writing a sweep
+
+**A sweep is blind exactly when its sample set has fewer degrees of freedom than
+the answer does.** So, before running it:
+
+1. Name every quantity the answer can turn on — not the ones being swept, all of
+   them. Rounding puts more on that list than the shape does: exponent,
+   mantissa, parity of the last bit, sign, which side of a tie.
+2. For each, name **two samples in the set that differ on it and agree on
+   everything else.** Not "the set covers a wide range" — two named members.
+3. Anything with no such pair is a **constant of the run**, not a variable. The
+   finding is then a statement about that constant, and it should be written
+   down as one or the sample set should be widened until it is not.
+
+Step 2 is the whole rule. It is the one that fails on this instance and it fails
+in one line: for *parity of the last mantissa bit*, there is no such pair among
+`1`, `2^10`, `2^20`, `2^40`, because all four are zero.
+
+The trap the rule is aimed at: **the family reached for by convention is usually
+the family with the fewest degrees of freedom.** Powers of two are the canonical
+case — what anyone would pick to span a range, and constant in the one bit this
+answer turned on — but tidy integers, unit radii, the origin and the identity
+placement are the same trap. Convention is what makes a family easy to write
+*and* what makes every member of it agree.
+
+**What it costs**, and it is not nothing. Step 1 wants somebody who knows what
+the arithmetic can turn on, which is the expensive ingredient and is not
+purchasable by sampling harder. Step 2 costs a doubling of the sample set per
+axis it finds — here 4 coordinates became 8 and the run stayed instant, but an
+axis found in a family that already takes minutes is a real bill, and it is
+sometimes right to name the constant instead of paying it. Naming it is the
+cheap outcome and it is a legitimate one: *"this is a statement about even
+mantissas"* is a true, useful, much smaller finding than the one that was
+claimed.
+
+### 62.5 The standing form: make the sweep prove it saw both answers
+
+Steps 1-3 are done by a person once. What stops the sample set silently
+narrowing again is an assertion, and the fixed file carries it:
+`the_spread_a_written_feature_survives_to` counts how many coordinates kept the
+feature at the tie and how many lost it, and asserts the two counts are
+**equal** — with a message saying the sweep is not sampling both sides of the
+tie and can only report one cliff. Measured here at `b4e698f` from the test's own
+output: *"a written feature survives to a spread of `2^52` at worst and `2^53`
+at best; at the tie 4 kept the feature and 4 swallowed it; 108 still there, 44
+gone."*
+
+That is a **positive control on the sample set**, and it is the same argument
+§56.7 makes about an absence that could not have been a presence, one level
+down: there the control proves the sweep could have failed, here it proves the
+sweep could have answered the other way. §42.12's tenth criterion is the same
+idea for a rate.
+
+It is also §15.6's rule pointed at a sample set rather than at a bound. A
+published bound wants a test; a published finding wants a test that the sample
+set could have contradicted it.
+
+### 62.6 The `testing` skill already had this, and what it does not reach
+
+*"Vary what the family cannot vary, not just more of what it can"* is in the
+skill already, under **"A second family for what the first cannot draw"**. Read
+in full rather than skimmed to its examples, it goes further than those examples
+suggest: its two worked cases are shapes — the notched star whose corners never
+give two edges overlapping bounding boxes, and `a_simple_polygon` beside it —
+but its closing clause is *"the knots in the spline families are not all small
+whole numbers for the same reason"*, and a knot value is a number. **"Not all
+small whole numbers" is already a warning against a degenerate numeric sample
+set.** So the rule covers a family's parameters, numbers included, and asking it
+to say "this is about numbers too" would be redundant with a clause it already
+has. Saying so explicitly here, because a section about sample sets that only
+sampled the two shape examples would be its own subject matter.
+
+**What the rule does not reach is the coordinates a family is *placed at*.**
+Those are not parameters of the family. Nothing in the family generates them,
+shrinking never touches them, and a family drawn entirely correctly can be
+evaluated at one placement for its whole life. They are the arithmetic context
+the family runs in — and they are the axis both defects behind this section were
+blind on.
+
+So the sentence that is missing is: **a family's placement is part of its sample
+set**, with §62.4's degrees-of-freedom check as how to apply it. That is a change
+to `.claude/skills/testing/SKILL.md`, and this lane does not own that file; it is
+reported rather than made.
+
+### 62.7 The uncomfortable half
+
+This family is why the `claim-audit` skill would have caught none of the four
+arms, and the fourth is the proof rather than another example. A claim audit
+reads a sentence and asks whether it is consistent and whether it names
+something real. This doc comment was both, it had already had exactly that pass
+in writing, and it was blind. Saying *review harder* would have changed nothing,
+so it is not what is recorded.
+
+The skill is not thereby useless — it is aimed at claims that something cannot
+be done or cannot be reached (§16.10), and it finds those. What it cannot see is
+a claim that is true about everything it sampled and silent about what it did
+not. **The control for that is arithmetic, not reading**: a balance assertion,
+or a census one level finer than the claim.
+
 ---
 
-## 62. What a release build hands back when the kernel is wrong, recorded 2026-09-07
+## 66. What a release build hands back when the kernel is wrong, recorded 2026-09-07
 
 §4.1 gives a broken internal invariant one response, a panic, and the reason is
 that emitting a corrupt solid is worse than dying. §4.3 then wrote "in debug"
@@ -18980,7 +19256,7 @@ release record enough for a post-mortem and return an error that says *internal
 error*. What follows measures the reason §4.3 gave, so that the policy is decided
 by a number rather than by an argument about a different check.
 
-### 62.1 What a release build does today, replayed
+### 66.1 What a release build does today, replayed
 
 Three runs of one harness against `a6f03b8`, built with plain `cargo build
 --release` — the release profile has `debug-assertions` off, and
@@ -19015,9 +19291,9 @@ What they do show is a separate thing worth its own row: **"valid" is not a
 property of a model on its own.** A `Policy::tolerant` fuse can build a solid
 whose coordinates span `inf` and both the fuse and `Model::validate` will call it
 sound, and the same model handed to a certified caller is broken. That is left
-open in §62.7.
+open in §66.7.
 
-### 62.2 What the touched checks cost in release — the measurement
+### 66.2 What the touched checks cost in release — the measurement
 
 Three release binaries from the same tree, differing only in a forced-on gate,
 run interleaved so that machine noise falls on all three alike, best of five:
@@ -19076,7 +19352,7 @@ never measured for them, and measured it is between nothing and eight percent.
 A decision about test-suite runtime is not a decision about what a released
 kernel hands a caller, and this is the number that says so.
 
-### 62.3 So the checks run always, and then the question is what they do
+### 66.3 So the checks run always, and then the question is what they do
 
 The gates go. `check_touched_solid`, `check_touched_face`, `check_touched_wire`
 and `check_touched_edge` run in every build, at 50–65 ns a face, and
@@ -19088,10 +19364,10 @@ That is the half of the proposal the number decides on its own, and it is worth
 separating from the half it does not: **running the check is not the same
 decision as what the check does when it fails.** Today a release build cannot
 panic because it never looks. Once it looks, §4.1's panic is back by default, and
-Mattias's proposal is that release should instead record and return. §62.4 is
+Mattias's proposal is that release should instead record and return. §66.4 is
 where that stops being uniform.
 
-### 62.4 Which operations can return `Err`, and which cannot
+### 66.4 Which operations can return `Err`, and which cannot
 
 The line is not "does this operation document `# Atomic`". It is **can the check
 be made before anything the caller can see has changed** — structural
@@ -19151,7 +19427,7 @@ pays for it: `Assembly::commit` writes into a scratch `Model`, sweeps it, and
 copies into the caller's only if the sweep passed. The cost is one extra copy of
 the answer's entities plus one sweep of a model the size of the answer, against a
 fuse that costs 51 ms. The `add_*` builders in `build.rs` are the same change,
-and they are the ones where 62.2's +7.9% would matter — an importer that pays a
+and they are the ones where 66.2's +7.9% would matter — an importer that pays a
 scratch-and-copy per solid pays more than 4 µs. That is a real trade and it is
 why those rows say "until", not "never".
 
@@ -19160,11 +19436,11 @@ why those rows say "until", not "never".
 (`model.rs:289-293`), and the previous isometries are gone. The inverse isometry
 would restore them — `movement` is invertible or `Isometry::translation` would
 not have built it — so this is a *gap* and not a *limit* in §16.10's sense, and
-§62.8 keeps it open rather than closing it with a paragraph. Until somebody
+§66.7 keeps it open rather than closing it with a paragraph. Until somebody
 writes that, there is nothing to return an `Err` *to*: the model is already
 wrong.
 
-### 62.5 Two doors, and why they must not be one
+### 66.5 Two doors, and why they must not be one
 
 `Error::Undecidable { records }` means the arithmetic honestly could not settle
 something, and a caller is *supposed* to answer it by retrying under a more
@@ -19199,10 +19475,10 @@ uses a model that may already hold what the check tripped on. The doc comment on
 the variant says this, and so does its `Display`, because the string is what ends
 up in somebody's bug report.
 
-### 62.6 Where the post-mortem record goes, and what it costs when nothing is wrong
+### 66.6 Where the post-mortem record goes, and what it costs when nothing is wrong
 
 `ProvenanceLog` is the obvious sink and it is the wrong one, for the same reason
-§62.5 gives about the door. It is a `Vec<Record>` of decisions the arithmetic
+§66.5 gives about the door. It is a `Vec<Record>` of decisions the arithmetic
 could not certify (§5), it is what `Error::Undecidable` carries, and
 `log.worst_wobble` is read to *decide* whether an operation refuses
 (`fuse/mod.rs:183`). A kernel bug written into it is a record that reads as one
@@ -19225,13 +19501,13 @@ So the variant carries its own owned report, built only on the failing branch:
 **The cost when nothing goes wrong is zero, and it is zero for the same reason
 `ProvenanceLog` is.** The report is a struct built inside the `else` of a check
 that passed; a certified operation constructs nothing, allocates nothing and logs
-nothing. What is *not* free is the check itself, and §62.2 is the answer to that:
+nothing. What is *not* free is the check itself, and §66.2 is the answer to that:
 50–65 ns a face, always, in every build.
 
-### 62.7 What this leaves open
+### 66.7 What this leaves open
 
 **`Assembly::commit` needs a scratch model before the fuse's panic can become an
-`Err`.** §62.4 says why and says what shape it takes. Nobody has measured the
+`Err`.** §66.4 says why and says what shape it takes. Nobody has measured the
 copy — the sweep half is measured above and is free at a fuse's scale, and the
 copy is an unknown that is probably also free at that scale and certainly is not
 at `add_extrusion`'s.
@@ -19242,7 +19518,7 @@ should put the *previous* broken-in-a-different-way state back is not obvious,
 and §4.1's answer for an in-place mutation is still a panic until somebody argues
 the other side.
 
-**Whether "valid" should depend on a policy at all.** §62.1's sixteen are one
+**Whether "valid" should depend on a policy at all.** §66.1's sixteen are one
 model that `Model::validate` calls sound under `Policy::tolerant` and broken
 under `Policy::certified()`, with a coordinate span of `inf` in ten of them. That
 is not a release-build question and it is not answered here, but a solid that is
