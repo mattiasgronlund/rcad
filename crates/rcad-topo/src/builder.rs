@@ -245,6 +245,19 @@ impl SolidBuilder {
     /// [`Orientation::Forward`] means the face's own surface points out of the
     /// material, which is a STEP `advanced_face` with `same_sense` true.
     ///
+    /// **[`Orientation::Reversed`] is only for a curved face**, and a flat one
+    /// given it is
+    /// [`Invalid::AFlatFaceIsUsedReversed`](crate::Invalid::AFlatFaceIsUsedReversed)
+    /// from
+    /// [`Model::validate`](crate::Model::validate) when the description is
+    /// built. A plane welds "which surface" to "which way", so a wall facing the
+    /// other way is a plane stored turned round
+    /// ([`Plane::reversed`](rcad_geom::Plane::reversed)) and then used forwards;
+    /// a sphere and a pipe have no turned-round form, so those carry the turn
+    /// here instead. `rcad-step` maps a `same_sense = false` the same way — a
+    /// plane is reversed, a curved surface is used reversed — so a STEP file's
+    /// flag does not arrive here unchanged (`docs/decisions.md` §31.3, §36.24).
+    ///
     /// # Errors
     ///
     /// [`Error::ASolidBuiltFaceByFaceHasOneShell`] if a shell was already

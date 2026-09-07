@@ -403,6 +403,13 @@ fn the_sweep_passes_two_cubes_at_one_place_and_the_pass_of_its_own_refuses_them(
 /// This is the division the builder is built on: what one call can decide is
 /// decided there, and what takes the whole solid comes back from
 /// [`Model::validate`] under the name the sweep already had.
+///
+/// **The name is `AFlatFaceIsUsedReversed` and not `VolumeIsNotPositive`**,
+/// which is the more useful half of the two: a cube described inside out has
+/// negative volume *and* six planes used reversed, and only the second says
+/// which rule was broken. Turning one wall round instead leaves the volume
+/// positive and is caught by that name alone — `a_flat_face_used_reversed` in
+/// `validate.rs` is where that lives.
 #[test]
 fn a_solid_described_with_every_face_turned_round_is_refused_by_the_sweep() {
     let policy = Policy::certified();
@@ -421,7 +428,7 @@ fn a_solid_described_with_every_face_turned_round_is_refused_by_the_sweep() {
     assert!(
         matches!(
             refused,
-            Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
+            Err(Error::Invalid(Invalid::AFlatFaceIsUsedReversed))
         ),
         "expected the sweep to say the faces point inwards, got {refused:?}"
     );
