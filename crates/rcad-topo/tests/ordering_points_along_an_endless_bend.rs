@@ -28,6 +28,8 @@
 //! among what stands under its own name. That is a separate gap and the numbers
 //! below never blend the two (§17.7).
 
+// `pairs` describes its frustum through `cones::a_frustum`.
+mod cones;
 mod pairs;
 
 use rcad_geom::Deflection;

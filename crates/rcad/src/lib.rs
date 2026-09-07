@@ -402,6 +402,24 @@ pub use rcad_geom::{
 /// on results the caller was handed, and a caller cannot name what its own
 /// results were certified against if the name is not exported (§15.6).
 pub use rcad_geom::{SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS};
+
+/// How far apart a model's coordinates may be, and the name that check goes by
+/// in a provenance record.
+///
+/// Both halves of §15.6 for one check. The bound is
+/// [`DynamicRange::LARGEST_SUPPORTED_RATIO`], and a caller handed
+/// [`Invalid::DynamicRangeTooWide`] reads a ratio out of it that means nothing
+/// on its own: with no bound out here there is nothing to compare it against and
+/// no way to reach the same ratio from the model it came from, so copying the
+/// digits of a constant that can move is the only route left.
+///
+/// [`DYNAMIC_RANGE_CHECK`] is the tolerant half of the same check. Under
+/// [`Policy::tolerant`] it warns instead of refusing, and what it leaves behind
+/// is a [`Record`] whose [`predicate`](Record::predicate) is this name — so a
+/// caller reading its own log can count records without it and say which check
+/// they came from with it. Out here for the same reason as the `SIDE_OF_*` names
+/// above.
+pub use rcad_geom::{DYNAMIC_RANGE_CHECK, DynamicRange};
 pub use rcad_predicates::{
     Approximation, Cause, Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D,
     Point as PredicatePoint, Policy, ProvenanceLog, Record, Severity, SideOfSurface, Strictness,

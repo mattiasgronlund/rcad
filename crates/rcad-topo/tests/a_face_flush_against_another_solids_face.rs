@@ -20,6 +20,8 @@
 //! the other order, because agreeing with each other is what the two orders did
 //! wrong here: one of them was right and the other was not.
 
+// `pairs` describes its frustum through `cones::a_frustum`.
+mod cones;
 #[path = "pairs/mod.rs"]
 mod pairs;
 

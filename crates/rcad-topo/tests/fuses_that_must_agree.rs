@@ -120,6 +120,8 @@
 //! argument for plane-authoritative geometry stated as an assertion. It runs
 //! inside [`fused`], so it costs no wall clock at all.
 
+// `pairs` describes its frustum through `cones::a_frustum`.
+mod cones;
 mod pairs;
 
 use std::cell::{Cell, RefCell};
