@@ -1,24 +1,27 @@
-# **This workflow has run and has never passed.** As of 2026-09-07 it has fired
-# on ten pushes to `main`, back to 2026-09-06T20:09Z, and every one failed in
-# 11–25 seconds without reaching a single check.
+# **No CI run has ever succeeded.** Re-derive rather than believe this line:
+# `gh run list --repo mattiasgronlund/rcad`. It is written as a fact only a fix
+# can falsify, because the two counts that stood here before both went stale
+# within the day, one of them in this file.
 #
-# Until this line was corrected the header opened "This workflow has never run.
-# There is no remote and no CI (`git remote -v` is empty)". `origin` has been
-# `https://github.com/mattiasgronlund/rcad.git` for at least a day. That
-# sentence was true when written, went false without a commit, and is why a red
-# CI was read for a day as an absent one — so if you change what this file does,
-# change this paragraph in the same commit or leave it saying nothing.
+# Two paragraphs of this header have now been wrong. It opened "This workflow
+# has never run. There is no remote and no CI (`git remote -v` is empty)", which
+# was true when written and went false without a commit — and its replacement
+# said the runs "all failed in 11–25 seconds without reaching a single check",
+# written on 2026-09-07 from the first page of `gh run list` and **false**: run
+# `33916660058` took 11m28s, and passed `just check` and `just lint`. A page of
+# ten, every row a push to `main`, could only return the answer it returned.
+# So: if you change what this file does, change this header in the same commit,
+# and re-derive anything numeric rather than copying it forward.
 #
-# Three faults, in the order a run meets them. Only the second is fixed.
+# Three faults, in the order a run meets them. Two are fixed and the third is
+# the whole remaining problem.
 #
-# **1. A rustup component race, unfixed.** mise installs the six `[tools]` at
-# once, each materialises the 1.96.0 toolchain that `rust-toolchain.toml` pins,
-# and they clobber one another in `~/.rustup/downloads`: "component download
-# failed for clippy…", "could not rename 'downloaded' file … No such file or
-# directory", the same partial hash reported by two installs concurrently.
-# Candidates nobody has tested: materialise the toolchain in a step before
-# `mise install`, or serialise the installs. This fires ~10 s before fault 2 and
-# is untouched by it.
+# **1. A rustup component race, fixed below by `rustup show`.** mise installs
+# the six `[tools]` in parallel and each one triggers rustup to materialise the
+# toolchain pinned in `rust-toolchain.toml`. They race over the same `.partial`
+# in `~/.rustup/downloads` and all but one die renaming it — "component download
+# failed for clippy…", the same partial hash reported by two installs at once.
+# Materialising the toolchain in its own step first leaves nothing to race for.
 #
 # **2. The kache wrapper deadlock, fixed 2026-09-07 in `mise.toml`.** mise
 # applied `RUSTC_WRAPPER = "kache"` while installing the tool `kache`, so every
@@ -26,7 +29,25 @@
 # check-kache-off-on-ci` holds it, and holds the other direction too so the
 # cache does not quietly go off for humans.
 #
-# **3. `just test` needs a STEP corpus, still open.** **Seven** test files in
+# Neither fix is a guess, and each has been watched separately.
+#
+# Together: PR #1 (`ci-kache-bootstrap`, `4f2e30e`, run `33916660058`, two days
+# before either was written here) put `rustup show` in front and took the
+# wrapper away. The install succeeded, `just check` and `just lint` passed, and
+# `just test` ran **925 tests green** before failing on the corpus alone. That
+# PR is still open. Its kache half is superseded — it deleted `RUSTC_WRAPPER`
+# outright, which turns the build cache off for every human in order to fix a
+# runner, where `mise.toml` now empties it only when `CI` is set.
+#
+# Fault 2 alone: run `34109767839`, the push that landed the `mise.toml` fix
+# with no `rustup show` yet. `kache … rustc -vV` is absent from the log, and the
+# tools that fail to install drop from six to **five** — `just` gets through —
+# while the run reaches 1m36s instead of dying in twenty seconds. That is the
+# kache fix working on a runner with fault 1 still in front of it, which is the
+# one thing PR #1 could not show, having fixed both at once.
+#
+# **3. `just test` needs a STEP corpus, and is now the only thing failing.**
+# **Seven** test files in
 # `rcad-step` read `RCAD_STEP_CORPUS` — an earlier version of this header said
 # four, and so do two other places; the count is `grep -rln RCAD_STEP_CORPUS
 # --include=*.rs`. They refuse to skip when it is unset, because they used to
@@ -62,6 +83,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # mise installs the `cargo:` tools in parallel, and each one triggers
+      # rustup to materialise the toolchain pinned in `rust-toolchain.toml`.
+      # They race over the same `.partial` file in ~/.rustup/downloads and all
+      # but one die renaming it. Materialising the toolchain first leaves
+      # nothing to race for.
+      - run: rustup show
       - uses: jdx/mise-action@v2
         with:
           experimental: true
