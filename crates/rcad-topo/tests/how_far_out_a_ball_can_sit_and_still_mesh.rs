@@ -404,6 +404,58 @@ fn a_quarter_radius_needs_a_quarter_of_the_distance_to_split_the_same_way() {
     assert!(meshes(0.25, odd_quarter, COARSE));
 }
 
+/// Every radius has a band of its own, and the alternation is in all of them.
+///
+/// The test above scales the reported pair and gets the split back, which is two
+/// points at one radius and settles nothing on its own. This is the general
+/// claim: for a radius `r` the tie is `ulp(c) == 2 * r`, and the ulp is
+/// `2^(e - 52)` across `[2^e, 2^(e + 1))`, so **each radius has exactly one
+/// binade where the placement is read at all** and it sits at
+/// `e = 53 + log2(r)`. Quartering the radius does not weaken the tie argument;
+/// it moves the band down two binades, which is why the same behaviour turns up
+/// at a quarter of the distance and not at the same distance.
+///
+/// Sixteen consecutive placements from the bottom of each band, four radii two
+/// binades apart, asserted against parity one placement at a time. The bands do
+/// not overlap: at `2^51` a unit ball meshes and a quarter ball alternates, and
+/// at `2^53` it is the other way round.
+#[test]
+fn each_radius_has_its_own_band_and_they_all_alternate() {
+    for (radius, exponent) in [(0.25f64, 51u64), (0.5, 52), (1.0, 53), (2.0, 54)] {
+        let bottom = two_to_the(exponent);
+        assert_eq!(
+            ulp_of(bottom),
+            2.0 * radius,
+            "a ball of radius {radius} is exactly half an ulp from 2^{exponent}"
+        );
+
+        for step in 0..16 {
+            let out = bottom + f64::from(step) * ulp_of(bottom);
+            let by_parity = out.to_bits() % 2 == 1;
+            assert_eq!(
+                meshes(radius, out, COARSE),
+                by_parity,
+                "radius {radius} at {out:.1}, last bit {}: {}",
+                out.to_bits() % 2,
+                what_happened(radius, out, COARSE)
+            );
+        }
+    }
+
+    let two_51 = two_to_the(51);
+    assert!(
+        meshes(1.0, two_51, COARSE) && meshes(1.0, two_51 + 0.5, COARSE),
+        "a unit ball is four ulps wide down at 2^51, so it is nowhere near a tie \
+         and its last bit is not read"
+    );
+    let two_53 = two_to_the(53);
+    assert!(
+        !meshes(0.25, two_53, COARSE) && !meshes(0.25, two_53 + 2.0, COARSE),
+        "and a quarter ball is an eighth of an ulp up at 2^53, which is under \
+         every tie, so its last bit is not read either"
+    );
+}
+
 /// The parity law holds on the `z` axis too, and the refusal it produces there
 /// is a different one.
 ///
