@@ -19230,3 +19230,181 @@ be done or cannot be reached (§16.10), and it finds those. What it cannot see i
 a claim that is true about everything it sampled and silent about what it did
 not. **The control for that is arithmetic, not reading**: a balance assertion,
 or a census one level finer than the claim.
+
+---
+
+## 64. A refusal that named the wrong decision, recorded 2026-09-07
+
+A soak of `two_solids_fused_by_a_stranger` crashed `Model::fuse` in
+`Record::new`:
+
+```
+thread '<unnamed>' panicked at crates/rcad-predicates/src/provenance.rs:190:17:
+orient3d: a certified outcome does not get a provenance record
+```
+
+That assert enforces §5 — *detailed records only on non-certified outcomes* —
+so a certified `orient3d` arriving with a record is a contradiction, and exactly
+one of the two sides of it is wrong. **The caller is wrong.** The assert stands
+untouched and §5 stands untouched; what is recorded here is the evidence that
+settled it, so that the next person to meet this crash does not widen the assert
+to make it go away.
+
+### 64.1 What actually reached the assert
+
+The walk in `crates/rcad-topo/src/holds.rs` holds *two* decisions at the point
+it refuses and reports only one of them:
+
+```rust
+match crossing(sides[index], sides[next], along) {
+    Some(count) => winding += count,
+    None => return Err(gave_up_turning_a_corner(point, sides[index])),   // line 322
+}
+```
+
+`crossing` returns `None` only through `above_the_line(from_side)?` or
+`above_the_line(to_side)?`, and `above_the_line` returns `None` only for
+`Decision::Undecidable`. So reaching that arm proves *one of the two sides* was
+undecidable — and the arm hands over `sides[index]` whichever one it was.
+
+The reproducer takes the other branch. A probe printed at the refusal, on the
+crashing input:
+
+```
+index=1 next=2
+sides[index] = Neg
+sides[next]  = Undecidable { enclosure: 3.6537540933272573e47 }
+along        = Pos
+from  = Point([0.0, 0.0, 0.0])
+to    = Point([0.0, 4.243991582e-314, 2.3611832414348226e21])
+point = Exact([-0.0, 1.770887431076117e21, 5.902958103587057e20])
+```
+
+and a second probe in `Record::new` itself printed what it was then asked to
+record:
+
+```
+predicate=orient3d level=Exact outcome=Neg
+inputs=[Exact([-0.0, 1.770887431076117e21, 5.902958103587057e20])]
+measures=Volume
+```
+
+`outcome=Neg` is the certified answer about corner 1. The refusal is about
+corner 2. Both probes were temporary and neither is in the tree.
+
+That input is §3.5's spread and nothing more exotic: coordinates around `1e21`
+sitting beside a `4.2e-314` subnormal, so the interval on the determinant is
+`3.7e47` wide and no scaling brings both ends into range at once. The
+undecidable side is honest. Only the record made about it is not.
+
+### 64.2 Why this is the caller's bug and not the assert's
+
+The tempting reading is the other one: the *walk* gave up while this particular
+predicate was certified, so perhaps a certified outcome may legitimately carry a
+record after all. It may not, and the reason is arithmetic rather than taste.
+
+A `Record` has an `enclosure`, and `Record::new` takes it out of the `Decision`
+because that is the only place it exists. A certified `Neg` has no enclosure —
+there is no interval that straddled zero, because nothing straddled zero. A
+record built from one would have to invent the field, and `worst_wobble` would
+then be a maximum over a number nobody measured. §15.3 is the same mistake one
+level down: an enclosure whose units nobody can recover is not a smaller record,
+it is a wrong one.
+
+The record the walk actually wants already exists and is one line away:
+`sides[next]` carries `Undecidable { enclosure: 3.65e47 }`, which is exactly the
+number a reader of the refusal needs. Naming the certified neighbour throws away
+a measurement that was in hand.
+
+So this is a **gap and not a limit** in §16.10's terms — the answer exists, and
+the code reached past it.
+
+### 64.3 The other one in the same function, which nothing has hit yet
+
+Twelve lines up:
+
+```rust
+Decision::Zero => match lies_between(from, corners[next], point) {
+    Some(true) => return Ok(None),
+    Some(false) => (),
+    None => return Err(gave_up_turning_a_corner(point, along)),          // line 315
+},
+```
+
+`along` is bound to `Decision::Zero` by the arm it is in, so this call **cannot**
+be given anything but a certified outcome: reaching it panics every time. It is
+not reachable with an exact point — `lies_between` compares a box against a
+segment's span along one axis, and a zero-width box always answers `Some` — so it
+wants a `PredicatePoint` that really is a box. Whether the fuse can present one
+here was not demonstrated and is not claimed either way.
+
+It also needs a different fix from line 322's. Nothing was undecided by a
+predicate there: every `orient3d` was certified, and what could not be settled
+is the *ordering* of a box against the ends of a segment. There is no
+`orient3d` record to name, so the honest record is about the ordering, with the
+box's overhang as its enclosure — or the refusal carries no record at all. That
+is a design question for whoever owns `holds.rs`, not a rename.
+
+### 64.4 Why the signature admits the mistake
+
+`Record::new` takes an `outcome: Decision`, and three of that type's four values
+are always a bug there. The type is wider than the contract, and the contract is
+kept by a runtime assert that every call site has to remember — sixteen of them
+outside tests, across three crates, on this tip.
+
+Narrowing it — `Record::new(…, enclosure: f64, …)`, with the caller made to
+destructure the `Undecidable` it claims to have — would move both faults above
+to compile time, because neither call site can produce an `f64` it does not have.
+That is the shape of the fix worth taking, and it is deliberately **not** taken
+here: it changes every call site in `rcad-topo` and `rcad-geom`, which is a unit
+of work rather than a bug fix, and §13's rule is that it waits for the consumer
+that names it. The consumer is the `holds.rs` fix; whoever makes that fix should
+decide whether to make it a type change instead.
+
+### 64.5 The other fifteen, and the one held up by a distant invariant
+
+Every other production call site was read, because "one caller got it wrong" is
+worth nothing without knowing whether the rest did too. The fifteen away from
+`holds.rs` are all safe, and mostly for the dull reason: seven build the
+`Undecidable` themselves out of an `f64` and never take a `Decision` at all,
+five sit inside a `Decision::Undecidable { .. }` match arm — `validate.rs:272`
+binds it as `decision @ Decision::Undecidable { .. }`, which is what makes it
+proof against the two guard arms above it — and three (`orient2d.rs:98`,
+`orient3d.rs:110`, `intersect.rs:2713`) sit behind an
+`if decision.is_certified() { return … }`.
+
+The sixteenth site is `holds.rs:639`, the one inside `gave_up`, and five callers
+reach it. Lines 315 and 322 are §64.1 and §64.3. Lines 277 and 545 destructure
+`Undecidable` on the spot and are fine. Line 372 is fine too, and is worth
+naming because it is *correct for a reason that is not local to it*:
+
+```rust
+match side {
+    Decision::Zero => on_its_boundary = true,
+    settled if settled == inwards => (),
+    Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+    other => return Err(gave_up_on_a_side(&trimming.surface, point, other)),
+}
+```
+
+A guard arm can fall through, so `Pos | Neg` alone would not prove `other` is
+undecidable — it does, but only because `inwards` came from
+`the_side_this_face_lies_on`, which writes `found = Some(side)` inside its
+`Decision::Pos | Decision::Neg` arm and nowhere else. The day that function
+learns to return `Some(Undecidable)`, this line starts panicking, and nothing in
+the file says so. Same shape as line 322: a `Decision` whose certifiedness is
+argued at a distance rather than destructured on the spot. §64.4's narrowing
+would settle this one too.
+
+### 64.6 What this lane did not do
+
+No code changed. The fault is entirely in `crates/rcad-topo/src/holds.rs`, which
+this lane did not own, and the two remedies are:
+
+- **line 322** — hand `gave_up_turning_a_corner` whichever of `sides[index]` and
+  `sides[next]` is the undecidable one, rather than always the first.
+- **line 315** — decide what a refusal that no predicate refused should record,
+  per §64.3.
+
+Widening the assert in `provenance.rs` is not on that list and is the thing this
+section exists to forbid.
