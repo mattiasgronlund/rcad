@@ -170,6 +170,18 @@ twice" was measured over somebody else's uncommitted work, and a clean fast-forw
 had to be handed back to Mattias undone, because landing it would have moved the
 other session's HEAD underneath it.
 
+**And never the hub.** `main` is checked out in a worktree, locked like any lane, so
+the merge tree is one you made and hold. The hub cannot be locked, so merging there
+is merging where nobody can see you — `docs/decisions.md` §60, and `just check-hub`
+fails over it.
+
+**Reclaim the disk as you close, not when it runs out.** `just clean-targets` then
+`just prune-worktrees`, in that order: the sweep skips locked and current trees and
+is safe any time, while the prune only removes what has landed. A worktree is cheap
+and a built worktree is 14 GB, so the count in `just lanes` is not the thing to
+watch. Then re-park the hub — `git -C <hub> checkout --detach main` — so the next
+`just check-hub` is green and the hub is not left behind on a stale commit.
+
 **Unlock each worktree as you merge it** — `git worktree unlock <path>`. Nothing
 releases a lock on its own, so a lock left behind is rubbish that only a person
 clears, and `just prune-worktrees` will keep the worktree for ever rather than
