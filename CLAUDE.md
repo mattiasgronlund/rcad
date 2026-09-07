@@ -11,6 +11,31 @@ Always use the code-quality skill when coding. Big work goes to lanes in a
 worktree — the `delegating` skill has the mechanics, and only whoever is
 dispatching needs them.
 
+## Nobody works in the hub
+
+`/home/mattias/git/mattiasgronlund/rcad` is the **hub**. It owns `.git` and
+nothing else happens there. Every session gets a worktree of its own — call
+`EnterWorktree` first thing — and `main` lives checked out in a worktree too,
+never in the hub.
+
+This is not tidiness. `git worktree lock` is this repo's record of who owns a
+tree (§55), and it answers *"fatal: The main working tree cannot be locked or
+unlocked"* for the hub, with no flag to override. So the hub is the one tree
+whose owner cannot be written down, and it is the tree every session lands in by
+default. The rule deletes that case instead of inventing a second record beside
+the lock: a tree nobody works in needs no owner, and `just lanes` printing
+nothing beside it becomes true rather than a guess.
+
+`main` leaving the hub is the half that does the work. Git will not let a lane
+move a branch that is checked out elsewhere, so a hub holding `main` drags every
+merge back into the unlockable tree however carefully the lanes were dispatched.
+Parked on a detached HEAD, `main` is checkable out — and lockable — in a
+worktree like any lane.
+
+`just check-hub` fails when the hub has a branch checked out or work left in it,
+and it is in `just default`. A repository with one worktree is exempt, because a
+lone checkout is not a hub. `docs/decisions.md` §60.
+
 `docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
 `just decision 49` or `just decision 49.6`. Never guess a line range.
 
@@ -72,16 +97,27 @@ at four questions of four options and would split one message into seven.
 **Every question also goes in `open-questions.md` in this session's scratchpad,
 the same turn you ask it.** A question asked only in the terminal scrolls away,
 and recovering it costs a full-context turn — which happened, and is why the file
-exists. One line each:
+exists. Write each one the way the `grilling` skill formats a round — a heading
+line, the body under it, the recommendation last:
 
 ```
-- [ ] **Q11** — Short question in one line? → *recommend (a), because …*
+- [ ] **Q11** — Short heading, in one line?
+
+  The body, as many paragraphs as it takes. Backticks, `§` refs and file:line
+  belong here; this is the argument, not a summary of it.
+
+  ➡️ *Recommend (a), because …*
 ```
 
-`- [x]` and `→ answered: …` when the answer comes. The status line reads the file
-and shows the open labels, collapsed — `❓ K1-K4, Q2, Q4-Q6`. The user can
-therefore read what is outstanding without `!cat`, which would add the file to
-the conversation and charge for it on every later turn.
+The checkbox line carries the label and the heading, and everything indented
+under it belongs to that question. `- [x]` and `→ answered: …` when the answer
+comes.
+
+**Read one back with `just question`, never with `!cat`.** The status line shows
+the open labels collapsed, after the session's hash — `❓ 766405 K1-K4, Q2,
+Q4-Q6` — and that hash is the address: `just question 766405` lists the headings,
+`just question 766405 Q11` prints that one entry in full. `!cat` puts all of them
+in the conversation instead, and charges for every line on every later turn.
 
 **A label is a letter and a number, and the letter carries meaning.** `Q` for a
 grilling round or any plain decision — that is what the `grilling` skill's format
@@ -90,6 +126,12 @@ already uses. A lane's findings take **the lane's own letter**, which is where
 from" is the first thing asked about a finding. The label goes straight after the
 checkbox; the status line reads it there and nowhere else, so a body is free to
 mention `M5` or `§52.11` without becoming a question.
+
+**One entry may carry two labels when one answer settles both** — `**Q7 / Q11**
+— …`, addressable as either. Both are counted and both are shown. Reading only
+the first is a bug that has been fixed once already: on 2026-09-06 the line
+showed fourteen of sixteen open questions and looked complete (`docs/decisions.md`
+§59.2).
 
 **Never in the tree.** Four sessions were live across these two repos on
 2026-09-05; a tracked file would have had all four writing to it. Per session

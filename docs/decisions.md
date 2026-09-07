@@ -11907,6 +11907,12 @@ radius one gives `6.143234069592546e-13` against `4.848820560097969e-11` —
 `78.929` times apart in both cases. **So `closest` at the origin over-reports the
 floor these rows name by seventy-nine times.**
 
+The ball's two readings here are as of `fdf5e58`'s parent. Both have since
+halved, to `3.0716170347962663e-13` and `2.4244102800489844e-11`, because a ball
+is now charged from its centre rather than from its poles — §58.11. The
+seventy-nine did not move, and neither did the bar's pair, which is the point
+the sentence above is making.
+
 The rows themselves stand, and the reason is the shape of the two formulas rather
 than a second measurement: the added term is a constant share of how far the face
 reaches and does not grow with the placement, while `how_far_moving_this_face_rounds`
@@ -13482,8 +13488,8 @@ and one was never started.
 | 6 | the file's unit reaches `Scale::unit`; an unknown unit is refused | **met** | `a_file_written_in_inches_comes_back_in_inches` measures one cubic inch and not 16.387 of anything, and `a_unit_the_kernel_does_not_have_is_refused_rather_than_scaled`. No length conversion happens anywhere: §3.5 says a unit is a label, so `CONVERSION_BASED_UNIT` is matched against an exact table of eight `(factor, base)` pairs and a factor outside it is refused with the number printed |
 | 7 | a file asking for more precision than its numbers carry says so | **met, and vacuous on the corpus** | `a_file_declaring_more_precision_than_its_numbers_carry_says_so`, one comparison of two numbers the file wrote. **0 of 367 real files reach it** — every one declares something around `1e-7` on a part tens of millimetres across, about `10^9` coordinate spacings and comfortably keepable. The check is real and the corpus does not exercise it |
 | 8 | two solids that occupy the same space are not called a valid model | **unmet** | Nothing was built. The tree pins the opposite: `two_solids_described_at_the_same_place_are_still_called_a_valid_model` builds a cube, describes the same cube again through `SolidBuilder`, and the certified sweep returns `Ok(())`. A grep for a public interference pass over `crates/*/src` returns nothing. §42.10's lane 4 never ran. The test fails the day the criterion is met, which is §19's shape and the right way to leave it |
-| 9 | every solid the corpus yields validates, or the refusal names one | **met, under another name** | Not `every_solid_in_the_corpus_validates_or_the_refusal_names_one` but the harness's own `.expect("and every imported model validates under a certified policy")` inside `how_often_a_real_file_imports.rs`, run over all 46 KiCad imports and all 88 control files. **No imported model has ever failed the sweep**, and structurally none can: `SolidBuilder::build` writes into a throwaway model, runs the real sweep over that, and only writes into the caller's model if the sweep is happy |
-| 10 | the import rate, family by family and never blended, with a control at 100% | **met in part** | `how_often_a_real_file_imports` measures and publishes three families — control **88/88**, KiCad **46/323 = 14.2%**, NIST **0/44** — with per-family refusal breakdowns and a corner-miss distribution. The control's 88 is asserted and one refusal there is one failure. **But nothing asserts the real-file rate.** If 46/323 fell to 1/323 the test would still pass. And the whole measurement is behind `RCAD_STEP_CORPUS`: `mise exec -- just default` is green at 1427 tests with the variable unset, so the headline is not in the suite CI runs |
+| 9 | every solid the corpus yields validates, or the refusal names one | **met, under another name** | Not `every_solid_in_the_corpus_validates_or_the_refusal_names_one` but the harness's own `.expect("and every imported model validates under a certified policy")` inside `how_often_a_real_file_imports.rs`, run over every KiCad import — 46 when this was written, 97 measured today — and all 88 control files. **No imported model has ever failed the sweep**, and structurally none can: `SolidBuilder::build` writes into a throwaway model, runs the real sweep over that, and only writes into the caller's model if the sweep is happy |
+| 10 | the import rate, family by family and never blended, with a control at 100% | **met in part** | `how_often_a_real_file_imports` measures and publishes three families — control **88/88**, KiCad **97/323 = 30.0%**, NIST **1/44 = 2.3%** — with per-family refusal breakdowns and a corner-miss distribution. The control's 88 is asserted and one refusal there is one failure. **The real-file rate is asserted too, by name and not by rate.** `d23c700` pinned the KiCad set as `KICAD_FILES_THAT_IMPORT`, and `assert_pinned_kicad_imports` compares it against what imported as a *set*, so it fails **both ways**: a file that starts importing fails it exactly as a file that stops does, and the message names which files moved rather than handing back a count (§44.10). What is still missing is only that the whole measurement sits behind `RCAD_STEP_CORPUS`, so it is not in the suite a run without that variable covers. Row rates re-measured 2026-09-06 with `mise exec -- just t how_often_a_real_file_imports --no-capture`; the row said `46/323 = 14.2%` and `0/44`, which is the tree at `d23c700` and before the lanes that moved both — `KICAD_FILES_THAT_IMPORT`'s own doc comment accounts for the fifty and then the one |
 | 11 | `add_extrusion` bakes its lift | **unmet** | `crates/rcad-topo/src/build.rs:571` still writes `ShellUse { shell, loc: *placement, .. }`. No test of that name exists anywhere. §41.13's §19 violation is untouched |
 | 12 | the mesher reads a placed face's stored surface instead of round-tripping it | **unmet** | `crates/rcad-topo/src/fuse/select.rs:1045` still charges `Surface::ROUND_TRIP_ROUNDOFF`, which is `256 · f64::EPSILON`. §41.11 item 19 is untouched |
 | 13 | `Approximation` gets the boundary guard `Scale` has | **unmet** | `Approximation` still derives a plain `Deserialize` with no `try_from` in `crates/rcad-predicates/src/provenance.rs`. `rcad-predicates` is at **0 files changed for the whole milestone** |
@@ -17622,236 +17628,6 @@ advance from §53.4's own brief, which already orders B and C to follow every
 `f64`-returning call across file boundaries. A prediction its own plan half
 guarantees is not one.
 
-## 58. The floor a mesh publishes is one the walk will take, recorded 2026-09-06
-
-### 58.1 The unit, and why its record is late
-
-Ten commits, `c9ff754..8358620`, in three lanes — floor, tolerant and import —
-merged at `86b72c3` and closed with three documentation commits. It changed
-`SolidView::room_a_mesh_has_to_work_in`, added two functions to `mesh.rs`, moved
-what `Error::DeflectionBelowWhatAMeshCanReach` hands a caller, added five tests
-across three files, and discharged `docs/consumers.md`'s announcement bullet for
-the first time. **It left no section here at all.** This is that section, written
-from the commits and from the tree rather than from anyone's report.
-
-### 58.2 One number doing two jobs, and only one of them was its job
-
-`room_a_mesh_has_to_work_in` is asked two different questions and had one answer
-for both.
-
-- **Let a caller's own deflection through, or refuse it.** The floor that belongs
-  here is `how_far_a_mesh_point_of_this_face_rounds`: how close to the surface a
-  mesh point can be **placed**, once the evaluator has rounded against how far
-  the surface reaches and the placement has rounded again against how far the
-  face reaches where the solid sits.
-- **Pick a deflection for a tolerant caller who asked for finer than the
-  arithmetic has.** Here there is nobody left to hand a refusal to. Whatever
-  comes out of that line goes to `rcad_geom::walk` with no-one else looking at
-  it.
-
-The placing floor says nothing about **how many points** the walk will put along
-one crossing, and the walk will not put more than
-`MOST_POINTS_ALONG_ONE_CROSSING` of them. So the fallback handed the walk twice a
-number the walk refuses, and a caller got
-`rcad_geom::Error::TooManyPointsAlongOneCrossing { most: 1048576 }` for a
-deflection this crate had just worked out itself. A round bar of radius one at
-the origin, `Deflection::of(1e-300)`, `Policy::tolerant(100.0)`: four public
-calls, no fuse, no import, no placement, nothing leaning.
-
-`whether_the_floor_predicts_the_step_cap.rs`'s header carries how far short it
-was: `4.8706` times from the step cap on its own, then divided by the three
-sixteenths of the deflection the walk is actually handed, which is `25.98`, and
-`walk`'s own deviation puts the crossover a little past twenty-six. The measured
-bracket either side of it is between sixteen and thirty-two.
-
-### 58.3 The fix: a second floor, and which one answers whom
-
-`the_finest_deflection_the_walk_will_take` is the placing floor with one term
-added — `how_far_a_step_at_the_cap_stands_off_its_chord`, what the arc of one
-step stands off its own chord when a whole turn is walked in as many steps as the
-walk allows. The added term goes in exactly where the evaluator's roundoff goes
-in, so it pays the same two cuts on the way down: the movement into place comes
-off the deflection before the walk is called, and the walk is handed
-`WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO` of what is left.
-
-**Which floor is read depends on who chose the number, and that is the whole
-design.** A caller who names a deflection is let through against the *placing*
-floor and gets whatever the walk or the triangulator then says about the number
-that caller chose. A deflection this crate picks is measured against the *walk*
-floor, so the policy is asked about the number it will actually get. Asking a
-policy about the first and then handing back the second is telling a caller its
-budget was kept and then straying seventy-nine times further than it allowed.
-
-`ROOM_ABOVE_THE_FLOOR` stays at `2.0` and its reason changed. It is no longer a
-multiple of the placing floor, and no multiple of the placing floor would have
-served: at the floor the walk asks `acos` for an angle three millionths of a
-radian wide, where the subtraction in `1 − room/reach` has few digits left, and a
-step count one over the cap is a refusal.
-
-### 58.4 What `closest` carries now, and the separation, measured here
-
-`DeflectionBelowWhatAMeshCanReach`'s `closest` used to be the placing floor and
-is now the walk floor. That is a change to a published number and
-`docs/consumers.md` records the announcement of it.
-
-Re-measured for this section rather than copied, through a probe outside the tree
-that calls only the public API: `Model::add_round_bar` / `Model::add_ball`, then
-`SolidView::mesh` under `Policy::certified()`. The walk floor is read straight
-out of the refusal's own `closest`. The placing floor is **hunted for** — bisect
-for the deflection at which `DeflectionBelowWhatAMeshCanReach` stops being the
-answer — which is the same hunt
-`the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away`
-makes, and neither number is worked out from the arithmetic that produces it.
-
-| solid, asked `1e-300` | placing floor, hunted | walk floor, from `closest` | apart by |
-|---|---|---|---|
-| round bar, radius 1, height 2, at the origin | `9.214851104388813e-13` | `7.273230840146953e-11` | `78.92944506377196` |
-| ball, radius 1, at the origin | `6.143234069592546e-13` | `4.848820560097969e-11` | `78.92944506377192` |
-
-**The seventy-nine is a fact about the added term and not about either shape.**
-Two solids that share no face agree on it to fifteen digits, because at the
-origin `how_far_moving_this_face_rounds` is zero and the ratio collapses to
-`(POINT_ALONG_A_CROSSING_ROUNDOFF + the step's stand-off) /
-POINT_ALONG_A_CROSSING_ROUNDOFF`. It is not a factor to carry about: away from
-the origin the movement term dominates both floors and they converge.
-
-Two honesties about that table. The hunted column **converges from above** — a
-hundred geometric halvings from `1e-300` stop at the first deflection not ruled
-out, so it can sit a few `ulp` high, and the ball's reading is thirteen `ulp`
-above the `6.143234069592533e-13` `mesh.rs` publishes while agreeing with it to
-thirteen digits. And **the same hunt does not work far from the origin**: there
-the first deflection above the placing floor is one the walk accepts, so the
-probe meshes for real and does not finish — the wall
-`whether_the_floor_predicts_the_step_cap.rs` names in *why there is no test here
-that meshes at the new floor*. What this section did measure out there is the
-walk floor alone, `3.9968513728593615e-6` for a unit ball at `x = 1e9`, which is
-the figure `docs/consumers.md` announced.
-
-### 58.5 Every bound this unit publishes, against the test that carries it
-
-§15.6 says a published bound needs a test. Row by row, checked in the tree at
-`99d6458`, where the three `rcad-topo` binaries this unit touches run 31 tests
-and the `rcad-step` one runs 2, and all 33 pass.
-
-| what is published, and where | carried by | holds? |
-|---|---|---|
-| `closest` names a deflection the walk will take (`error.rs`, `mesh.rs`) | `a_tolerant_caller_is_refused_by_the_floor_and_not_by_the_walk` | **in part** — see below |
-| the mesher settles a fallback against its own floor instead of handing the walk a deflection it refuses | the same test, by the refusal's *name* | **yes** |
-| a bar a billion units out still gets its old fallback, 5134 points and `5.99402529715387e-6` of deviation | `the_fallback_a_bar_a_billion_units_out_already_had_says_the_same_thing`, asserting both exactly | **yes** |
-| a tolerant caller is refused as if its solid were broken where `room_left_over` gives up, over twelve cells | `a_tolerant_caller_is_refused_as_if_its_solid_were_broken_and_a_certified_one_is_not` | **yes** |
-| those bars are not the thing that is wrong: built certified, empty provenance log, `validate` passes certified | `every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for` | **yes** |
-| the mesher's floor stays put over four leans while the crossing's rounding runs away from it | `the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away` | **yes, as a shape** — no value asserted |
-| styling is never a key in `shapes_this_reader_did_not_take`, and a styling-only file gets an `Err` rather than an empty map | `styling_is_never_among_the_shapes_walked_past`, over the real corpus | **yes** |
-| `9.2148511043888e-13` and `7.273230840146953e-11`, the two floors of a bar of radius one at the origin (`mesh.rs`) | nothing | **no test** |
-| `6.143234069592533e-13`, `4.848820560097969e-11` and *78.93 times apart* for a ball at the origin (`error.rs`) | nothing — the hunt above is in one test's prose, and that test asserts only that four leans agree | **no test** |
-| `741 455` steps at twice the floor against `1 048 576` at it (`ROOM_ABOVE_THE_FLOOR`) | nothing | **no test** |
-| the leaning-cap figures: a conic reach of `9.999999999999999e8` at `lean = 1e9`, a crossing rounding of `5.6843418889229724e-5`, a floor of `9.697641120195938e-11` (`mesh.rs`) | nothing — the lean sweep that exists uses `4e9`…`1e11` and asserts no value | **no test** |
-
-**The first row is the one worth reading twice.** The test asserts
-`closest > 1 − cos(π / MOST_POINTS_ALONG_ONE_CROSSING)` on a bar of radius one at
-the origin, which is a **necessary** condition: below that the walk certainly
-refuses. It is not the promise the unit is named for, which is that the
-deflection the mesher then picks — `closest` through `ROOM_ABOVE_THE_FLOOR` and
-two more cuts — is one the walk **accepts**. The tree says why not, and the
-reason is honest: at twice the floor a bar's two cap circles come to about one
-and a half million boundary points and the triangulator was still running after
-two minutes. So the promise is checked from the refusal side and not from the
-mesh side, and that is a gap this section names rather than one it hides.
-
-**Four rows say *no test*, and three of them are the same species**: a floor's
-value written into a doc comment because somebody measured it once. §56.5 made
-exactly this repair for the floor at a distance, and the same repair is available
-here — a test that hunts for both floors of one shape at the origin and asserts
-the pair, which is cheap because both refusals are immediate. **This section does
-not make it**: this lane owns `docs/` only. It is recorded as owed.
-
-### 58.6 The new floor is too low on a leaning cut, and this unit did not close it
-
-`walk` charges its room against `Conic::how_far_it_reaches`, the crossing's own
-longer semi-axis. Both floors charge `how_far_the_points_of_reach`, the face's
-corners plus its surface's radius. **They are not the same number, and the second
-is not always the bigger.** A bar of radius one cut by a leaning plane has its
-ellipse walked as an edge of the *wall*, whose reach is `2` at every lean and
-knows nothing about the plane; the conic's own reach grows with the lean without
-bound.
-
-So the fix's promise does not hold on that family, and `mesh.rs` says so in the
-same breath as making it. It holds where a crossing is a circle no wider than the
-surface it is cut on — every cap circle of a bar, every circle a plane cuts in a
-ball — which is what the defect was about. On a leaning cut the change moved
-**which refusal arrives** and did not earn an answer:
-`TooManyPointsAlongOneCrossing` before, `AWireDoesNotFanIntoALoopToMesh` with
-`TooFewCorners { count: 1 }` after, and neither is a mesh.
-
-By §16.10 this is a **gap and not a limit**, and the family of fixes is named
-rather than waved at: charge the crossings instead of the corners, and every
-conic on the face has to be worked out before there is a deflection to walk one
-with — the walk's own job, done twice. Bound the ellipse from the pair of
-surfaces that cut it, and the floor stops being a question about one surface,
-which is the thing that makes it cheap. Or keep the stand-in away from the
-numbers it is wrong about, which is what is claimed today and is a claim about
-**who chose the deflection**, not about a face's reach covering its crossings'.
-The third is free and the tree takes it. Extending this floor to a caller-named
-deflection would turn a floor that does not bind into a wrong answer.
-
-### 58.7 The step cap is a gap; the rounding under it is a limit
-
-`DeflectionBelowWhatAMeshCanReach` now has two reasons behind one name and
-`error.rs` keeps them apart. The rounding half is a **limit**: no `f64` point
-sits closer to the surface, and §18's scaling reaches it exactly. The step-cap
-half is a **gap**: the answer exists, `f64` reaches it, and a bigger cap hands it
-back. It is deferred because a mesh at the cap is already a million points along
-one circle and nobody has asked for two — §13, and the deferral is of a limit's
-*neighbour*, so it is written down as owed rather than as impossible.
-
-### 58.8 What a tolerant caller is told where the walk runs out of room
-
-The tolerant lane measured a second thing and fixed none of it, which is the
-right order. Where `rcad_geom`'s `room_left_over` runs out, a certified caller is
-refused with `CannotPlaceAPointThatCloseToACrossing` carrying both numbers — how
-much of the deflection was left to walk the crossing in, and how much the
-crossing rounds by — and a tolerant caller is waved through with `Ok(None)`. The
-walk then hands back a crossing with no points between its ends, a closed edge's
-single corner becomes the whole of its wire, and the mesher answers
-`AWireDoesNotFanIntoALoopToMesh { TooFewCorners { count: 1 } }`, which is the
-name for a malformed solid.
-
-**Neither caller gets a mesh and the tolerant one is told something untrue about
-why.** Twelve cells, twelve of each, and the solids are built certified with an
-empty provenance log and pass `validate` certified. `docs/consumers.md` records
-a consumer that keeps an unrecognised refusal's debug text verbatim in its bug
-reports, so this wording travels: what that consumer files for this is a corner
-count and a face key, and not one of the two numbers that say what happened.
-
-That is the third way to reach the four *malformed shape* refusals, and `mesh.rs`
-now names all three: a solid that arrived from a file, a fuse that was wrong
-about a block corner on a ball's pole, and this — a tolerant policy on a solid
-nothing is wrong with.
-
-### 58.9 The import lane, and where it is recorded
-
-The third lane's finding — `Import`'s census reading as complete when styling is
-read past uncounted — is §56.6, written by a different session that found the
-same defect independently and dropped its own fix on finding this lane's. It is
-not restated here. What belongs here is only that the lane is part of this unit
-and that its test is in the table in §58.5.
-
-### 58.10 What this does not close
-
-1. **The leaning cut**, §58.6. A gap, with its family of fixes named and none of
-   them taken.
-2. **The tolerant wave-through**, §58.8. Measured over twelve cells and not
-   fixed. Any fix closes the window those twelve cells live in, and the file says
-   so, so a red there would be the fix and not a regression.
-3. **Four published numbers with no test**, §58.5. Owed, and cheap.
-4. **The promise checked only from the refusal side**, §58.5. Whether the
-   fallback should be held to a mesh that *finishes* as well as to one the walk
-   accepts is a separate question, and no section has answered it.
-5. **A caller-named deflection is still held to the placing floor and no other**,
-   deliberately. Holding it to the step cap as well would make
-   `TooManyPointsAlongOneCrossing` unreachable through `mesh`, which is a claim
-   about the public API and wants its own demonstration.
-
 ## 55. Nobody owned a worktree, recorded 2026-09-06
 
 §54 is left for §53's unit record. This section is numbered 55 because a peer
@@ -18379,3 +18155,592 @@ The fixtures are duplicates rather than the real file, because the real file has
 no duplicate today and pinning it there would prove nothing. Before the check,
 the heading-shape grep found nothing wrong with a two-line file containing `## 1.`
 twice; that is what the check-in demonstration ran.
+
+## 58. The floor a mesh publishes is one the walk will take, recorded 2026-09-06
+
+### 58.1 The unit, and why its record is late
+
+Ten commits, `c9ff754..8358620`, in three lanes — floor, tolerant and import —
+merged at `86b72c3` and closed with three documentation commits. It changed
+`SolidView::room_a_mesh_has_to_work_in`, added two functions to `mesh.rs`, moved
+what `Error::DeflectionBelowWhatAMeshCanReach` hands a caller, added five tests
+across three files, and discharged `docs/consumers.md`'s announcement bullet for
+the first time. **It left no section here at all.** This is that section, written
+from the commits and from the tree rather than from anyone's report.
+
+### 58.2 One number doing two jobs, and only one of them was its job
+
+`room_a_mesh_has_to_work_in` is asked two different questions and had one answer
+for both.
+
+- **Let a caller's own deflection through, or refuse it.** The floor that belongs
+  here is `how_far_a_mesh_point_of_this_face_rounds`: how close to the surface a
+  mesh point can be **placed**, once the evaluator has rounded against how far
+  the surface reaches and the placement has rounded again against how far the
+  face reaches where the solid sits.
+- **Pick a deflection for a tolerant caller who asked for finer than the
+  arithmetic has.** Here there is nobody left to hand a refusal to. Whatever
+  comes out of that line goes to `rcad_geom::walk` with no-one else looking at
+  it.
+
+The placing floor says nothing about **how many points** the walk will put along
+one crossing, and the walk will not put more than
+`MOST_POINTS_ALONG_ONE_CROSSING` of them. So the fallback handed the walk twice a
+number the walk refuses, and a caller got
+`rcad_geom::Error::TooManyPointsAlongOneCrossing { most: 1048576 }` for a
+deflection this crate had just worked out itself. A round bar of radius one at
+the origin, `Deflection::of(1e-300)`, `Policy::tolerant(100.0)`: four public
+calls, no fuse, no import, no placement, nothing leaning.
+
+`whether_the_floor_predicts_the_step_cap.rs`'s header carries how far short it
+was: `4.8706` times from the step cap on its own, then divided by the three
+sixteenths of the deflection the walk is actually handed, which is `25.98`, and
+`walk`'s own deviation puts the crossover a little past twenty-six. The measured
+bracket either side of it is between sixteen and thirty-two.
+
+### 58.3 The fix: a second floor, and which one answers whom
+
+`the_finest_deflection_the_walk_will_take` is the placing floor with one term
+added — `how_far_a_step_at_the_cap_stands_off_its_chord`, what the arc of one
+step stands off its own chord when a whole turn is walked in as many steps as the
+walk allows. The added term goes in exactly where the evaluator's roundoff goes
+in, so it pays the same two cuts on the way down: the movement into place comes
+off the deflection before the walk is called, and the walk is handed
+`WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO` of what is left.
+
+**Which floor is read depends on who chose the number, and that is the whole
+design.** A caller who names a deflection is let through against the *placing*
+floor and gets whatever the walk or the triangulator then says about the number
+that caller chose. A deflection this crate picks is measured against the *walk*
+floor, so the policy is asked about the number it will actually get. Asking a
+policy about the first and then handing back the second is telling a caller its
+budget was kept and then straying seventy-nine times further than it allowed.
+
+`ROOM_ABOVE_THE_FLOOR` stays at `2.0` and its reason changed. It is no longer a
+multiple of the placing floor, and no multiple of the placing floor would have
+served: at the floor the walk asks `acos` for an angle three millionths of a
+radian wide, where the subtraction in `1 − room/reach` has few digits left, and a
+step count one over the cap is a refusal.
+
+### 58.4 What `closest` carries now, and the separation, measured here
+
+`DeflectionBelowWhatAMeshCanReach`'s `closest` used to be the placing floor and
+is now the walk floor. That is a change to a published number and
+`docs/consumers.md` records the announcement of it.
+
+Re-measured for this section rather than copied, through a probe outside the tree
+that calls only the public API: `Model::add_round_bar` / `Model::add_ball`, then
+`SolidView::mesh` under `Policy::certified()`. The walk floor is read straight
+out of the refusal's own `closest`. The placing floor is **hunted for** — bisect
+for the deflection at which `DeflectionBelowWhatAMeshCanReach` stops being the
+answer — which is the same hunt
+`the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away`
+makes, and neither number is worked out from the arithmetic that produces it.
+
+| solid, asked `1e-300` | placing floor, hunted | walk floor, from `closest` | apart by |
+|---|---|---|---|
+| round bar, radius 1, height 2, at the origin | `9.214851104388813e-13` | `7.273230840146953e-11` | `78.92944506377196` |
+| ball, radius 1, at the origin | `6.143234069592546e-13` | `4.848820560097969e-11` | `78.92944506377192` |
+
+The ball's row is as measured for this section and is **superseded**: §58.11
+halves both of its floors to `3.0716170347962663e-13` and
+`2.4244102800489844e-11`. The bar's row and both ratios stand.
+
+**The seventy-nine is a fact about the added term and not about either shape.**
+Two solids that share no face agree on it to fifteen digits, because at the
+origin `how_far_moving_this_face_rounds` is zero and the ratio collapses to
+`(POINT_ALONG_A_CROSSING_ROUNDOFF + the step's stand-off) /
+POINT_ALONG_A_CROSSING_ROUNDOFF`. It is not a factor to carry about: away from
+the origin the movement term dominates both floors and they converge.
+
+Two honesties about that table. The hunted column **converges from above** — a
+hundred geometric halvings from `1e-300` stop at the first deflection not ruled
+out, so it can sit a few `ulp` high, and the ball's reading is thirteen `ulp`
+above the `6.143234069592533e-13` `mesh.rs` publishes while agreeing with it to
+thirteen digits. And **the same hunt does not work far from the origin**: there
+the first deflection above the placing floor is one the walk accepts, so the
+probe meshes for real and does not finish — the wall
+`whether_the_floor_predicts_the_step_cap.rs` names in *why there is no test here
+that meshes at the new floor*. What this section did measure out there is the
+walk floor alone, `3.9968513728593615e-6` for a unit ball at `x = 1e9`, which is
+the figure `docs/consumers.md` announced. That one is **superseded by §58.11**
+too, at `3.996827132753364e-6` — and it moved in the fifth figure where the pair
+at the origin halved, because out there the placing term is eighty thousand times
+the added one. It now has a test,
+`a_unit_ball_a_thousand_million_units_out_is_cut_to_what_the_docs_announce`,
+which it did not when this section was written.
+
+### 58.5 Every bound this unit publishes, against the test that carries it
+
+§15.6 says a published bound needs a test. Row by row, checked in the tree at
+`99d6458`, where the three `rcad-topo` binaries this unit touches run 31 tests
+and the `rcad-step` one runs 2, and all 33 pass.
+
+| what is published, and where | carried by | holds? |
+|---|---|---|
+| `closest` names a deflection the walk will take (`error.rs`, `mesh.rs`) | `a_tolerant_caller_is_refused_by_the_floor_and_not_by_the_walk` | **in part** — see below |
+| the mesher settles a fallback against its own floor instead of handing the walk a deflection it refuses | the same test, by the refusal's *name* | **yes** |
+| a bar a billion units out still gets its old fallback, 5134 points and `5.99402529715387e-6` of deviation | `the_fallback_a_bar_a_billion_units_out_already_had_says_the_same_thing`, asserting both exactly | **yes** |
+| a tolerant caller is refused as if its solid were broken where `room_left_over` gives up, over twelve cells | `a_tolerant_caller_is_refused_as_if_its_solid_were_broken_and_a_certified_one_is_not` | **yes** |
+| those bars are not the thing that is wrong: built certified, empty provenance log, `validate` passes certified | `every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for` | **yes** |
+| the mesher's floor stays put over four leans while the crossing's rounding runs away from it | `the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away` | **yes, as a shape** — no value asserted |
+| styling is never a key in `shapes_this_reader_did_not_take`, and a styling-only file gets an `Err` rather than an empty map | `styling_is_never_among_the_shapes_walked_past`, over the real corpus | **yes** |
+| `9.2148511043888e-13` and `7.273230840146953e-11`, the two floors of a bar of radius one at the origin (`mesh.rs`) | `a_round_bar_at_the_origin_places_a_point_a_thousand_times_closer_than_it_can_be_cut` | **yes**, since this section was written |
+| `6.143234069592533e-13`, `4.848820560097969e-11` and *78.93 times apart* for a ball at the origin (`error.rs`) | `a_unit_ball_at_the_origin_places_a_point_a_thousand_times_closer_than_it_can_be_cut`, and the ratio on both shapes at once | **yes**, and the two floors are **superseded** by §58.11 — `3.0716170347962663e-13` and `2.4244102800489844e-11`. The ratio stands |
+| `741 455` steps at twice the floor against `1 048 576` at it (`ROOM_ABOVE_THE_FLOOR`) | `what_twice_the_room_buys_a_walk_at_its_step_cap.rs`, which also pins the one-step margin and the design room the count belongs to | **yes**, since this section was written |
+| the leaning-cap figures: a conic reach of `9.999999999999999e8` at `lean = 1e9`, a crossing rounding of `5.6843418889229724e-5`, a floor of `9.697641120195938e-11` (`mesh.rs`) | nothing, and nothing is owed — `f9d54e0` deleted the doc block that held all three | **withdrawn** |
+
+**The first row is the one worth reading twice.** The test asserts
+`closest > 1 − cos(π / MOST_POINTS_ALONG_ONE_CROSSING)` on a bar of radius one at
+the origin, which is a **necessary** condition: below that the walk certainly
+refuses. It is not the promise the unit is named for, which is that the
+deflection the mesher then picks — `closest` through `ROOM_ABOVE_THE_FLOOR` and
+two more cuts — is one the walk **accepts**. The tree says why not, and the
+reason is honest: at twice the floor a bar's two cap circles come to about one
+and a half million boundary points and the triangulator was still running after
+two minutes. So the promise is checked from the refusal side and not from the
+mesh side, and that is a gap this section names rather than one it hides.
+
+**Three rows say *no test*, and they are one species**: a floor's value written
+into a doc comment because somebody measured it once. §56.5 made exactly this
+repair for the floor at a distance, and the same repair is available here — a
+test that hunts for both floors of one shape at the origin and asserts the pair,
+which is cheap because both refusals are immediate. **This section does not make
+it**: this lane owns `docs/` only. It is recorded as owed.
+
+**The fourth row is not owed, because the bound it asks for a test on no longer
+exists.** It was written as a fourth *no test* and it is a **withdrawn** bound.
+`f9d54e0` rewrote `the_finest_deflection_the_walk_will_take`'s doc block and
+deleted all three numbers with it — the conic reach, the crossing rounding and
+the floor — and that commit sits inside the reach under-charge unit, merged as
+`74c14c7` immediately before this section was written. So the census read a tree
+that had already moved under it and asked for a test on a number nothing
+publishes any more. Deleting the row would hide that; a row that says *withdrawn*
+and names the commit does not.
+
+What the block says now is a different claim about a different tree. The wall's
+reach is no longer `2` at every lean: `mesh.rs` records `2000001.5` at
+`lean = 1e6` and `4000000001.5` at `lean = 2e9`, which is `2 · lean + 1.5`, the
+way the ellipse itself climbs. Those two are a *shape* under test rather than two
+asserted values — `what_a_leaning_cut_costs_the_floor_under_a_mesh.rs` divides
+the floor by that oracle at four leans and asserts the four shares agree — and
+the floors that come out of it are asserted to the last digit by
+`what_floor_a_bar_with_a_leaning_cap_is_given.rs`.
+
+### 58.6 The new floor is too low on a leaning cut, and this unit did not close it
+
+`walk` charges its room against `Conic::how_far_it_reaches`, the crossing's own
+longer semi-axis. Both floors charge `how_far_the_points_of_reach`, the face's
+corners plus its surface's radius. **They are not the same number, and the second
+is not always the bigger.** A bar of radius one cut by a leaning plane has its
+ellipse walked as an edge of the *wall*, whose reach is `2` at every lean and
+knows nothing about the plane; the conic's own reach grows with the lean without
+bound.
+
+So the fix's promise does not hold on that family, and `mesh.rs` says so in the
+same breath as making it. It holds where a crossing is a circle no wider than the
+surface it is cut on — every cap circle of a bar, every circle a plane cuts in a
+ball — which is what the defect was about. On a leaning cut the change moved
+**which refusal arrives** and did not earn an answer:
+`TooManyPointsAlongOneCrossing` before, `AWireDoesNotFanIntoALoopToMesh` with
+`TooFewCorners { count: 1 }` after, and neither is a mesh.
+
+By §16.10 this is a **gap and not a limit**, and the family of fixes is named
+rather than waved at: charge the crossings instead of the corners, and every
+conic on the face has to be worked out before there is a deflection to walk one
+with — the walk's own job, done twice. Bound the ellipse from the pair of
+surfaces that cut it, and the floor stops being a question about one surface,
+which is the thing that makes it cheap. Or keep the stand-in away from the
+numbers it is wrong about, which is what is claimed today and is a claim about
+**who chose the deflection**, not about a face's reach covering its crossings'.
+The third is free and the tree takes it. Extending this floor to a caller-named
+deflection would turn a floor that does not bind into a wrong answer.
+
+**Everything above this line is the tree as it was, and the gap has since been
+closed by the second of those three and not the third.** The reach under-charge
+unit, merged as `74c14c7`, made `how_far_the_points_of_reach` bound a pipe's or a
+cone's face along its own axis from the pair of surfaces either side of each of
+its edges. `f9d54e0` inside it rewrote the doc block this section is reading, so
+"whose reach is `2` at every lean" is no longer true of anything: the wall now
+reaches `2 · lean + 1.5`. What survives is the narrow claim — a face's reach
+still does not cover its crossings' where nothing along an edge bounds where that
+edge runs, a cone met by a pipe on its own axis being such an edge. Only the
+`Cylinder` and `Cone` arms moved: a ball and a ring are bounded surfaces, so
+`Sphere` and `Torus` are still charged from their corners.
+
+### 58.7 The step cap is a gap; the rounding under it is a limit
+
+`DeflectionBelowWhatAMeshCanReach` now has two reasons behind one name and
+`error.rs` keeps them apart. The rounding half is a **limit**: no `f64` point
+sits closer to the surface, and §18's scaling reaches it exactly. The step-cap
+half is a **gap**: the answer exists, `f64` reaches it, and a bigger cap hands it
+back. It is deferred because a mesh at the cap is already a million points along
+one circle and nobody has asked for two — §13, and the deferral is of a limit's
+*neighbour*, so it is written down as owed rather than as impossible.
+
+### 58.8 What a tolerant caller is told where the walk runs out of room
+
+The tolerant lane measured a second thing and fixed none of it, which is the
+right order. Where `rcad_geom`'s `room_left_over` runs out, a certified caller is
+refused with `CannotPlaceAPointThatCloseToACrossing` carrying both numbers — how
+much of the deflection was left to walk the crossing in, and how much the
+crossing rounds by — and a tolerant caller is waved through with `Ok(None)`. The
+walk then hands back a crossing with no points between its ends, a closed edge's
+single corner becomes the whole of its wire, and the mesher answers
+`AWireDoesNotFanIntoALoopToMesh { TooFewCorners { count: 1 } }`, which is the
+name for a malformed solid.
+
+**Neither caller gets a mesh and the tolerant one is told something untrue about
+why.** Twelve cells, twelve of each, and the solids are built certified with an
+empty provenance log and pass `validate` certified. `docs/consumers.md` records
+a consumer that keeps an unrecognised refusal's debug text verbatim in its bug
+reports, so this wording travels: what that consumer files for this is a corner
+count and a face key, and not one of the two numbers that say what happened.
+
+That is the third way to reach the four *malformed shape* refusals, and `mesh.rs`
+now names all three: a solid that arrived from a file, a fuse that was wrong
+about a block corner on a ball's pole, and this — a tolerant policy on a solid
+nothing is wrong with.
+
+### 58.9 The import lane, and where it is recorded
+
+The third lane's finding — `Import`'s census reading as complete when styling is
+read past uncounted — is §56.6, written by a different session that found the
+same defect independently and dropped its own fix on finding this lane's. It is
+not restated here. What belongs here is only that the lane is part of this unit
+and that its test is in the table in §58.5.
+
+### 58.10 What this does not close
+
+1. **The leaning cut**, §58.6. A gap when this was written, with its family of
+   fixes named and none of them taken. The reach under-charge unit, `74c14c7`,
+   has since taken the second of them; what is left open is the fallback the
+   closing paragraph of §58.6 names.
+2. **The tolerant wave-through**, §58.8. Measured over twelve cells and not
+   fixed. Any fix closes the window those twelve cells live in, and the file says
+   so, so a red there would be the fix and not a regression.
+3. **Three published numbers with no test**, §58.5. Owed, and cheap. A fourth row
+   was counted here and is withdrawn rather than owed.
+4. **The promise checked only from the refusal side**, §58.5. Whether the
+   fallback should be held to a mesh that *finishes* as well as to one the walk
+   accepts is a separate question, and no section has answered it.
+5. **A caller-named deflection is still held to the placing floor and no other**,
+   deliberately. Holding it to the step cap as well would make
+   `TooManyPointsAlongOneCrossing` unreachable through `mesh`, which is a claim
+   about the public API and wants its own demonstration.
+
+## 59. A question the status line could not name, recorded 2026-09-06
+
+The open questions of a session live in a file in that session's own scratchpad.
+No section had recorded it before this one. It could be counted and it could not
+be read: the status line said which labels were open, and getting the text of one
+meant `!cat` on the whole file. This records the address that closed that, a
+parser bug the work turned up, one recipe deliberately not built, and a number
+this section corrects.
+
+### 59.1 The address the file did not have
+
+The file is `<tmp>/claude-<uid>/<slug>/<session>/scratchpad/open-questions.md`.
+Every part of that is derivable except the session id, which only the harness
+knows — so nothing a person can type names the file. The status line already had
+the id, in its own input, and was throwing it away.
+
+Six characters of it now print beside the labels, the width `just lanes` prints a
+lane's ref in, and `just question <hash> <label>` takes that as the address.
+`just question` alone lists the sessions that have open questions; with a hash
+and no label it lists that session's labels and headings.
+
+What this replaces is `!cat`, and the cost of `!cat` is not the reading. Shell
+mode puts the output into the conversation, where it is charged again on every
+later turn; `statusline.sh`'s own header records 21 command outputs and 5 710
+characters put there that way on 2026-09-05. The file being read that way on
+2026-09-06 held sixteen open questions, to get the text of one.
+
+### 59.2 Fourteen of sixteen
+
+An entry may carry two labels when one answer settles both, `**Q7 / Q11**`. The
+parser matched the label once, so the second was neither counted nor shown.
+
+Measured on the file as it stood at 10:18 on 2026-09-06: fourteen open checkbox
+lines, two of them paired, so **sixteen open questions and fourteen labels on the
+line**. The two that were invisible, Q11 and Q27, had been open all day. Run on
+that file, the old parser prints fourteen labels and the new one sixteen.
+
+**This corrects a published number.** `0828cb9`, the doc comment it added to
+`statusline.sh`, and the paragraph it added to CLAUDE.md all say "thirteen of
+fifteen". That is a miscount of the same file — the open lines were fourteen, not
+thirteen — and it went in without being re-derived. The two files are corrected
+in the commit that adds this section. The commit message cannot be, so this is
+the record that it is wrong.
+
+The failure is the shape §57.8 had recorded from another direction that same day:
+a short answer that reads like a complete one. A status line whose whole job is
+"what is waiting on you" is the last place that can under-report it, so the
+labels are walked to the end of the run rather than matched once.
+
+### 59.3 What is not built: a recipe that writes a question
+
+A recipe that *asks* a question was proposed and declined. §13 is not what
+declines it — the consumer exists, it is every session — so the argument belongs
+here rather than in a deferral.
+
+A body is paragraphs of prose carrying backticks, `§` refs and `**`. Passing one
+through a shell argument means quoting all of that correctly, and it is never
+cheaper than `Edit`: the text is written once either way, and whatever the recipe
+prints is charged on top. The cost argument runs against the recipe, not for it.
+
+The stronger reason is what the two operations are. Adding a question is an
+append, which cannot silently match the wrong thing. Marking one answered is a
+substitution, `- [ ]` to `- [x]`, and that is the shape §50.8 keeps out of the
+shell: a pattern that does not match fails quietly, where `Edit` errors. A recipe
+that did the append and not the substitution would be half a tool, and one that
+did both would put the quiet half in the shell.
+
+The model also has no addressing problem to solve — its own scratchpad path is in
+its system prompt. The hash is for the person.
+
+`just question <hash>` with no label took the place of a write-side check. It
+reads labels through the same walk the status line uses, so an entry the line
+would drop is missing there too.
+
+### 59.4 The exemption the patching hook advertised but did not implement
+
+Found while writing a fixture for the above, and fixed in the same run.
+
+The hook refused `S=/tmp/…/scratchpad; cat > "$S/fixture.md"` and told the caller
+"Writing under /tmp or a scratchpad is still fine". It judges the extracted
+redirect fragment as text, so what it saw was `$S/fixture.md`, which matches
+neither `^/tmp/` nor `scratchpad`. Failing closed is the right direction; saying
+the opposite while doing it is not, and the caller it stops is a lane writing a
+fixture to its own scratchpad — the case CLAUDE.md keeps Bash for.
+
+Assignments made in the same command are now resolved before the path is judged.
+Only the same command can matter: the Bash tool carries a working directory
+between calls and no shell state, so a variable set in an earlier call is not set
+here either. One that cannot be resolved stays unresolved, and unresolved is
+still judged a tree file.
+
+The guard is not loosened, and that is the half worth testing: a variable holding
+`crates/rcad-geom/src` is still refused, and so is one this command never set.
+Five cases, two of which the old hook gets wrong.
+
+The hook then refused the command that would have added those five cases, because
+it carried `> "$W/lib.rs"` as literal text. Its own header already describes
+that: the cases live in JSON rather than in the runner for exactly this reason,
+and it had blocked two earlier drafts of its own test.
+
+### 59.5 What is still uncaught
+
+`check-decisions` now fails on two sections sharing a number (§57.8, `cc969ad`),
+so the collision this section's own numbering came close to repeating cannot
+happen silently any more — §58 was taken between the number being chosen and the
+section being written.
+
+**It catches the collision at merge, which is later than it is made.** The check
+reads one file, so it cannot see a number taken on a branch that has not landed.
+On 2026-09-06 this section and "Nobody works in the hub" were both written as
+§59, on two unmerged branches, and the duplicate was found by the other session
+saying so — not by the check, which would have fired only when the second of them
+merged. Four instances in one day, for a shape unnoticed across the fifty-seven
+sections before it: one near-miss on 56, §58 taken mid-write, this collision, and
+the renumber that settled it. Nothing watches the branches, and nothing is
+proposed here that should: the check fires before anything is published, which is
+the point at which being wrong costs something.
+
+A heading deleted with its body left behind still can. The orphaned lines join
+the section above, `decisions-toc` counts them there, and nothing says so. No
+check is built for it, and no claim is made here that none is needed: it has not
+cost anything yet, which is the only reason.
+
+## 60. Nobody works in the hub, recorded 2026-09-06
+
+§59 belongs to `rcad-c4`, which had claimed it in a worktree rather than in this
+file. That is the same collision §55's preamble opens with and §57.8 built a
+check for, and it happened again while this section was being written — so this
+one moved rather than argue about it. The two sessions agreed by message, which
+is a record that dies with them; the number in the heading is the one that does
+not.
+
+### 60.1 The tree the record cannot describe
+
+§55 settled that a worktree's git lock is this repository's statement of who owns
+it, and §55.4 gave the reason: it is the only candidate that survives the session
+that wrote it. The alarm here was raised by a session trying to use it for
+exactly that — announcing a ten-minute build before starting it — and finding
+that it could not.
+
+`git worktree lock` refuses the main working tree. There is no flag. So the one
+tree that the record structurally cannot describe is the tree every session lands
+in by default, and `just lanes` was printing `free` beside it whoever was
+building in it. That is not a gap in the tooling; it is `lanes` reporting the
+only thing git will tell it, which happens to be indistinguishable from an
+answer.
+
+The fix chosen is not a second record beside the lock. It is to delete the case:
+**nobody works in the hub.** A tree nobody works in needs no owner, and `free`
+becomes true about it rather than a guess.
+
+### 60.2 The demonstration
+
+Three refusals, all measured on 2026-09-06 in a repository built for the purpose.
+The first is why the hub cannot be owned; the second and third are why `main`
+cannot stay in it.
+
+| what was tried | what git said |
+|---|---|
+| `git worktree lock --reason "test" .`, and by absolute path | `fatal: The main working tree cannot be locked or unlocked` |
+| `git fetch . lane:main` from a lane, `main` checked out in the hub | `fatal: refusing to fetch into branch 'refs/heads/main' checked out at .../main` |
+| `git push . lane:main`, same shape | `! [remote rejected] lane -> main (branch is currently checked out)` |
+
+### 60.3 Why `main` leaving the hub is the load-bearing half
+
+"Sessions use worktrees" on its own does not survive contact with a merge. Rows
+two and three above say a branch checked out in the hub cannot be moved from
+anywhere else, so every merge has to be performed *in* the hub — which is the one
+moment when two sessions most need to know who is there, in the one tree that
+cannot say. A rule that holds until the interesting moment and then breaks is
+worse than none, because it is believed.
+
+Parked on a detached HEAD the hub holds no branch, `main` is checkable out in a
+worktree like any lane, and the merge tree is locked and named like any other.
+This was already the live state when the section was written — `main` was checked
+out and locked in `rcad-worktrees/wave-1`, held by a peer session mid-merge, and
+the hub was detached. Somebody had reached the same design and not written it
+down, which is the failure mode §55 was itself about.
+
+### 60.4 What changed
+
+| # | change | what proves it |
+|---|---|---|
+| 1 | `just check-hub` — fails when the hub has a branch checked out or uncommitted work in it; in `default` | `just check-hub-selftest`, in `default`; walks one fixture hub through lone-checkout, on-a-branch, dirty and parked, and asserts the middle two fail |
+| 2 | `just lanes` labels the first tree `hub`, leaves it out of the lane count, and warns when it is not parked | `check-lanes-selftest`, extended; its fixture hub sits on a branch, so the warning is exercised |
+| 3 | `.claude/hooks/session-start-hub.sh` tells a session that started in the hub to call `EnterWorktree` | `.claude/hooks/check-session-start-hub.sh`, in `check-hooks`; five cases, four of which assert *silence* |
+| 4 | `just clean-targets` asks git for the worktrees instead of guessing a path, and so reaches the sibling trees and the hub's own 14 GB | `check-clean-targets-selftest`, in `default`; asserts the hub's `target/` goes and that a locked tree's survives |
+| 5 | CLAUDE.md gains "Nobody works in the hub"; `delegating` gains never-merge-in-the-hub and a reclaim-and-re-park close | prose |
+
+### 60.5 A silent sweep that had been silent for a month
+
+Item 4 was meant to be a widening and turned out to be a bug fix. `clean-targets`
+built the string `$(dirname $(git rev-parse --show-toplevel))/rcad-worktrees`,
+which is the right answer only when it is run from the hub. Run from a lane it
+resolved to `rcad-worktrees/rcad-worktrees`, found nothing, and printed *"there is
+nothing here to clean"* — an empty answer wearing the clothes of a clean one, the
+same shape as §57.8's and §55's. The rule in this section makes every run a run
+from a lane, so it would have been every run from here on.
+
+The disk was at 92% when this was found.
+
+### 60.6 The exemption, and why it is structural
+
+`check-hub` passes when the repository has exactly one worktree, because then
+there is no hub and no lane, only a checkout, and no second session to collide
+with. That is a fresh clone, and it is the shape a CI checkout has. CI runs
+`check`, `lint`, `test` and `deny` rather than `default`, so the check does not
+fire there today and the exemption is not load-bearing for the build — it is
+what would keep it green if `default` ever moved into CI.
+
+It is deliberately not an environment variable: an exemption that has to be set
+is an exemption that gets set, whereas this one lapses by itself the moment a
+second tree exists, which is the moment ownership starts being a question.
+
+### 60.7 What this does not close
+
+**Nothing stops a session working in the hub.** The session-start hook is a
+notice and `check-hub` is a check; both can be ignored until the next `just
+default`. The mechanical version is a `PreToolUse` hook that refuses `Edit` and
+`Write` there — `no-in-place-rust-patching.sh` is the precedent — and it is
+deliberately not built: §13 wants the consumer named first, and it would also
+refuse Mattias's own `!` commands in the directory he starts in, which is a cost
+worth paying only once the cheap version is shown to leak.
+
+**Nothing re-parks the hub either.** After a merge the hub sits on whatever
+commit it was detached at, and it is a person or the closing gate that moves it
+forward. That is the safe direction to fail — a stale hub is harmless where a hub
+holding `main` is not — but §55.6's "an abandoned lock is rubbish only a person
+clears" now has a sibling.
+
+### 60.8 Untracked counts, and `fuzz/corpus/` is not ignored
+
+`rcad-c4` asked the two questions this section had answered only by implication,
+and both deserve the record rather than the implication.
+
+**Untracked-and-unignored is uncommitted work.** A check that looked only at
+tracked modifications would have passed the hub all evening while it held the
+single most valuable thing at risk: 1542 corpus entries a fuse campaign had
+earned and left there. When the campaign moved to a worktree it started from the
+tracked 1088, so those 1542 existed in exactly one place, and that place was the
+tree nobody owns. They are now committed — replaying takes the corpus from
+`cov: 13342 ft: 54505` to `cov: 14123 ft: 65660`, so they were coverage and not
+noise. A rule that ignored untracked files would have been silent about precisely
+the harm it exists to prevent.
+
+**`fuzz/corpus/` stays tracked.** The suggestion was to ignore it so that a fuzz
+run stops dirtying whatever tree it is in. That is backwards: 3999 corpus entries
+are committed on purpose, `fuzz/.gitignore` names `artifacts/`, `coverage/` and
+`target/` and pointedly not `corpus/`, and a seed corpus that is not shipped is a
+fuzzer that starts from nothing on every machine. The dirt a campaign leaves is
+not the problem; leaving it in the hub is. The remedy is the rule, not an
+exemption from it — and the exemption would have thrown away tonight's 1542.
+
+**What no check here can see.** The collision that sent this section from §59 to
+§60 was caught by one session telling another, not by `check-decisions`, which
+reads one file and so fires when the second branch *merges* rather than when the
+number is taken. §59.5 records that from the other side. It is the same fact as
+this section's: two sessions cannot see each other's work in progress, and the
+answer is a record that outlives the session — a lock, a heading, a commit — not
+a smarter check. Firing at publication is the right time; nothing above claims
+otherwise.
+
+### 60.9 A stale hub is not leftovers, and the message has to know which
+
+§60.7 called an un-re-parked hub harmless. It is harmless to the *repository* and
+it was not harmless to this check, which `rcad-c4` spotted before it bit anyone:
+a hub parked at an older commit shows every path that has landed since as
+untracked, indistinguishable by `status` from work somebody abandoned there. The
+symptom is one thing and the two causes want opposite fixes, so the message that
+says "commit this from a worktree of your own" sends a reader to duplicate a
+merge that has already happened.
+
+They are told apart by asking git rather than by guessing: if nothing is modified
+and **every** untracked path is already in `ls-tree main`, the hub is behind, not
+dirty. `check-hub` then names the command that fixes it and says that nothing
+moves the hub's HEAD on its own. `check-hub-selftest` builds that state — a file
+committed on `main` from a lane, present on disk in a hub whose HEAD predates it
+— and asserts both that the stale message appears and that the leftovers message
+does not.
+
+**The first remedy this section printed did not work.** It was
+`git -C <hub> checkout --detach main`, on the reasoning that files whose content
+already matches the target commit cannot be at risk. Git does not reason that
+way. It refuses on the paths alone:
+
+    error: The following untracked working tree files would be overwritten by checkout:
+            fuzz/corpus/aaa
+    Please move or remove them before you switch branches.
+
+Measured both ways in a throwaway repository: byte-identical content aborts, and
+differing content aborts with the same message, so the two are indistinguishable
+from the output. `git clean -fd` first, then the checkout, exits 0, restores
+every file byte-identical, and leaves `git status` empty. The published line is
+therefore `git -C <hub> clean -fd && git -C <hub> checkout --detach main`, and
+`clean` without `-x` leaves ignored files alone, so a campaign's crash artifacts
+survive it.
+
+So the files are deleted either way. "Re-parking makes them tracked rather than
+deleted" was argued between the two sessions and never reached this file, which
+is the only reason it is not a correction to a published paragraph. What survives
+of it is the *timing*: deleting at re-park time is safe because by then the
+content is on `main`, where deleting before the merge would have left
+`lane-hub-rule` as the only copy.
+
+**The selftest runs the line the check prints**, greps it back out of the output,
+executes it, and asserts the hub lands on `main`, that `status` comes back empty,
+that the removed file is restored, and that `check-hub` then passes. A remedy
+nobody executes is a claim without a test, which is §15.6's rule pointed at a
+string rather than at a bound. Restoring the old one-command version fails it
+with *"the remedy the check prints does not run"*.
+
+Found by `rcad-c4` running it rather than reading it — twice over, since §60.7's
+"harmless" is what pointed them at the case to begin with. Both defects were in
+prose that had been reviewed and neither was in code that had been tested, which
+is the argument for the paragraph above.
