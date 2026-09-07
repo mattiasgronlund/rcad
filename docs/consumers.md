@@ -626,10 +626,24 @@ running anything.
 **The second was found by nothing, and that is the difference that matters.**
 rscene had a test that reached a live defect up here: a cone placed so that its
 apex reads exactly zero, where the nearest mesh point then sat outside a ball of
-zero width. §56's fix moved that mesh point onto the apex, so nothing in rscene
-reaches the defect any more — and **the defect is untouched**. That account is
-rscene's; this side has not re-taken the measurement and nothing in rcad changes
-on it.
+zero width. **The ball is zero wide because there is nothing to size it with.** A
+cone has no normal at its apex, so a consumer shading one has to find the apex
+among the mesh points in order to know not to ask, and its only handle is exact
+equality against `Cone::apex()` with a small ball behind it for the case where
+rcad's arithmetic moved the point. The one length available to size that ball is
+the apex's own coordinates, so it comes out as some multiple of `ε · |apex|` —
+and an apex on the origin makes it exactly zero, for every multiple, while rcad's
+floor under the same solid does not go to zero at all. Measured in this tree at
+`b3a21da` under a certified policy with the apex reading `[0, 0, 0]`: a cone
+reaching `1` is floored at `3.6366154200734765e-11` and one reaching `1e9` at
+`3.636615420073477e-2`. Nine decades of floor against a backstop that stays
+exactly zero, so the backstop vanishes precisely where it was asked to work.
+
+§56's fix moved the mesh point onto the apex, which closed **the route from that
+defect to a wrong answer and not the defect** — it is still there and still one
+builder call away. That is what makes this the second arm and not the first.
+rscene's account of what its own test used to see is rscene's; this side has not
+re-taken those figures and nothing in rcad changes on them.
 
 The first arm is caught by somebody reading the sentence, and somebody did read
 the near-apex doc comment. This one has no sentence to read. The test file says
@@ -639,13 +653,14 @@ test that still has it.**
 
 There is no rcad-side trigger available for it, and saying so is worth more than
 proposing one. The bullet above fires when rcad **closes** a defect a consumer
-has described; §56 closed nothing here, so nothing was owed and an announcement
-would not have helped. What rcad would need in order to see it is which of a
-consumer's tests reaches which of rcad's defects, and that is a fact about
-rscene's tree that rcad does not hold and has no way to acquire. The control that
-does exist is downstream and rcad has already argued for it in a neighbouring
-case: `docs/decisions.md` §56.7 says an absence that could not have been a
-presence proves nothing, and asks a sweep to carry a positive control. **A
+has described; §56 closed no defect here, only the route to it, so nothing was
+owed and an announcement would not have helped. What rcad would need in order to
+see it is which of a consumer's tests reaches which of rcad's defects, and that
+is a fact about rscene's tree that rcad does not hold and has no way to acquire.
+The control that does exist is downstream and rcad has already argued for it in
+a neighbouring case: `docs/decisions.md` §56.7 says an absence that could not
+have been a presence proves nothing, and asks a sweep to carry a positive
+control. **A
 demonstration wants the same thing** — an assertion that it still reaches the
 thing it demonstrates — and it wants it for exactly the reason this instance
 shows, that the day it stops reaching is the day nothing says so.
