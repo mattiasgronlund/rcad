@@ -17,8 +17,23 @@ lockfile = true
 # variable is the file which installs the tool. `build.rustc-wrapper` applies to
 # every cargo invocation in the repo, including one made without mise, and cargo
 # fails outright on a wrapper it cannot find; this way the variable exists
-# exactly where `kache` does. CI runs `mise exec -- just ...`, so it gets it too.
+# exactly where `kache` does.
+#
+# **Off on CI, and the sentence above is why.** mise applies this `[env]` while
+# it installs the `[tools]`, so on a runner cargo was asked to run `kache` in
+# order to build `kache` and every tool install failed — ten pushes in a row,
+# none of them reaching a check. A runner is also cold, so the wrapper there
+# costs a download and saves nothing.
+#
+# The test is keyed on `CI` and not on `GITHUB_ACTIONS` because what makes the
+# cache worthless is a machine that is thrown away, which `CI` names and
+# GitHub's runners are only one instance of.
+#
+# The value goes empty rather than away because a template cannot produce an
+# absent key, and cargo reads an empty `RUSTC_WRAPPER` as no wrapper at all —
+# which is the same spelling the line below already told people to use.
+# `just check-kache-off-on-ci` holds both halves.
 #
 # To build without the cache for a run: `RUSTC_WRAPPER= just default`.
 [env]
-RUSTC_WRAPPER = "kache"
+RUSTC_WRAPPER = '{% if get_env(name="CI", default="") == "" %}kache{% endif %}'
