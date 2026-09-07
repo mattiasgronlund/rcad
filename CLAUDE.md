@@ -130,7 +130,8 @@ mention `M5` or `§52.11` without becoming a question.
 **One entry may carry two labels when one answer settles both** — `**Q7 / Q11**
 — …`, addressable as either. Both are counted and both are shown. Reading only
 the first is a bug that has been fixed once already: on 2026-09-06 the line
-showed thirteen of fifteen open questions and looked complete.
+showed fourteen of sixteen open questions and looked complete (`docs/decisions.md`
+§59.2).
 
 **Never in the tree.** Four sessions were live across these two repos on
 2026-09-05; a tracked file would have had all four writing to it. Per session

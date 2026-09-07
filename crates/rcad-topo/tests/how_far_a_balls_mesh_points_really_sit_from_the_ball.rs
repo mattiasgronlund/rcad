@@ -8,11 +8,20 @@
 //! `|p - centre| - radius` for each of them, and compares that to what was
 //! promised.
 //!
-//! Every mesh point of a ball is *on* the sphere by construction — a chord cuts
-//! inside the arc, but the chord's **ends** do not. So the number measured here
-//! is a roundoff, not a chord sag, and what a deflection buys is how far the
-//! middle of a triangle sits inside the surface, which is a different distance
-//! and not the one this file measures.
+//! Where a part sits, every mesh point of a ball is *on* the sphere by
+//! construction — a chord cuts inside the arc, but the chord's **ends** do not.
+//! So the number measured here is a roundoff, not a chord sag, and what a
+//! deflection buys is how far the middle of a triangle sits inside the surface,
+//! which is a different distance and not the one this file measures.
+//!
+//! **"By construction" runs out, and this file does not cover where.** It holds
+//! the sentence over the radii and the two placements below — out to ten
+//! thousand — and not past them. A ball smaller than the spacing of the `f64`
+//! grid it is placed on has no representable point on its own surface at all, so
+//! far enough out the points come off the sphere by a share of the radius that
+//! grows with the distance, and the roundoff this file measures stops being a
+//! roundoff. `how_far_a_balls_mesh_strays_when_the_ball_sits_far_from_the_origin.rs`
+//! is what measures that end, out to `1e13`, and carries the figures.
 
 use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -51,8 +60,13 @@ fn where_the_balls_go() -> [(&'static str, Isometry); 2] {
     ]
 }
 
-/// A certified ball's mesh points sit on the sphere to within roundoff, and the
-/// log says nothing because nothing was fudged.
+/// Where a part sits, a certified ball's mesh points sit on the sphere to within
+/// roundoff, and the log says nothing because nothing was fudged.
+///
+/// The qualifier is load-bearing and is [`where_the_balls_go`]: this holds at the
+/// origin and ten thousand out, which is where a part sits, and it is false far
+/// enough past that. `Mesh::deviation`'s doc cites this test by name for the
+/// first half of that, so the range here is what that sentence means.
 ///
 /// The claim under test is the one a downstream consumer disputed: that a
 /// certified ball comes back with points a quarter of a radius off, refusing

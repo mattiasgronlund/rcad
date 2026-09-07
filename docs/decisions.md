@@ -11907,6 +11907,12 @@ radius one gives `6.143234069592546e-13` against `4.848820560097969e-11` —
 `78.929` times apart in both cases. **So `closest` at the origin over-reports the
 floor these rows name by seventy-nine times.**
 
+The ball's two readings here are as of `fdf5e58`'s parent. Both have since
+halved, to `3.0716170347962663e-13` and `2.4244102800489844e-11`, because a ball
+is now charged from its centre rather than from its poles — §58.11. The
+seventy-nine did not move, and neither did the bar's pair, which is the point
+the sentence above is making.
+
 The rows themselves stand, and the reason is the shape of the two formulas rather
 than a second measurement: the added term is a constant share of how far the face
 reaches and does not grow with the placement, while `how_far_moving_this_face_rounds`
@@ -18236,6 +18242,10 @@ makes, and neither number is worked out from the arithmetic that produces it.
 | round bar, radius 1, height 2, at the origin | `9.214851104388813e-13` | `7.273230840146953e-11` | `78.92944506377196` |
 | ball, radius 1, at the origin | `6.143234069592546e-13` | `4.848820560097969e-11` | `78.92944506377192` |
 
+The ball's row is as measured for this section and is **superseded**: §58.11
+halves both of its floors to `3.0716170347962663e-13` and
+`2.4244102800489844e-11`. The bar's row and both ratios stand.
+
 **The seventy-nine is a fact about the added term and not about either shape.**
 Two solids that share no face agree on it to fifteen digits, because at the
 origin `how_far_moving_this_face_rounds` is zero and the ratio collapses to
@@ -18253,7 +18263,12 @@ probe meshes for real and does not finish — the wall
 `whether_the_floor_predicts_the_step_cap.rs` names in *why there is no test here
 that meshes at the new floor*. What this section did measure out there is the
 walk floor alone, `3.9968513728593615e-6` for a unit ball at `x = 1e9`, which is
-the figure `docs/consumers.md` announced.
+the figure `docs/consumers.md` announced. That one is **superseded by §58.11**
+too, at `3.996827132753364e-6` — and it moved in the fifth figure where the pair
+at the origin halved, because out there the placing term is eighty thousand times
+the added one. It now has a test,
+`a_unit_ball_a_thousand_million_units_out_is_cut_to_what_the_docs_announce`,
+which it did not when this section was written.
 
 ### 58.5 Every bound this unit publishes, against the test that carries it
 
@@ -18270,9 +18285,9 @@ and the `rcad-step` one runs 2, and all 33 pass.
 | those bars are not the thing that is wrong: built certified, empty provenance log, `validate` passes certified | `every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for` | **yes** |
 | the mesher's floor stays put over four leans while the crossing's rounding runs away from it | `the_floor_under_a_deflection_stays_put_while_the_crossing_it_stands_for_runs_away` | **yes, as a shape** — no value asserted |
 | styling is never a key in `shapes_this_reader_did_not_take`, and a styling-only file gets an `Err` rather than an empty map | `styling_is_never_among_the_shapes_walked_past`, over the real corpus | **yes** |
-| `9.2148511043888e-13` and `7.273230840146953e-11`, the two floors of a bar of radius one at the origin (`mesh.rs`) | nothing | **no test** |
-| `6.143234069592533e-13`, `4.848820560097969e-11` and *78.93 times apart* for a ball at the origin (`error.rs`) | nothing — the hunt above is in one test's prose, and that test asserts only that four leans agree | **no test** |
-| `741 455` steps at twice the floor against `1 048 576` at it (`ROOM_ABOVE_THE_FLOOR`) | nothing | **no test** |
+| `9.2148511043888e-13` and `7.273230840146953e-11`, the two floors of a bar of radius one at the origin (`mesh.rs`) | `a_round_bar_at_the_origin_places_a_point_a_thousand_times_closer_than_it_can_be_cut` | **yes**, since this section was written |
+| `6.143234069592533e-13`, `4.848820560097969e-11` and *78.93 times apart* for a ball at the origin (`error.rs`) | `a_unit_ball_at_the_origin_places_a_point_a_thousand_times_closer_than_it_can_be_cut`, and the ratio on both shapes at once | **yes**, and the two floors are **superseded** by §58.11 — `3.0716170347962663e-13` and `2.4244102800489844e-11`. The ratio stands |
+| `741 455` steps at twice the floor against `1 048 576` at it (`ROOM_ABOVE_THE_FLOOR`) | `what_twice_the_room_buys_a_walk_at_its_step_cap.rs`, which also pins the one-step margin and the design room the count belongs to | **yes**, since this section was written |
 | the leaning-cap figures: a conic reach of `9.999999999999999e8` at `lean = 1e9`, a crossing rounding of `5.6843418889229724e-5`, a floor of `9.697641120195938e-11` (`mesh.rs`) | nothing, and nothing is owed — `f9d54e0` deleted the doc block that held all three | **withdrawn** |
 
 **The first row is the one worth reading twice.** The test asserts
@@ -18413,6 +18428,129 @@ and that its test is in the table in §58.5.
    deliberately. Holding it to the step cap as well would make
    `TooManyPointsAlongOneCrossing` unreachable through `mesh`, which is a claim
    about the public API and wants its own demonstration.
+
+## 59. A question the status line could not name, recorded 2026-09-06
+
+The open questions of a session live in a file in that session's own scratchpad.
+No section had recorded it before this one. It could be counted and it could not
+be read: the status line said which labels were open, and getting the text of one
+meant `!cat` on the whole file. This records the address that closed that, a
+parser bug the work turned up, one recipe deliberately not built, and a number
+this section corrects.
+
+### 59.1 The address the file did not have
+
+The file is `<tmp>/claude-<uid>/<slug>/<session>/scratchpad/open-questions.md`.
+Every part of that is derivable except the session id, which only the harness
+knows — so nothing a person can type names the file. The status line already had
+the id, in its own input, and was throwing it away.
+
+Six characters of it now print beside the labels, the width `just lanes` prints a
+lane's ref in, and `just question <hash> <label>` takes that as the address.
+`just question` alone lists the sessions that have open questions; with a hash
+and no label it lists that session's labels and headings.
+
+What this replaces is `!cat`, and the cost of `!cat` is not the reading. Shell
+mode puts the output into the conversation, where it is charged again on every
+later turn; `statusline.sh`'s own header records 21 command outputs and 5 710
+characters put there that way on 2026-09-05. The file being read that way on
+2026-09-06 held sixteen open questions, to get the text of one.
+
+### 59.2 Fourteen of sixteen
+
+An entry may carry two labels when one answer settles both, `**Q7 / Q11**`. The
+parser matched the label once, so the second was neither counted nor shown.
+
+Measured on the file as it stood at 10:18 on 2026-09-06: fourteen open checkbox
+lines, two of them paired, so **sixteen open questions and fourteen labels on the
+line**. The two that were invisible, Q11 and Q27, had been open all day. Run on
+that file, the old parser prints fourteen labels and the new one sixteen.
+
+**This corrects a published number.** `0828cb9`, the doc comment it added to
+`statusline.sh`, and the paragraph it added to CLAUDE.md all say "thirteen of
+fifteen". That is a miscount of the same file — the open lines were fourteen, not
+thirteen — and it went in without being re-derived. The two files are corrected
+in the commit that adds this section. The commit message cannot be, so this is
+the record that it is wrong.
+
+The failure is the shape §57.8 had recorded from another direction that same day:
+a short answer that reads like a complete one. A status line whose whole job is
+"what is waiting on you" is the last place that can under-report it, so the
+labels are walked to the end of the run rather than matched once.
+
+### 59.3 What is not built: a recipe that writes a question
+
+A recipe that *asks* a question was proposed and declined. §13 is not what
+declines it — the consumer exists, it is every session — so the argument belongs
+here rather than in a deferral.
+
+A body is paragraphs of prose carrying backticks, `§` refs and `**`. Passing one
+through a shell argument means quoting all of that correctly, and it is never
+cheaper than `Edit`: the text is written once either way, and whatever the recipe
+prints is charged on top. The cost argument runs against the recipe, not for it.
+
+The stronger reason is what the two operations are. Adding a question is an
+append, which cannot silently match the wrong thing. Marking one answered is a
+substitution, `- [ ]` to `- [x]`, and that is the shape §50.8 keeps out of the
+shell: a pattern that does not match fails quietly, where `Edit` errors. A recipe
+that did the append and not the substitution would be half a tool, and one that
+did both would put the quiet half in the shell.
+
+The model also has no addressing problem to solve — its own scratchpad path is in
+its system prompt. The hash is for the person.
+
+`just question <hash>` with no label took the place of a write-side check. It
+reads labels through the same walk the status line uses, so an entry the line
+would drop is missing there too.
+
+### 59.4 The exemption the patching hook advertised but did not implement
+
+Found while writing a fixture for the above, and fixed in the same run.
+
+The hook refused `S=/tmp/…/scratchpad; cat > "$S/fixture.md"` and told the caller
+"Writing under /tmp or a scratchpad is still fine". It judges the extracted
+redirect fragment as text, so what it saw was `$S/fixture.md`, which matches
+neither `^/tmp/` nor `scratchpad`. Failing closed is the right direction; saying
+the opposite while doing it is not, and the caller it stops is a lane writing a
+fixture to its own scratchpad — the case CLAUDE.md keeps Bash for.
+
+Assignments made in the same command are now resolved before the path is judged.
+Only the same command can matter: the Bash tool carries a working directory
+between calls and no shell state, so a variable set in an earlier call is not set
+here either. One that cannot be resolved stays unresolved, and unresolved is
+still judged a tree file.
+
+The guard is not loosened, and that is the half worth testing: a variable holding
+`crates/rcad-geom/src` is still refused, and so is one this command never set.
+Five cases, two of which the old hook gets wrong.
+
+The hook then refused the command that would have added those five cases, because
+it carried `> "$W/lib.rs"` as literal text. Its own header already describes
+that: the cases live in JSON rather than in the runner for exactly this reason,
+and it had blocked two earlier drafts of its own test.
+
+### 59.5 What is still uncaught
+
+`check-decisions` now fails on two sections sharing a number (§57.8, `cc969ad`),
+so the collision this section's own numbering came close to repeating cannot
+happen silently any more — §58 was taken between the number being chosen and the
+section being written.
+
+**It catches the collision at merge, which is later than it is made.** The check
+reads one file, so it cannot see a number taken on a branch that has not landed.
+On 2026-09-06 this section and "Nobody works in the hub" were both written as
+§59, on two unmerged branches, and the duplicate was found by the other session
+saying so — not by the check, which would have fired only when the second of them
+merged. Four instances in one day, for a shape unnoticed across the fifty-seven
+sections before it: one near-miss on 56, §58 taken mid-write, this collision, and
+the renumber that settled it. Nothing watches the branches, and nothing is
+proposed here that should: the check fires before anything is published, which is
+the point at which being wrong costs something.
+
+A heading deleted with its body left behind still can. The orphaned lines join
+the section above, `decisions-toc` counts them there, and nothing says so. No
+check is built for it, and no claim is made here that none is needed: it has not
+cost anything yet, which is the only reason.
 
 ## 60. Nobody works in the hub, recorded 2026-09-06
 

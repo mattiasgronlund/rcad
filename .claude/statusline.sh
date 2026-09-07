@@ -87,7 +87,7 @@ fi
 #
 # One entry may carry several labels, `**Q7 / Q11** — …`, when one answer settles
 # both. Reading only the first is how Q11 and Q27 sat open all of 2026-09-06
-# while the status line showed thirteen of the fifteen and looked complete. A
+# while the status line showed fourteen of the sixteen and looked complete. A
 # question the file records and the line does not show is the one failure this
 # line cannot have, so the labels are walked until the run of them ends.
 numbers=$(awk '
