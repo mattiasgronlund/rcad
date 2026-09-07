@@ -4338,21 +4338,37 @@ mod tests {
     /// three, and stretching that is the only thing this number does.
     const A_LONG_RULING: f64 = 40.0;
 
-    /// A ball, a pipe and a ring are handed cells that fit, and a cone is handed
-    /// one charged eight times over.
+    /// A ball and a ring are handed cells that fit, and a cone is handed one
+    /// charged eight times over.
     ///
     /// [`how_many_steps`] is asked for one edge at a time and never for the cell
     /// two of its steps close off, so the question is what the cell costs when
     /// the two answers are put together.
     ///
-    /// **On a ball, a pipe and a ring the cell fits, and it only just fits.**
-    /// Both sides of a cell come back under `√(share · radius · room / 2)`, so a
-    /// square one has a diagonal `√2` longer, which strays twice as far — and
+    /// **On a ball the cell fits, and it only just fits.** Both sides come back
+    /// under `√(share · radius · room / 2)`, so a square one has a diagonal `√2`
+    /// longer, which strays twice as far — and
     /// [`WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET`] being a half is exactly that
     /// factor of two. The ball measured here uses **98.1%** of the deflection
     /// and nothing left over, so that constant is not a spare margin that could
     /// be spent elsewhere: raise it and the walk starts handing over cells that
-    /// are already past the deflection before a triangle is cut.
+    /// are already past the deflection before a triangle is cut. At `0.8` this
+    /// test fails with the ball's cell charged `1.4640`.
+    ///
+    /// **A ring fits with room to spare, and the reason is not slack in the
+    /// budget.** Its two terms `C_v²/(3r)` and `C_u²/(2S)` are *added*, and the
+    /// one radius `how_many_steps` gives a torus is
+    /// `1/(1/(3r) + 1/(2S))` — so the two directions **split** the half rather
+    /// than each taking it. `0.481` and `0.435` for the outer and inner equators
+    /// of a ring of four and one are that split, not headroom.
+    ///
+    /// **The pipe here is coverage and not evidence, and the difference is worth
+    /// saying.** A cylinder is flat along its axis, so the step up one comes back
+    /// as a single step and contributes nothing to what the cell is charged. Its
+    /// `0.486` is one chord measured against half a budget — the same number a
+    /// lone side would give. It says nothing about a diagonal, so it is checked
+    /// on its own below rather than counted among the cells that carry the
+    /// finding.
     ///
     /// **On a cone it does not fit, and by a factor that grows with the
     /// frustum.** A cone is flat along its rulings, so a step up one is charged
@@ -4366,19 +4382,41 @@ mod tests {
     /// the second half of this test.** Handed to the triangulator at the
     /// deflection it was sized against it comes back
     /// `BoundarySideStraysFurtherThanTheDeflection`, straying `0.0801` against a
-    /// deflection of `0.01`. A boundary side is the one thing `refine_the_inside`
-    /// may not cut, so there is nothing to refine and the answer is a refusal.
-    /// **The wrong mesh is not one of the outcomes.**
+    /// deflection of `0.01`.
     ///
-    /// **And today's walk never draws one**, because every step it takes round a
-    /// cone is sized at the `v` that step sits at — the frustum's two rims are
-    /// two chains with two step counts, and the ruling between them is a
-    /// boundary side charged nothing because it lies on the cone exactly. The
-    /// rectangle built here is one this file makes up: it puts the *bottom*
-    /// rim's step count on the *top* rim. `how_far_inside_a_triangle_a_mesh_
-    /// really_strays.rs` is the same question asked of solids the builder
-    /// actually makes, measured against each surface's own closed-form distance
-    /// rather than against the triangulator's bound.
+    /// **The diagonal never gets a say, and naming where the refusal comes from
+    /// matters.** `triangulate` sweeps every boundary side against the whole
+    /// deflection *before* it refines anything — `crates/rcad-mesh/src/
+    /// triangulate.rs:181-188` — and the side that fails is the one at
+    /// `v = 42` carrying the bottom rim's width round. It is over budget on its
+    /// own, as a side, so the sweep refuses the patch and `refine_the_inside` is
+    /// never called. (It is separately true that a boundary side is the one
+    /// thing the refinement may not cut, `triangulate.rs:933`. That is not what
+    /// stopped this cell.)
+    ///
+    /// # Why the walk's sizing cannot make a mesh stray, whatever it hands over
+    ///
+    /// Not an argument about which cells the walk happens to draw — that is a
+    /// statement about today's callers, which §16.10 says is the wrong shape of
+    /// claim. It is structural, and it is three links long.
+    ///
+    /// [`SolidView::mesh`] is the only function anywhere that returns a [`Mesh`].
+    /// Its only feed is the [`triangulate`] call in [`BuildingAMesh::hand_over`].
+    /// And `triangulate` returns `Ok` only when every triangle inside the domain
+    /// satisfies `how_far_a_flat_piece_strays(...) <= deflection` — the boundary
+    /// sweep above, and then `refine_the_inside` cutting until nothing misses or
+    /// refusing when it cannot.
+    ///
+    /// So what the walk's sizing decides is **whether a mesh comes back at all**
+    /// and **how many triangles it costs**. It cannot decide whether the answer
+    /// is inside the deflection, because nothing that misses is ever returned.
+    /// A cell charged eight times over is a refusal or a pile of extra
+    /// triangles, never a mesh that strays.
+    ///
+    /// `how_far_inside_a_triangle_a_mesh_really_strays.rs` is the other end of
+    /// that: it takes the triangles that do come back out of solids the builder
+    /// makes and measures them against each surface's own closed-form distance,
+    /// rather than reading the triangulator's bound back.
     #[test]
     fn the_cell_two_steps_close_off_fits_on_a_ball_and_is_eight_times_over_on_a_cone() {
         use rcad_geom::{Cone, Cylinder, Torus};
@@ -4389,9 +4427,14 @@ mod tests {
         let ring = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a ring"));
         let cone = Surface::Cone(Cone::new(Axis::z(), 0.5).expect("a cone"));
 
+        let a_pipes_cell = what_a_cell_of_two_steps_is_charged(&pipe, [0.0, 0.0], room) / room;
+        assert!(
+            a_pipes_cell <= 1.0,
+            "a pipe's cell is charged {a_pipes_cell} of the deflection"
+        );
+
         let fits = [
             ("a ball of radius one", ball, [0.0, 0.0]),
-            ("a pipe of radius one", pipe, [0.0, 0.0]),
             ("a ring of four and one", ring, [0.0, 0.0]),
             (
                 "the inner equator of that ring",

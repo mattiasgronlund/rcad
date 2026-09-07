@@ -26,9 +26,12 @@
 //! `the_cell_two_steps_close_off_fits_on_a_ball_and_is_eight_times_over_on_a_cone`
 //! in `mesh.rs` is the other half, and it is the half that carries the numbers:
 //! a ball's cell uses 98.1% of the deflection and a stretched cone's is charged
-//! eight times over. This file is what says the stretched cone's mesh is fine
-//! anyway, because the walk sizes each rim of a frustum at its own radius and
-//! never draws the cell that unit test makes up.
+//! eight times over. That test also carries the argument for why a cell charged
+//! eight times over cannot reach a mesh — `SolidView::mesh` is the only thing
+//! that returns one, `triangulate` is its only feed, and `triangulate` returns
+//! `Ok` only when every triangle it holds is inside the deflection. This file is
+//! the same claim from the other end: not that the arithmetic must hold, but
+//! that on real solids it does.
 //!
 //! # Where a sample lands
 //!
@@ -106,13 +109,22 @@ const ROWS_ACROSS_A_TRIANGLE: u32 = 9;
 /// The deflections every solid below is cut at, as a share of its own size.
 const HOW_COARSE: [f64; 4] = [1e-3, 1e-2, 1e-1, 0.3];
 
-/// One solid to measure, the model it lives in, and the size the ladder above is
-/// read against.
+/// One solid to measure, the model it lives in, the size the ladder above is
+/// read against, and the least of its deflection it has to use.
+///
+/// **The floor is per shape and not one number over the family.** One over the
+/// family is a floor on whichever shape happens to be worst and on nothing else:
+/// the balls here use 0.44 and 0.45, so a single guard they satisfy would let
+/// the stretched frustum — the shape this file was written for — slacken by
+/// three and a half times with the headline number unmoved. Each shape carries
+/// its own, set a little under what it measures, so a regression in any one of
+/// them fails on that one's line.
 struct Shape {
     what: String,
     model: Model,
     solid: SolidKey,
     size: f64,
+    at_least: f64,
 }
 
 fn a_model(size: f64) -> Model {
@@ -127,10 +139,15 @@ fn a_model(size: f64) -> Model {
 /// it sits on. From two up to forty-two the top rim is twenty times as wide as
 /// the bottom, which is the widest spread between the two ends of one face
 /// anything here builds.
+///
+/// Every `at_least` is about seven eighths of what the shape measures today, so
+/// ordinary wobble in the arithmetic does not trip it and a shape that stopped
+/// being measured at all — an empty mesh, a face that stopped being curved, a
+/// walk that started cutting three times as fine as it was asked — does.
 fn the_family() -> Vec<Shape> {
     let mut family = Vec::new();
 
-    for radius in [1.0, 7.0] {
+    for (radius, at_least) in [(1.0, 0.38), (7.0, 0.39)] {
         let mut model = a_model(radius);
         let ball = model
             .add_ball(radius, &Isometry::identity())
@@ -140,6 +157,7 @@ fn the_family() -> Vec<Shape> {
             model,
             solid: ball,
             size: radius,
+            at_least,
         });
     }
 
@@ -152,9 +170,14 @@ fn the_family() -> Vec<Shape> {
         model,
         solid: bar,
         size: 3.0,
+        at_least: 0.16,
     });
 
-    for (slope, near, far) in [(0.5, 1.0, 3.0), (0.5, 2.0, 42.0), (0.25, 2.0, 8.0)] {
+    for (slope, near, far, at_least) in [
+        (0.5, 1.0, 3.0, 0.27),
+        (0.5, 2.0, 42.0, 0.24),
+        (0.25, 2.0, 8.0, 0.25),
+    ] {
         let mut model = a_model(far);
         let frustum = cones::a_frustum(&mut model, slope, near, far);
         family.push(Shape {
@@ -162,6 +185,7 @@ fn the_family() -> Vec<Shape> {
             model,
             solid: frustum,
             size: far,
+            at_least,
         });
     }
 
@@ -172,6 +196,7 @@ fn the_family() -> Vec<Shape> {
         model,
         solid: cone,
         size: 4.0,
+        at_least: 0.14,
     });
 
     let mut model = a_model(5.0);
@@ -181,6 +206,7 @@ fn the_family() -> Vec<Shape> {
         model,
         solid: bend,
         size: 5.0,
+        at_least: 0.29,
     });
 
     family
@@ -196,9 +222,9 @@ fn the_family() -> Vec<Shape> {
 /// shows a cone's cell can be charged for.
 #[test]
 fn no_triangle_of_a_curved_mesh_strays_further_than_the_deflection_it_was_cut_at() {
-    let mut worst_share = 0.0_f64;
-    let mut worst_shape = String::new();
     for shape in the_family() {
+        let mut worst_share = 0.0_f64;
+        let mut worst_rung = 0.0_f64;
         for coarse in HOW_COARSE {
             let asked = coarse * shape.size;
             let mesh = shape
@@ -218,13 +244,18 @@ fn no_triangle_of_a_curved_mesh_strays_further_than_the_deflection_it_was_cut_at
             );
             if strays / asked > worst_share {
                 worst_share = strays / asked;
-                worst_shape = format!("{} at {coarse} of its size", shape.what);
+                worst_rung = coarse;
             }
         }
+        println!(
+            "{:<44} uses {worst_share:.4} of its deflection, at {worst_rung} of its size",
+            shape.what
+        );
+        assert!(
+            worst_share > shape.at_least,
+            "{} used {worst_share} of its deflection at every rung, under its floor of {}",
+            shape.what,
+            shape.at_least
+        );
     }
-    println!("the worst uses {worst_share:.4} of its deflection: {worst_shape}");
-    assert!(
-        worst_share > 0.05,
-        "nothing here used more than {worst_share} of its deflection, so this measures nothing"
-    );
 }
