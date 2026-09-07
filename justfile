@@ -563,6 +563,15 @@ decisions-find pattern:
 # case rather than the unlucky one. It happened while §57 was being written
 # (§57.4), and nothing in this file noticed; the collision was found by hand,
 # at merge time, which is the expensive place to find it.
+#
+# **A `## N.` lower than the one before it, and a `### N.M` sitting under the
+# wrong `## N.`, are two more ways to go silently unreachable.** A renumbering
+# that moves later sections down leaves the file out of order if a stray
+# earlier one is missed, and a subsection typed by hand during that renumbering
+# can end up under the wrong parent — `### 64.3` left under `## 69.` after 64
+# was renumbered to 67 is the shape it takes, and it happened four times in one
+# session and was only caught by grepping for it. Neither is a duplicate, so
+# the check above passes both. `docs/decisions.md` §71.
 check-decisions:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -582,6 +591,31 @@ check-decisions:
             grep -nE "^(## ${id//./\\.}\. |### ${id//./\\.} )" "{{decisions_file}}"
         done
         echo "^ these sections share a number, and 'just decision' reaches only the first"
+        exit 1
+    fi
+
+    order=$(awk '
+        /^## [0-9]/ {
+            rest = $0; sub(/^#+ /, "", rest)
+            p = index(rest, " "); n = substr(rest, 1, p - 1) + 0
+            if (n < top) print FNR ": ## " n " comes after ## " top
+            top = n; lastsub = 0
+            next
+        }
+        /^### [0-9]/ {
+            rest = $0; sub(/^#+ /, "", rest)
+            p = index(rest, " "); id = substr(rest, 1, p - 1)
+            split(id, parts, ".")
+            subtop = parts[1] + 0; subnum = parts[2] + 0
+            if (subtop != top)
+                print FNR ": ### " id " is not under its own ## " top
+            else if (subnum < lastsub)
+                print FNR ": ### " id " comes after ### " top "." lastsub
+            lastsub = subnum
+        }' "{{decisions_file}}")
+    if [ -n "$order" ]; then
+        echo "$order"
+        echo "^ decisions.md section numbers are out of order (docs/decisions.md §71)"
         exit 1
     fi
 
@@ -685,6 +719,41 @@ check-decisions-selftest:
     if {{just_executable()}} --set decisions_file "$dir/twice-sub.md" \
         check-decisions >/dev/null 2>&1; then
         echo "two subsections numbered 1.1 passed check-decisions"; exit 1
+    fi
+
+    # Descending: §1 lands after §2, which a renumbering that skips one section
+    # leaves behind.
+    cat > "$dir/descending.md" <<'MD'
+    ## 2. Second
+    ## 1. First
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/descending.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "## 1. after ## 2. passed check-decisions"; exit 1
+    fi
+
+    # Descending within a section: §1.1 lands after §1.2.
+    cat > "$dir/descending-sub.md" <<'MD'
+    ## 1. First
+    ### 1.2 Beta
+    ### 1.1 Alpha
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/descending-sub.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "### 1.1 after ### 1.2 passed check-decisions"; exit 1
+    fi
+
+    # Wrong parent: §1.2 is left under §2 by a renumbering, exactly the way
+    # `### 64.3` ended up under `## 69.` in the real file.
+    cat > "$dir/wrong-parent.md" <<'MD'
+    ## 1. First
+    ### 1.1 Alpha
+    ## 2. Second
+    ### 1.2 Beta
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/wrong-parent.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "### 1.2 under ## 2. passed check-decisions"; exit 1
     fi
 
 # One item of Rust source, by its name, with its doc comment and attributes.
