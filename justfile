@@ -1225,9 +1225,22 @@ check-t-selftest:
         ;;
     esac
 
-# CI is about to fetch the STEP corpus (see `RCAD_STEP_CORPUS` above) from
-# upstream instead of having it on disk, so "CI is green" and "my machine is
-# green" need to mean the same corpus. `corpus/manifest.sha256` pins the
+# `corpus/fetch.sh` rebuilds the STEP corpus from upstream, so a runner can have
+# one without this repo carrying 133 MiB of other people's CAD files. The pins
+# live in the script and the evidence behind them in `corpus/sources.md`.
+#
+# It refuses a destination that is not empty, which is the whole safety story: a
+# corpus is somebody's only copy, it is in no git repository, and a mistyped
+# path must not be a way to lose it. So rebuilding over an existing corpus means
+# deleting it first, deliberately.
+#
+# Rebuilds the STEP corpus from upstream into `RCAD_STEP_CORPUS`.
+fetch-corpus destination=RCAD_STEP_CORPUS:
+    ./corpus/fetch.sh "{{destination}}"
+
+# CI fetches the STEP corpus (see `RCAD_STEP_CORPUS` above) with that script
+# rather than having it on disk, so "CI is green" and "my machine is green" have
+# to mean the same corpus. `corpus/manifest.sha256` pins the
 # sha256 of every `.stp`/`.step` file the test suite reads (`files_under` in
 # `crates/rcad-step/tests/every_file_in_the_corpus_reads.rs` — the walk that
 # picks those two extensions, case-insensitively, and nothing else); this

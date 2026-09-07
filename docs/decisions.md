@@ -741,6 +741,7 @@ slips, it slips there.
 | `ProvenanceSink` streaming | On demand | §5 — no caller yet |
 | Branded lifetimes for cross-model keys | Indefinitely | Debug-checked model id is the pragmatic fix |
 | A `&Policy` on `where_a_closed_crossing_starts` | A consumer that fuses tolerantly | §13 — the gap is real and nothing named is standing on it |
+| `check-front-door` (a check that no test or bench under `crates/rcad` imports `rcad_geom` directly) | On demand | §13 rule 3 — the one violation found is already fixed by hand; nothing yet needs it enforced |
 
 **Amended 2026-08-30.** §1.7 inserts M2.5, and the planar fuse is where scratch
 allocation first becomes measurable — candidate pair lists, split pieces, image
@@ -809,6 +810,24 @@ and half a dozen test files call, for a caller nobody has named — which is
 exactly the trade §13 exists to settle. The doc comment tells such a caller to
 check itself against the door rather than against the census, and that sentence
 is the deferral's mitigation.
+
+**Amended 2026-09-07: a `check-front-door` recipe is deferred, not built, and
+the gap it would close is real.** The rule is that a consumer of `rcad` goes
+through the front door — no test or bench under `crates/rcad` should import
+`rcad_geom`, or any crate underneath the facade, directly. One did:
+`crates/rcad/tests/coordinates_that_span_too_wide_a_range.rs` reached past the
+facade for `DynamicRange`, which the facade did not re-export. `5692a7f` added
+the re-export and `50a5fb7` swapped the import for it. Measured before the
+pair, `grep -rn "rcad_geom::" crates/rcad/tests crates/rcad/benches` gives 1
+hit — that file, importing `DynamicRange`; measured at `50a5fb7`, 0.
+
+**Nothing prevents it recurring.** No recipe in `justfile`, no lint, and no
+test asserts that count stays at 0 — a future test file can add the same
+import and `just default` will not see it. The lane that found and fixed the
+gap declined to build the recipe, citing §13 rule 3: no named consumer beyond
+the one violation it would have caught, no build. Mattias's answer, asked for
+directly: defer the recipe, record the gap. So the gap is known, the check is
+deliberately not built, and the answer to "can this recur" is yes.
 
 ---
 
@@ -19230,6 +19249,108 @@ be done or cannot be reached (§16.10), and it finds those. What it cannot see i
 a claim that is true about everything it sampled and silent about what it did
 not. **The control for that is arithmetic, not reading**: a balance assertion,
 or a census one level finer than the claim.
+
+### 62.8 Six instances, three of them from inside the work of writing this section
+
+The two arms above are the mechanism, found in a test file's own sampling. This
+week it also fired in prose, about the tools this project reads its own state
+through — and it fired a third time inside the sessions doing the finding.
+Mattias asked for the count; it moved twice while the question was open, which
+belongs in the record beside the instances themselves. There are six.
+
+1. **Four became seven, in two files.** `justfile` and `CLAUDE.md` both said
+   four `rcad-step` test files skip without a corpus. `grep -rln
+   RCAD_STEP_CORPUS --include=*.rs` gives seven, and none of them skip —
+   `every_file_in_the_corpus_reads.rs:149` panics rather than passing, on
+   purpose, with the message "this test does not skip on a missing corpus."
+   Fixed in `fe602b8`.
+2. **A header outlived the sentence it opened with.** `.github/workflows/ci.yml`
+   opened "This workflow has never run. There is no remote and no CI." `origin`
+   had pointed at GitHub for at least a day by the time that sentence was still
+   being read as current. Fixed in `1f880ea`.
+3. **"Ten consecutive failures, every one in the tool install, none reaching a
+   check."** `fe602b8` wrote that into `CLAUDE.md`, read off `gh run list`'s
+   first page — ten rows, every one a push to `main`, the only branch this
+   repository's CI runs on. Run `33916660058` sits on that same page: it took
+   11m28s and passed `just check` and `just lint` before failing on the corpus.
+   `949ea07` corrected it by counting all 26: zero successes, ever — a fact
+   only a fix can falsify, where a count goes stale on the next push.
+4. **The same sentence, in a different file, independently, within the hour.**
+   `1f880ea` wrote "fired on ten pushes to `main` … every one failed in 11–25
+   seconds without reaching a single check" into `ci.yml`'s own header — the
+   same first page, read by the session correcting the *previous* false
+   header. `bb90345` corrected it, in its own words: "That was false, and it
+   was mine."
+5. **A handoff document dropped its own `Q22`.** A session's list of its own
+   open questions, kept in its scratchpad, silently lost one entry and read as
+   complete. The scratchpad dies with the session by design (this file's own
+   "Never in the tree"), so this instance is not re-checkable the way the other
+   five are — it stands on the session's contemporaneous report and nothing
+   else.
+6. **375 MB is the directory; the tests read 133.4 MiB of it.** `ci.yml` and a
+   session's notes called the corpus "375 MB of third-party files," and `du -sh`
+   on the corpus directory does give `375M` — true, of the directory.
+   `every_file_in_the_corpus_reads.rs:175-180` opens only `.stp` and `.step`,
+   case-insensitively. Counted directly: the corpus holds 520 files, of which
+   367 are `.stp`/`.step` totalling 139867388 bytes (133.4 MiB); the other 153
+   — `.pdf`, `.prt`, `.SLDPRT`, `.CATPart`, `.ipt` and others — are never opened
+   by a test.
+
+Three and four are the sharpest pair, and worth naming on their own: **`gh run
+list` defaults to one page, and for a repository whose CI runs only on pushes
+to `main`, that page is every push to `main`.** The natural invocation and the
+blind invocation are the same invocation — §62.3's "the obvious choice and the
+blind choice were the same choice," said about a tool instead of a float, and
+it took two sessions saying it independently inside one hour to notice.
+
+### 62.9 Two more, in tooling rather than prose
+
+A run of `mise exec -- just default` was still in progress when a watcher timed
+out on it and grepped `gh run view --log-failed` anyway. On a run that has not
+finished, that grep returns nothing, so it printed "no failure found" about a
+job that had not failed — it had not run its course yet. The rule this earns,
+in its own words rather than a repeat of "assert both directions": **an
+observable that reads empty in the failure case cannot be the whole test**,
+because it reads exactly as empty when the run is simply not done.
+
+Run `34150494501` came back `conclusion: failure` after 0 seconds — `createdAt`
+and `updatedAt` are the same second, `jobs` is empty, and
+`repos/mattiasgronlund/rcad/commits/47264160.../check-runs` gives
+`total_count: 0`. That is not a fast failure, it is a run that never started —
+its push, `4726416`, carried a workflow file GitHub could not schedule a job
+from — and there is nothing to annotate. A 0 s failure and a failing step want
+reading differently, and the trap under both is the same one: the evidence that
+would tell them apart is missing in exactly the case you need it.
+
+### 62.10 A verification that inherited the claim's own blind spot
+
+This crate's own name is spelled two ways — `rcad_geom` in code, `rcad-geom` in
+prose about paths and dependencies — and `CLAUDE.md` says so in words. The trap
+was already named. Two sessions walked into it anyway, from opposite
+directions, inside a day.
+
+Re-derived at `de7a932` (branch `facade-range-check-pairing`): `grep -rn
+"rcad_geom" crates/rcad/tests crates/rcad/benches` gives 3; `grep -rnE
+"rcad_geom|rcad-geom" crates/rcad/tests crates/rcad/benches` gives 7, across 5
+files. Of the 7, 4 spell it with a hyphen and are invisible to the narrower
+grep.
+
+**Not the same shape as §62.1/§62.2.** Those were a sweep whose sample set
+could not reach the answer it needed. Here a number had already been checked
+once: a stale claim of "prose in five places" was re-measured down to 3, and
+that re-measurement is what `de7a932`'s own commit message publishes. The
+grep behind it was `rcad_geom` alone — the same underscore-only blind spot the
+claim it was correcting already had. **Checking a number is supposed to be the
+activity that catches this, and the check inherited the error instead of
+catching it.** `rcad-51` caught it only by reproducing the grep rather than
+reading the commit — a third pass, and the only one of the three that
+recomputed instead of trusting the pass before it.
+
+The chain is a claim, a verification that repeats the claim's own error, and a
+third pass that catches it only because it recomputed. That is the sharper
+finding: a verification is not exempt from the sample-set question just
+because it is a verification. "Did the check see both spellings" has to be
+asked again at every hop, including the hop whose job is to ask it.
 
 ## 63. One grammar, two readers that disagreed, recorded 2026-09-07
 
