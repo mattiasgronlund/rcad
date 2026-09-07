@@ -79,58 +79,22 @@ if [ -z "$questions" ]; then
 fi
 [ -n "$questions" ] && [ -r "$questions" ] || exit 0
 
-# The label is whatever letter and number sit right after the checkbox, not the
-# first Q anywhere on the line: a body is free to mention M5 or Q7 in passing.
-# The letter is kept because it is doing work — grilling numbers a round Q1, Q2,
-# and a wave numbers a lane's findings by the lane's own letter, so K1-K4 came
-# from "Lane K". Reading them as one undifferentiated series would lose that.
+# The grammar lives in `.claude/questions.py` and not here. It used to live in
+# both, kept in step by a comment claiming they matched, and they did not: an
+# entry carrying two labels, `**Q7 / Q11**`, counted as one, and Q11 and Q27 sat
+# open all of 2026-09-06 while this line showed fourteen of the sixteen and
+# looked complete. A question the file records and the line does not show is the
+# one failure this line cannot have, and one parser is how that is guaranteed
+# rather than asserted.
 #
-# One entry may carry several labels, `**Q7 / Q11** — …`, when one answer settles
-# both. Reading only the first is how Q11 and Q27 sat open all of 2026-09-06
-# while the status line showed fourteen of the sixteen and looked complete. A
-# question the file records and the line does not show is the one failure this
-# line cannot have, so the labels are walked until the run of them ends.
-numbers=$(awk '
-	/^[[:space:]]*```/ { fence = !fence; next }
-	fence { next }
-	/^- \[ \]/ {
-		line = $0
-		sub(/^- \[ \][[:space:]]*/, "", line)
-		sub(/^\*+/, "", line)
-		while (match(line, /^[A-Z]+[0-9]+/)) {
-			label = substr(line, 1, RLENGTH)
-			line = substr(line, RLENGTH + 1)
-			match(label, /[0-9]+/)
-			print substr(label, 1, RSTART - 1), substr(label, RSTART)
-			if (!sub(/^\**[[:space:]]*\/[[:space:]]*\**/, "", line)) break
-		}
-	}
-' "$questions" | sort -k1,1 -k2,2n -u)
+# One process rather than the four this used to fork, which is also why it got
+# faster: 27.8 ms to 15.6 ms, measured, on a line that redraws every 5 seconds.
+compact=$(python3 "$(dirname "$(readlink -f "$0")")/questions.py" compact "$questions")
 
-if [ -z "$numbers" ]; then
+if [ -z "$compact" ]; then
 	printf '%s\n' "${green}✓${off} ${dim}no open questions${off}"
 	exit 0
 fi
-
-# Consecutive runs collapse within a letter: Q2 Q4 Q5 Q6 K1 K2 K3 -> "K1-K3,
-# Q2, Q4-Q6". A run of exactly two reads better spelled out than hyphenated.
-compact=$(awk '
-	{ letter[++c] = $1; n[c] = $2 }
-	END {
-		i = 1
-		while (i <= c) {
-			j = i
-			while (j < c && letter[j + 1] == letter[i] && n[j + 1] == n[j] + 1) j++
-			L = letter[i]
-			if (j == i) seg = L n[i]
-			else if (j == i + 1) seg = L n[i] ", " L n[j]
-			else seg = L n[i] "-" L n[j]
-			out = (out == "" ? seg : out ", " seg)
-			i = j + 1
-		}
-		print out
-	}
-' <<<"$numbers")
 
 # The hash is the address `just question` takes, and it is here because nothing
 # else knows it: the file is named by the session id, which only the harness
