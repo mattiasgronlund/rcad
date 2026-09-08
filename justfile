@@ -7,7 +7,7 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus lint test check-t-selftest deny
+default: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -387,8 +387,8 @@ check-default-runs-every-check:
     listed=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "18" ]; then \
-        echo "found $n check-* recipes, expected 18"; \
+    if [ "$n" != "19" ]; then \
+        echo "found $n check-* recipes, expected 19"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -1544,10 +1544,24 @@ check-clean-targets-selftest:
 # worktree is provably safe, and this repo learned the hard way that nothing
 # reclaims them on its own: the harness sweep keeps any worktree holding unpushed
 # commits, so with no remote configured it kept all 38 for ever (§50.8).
-prune-worktrees:
+#
+# Two defects, both demonstrated before either fix was written (§76). First,
+# `main` is an ancestor of itself, so the tree holding it used to fall through
+# to `remove` like any merged lane — this actually happened on 2026-09-08. It
+# gets its own check, ahead of the ancestry test, because §60 says `main` lives
+# in a worktree and never the hub; this recipe honoring that is not optional.
+# Second, a detached tree reports its branch as the literal string `HEAD`, and
+# resolving that string as a ref used to go through whichever tree the command
+# was standing in — from the tree holding `main`, `HEAD` resolved to `main`
+# itself, trivially an ancestor, so a clean detached tree was removed no matter
+# what it held. Its commits sit on no branch, so nothing else protects them: a
+# detached tree is now judged by its own commit (`git -C "$tree" rev-parse
+# HEAD`, no branch name involved at all) and kept unconditionally, the same way
+# a locked or dirty tree is.
+prune-worktrees dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
-    repo=$(git rev-parse --show-toplevel)
+    repo=$(git -C "{{dir}}" rev-parse --show-toplevel)
     kept=0
     # A lock means an agent is working in there right now — git holds one for the
     # life of the agent and releases it on exit. Never force past it: the pid in
@@ -1557,22 +1571,78 @@ prune-worktrees:
     for tree in $(git -C "$repo" worktree list --porcelain | awk '/^worktree /{print $2}'); do
         [ "$tree" = "$repo" ] && continue
         branch=$(git -C "$tree" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        commit=$(git -C "$tree" rev-parse HEAD 2>/dev/null || echo "")
+        name="$branch"
+        [ "$branch" = "HEAD" ] && name="detached at $(git -C "$tree" rev-parse --short HEAD 2>/dev/null || echo "$commit")"
         if grep -qxF "$tree" <<<"$locked"; then
             echo "kept (locked, an agent is using it): $tree"
             kept=$((kept + 1))
         elif [ -n "$(git -C "$tree" status --porcelain 2>/dev/null)" ]; then
             echo "kept (uncommitted changes): $tree"
             kept=$((kept + 1))
-        elif [ -z "$branch" ] || ! git -C "$repo" merge-base --is-ancestor "$branch" main 2>/dev/null; then
-            echo "kept (not merged into main): $tree [$branch]"
+        elif [ "$branch" = "main" ]; then
+            echo "kept (holds main, which a worktree carries by rule, never the hub -- §60): $tree"
+            kept=$((kept + 1))
+        elif [ "$branch" = "HEAD" ]; then
+            echo "kept (detached; its commits are on no branch, so nothing else protects them): $tree [$name]"
+            kept=$((kept + 1))
+        elif [ -z "$commit" ] || ! git -C "$repo" merge-base --is-ancestor "$commit" main 2>/dev/null; then
+            echo "kept (not merged into main): $tree [$name]"
             kept=$((kept + 1))
         else
             git -C "$repo" worktree remove --force "$tree"
-            echo "removed: $tree"
+            echo "removed: $tree [$name]"
         fi
     done
     git -C "$repo" worktree prune
     echo "$kept worktree(s) kept; their branches are untouched either way"
+
+# Pins the two defects fixed above (§76) — `prune-worktrees` had no selftest at
+# all, which is exactly how both survived to be found live.
+#
+# The fixture builds five worktrees off a throwaway `main` and runs the sweep
+# from a sixth, so `main`'s own tree is judged rather than skipped as "the tree
+# you are standing in". `held` is locked, `dirty` carries an uncommitted file,
+# `loose` is detached, and `merged` is fast-forwarded into `main` before the
+# sweep runs, so its commit really is `main`'s ancestor. A guard that kept
+# everything would pass the first four and only the fifth catches it.
+check-prune-worktrees-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'git -C "$dir/main" worktree unlock "$dir/held" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    git init -q -b main "$dir/main"
+    git -C "$dir/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m root
+    git -C "$dir/main" worktree add -q "$dir/runner" -b runner
+    git -C "$dir/main" worktree add -q "$dir/held" -b held
+    git -C "$dir/main" worktree add -q "$dir/merged" -b merged
+    git -C "$dir/main" worktree add -q "$dir/dirty" -b dirty
+    git -C "$dir/main" worktree add -q --detach "$dir/loose"
+    git -C "$dir/merged" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "landed work"
+    git -C "$dir/main" merge -q merged
+    echo change >"$dir/dirty/uncommitted.txt"
+    git -C "$dir/main" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/held"
+    got=$(just prune-worktrees "$dir/runner")
+    fail() {
+        echo "prune-worktrees drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    [ -d "$dir/main" ] || fail "the worktree holding main was removed"
+    [ -d "$dir/held" ] || fail "a locked worktree was removed while an agent was using it"
+    [ -d "$dir/dirty" ] || fail "a worktree with uncommitted changes was removed"
+    [ -d "$dir/loose" ] || fail "a clean detached worktree was removed"
+    [ ! -d "$dir/merged" ] || fail "a clean lane branch merged into main was not removed"
+    grep -qF "kept (holds main" <<<"$got" \
+        || fail "the tree holding main was not given its own kept reason"
+    grep -qF "kept (locked, an agent is using it): $dir/held" <<<"$got" \
+        || fail "the locked worktree was not reported as kept"
+    grep -qF "kept (uncommitted changes): $dir/dirty" <<<"$got" \
+        || fail "the dirty worktree was not reported as kept"
+    grep -qF "kept (detached" <<<"$got" \
+        || fail "the detached worktree was not reported as kept"
+    grep -qF "removed: $dir/merged" <<<"$got" \
+        || fail "a merged lane branch was not reported as removed"
 
 # Who is working where, right now. Run this before you touch a shared tree.
 #
