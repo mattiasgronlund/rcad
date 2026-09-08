@@ -7,7 +7,7 @@
 
 use rcad_geom::{DYNAMIC_RANGE_CHECK, Isometry, Point, Scale};
 use rcad_predicates::{
-    Approximation, Cause, Decision, Level, Measures, Policy, ProvenanceLog, Record, Severity,
+    Approximation, Cause, Level, Measures, Policy, ProvenanceLog, Record, Severity,
 };
 use rcad_topo::{Containment, Error, Invalid, Model, Profile, ProfileBuilder};
 
@@ -415,7 +415,7 @@ fn a_crossing_that_could_not_be_named_stays_undecided_and_does_not_become_bad_ge
         "where a plane and a sphere cross",
         &[],
         Level::Interval,
-        Decision::Undecidable { enclosure: 8e-14 },
+        8e-14,
         Measures::Area,
     ));
 

@@ -446,6 +446,14 @@ The roadmap says "never panic, return `EvalError`" (§4.5). `CLAUDE.md` says
 | Broken internal invariant — edge with three coedges, key resolving to a freed slot, approximation grew | **panic** | It is a bug; emitting a corrupt solid is worse than dying |
 | Cannot decide | `Decision::Undecidable` | It is a result, not a failure |
 
+**The middle row is amended by §66.** It still holds in a debug build. In a
+release build the response is a panic only where the operation has already
+written into the caller's model and cannot take it back; where the check can be
+made *before* the write, the response is an `Err` that says "this kernel has a
+bug", which is a third door and not `Error::Undecidable`. What the row must
+never mean is what a release build actually does today — neither of the two,
+because the check does not run at all (§66.1).
+
 ### 4.2 Error types
 
 `thiserror` enums per crate. No `anyhow` in library code. A `#[non_exhaustive]
@@ -464,6 +472,10 @@ O(n²) and the suite stops being runnable long before M4.
 
 - **After every mutation, in debug**: cheap checks on *touched entities only* —
   keys resolve, coedge count, orientation agrees, approximation did not grow.
+  **Amended by §66: "in debug" is withdrawn and they run always.** The O(n²)
+  above is the full sweep's and was never measured for these; measured, they cost
+  50–65 ns per face of the solid they are handed and the full sweep costs 3.4–4.4
+  µs per face of the whole model (§66.2).
 - **At test and import boundaries**: full `Model::validate()`, public API, called
   by `proptest` and by anyone importing untrusted data.
 - **Always, including release**: the approximation-growth check. One comparison,
@@ -19508,3 +19520,1526 @@ Nothing checks that CLAUDE.md's description of the grammar matches the parser.
 `check-default-runs-every-check` exists because a claim in CLAUDE.md wants a test
 (§15.6), and this is the same kind of claim with no such test. It has not drifted
 yet, which is the only reason.
+
+---
+
+## 66. What a release build hands back when the kernel is wrong, recorded 2026-09-07
+
+§4.1 gives a broken internal invariant one response, a panic, and the reason is
+that emitting a corrupt solid is worse than dying. §4.3 then wrote "in debug"
+beside the checks that would notice, and gave a reason about **test-suite
+runtime**: a full sweep after every operation makes an *n*-operation test O(n²).
+
+Those two sentences are about different things and the second quietly became the
+policy for the first. In a release build `Model::check_touched_solid` and its
+three siblings open with `if !cfg!(debug_assertions) { return; }`
+(`crates/rcad-topo/src/model.rs:547, 564, 575, 632`) and
+`Assembly::commit`'s post-write sweep is gated the same way
+(`crates/rcad-topo/src/fuse/assemble.rs:300`). So the release answer to a broken
+invariant is neither of §4.1's two: no panic, no `Err`, and a solid that does not
+validate comes back as `Ok`. §61 is that bug found by a fuzzer and fixed at the
+door; this section is about the door being the only thing that was between it and
+a caller.
+
+The proposal this section settles is Mattias's: keep the panic in debug, and in
+release record enough for a post-mortem and return an error that says *internal
+error*. What follows measures the reason §4.3 gave, so that the policy is decided
+by a number rather than by an argument about a different check.
+
+### 66.1 What a release build does today, replayed
+
+Three runs of one harness against `a6f03b8`, built with plain `cargo build
+--release` — the release profile has `debug-assertions` off, and
+`.cargo/config.toml` supplies the `-C target-cpu=x86-64-v3` that `inari` needs,
+so no `RUSTFLAGS` is involved and nothing clobbers it. The harness is the fuzz
+target's own decode and split (`fuzz/fuzz_targets/two_solids_fused_by_a_stranger.rs`),
+with the one difference that it **keeps** the fuse's answer instead of doing
+`let _ =` on it, and asks `Model::validate` about every model the fuse called
+`Ok`.
+
+- **341 crash artifacts** from the two soak trees: 12 halves reached the fuse, 7
+  answered `Ok`, and **0** of those fail `Model::validate`. §61 and the four
+  lanes merged into `a6f03b8` closed what was there.
+- **The 9 975-input corpus** (4 835 + 5 140 across the same two trees): 2 923
+  halves reached the fuse, 1 060 answered `Ok`, and **0** of those fail
+  `Model::validate` *under the policy the fuse itself ran under*.
+- The same 1 060, validated a second time under `Policy::certified()`: **16**
+  fail, all sixteen fused under `Policy::tolerant`, **fifteen under
+  `Rule::Difference` and one under `Rule::Union`**, ten with a span of `inf`.
+  The complaint is always `Invalid::DynamicRangeTooWide`.
+
+  The rule count was first written here as thirteen, which was wrong. The rule
+  is the input's first byte mod 3 (`fuzz_targets/two_solids_fused_by_a_stranger.rs:97`),
+  and fifteen of the sixteen carry `0xb9` against `2fb467fc`'s `0x84` — counted
+  off the bytes, twice, by two people who did not share a harness.
+
+**Those 16 are not a release-build hole, and saying so is the point of measuring
+them.** They were carried as an unexplained residue — sixteen wrong answers on
+both trees, unchanged by the fixes. What the second validation shows is that they
+are the *same* answer read under a stricter policy than the one that produced it:
+`Assembly::commit` sweeps under the operation's own `policy` (`assemble.rs:300`
+and `:309`), so a debug build accepts these too, and a debug build and a release
+build agree about all sixteen. Nothing here is decided by how the caller was
+compiled.
+
+What they do show is a separate thing worth its own row: **"valid" is not a
+property of a model on its own.** A `Policy::tolerant` fuse can build a solid
+whose coordinates span `inf` and both the fuse and `Model::validate` will call it
+sound, and the same model handed to a certified caller is broken. That is left
+open in §66.7.
+
+### 66.2 What the touched checks cost in release — the measurement
+
+Three release binaries from the same tree, differing only in a forced-on gate,
+run interleaved so that machine noise falls on all three alike, best of five:
+
+| Workload | Today | Touched checks on | Both on |
+|---|---|---|---|
+| 144 unions of cubes, growing to a 98-face solid | 7.349 s | 7.817 s | 7.712 s |
+| 200 000 `place_solid` on a 202-face solid | 3.03 ms | 2.001 s | 2.019 s |
+| 2 000 `add_extrusion` of a 62-face solid | 112.8 ms | 113.6 ms | 115.0 ms |
+
+The extrusion row is the only one where five runs are not enough — the gap is
+smaller than the spread — so it was run again on its own, fifteen interleaved
+pairs, giving 103.7 ms against 111.9 ms. That is the figure quoted below.
+
+"Touched checks on" replaces the four `!cfg!(debug_assertions)` guards with
+`false`. "Both on" also removes the `cfg!(debug_assertions) &&` from
+`assemble.rs:300`, so the fuse sweeps the whole model twice per call in release
+as well.
+
+Two figures come out of that, and they are what the whole argument turns on.
+
+**The touched checks cost 50–65 ns per face of the solid they are handed.**
+`place_solid` does nothing else at all — it rewrites one isometry per shell — so
+it isolates them: 15.2 ns per call becomes 10.0 µs on a 202-face solid, which is
+49 ns a face. `add_extrusion`, timed on its own over fifteen interleaved pairs,
+goes from 51.9 µs to 56.0 µs per 62-face solid, which is 66 ns a face.
+
+**The full sweep costs 3.4–4.4 µs per face of the whole model.** Measured with
+no source edit at all, since `Model::validate` is public: 209 µs at 62 faces,
+2.14 ms at 620, 22.9 ms at 6 200, 108 ms at 24 800. Linear, as it should be.
+
+So the checks §4.3 sent to debug are **seventy times cheaper per face** than the
+sweep §4.3's O(n²) is about, and they are taken over *one solid* rather than over
+the whole model, which is the half that makes them not quadratic at all. On a
+model of 400 solids a sweep per operation is 108 ms and a touched check is 4 µs:
+a factor of 25 000, and only one of the two grows with the model.
+
+What that buys, per operation:
+
+- **A fuse: 0.01%.** 51 ms per union in the chain above, against about 5 µs of
+  checking. The measured +6.4% is smaller than the baseline's own spread across
+  five runs (7.35 s to 9.17 s), so the honest statement is that it is below this
+  machine's noise floor, and the per-face figure says why.
+- **Building a solid from scratch: +7.9%.** The one real cost. `add_extrusion`
+  spends 52 µs on a 62-face solid and 4.1 µs of checking is a visible fraction of
+  it. This is the number that would show up in an importer.
+- **`Model::place_solid`: ×660.** 15.2 ns becomes 10.0 µs. In ratio this is
+  enormous and in absolute terms it is ten microseconds on a 202-face solid, so
+  an application moving a solid sixty times a second spends 0.06% of a frame on
+  it. It is still the one call where the checks are the entire cost, and a
+  transform-heavy loop over a large assembly is where somebody would notice.
+
+**§4.3's stated reason does not survive this.** "The test suite becomes
+quadratic" is true of `Model::validate` and false of the touched checks; it was
+never measured for them, and measured it is between nothing and eight percent.
+A decision about test-suite runtime is not a decision about what a released
+kernel hands a caller, and this is the number that says so.
+
+### 66.3 So the checks run always, and then the question is what they do
+
+The gates go. `check_touched_solid`, `check_touched_face`, `check_touched_wire`
+and `check_touched_edge` run in every build, at 50–65 ns a face, and
+`assemble.rs:300`'s post-write sweep runs in every build too — it is one
+`Model::validate` of a model the fuse has already spent tens of milliseconds on,
+and both binaries above say it is free at that scale.
+
+That is the half of the proposal the number decides on its own, and it is worth
+separating from the half it does not: **running the check is not the same
+decision as what the check does when it fails.** Today a release build cannot
+panic because it never looks. Once it looks, §4.1's panic is back by default, and
+Mattias's proposal is that release should instead record and return. §66.4 is
+where that stops being uniform.
+
+### 66.4 Which operations can return `Err`, and which cannot
+
+The line is not "does this operation document `# Atomic`". It is **can the check
+be made before anything the caller can see has changed** — structural
+confinement, not a paragraph about blast radius. Every entry point that mutates a
+`Model`, with where its commit is:
+
+| Entry point | Where it writes | Verdict |
+|---|---|---|
+| `SolidBuilder::build` (`builder.rs:320`) | scratch `Model`, swept, then the caller's | **Convert.** Structural |
+| `Model::fuse` (`fuse/mod.rs:149`) | the caller's model, `assemble.rs:303` | Panic, until it gets a scratch |
+| `Model::add_cube` (`build.rs:495`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::add_extrusion` (`build.rs:533`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::add_round_bar` (`build.rs:623`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::add_ball` (`build.rs:719`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::add_bar_cut_off_by` (`build.rs:805`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::place_solid` (`model.rs:280`) | existing entities, in place | **Panic.** Nothing to undo it with |
+| `Model::set_vertex_approximation` (`model.rs:308`) | one field, in place | **Panic** |
+| `Model::set_edge_approximation` (`model.rs:337`) | one field, in place | **Panic** |
+| `Model::set_face_approximation` (`model.rs:381`) | one field, in place | **Panic** |
+
+`SolidBuilder::build` is the only one that is already right, and it is worth
+reading because it is the shape every other row wants: it writes the draft into a
+`Model::new(model.scale())`, runs the full sweep on *that*, returns the sweep's
+`Err` if it fails, and only then writes into the caller's model
+(`builder.rs:330-340`). Its `check_touched_solid` on the real model afterwards is
+a second write of a description that just passed a full sweep, so it should never
+fire — and if it did, the caller's model would already have it.
+
+**The fuse is not confined the way it looks, and this is the correction that cost
+the most to find.** `Model::fuse` documents `# Atomic` — "the whole answer is
+worked out in scratch and written in one go. Any `Err` leaves the model
+byte-identical" — and it is true of every error the operation raises, because
+`Scratch`, `Assembly` and `Chosen` are plain data and every refusal happens
+before `commit`. The scratch `Model` at `assemble.rs:1112` is **not** the answer
+being built: it is a throwaway used to ask which shell nests inside which, by
+measuring volumes. `Assembly::commit` takes `model: &mut Model` and
+`write_into(model, …)` at `assemble.rs:303` writes straight into the caller's
+arena. The sweep at `:309` that would catch a corrupt answer runs **after** that
+write.
+
+So converting the fuse's panic to an `Err` today would hand the caller an error
+*and* leave the corrupt solid in their model. The write is purely additive —
+`write_into` only calls `add_vertex`, `add_edge_running`, `add_coedge`,
+`add_wire_of_steps`, `add_face`, `add_shell`, `add_solid`, and the doc comment's
+"nothing is removed from the arena" holds — so the *inputs* survive. That is not
+enough: the orphan entities stay in the arena, and every later `Model::validate`
+fails on them. An `Err` that permanently poisons the model is worse than the
+panic, not better.
+
+**Nothing in this crate can undo a write.** `grep -n '\.remove(' crates/rcad-topo/src/`
+returns thirteen hits and every one is either a test helper reaching through
+`data_mut()` or `serialize.rs` tidying a model it is still building. There is no
+rollback and no arena free-list walk, so "additive" does not mean "undoable".
+
+The fix is the shape `SolidBuilder::build` already has, and the same measurement
+pays for it: `Assembly::commit` writes into a scratch `Model`, sweeps it, and
+copies into the caller's only if the sweep passed. The cost is one extra copy of
+the answer's entities plus one sweep of a model the size of the answer, against a
+fuse that costs 51 ms. The `add_*` builders in `build.rs` are the same change,
+and they are the ones where 66.2's +7.9% would matter — an importer that pays a
+scratch-and-copy per solid pays more than 4 µs. That is a real trade and it is
+why those rows say "until", not "never".
+
+`place_solid` is the one row where the answer is a settled panic. It overwrites
+`used.loc` on every shell of an existing solid before checking anything
+(`model.rs:289-293`), and the previous isometries are gone. The inverse isometry
+would restore them — `movement` is invertible or `Isometry::translation` would
+not have built it — so this is a *gap* and not a *limit* in §16.10's sense, and
+§66.7 keeps it open rather than closing it with a paragraph. Until somebody
+writes that, there is nothing to return an `Err` *to*: the model is already
+wrong.
+
+### 66.5 Two doors, and why they must not be one
+
+`Error::Undecidable { records }` means the arithmetic honestly could not settle
+something, and a caller is *supposed* to answer it by retrying under a more
+tolerant policy — that is what `Policy` is for and what §4.2 says the variant is.
+"This kernel has a bug" arriving through that same door puts the retry loop on
+top of a computation that is already wrong, and a tolerant retry is exactly the
+thing most likely to accept the wrong answer. So the two must be
+distinguishable without reading a string.
+
+**A new variant on `Error`, not a new error type.** `Error::TheKernelIsWrong`,
+carrying an owned report. Considered and rejected: a separate `KernelBug` type
+returned as `Result<T, Either<Error, KernelBug>>` from every entry point. It is
+the more honest shape in the type system and it is worse here, because every
+public entry point already returns `Result<_, Error>`, a second type forces a sum
+at every call site in `rcad` and in every consumer, and the `From` impl that
+would make that bearable is precisely the place the two get merged back into one
+again. `Error` is `#[non_exhaustive]` (§40), so adding the variant is not a
+breaking change, and the wildcard-arm rule means every existing match keeps
+compiling while `just check-wildcards` still names what is unhandled.
+
+**The name must not be able to be read as a refusal.** `Error::Internal` is what
+this would usually be called and it is the wrong name here, because a caller
+skimming variants sorts them into "the input was bad", "it could not decide" and
+"something else", and "something else" is where a retry loop puts its default
+arm. The variant says what happened to *the kernel*, not to the request.
+
+**What a caller does with it: report it, and do not retry.** In that order and
+nothing else. Retrying under a tolerant policy re-runs an operation whose
+intermediate state is already known to be wrong. Retrying under the *same* policy
+is deterministic and will fail the same way. Falling back to another operation
+uses a model that may already hold what the check tripped on. The doc comment on
+the variant says this, and so does its `Display`, because the string is what ends
+up in somebody's bug report.
+
+### 66.6 Where the post-mortem record goes, and what it costs when nothing is wrong
+
+`ProvenanceLog` is the obvious sink and it is the wrong one, for the same reason
+§66.5 gives about the door. It is a `Vec<Record>` of decisions the arithmetic
+could not certify (§5), it is what `Error::Undecidable` carries, and
+`log.worst_wobble` is read to *decide* whether an operation refuses
+(`fuse/mod.rs:183`). A kernel bug written into it is a record that reads as one
+more undecided decision, and any consumer summing wobble over the log would be
+summing a bug into a tolerance. It also breaks the rule the log exists to keep:
+provenance is recorded per decision, and a broken invariant is not a decision.
+
+So the variant carries its own owned report, built only on the failing branch:
+
+- **Which check tripped**, as a name, not a formatted sentence.
+- **Which entities**, as the keys the check was handed — a `SolidKey` and the
+  `EdgeKey` under it, say. Keys, because they are what a caller can hand back and
+  what a later `Model::validate` will name too.
+- **The operation's `ProvenanceLog` as it stood**, moved in rather than pointed
+  at. §5's reason for splitting the log off the model is that a pointer into a
+  log dangles the moment the model changes, and a report that outlives the
+  operation is exactly that case. It is a move of a `Vec` that the operation was
+  about to drop.
+
+**The cost when nothing goes wrong is zero, and it is zero for the same reason
+`ProvenanceLog` is.** The report is a struct built inside the `else` of a check
+that passed; a certified operation constructs nothing, allocates nothing and logs
+nothing. What is *not* free is the check itself, and §66.2 is the answer to that:
+50–65 ns a face, always, in every build.
+
+### 66.7 What this leaves open
+
+**`Assembly::commit` needs a scratch model before the fuse's panic can become an
+`Err`.** §66.4 says why and says what shape it takes. Nobody has measured the
+copy — the sweep half is measured above and is free at a fuse's scale, and the
+copy is an unknown that is probably also free at that scale and certainly is not
+at `add_extrusion`'s.
+
+**Whether `place_solid` should roll back with the inverse isometry.** It can:
+`movement` is invertible. Whether an operation that discovers a broken solid
+should put the *previous* broken-in-a-different-way state back is not obvious,
+and §4.1's answer for an in-place mutation is still a panic until somebody argues
+the other side.
+
+**Whether "valid" should depend on a policy at all.** §66.1's sixteen are one
+model that `Model::validate` calls sound under `Policy::tolerant` and broken
+under `Policy::certified()`, with a coordinate span of `inf` in ten of them. That
+is not a release-build question and it is not answered here, but a solid that is
+valid only for the caller who made it is a thing a file format has to have an
+opinion about, and `Invalid::DynamicRangeTooWide` is where that opinion would go.
+
+**The +7.9% on `add_extrusion` has no consumer to weigh it against.** It is
+measured on a synthetic loop of 2 000 extrusions. Whether it matters is a
+question for the importer, and §13's rule says the answer waits for the importer
+to exist rather than being guessed here.
+
+---
+
+## 67. A piece bounded by two straight sides, recorded 2026-09-07
+
+`two_solids_fused_by_a_stranger` — the fuzz target that reaches `Model::fuse`
+with a stranger's bytes — crashed `arrange.rs`:
+
+```
+a piece bounded by straight sides has at least three of them, this one has 2
+```
+
+The assert's own doc comment said why it could not be reached: *"Two straight
+lines enclose no area, so a piece like that is a zero-area face, which §17.4
+prevents rather than filters: reaching here means the splitter is wrong."* It was
+wrong the way §16.10 says such sentences go wrong — true about the splitter and
+silent about the input.
+
+### 67.1 What the bytes are
+
+Two blocks ten across, a long way apart, and the second one has two of its walls
+written down carrying planes that are not theirs. Its `x = 5` wall carries the
+plane of its `y = 5.1865234375` wall, leaned by `1.8e-304`; its `x = 15` wall
+carries the plane `x = -5`. The corners the model stores are a perfectly ordinary
+box.
+
+Two things had to fail to see it, and both are load-bearing:
+
+**`Model::validate` measures the corners and allows the model's own declared
+size.** `Model::allowed_wobble` is `Scale::default_linear_tolerance` plus what
+writing a plane down costs, and the first of those is the model's `nominal_size`
+times `Scale::RELATIVE_LINEAR_TOLERANCE`. These bytes declare a part
+`1.8446744073709552e21` mm across — two hundred light-years — which buys
+`1.8e12` mm of room off a plane. The two walls are twenty and ten out and walk
+straight through.
+
+**The fuse does not measure the corners at all.** `bake::derive_a_corner` builds
+each corner afresh as the meet of three of the surfaces around it and then checks
+that every surface around it passes through *that* point. A solid whose planes
+agree with each other and whose stored corners are somewhere else is
+self-consistent under that check, so it bakes — into a different solid. Here the
+baked bottom face is a quadrilateral with a corner at `x = -5.5e304`, and two of
+its four sides run along two lines that meet at one of its corners and are
+`9e-304` apart at the next one along, which no `f64` beside a coordinate of five
+can show. The walk comes back with a cycle of two straight sides.
+
+`Arrangement::crossing_like` is why the two lines stay two. It folds two
+different partners that cut a face in the *same* line into one crossing, by an
+exact determinant on stored coefficients (`relation_of_two_lines`). Two planes a
+hair apart are not the same line, so nothing folds them, and the two-sided cycle
+is what is left.
+
+### 67.2 The judgement: a refusal, not an assert
+
+CLAUDE.md's rule is panic on a broken internal invariant, `Err` on bad caller
+input. A cycle of two straight sides is the second, and §38.2 already made this
+exact call one bug earlier — *two arcs lying on top of each other hit an assert;
+coincident input is data, not a broken invariant*.
+
+`wire_from` now returns `Invalid::WireTooShort { count }`. That is not a new name
+for the rule: it is the one `Model::validate` and `SolidBuilder::add_wire`
+already state — *three steps, or one edge that closes already, or two different
+edges that are not both straight*. The condition the assert tested is that rule
+exactly, so the refusal reuses it rather than inventing a synonym.
+
+It is a **limit** and not a gap (§16.10). The piece is a sliver whose two corners
+are `9e-304` apart beside coordinates of five: no scaling reaches it, because the
+ratio is `1e-304` and an `f64` carries sixteen digits at a point. The answer does
+not exist in the arithmetic the kernel is built on, so it is refused rather than
+approximated.
+
+### 67.3 Only the tolerant draw ever saw it
+
+`crates/rcad-topo/tests/a_piece_of_a_face_bounded_by_two_straight_sides.rs`
+carries both halves. Under `Policy::certified()` the same fuse never reaches the
+walk — it gives up on `where two planes cross` for two of the leaning planes and
+returns `Error::Undecidable`. It takes a policy with slop to approximate that
+crossing and carry on into an arrangement built on it, and the corpus entry drew
+`Policy::tolerant(1.8e21)`.
+
+That is worth writing down because it is the shape of what the target is for. The
+target's own header argues that a model that *passes* `validate` might still
+crash `fuse`; the answer is yes, and the route was neither of the two the header
+guessed at. It was the model's declared `Scale` — a number nothing measures
+against anything — widening two separate checks at once.
+
+### 67.4 What is still owed, and not done here
+
+Two things, both outside this lane's files, both reported rather than made:
+
+**`Model::fuse`'s `# Errors` list does not mention this refusal.** It already
+names `Error::Invalid` for three other reasons, so the variant class is
+documented and the sentence is missing rather than wrong. `fuse/mod.rs`.
+
+**Nothing compares a baked corner with the corner the model stored.** That is the
+hole the bytes went through, and it is a real one: `bake` reconstructs geometry
+the caller supplied and never checks the reconstruction against what was
+supplied. Whether that check belongs in `bake` or in `validate` — and whether
+`allowed_wobble` should scale with a number the model declares about itself at
+all — is a decision, not a patch, and it wants its own lane.
+
+### 67.5 What the test carries, and why it carries bytes
+
+The test replays the corpus entry's bytes rather than describing the solid
+through `SolidBuilder`. That is a deliberate second choice. Four hand-built
+versions were tried — a block with a leaned wall, a block with a wall wearing its
+neighbour's plane, two blocks a subnormal apart, and a sweep over both the lean
+and the slop — and every one of them was refused somewhere *else* first:
+`AFaceMeetsItsNeighbourOnItsOwnSurface`, `ResultIsNotManifold { count: 1 }`,
+`CannotTellTheCellsOfAFaceApart`, and a winding the sweep could not decide. Each
+refusal is correct; none of them is this bug. A hand-built pair that differs from
+the failing one in a way nobody noticed is the `fuse-debugging` skill's own named
+trap, and the bytes are the one description that cannot drift.
+
+### 67.6 §70 took the driver away, and three corrections to what is above
+
+§67.4 filed *"nothing compares a baked corner with the corner the model stored"*
+and *"whether `allowed_wobble` should scale with a number the model declares
+about itself at all"* as owed work. §70 took the second half: the allowance is
+now the smaller of what the model declares and what its own corners show. The
+consequence for this section is that **its own test lost its driver.** The corpus
+entry no longer gets past the sweep, so nothing here reaches the walk any more.
+
+The refusal in `wire_from` is unchanged and still right. What changed is that
+today it is guarded by a refusal upstream rather than by a test that drives it,
+and the test file now says that in as many words instead of quietly passing.
+
+**Correction one: three walls are out, not two.** §67.1 counts twenty and ten.
+Measured on `2d84b9b`, the worst corner of each wall that is off its own plane
+is `20`, `10` and `0.3593845367340691` — three walls. The third was missed
+because it is small enough to read as noise beside the other two and is not.
+
+**Correction two: the number in the refusal is a witness, not a maximum.** The
+sweep returns `VertexOffItsFacePlane { distance: 9.536734069115482e-6 }` on these
+bytes, which is *none of those three walls*. `check_flat_face` returns on the
+first corner it finds outside the allowance, walking faces in stored order, so
+the distance it carries is whichever corner it happened to reach first. Reading
+it as "how bad is the worst" is wrong, and `the_sweep_names_a_witness_and_not_the_worst_wall`
+now pins both halves. The allowance these are measured against is
+`1e-9 × 10.359375 = 1.0359375e-8`, the largest coordinate the model actually has.
+
+**Correction three: §67.5's census is softer than it reads.**
+`Plane::from_coefficients` takes `a * x + b * y + c * z + d = 0`, so its fourth
+number is *minus* the offset — and every hand-built reconstruction in §67.5 fed
+it the offset. Those solids were the wrong shape, and the old `allowed_wobble`
+was wide enough to let them through the builder without saying so. So of the four
+refusals §67.5 lists, an unknown share were refusing a mistake rather than
+refusing this bug. The conclusion §67.5 drew from them — carry the bytes — was
+right for a different reason than the one given: the bytes cannot drift, and a
+reconstruction that is silently ten units wrong is exactly the drift.
+
+### 67.7 What can still reach the walk, and what is only a census
+
+With the sign fixed, a solid whose wall carries a hair of lean **builds and
+passes the tightened sweep**: normal `(-1e-100, 1, 0)` on a wall at `y = 5` puts
+that wall's own corners `1e-99` off it, which is nothing beside a coordinate of
+ten. So the ingredient the two-sided walk needs is still legal, and
+`two_walls_a_hair_apart_are_caught_before_the_walk_gets_a_two_sided_piece` builds
+it: two knives whose far walls sit at `y = 5`, one plain and one leaned, cutting
+one face in two lines that meet at `x = 0` and are `1e-99` apart at `x = 10`.
+
+It does not reach the walk. Under `Policy::tolerant` it is
+`TwoCurvesTouchWithoutCrossing`; under `Policy::certified` it is
+`Error::Undecidable` on the two planes. Both are correct, and both are upstream.
+
+**This is a census, not a demonstration, and the difference matters here more
+than usual.** Nine shapes have now been tried across §67 and this section — four
+in §67.5, five here — against six distinct refusals. That is evidence the walk is
+hard to reach. It is not the demonstration §16.10 asks for before writing *this
+cannot happen*, and §67 is the section that made §16.10's point about the
+original assert, so it is the last place to weaken it. What can be said exactly:
+
+> The walk needs two crossings that are two different lines sharing both nodes.
+> `crossing_like` folds same-line partners, so the two lines are genuinely
+> different and meet at one point; the second shared node exists only because the
+> arrangement could not tell two points apart. Every construction tried that
+> produces two planes that near is stopped by `TwoCurvesTouchWithoutCrossing`,
+> `CannotTellTheCellsOfAFaceApart` or an undecided plane crossing first.
+
+Nothing rules out a fourth arrangement of those same ingredients that slips
+between all three. So the refusal stays, unweakened, and the file that used to
+drive it now guards §70's cap instead — which is the other thing §67 asked for.
+
+### 67.8 One more §16.10-shaped doc claim, next door
+
+`bake.rs:535-538` says the stored corner is what picks between multiple meet
+points when a triple of surfaces has more than one. The code consults no stored
+corner: `let [only] = places.as_slice() else { continue; }` passes over every
+multi-place triple without looking. That is a filter described and not written,
+in the same function §67.1 blames for never comparing a baked corner with a
+stored one — and the two are the same gap seen twice. Not fixed here; `bake.rs`
+is not this lane's file.
+
+---
+
+## 68. Sixteen answers only the policy that built them calls valid, recorded 2026-09-07
+
+Sixteen halves out of a 9 975-input `two_solids_fused_by_a_stranger` corpus fuse
+to `Ok` and then fail `Model::validate` under `Policy::certified()`, always with
+`Invalid::DynamicRangeTooWide`. This section is what the sixteen turned out to
+be, and why the answer is a sentence in a doc comment and a test rather than a
+new refusal.
+
+The short version: **all sixteen fused under `Policy::tolerant`, all sixteen
+validate under that same tolerant policy, and it is the fuse and not the caller
+that made the span wide.** Nothing contradicted itself and nothing was
+corrupted. What the sixteen are is the shadow of a sentence nobody had written
+down: *"valid" is a property of a model and a policy, not of a model on its
+own.*
+
+  65.1    The measurement, all sixteen                            48 lines
+  65.2    The exit check is live, and the policy stood it down     31 lines
+  65.3    Why not at the door                                      18 lines
+  65.4    Why not a refusal past the point the tag stops meaning anything   58 lines
+  65.5    Atomicity was never at risk here                         16 lines
+  65.6    What was written instead, and what is left open          36 lines
+
+### 68.1 The measurement, all sixteen
+
+For each corpus entry the fuzz target's own decode was replayed, the model's
+span measured before the fuse and again after, and the model swept a second time
+under `Policy::certified()`. Span is the model's largest located coordinate over
+its shortest open-edge chord — the two numbers `Model::check_dynamic_range`
+measures, without the radii, because every face in all sixteen is a plane.
+
+| # | corpus entry | half | rule | span in | span out |
+|---|---|---|---|---|---|
+| 1 | `05a2c9cf` | second | Difference | `1.5` | `inf` |
+| 2 | `1c2757f6` | first | Difference | `1.5` | `inf` |
+| 3 | `24ad8af5` | second | Difference | `1.5` | `inf` |
+| 4 | `2fb467fc` | first | **Union** | `1.0` | `1.8328898507823975e252` |
+| 5 | `310b77d5` | first | Difference | `1.5` | `inf` |
+| 6 | `3c405544` | second | Difference | `1.5000053564996183` | `3.2766741885823735e246` |
+| 7 | `3c7a0cd6` | second | Difference | `1.5` | `inf` |
+| 8 | `3c7c9338` | first | Difference | `1.5` | `7.308985508549999e289` |
+| 9 | `75d25a59` | second | Difference | `1.5` | `inf` |
+| 10 | `7e19c77c` | first | Difference | `1.5` | `4.50920175892576e111` |
+| 11 | `875b4288` | first | Difference | `1.5` | `inf` |
+| 12 | `909f5d0c` | first | Difference | `1.5` | `inf` |
+| 13 | `98d5bb7a` | second | Difference | `1.5` | `inf` |
+| 14 | `bd34edca` | second | Difference | `1.5` | `4.323455642275676e17` |
+| 15 | `f91807c9` | first | Difference | `1.5000000000042746` | `8.426686567238631e307` |
+| 16 | `fb4102cd` | second | Difference | `1.5` | `inf` |
+
+Fifteen `Difference` and one `Union`. Every one of the fifteen has
+`split == solids.len()`, so `tools` is empty and `A \ nothing` is the union of
+both argument solids — the sixteen are all unions, and thirteen of them are two
+ten-millimetre blocks.
+
+**Every input span is between `1.0` and `1.5000053564996183`**, three orders
+inside `DynamicRange::LARGEST_SUPPORTED_RATIO`. **Every output span is at least
+`4.323455642275676e17`.** And the largest coordinate is *unchanged by the fuse
+in all sixteen* — `15.0` in and `15.0` out for fifteen of them,
+`2.3611832414348226e21` both ways for the Union. So the whole growth is at the
+bottom: the fuse built a short edge, and every one of them is the sliver
+`Assembly::check_dynamic_range` was written for. The narrowest,
+`4.323455642275676e17`, is two ten-millimetre blocks one of which is tilted by
+about `7e-18` radians, and its sliver is `3.469446951953614e-17` across.
+
+### 68.2 The exit check is live, and the policy stood it down
+
+The reading these sixteen invite is that the answer's range was never measured.
+It was. `fuse/mod.rs` measures it at the exit, one line before the only mutation
+of the whole operation:
+
+```rust
+if the_inputs_fit_in_f64(self, arguments, tools)? {
+    assembly.check_dynamic_range(policy, log)?;
+}
+```
+
+`the_inputs_fit_in_f64` is the guard that keeps a fuse from being blamed for a
+range its caller handed it, and §68.1 says it passes for all sixteen — their
+inputs span `1.5`. So `Assembly::check_dynamic_range` ran on all sixteen answers
+and measured exactly the spans in the table. What it did with them is
+`DynamicRange::check_under_policy`, and that is where the policy enters:
+`Severity::Fail` returns `Error::DynamicRangeTooWide`, `Severity::Warn` pushes a
+record and hands back an `Approximation` for the caller to hang on what it
+builds. `Policy::tolerant` carries `Warn`.
+
+`a_certified_fuse_of_the_very_same_pair_refuses_the_answer_it_would_have_built`
+is the control: the identical pair of blocks under `Policy::certified()` comes
+back `Err(Invalid::DynamicRangeTooWide { ratio: 4.323455642275676e17 })`, which
+is the same number the tolerant fuse wrote a model for. One pair, two policies,
+two outcomes, and neither is wrong.
+
+### 68.3 Why not at the door
+
+Because the measurement rules it out, and this is the whole reason the
+measurement was the deliverable. Refusing a fuse whose *inputs* span too wide a
+range would have to refuse a span of `1.5`, which is two ordinary blocks — every
+fuse in the kernel. Nothing about any of the sixteen inputs is out of range, out
+of the ordinary, or even slightly unusual: they are hundred-millimetre-scale
+boxes.
+
+That is also what `the_inputs_fit_in_f64`'s doc comment already says, in the
+other direction — a frame at `2^40` with millimetre walls is out of range before
+anything is fused, and refusing *that* here would report somebody else's dynamic
+range as this fuse's bug. The sixteen are the mirror case and they land the same
+way: the door is not where this belongs.
+
+### 68.4 Why not a refusal past the point the tag stops meaning anything
+
+This is the candidate that is actually tempting, and it needs an argument rather
+than a shrug.
+
+There is a principled line short of "tolerant never refuses". `Severity::Warn`
+hands back `Approximation::new(self.coordinate_spacing(), Cause::TolerantFallback)`,
+and `coordinate_spacing` is `largest_coordinate_magnitude * f64::EPSILON` with
+its own doc saying **"no feature smaller than this can be told apart from the
+one next to it"**. So once the span passes `1.0 / f64::EPSILON` — `4.5036e15` —
+the tag a tolerant policy hands back is *wider than the feature it is describing*.
+At entry 14 the tag is `15.0 * f64::EPSILON`, about `3.33e-15`, hung on a sliver
+`3.469446951953614e-17` across: the tag says the edge might not exist. All
+sixteen are past that line; the narrowest, `4.32e17`, is by a factor of 96.
+
+Four reasons that line is not taken here, in order of weight.
+
+**It contradicts a decision that is already taken and already tested.**
+`a_fuse_that_builds_a_sliver.rs::the_edge_across_a_sliver_is_as_long_as_the_sliver_is`
+fuses two blocks a `1e-200` hair apart under a tolerant policy and asserts the
+fuse *writes* the answer, with the sliver edge exactly one hair long and not
+`0.0`. Its span is `1.5e201`. Taking the line above turns that test's subject
+into a refusal, which is a change to what `Policy::tolerant` means and not a bug
+fix. §16.10 asks which of *limit* and *gap* a refusal would be; this one is
+neither, because there is no refusal to justify — the answer exists, `f64` holds
+every coordinate of it exactly, and the model round-trips.
+
+**It belongs in `rcad-geom`, not in one operation.** The line is a property of
+`DynamicRange::check_under_policy` — the place where a span meets a severity —
+and putting it in `Assembly::check_dynamic_range` would give the fuse a
+strictness `Model::validate` does not share, which is a second way for two parts
+of the kernel to disagree about the same model. That file is owned by neither
+this lane nor this section.
+
+**It would move published refusal rates and nobody has measured what it costs.**
+`how_often_a_fuse_with_a_cone_refuses.rs`, `how_often_a_curved_fuse_refuses.rs`
+and `how_often_a_fuse_with_a_torus_refuses.rs` publish numbers that a new
+tolerant refusal moves. A line drawn from sixteen fuzz inputs, without that
+measurement, is a number chosen for the inputs that produced it.
+
+**The failure it would prevent has not been shown to exist.** A caller who fuses
+tolerantly and then tightens the policy gets a *refusal*, not a wrong answer. All
+sixteen were swept a third time under the policy their own fuse ran under, and
+**sixteen of sixteen pass**. Not one of them is a model that its own strictness
+calls broken; the split is entirely between two strictnesses, and the stricter of
+the two refuses rather than answering. There is no case here of a tolerant answer
+being silently wrong at the strictness it was built for.
+
+### 68.5 Atomicity was never at risk here
+
+Worth recording because it is the first thing to check about any refusal in a
+fuse, and the answer is clean. `Assembly::check_dynamic_range` is called at
+`fuse/mod.rs:196` and `Assembly::commit` — the first and only mutation of the
+whole operation — at `fuse/mod.rs:200`. So the refusal that exists lands four
+lines before anything is written and the model is byte-identical, which is what
+`Model::fuse`'s **Atomic** section promises.
+`a_certified_fuse_of_the_very_same_pair_refuses_the_answer_it_would_have_built`
+asserts the model still holds its two input solids after the refusal.
+
+Any refusal added later at this same point inherits that for free. A refusal
+that had to land *after* `commit` would not, and would be a different section.
+
+### 68.6 What was written instead, and what is left open
+
+Two things, and no change to what anything computes.
+
+**`Model::fuse` now says what `Ok` promises.** It promised "the answer is valid";
+it now says the answer passes `Model::validate` under `policy` and under no
+other, that a tolerant fuse therefore writes solids a later certified caller is
+told are broken, and that both readings are correct. The sentence that was
+missing is the one this section opens with, and a caller reaching for
+`Policy::tolerant` is where it is worth reading.
+
+**`a_model_only_the_policy_that_built_it_calls_valid.rs` measures it.** One
+model, unchanged, accepted by the tolerant sweep and refused by the certified
+one, at a span of `1.5e201` and again at `4.323455642275676e17` — the second so
+that `inf` cannot be read as "the numbers were absurd". Beside them the two
+halves of §68.1's verdict: that the inputs span `1.5` and the answer the fuse
+builds spans `4.32e17`, and that the certified fuse of the same pair refuses.
+
+One thing found on the way and left where it was found: **a pair of translated
+blocks cannot be made to span `inf`.** At a hair of `2.78e-308` the tolerant fuse
+comes back `Undecidable` instead, because *where three surfaces meet* is an area,
+an area is two such hairs multiplied, and that underflows to nothing — the
+enclosure comes back `inf` and the wobble gate refuses. The corpus's ten `inf`
+answers got past that by carrying their hair in a plane's own coefficients
+instead — `fb4102cd` has a normal of `[6.3e-322, -1.0, 0.0]` at an offset of
+`3.16e-321` — where no area is ever formed from two of them. Nobody has asked
+what else that asymmetry reaches.
+
+**Left open:** whether `Policy::tolerant` should refuse a span past
+`1.0 / f64::EPSILON`, where the tag it hands back stops being narrower than the
+feature it describes. §68.4 says why this lane did not take it; it is a
+`rcad-geom` change, and what it needs is the refusal-rate measurement nobody has
+made.
+
+---
+
+## 69. A refusal that named the wrong decision, recorded 2026-09-07
+
+A soak of `two_solids_fused_by_a_stranger` crashed `Model::fuse` in
+`Record::new`:
+
+```
+thread '<unnamed>' panicked at crates/rcad-predicates/src/provenance.rs:190:17:
+orient3d: a certified outcome does not get a provenance record
+```
+
+That assert enforces §5 — *detailed records only on non-certified outcomes* —
+so a certified `orient3d` arriving with a record is a contradiction, and exactly
+one of the two sides of it is wrong. **The caller is wrong.** The assert stands
+untouched and §5 stands untouched; what is recorded here is the evidence that
+settled it, so that the next person to meet this crash does not widen the assert
+to make it go away.
+
+### 69.1 What actually reached the assert
+
+The walk in `crates/rcad-topo/src/holds.rs` holds *two* decisions at the point
+it refuses and reports only one of them:
+
+```rust
+match crossing(sides[index], sides[next], along) {
+    Some(count) => winding += count,
+    None => return Err(gave_up_turning_a_corner(point, sides[index])),   // line 322
+}
+```
+
+`crossing` returns `None` only through `above_the_line(from_side)?` or
+`above_the_line(to_side)?`, and `above_the_line` returns `None` only for
+`Decision::Undecidable`. So reaching that arm proves *one of the two sides* was
+undecidable — and the arm hands over `sides[index]` whichever one it was.
+
+The reproducer takes the other branch. A probe printed at the refusal, on the
+crashing input:
+
+```
+index=1 next=2
+sides[index] = Neg
+sides[next]  = Undecidable { enclosure: 3.6537540933272573e47 }
+along        = Pos
+from  = Point([0.0, 0.0, 0.0])
+to    = Point([0.0, 4.243991582e-314, 2.3611832414348226e21])
+point = Exact([-0.0, 1.770887431076117e21, 5.902958103587057e20])
+```
+
+and a second probe in `Record::new` itself printed what it was then asked to
+record:
+
+```
+predicate=orient3d level=Exact outcome=Neg
+inputs=[Exact([-0.0, 1.770887431076117e21, 5.902958103587057e20])]
+measures=Volume
+```
+
+`outcome=Neg` is the certified answer about corner 1. The refusal is about
+corner 2. Both probes were temporary and neither is in the tree.
+
+That input is §3.5's spread and nothing more exotic: coordinates around `1e21`
+sitting beside a `4.2e-314` subnormal, so the interval on the determinant is
+`3.7e47` wide and no scaling brings both ends into range at once. The
+undecidable side is honest. Only the record made about it is not.
+
+### 69.2 Why this is the caller's bug and not the assert's
+
+The tempting reading is the other one: the *walk* gave up while this particular
+predicate was certified, so perhaps a certified outcome may legitimately carry a
+record after all. It may not, and the reason is arithmetic rather than taste.
+
+A `Record` has an `enclosure`, and `Record::new` takes it out of the `Decision`
+because that is the only place it exists. A certified `Neg` has no enclosure —
+there is no interval that straddled zero, because nothing straddled zero. A
+record built from one would have to invent the field, and `worst_wobble` would
+then be a maximum over a number nobody measured. §15.3 is the same mistake one
+level down: an enclosure whose units nobody can recover is not a smaller record,
+it is a wrong one.
+
+The record the walk actually wants already exists and is one line away:
+`sides[next]` carries `Undecidable { enclosure: 3.65e47 }`, which is exactly the
+number a reader of the refusal needs. Naming the certified neighbour throws away
+a measurement that was in hand.
+
+So this is a **gap and not a limit** in §16.10's terms — the answer exists, and
+the code reached past it.
+
+### 69.3 The other one in the same function, and it is reachable
+
+Twelve lines up:
+
+```rust
+Decision::Zero => match lies_between(from, corners[next], point) {
+    Some(true) => return Ok(None),
+    Some(false) => (),
+    None => return Err(gave_up_turning_a_corner(point, along)),          // line 315
+},
+```
+
+`along` is bound to `Decision::Zero` by the arm it is in, so this call **cannot**
+be given anything but a certified outcome: reaching it panics every time.
+
+**It is reachable, and the demonstration is a test rather than a paragraph**
+(§16.10). `SolidView::classify_uncertain_point` is public and takes a
+`rcad_predicates::Point`, whose `Constructed([Interval; 3])` variant is public
+and whose `Interval::new` is public — so *any* box is a caller's to hand over,
+and no fuse, no fuzzer and no spread is needed to get one here.
+`a_refusal_no_predicate_made_must_not_be_recorded_as_one` is that box: it lies
+along the outline's first side with its `y` and `z` exact, so every `orient3d`
+about it certifies and `along` is exactly `Zero`, and it runs a millimetre past
+the corner at the far end, so the ordering cannot be settled. It panicked on
+`314b453` under `Policy::certified()`.
+
+The first note here said the reachability "was not demonstrated and is not
+claimed either way", which was the right thing to write and the wrong thing to
+leave. §16.10 asks the question of the **public API** rather than of today's
+callers, and the public API answers it in one line.
+
+**The fix is a different constructor, not a different argument.** Nothing was
+undecided by a predicate: what could not be settled is the *ordering* of a box
+against the ends of a side, which §17.4 answers by comparing one axis and asks
+no predicate at all. So `gave_up_ordering_along_a_side` records the ordering
+under its own name, at `Level::Interval`, with the overhang as its enclosure and
+`Measures::Length` as its units — and `lies_between` now hands that overhang back
+(`Result<bool, f64>`) instead of throwing away the only measurement of the
+refusal there is. Filing it as an `orient3d` of `Measures::Volume` would have put
+a width in units nothing on this path worked in, which is §15.3's mistake with
+the degree wrong instead of the level.
+
+### 69.4 Why the signature admits the mistake
+
+`Record::new` takes an `outcome: Decision`, and three of that type's four values
+are always a bug there. The type is wider than the contract, and the contract is
+kept by a runtime assert that every call site has to remember — sixteen of them
+outside tests, across three crates, on this tip.
+
+Narrowing it — `Record::new(…, enclosure: f64, …)`, with the caller made to
+destructure the `Undecidable` it claims to have — would move both faults above
+to compile time, because neither call site can produce an `f64` it does not have.
+That is the shape of the fix worth taking, and it is deliberately **not** taken
+here: it changes every call site in `rcad-topo` and `rcad-geom`, which is a unit
+of work rather than a bug fix, and §13's rule is that it waits for the consumer
+that names it.
+
+**The consumer has now arrived** — it is the `holds.rs` fix in §69.1 and §69.3,
+and it is the reason this paragraph is an argument for the change rather than a
+note that nothing needs it. It still did not happen in this lane, because the
+call sites it touches run through files another lane held open at the time. It is
+its own unit, and this section is its case.
+
+### 69.5 The other fifteen, and the one held up by a distant invariant
+
+Every other production call site was read, because "one caller got it wrong" is
+worth nothing without knowing whether the rest did too. The fifteen away from
+`holds.rs` are all safe, and mostly for the dull reason: seven build the
+`Undecidable` themselves out of an `f64` and never take a `Decision` at all,
+five sit inside a `Decision::Undecidable { .. }` match arm — `validate.rs:272`
+binds it as `decision @ Decision::Undecidable { .. }`, which is what makes it
+proof against the two guard arms above it — and three (`orient2d.rs:98`,
+`orient3d.rs:110`, `intersect.rs:2713`) sit behind an
+`if decision.is_certified() { return … }`.
+
+The sixteenth site is `holds.rs:639`, the one inside `gave_up`, and five callers
+reach it. Lines 315 and 322 are §69.1 and §69.3. Lines 277 and 545 destructure
+`Undecidable` on the spot and are fine. Line 372 is fine too, and is worth
+naming because it is *correct for a reason that is not local to it*:
+
+```rust
+match side {
+    Decision::Zero => on_its_boundary = true,
+    settled if settled == inwards => (),
+    Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+    other => return Err(gave_up_on_a_side(&trimming.surface, point, other)),
+}
+```
+
+A guard arm can fall through, so `Pos | Neg` alone would not prove `other` is
+undecidable — it does, but only because `inwards` came from
+`the_side_this_face_lies_on`, which writes `found = Some(side)` inside its
+`Decision::Pos | Decision::Neg` arm and nowhere else. The day that function
+learns to return `Some(Undecidable)`, this line starts panicking, and nothing in
+the file says so. Same shape as line 322: a `Decision` whose certifiedness is
+argued at a distance rather than destructured on the spot. §69.4's narrowing
+would settle this one too.
+
+**No guard was added there**, and that is the decision rather than an omission.
+There is no bug at line 372 today; a guard would defend against one that does
+not exist and would put a second, quieter copy of the invariant beside the real
+one. What the hazard needs is to be *written down*, which is this paragraph, and
+to be settled by the type — which is §69.4. The name to look it up by: **a
+certifiedness argued in another function**.
+
+### 69.6 What it took to reproduce this without a fuzzer
+
+The fuzzer needed a model whose coordinates ran from `4.2e-314` to `2.4e21`, and
+neither test here needs a spread at all. Two things stood between a hand-built
+model and the walk, and both are worth knowing before writing the next test that
+has to reach it.
+
+**A box on a spoke grazes both of its neighbours.** The walk is only asked about
+a point already on the face's plane, and the way a polygon says so is one of the
+triangles fanned from its first corner reporting that the ray starts on it. Every
+fan triangle beside a spoke has that spoke for an edge, so a box sitting on a
+spoke makes both of them refuse and neither can report anything — the walk is
+never entered and the crash never happens. What fixes it is a **corner that
+points back into the outline**: the fan then overlaps itself, and a spoke runs
+through the middle of a triangle that is not beside it. That triangle answers.
+`OUTLINE`'s `[6, 0]` is that corner, and it does the same work in both tests.
+
+**A certified policy cannot get past the first corner.** The spoke from the first
+corner to itself is a determinant with two equal rows — exactly zero, and interval
+arithmetic cannot see that it is zero, because it does not know the two rows are
+the same. So a *constructed* point refuses there and the walk stops having named
+the undecided corner correctly, which is not the bug. The fuzzer's point was
+`Exact`, which is why it got past. A hand-built box gets past instead by being
+resolved: under `Policy::tolerant` a narrow enough enclosure reads as `Zero`.
+
+That turns the test into an arithmetic problem with a real window. The budget is
+`64 · ε · working_size`, which is `1.42e-12` at 100 mm, and a volume's enclosure
+converts to a wobble as `enclosure / working_size²` (§15.3) — so the first
+corner's enclosure has to come in at or under `1.42e-8` and the spoke's has to
+come in over it. Both are linear in the width of the box, so shrinking the box
+moves them together and separates nothing. What separates them is **moving one
+corner and not the other**, because a spoke's enclosure grows with how far out
+its corner sits: `[160, -80]` is ten times out, and the two enclosures measure
+
+```
+first corner  9.600000794307562e-9     resolves    (wobble 9.6e-13 ≤ 1.42e-12)
+spoke         2.560002485552104e-7     does not    (wobble 2.56e-11)
+```
+
+a factor of about 27, with the budget between them. In plain terms: a fifth of a
+nanometre of doubt about a point on a 160 mm part — an ordinary amount for a
+constructed point to carry — and one corner of the outline far enough away that
+the same doubt is twenty-seven times too much when asked about *that* corner.
+
+Both numbers were measured. The first was also predicted, by scaling an earlier
+probe, and the prediction was wrong by a factor of four — which is why the
+measured pair is what is written here.
+
+## 70. A model that decides how closely it will be checked, recorded 2026-09-07
+
+§67.4 left two questions open and called them a decision rather than a patch.
+This is the decision. One of them turned out to have a fix and the other turned
+out to be answered by measurement rather than by taste.
+
+### 70.1 The number a file was allowed to write about itself
+
+`Model::allowed_wobble` is how far off its own plane a face's corner may sit,
+and it was two things added:
+
+```
+Scale::default_linear_tolerance()   +   what_writing_a_plane_down_costs()
+= nominal_size × 1e-9                   = 16 × SIGNED_DISTANCE_ROUNDOFF
+                                          × largest_coordinate()
+```
+
+The second term is measured — `largest_coordinate` walks the model's own
+corners. The first was **declared**: `Scale` is a field of the model, so it
+arrives with the file, and a file that says how big it is has thereby said how
+closely it will be checked. That is a self-certifying input, and the fuzzer
+found it.
+
+Measured on §67's corpus entry, `crash-7d309176caedc7140756f167d7db5e7740eff1c3`
+bytes `2382..4763`, decoded and swept:
+
+```
+nominal_size            1.8446744073709552e21     declared
+default_linear_tolerance  1.8446744073709553e12   declared × 1e-9
+largest coordinate        1.0359375e1             measured over its corners
+faces off their own plane  3.593845367340691e-1, 1e1, 2e1
+Model::validate           passes
+```
+
+Two hundred light-years of declaration, ten millimetres of block, and twenty
+millimetres of wobble walking through a check that thought it had `1.8e12` to
+play with.
+
+### 70.2 The fix, and the family of alternatives it beat
+
+**`allowed_wobble`'s first term is now the smaller of what the model says and
+what its corners show.** In `crates/rcad-topo/src/validate.rs`:
+
+```rust
+let what_the_model_says = self.scale().default_linear_tolerance();
+let what_its_corners_show = Scale::RELATIVE_LINEAR_TOLERANCE * self.largest_coordinate();
+what_the_model_says.min(what_its_corners_show) + self.what_writing_a_plane_down_costs()
+```
+
+§16.10 asks for the family, not a paragraph. Five scalings were on the table.
+
+**(a) Leave it.** The hole is unbounded: `nominal_size` is any positive finite
+`f64`, so a stranger buys `1e300` of room for the cost of one field.
+
+**(b) Drop `Scale` and scale on `largest_coordinate` alone.** This closes the
+overstating direction and opens the understating one: a model declaring `1` with
+one vertex parked at `1e21` would then *earn* `1e12` of wobble on the geometry
+beside the origin. Measured, not argued — `crash-f984851…` is a model whose
+largest coordinate really is `2.3611832414348226e21`.
+
+**(c) An absolute floor or cap in millimetres.** This is the thing `Scale`
+exists to avoid. A number in millimetres cannot be right for a bracket and for a
+bridge at once, and §15.6 would want the bound demonstrated for both.
+
+**(d) Refuse the model outright when `nominal_size` and `largest_coordinate`
+disagree by more than some ratio.** A second threshold to argue about, and it
+refuses models that are merely mis-declared rather than broken. The ratio on
+§67's entry is `1.8e20`; on `crash-f984851…` it is `100`, and that second one is
+an ordinary overstatement that nothing should refuse.
+
+**(e) The minimum, which is what was taken.** It is the tightest of (a) and (b)
+in both directions at once and introduces no new number: `min` is not a
+threshold. What it costs a legitimate model is the case where the declaration
+honestly exceeds the geometry — a model holding one small fragment of a large
+part. That model's tolerance drops to what its own corners earn, and the
+direction is the safe one `what_writing_a_point_down_costs` already picked: too
+small a budget refuses a sound corner, too large a one accepts a corner nobody
+placed.
+
+**So: yes, it may scale with a number the model declares — but never with that
+number alone, and never above what the model's own corners show.**
+
+### 70.3 Where the missing comparison goes: `bake`, measured
+
+§67.4's other question: nothing compares a baked corner with the corner the
+model stored, and does that check belong in `bake` or in `validate`?
+
+**`bake`.** Two reasons, one structural and one measured.
+
+The structural one is that with §70.2 in place `validate` *already makes* the
+comparison for every well-conditioned corner: a corner within `allowed_wobble`
+of all three planes through it is within that of their meet. What survives is
+the ill-conditioned case — three surfaces at a grazing angle, where a corner
+close to all three can still be far from where they cross. That is a question
+about a *re-derivation*, and only the thing that re-derives has both points to
+compare. `validate` does not re-derive corners and has no reason to start.
+
+The measured one is what re-deriving costs. On this machine, `Policy::certified`:
+
+```
+Plane::signed_distance_to                            3 ns
+meet_of_three_surfaces, three perpendicular planes  571 ns
+Model::validate over one block                    13.519 µs
+Model::fuse of two blocks                          1.353 ms
+```
+
+The distance is what the sweep pays per corner per face today and the meet is
+what a re-derivation would pay per corner per triple — 190 times dearer. A box's
+eight corners are eight triples, `4.6 µs`, which is a **34% increase on the whole
+sweep** of that box. And `derive_a_corner` tries *every* triple, so the cost is
+cubic in the faces round a corner where the distance check is linear: a corner
+where six faces meet is twenty meets, `11.4 µs`, most of one sweep for one
+corner. §4.3 says the full sweep runs at every import and test boundary; this is
+the shape of cost it was written about.
+
+The comparison itself is one line where it belongs. `place_a_corner` already
+holds `model.data().vertices[slot].point` (`bake.rs:500`) and `derive_a_corner`
+returns the rebuilt point beside it. **This is not done here** — it is a fuse
+change with its own test to write, and the lane that did §70.2 ran out of budget
+before it. It is owed, and it is owed to `bake.rs`.
+
+While reading for that: `derive_a_corner`'s doc comment says "the stored corner
+is what says which: it is a cached sample of the truth (§17.1), so the box it
+falls inside is the one. Two boxes that both hold it are two answers to one
+question and the triple is passed over." The code consults no stored corner at
+all — it takes `let [only] = places.as_slice() else { continue; }`, passing over
+*every* multi-place triple regardless of where the stored corner sits. The
+sentence describes a filter that is not there, which is the §16.10 shape again.
+
+### 70.4 What this refuses now, and what it still does not
+
+Both of this session's crash reproducers were replayed against the fix with
+`cargo +nightly fuzz run two_solids_fused_by_a_stranger <path>`. Both run clean,
+as they did before — but one of them now stops a stage earlier:
+
+`crash-7d309176caedc7140756f167d7db5e7740eff1c3` is **refused at the sweep**,
+which is the gate the fuzz target runs before it fuses at all:
+`Invalid(VertexOffItsFacePlane { distance: 9.536734069115482e-6 })`, against a
+budget that fell from `1.8446744073709553e12` to `1.0359375e-8`. The fuse it
+crashed is never reached.
+
+`crash-f984851ca89020e1ff939c087667a0aa86bc352d` is **unchanged**. It declares
+`2.3611832414348226e23` with a largest coordinate of `2.3611832414348226e21`, so
+the cap tightens its budget from `2.3611832414348228e14` to
+`2.3611832414348228e12` — and its faces sit at most `4.021529366771898e-87` off
+their own planes, so it passes as it should. §69's refusal is what that one was
+about and this does not touch it.
+
+**What is still open.** `largest_coordinate` is model-wide, so a model holding
+one solid with a corner at `1e21` still buys `1e12` of wobble for a second,
+small solid beside the origin. Narrowing it per face or per solid was
+considered and not taken: a part's tolerance is a property of the part, and a
+face near the origin of a large part is entitled to the large part's tolerance.
+Closing that needs the §70.3 comparison, not a smaller radius.
+
+### 70.5 Two tests it moves, and why they were not adjusted
+
+`crates/rcad-topo/tests/a_piece_of_a_face_bounded_by_two_straight_sides.rs` —
+§67's own test file — carries §67's bytes and asserts, at line 88, that *"the
+sweep lets these blocks through, which is how they reach the fuse"*. §70.2 makes
+that false, which is the point of §70.2. Both tests in that file fail on the
+premise rather than on the assertion:
+
+```
+a_wall_wearing_its_neighbours_plane_is_refused_and_does_not_crash_the_fuse   FAIL
+a_certified_policy_gives_up_before_it_gets_that_far                          FAIL
+  the sweep lets these blocks through, which is how they reach the fuse:
+  Invalid(VertexOffItsFacePlane { distance: 9.536734069115482e-6 })
+```
+
+They were left failing rather than edited. What §67 tested is still worth
+testing — a two-sided piece is a refusal and not an assert — and the bytes are
+no longer a way to reach it, so somebody has to decide whether that file gets a
+model that reaches the walk another way or whether the assert's own test is
+enough. That is §67's lane's call, not this one's.
+
+---
+
+## 71. `check-decisions` learns order, recorded 2026-09-07
+
+`check-decisions` (§57.8) already refused two sections sharing a number. It said
+nothing about a section landing in the wrong place, and two ways to land in the
+wrong place happened on the same day.
+
+### 71.1 The two shapes
+
+A duplicate and an out-of-order section look alike at a glance — both are a
+number that does not say what it should — but they are different mistakes with
+different causes, and the file carried both on 2026-09-07.
+
+**The duplicate.** Two sessions each appended a `## 62.` hours apart — one "What
+a release build hands back when the kernel is wrong", one "A sweep that could
+only ever return one answer" — because each read "the next free number" off a
+tree that disagreed with the other about what was next. Nothing noticed until
+the merge, and the merge was resolved by taking one side of the file whole,
+which silently dropped two amendments the other side had made to §4.1 and §4.3.
+That second loss was caught by a line count, not by reading it.
+
+**Out of order.** Three lane briefs were given §63, §64, §65 while `main` landed
+its own §63 underneath them. They were renumbered to §67, §68, §69 by hand, and
+the renumbering is why the file now reads 61, 62, 63, 66, 67, 68, 69 — a gap is
+what a renumbering leaves behind, and §57.8's own doc comment already says a gap
+is not a defect. What the renumbering also left, four times over in one session,
+was a `### 64.3` still sitting under the new `## 69.` after its own `## 64.`
+had become `## 67.` — a subsection typed once and never moved when its parent's
+number changed underneath it. That was caught by grepping for it by hand, which
+is the same expensive place §57.8 was written to move the duplicate check away
+from.
+
+### 71.2 What `check-decisions` checks now
+
+Two more passes, after the existing format and duplicate checks and before
+either exits:
+
+- **Descending is an error.** A `## N.` lower than the `## N.` before it in file
+  order.
+- **A misnested subsection is an error.** A `### N.M` whose `N` does not match
+  the `## N.` it currently sits under, or whose `M` is lower than the `### N.M`
+  before it within that same section.
+
+Gaps are still fine, at both levels — nothing here re-litigates §57.8's own
+point, and the real file's 61, 62, 63, 66, 67, 68, 69 is exactly what a correct
+file with a gap looks like, so it is the fixture the check has to pass rather
+than one of the ones it has to fail.
+
+### 71.3 Fixtures, not the real file
+
+`check-decisions-selftest` proves five broken shapes against small fixture
+files built for the purpose, the same way §57.8's own selftest proved the
+duplicate check: the two duplicate checks §57.8 already had (a repeated `##`
+and a repeated `###`), plus the three this section adds (a descending `##`, a
+`###` descending within its own section, and a `###` sitting under the wrong
+`##`). Editing the real `docs/decisions.md` to demonstrate a defect would be
+demonstrating the defect into the file that must not have it.
+
+---
+
+## 72. The line where a tolerant tag stops meaning anything, measured, recorded 2026-09-07
+
+§68.4 left one thing open: whether `Policy::tolerant` should **refuse** a span
+past `1.0 / f64::EPSILON` — `4.5036e15` — where the tolerance tag it hands back
+stops being narrower than the feature it is describing. It gave four reasons for
+not taking the line, and said what the argument was missing: the refusal-rate
+measurement nobody had made.
+
+The measurement is here. **The answer is that the line should not be taken**, and
+one of §68.4's four reasons is withdrawn on the way, because the measurement says
+it was never a cost at all.
+
+### 72.1 The three published rates, before and after
+
+The change measured is three lines at the top of `DynamicRange::check_under_policy`'s
+`Severity::Warn` arm, in `crates/rcad-geom/src/scale.rs`:
+
+```rust
+if self.ratio > 1.0 / f64::EPSILON {
+    return Err(Error::DynamicRangeTooWide { ratio: self.ratio });
+}
+```
+
+Both runs are one command:
+
+```
+mise exec -- just t -E 'test(/how_often_a_certified_fuse_with_a_cone_in_it_refuses/)
+  + test(/how_often_a_certified_fuse_with_a_torus_in_it_refuses/)
+  + test(/how_often_a_certified_fuse_of_a_turned_curved_pair_refuses/)' --no-capture
+```
+
+| rate | before | after |
+|---|---|---|
+| turned curved pair, 384 fuses | 0.0% | 0.0% |
+| a frustum against a corner-up cube, 96 | 90.6% | 90.6% |
+| a pointed cone against a corner-up cube, 96 | 81.2% | 81.2% |
+| a frustum against a block, 96 | 93.8% | 93.8% |
+| a frustum against a bar, 96 | 100.0% | 100.0% |
+| two frustums on one axis, 96 | 100.0% | 100.0% |
+| a bend against a slab square to the axis, 96 | 100.0% | 100.0% |
+| a round bar against a slab square to the axis, 96 | 75.0% | 75.0% |
+| a bend against a wedge through the axis, 96 | 100.0% | 100.0% |
+| a round bar against a wedge through the axis, 96 | 0.0% | 0.0% |
+| a bend against a bar through the hole, 96 | 100.0% | 100.0% |
+| a round bar against a bar through the hole, 96 | 0.0% | 0.0% |
+| a bend against a ball in the bend, 96 | 100.0% | 100.0% |
+| a round bar against a ball in the bend, 96 | 100.0% | 100.0% |
+| a bend against a second bend, 96 | 100.0% | 100.0% |
+
+Not a percentage moved, and not a *name* moved either: all four of the cone's
+corner-up breakdown, all four of the frustum-against-a-block breakdown, every
+count identical.
+
+**They cannot move, and the reason is one line of `Policy`.** All three files
+fuse under `Policy::certified()`, and `Policy::certified` sets
+`dynamic_range_check: Severity::Fail`. The line lives in the `Severity::Warn`
+arm. `Policy::tolerant` is the only constructor in the crate that asks for
+`Warn`, and none of the three ever builds one — the word `tolerant` does not
+appear in any of the three files.
+
+So **§68.4's third reason is withdrawn.** "It would move published refusal rates
+and nobody has measured what it costs" was a fair thing to say without the
+measurement, and with the measurement it is false: the cost to the published
+rates is exactly zero, by construction and in fact. A future argument for this
+line does not have to answer it.
+
+### 72.2 What does move: four tests, and every one of them is about this
+
+`mise exec -- just t` — the whole suite, 1800 tests — with the same three lines
+in place:
+
+```
+Summary [27.378s] 1332/1800 tests run: 1328 passed, 4 failed, 0 skipped
+```
+
+The run stops at the first failures, so 1332 is what got as far as running, not a
+count of what passes. The four are:
+
+- `a_fuse_that_builds_a_sliver::the_edge_across_a_sliver_is_as_long_as_the_sliver_is`
+- `a_model_only_the_policy_that_built_it_calls_valid::a_tolerant_fuse_writes_a_sliver_only_a_tolerant_sweep_calls_valid`
+- `a_model_only_the_policy_that_built_it_calls_valid::the_two_sweeps_split_the_same_way_a_long_way_from_overflow`
+- `a_model_only_the_policy_that_built_it_calls_valid::the_inputs_span_one_and_a_half_and_the_answer_the_fuse_builds_spans_far_more`
+
+There is no collateral damage anywhere in the kernel. What breaks is four tests
+whose whole subject is this behaviour, three of them written by §68 itself to
+record it. That is not a bill to be weighed against a benefit; it is four
+statements that the line is wrong, and taking the line means answering them
+rather than paying for them.
+
+So **§68.4's first reason is now the whole of the case against**, and it is
+unchanged: `the_edge_across_a_sliver_is_as_long_as_the_sliver_is` deliberately
+pins that a tolerant fuse *writes* a `1e-200` sliver, at a span of `1.5e201`.
+
+### 72.3 Nothing past the line came back wrong, and the family looks empty
+
+§68.4's fourth reason — "the failure it would prevent has not been shown to
+exist" — is the one §16.10 says needs a demonstration rather than a paragraph.
+Four shapes were built and fused both ways round under `Policy::tolerant(100.0)`,
+and every answer measured against a closed form. Two ten-millimetre blocks, the
+second at `(5, hair, 5)`, so the union is `1750 - 75·hair` mm³ and every hair
+here is far too small to move that from `1750.0`.
+
+| | span of the answer | shortest edge | volume, `[low, high]` | volume, `[high, low]` |
+|---|---|---|---|---|
+| A. hair `3.469446951953614e-17` at the origin | `4.323455642275676e17` | `3.469446951953614e-17` | `1750.0` | `1750.0` |
+| B. hair `1e-200` at the origin | `1.5e201` | `1e-200` | `1750.0` | `1750.0` |
+| C. A, whole pair moved `2^40` along `x` | `3.1691265006138082e28` | `3.469446951953614e-17` | `1750.0` | `1750.0` |
+| D. A, whole pair moved `2^40` along `y` | `2.199023255572e11` | `5.0` | `1750.0` | `1750.0` |
+
+Exact, in every cell, at every order. And a *second* tolerant operation on the
+wide answer is exact too: cutting A's and B's answers with a 30 mm block covering
+everything above `y = 5` leaves `875.0` mm³ against a closed form of
+`500 + 75·(5 - hair)`, which is `875.0`.
+
+**C and D together are why.** C is seven thousand billion times past the line —
+`3.17e28` against `4.5e15` — and bit-for-bit right, because the largest
+coordinate is on `x` and the hair is on `y`, where the coordinates are small and
+`f64` has digits to spare. D is the same pair with the hair moved *onto* the big
+coordinate, and `2^40 + 3.469446951953614e-17` is `2^40`: the hair is rounded
+away before anything is fused, there is no sliver to build, and **the span falls
+back to `2.2e11` with a shortest edge of `5.0`** — an ordinary model.
+
+That is the shape of the argument, and it is a property of `f64` rather than of
+these four shapes. Two distinct `f64` near a magnitude `L` differ by at least
+`ulp(L)`, which is about `L · f64::EPSILON`. So a chord of length `h` whose two
+ends differ on an axis where both are near `L` has `h ≳ L · f64::EPSILON`, and
+`L / h ≲ 1 / f64::EPSILON` — *at* the line, never past it. **Past the line, the
+short feature's ends must agree exactly on every axis where they are large, and
+differ only where they are small.** There is no third case. The reason the
+answers above are exact is the reason they had to be.
+
+**What this does not show.** It is a demonstration over translated blocks with
+flat faces, plus one second operation. It says nothing about a hair carried in a
+plane's own coefficients rather than in a translation — §68.6's `fb4102cd`, with
+a normal of `[6.3e-322, -1.0, 0.0]` — where the small number never becomes a
+coordinate difference at all and the argument above does not reach. Nor does it
+cover curved faces, where a coordinate is the *output* of a construction and the
+short chord's ends need not be a difference of two stored numbers. Those are the
+two places to look if anyone wants to reopen this; what is settled is that the
+straightforward reading of "the tag is wider than the feature" does not produce a
+wrong answer, and the reason it does not is structural.
+
+So the fourth reason is upgraded rather than repeated: not "no case has been
+shown", but "here is why the case cannot be built out of coordinate differences,
+and here are the two families that argument does not cover".
+
+### 72.4 The verdict
+
+**No.** `Policy::tolerant` keeps warning past `1.0 / f64::EPSILON` rather than
+refusing. Of §68.4's four reasons, the third is withdrawn as measured-at-zero,
+and the other three stand:
+
+1. Four tests pin the opposite, deliberately, and three of them are §68's own.
+2. It belongs in `check_under_policy` — that much §68.4 had right, and this
+   lane put it there to measure it — but `Model::fuse` and `Model::validate`
+   would then agree on a refusal that nothing has shown is earned.
+3. *Withdrawn.* Zero of the three published rates move; all three are certified,
+   and the line only touches `Warn`.
+4. Every answer past the line measured exact, at spans up to `3.17e28`, and the
+   arithmetic says why.
+
+The honest reading of §68.4's observation is that the tag is **conservative**
+rather than meaningless. `coordinate_spacing` is a whole-model bound —
+`largest_coordinate_magnitude · f64::EPSILON` — hung on a feature that lives
+where the coordinates are small. A bound that is loose is a bound; it never
+claims the feature is missing, only that nothing smaller than that is
+*guaranteed* to be resolved anywhere in the model. Refusing on it would be
+refusing an answer `f64` holds exactly, which §16.10 calls a gap and not a limit,
+and this kernel does not manufacture gaps.
+
+`DynamicRange::LARGEST_SUPPORTED_RATIO` stays the one number that decides, at
+`1e11`, with `Severity` deciding how loud to be about crossing it. No second
+threshold inside the warn band.
+
+### 72.5 What would reopen it
+
+A demonstration, in the shape §16.10 asks for: one tolerant fuse past the line
+whose answer is *wrong* — not merely wide — measured against a closed form or
+against the same fuse asked the other way round. The two families 72.3 does not
+cover are where to look. A rate measurement is no longer owed; 72.1 is it.
+
+## 73. A record that cannot be born certified, recorded 2026-09-08
+
+§69.4 named the change and did not take it: `Record::new` took an
+`outcome: Decision`, three of whose four values were always a bug in that
+position, and the contract was kept by a runtime assert that sixteen production
+call sites had to remember. Two of them forgot, and §69.1 and §69.3 are the
+faults that came of it.
+
+This is that change. The constructor now takes `enclosure: f64` and builds the
+`Undecidable` itself:
+
+```rust
+pub fn new(
+    predicate: &'static str,
+    inputs: &[Point],
+    level: Level,
+    enclosure: f64,
+    measures: Measures,
+) -> Self {
+    Self {
+        predicate,
+        inputs: inputs.to_vec(),
+        level,
+        outcome: Decision::Undecidable { enclosure },
+        enclosure,
+        measures,
+        approximation: None,
+    }
+}
+```
+
+The `panic!` §69 leaned on is gone, and nothing can reach where it stood: a
+caller with a `Decision` in hand has to destructure it to get the `f64`, and the
+only arm that yields one is `Undecidable`.
+
+### 73.1 What did *not* change
+
+**The `outcome` field stays.** It is what a policy writes a sign into —
+`Record::resolve_to` sets it, and `Record::outcome` says it "starts out
+`Decision::Undecidable` and becomes a sign if a policy resolved it". Only the
+*parameter* narrowed. The invariant "a record is born undecidable" moved out of
+a runtime assert and into the constructor's own body, where no caller is asked
+to remember it.
+
+**The mirror assert in `resolve_to` stays too**, and for the opposite reason: it
+checks that resolving *produces* a certified sign, which is a claim about the
+policy rather than about the caller's destructuring, and no type here makes it
+by construction.
+
+### 73.2 The three sites that leaned on an early return
+
+§69.5 grouped the sixteen. The seven that already had an `f64` in hand got
+shorter — `Decision::Undecidable { enclosure: slop }` became `slop`. The five in
+a `Decision::Undecidable { .. }` match arm changed `..` to `enclosure` and passed
+it on; `validate.rs`'s `decision @ Decision::Undecidable { .. }` binding is gone,
+because there is nothing left that wants the whole `Decision`.
+
+The interesting three were `orient2d.rs:98`, `orient3d.rs:110` and
+`intersect.rs:2713`, all behind
+
+```rust
+if decision.is_certified() {
+    return decision;
+}
+```
+
+All three destructure on the spot now, and the early return is the `else`:
+
+```rust
+let Decision::Undecidable { enclosure } = decision else {
+    return decision;
+};
+```
+
+No site needed an `unreachable!`, and none needed a made-up number. Every one of
+the sixteen had the enclosure available where it stood; what it lacked was a
+signature that asked for it.
+
+### 73.3 `holds.rs`, and the certifiedness argued in another function
+
+§69.5 named this hazard and left it standing on purpose: the match arm in
+`what_a_curved_face_holds` was correct only because `the_side_this_face_lies_on`
+happens to write `found = Some(side)` inside its `Decision::Pos | Decision::Neg`
+arm and nowhere else. Before:
+
+```rust
+match side {
+    Decision::Zero => on_its_boundary = true,
+    settled if settled == inwards => (),
+    Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+    other => return Err(gave_up_on_a_side(&trimming.surface, point, other)),
+}
+```
+
+`other` is a `Decision`, a guard arm above it can fall through, and the
+certifiedness of what reached `gave_up_on_a_side` was argued a function away.
+After:
+
+```rust
+match side {
+    Decision::Zero => on_its_boundary = true,
+    settled if settled == inwards => (),
+    Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+    Decision::Undecidable { enclosure } => {
+        return Err(gave_up_on_a_side(&trimming.surface, point, enclosure));
+    }
+    other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+}
+```
+
+The distant argument is now **unnecessary for this line's safety**. Whatever
+`the_side_this_face_lies_on` learns to return, `inwards` only affects which of
+the arms a `Pos`, `Neg` or `Zero` takes — and none of those three can reach the
+refusal, because the arm that reaches it names `Undecidable` and the wildcard
+below it is `panic!`. The day that function returns `Some(Undecidable)`, this
+loop treats a matching undecided side as "inside" rather than panicking in
+`Record::new`; that is a different bug, and a worse-behaved one, so the distant
+argument still earns its paragraph in §69.5 — it just no longer holds up a
+record.
+
+The narrowing travelled the whole way down: `gave_up`, `gave_up_on_a_side` and
+`gave_up_turning_a_corner` all take an `f64` now, which is what forced each of
+the five callers to destructure. `whichever_of_them_was_not_read` returns `f64`
+instead of `Decision`; its `assert!` became a `let … else { panic! }` on the
+same invariant, one arm rather than two, and it no longer has a second copy of
+itself waiting inside `Record::new`.
+
+Three wildcard arms became `panic!` where they had been `return Err(gave_up…)`.
+That is not a new refusal being invented: those arms are now reachable only by a
+`Decision` variant that does not exist yet, which §40 says is a stop rather than
+a guess.
+
+### 73.4 The test, and what it does not prove
+
+The old failure was a runtime panic; the new one is a compile error, which no
+running test can exercise. So there are two, and they prove different halves.
+
+The compile-time half is a `compile_fail` doctest on `Record::new`, paired with
+an identical one that is not `compile_fail`. The pair is the point: same five
+lines, same imports, only the fourth argument differs — `1e-30` in the one that
+compiles, `Decision::Pos` in the one that must not. A `compile_fail` doctest
+passes when the snippet fails to build *for any reason*, including a typo in an
+import, so on its own it proves almost nothing. Its twin passing is what rules
+that out. Compiled directly, the failing snippet gives:
+
+```
+error[E0308]: mismatched types
+ --> src/main.rs:4:68
+  |
+4 |     let record = Record::new("orient3d", &origin, Level::Interval, Decision::Pos, Measures::Volume);
+  |                  -----------                                       ^^^^^^^^^^^^^ expected `f64`, found `Decision`
+```
+
+The runtime half replaces `a_certified_outcome_may_not_be_recorded`, which had
+no panic left to catch. `a_record_is_born_undecidable` asserts that a fresh
+record's `outcome()` is `Decision::Undecidable` carrying the enclosure it was
+handed. **That test does not prove the compile-time property.** It would pass
+just as well against the old signature. It is there because the field is still
+a `Decision` and still mutable through `resolve_to`, so "born undecidable" is
+worth pinning as behaviour and not only as a type.
+
+Neither test proves the sixteen call sites are right. Nothing is asked to: the
+signature is, which is the whole of what §69.4 wanted.

@@ -2704,13 +2704,13 @@ pub(crate) fn ask<P: Predicate>(
     log: &mut ProvenanceLog,
 ) -> Result<Decision> {
     let (decision, level) = decide(question);
-    if decision.is_certified() {
+    let Decision::Undecidable { enclosure } = decision else {
         return Ok(decision);
-    }
+    };
 
     let mut records = ProvenanceLog::new();
     let settled = resolve_under_policy(
-        Record::new(question.name(), inputs, level, decision, measures),
+        Record::new(question.name(), inputs, level, enclosure, measures),
         policy,
         &mut records,
     );

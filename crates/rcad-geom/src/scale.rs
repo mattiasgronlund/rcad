@@ -1,7 +1,7 @@
 //! What the numbers mean, and how big the part is.
 
 use rcad_predicates::{
-    Approximation, Cause, Decision, Level, Measures, Policy, ProvenanceLog, Record, Severity,
+    Approximation, Cause, Level, Measures, Policy, ProvenanceLog, Record, Severity,
 };
 use serde::{Deserialize, Serialize};
 
@@ -280,7 +280,7 @@ impl DynamicRange {
                     DYNAMIC_RANGE_CHECK,
                     &[],
                     Level::Float,
-                    Decision::Undecidable { enclosure: slop },
+                    slop,
                     // The spacing between neighbouring coordinates is already a
                     // distance, so this record needs no converting to be read
                     // as one (decisions.md §15.2).

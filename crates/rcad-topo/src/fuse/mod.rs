@@ -119,6 +119,24 @@ impl Model {
     /// removed from the arena, so "deleted" in [`Fused`] means an input with no
     /// image rather than a key that has stopped resolving.
     ///
+    /// # What `Ok` promises, and under which policy
+    ///
+    /// An answer this returns `Ok` for passes [`Model::validate`] **under
+    /// `policy`, and under no other**. A fuse invents features neither input
+    /// had — the sliver where two nearly-flush faces meet is as thin as the gap
+    /// between the two planes, which has no lower bound short of zero — and a
+    /// tolerant `policy` warns about a spread that thin where a certified one
+    /// refuses it. So a tolerant fuse writes solids that a later certified
+    /// caller is told are broken, and both readings are correct: "valid" is a
+    /// property of a model *and a policy*, not of a model on its own.
+    ///
+    /// Nothing is corrupted when that happens and the two never disagree at the
+    /// same strictness — a caller who tightens the policy gets a refusal, never
+    /// a wrong answer. What a caller must not do is fuse tolerantly and then
+    /// hand the result on as if it were certified.
+    /// `a_model_only_the_policy_that_built_it_calls_valid.rs` measures it, and
+    /// `docs/decisions.md` §68 says why the refusal is not moved into the fuse.
+    ///
     /// # Atomic
     ///
     /// The whole answer is worked out in scratch and written in one go. Any
@@ -137,7 +155,10 @@ impl Model {
     /// answer encloses no space, or when the answer's own shortest edge is too
     /// small to resolve beside its own coordinates — which is
     /// [`Invalid::DynamicRangeTooWide`] about a feature the inputs did not have
-    /// and the fuse built (see `Assembly::check_dynamic_range`).
+    /// and the fuse built (see `Assembly::check_dynamic_range`), or when cutting
+    /// a face left a piece bounded by two straight sides, which enclose no area
+    /// and so describe no face — [`Invalid::WireTooShort`], and §67 for why that
+    /// is the input's fault and not the splitter's.
     ///
     /// # Panics
     ///
@@ -474,9 +495,7 @@ fn gave_up(
         predicate,
         inputs,
         Level::Interval,
-        Decision::Undecidable {
-            enclosure: f64::INFINITY,
-        },
+        f64::INFINITY,
         measures,
     ));
     Error::Undecidable {
@@ -586,8 +605,8 @@ fn must_decide(
 ) -> Result<Decision> {
     match decision {
         Decision::Neg | Decision::Zero | Decision::Pos => Ok(decision),
-        Decision::Undecidable { .. } => {
-            let record = Record::new(predicate, inputs, Level::Interval, decision, measures);
+        Decision::Undecidable { enclosure } => {
+            let record = Record::new(predicate, inputs, Level::Interval, enclosure, measures);
             match resolve_under_policy(record, policy, log) {
                 settled @ (Decision::Neg | Decision::Zero | Decision::Pos) => Ok(settled),
                 Decision::Undecidable { .. } => Err(Error::Undecidable {

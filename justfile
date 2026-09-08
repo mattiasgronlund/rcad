@@ -156,7 +156,19 @@ check:
 # one at 90: a test-only label mapper over `rcad_topo::Error`, naming the five
 # refusals that file has actually seen and answering "an unexpected refusal" for
 # the rest. Reaching the arm is the finding, not the pass.
-wildcard_arms := "92"
+#     lane-record-enclosure  after §73's narrowing  83 direct + 5 composite = 88
+#
+# Four go away and none arrive. Three are `holds.rs` 318, 377 and 550, where a
+# `Decision` reached `gave_up_…` through a wildcard; `Record::new` takes an
+# `f64` now, so each arm has to name `Undecidable` to get one, and the wildcard
+# below it can only be reached by a variant that does not exist yet
+# (`docs/decisions.md` §73.3). The fourth is `validate.rs:281`, and it was a
+# false positive the ledger was carrying: the arm above it read
+# `decision @ Decision::Undecidable { .. }`, and clippy does not see a `@`
+# binding as covering the variant. Written plainly as
+# `Decision::Undecidable { enclosure }` — which is what the narrowing wanted
+# anyway — the same match stops warning. The arm itself did not move.
+wildcard_arms := "88"
 
 check-wildcards:
     @find crates -name lib.rs -path '*/src/*' -exec touch {} +
@@ -572,6 +584,15 @@ decisions-find pattern:
 # case rather than the unlucky one. It happened while §57 was being written
 # (§57.4), and nothing in this file noticed; the collision was found by hand,
 # at merge time, which is the expensive place to find it.
+#
+# **A `## N.` lower than the one before it, and a `### N.M` sitting under the
+# wrong `## N.`, are two more ways to go silently unreachable.** A renumbering
+# that moves later sections down leaves the file out of order if a stray
+# earlier one is missed, and a subsection typed by hand during that renumbering
+# can end up under the wrong parent — `### 64.3` left under `## 69.` after 64
+# was renumbered to 67 is the shape it takes, and it happened four times in one
+# session and was only caught by grepping for it. Neither is a duplicate, so
+# the check above passes both. `docs/decisions.md` §71.
 check-decisions:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -591,6 +612,31 @@ check-decisions:
             grep -nE "^(## ${id//./\\.}\. |### ${id//./\\.} )" "{{decisions_file}}"
         done
         echo "^ these sections share a number, and 'just decision' reaches only the first"
+        exit 1
+    fi
+
+    order=$(awk '
+        /^## [0-9]/ {
+            rest = $0; sub(/^#+ /, "", rest)
+            p = index(rest, " "); n = substr(rest, 1, p - 1) + 0
+            if (n < top) print FNR ": ## " n " comes after ## " top
+            top = n; lastsub = 0
+            next
+        }
+        /^### [0-9]/ {
+            rest = $0; sub(/^#+ /, "", rest)
+            p = index(rest, " "); id = substr(rest, 1, p - 1)
+            split(id, parts, ".")
+            subtop = parts[1] + 0; subnum = parts[2] + 0
+            if (subtop != top)
+                print FNR ": ### " id " is not under its own ## " top
+            else if (subnum < lastsub)
+                print FNR ": ### " id " comes after ### " top "." lastsub
+            lastsub = subnum
+        }' "{{decisions_file}}")
+    if [ -n "$order" ]; then
+        echo "$order"
+        echo "^ decisions.md section numbers are out of order (docs/decisions.md §71)"
         exit 1
     fi
 
@@ -694,6 +740,41 @@ check-decisions-selftest:
     if {{just_executable()}} --set decisions_file "$dir/twice-sub.md" \
         check-decisions >/dev/null 2>&1; then
         echo "two subsections numbered 1.1 passed check-decisions"; exit 1
+    fi
+
+    # Descending: §1 lands after §2, which a renumbering that skips one section
+    # leaves behind.
+    cat > "$dir/descending.md" <<'MD'
+    ## 2. Second
+    ## 1. First
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/descending.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "## 1. after ## 2. passed check-decisions"; exit 1
+    fi
+
+    # Descending within a section: §1.1 lands after §1.2.
+    cat > "$dir/descending-sub.md" <<'MD'
+    ## 1. First
+    ### 1.2 Beta
+    ### 1.1 Alpha
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/descending-sub.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "### 1.1 after ### 1.2 passed check-decisions"; exit 1
+    fi
+
+    # Wrong parent: §1.2 is left under §2 by a renumbering, exactly the way
+    # `### 64.3` ended up under `## 69.` in the real file.
+    cat > "$dir/wrong-parent.md" <<'MD'
+    ## 1. First
+    ### 1.1 Alpha
+    ## 2. Second
+    ### 1.2 Beta
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/wrong-parent.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "### 1.2 under ## 2. passed check-decisions"; exit 1
     fi
 
 # One item of Rust source, by its name, with its doc comment and attributes.
@@ -988,6 +1069,18 @@ check-questions-selftest:
 # `practices` ships only skills, so nothing here runs it — its directory
 # existing is the whole check. A skill that fails to load fails visibly, in the
 # session, which is not true of a hook or a parser.
+#
+# **Two questions, and the first one alone was not enough.** Where the files are
+# is the bootstrap and has to be asked here, because it is what runs when the
+# plugin is missing. Whether Claude Code has been *told* about them is a
+# different question, and `rscene` answered it the hard way on 2026-09-08: three
+# plugin directories present, this recipe green, and nothing loaded — no hooks,
+# no skills, no message saying so. A directory is not an install.
+#
+# The second question is asked by the plugin, because the answer is the same for
+# both repos and the copy is what goes stale. It cannot prove *this* session
+# loaded anything — settings are read at session start — so it rules out the
+# silent case and says exactly that rather than claiming more.
 check-plugins:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1008,6 +1101,7 @@ check-plugins:
         exit 1
     fi
     echo "3 plugins, all where this repo expects them"
+    "{{guardrails_plugin}}/bin/check-declared.sh" mattiasgronlund-local questions guardrails practices
 
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT

@@ -294,6 +294,12 @@ impl PointsAlongACrossing {
 /// [`Error::AnEndOfARunNamesNoPlace`] when an end is neither the box that says
 /// nothing at all is known nor a box with a middle.
 ///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] when the run says its two
+/// surfaces cross in a conic and they do not: a plane that misses the ball it is
+/// named against, or touches it at one point, leaves a circle of no radius, and
+/// there is no angle to walk round one. A **limit** and not a gap (§16.10) —
+/// the curve the run names does not exist at any precision.
+///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a run between a
 /// cone or a torus and another curved surface — the same two refusals
@@ -404,6 +410,11 @@ pub fn walk(
 /// degree-four run pick both loops or neither, and
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the crossing's size or a seed
 /// on it falls out of `f64`'s range.
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose conic is not a
+/// curve — a plane that misses or grazes the ball it is named against — exactly
+/// as [`walk`] does, and for the same reason: there is nowhere on a circle of no
+/// radius that the pair alone picks out.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a cone or a
@@ -548,6 +559,11 @@ enum WhatARunLiesOn {
 /// hyperbola, and [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the
 /// half-spaces on a hyperbola's run hold both branches or neither.
 ///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] when the pair has a conic
+/// builder and what comes out of it is not a curve — a plane that misses a ball
+/// altogether, or touches it at one point, is the shape a stranger's model
+/// reached this by. See [`Conic::has_an_angle_round_it`].
+///
 /// Whatever the conic builders refuse, for the pairs that have one.
 fn what_a_run_between_these_two_lies_on(
     pair: [Surface; 2],
@@ -555,7 +571,7 @@ fn what_a_run_between_these_two_lies_on(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<WhatARunLiesOn> {
-    match pair {
+    let lies_on = match pair {
         [Surface::Plane(_), Surface::Plane(_)] => Ok(WhatARunLiesOn::StraightLine),
         [Surface::Plane(flat), Surface::Sphere(ball)]
         | [Surface::Sphere(ball), Surface::Plane(flat)] => {
@@ -661,7 +677,29 @@ fn what_a_run_between_these_two_lies_on(
             Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
             Surface::Torus(_),
         ] => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+    }?;
+
+    // A conic builder is handed the pair the caller's run *says* it lies on,
+    // and a stranger's model says whatever it likes: a seam plane 512 away from
+    // the ball it claims to cut leaves `where_a_plane_cuts_a_ball` a negative
+    // discriminant, which clamps to a radius of zero. Every road out of a conic
+    // that shrank to a point runs through `NaN`, so it is stopped here, once,
+    // rather than at each of them.
+    //
+    // **Asked only of a conic whose size is a number**, because a conic too big
+    // to put a bound on arrives here looking exactly like one that shrank: an
+    // overflowed semi-axis length times a direction with a zero in it is `NaN`
+    // in that coordinate, so no length of it is > 0. That one already has a name
+    // one step later in `walk` and it is a different one —
+    // `CannotWorkOutHowBigACrossingIs`, a gap rather than a limit, because the
+    // same pair written smaller is walked without complaint.
+    if let WhatARunLiesOn::Conic(conic) = &lies_on
+        && conic.the_size_it_was_worked_out_from().is_finite()
+        && !conic.has_an_angle_round_it()
+    {
+        return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
     }
+    Ok(lies_on)
 }
 
 /// The two seeds of a degree-four crossing, once they have been checked for
@@ -758,7 +796,7 @@ fn the_seed_this_run_is_picked_up_at(
     let mut settled_seeds = Vec::new();
     for seed in seeds {
         let (settled, off) = settled_with_a_bound(surfaces, seed)?;
-        if picked_by.is_empty() || every_half_space_holds(picked_by, settled, off, policy, log) {
+        if picked_by.is_empty() || every_half_space_holds(picked_by, settled, off, policy, log)? {
             settled_seeds.push(settled);
         }
     }
@@ -1183,21 +1221,30 @@ fn how_far_a_pipe_reaches_from(
 
 /// Whether the box `at` is known to be inside is on or outside every one of
 /// `picked_by`.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when `at` is not a point, so there
+/// is no box round it to ask about. A conic that is a curve at all
+/// ([`Conic::has_an_angle_round_it`]) places every corner in `f64`'s range
+/// except by overflowing it, which is what that name already covers.
 fn every_half_space_holds(
     picked_by: &[Picker],
     at: Point,
     deviation: f64,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> bool {
-    let at = somewhere_within(at, deviation);
+) -> Result<bool> {
+    let Some(at) = somewhere_within(at, deviation) else {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    };
     let mut on_or_outside = true;
     for picker in picked_by {
         if which_side_of(picker, at, policy, log) == Decision::Neg {
             on_or_outside = false;
         }
     }
-    on_or_outside
+    Ok(on_or_outside)
 }
 
 /// What comes back for a run that needs no help at all: its two ends are the
@@ -1263,9 +1310,7 @@ fn room_left_over(
             ROOM_LEFT_TO_REFINE_A_WALK,
             &[],
             Level::Float,
-            Decision::Undecidable {
-                enclosure: deviation,
-            },
+            deviation,
             Measures::Length,
         ));
         return Ok(None);
@@ -1338,6 +1383,41 @@ struct Conic {
 }
 
 impl Conic {
+    /// Whether there is an angle to go round this at all.
+    ///
+    /// A conic that shrank to a point is not a curve, and every road out of one
+    /// runs through `NaN`: [`Conic::angle_of`] divides by a semi-axis's own
+    /// squared length, so a semi-axis of zero hands back `0/0`, and then
+    /// [`Conic::at`] builds a corner out of that angle, [`somewhere_within`]
+    /// builds a box out of that corner, and the box is `NaN` on both sides.
+    /// A semi-axis carrying a `NaN` already fails `> 0.0` here.
+    ///
+    /// **The centre is asked about too, because a size that is a number is no
+    /// promise the centre is a point.** [`how_big_this_is`] folds through
+    /// [`f64::max`], which drops a `NaN` rather than spreading it, so a centre of
+    /// `(NaN, ∞, NaN)` — which is what `normal * ∞` makes of a normal with a zero
+    /// in it — leaves a perfectly finite size and a `NaN` in every corner
+    /// [`Conic::at`] places.
+    ///
+    /// **Only the caller knows whether a semi-axis that is not a length means
+    /// "no curve" or "too big to measure"**, which is why this asks neither
+    /// about infinity nor about `NaN` by name and the one call site checks the
+    /// size first.
+    ///
+    /// **[`Vector::length`] and not `length_squared`, and that is the whole
+    /// difference between this refusal and §39's.** A bar of radius `1e-200` has
+    /// a cap circle whose squared semi-axis is `1e-400` and underflows to zero,
+    /// and that circle *is* a curve — the same bar written larger is walked, so
+    /// what ran out is `f64`'s exponent and the answer is
+    /// [`Error::CannotWorkOutHowBigACrossingIs`], a gap
+    /// (`a_bar_too_thin_for_its_own_squares_is_refused_rather_than_asserted_against`).
+    /// [`Vector::length`] scales the squares back into range and answers
+    /// `1e-200`, so asking it here tells that bar apart from a circle whose
+    /// radius really is zero, which no scaling rescues.
+    fn has_an_angle_round_it(&self) -> bool {
+        self.centre.is_finite() && self.across.length() > 0.0 && self.and.length() > 0.0
+    }
+
     /// The point at `angle` radians round, measured from
     /// [`Conic::across`](Conic) towards [`Conic::and`](Conic).
     fn at(&self, angle: f64) -> Point {
@@ -1430,7 +1510,7 @@ impl Conic {
         let backwards = from + wrapped(to - from) - core::f64::consts::TAU;
         let mut picked: Vec<(f64, f64)> = Vec::new();
         for end in [onwards, backwards] {
-            if self.picked_by_all(picked_by, (from + end) / 2.0, deviation, policy, log) {
+            if self.picked_by_all(picked_by, (from + end) / 2.0, deviation, policy, log)? {
                 picked.push((from, end));
             }
         }
@@ -1449,7 +1529,7 @@ impl Conic {
         deviation: f64,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> bool {
+    ) -> Result<bool> {
         every_half_space_holds(picked_by, self.at(middle), deviation, policy, log)
     }
 }
@@ -1490,8 +1570,8 @@ fn which_side_of(
     };
     match decision {
         Decision::Pos | Decision::Zero | Decision::Neg => decision,
-        Decision::Undecidable { .. } => resolve_under_policy(
-            Record::new(named, &[at], Level::Interval, decision, measures),
+        Decision::Undecidable { enclosure } => resolve_under_policy(
+            Record::new(named, &[at], Level::Interval, enclosure, measures),
             policy,
             log,
         ),
@@ -1835,7 +1915,7 @@ fn which_branch_of_a_hyperbola_this_run_is(
             size,
         };
         let deviation = POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * size;
-        if every_half_space_holds(picked_by, branch.at(0.0), deviation, policy, log) {
+        if every_half_space_holds(picked_by, branch.at(0.0), deviation, policy, log)? {
             held.push(branch);
         }
     }
@@ -2200,7 +2280,7 @@ fn which_of_these_circles_this_run_is(
             .all(|end| circle.how_far_off_it(*end) <= deviation);
         if holds_every_end
             && (picked_by.is_empty()
-                || every_half_space_holds(picked_by, circle.at(0.0), deviation, policy, log))
+                || every_half_space_holds(picked_by, circle.at(0.0), deviation, policy, log)?)
         {
             held.push(circle);
         }
@@ -2224,15 +2304,26 @@ fn how_big_this_is(places: &[Point], lengths: &[f64]) -> f64 {
     widest.max(f64::MIN_POSITIVE)
 }
 
-/// The box a computed point is really known to be inside.
+/// The box a computed point is really known to be inside, or `None` when there
+/// is no such box.
 ///
 /// Handed to a predicate as an exact triple instead, a point that came out of
 /// trigonometry buys a certified sign about noise (§2.5, §27.7).
-fn somewhere_within(point: Point, deviation: f64) -> PredicatePoint {
-    PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
-        Interval::new(coordinate - deviation, coordinate + deviation)
-            .expect("a deviation is a positive length, so the low end is below the high one")
-    }))
+///
+/// **A sign is not the whole of what an interval refuses**, and the `expect`
+/// this used to carry said it was: "a deviation is a positive length, so the low
+/// end is below the high one" reasons about the *order* of two numbers and is
+/// silent about the case where they are not ordered at all. A two-hour
+/// `cargo fuzz` soak of `Model::fuse` walked a seam whose conic had shrunk to a
+/// point, so both ends came out `NaN`, and a claim about signs cannot cover
+/// that. Nor can a wider one be earned here: the family of fixes is a claim, an
+/// assert, or an answer, and the first two are the same bet twice over — this
+/// runs on a stranger's bytes, and `walk` already hands its caller an `Err`.
+/// So the answer is `None` and the caller names the refusal.
+fn somewhere_within(point: Point, deviation: f64) -> Option<PredicatePoint> {
+    let [x, y, z] = point.coordinates();
+    let side = |coordinate: f64| Interval::new(coordinate - deviation, coordinate + deviation).ok();
+    Some(PredicatePoint::Constructed([side(x)?, side(y)?, side(z)?]))
 }
 
 /// `angle` moved into `[0, 2π)`.

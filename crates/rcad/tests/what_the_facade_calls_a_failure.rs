@@ -14,9 +14,9 @@
 //! should never have to depend on a crate the facade exists to hide.
 
 use rcad::{
-    Approximation, Cause, Containment, Decision, Deflection, Error, GeometryError, Invalid,
-    Isometry, Level, Measures, Model, Point, Policy, PredicateError, ProfileBuilder, ProvenanceLog,
-    Record, Scale, TopologyError,
+    Approximation, Cause, Containment, Deflection, Error, GeometryError, Invalid, Isometry, Level,
+    Measures, Model, Point, Policy, PredicateError, ProfileBuilder, ProvenanceLog, Record, Scale,
+    TopologyError,
 };
 
 #[test]
@@ -49,7 +49,7 @@ fn an_operation_that_could_not_decide_keeps_its_own_variant_at_the_facade() {
         "orient3d",
         &[],
         Level::Interval,
-        Decision::Undecidable { enclosure: 1e-17 },
+        1e-17,
         Measures::Volume,
     ));
 
@@ -81,7 +81,7 @@ fn an_undecided_crossing_is_not_filed_as_bad_geometry() {
         "where a plane and a sphere cross",
         &[],
         Level::Interval,
-        Decision::Undecidable { enclosure: 4e-13 },
+        4e-13,
         Measures::ManyLengths { how_many: 4 },
     ));
 

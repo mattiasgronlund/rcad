@@ -89,13 +89,13 @@ pub fn orient2d_tolerantly(
     log: &mut ProvenanceLog,
 ) -> Decision {
     let (decision, level) = orient2d_reporting_level(a, b, c);
-    if decision.is_certified() {
+    let Decision::Undecidable { enclosure } = decision else {
         return decision;
-    }
+    };
     // A record carries [`Point`], which is three-dimensional. A flat predicate
     // has no third coordinate to report, so its inputs go in at height zero.
     let inputs = [at_height_zero(a), at_height_zero(b), at_height_zero(c)];
-    let record = Record::new(ORIENT2D, &inputs, level, decision, Measures::Area);
+    let record = Record::new(ORIENT2D, &inputs, level, enclosure, Measures::Area);
     resolve_under_policy(record, policy, log)
 }
 
