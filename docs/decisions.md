@@ -21043,3 +21043,455 @@ worth pinning as behaviour and not only as a type.
 
 Neither test proves the sixteen call sites are right. Nothing is asked to: the
 signature is, which is the whole of what §69.4 wanted.
+
+## 74. A vertex placed at `NaN`, recorded 2026-09-08
+
+`where_a_closed_crossing_starts` ended its conic arm in `Ok(conic.at(0.0))` with
+nothing between that point and the caller. The question put to this lane was
+whether that `Ok` could carry a point that is not a place.
+
+**It could, and the input is three lines long.** A pipe of radius `1e300` about
+the z axis, against the plane `Plane::from_point_and_normal(origin, (1, 0,
+1e-20))`, on a run stated as `RightRoundWhereItsFacesCross`, answered
+`Ok(Point([NaN, NaN, NaN]))`. Both surfaces are ones `Cylinder::new` and
+`Plane::from_point_and_normal` accept, both public; the function is public and
+re-exported from `rcad`. This is §16.10's public-API door and not a walk through
+today's callers.
+
+### 74.1 Why the degenerate check let it past
+
+`what_a_run_between_these_two_lies_on` refuses a conic that shrank to a point,
+and it asks that question **only of a conic whose size is finite** — deliberately,
+because an overflowed conic arrives looking exactly like a shrunk one and has a
+different and better name one step later (`CannotWorkOutHowBigACrossingIs`, a gap
+rather than a limit). `walk` takes that step: `deviation = ROUNDOFF · size` is
+infinite, and it refuses.
+
+`where_a_closed_crossing_starts` never took it. It has no bound to publish, so
+there was nothing there to notice the infinity, and the two public doors onto one
+crossing disagreed about whether it could be answered at all.
+
+The `NaN` rather than an honest infinity comes from `Conic::at`:
+
+```text
+at(0) = centre + across·cos 0 + and·sin 0
+```
+
+`sin 0` is exactly `0.0`, and the ellipse a nearly-parallel plane cuts out of a
+pipe is stretched down the slope by `‖n‖ / |n·w|` — so `and` is a semi-axis of
+infinity, `∞ · 0` is `NaN`, and the `NaN` reaches every coordinate through the
+sum.
+
+### 74.2 What the caller saw
+
+`rcad-topo`'s `fuse::arrange` takes this answer at two places. At
+`arrange.rs:3509` an `Err` is folded into `ACrossingThisCannotBeOrderedAlong`, so
+only an `Ok` gets through — and an `Ok` here was a `NaN` triple handed straight
+to `PredicatePoint::from`, which is §27.7's mistake: an exact triple made of
+noise, offered to a predicate as something to certify a sign about.
+
+At `arrange.rs:1305` the answer goes to `where_the_crossing_starts`, whose first
+line is
+
+```rust
+assert!(
+    from.is_finite(),
+    "a closed crossing is walked between two surfaces built from finite numbers, so where it \
+     starts is a real place"
+);
+```
+
+with a doc comment saying "a seed that is not a place is a bug in the walk". That
+sentence was right about whose bug it is and wrong about it being impossible. It
+is exactly the shape §16.10 warns about: an argument for an absence, well
+written, and deflecting scrutiny in proportion. Its premise — *the surfaces were
+built from finite numbers* — is true and does not carry the conclusion, because
+what overflowed is not a surface's own number but a ratio of two of them.
+
+**Not demonstrated here: that a `Model::fuse` reaches that assert.** Getting
+there needs a fuse whose arrangement holds a plane face and a pipe face crossing
+in an ellipse this stretched, with no node already on the crossing, and building
+one was outside this lane. What is demonstrated is the function's own answer,
+which is the door §16.10 asks about.
+
+### 74.3 The fix, and why it is on the point and not on the size
+
+One check, in the conic arm:
+
+```rust
+let start = conic.at(0.0);
+if !start.is_finite() {
+    return Err(Error::CannotWorkOutHowBigACrossingIs);
+}
+Ok(start)
+```
+
+The name is the one `walk` gives the identical pair, and the one this function's
+own `# Errors` section already promised — "when the crossing's size **or a seed
+on it** falls out of `f64`'s range" — so the doc was true of the quartic arm and
+false of the conic arm, and this makes it true of both. It is a **gap**: the same
+pipe and plane written a hundred orders of magnitude down start at a whole
+number, so what ran out is `f64`'s exponent and not the answer's existence.
+
+The obvious alternative was to mirror `walk` — refuse when
+`the_size_it_was_worked_out_from()` is not finite. It catches this pair too, and
+**it is sound today**: the enumeration was done, and all six conic builders put
+both semi-axis *scalars* into `how_big_this_is`'s list and scale them by vectors
+of length one, so a finite size does imply a finite start.
+
+It was not taken because that sentence is a **sufficiency claim** (§16.10's third
+species) and the point check is not. The claim ranges over six builders and the
+provenance of every direction vector each of them uses, and **this lane got it
+wrong on the first pass**, which is the evidence that it is not free to maintain.
+Two of the six — `the_two_meridian_circles` and
+`the_two_circles_a_cone_and_a_pipe_cut` — scale by `up = along/‖along‖²`, which is
+not a unit vector on its face; a torus axis written `(1e-200, 1e-200, 1e-200)`
+squares to `3e-400`, which is zero in `f64`, so `up` would be infinite while the
+two radii in the size list stayed exactly what the caller wrote. That was written
+down here as a demonstrated hole, a test was written for it, and the test failed:
+the refusal that came back was `CannotNameWhichPieceOfACrossingThisIs` and not
+`CannotWorkOutHowBigACrossingIs`, because `Axis::new` scales every direction to
+length one — and so does the `TryFrom` a deserialized axis goes through — so
+`‖along‖²` is one and `up` is `along`. The fact that rescues the claim lives two
+files away from the builder that depends on it.
+
+So: the size guard holds, on a chain that has to be re-walked whenever a builder
+is added or a direction stops being unit. The point guard is one line, is the
+property the caller actually needs, and has nothing to re-walk.
+`every_axis_a_caller_can_build_has_a_direction_of_length_one` in the test file
+pins the step that was misread, so the next reader finds it checked rather than
+asserted.
+
+§69.5's objection to a guard on a branch nothing can reach does not apply here:
+this branch was reached, with a printed `Ok(Point([NaN, NaN, NaN]))` before the
+change and a named `Err` after it, on the same input.
+
+### 74.4 What was tested, and what the boundary does not cover
+
+`crates/rcad-geom/tests/where_a_closed_crossing_starts_is_a_place_or_a_refusal.rs`.
+
+`a_conic_too_big_to_hold_a_point_is_refused_and_the_same_pair_smaller_starts_somewhere`
+pins the pair above, and asserts the other half of the gap: the same pipe at
+`1e200` starts at a finite point away from the origin, and `walk` agrees with
+this function on both radii.
+
+`every_conic_crossing_this_answers_starts_at_a_place` sweeps six configurations
+through all four conic builders at every tenth power of two from `2⁻⁵⁰⁰` to
+`2⁵⁰⁰`, both ways round: 1,096 of 1,212 asks start at a place and 116 refuse, and
+every `Ok` is checked for being finite. Both counts are held to a floor, so a
+change that turns the sweep into all-refusals fails it.
+
+`every_axis_a_caller_can_build_has_a_direction_of_length_one` is the third, and
+it is 74.3's own correction rather than a check on this function.
+
+**What that boundary does not cover**, named rather than left silent:
+
+- **Placements far from the origin whose differences are small.** The sweep
+  scales whole configurations, which is the case one power of two fixes; the
+  case it cannot fix (§16.9's limit) is not in it.
+- **Degree-four pairs.** A ball against a pipe and two leaning pipes leave
+  through `the_seed_this_run_is_picked_up_at`, not through `Conic::at`, and
+  `a_quartic_picked_up_at` already refuses a seed that is not a point.
+- **The two circle-picking builders.** A plane against a torus and a coaxial cone
+  against a pipe refuse a run with no picker on it as a tie before any of this is
+  reached, so the sweep says nothing about them. They carry a guard of their own
+  in `which_of_these_circles_this_run_is`, which asks the centre and both
+  semi-axes directly.
+- **Underflow.** A conic whose size runs off the *bottom* of `f64` is a different
+  question. `has_an_angle_round_it` asks `Vector::length` rather than
+  `length_squared` precisely so that a bar of radius `1e-200` is told apart from
+  a circle of no radius, and nothing found here moves that.
+
+## 75. The corner the model was holding all along, recorded 2026-09-08
+
+### 75.1 A paragraph describing a filter that was not there
+
+`derive_a_corner` in `crates/rcad-topo/src/fuse/bake.rs` carried this sentence:
+
+> Three surfaces can meet at more than one point, and the stored corner is what
+> says which: it is a cached sample of the truth (§17.1), so the box it falls
+> inside is the one. Two boxes that both hold it are two answers to one question
+> and the triple is passed over.
+
+The solving loop was:
+
+```rust
+let Ok(MeetOfThree::At(places)) =
+    meet_of_three_surfaces([&triple[0], &triple[1], &triple[2]], policy, log)
+else {
+    continue;
+};
+let [only] = places.as_slice() else {
+    continue;
+};
+```
+
+`let [only] … else { continue }` passes over **every** multi-place triple, not
+the ambiguous ones the paragraph describes. And the function could not have done
+what the paragraph said: `vertex: VertexKey` was read once in the whole body, to
+be copied into the returned `BakedCorner`, so the loop that places the point had
+no stored corner to consult. §70.3 spotted this while measuring something else
+and called it "the §16.10 shape again".
+
+**It is a gap and not a limit.** The answer exists: two planes and a pipe cross
+at both ends of a chord, `MeetOfThree::At` hands back both boxes, and which of
+them a corner is, is a fact the model has been holding since it was built. A
+corner like that could only be placed by some *other* triple round it, and
+refused as `Error::Undecidable` when there was none — a representable answer
+turned away.
+
+The consumer is named, so §13 does not defer it: the fuzz target
+`two_solids_fused_by_a_stranger` decodes an arbitrary model, and a stranger's
+solid is under no obligation to keep its curved corners on well-conditioned
+triples. Nothing this milestone *builds* has such a corner — every builder in
+`build.rs` makes curved corners with exactly two surfaces round them (a cap
+circle) and flat ones with three — which is why the demonstration below is a
+unit test on the three surfaces and not a solid.
+
+### 75.2 The fix: an overlap of two boxes, which needs no tolerance
+
+`the_place_the_model_points_at` is the whole of it.
+
+One place and the model is not consulted at all — the surfaces gave a single
+answer and there is nothing to choose. That is every corner of every flat solid,
+because three planes meet at one point or at none, so nothing about the
+polyhedral half of the kernel turns on any of what follows.
+
+More than one, and the place whose box **overlaps** the box the model's own
+corner is in is the one. Both are certified enclosures of true points, so:
+
+- the comparison needs no tolerance, no constant and no policy — it is
+  `lo <= other.hi && other.lo <= hi` per axis, the same shape as
+  `Bounds::provably_misses`;
+- a pair that misses is a **proof** that the model's corner is not that meet,
+  not a hint that it is far from it.
+
+That is what the trap in this lane's brief asked for. §70 is about a model that
+declares how closely it will be checked; nothing here reads a number the model
+declares, and nothing here scales with one.
+
+Two places overlapping, or none overlapping, both give `None`: the first is two
+answers to one question, the second is the model's corner and its surfaces
+disagreeing by more than either box allows. **Neither is a refusal.** It is that
+triple saying nothing about this corner while another may still place it, which
+is the same standing `MeetOfThree::Nowhere` and `MoreThanAPoint` already had
+(§34.9).
+
+**The model's corner never places the point.** It selects among places the
+surfaces already agree on, and the geometry comes from the meet. A wrong cached
+corner therefore cannot move a right answer — the worst it can do is fail to
+pick, which costs a refusal and never a wrong solid. That is the §17.1 reading
+of "cached sample" taken seriously in both directions.
+
+**The doc now matches the code, and the change went that way round.** The
+paragraph as written was true of the design and false of the code, so the code
+moved. Two sentences were added rather than rewritten: that a single place is
+taken without consulting anything, and that no place overlapping is also a pass.
+Neither was in the original and both are behaviour a reader has to know.
+
+### 75.3 Where the model's corner comes from, and an assert that moved
+
+`place_a_corner` already worked out where the model puts a corner — that is what
+a corner with fewer than three surfaces round it *is*, read out and moved (§31.3,
+§34.6). It is now `where_the_model_puts_a_corner`, and the two-surface answer and
+the three-surface selector are the same call:
+
+- placement is `Isometry::identity()` → the stored triple, exactly, because a box
+  round a move that rounded nothing would turn an exact corner inexact and that is
+  the whole of §17.7's lattice control;
+- otherwise `where_a_corner_lands_after_moving`, whose box is what the move cost,
+  through `as_exact_as_it_is`.
+
+Two things follow that are worth writing down.
+
+**The placement assert now covers both routes.** `bake`'s doc has always said it
+panics when the faces round one corner sit at different placements, and the
+assert lived inside the fewer-than-three branch, so the documented panic was only
+half enforced. It is now in `where_the_model_puts_a_corner`, which both routes
+call. A corner in two places at once has no world position for anything to
+select against; a solid like that is broken rather than awkward, and §4.3's
+"corrupt is worse than a crash" is why this is an assert and not an `Err`.
+
+**The joined-face path pays for it too.** `corner_of_every_vertex_left` handles a
+solid whose coplanar faces were joined on the way in, and it now builds the same
+`PlacedSurface` set as the ordinary route to get each corner. That is work it did
+not do before and it buys nothing on that path — everything there is a plane, so
+the selection is never consulted. It was taken anyway, because the alternative is
+`derive_a_corner` having a second contract for one caller, and a second spelling
+of one question is how two callers come to disagree (the argument
+`side_of_surface` is already written on).
+
+### 75.4 A prune, and why it changes no answer
+
+The search stops at the first triple that solves to an exact point:
+
+```rust
+if point.uncertainty() == 0.0 {
+    break 'every_triple;
+}
+```
+
+This is not an approximation of the old behaviour, it is the old behaviour. The
+widths were compared with `<`, so once `best` held a box of no width no later
+triple could displace it; the loop was running `meet_of_three_surfaces` for
+triples whose answers it had already decided to throw away. §70.3's cost argument
+is that `derive_a_corner` is cubic in the faces round a corner — twenty meets for
+a corner where six faces meet — and this makes the well-conditioned case stop at
+the first.
+
+It bites on nothing this milestone builds. Every corner of every solid in the
+suite has exactly three faces round it, so there is exactly one triple and
+nothing to break out of. It is written for the corner §70.3 named and the fuzzer
+can reach.
+
+### 75.5 The benchmark, re-run
+
+§70.3's four numbers, re-measured on this machine with a throwaway probe (a
+crate under the session scratchpad that path-depends on this worktree, built
+`--release`, each figure the mean of a warmed loop). Nine runs of the binary,
+alternating between the base `bake.rs` and this one:
+
+```
+                                                    §70.3     measured here
+Plane::signed_distance_to                            3 ns     1.6 – 8.8 ns
+meet_of_three_surfaces, three perpendicular planes  571 ns     549 – 743 ns
+Model::validate over one block                   13.519 µs     11.2 – 13.4 µs
+Model::fuse of two blocks                         1.353 ms     1.29 – 1.39 ms
+```
+
+`Model::validate` and `Model::fuse` land on §70.3's numbers. The two nanosecond
+figures do not settle to a single value on this machine — `signed_distance_to`
+reads between 1.6 ns and 8.8 ns depending on what the surrounding loop got
+hoisted, and `meet_of_three_surfaces` swung 30% between two runs of the *same*
+binary. **So the 190:1 ratio in §70.3 is not reproducible to two figures here**
+and nothing below is argued from it; what survives re-measurement is the order,
+which is two to three hundred times, and §70.3's conclusion rests on that.
+
+The 34% figure survives too, and gets worse rather than better: eight corners of
+one block at one triple each is `8 × 549 ns = 4.4 µs` against a sweep of
+`11.2 µs`, which is 39%.
+
+**Before and after this section, `Model::fuse` of two blocks:**
+
+```
+base 41b7160    1.347 ms   1.389 ms   1.288 ms
+this section    1.386 ms   1.307 ms   1.302 ms
+```
+
+Indistinguishable, and that is the expected result rather than a lucky one: a
+block's corners have three faces each, so the prune has nothing to break out of
+and the only added work is one `where_a_corner_lands_after_moving` per corner of
+a placed solid — sixteen calls against a millisecond. **The consultation is free
+on the shape the kernel builds today**, which is what makes it affordable to put
+in the path of every corner rather than behind a flag.
+
+The command, for whoever re-runs it:
+
+```
+mise exec -- cargo build --release --manifest-path <scratchpad>/corner-cost/Cargo.toml
+<scratchpad>/corner-cost/target/release/corner-cost
+```
+
+The probe is not checked in. It measures four things across three crates and
+would be a fifth `benches/` file for one paragraph; §13's rule about a part with
+no named consumer covers a benchmark as well as a feature. What is checked in is
+this section, which is what the next reader needs.
+
+### 75.6 What §70.3 owed, and what is still owed
+
+§70.3 owed two things to `bake.rs`. This settles one and a half of them.
+
+**Settled: the consultation.** `derive_a_corner` reads the model's corner, the
+doc and the code agree, and there is a test either way — a corner the model
+places at one of two poles, and a corner whose box holds both and is therefore
+passed over.
+
+**Settled: the comparison, as a selector.** §70.3 wanted "nothing compares a
+baked corner with the corner the model stored" fixed, and the overlap test is
+that comparison, made where §70.3 said it belonged — in the thing that
+re-derives, which is the only thing holding both points.
+
+**Still owed: the comparison as a refusal.** The overlap test runs only where
+there is a choice to make. A *single*-place triple is still taken without asking
+whether the model's corner is anywhere near it, so the ill-conditioned corner
+§70.3 describes — three surfaces at a grazing angle, a corner close to all three
+and far from where they cross — still passes. Making the test universal is one
+line and was not taken here, for a reason that is measurement and not taste:
+`re_deriving_the_corners_of_a_turned_cube_gives_boxes_that_hold_them` compares
+the two with `1e-12` of slack, which is evidence that the boxes do **not** always
+overlap on inputs this kernel already accepts, and turning that into
+`Invalid::VertexOffItsFacePlane` would refuse solids that fuse today. That is a
+refusal-rate change with its own measurement to do and its own family of
+alternatives to name (§16.10), and it is bigger than the lane it turned up in.
+
+Every `how_often_*_refuses.rs` suite still publishes the rate it published
+before — `mise exec -- just t -E 'test(/how_often/)'` is green, and those suites
+assert their own numbers, so green *is* the statement that nothing moved. That
+is what "a single place is taken exactly as before" predicts. `just default` is
+green at **1808 tests, 0 skipped**, up two from 1806 — the two new ones.
+
+## 76. Two ways `prune-worktrees` removed the wrong tree, recorded 2026-09-08
+
+`just prune-worktrees` (§50.8) removes a worktree once it is clean and its
+branch is an ancestor of `main`. Two ways that test picked the wrong tree, both
+found in the same afternoon, and it had no selftest at all — `clean-targets`,
+the sibling recipe right above it in the `justfile`, has had one since it was
+written (`check-clean-targets-selftest`); `prune-worktrees` did not.
+
+### 76.1 The tree holding `main` is an ancestor of itself
+
+`main` is trivially an ancestor of itself, so the worktree that had `main`
+checked out fell through the same test as any merged lane branch and was
+force-removed. This is not a hypothetical: it happened on 2026-09-08. The
+sweep removed `rcad-worktrees/wave-1`, where `main` was checked out, leaving
+`main` checked out nowhere — the exact state §60 exists to prevent. It was put
+back with `git worktree add …/wave-1 main`.
+
+The fix is a check ahead of the ancestry test: a worktree whose branch is
+literally `main` is kept, with its own reason in the output, because §60
+already settled that `main` lives in a worktree and never the hub — this
+recipe agreeing with that rule is not a judgement call left to ancestry.
+
+### 76.2 A detached worktree was judged by whichever tree you stood in
+
+`git rev-parse --abbrev-ref HEAD` returns the literal string `HEAD` for a
+worktree checked out detached, not a branch name. The old recipe then asked
+`git -C "$repo" merge-base --is-ancestor "HEAD" main`, and `$repo` came from
+`git rev-parse --show-toplevel` with no `-C`, which from a linked worktree
+returns *that* worktree, not the hub. Standing in the tree holding `main` — the
+natural place right after a merge — `"HEAD"` resolves there to `main` itself,
+trivially its own ancestor. Every clean detached worktree would have been
+removed, whatever commit it actually held.
+
+This had not happened yet when it was found, and it is worse than §76.1: a
+branch survives a worktree's removal because the branch still exists and still
+names its commits (the sweep never deletes branches, only worktrees). A
+detached tree has no branch. Its commits are anchored only by that worktree's
+`HEAD`, and removing the worktree removes the anchor — a commit not otherwise
+reachable becomes collectible. `rcad-worktrees/bend-s-slide`, detached and
+clean, was exactly this shape the day this was found.
+
+The fix judges a worktree by its own commit, not a name resolved through
+whatever directory the command happens to run from: `git -C "$tree" rev-parse
+HEAD` reads it straight from the tree in question. That also retires the old
+`[ -z "$branch" ]` guard — it was meant to catch exactly this case and never
+did, because `HEAD` is not empty. A detached tree is now recognized directly
+(`branch = "HEAD"`) and kept unconditionally, the same way a locked or dirty
+one is, rather than run through the ancestry test at all — a commit reachable
+from `main` today does not make the anchor disposable, since nothing but that
+worktree's `HEAD` names it as safe to keep. `prune-worktrees` also gained a
+`dir="."` argument, matching `clean-targets`, so a selftest can point it at a
+fixture instead of the repo it runs in.
+
+### 76.3 What let both survive
+
+Neither defect was reasoned out from reading the recipe; §76.1 was read off the
+worktree list after the fact, and §76.2 was found by working out git's
+worktree semantics by hand, not by a test failing. `check-prune-worktrees-selftest`
+now pins five outcomes against one fixture: the tree holding `main` survives,
+a locked tree survives, a dirty tree survives, a clean detached tree survives,
+and — because a guard that keeps everything passes the first four for free and
+proves nothing — a clean lane branch actually merged into `main` is removed.
+It is wired into `default` next to `check-clean-targets-selftest`, so a
+`prune-worktrees` change without a passing selftest is a red `just default`,
+not a quiet gap noticed only when it next deletes the wrong tree.
