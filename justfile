@@ -171,24 +171,52 @@ check:
 wildcard_arms := "88"
 
 check-wildcards:
-    @find crates -name lib.rs -path '*/src/*' -exec touch {} +
-    @out=$(cargo clippy --workspace --all-targets -- \
-            -W clippy::wildcard_enum_match_arm 2>&1) \
-        || { echo "$out" | grep '^error' | head -5; \
-             echo "clippy did not finish, so this counted nothing"; exit 1; }; \
-    direct=$(echo "$out" | grep -c '^warning: wildcard match'); \
-    files=$(find crates -name '*.rs' \( -path '*/src/*' -o -path '*/tests/*' \
-            -o -path '*/benches/*' -o -path '*/examples/*' \)); \
-    enums=$(grep -hoE '^[ \t]*pub enum [A-Za-z0-9_]+' $(find crates -path '*/src/*' -name '*.rs') \
-            | awk '{print $NF}' | sort -u | paste -sd'|'); \
-    composite=$(awk -v enums="$enums" -f crates/rcad-step/tools/composite_wildcards.awk $files \
-            | grep '^COUNT=' | cut -d= -f2); \
-    found=$((direct + composite)); \
-    if [ "$found" != "{{wildcard_arms}}" ]; then \
-        echo "wildcard arms over our own enums: $found ($direct direct, $composite composite), expected {{wildcard_arms}}"; \
-        echo "a new one, or a new variant reaching an old one — see docs/decisions.md §40"; \
-        exit 1; \
+    #!/usr/bin/env bash
+    set -uo pipefail
+    find crates -name lib.rs -path '*/src/*' -exec touch {} +
+    mkdir -p target
+    log=target/last-wildcard-clippy.log
+    if ! CARGO_TERM_COLOR=never cargo clippy --workspace --all-targets -- \
+            -W clippy::wildcard_enum_match_arm > "$log" 2>&1; then
+        grep '^error' "$log" | head -5
+        echo "clippy did not finish, so this counted nothing"
+        echo "full log: $log"
+        exit 1
     fi
+    direct=$({{ just_executable() }} _wildcard-direct-count "$log")
+    files=$(find crates -name '*.rs' \( -path '*/src/*' -o -path '*/tests/*' \
+            -o -path '*/benches/*' -o -path '*/examples/*' \))
+    enums=$(grep -hoE '^[ \t]*pub enum [A-Za-z0-9_]+' $(find crates -path '*/src/*' -name '*.rs') \
+            | awk '{print $NF}' | sort -u | paste -sd'|')
+    composite=$(awk -v enums="$enums" -f crates/rcad-step/tools/composite_wildcards.awk $files \
+            | grep '^COUNT=' | cut -d= -f2)
+    found=$((direct + composite))
+    if [ "$found" = "{{wildcard_arms}}" ]; then
+        exit 0
+    fi
+    echo "wildcard arms over our own enums: $found ($direct direct, $composite composite), expected {{wildcard_arms}}"
+    if [ "$direct" = "0" ] && [ "{{wildcard_arms}}" != "0" ]; then
+        echo "0 direct is the parse breaking, not the arms going away: clippy ran and"
+        echo "nothing it printed was matched. Read $log before touching the ledger."
+        exit 1
+    fi
+    echo "a new one, or a new variant reaching an old one — see docs/decisions.md §40"
+    exit 1
+
+# The direct half of the count, kept apart from the clippy run so
+# `check-wildcards-selftest` can hold it against logs whose answer is already
+# known — the same split as `t` and `_test-digest`, for the same reason.
+#
+# ANSI escapes come off before anything is matched. `ci.yml` sets
+# `CARGO_TERM_COLOR=always`, which puts an escape in front of every `warning:`,
+# and every `^`-anchored pattern here then matches nothing at all. Run
+# 34264306999 counted 0 of 83 that way and took `main` red while this machine
+# stayed green, because cargo colours nothing when its stdout is a `$(...)`
+# rather than a terminal. Stripping is what makes the count the same answer
+# either way; `CARGO_TERM_COLOR=never` above is what keeps the saved log
+# readable when a human opens it.
+_wildcard-direct-count log:
+    @sed 's/\x1b\[[0-9;]*m//g' '{{ log }}' | grep -c '^warning: wildcard match' || true
 
 # Pins the composite-wildcard scan against fixtures it does not read off the
 # tree, so it stays proven even on a tree where nothing real trips it.
@@ -269,6 +297,22 @@ check-wildcards-selftest:
         echo "--- want ---"; echo "$want"
         exit 1
     fi
+
+    # The direct half, against the same line with and without cargo's colours.
+    # The escapes below are the bytes `cargo clippy` actually emitted under
+    # `CARGO_TERM_COLOR=always` on 2026-09-08, not a guess at their shape.
+    w='wildcard match will also match any future added variants'
+    printf 'warning: %s\n' "$w" "$w" > "$dir/plain.log"
+    printf '\033[1m\033[33mwarning\033[0m\033[1m: %s\033[0m\n' "$w" "$w" > "$dir/coloured.log"
+    for f in plain coloured; do
+        got=$({{ just_executable() }} _wildcard-direct-count "$dir/$f.log")
+        if [ "$got" != "2" ]; then
+            echo "_wildcard-direct-count read $got warnings from $f.log, expected 2"
+            echo "a count that only works on one of these is a count that only"
+            echo "works off a runner — see the comment on the recipe"
+            exit 1
+        fi
+    done
 
 # How many tests are marked `#[ignore]` today. Move it with the commit that
 # moves the tree, the same way `wildcard_arms` above works.
