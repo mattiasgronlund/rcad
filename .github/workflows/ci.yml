@@ -1,14 +1,27 @@
-# **CI is green, and `main` is the run that says so.** Re-derive rather than
-# believe it: `gh run list --repo mattiasgronlund/rcad --status success`, whose
-# empty answer was the claim this header carried until 2026-09-07.
+# **CI has been green, and every green so far ran `just test`, not `just
+# default`.** Re-derive rather than believe it: `gh run list --repo
+# mattiasgronlund/rcad --status success` for the greens, then
+# `git show <sha>:.github/workflows/ci.yml` for what each one actually ran. The
+# empty answer to that first command was the claim this header carried until
+# 2026-09-07.
+#
+# **The switch to `just default` went red on its first run**, `34260645261`,
+# push of `02367fc`, in 31 s. This paragraph is here because the header two
+# paragraphs down instructs it: if the file changes and no run has gone green
+# since, say so rather than leaving a green sentence standing. `check-plugins`
+# asked a runner what Claude Code had been told and a runner has no Claude Code;
+# `3e59648` and `docs/decisions.md` §77 are the fix and the rule it settled.
+# When a `just default` run goes green on `main`, name it here and delete this
+# paragraph rather than adding to it.
 #
 # **Do not write the tally here.** A count is stale on the next push, and the two
 # that stood in this header both went stale within a day. Name runs instead;
 # those keep. `34155345448` (2026-09-07) and `34255349804` (2026-09-08, sha
 # `41b7160`) are pushes to `main` that reported **1787** and **1806 tests run,
-# all passed, 0 skipped** — each the same three numbers `just default` gave on
-# the same tree. That agreement is the whole point of a runner: before it, every
-# green here was one person running the gate locally and reporting it honestly.
+# all passed, 0 skipped** — each the same three numbers a local `just default`
+# gave on the same tree. That agreement is the whole point of a runner: before
+# it, every green here was one person running the gate locally and reporting it
+# honestly.
 #
 # Name the commit whenever you say "CI is green", because runs are not
 # interchangeable. The first success was a pull request — `origin/main` plus two
@@ -165,6 +178,12 @@ jobs:
       # that repo could turn this one red with no commit here, and a green would
       # stop meaning "this tree passes". Bump it deliberately.
       #
+      # Bumped from `952672e` to `f5f2f48` on 2026-09-08, and that bump is load
+      # bearing rather than housekeeping: `f5f2f48` is where `check-declared.sh`
+      # learned to skip on a machine with no Claude Code, which is what this
+      # runner is. Pinned back below it, `just default` goes red at
+      # `check-plugins`. `docs/decisions.md` §77.
+      #
       # What this does **not** check is that a human's installed plugins match
       # the pin: `check-plugins` tests that three directories exist, not which
       # version they hold, so local and CI can disagree about the plugin half of
@@ -187,7 +206,7 @@ jobs:
             echo "  gh repo edit mattiasgronlund/claude-questions --visibility public"
             exit 1
           fi
-          git -C "$RUNNER_TEMP/claude-plugins" checkout --quiet 952672e6a29722c7685a9106ddf8781197eebe51
+          git -C "$RUNNER_TEMP/claude-plugins" checkout --quiet f5f2f483deb966263b6201dc4b9a6905ca3fb6dc
           echo "CLAUDE_PLUGINS_ROOT=$RUNNER_TEMP/claude-plugins/plugins" >> "$GITHUB_ENV"
       # mise installs the `cargo:` tools in parallel, and each one triggers
       # rustup to materialise the toolchain pinned in `rust-toolchain.toml`.

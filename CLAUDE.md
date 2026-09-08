@@ -244,9 +244,16 @@ it ran four recipes and the `check-*` ones gated nothing but your own machine.
 
 **One arm is not the same there, and it is the only one.** `check-plugins` asks
 Claude Code whether the plugins are *declared* and not merely on disk; a runner
-has no `~/.claude` for that to be a question about, so it prints that it skipped
-and carries on. Everything else — the three directories, the parser selftest,
-every other `check-*` — runs on the runner exactly as it runs here.
+has no config directory for that to be a question about, so it prints that it
+skipped and carries on. Everything else — the three directories, the parser
+selftest, every other `check-*` — runs on the runner exactly as it runs here.
+The skip is in `check-declared.sh` rather than in the `justfile`, so `rscene`
+gets the same one; `docs/decisions.md` §77.
+
+**No `just default` run has gone green on `main` yet.** The switch went red on
+its first run and the fix is §77; the earlier greens all ran `just test`. Check
+what a run actually ran — `git show <sha>:.github/workflows/ci.yml` — before
+treating a green as covering the `check-*` recipes.
 
 **CI is green, and the commit it was green on matters more than the word.**
 Check rather than believe — `gh run list --repo mattiasgronlund/rcad --status

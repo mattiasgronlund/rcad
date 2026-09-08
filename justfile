@@ -1128,21 +1128,12 @@ check-plugins:
     # `rscene` hit exactly that. So this asks Claude Code whether it has been
     # *told* about them, which is a different question from the loop above.
     #
-    # Skipped where there is no Claude Code to have been told. `~/.claude` is
-    # the whole installation — settings, `plugins/known_marketplaces.json`,
-    # `plugins/installed_plugins.json` — and a runner has none of it, so the
-    # question is about nothing there. That is the narrowest predicate that
-    # covers a runner: any machine a human works on has the directory, so this
-    # cannot quietly stop checking on one.
-    #
-    # It says so rather than skipping silently, which is §45's whole lesson: the
-    # corpus tests used to print "skipping" and return green, and a green suite
-    # had then never read a real file.
-    if [ -d "$HOME/.claude" ]; then
-        "{{guardrails_plugin}}/bin/check-declared.sh" mattiasgronlund-local questions guardrails practices
-    else
-        echo "no ~/.claude, so no Claude Code to declare them to: declaration check skipped"
-    fi
+    # It skips where there is no Claude Code to have been told, and says so
+    # rather than passing quietly. That guard used to be four lines here; it is
+    # in the script now, with a selftest, because it is the same guard `rscene`
+    # needs and a copy per repo is a copy that goes stale. `docs/decisions.md`
+    # §77.
+    "{{guardrails_plugin}}/bin/check-declared.sh" mattiasgronlund-local questions guardrails practices
 
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
