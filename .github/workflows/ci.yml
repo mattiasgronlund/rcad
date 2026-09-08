@@ -1,18 +1,19 @@
-# **CI has been green, and every green so far ran `just test`, not `just
-# default`.** Re-derive rather than believe it: `gh run list --repo
-# mattiasgronlund/rcad --status success` for the greens, then
-# `git show <sha>:.github/workflows/ci.yml` for what each one actually ran. The
-# empty answer to that first command was the claim this header carried until
-# 2026-09-07.
+# **CI has been green, and `34266469454` is the first green that ran `just
+# default`.** Push of `e8ae455`, 2026-09-08, 15m44s: 1811 tests run, 1811
+# passed, 0 skipped — the same three numbers a local `just default` gave on the
+# same tree. Every green before it ran `just test`. Re-derive rather than
+# believe it: `gh run list --repo mattiasgronlund/rcad --status success` for the
+# greens, then `git show <sha>:.github/workflows/ci.yml` for what each one
+# actually ran. The empty answer to that first command was the claim this header
+# carried until 2026-09-07.
 #
-# **The switch to `just default` went red on its first run**, `34260645261`,
-# push of `02367fc`, in 31 s. This paragraph is here because the header two
-# paragraphs down instructs it: if the file changes and no run has gone green
-# since, say so rather than leaving a green sentence standing. `check-plugins`
-# asked a runner what Claude Code had been told and a runner has no Claude Code;
-# `3e59648` and `docs/decisions.md` §77 are the fix and the rule it settled.
-# When a `just default` run goes green on `main`, name it here and delete this
-# paragraph rather than adding to it.
+# **Getting there took three red runs, and only the first was about plugins.**
+# `34260645261` asked a runner what Claude Code had been told; `34264306999` and
+# `34265339769` counted colour codes instead of clippy warnings, because this
+# file sets `CARGO_TERM_COLOR: always` and the recipe anchored a grep at `^`.
+# `docs/decisions.md` §77 is the rule all three settled: a check can pass for a
+# property of the environment it runs in rather than of the tree, and the way to
+# find out is to take away what the environment supplies and run it again.
 #
 # **Do not write the tally here.** A count is stale on the next push, and the two
 # that stood in this header both went stale within a day. Name runs instead;

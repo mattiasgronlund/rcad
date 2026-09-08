@@ -250,10 +250,17 @@ selftest, every other `check-*` — runs on the runner exactly as it runs here.
 The skip is in `check-declared.sh` rather than in the `justfile`, so `rscene`
 gets the same one; `docs/decisions.md` §77.
 
-**No `just default` run has gone green on `main` yet.** The switch went red on
-its first run and the fix is §77; the earlier greens all ran `just test`. Check
-what a run actually ran — `git show <sha>:.github/workflows/ci.yml` — before
-treating a green as covering the `check-*` recipes.
+**`34266469454` is the first `just default` green on `main`**, push of
+`e8ae455`. Every green before it ran `just test`, so check what a run actually
+ran — `git show <sha>:.github/workflows/ci.yml` — before treating an older green
+as covering the `check-*` recipes.
+
+**Three red runs came first, and only the first was about plugins.** The other
+two counted colour codes instead of clippy warnings: `ci.yml` sets
+`CARGO_TERM_COLOR: always` and `check-wildcards` anchored its grep at `^`. All
+three are the same shape — a check passing for a property of the environment it
+ran in rather than of the tree — and the way to find one is to take away what
+the environment supplies and run it again. `docs/decisions.md` §77.6.
 
 **CI is green, and the commit it was green on matters more than the word.**
 Check rather than believe — `gh run list --repo mattiasgronlund/rcad --status
@@ -263,10 +270,11 @@ paragraph said before.
 **Read that answer as a list and never write the tally down here.** A count goes
 stale on the next push, which is exactly why the sentence this replaced said
 "never succeeded" rather than "26 of 26" — and the count that stood beside it
-*was* stale within a day, twice. A named run does not go stale. Two to know:
-`34155345448` and `34255349804`, both pushes to `main`, each reporting the same
-three numbers as `just default` on the same tree — 1787 tests before the fuse
-fuzz work landed, 1806 after.
+*was* stale within a day, twice. A named run does not go stale. Three to know,
+all pushes to `main`, each reporting the same three numbers as `just default` on
+the same tree: `34155345448` at 1787 tests, `34255349804` at 1806 after the fuse
+fuzz work landed, and `34266469454` at 1811 — the last of those the first run
+that put the whole gate on a runner rather than `just test`.
 
 The other green is a pull request build that contained almost none of the work
 queued behind it. For a day "CI is green" and "the work is covered" were both

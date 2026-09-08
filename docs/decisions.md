@@ -21842,8 +21842,90 @@ plugin directories, the questions parser selftest, every other `check-*` recipe
 run on the runner exactly as they run here. Only "has Claude Code been told" is
 skipped, and only where there is no Claude Code to have been told.
 
-**No `just default` run has yet gone green on `main`.** The header of `ci.yml`
-says so and says to delete that paragraph when one does, rather than adding a
-sentence beside it. Prefer a claim a repair makes wrong to a number time makes
-wrong (§64) — and this section is not evidence of a green either. It is a
-local `just default` and an argument.
+**Run `34266469454`, push of `e8ae455`, is the first `just default` to go green
+on `main`.** It reported 1811 tests run, 1811 passed, 0 skipped — the same three
+numbers a local `just default` gave on the same tree, which is the agreement a
+runner exists to produce. It printed `no /home/runner/.claude, so no Claude Code
+to have been told about mattiasgronlund-local: the declaration check is skipped,
+not passed`, so the skip fired where it was meant to and said so.
+
+It took two more red runs to get there, and neither was about plugins. §77.6.
+
+### 77.6 A check that asked what kind of terminal it had
+
+Runs `34264306999` (push of `3e59648`) and `34265339769` (push of `5b2413e`).
+Both cleared `check-plugins` — the skip printed, the marketplace clone resolved
+— and both died one recipe later on the same line:
+
+    wildcard arms over our own enums: 5 (0 direct, 5 composite), expected 88
+
+**Zero direct is a parse breaking, not eighty-three match arms going away.**
+`ci.yml` sets `CARGO_TERM_COLOR: always`, so clippy writes
+
+    ESC[1m ESC[33m warning ESC[0m ESC[1m ": wildcard match will also match ..."
+
+and `check-wildcards` counted with `grep -c '^warning: wildcard match'`, anchored
+at the start of the line. The escape sits where the anchor is looking, and every
+direct warning stops matching at once.
+
+**The number looked like a tree state, which is why it cost two pushes.** The 5
+that survived are the composite arms, and they come from an `awk` pass over
+`.rs` files that colour never touches. So the recipe reported a plausible count
+and sent its reader to §40 to hunt for a new wildcard, rather than saying the
+count had failed. A check that can be wrong should fail in a way that names
+itself; this one failed in the vocabulary of a real defect.
+
+**Two people measured it, and the second measurement is the better one.** The
+dispatcher session reproduced the failure with `CARGO_TERM_COLOR=always just
+check-wildcards`, which gives the runner's line byte for byte. A peer session
+then read one clippy log two ways: anchored grep as the recipe writes it, 0;
+the same log with the escapes stripped, 83. 83 + 5 = 88, the pinned count. The
+first shows the failure happens; only the second shows the arms were in the log
+the whole time.
+
+**The fix is three parts and each does something the others do not.**
+`_wildcard-direct-count` takes the count out of the clippy run and strips ANSI
+before matching, so the answer is the same either way — the same split `t` and
+`_test-digest` already use, and for the reason the comment there gives: a parser
+kept apart from the run is one you can hold against logs whose answer is already
+known. `CARGO_TERM_COLOR=never` on the clippy call keeps the saved log readable,
+which matters because the failure branch greps `'^error'` out of it and was
+anchored the same way. And `0 direct` against a non-zero ledger now says the
+parse broke and names the log.
+
+**The test is the coloured line itself.** `check-wildcards-selftest` carries the
+same warning twice, once plain and once with the escapes `cargo clippy` actually
+emitted under `CARGO_TERM_COLOR=always` — captured from a real run, not guessed
+at. Both must count 2. Mutation-checked by taking the `sed` back out, which
+reports `read 0 warnings from coloured.log, expected 2`: the runner's own number.
+
+**This is the third instance in a day, and three is what makes it a rule.** Each
+one is a check that passed for a property of the environment it ran in rather
+than a property of the tree.
+
+- §77.1's pre-flight sweep pointed `CLAUDE_PLUGINS_ROOT` at a real clone on a
+  machine where the marketplace is registered.
+- §77.2's declaration arm asked a question that only has an answer where Claude
+  Code is installed, and every machine that ran it had one.
+- This one anchored a grep at `^` and was only ever run where cargo had no
+  terminal to colour for. A `$(...)` capture is not a tty, so a local green
+  earned the anchor a pass a runner never would.
+
+The technique that found all three is the same: **take away what the environment
+supplies and run it again.** Point the variable at an empty directory. Point
+`HOME` at one. Force the colour on. A green is evidence about the environment it
+ran in and about no other.
+
+One rule falls out of it that is worth stating on its own: **a recipe that parses
+a tool's output owns the format it parses.** Reading a format the ambient
+environment chooses is how a check ends up measuring the machine.
+
+**What a green still cannot cover.** After the fix, every non-compiling `check-*`
+recipe was run in a built runner shape — a plain `--no-local` clone with one
+worktree, colour forced on, `HOME` empty — and all passed, `check-hub` correctly
+answering that a lone checkout is not a hub. That is evidence and not proof:
+`check-kache-off-on-ci` forces `CI` both ways itself and is indifferent, and the
+four selftests that build their own repositories already pass `-c user.email`
+explicitly, so the identity trap was closed before anyone looked. The gap that
+remains is the one that has now bitten three times — an environment difference
+nobody has thought to remove yet.
