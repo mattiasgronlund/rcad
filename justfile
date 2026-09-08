@@ -1065,6 +1065,18 @@ check-questions-selftest:
 # `practices` ships only skills, so nothing here runs it — its directory
 # existing is the whole check. A skill that fails to load fails visibly, in the
 # session, which is not true of a hook or a parser.
+#
+# **Two questions, and the first one alone was not enough.** Where the files are
+# is the bootstrap and has to be asked here, because it is what runs when the
+# plugin is missing. Whether Claude Code has been *told* about them is a
+# different question, and `rscene` answered it the hard way on 2026-09-08: three
+# plugin directories present, this recipe green, and nothing loaded — no hooks,
+# no skills, no message saying so. A directory is not an install.
+#
+# The second question is asked by the plugin, because the answer is the same for
+# both repos and the copy is what goes stale. It cannot prove *this* session
+# loaded anything — settings are read at session start — so it rules out the
+# silent case and says exactly that rather than claiming more.
 check-plugins:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1085,6 +1097,7 @@ check-plugins:
         exit 1
     fi
     echo "3 plugins, all where this repo expects them"
+    "{{guardrails_plugin}}/bin/check-declared.sh" mattiasgronlund-local questions guardrails practices
 
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
