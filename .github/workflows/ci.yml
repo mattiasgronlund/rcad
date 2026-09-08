@@ -1,18 +1,20 @@
-# **CI is green, and `main` is the run that says so.** Two of 34 runs have
-# succeeded, both on 2026-09-07: `34150613867` (pull request, 14m48s) and
-# `34155345448` (push to `main`, 12m41s). Re-derive rather than believe this:
-# `gh run list --repo mattiasgronlund/rcad --status success`, whose empty answer
-# was the claim this header carried until today.
+# **CI is green, and `main` is the run that says so.** Re-derive rather than
+# believe it: `gh run list --repo mattiasgronlund/rcad --status success`, whose
+# empty answer was the claim this header carried until 2026-09-07.
 #
-# Name the commit whenever you say this, because the two runs are not
-# interchangeable. The pull request one was `origin/main` plus two corpus
-# commits and contained none of the thirteen queued behind it, so it proved the
-# fetch and almost nothing else — for a day "CI is green" and "the work is
-# covered" were separately true and separately false. `34155345448` ran the
-# seventeen commits that landed and reported **1787 tests run, 1787 passed, 0
-# skipped**, the same three numbers as `just default` on the same tree. That
-# agreement is the whole point of a runner: before it, every green here was one
-# person running the gate locally and reporting it honestly.
+# **Do not write the tally here.** A count is stale on the next push, and the two
+# that stood in this header both went stale within a day. Name runs instead;
+# those keep. `34155345448` (2026-09-07) and `34255349804` (2026-09-08, sha
+# `41b7160`) are pushes to `main` that reported **1787** and **1806 tests run,
+# all passed, 0 skipped** — each the same three numbers `just default` gave on
+# the same tree. That agreement is the whole point of a runner: before it, every
+# green here was one person running the gate locally and reporting it honestly.
+#
+# Name the commit whenever you say "CI is green", because runs are not
+# interchangeable. The first success was a pull request — `origin/main` plus two
+# corpus commits, containing none of the thirteen queued behind it — so it proved
+# the fetch and almost nothing else. For a day "CI is green" and "the work is
+# covered" were separately true and separately false.
 #
 # Three of this header's claims have gone false, and two of them were errors.
 # It opened "This workflow has never run. There is no remote and no CI (`git
@@ -147,8 +149,11 @@ jobs:
       # value that comes out empty; it makes the whole workflow file invalid, and
       # the run then fails in 0 s having never started a job.
       - run: echo "RCAD_STEP_CORPUS=$RUNNER_TEMP/rcad-step-corpus" >> "$GITHUB_ENV"
-      # `just default` begins with `check-plugins`, and three of its recipes run
-      # scripts that live in the shared marketplace now rather than in `.claude/`.
+      # `just default` begins with `check-plugins` — pinned there by
+      # `check-default-runs-every-check` since 2026-09-08, because it ran first
+      # only by where it sat and this step's diagnosis depends on it — and three
+      # of its recipes run scripts that live in the shared marketplace now
+      # rather than in `.claude/`.
       # A runner has no Claude Code to install a plugin into, so it clones the
       # marketplace and points `CLAUDE_PLUGINS_ROOT` at it — the same escape
       # hatch `check-plugins` offers a human whose clone is somewhere else.

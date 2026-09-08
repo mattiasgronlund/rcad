@@ -246,14 +246,20 @@ green covers what a local green covers. Before that it ran four recipes and the
 **CI is green, and the commit it was green on matters more than the word.**
 Check rather than believe — `gh run list --repo mattiasgronlund/rcad --status
 success` — because the empty answer that command used to give is what this
-paragraph said before. On 2026-09-07 it returned two of 34 runs, and they are
-not interchangeable: one pull request build containing almost none of the work
-queued behind it, and `34155345448`, the push that ran the seventeen commits
-which landed and reported **1787 tests run, 1787 passed, 0 skipped** — the same
-three numbers as the local gate on the same tree.
+paragraph said before.
 
-For a day "CI is green" was true and "the work is covered" was false, of the
-same repository at the same moment. Say which commit.
+**Read that answer as a list and never write the tally down here.** A count goes
+stale on the next push, which is exactly why the sentence this replaced said
+"never succeeded" rather than "26 of 26" — and the count that stood beside it
+*was* stale within a day, twice. A named run does not go stale. Two to know:
+`34155345448` and `34255349804`, both pushes to `main`, each reporting the same
+three numbers as `just default` on the same tree — 1787 tests before the fuse
+fuzz work landed, 1806 after.
+
+The other green is a pull request build that contained almost none of the work
+queued behind it. For a day "CI is green" and "the work is covered" were both
+true statements about this repo and both useless without a sha. Say which
+commit.
 
 Three faults kept every earlier run red — the tool install, a rustup race, and
 the missing STEP corpus, cleared in that order, the last by `corpus/fetch.sh`.

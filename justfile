@@ -386,6 +386,18 @@ check-kache-off-on-ci:
 #
 # So bumping the number is how a new `check-*` recipe gets added, deliberately,
 # in the commit that adds it.
+#
+# The last arm pins `check-plugins` **first**, which the three above could not:
+# both sides of every comparison here are `sort -u`, so this recipe was blind to
+# order by construction. CLAUDE.md publishes "first thing in `just default`" and
+# `ci.yml` leans on it, and a published claim wants a test (§15.6) — it had none,
+# and `check-plugins` ran first only because of where it happened to sit.
+#
+# What the order buys is the error message. Without plugins `check-plugins` exits
+# 1 and names the install command, while `check-hooks` and
+# `check-questions-selftest` exit **127** on a missing `selftest.sh` — no
+# message, no remedy, and the failure a CI log explains worst. Found by rcad-c2,
+# who also noticed that nothing held the ordering it depends on.
 check-default-runs-every-check:
     @defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
     listed=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
@@ -409,6 +421,16 @@ check-default-runs-every-check:
         echo "default's non-check-* recipes are '$others', expected 'check deny lint test '"; \
         echo "CLAUDE.md says default runs these four and every check-* besides"; \
         echo "change that sentence in the same commit, or this is now false"; \
+        exit 1; \
+    fi; \
+    first=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep -m1 .); \
+    if [ "$first" != "check-plugins" ]; then \
+        echo "default runs '$first' first, expected 'check-plugins'"; \
+        echo "CLAUDE.md says check-plugins runs first thing in just default, and"; \
+        echo "ci.yml leans on it: with no plugins, check-hooks and"; \
+        echo "check-questions-selftest exit 127 on a missing selftest.sh, which is"; \
+        echo "the failure a runner explains worst, while check-plugins exits 1 and"; \
+        echo "names the command that installs them"; \
         exit 1; \
     fi
 
