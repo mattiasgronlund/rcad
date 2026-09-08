@@ -90,9 +90,10 @@ fn a_corner_a_tenth_of_a_nanometre_off_its_own_top_is_refused() {
 /// with the place its surfaces cross, at corners of size one.
 ///
 /// `MEASURING_SLACK` (16) times `Plane::SIGNED_DISTANCE_ROUNDOFF` (`4 · ε`),
-/// both spelled out here rather than imported: neither is public, and a bound a
-/// doc comment publishes wants a test that goes red when somebody moves it
-/// (§15.6).
+/// both spelled out here rather than imported: `MEASURING_SLACK` is
+/// `pub(crate)` and this test cannot see it, and even where a constant is
+/// public a bound a doc comment publishes wants a test that goes red when
+/// somebody moves it (§15.6).
 const ROOM_FOR_ROUNDING: f64 = 16.0 * 4.0 * f64::EPSILON;
 
 /// A corner half that room off its top is a corner that could have rounded
@@ -100,7 +101,7 @@ const ROOM_FOR_ROUNDING: f64 = 16.0 * 4.0 * f64::EPSILON;
 ///
 /// This is the half of the change that `NUDGE` above cannot show: without the
 /// room, two zero-width boxes overlap only when they are equal, and this corner
-/// is not equal by seven ulps.
+/// is not equal by 32 ulps.
 #[test]
 fn a_corner_half_the_rounding_room_off_its_own_top_is_baked() {
     let mut model = Model::new(a_working_size());

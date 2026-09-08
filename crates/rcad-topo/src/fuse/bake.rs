@@ -682,8 +682,9 @@ fn derive_a_corner(
 /// face satisfies `n·p = off` only to a rounding, and the meet those planes
 /// solve to sits a few ulps from the corner the model wrote down. Both boxes
 /// have no width at all when the arithmetic is exact, so a few ulps is a miss,
-/// and asking for the corner bit for bit refused 33 solids the kernel had
-/// already accepted (§75.6).
+/// and asking for the corner bit for bit refused 30 solids the kernel had
+/// already accepted, plus changed the reason for 3 more that were refused
+/// already — the skew corpus went from 51 refused to 81 (§75.6).
 ///
 /// So [`MEASURING_SLACK`] × [`Plane::SIGNED_DISTANCE_ROUNDOFF`] × the corner's
 /// own size is added to the stored box on every side. That is **the same
