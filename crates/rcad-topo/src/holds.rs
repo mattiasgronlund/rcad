@@ -273,8 +273,8 @@ fn what_a_round_wire_encloses(
         return Err(cannot());
     }
     let side = side_of_surface(&surface, point);
-    if let Decision::Undecidable { .. } = side {
-        return Err(gave_up_on_a_side(&surface, point, side));
+    if let Decision::Undecidable { enclosure } = side {
+        return Err(gave_up_on_a_side(&surface, point, enclosure));
     }
     Ok(side)
 }
@@ -315,7 +315,10 @@ fn walk_one_outline(
                 Err(overhang) => return Err(gave_up_ordering_along_a_side(point, overhang)),
             },
             Decision::Pos | Decision::Neg => (),
-            other => return Err(gave_up_turning_a_corner(point, other)),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_turning_a_corner(point, enclosure));
+            }
+            other => panic!("a corner came back with a decision nothing here knows: {other:?}"),
         }
         match crossing(sides[index], sides[next], along) {
             Some(count) => winding += count,
@@ -374,7 +377,10 @@ fn what_a_curved_face_holds(
             Decision::Zero => on_its_boundary = true,
             settled if settled == inwards => (),
             Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
-            other => return Err(gave_up_on_a_side(&trimming.surface, point, other)),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(&trimming.surface, point, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
     }
     Ok(if on_its_boundary {
@@ -547,7 +553,10 @@ pub(crate) fn the_side_this_face_lies_on(
                 Some(already) if already == side => (),
                 Some(_) => return Err(Invalid::AFaceStraddlesSomethingTrimmingIt.into()),
             },
-            other => return Err(gave_up_on_a_side(partner, at, other)),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(partner, at, enclosure));
+            }
+            other => panic!("a corner came back with a decision nothing here knows: {other:?}"),
         }
     }
     Ok(found)
@@ -625,17 +634,18 @@ fn above_the_line(side: Decision) -> Option<bool> {
 /// lying, which is the only reason it was ever found.
 ///
 /// [`crossing`] gives up only through [`above_the_line`], which reads every
-/// certified sign, so one of the two really is undecided and the assert below
+/// certified sign, so one of the two really is undecided and the panic below
 /// has nothing to fall back to.
-fn whichever_of_them_was_not_read(from_side: Decision, to_side: Decision) -> Decision {
-    if let Decision::Undecidable { .. } = from_side {
-        return from_side;
+fn whichever_of_them_was_not_read(from_side: Decision, to_side: Decision) -> f64 {
+    if let Decision::Undecidable { enclosure } = from_side {
+        return enclosure;
     }
-    assert!(
-        matches!(to_side, Decision::Undecidable { .. }),
-        "the crossing count was refused with both of its ends decided: {from_side:?} and {to_side:?}"
-    );
-    to_side
+    let Decision::Undecidable { enclosure } = to_side else {
+        panic!(
+            "the crossing count was refused with both of its ends decided: {from_side:?} and {to_side:?}"
+        )
+    };
+    enclosure
 }
 
 /// What to hand back when the side of a surface could not be settled.
@@ -649,12 +659,12 @@ fn whichever_of_them_was_not_read(from_side: Decision, to_side: Decision) -> Dec
 /// refusal in a fresh one. Whoever asked may well carry on — a ray that grazes
 /// one face tries the next target — and emptying their log on the way past would
 /// take the records of every decision that *was* settled with it.
-fn gave_up_on_a_side(surface: &Surface, point: PredicatePoint, decision: Decision) -> Error {
+fn gave_up_on_a_side(surface: &Surface, point: PredicatePoint, enclosure: f64) -> Error {
     gave_up(
         name_of_surface(surface),
         point,
         Level::Exact,
-        decision,
+        enclosure,
         Measures::Area,
     )
 }
@@ -664,8 +674,8 @@ fn gave_up_on_a_side(surface: &Surface, point: PredicatePoint, decision: Decisio
 /// The predicate has already put its own record in the caller's log on the way
 /// past (`orient3d_tolerantly` does that for every level it could not settle),
 /// so what this adds is which *question* the walk was asking when it stopped.
-fn gave_up_turning_a_corner(point: PredicatePoint, decision: Decision) -> Error {
-    gave_up(ORIENT3D, point, Level::Exact, decision, Measures::Volume)
+fn gave_up_turning_a_corner(point: PredicatePoint, enclosure: f64) -> Error {
+    gave_up(ORIENT3D, point, Level::Exact, enclosure, Measures::Volume)
 }
 
 /// The name the ordering of a point along a side goes by in provenance records.
@@ -691,9 +701,7 @@ fn gave_up_ordering_along_a_side(point: PredicatePoint, overhang: f64) -> Error 
         BETWEEN_TWO_CORNERS,
         point,
         Level::Interval,
-        Decision::Undecidable {
-            enclosure: overhang,
-        },
+        overhang,
         Measures::Length,
     )
 }
@@ -702,11 +710,11 @@ fn gave_up(
     named: &'static str,
     point: PredicatePoint,
     level: Level,
-    decision: Decision,
+    enclosure: f64,
     measures: Measures,
 ) -> Error {
     let mut records = ProvenanceLog::new();
-    records.push(Record::new(named, &[point], level, decision, measures));
+    records.push(Record::new(named, &[point], level, enclosure, measures));
     Error::Undecidable { records }
 }
 

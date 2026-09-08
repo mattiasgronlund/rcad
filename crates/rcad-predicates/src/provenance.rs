@@ -166,35 +166,52 @@ pub struct Record {
 }
 
 impl Record {
-    /// A record of `predicate` on `inputs` coming back `outcome` at `level`.
+    /// A record of `predicate` on `inputs` giving up at `level`, with the
+    /// interval that straddled zero `enclosure` wide.
+    ///
+    /// The outcome is [`Decision::Undecidable`] and there is no way to ask for
+    /// another one: a certified outcome does not get a record, and that is the
+    /// whole reason an empty log means something. The parameter is an `f64`
+    /// rather than a `Decision` so a caller that has not destructured its
+    /// `Undecidable` cannot build one (decisions.md §73).
     ///
     /// `measures` says what the predicate's value is a measure of, and it is
-    /// not optional. Without it the enclosure below is a bare number whose
-    /// units nobody can recover, and a maximum taken over two records of
-    /// different degrees means nothing (decisions.md §15.3).
+    /// not optional. Without it the enclosure is a bare number whose units
+    /// nobody can recover, and a maximum taken over two records of different
+    /// degrees means nothing (decisions.md §15.3).
     ///
-    /// # Panics
+    /// An enclosure is what it takes, and this compiles:
     ///
-    /// If `outcome` is certified. A certified outcome does not get a record —
-    /// that is the whole reason an empty log means something.
+    /// ```
+    /// use rcad_predicates::{Decision, Level, Measures, Point, Record};
+    ///
+    /// let origin = [Point::Exact([0.0, 0.0, 0.0])];
+    /// let record = Record::new("orient3d", &origin, Level::Interval, 1e-30, Measures::Volume);
+    /// assert_eq!(record.outcome(), Decision::Undecidable { enclosure: 1e-30 });
+    /// ```
+    ///
+    /// A caller that hands over a certified `Decision` instead does not — the
+    /// same lines, with only the fourth argument changed:
+    ///
+    /// ```compile_fail
+    /// use rcad_predicates::{Decision, Level, Measures, Point, Record};
+    ///
+    /// let origin = [Point::Exact([0.0, 0.0, 0.0])];
+    /// let record = Record::new("orient3d", &origin, Level::Interval, Decision::Pos, Measures::Volume);
+    /// assert_eq!(record.outcome(), Decision::Undecidable { enclosure: 1e-30 });
+    /// ```
     pub fn new(
         predicate: &'static str,
         inputs: &[Point],
         level: Level,
-        outcome: Decision,
+        enclosure: f64,
         measures: Measures,
     ) -> Self {
-        let enclosure = match outcome {
-            Decision::Undecidable { enclosure } => enclosure,
-            Decision::Neg | Decision::Zero | Decision::Pos => {
-                panic!("{predicate}: a certified outcome does not get a provenance record")
-            }
-        };
         Self {
             predicate,
             inputs: inputs.to_vec(),
             level,
-            outcome,
+            outcome: Decision::Undecidable { enclosure },
             enclosure,
             measures,
             approximation: None,
@@ -349,7 +366,7 @@ mod tests {
             "orient3d",
             &[Point::from([0.0, 0.0, 0.0])],
             Level::Interval,
-            Decision::Undecidable { enclosure },
+            enclosure,
             measures,
         )
     }
@@ -428,16 +445,20 @@ mod tests {
         assert_eq!(outer.len(), 1);
     }
 
+    /// The compile-time half of this is the `compile_fail` doctest on
+    /// [`Record::new`]: a certified `Decision` in that argument no longer
+    /// builds. This is the half a running test can see — that the record is
+    /// born undecidable, carrying the enclosure it was handed, with no way to
+    /// ask for anything else (docs/decisions.md §73).
     #[test]
-    #[should_panic(expected = "does not get a provenance record")]
-    fn a_certified_outcome_may_not_be_recorded() {
-        let _ = Record::new(
-            "orient3d",
-            &[],
-            Level::Float,
-            Decision::Pos,
-            Measures::Volume,
+    fn a_record_is_born_undecidable() {
+        let record = record_measuring(1e-30, Measures::Volume);
+
+        assert_eq!(
+            record.outcome(),
+            Decision::Undecidable { enclosure: 1e-30 }
         );
+        assert_eq!(record.enclosure(), 1e-30);
     }
 
     #[test]

@@ -1015,7 +1015,7 @@ fn a_touching_point_could_not_be_placed(
         named,
         at,
         Level::Interval,
-        Decision::Undecidable { enclosure },
+        enclosure,
         Measures::Area,
     ));
     Error::Undecidable { records }
@@ -1810,9 +1810,7 @@ fn an_exact_step_could_not_be_taken(named: &'static str, at: &[PredicatePoint]) 
         named,
         at,
         Level::Exact,
-        Decision::Undecidable {
-            enclosure: f64::INFINITY,
-        },
+        f64::INFINITY,
         Measures::Area,
     ));
     Error::Undecidable { records }

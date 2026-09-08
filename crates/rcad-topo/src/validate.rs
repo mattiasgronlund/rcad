@@ -267,13 +267,13 @@ impl Model {
                         Decision::Pos | Decision::Neg => {
                             return Err(Invalid::VertexOffItsFaceSurface.into());
                         }
-                        decision @ Decision::Undecidable { .. } => {
+                        Decision::Undecidable { enclosure } => {
                             let mut records = ProvenanceLog::new();
                             records.push(Record::new(
                                 name_of_surface(and),
                                 &[at],
                                 Level::Exact,
-                                decision,
+                                enclosure,
                                 Measures::Area,
                             ));
                             return Err(Error::Undecidable { records });
@@ -1650,13 +1650,13 @@ fn check_curved_face(view: FaceView<'_>, surface: &Surface, writing_it_down: f64
                 Decision::Pos | Decision::Neg => {
                     return Err(Invalid::VertexOffItsFaceSurface.into());
                 }
-                Decision::Undecidable { .. } => {
+                Decision::Undecidable { enclosure } => {
                     let mut records = ProvenanceLog::new();
                     records.push(Record::new(
                         named,
                         &[point],
                         Level::Exact,
-                        decision,
+                        enclosure,
                         Measures::Area,
                     ));
                     return Err(Error::Undecidable { records });
@@ -2134,7 +2134,9 @@ fn a_boundary_that_encloses_too_little_to_wind(corners: &[[f64; 3]]) -> Provenan
         SWEPT_AREA,
         &at,
         Level::Interval,
-        NOTHING_IS_KNOWN,
+        // The enclosure of `NOTHING_IS_KNOWN`: no walk got far enough to bound
+        // the area, so there is no width to compare against a budget.
+        f64::INFINITY,
         Measures::Area,
     ));
     records
@@ -2163,7 +2165,7 @@ pub(crate) fn winding_round(corners: &[[f64; 3]], normal: [f64; 3]) -> Result<De
     };
     match decision {
         Decision::Neg | Decision::Zero | Decision::Pos => Ok(decision),
-        Decision::Undecidable { .. } => {
+        Decision::Undecidable { enclosure } => {
             let corners: Vec<PredicatePoint> = swept
                 .corners
                 .iter()
@@ -2174,7 +2176,7 @@ pub(crate) fn winding_round(corners: &[[f64; 3]], normal: [f64; 3]) -> Result<De
                 SWEPT_AREA,
                 &corners,
                 level,
-                decision,
+                enclosure,
                 Measures::Area,
             ));
             Err(crate::Error::Undecidable { records })

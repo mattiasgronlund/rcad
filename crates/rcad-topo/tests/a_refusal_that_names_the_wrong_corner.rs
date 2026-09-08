@@ -1,8 +1,12 @@
 //! Two ways the outline walk gave up and reported a corner it had decided.
 //!
-//! Both crash `Record::new` — *"orient3d: a certified outcome does not get a
+//! Both crashed `Record::new` — *"orient3d: a certified outcome does not get a
 //! provenance record"* — because a certified sign has no enclosure to record and
-//! the walk handed one over anyway. A fuzzer found the first through
+//! the walk handed one over anyway. That panic is gone: `Record::new` takes an
+//! `f64` enclosure now, so the walk has to destructure its `Undecidable` before
+//! it can build a record at all, and neither fault could be written today
+//! (§73). What these two tests still hold down is the *answer* — that the
+//! refusal names the corner nobody could read. A fuzzer found the first through
 //! `Model::fuse` (`two_solids_fused_by_a_stranger`, artifact
 //! `crash-f984851ca89020e1ff939c087667a0aa86bc352d`) after a soak of a model
 //! whose coordinates were spread from `4.2e-314` to `2.4e21`. Neither test needs

@@ -2963,7 +2963,7 @@ fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceL
         "orient2d",
         &[PredicatePoint::from(at.coordinates())],
         Level::Exact,
-        Decision::Undecidable { enclosure },
+        enclosure,
         Measures::Area,
     ));
     Error::Undecidable {

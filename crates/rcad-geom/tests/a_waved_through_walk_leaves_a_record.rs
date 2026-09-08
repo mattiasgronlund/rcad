@@ -32,9 +32,9 @@
 //! What happened here is exactly `Cause::TolerantFallback`: "an operation chose
 //! an approximate construction over failing, set by the operation, not by this
 //! crate". Writing that cause onto the record needs `Record::resolve_to`, which
-//! is `pub(crate)` to `rcad-predicates`, and `Record::new` panics on a certified
-//! outcome — so from `rcad-geom` the record can only be pushed unresolved. The
-//! magnitude and the cause are not lost: they ride back on
+//! is `pub(crate)` to `rcad-predicates`, and `Record::new` builds an undecided
+//! record and nothing else (§73) — so from `rcad-geom` the record can only be
+//! pushed unresolved. The magnitude and the cause are not lost: they ride back on
 //! `PointsAlongACrossing::deviation`. See the report for the constructor that
 //! would close it.
 

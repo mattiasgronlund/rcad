@@ -495,9 +495,7 @@ fn gave_up(
         predicate,
         inputs,
         Level::Interval,
-        Decision::Undecidable {
-            enclosure: f64::INFINITY,
-        },
+        f64::INFINITY,
         measures,
     ));
     Error::Undecidable {
@@ -607,8 +605,8 @@ fn must_decide(
 ) -> Result<Decision> {
     match decision {
         Decision::Neg | Decision::Zero | Decision::Pos => Ok(decision),
-        Decision::Undecidable { .. } => {
-            let record = Record::new(predicate, inputs, Level::Interval, decision, measures);
+        Decision::Undecidable { enclosure } => {
+            let record = Record::new(predicate, inputs, Level::Interval, enclosure, measures);
             match resolve_under_policy(record, policy, log) {
                 settled @ (Decision::Neg | Decision::Zero | Decision::Pos) => Ok(settled),
                 Decision::Undecidable { .. } => Err(Error::Undecidable {

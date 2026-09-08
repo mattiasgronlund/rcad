@@ -1310,9 +1310,7 @@ fn room_left_over(
             ROOM_LEFT_TO_REFINE_A_WALK,
             &[],
             Level::Float,
-            Decision::Undecidable {
-                enclosure: deviation,
-            },
+            deviation,
             Measures::Length,
         ));
         return Ok(None);
@@ -1572,8 +1570,8 @@ fn which_side_of(
     };
     match decision {
         Decision::Pos | Decision::Zero | Decision::Neg => decision,
-        Decision::Undecidable { .. } => resolve_under_policy(
-            Record::new(named, &[at], Level::Interval, decision, measures),
+        Decision::Undecidable { enclosure } => resolve_under_policy(
+            Record::new(named, &[at], Level::Interval, enclosure, measures),
             policy,
             log,
         ),

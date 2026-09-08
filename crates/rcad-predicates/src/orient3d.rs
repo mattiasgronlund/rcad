@@ -104,10 +104,10 @@ pub fn orient3d_tolerantly(
     log: &mut ProvenanceLog,
 ) -> Decision {
     let (decision, level) = orient3d_reporting_level(a, b, c, d);
-    if decision.is_certified() {
+    let Decision::Undecidable { enclosure } = decision else {
         return decision;
-    }
-    let record = Record::new(ORIENT3D, &[a, b, c, d], level, decision, Measures::Volume);
+    };
+    let record = Record::new(ORIENT3D, &[a, b, c, d], level, enclosure, Measures::Volume);
     resolve_under_policy(record, policy, log)
 }
 
