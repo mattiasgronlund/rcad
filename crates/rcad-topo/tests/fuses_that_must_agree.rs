@@ -259,9 +259,9 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// unnoticed rather than as a target.
 ///
 /// Eighteen per cent. [`measured`] runs from a fixed seed, so the shipped corpus
-/// of 423 skew fuses refuses 51 of them, 12.06%, every run on every machine.
+/// of 429 skew fuses refuses 51 of them, 11.89%, every run on every machine.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
-/// drift — 5.9 points is twenty-five fuses, four times the headroom
+/// drift — 6.1 points is twenty-six fuses, four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
 /// a regression in the one family that reaches a branch nothing else does.
 ///
