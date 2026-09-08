@@ -21723,6 +21723,52 @@ It is wired into `default` next to `check-clean-targets-selftest`, so a
 `prune-worktrees` change without a passing selftest is a red `just default`,
 not a quiet gap noticed only when it next deletes the wrong tree.
 
+### 76.4 Most trees carry no lock, and that is not a hook failure
+
+`rcad-51` lost its worktree twice, and the obvious suspects — `prune-worktrees`
+above, or the hook that is supposed to write the lock — are both innocent. The
+cause is arithmetic about dates.
+
+The lock became the ownership record in `925669a`, 2026-09-06 02:09. It is
+written by `.claude/hooks/worktree-create.sh`, and `git show
+925669a^:.claude/hooks/worktree-create.sh` has no `worktree lock` line at all
+where `925669a`'s has one. So every worktree older than that morning was
+created by a hook that could not have locked it, and 15 of the 23 here are:
+from `rcad-fuzz` on 2026-09-01 through `spike-floor` at 20:24 on 2026-09-05.
+None of them carries a lock, none of them ever could have, and a clean one of
+them sitting on a branch already merged is removed correctly by a recipe with
+no way to know anyone wanted it. **A missing lock on a tree older than
+2026-09-06 is expected**; it is evidence of nothing.
+
+Dates read off the mtime of each tree's `gitdir` file, which is a proxy and
+worth one check rather than an assumption: for all five locked trees the ISO
+timestamp inside the lock reason equals that mtime to the second — `fuzz-fuse-soak`
+locked `2026-09-07T09:39:42Z` against an mtime of 11:39:42.48 +0200, and the
+same for `dispatch-2`, `hub-rule`, `fuse-skin-validation` and `questions-grammar`.
+Five for five is not a proof, but a proxy that agrees with the only independent
+record available is worth more than one that was never compared to anything.
+
+**Three trees younger than the rule carry no lock either, and they are the
+interesting ones.** `agent-aa03cabfcfa3d9101` (2026-09-06 09:13),
+`fuzz-verify-main` (2026-09-07 14:43) and `wave-1` (2026-09-08 18:56). The
+mechanism is that the hook is a *tracked file, read from the session's own
+checkout*: a session working in a tree whose HEAD predates `925669a` runs the
+version with no lock in it, however new the worktree it is creating. And a tree
+made by hand with `git worktree add` never runs the hook at all — which is what
+the two named lanes are. So the rule's start date is not one instant across the
+repo; it arrives in each session as that session's checkout catches up.
+
+`wave-1` is the one to notice: it holds **`main`**. §76.1 is why that is safe
+today — the recipe keeps the tree holding `main` — but the ownership record and
+the guard now disagree about which trees are protected, and only the guard is
+tested. That is a gap and not a limit: it is reachable, and the fix is a lock,
+not a paragraph.
+
+Not written down: which session left `agent-aa03cabfcfa3d9101` unlocked. The
+mechanism above explains it and one bad hook run explains it equally well, and
+nothing here distinguishes them. `rcad [a57470]` declined to claim it, and so
+does this.
+
 ## 77. A gate that asks about the machine it runs on, recorded 2026-09-08
 
 `check-plugins` asks two questions. Are the three plugin directories there, and
