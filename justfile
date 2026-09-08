@@ -156,7 +156,19 @@ check:
 # one at 90: a test-only label mapper over `rcad_topo::Error`, naming the five
 # refusals that file has actually seen and answering "an unexpected refusal" for
 # the rest. Reaching the arm is the finding, not the pass.
-wildcard_arms := "92"
+#     lane-record-enclosure  after §73's narrowing  83 direct + 5 composite = 88
+#
+# Four go away and none arrive. Three are `holds.rs` 318, 377 and 550, where a
+# `Decision` reached `gave_up_…` through a wildcard; `Record::new` takes an
+# `f64` now, so each arm has to name `Undecidable` to get one, and the wildcard
+# below it can only be reached by a variant that does not exist yet
+# (`docs/decisions.md` §73.3). The fourth is `validate.rs:281`, and it was a
+# false positive the ledger was carrying: the arm above it read
+# `decision @ Decision::Undecidable { .. }`, and clippy does not see a `@`
+# binding as covering the variant. Written plainly as
+# `Decision::Undecidable { enclosure }` — which is what the narrowing wanted
+# anyway — the same match stops warning. The arm itself did not move.
+wildcard_arms := "88"
 
 check-wildcards:
     @find crates -name lib.rs -path '*/src/*' -exec touch {} +

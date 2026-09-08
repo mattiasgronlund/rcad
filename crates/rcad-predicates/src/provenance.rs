@@ -454,10 +454,7 @@ mod tests {
     fn a_record_is_born_undecidable() {
         let record = record_measuring(1e-30, Measures::Volume);
 
-        assert_eq!(
-            record.outcome(),
-            Decision::Undecidable { enclosure: 1e-30 }
-        );
+        assert_eq!(record.outcome(), Decision::Undecidable { enclosure: 1e-30 });
         assert_eq!(record.enclosure(), 1e-30);
     }
 
