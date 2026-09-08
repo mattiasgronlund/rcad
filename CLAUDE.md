@@ -239,9 +239,14 @@ after the prose.
 `just`. Never install a tool ad hoc.
 
 **CI runs `just default` — the same command you run.** One gate step since
-2026-09-07, so every `check-*` recipe is enforced on the runner too and a CI
-green covers what a local green covers. Before that it ran four recipes and the
-`check-*` ones gated nothing but your own machine.
+2026-09-07, so every `check-*` recipe is enforced on the runner too. Before that
+it ran four recipes and the `check-*` ones gated nothing but your own machine.
+
+**One arm is not the same there, and it is the only one.** `check-plugins` asks
+Claude Code whether the plugins are *declared* and not merely on disk; a runner
+has no `~/.claude` for that to be a question about, so it prints that it skipped
+and carries on. Everything else — the three directories, the parser selftest,
+every other `check-*` — runs on the runner exactly as it runs here.
 
 **CI is green, and the commit it was green on matters more than the word.**
 Check rather than believe — `gh run list --repo mattiasgronlund/rcad --status

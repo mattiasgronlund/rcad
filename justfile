@@ -1123,7 +1123,26 @@ check-plugins:
         exit 1
     fi
     echo "3 plugins, all where this repo expects them"
-    "{{guardrails_plugin}}/bin/check-declared.sh" mattiasgronlund-local questions guardrails practices
+    # On disk is not installed: clone the marketplace and never register it and
+    # the files are all there while a session loads no hooks and no skills.
+    # `rscene` hit exactly that. So this asks Claude Code whether it has been
+    # *told* about them, which is a different question from the loop above.
+    #
+    # Skipped where there is no Claude Code to have been told. `~/.claude` is
+    # the whole installation — settings, `plugins/known_marketplaces.json`,
+    # `plugins/installed_plugins.json` — and a runner has none of it, so the
+    # question is about nothing there. That is the narrowest predicate that
+    # covers a runner: any machine a human works on has the directory, so this
+    # cannot quietly stop checking on one.
+    #
+    # It says so rather than skipping silently, which is §45's whole lesson: the
+    # corpus tests used to print "skipping" and return green, and a green suite
+    # had then never read a real file.
+    if [ -d "$HOME/.claude" ]; then
+        "{{guardrails_plugin}}/bin/check-declared.sh" mattiasgronlund-local questions guardrails practices
+    else
+        echo "no ~/.claude, so no Claude Code to declare them to: declaration check skipped"
+    fi
 
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
