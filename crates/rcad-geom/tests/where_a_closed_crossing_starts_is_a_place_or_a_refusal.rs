@@ -189,7 +189,8 @@ fn pairs_that_cross_in_a_conic(scale: f64) -> Vec<[Surface; 2]> {
     };
     let ball = |centre: [f64; 3], radius: f64| {
         Surface::Sphere(
-            Sphere::new(Point::from(centre.map(|it| it * scale)), radius * scale).expect("a radius"),
+            Sphere::new(Point::from(centre.map(|it| it * scale)), radius * scale)
+                .expect("a radius"),
         )
     };
     let pipe = |radius: f64| {
@@ -198,13 +199,16 @@ fn pairs_that_cross_in_a_conic(scale: f64) -> Vec<[Surface; 2]> {
     let cone = Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a slope"));
 
     vec![
-        [plane([0.0, 0.0, 1.0], [1.0, 2.0, 3.0]), ball([0.5, 0.0, 0.0], 6.0)],
+        [
+            plane([0.0, 0.0, 1.0], [1.0, 2.0, 3.0]),
+            ball([0.5, 0.0, 0.0], 6.0),
+        ],
         [ball([0.5, 0.0, 0.0], 6.0), ball([3.0, 1.0, 0.5], 7.0)],
         [plane([0.0, 0.0, 1.0], [1.0, 2.0, 3.0]), pipe(2.0)],
         // The pair that overflows: a plane leaning a hair off the pipe's own
         // axis stretches the ellipse by `1 / |n·w|`.
         [plane([0.0, 0.0, 0.0], [1.0, 0.0, 1e-20]), pipe(2.0)],
-        [plane([0.0, 0.0, 5.0], [0.0, 0.0, 1.0]), cone.clone()],
+        [plane([0.0, 0.0, 5.0], [0.0, 0.0, 1.0]), cone],
         [plane([0.0, 0.0, 5.0], [0.2, 0.0, 1.0]), cone],
     ]
 }
