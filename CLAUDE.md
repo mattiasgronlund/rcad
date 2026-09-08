@@ -32,7 +32,7 @@ the fix landed here.
 - **`practices`** — the nine shared skills, `code-quality` and `delegating`
   among them.
 
-`just check-plugins` fails, first thing in `just default`, when one is missing,
+`just check-plugins` fails, first thing in `just gate`, when one is missing,
 and names the command that installs it. **A missing `guardrails` means the
 patching hook is not running at all** — the rule in "Editing files" below is
 then only prose, and it was written because prose alone did not hold.
@@ -62,11 +62,17 @@ crates, `docs/decisions.md`, and a `just` recipe of ours. `just check-hooks`
 appends that overlay to the plugin's own cases and fails loudly if it is named
 and missing.
 
+**A bare `just` lists the recipes, one line each** — `just` runs the first
+recipe in the file, and that is `list`. Every listed recipe carries a real
+sentence, so start there rather than reading the `justfile`.
+
 **Recipes the shared skills refer to.** `delegating` and `handoff` are written
 against this repo and say so; these are the commands they name. `just lanes`
-lists the worktrees and who holds each. `just default` is the full gate. `just
-check-hub` is the hub rule. `just clean-targets` then `just prune-worktrees`
-reclaims disk, in that order. The compile cache is wired through mise's `[env]`
+lists the worktrees and who holds each. **`just gate` is the whole gate**, and
+what CI runs — it was called `just default` until 2026-09-08, so an older
+document or a session's memory may still say that. `just check-hub` is the hub
+rule. `just clean-targets` then `just prune-worktrees` reclaims disk, in that
+order. The compile cache is wired through mise's `[env]`
 as `RUSTC_WRAPPER = "kache"`, which a non-interactive shell does not inherit —
 so every `cargo` and `just` in a lane's brief needs a `mise exec --` prefix.
 
@@ -92,7 +98,7 @@ Parked on a detached HEAD, `main` is checkable out — and lockable — in a
 worktree like any lane.
 
 `just check-hub` fails when the hub has a branch checked out or work left in it,
-and it is in `just default`. A repository with one worktree is exempt, because a
+and it is in `just gate`. A repository with one worktree is exempt, because a
 lone checkout is not a hub. `docs/decisions.md` §60.
 
 `docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
@@ -238,7 +244,7 @@ after the prose.
 (`cargo-nextest`, `cargo-deny`, `taplo`, `just`). Run things through
 `just`. Never install a tool ad hoc.
 
-**CI runs `just default` — the same command you run.** One gate step since
+**CI runs `just gate` — the same command you run.** One gate step since
 2026-09-07, so every `check-*` recipe is enforced on the runner too. Before that
 it ran four recipes and the `check-*` ones gated nothing but your own machine.
 
@@ -250,8 +256,8 @@ selftest, every other `check-*` — runs on the runner exactly as it runs here.
 The skip is in `check-declared.sh` rather than in the `justfile`, so `rscene`
 gets the same one; `docs/decisions.md` §77.
 
-**`34266469454` is the first `just default` green on `main`**, push of
-`e8ae455`. Every green before it ran `just test`, so check what a run actually
+**`34266469454` is the first whole-gate green on `main`**, push of `e8ae455`
+(the recipe was still called `default` when it ran). Every green before it ran `just test`, so check what a run actually
 ran — `git show <sha>:.github/workflows/ci.yml` — before treating an older green
 as covering the `check-*` recipes.
 
@@ -271,7 +277,7 @@ paragraph said before.
 stale on the next push, which is exactly why the sentence this replaced said
 "never succeeded" rather than "26 of 26" — and the count that stood beside it
 *was* stale within a day, twice. A named run does not go stale. Three to know,
-all pushes to `main`, each reporting the same three numbers as `just default` on
+all pushes to `main`, each reporting the same three numbers as `just gate` on
 the same tree: `34155345448` at 1787 tests, `34255349804` at 1806 after the fuse
 fuzz work landed, and `34266469454` at 1811 — the last of those the first run
 that put the whole gate on a runner rather than `just test`.
@@ -286,7 +292,7 @@ the missing STEP corpus, cleared in that order, the last by `corpus/fetch.sh`.
 `.github/workflows/ci.yml` carries all three and the evidence for each fix.
 
 So there is a second opinion now, and it agreed the first time it could. That is
-not licence to skip `just default` before handing work over: the runner only
+not licence to skip `just gate` before handing work over: the runner only
 sees what was pushed, and a merge you have not made is not in it.
 
 **`just t <args>` runs one test or a few.** Everything after the name goes to

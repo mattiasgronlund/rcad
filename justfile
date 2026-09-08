@@ -7,7 +7,30 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus lint test check-t-selftest deny
+# `just` with no arguments runs the **first** recipe in this file, not one named
+# `default` — so putting the listing here is what makes a bare `just` show you
+# what there is, and `just gate` the thing you actually wait nine minutes for.
+#
+# `--unsorted` keeps the file's own order, which is grouped by subject. Sorted
+# alphabetically the ten `check-*` recipes lead and `gate` lands under `g`,
+# between `fuzz-writer` and `lanes`.
+#
+# Every listed recipe carries a `[doc("...")]`. Without one, `just` takes the
+# **last line of the comment block above the recipe** as its description, and
+# every comment block here is an argument several paragraphs long — so the
+# listing was 35 rows of fragments torn out of mid-sentence, `check-decisions #
+# at merge time, which is the expensive place to find it.` among them.
+# `[private]` hides the nine `*-selftest` recipes, which nobody types.
+[doc("Everything this repo can do, one line each. Bare `just` runs this.")]
+list:
+    @{{ just_executable() }} --list --unsorted
+
+# The whole gate, and the same command CI runs. Named `gate` rather than
+# `test-all` because it is 19 checks, a lint and a `cargo-deny` around exactly
+# one `test` — and this repo already says "gated green", "a gate agent", "the
+# gate worktree". `test-all` would have shipped a false sentence on day one.
+[doc("Everything, in the order CI runs it. ~9 minutes.")]
+gate: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -28,6 +51,7 @@ default: check-plugins check check-enums check-wildcards check-wildcards-selftes
 # ones that forgot got four silent skips rather than a failure.
 export RCAD_STEP_CORPUS := env_var_or_default("RCAD_STEP_CORPUS", parent_directory(parent_directory(`git rev-parse --path-format=absolute --git-common-dir`)) / "rcad-step-corpus")
 
+[doc("Type-check the whole workspace, tests and benches included.")]
 check:
     cargo check --workspace --all-targets
 
@@ -170,6 +194,7 @@ check:
 # anyway — the same match stops warning. The arm itself did not move.
 wildcard_arms := "88"
 
+[doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -231,6 +256,7 @@ _wildcard-direct-count log:
 # and never `Toy::B`, so each is one variant short — 1 apiece, 3 in all — not
 # because three sites were found, but because three fixtures each leave one
 # of `Toy`'s two variants uncovered.
+[private]
 check-wildcards-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -339,8 +365,9 @@ ignored_tests := "0"
 # has to match says which of the two happened.
 #
 # `test-ignored` below is what actually runs them, and it is not part of
-# `default`: today's one ignored test **fails**, which is why it is ignored, so
-# a `default` that ran it would be red on purpose.
+# `gate`: today's one ignored test **fails**, which is why it is ignored, so
+# a `gate` that ran it would be red on purpose.
+[doc("How many tests are marked #[ignore]; fails when the count moves.")]
 check-ignored:
     @out=$(cargo nextest list --workspace --run-ignored ignored-only 2>/dev/null) \
         || { echo "nextest could not list the ignored tests, so this counted nothing"; exit 1; }; \
@@ -354,6 +381,7 @@ check-ignored:
 
 # Run them. Fails loudly if the selection is empty rather than reporting a run
 # of no tests as a pass.
+[doc("Run the #[ignore]d tests. They fail; that is why they are ignored.")]
 test-ignored:
     @if [ "{{ignored_tests}}" = "0" ]; then \
         echo "no test is marked #[ignore], so there is nothing here to run"; \
@@ -364,7 +392,7 @@ test-ignored:
 # The hook that refuses shell patching of a .rs file, against its own cases
 # (docs/decisions.md §50.8).
 #
-# It is in `default` because the hook fails in the direction that is hard to
+# It is in `gate` because the hook fails in the direction that is hard to
 # notice: a pattern that stops matching lets the thing through silently, which
 # is the same failure mode the hook exists to prevent. Two of its cases are
 # drafts of itself that were wrong — a commit message describing the rule, and
@@ -378,6 +406,7 @@ test-ignored:
 # recipe of ours. The plugin's runner appends it and fails loudly if the file is
 # named and missing, because a repo's own cases quietly not running is exactly
 # the drift the plugin was made to end.
+[doc("The hooks against their own cases: shell patching, context budget, worktrees.")]
 check-hooks:
     @{{guardrails_plugin}}/bin/selftest.sh .claude/patching-cases.local.json
     @.claude/hooks/check-worktree-create.sh
@@ -393,6 +422,7 @@ check-hooks:
 # It reads `mise env` rather than the file, because the file is a template and
 # what breaks CI is the value mise computes, not the text. That also means this
 # fails if the template stops parsing, which the eye does not catch.
+[doc("kache wraps rustc here, and wraps nothing on a runner.")]
 check-kache-off-on-ci:
     @on=$(CI=true mise env | sed -n 's/^export RUSTC_WRAPPER=//p' | tr -d "\"'"); \
     off=$(env -u CI mise env | sed -n 's/^export RUSTC_WRAPPER=//p' | tr -d "\"'"); \
@@ -408,15 +438,15 @@ check-kache-off-on-ci:
         exit 1; \
     fi
 
-# `default` runs `check`, `lint`, `test`, `deny` and every `check-*` there is,
+# `gate` runs `check`, `lint`, `test`, `deny` and every `check-*` there is,
 # which is what CLAUDE.md publishes and so is a claim that wants a test (§15.6).
 #
-# Since 2026-09-07 CI runs `default` itself rather than those four separately,
+# Since 2026-09-07 CI runs `gate` itself rather than those four separately,
 # which makes this recipe the thing that carries a new `check-*` onto the runner:
-# wire one into `default` and it is enforced there with no edit to `ci.yml`.
+# wire one into `gate` and it is enforced there with no edit to `ci.yml`.
 #
 # The failure it is really for is the other direction: a `check-*` recipe
-# written, committed and never wired into `default` is a check nobody runs, and
+# written, committed and never wired into `gate` is a check nobody runs, and
 # nothing else in this tree would notice. That has never happened, which is not
 # the same as being prevented.
 #
@@ -425,15 +455,17 @@ check-kache-off-on-ci:
 # stops matching empties both at once and two empty sets compare equal — the
 # recipe would pass having compared nothing, and an empty diff prints nothing,
 # which reads exactly like success. `check-ignored` says the same thing about
-# itself a hundred lines up. It is not hypothetical: renaming `default`, which
-# is under discussion, breaks the anchor on the second line below.
+# itself a hundred lines up. It is not hypothetical, and it has now happened:
+# renaming `default` to `gate` broke the anchor on the second line below, the
+# pinned count is what turned that into a failure rather than a silent pass, and
+# both arms were re-checked by mutation afterwards rather than by running green.
 #
 # So bumping the number is how a new `check-*` recipe gets added, deliberately,
 # in the commit that adds it.
 #
 # The last arm pins `check-plugins` **first**, which the three above could not:
 # both sides of every comparison here are `sort -u`, so this recipe was blind to
-# order by construction. CLAUDE.md publishes "first thing in `just default`" and
+# order by construction. CLAUDE.md publishes "first thing in `just gate`" and
 # `ci.yml` leans on it, and a published claim wants a test (§15.6) — it had none,
 # and `check-plugins` ran first only because of where it happened to sit.
 #
@@ -442,10 +474,11 @@ check-kache-off-on-ci:
 # `check-questions-selftest` exit **127** on a missing `selftest.sh` — no
 # message, no remedy, and the failure a CI log explains worst. Found by rcad-c2,
 # who also noticed that nothing held the ordering it depends on.
-check-default-runs-every-check:
+[doc("Every check-* recipe is in `gate`, and check-plugins is first.")]
+check-gate-runs-every-check:
     @defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
-    listed=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
-    others=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
+    listed=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
+    others=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
     if [ "$n" != "19" ]; then \
         echo "found $n check-* recipes, expected 19"; \
@@ -454,7 +487,7 @@ check-default-runs-every-check:
         exit 1; \
     fi; \
     if [ "$defined" != "$listed" ]; then \
-        echo "these check-* recipes are defined but not run by default:"; \
+        echo "these check-* recipes are defined but not run by gate:"; \
         printf '%s\n' "$defined" | while read -r r; do \
             printf '%s\n' "$listed" | grep -qx "$r" || echo "  $r"; \
         done; \
@@ -462,15 +495,15 @@ check-default-runs-every-check:
         exit 1; \
     fi; \
     if [ "$others" != "check deny lint test " ]; then \
-        echo "default's non-check-* recipes are '$others', expected 'check deny lint test '"; \
-        echo "CLAUDE.md says default runs these four and every check-* besides"; \
+        echo "gate's non-check-* recipes are '$others', expected 'check deny lint test '"; \
+        echo "CLAUDE.md says gate runs these four and every check-* besides"; \
         echo "change that sentence in the same commit, or this is now false"; \
         exit 1; \
     fi; \
-    first=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep -m1 .); \
+    first=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -m1 .); \
     if [ "$first" != "check-plugins" ]; then \
-        echo "default runs '$first' first, expected 'check-plugins'"; \
-        echo "CLAUDE.md says check-plugins runs first thing in just default, and"; \
+        echo "gate runs '$first' first, expected 'check-plugins'"; \
+        echo "CLAUDE.md says check-plugins runs first thing in just gate, and"; \
         echo "ci.yml leans on it: with no plugins, check-hooks and"; \
         echo "check-questions-selftest exit 127 on a missing selftest.sh, which is"; \
         echo "the failure a runner explains worst, while check-plugins exits 1 and"; \
@@ -478,6 +511,7 @@ check-default-runs-every-check:
         exit 1; \
     fi
 
+[doc("Every public enum is #[non_exhaustive] or says it is exhaustive on purpose.")]
 check-enums:
     @! awk '/^$/ {ok = 0} \
             /^#\[non_exhaustive\]/ {ok = 1} \
@@ -506,6 +540,7 @@ decisions_file := "docs/decisions.md"
 # no line *offsets* here. The sections are numbered, `just decision 49.6`
 # addresses one by its number, and an offset would be a second address for the
 # same section that goes stale the moment anybody inserts a paragraph.
+[doc("The map of docs/decisions.md: every section, and what it costs to read.")]
 decisions-toc:
     @awk '/^## [0-9]/ { \
              if (num != "") printf "  %-5s %-56s %4d lines\n", num, title, n; \
@@ -527,6 +562,7 @@ decisions-toc:
 # reads as "the decisions say nothing about this", which is the opposite of what
 # an unknown number means, and it is the same failure `check-ignored` above
 # guards against: an empty selection looks exactly like a clean pass.
+[doc("One section of docs/decisions.md by number: `just decision 49.6`.")]
 decision want:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -599,6 +635,7 @@ decision want:
 # **No match fails rather than printing nothing**, for the same reason `decision`
 # fails on a number that does not exist: an empty answer here reads as "the
 # decisions say nothing about this", and that is a claim a typo can forge.
+[doc("Which sections mention this? Answers in section numbers, not line numbers.")]
 decisions-find pattern:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -659,6 +696,7 @@ decisions-find pattern:
 # was renumbered to 67 is the shape it takes, and it happened four times in one
 # session and was only caught by grepping for it. Neither is a duplicate, so
 # the check above passes both. `docs/decisions.md` §71.
+[doc("Every heading in docs/decisions.md can be reached by its number.")]
 check-decisions:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -711,6 +749,7 @@ check-decisions:
 #
 # `#### ` inside the fixture is the case worth having: it is a heading, and a
 # lookup that stops at any heading would cut §1.1 in half without saying so.
+[private]
 check-decisions-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -865,6 +904,7 @@ check-decisions-selftest:
 # not where rustfmt would put it this fails and says so**, rather than printing
 # to the end of the file — an item that runs on for 7 000 lines is the failure
 # this whole recipe is against.
+[doc("One item of Rust source by name, with its doc comment: `just src Decision`.")]
 src want filter="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -951,6 +991,7 @@ src want filter="":
 # stays proven on a day the real `arrange_faces` is rewritten. `git ls-files` is
 # what the recipe searches, so the fixture is a real index — `git add` with no
 # commit is enough for that, and needs no identity configured.
+[private]
 check-src-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1023,6 +1064,7 @@ check-src-selftest:
         echo "src accepted something that is not an item name"; exit 1
     fi
 
+[doc("The whole test suite, and the doc tests.")]
 test:
     cargo nextest run --workspace
     cargo test --workspace --doc
@@ -1074,6 +1116,7 @@ guardrails_plugin := env_var_or_default("CLAUDE_GUARDRAILS_PLUGIN", plugins_root
 # of prose with backticks and `§` refs in it, so passing one as a shell argument
 # costs what `Edit` costs and echoes the whole thing back on top; and marking one
 # answered is a substitution, which is the quiet-failure shape §50.8 is about.
+[doc("One open question in full, by the hash the status line prints.")]
 question hash="" label="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1105,6 +1148,7 @@ question hash="" label="":
 # and it would be a second record beside the thing itself, which is the shape
 # §60 rejected for the hub. A dead session's file cannot be fixed, so judging it
 # is noise nobody can act on; a live session's can, so it is judged.
+[doc("The grammar violations in one session's question file, named in full.")]
 question-check hash:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1118,9 +1162,10 @@ question-check hash:
 # still reads a file end to end and still announces a violation under the
 # listing. The footer is rcad's, so rcad tests it.
 #
-# Keeping the recipe's name is deliberate: `check-default-runs-every-check`
+# Keeping the recipe's name is deliberate: `check-gate-runs-every-check`
 # counts `check-*` recipes and this one moving out of that set would be a
 # silent change to a number that exists to be loud.
+[private]
 check-questions-selftest:
     @{{questions_plugin}}/bin/selftest.sh
 
@@ -1129,7 +1174,7 @@ check-questions-selftest:
 #
 # It is its own recipe rather than a guard inside each caller because the answer
 # is the same for all of them and it is four lines of install instructions. It
-# runs early in `default` so a missing plugin says so once, in words, instead of
+# runs early in `gate` so a missing plugin says so once, in words, instead of
 # three times as "no such file or directory".
 #
 # `practices` ships only skills, so nothing here runs it — its directory
@@ -1147,6 +1192,7 @@ check-questions-selftest:
 # both repos and the copy is what goes stale. It cannot prove *this* session
 # loaded anything — settings are read at session start — so it rules out the
 # silent case and says exactly that rather than claiming more.
+[doc("The three Claude plugins are on disk, and Claude Code has been told.")]
 check-plugins:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1235,6 +1281,7 @@ check-plugins:
 # `--no-capture` streams instead. It exists to watch output as it happens, and
 # it also changes nextest's format, so digesting it would defeat the flag and
 # misread it at the same time.
+[doc("One test or a few, with the corpus and the build cache in place.")]
 t *args:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1289,6 +1336,7 @@ _test-digest log status:
 # The third fixture has no summary at all, which is what a compile error looks
 # like. It is the case where the head and not the tail is the useful end: rustc
 # reports the first error first, and every later one may be its consequence.
+[private]
 check-t-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1362,7 +1410,7 @@ check-t-selftest:
 
     # The documented example, run for real, because it is the one that was broken.
     # It is here rather than beside the fixtures because it needs the test
-    # binaries, which is why `default` runs this recipe after `test`.
+    # binaries, which is why `gate` runs this recipe after `test`.
     got=$({{ just_executable() }} t -E 'test(/a_cube_comes_back_sound_and_measuring_the_same/)')
     case "$got" in
     *"1 test run: 1 passed"*)
@@ -1382,6 +1430,7 @@ check-t-selftest:
 # deleting it first, deliberately.
 #
 # Rebuilds the STEP corpus from upstream into `RCAD_STEP_CORPUS`.
+[doc("Rebuild the STEP corpus from upstream into RCAD_STEP_CORPUS.")]
 fetch-corpus destination=RCAD_STEP_CORPUS:
     ./corpus/fetch.sh "{{destination}}"
 
@@ -1402,6 +1451,7 @@ fetch-corpus destination=RCAD_STEP_CORPUS:
 # manifest's own path list.
 #
 # Checks the STEP corpus on this machine against `corpus/manifest.sha256`.
+[doc("The STEP corpus on this machine matches corpus/manifest.sha256.")]
 check-corpus manifest="corpus/manifest.sha256":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1455,17 +1505,19 @@ check-corpus manifest="corpus/manifest.sha256":
     fi
     echo "corpus matches {{manifest}}: $(wc -l <"$manifest_abs") files, $root"
 
+[doc("Formatting and clippy, warnings denied. Rust and TOML both.")]
 lint:
     cargo fmt --all -- --check
     taplo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
 
+[doc("cargo-deny: advisories, bans, licences, sources. No LGPL at runtime.")]
 deny:
     cargo deny check
 
 # The property fuzzer, over a pair of surfaces (docs/decisions.md §24.14).
 #
-# NOT part of `just default`, and not because anybody chose to leave it out:
+# NOT part of `just gate`, and not because anybody chose to leave it out:
 # `cargo-fuzz` builds with a sanitizer that needs a nightly compiler and
 # `rust-toolchain.toml` pins a stable one, so this is the one recipe here that
 # uses a compiler the repo does not pin. What runs on every commit is the same
@@ -1474,6 +1526,7 @@ deny:
 #
 # RUSTFLAGS has to be repeated: cargo-fuzz sets it as an environment variable,
 # and that shadows the `.cargo/config.toml` entry `inari` needs to build at all.
+[doc("Fuzz the predicates over a pair of surfaces. Needs a nightly compiler.")]
 fuzz duration="60":
     cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz run where_two_surfaces_cross -- \
@@ -1488,6 +1541,7 @@ fuzz duration="60":
 #
 # No `-max_len`, unlike `fuzz`: the reader's promise is about any length of
 # anything, and the truncation cases live at every length there is.
+[doc("Fuzz the Part 21 reader over arbitrary bytes.")]
 fuzz-reader duration="60":
     cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz run no_step_file_makes_the_reader_panic -- \
@@ -1500,6 +1554,7 @@ fuzz-reader duration="60":
 # `postcard::from_bytes` — the same route a stranger's saved file takes — and
 # whatever `Model` comes out, sound or not, goes straight into
 # `rcad_step::write`, which owes an `Err` and never a panic either way.
+[doc("Fuzz the Part 21 writer over an arbitrary Model.")]
 fuzz-writer duration="60":
     cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz run no_model_makes_the_writer_panic -- \
@@ -1512,14 +1567,17 @@ fuzz-writer duration="60":
 # its own solids against each other — see
 # `fuzz/fuzz_targets/two_solids_fused_by_a_stranger.rs` for why two `Model`s
 # and not one cross-fused pair.
+[doc("Fuzz the fuse over two arbitrary Models.")]
 fuzz-fuse duration="60":
     cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz run two_solids_fused_by_a_stranger -- \
         -max_total_time={{duration}}
 
+[doc("The benchmarks.")]
 bench:
     cargo bench --workspace
 
+[doc("Format the Rust and the TOML in place.")]
 fmt:
     cargo fmt --all
     taplo fmt
@@ -1546,6 +1604,7 @@ fmt:
 # you are standing in, because you are using it, and any **locked** tree, because
 # a lock means an agent is working in there and deleting its `target/` mid-build
 # is exactly the interruption the lock exists to prevent.
+[doc("Strip target/ from every worktree git knows about. Skips locked ones.")]
 clean-targets dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1583,6 +1642,7 @@ clean-targets dir=".":
 # the sweep from the lane: the **hub's** must go, because it is the biggest and
 # the old path glob never reached it, the **locked** one must survive, and the
 # tree the sweep is standing in must survive.
+[private]
 check-clean-targets-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1638,6 +1698,7 @@ check-clean-targets-selftest:
 # detached tree is now judged by its own commit (`git -C "$tree" rev-parse
 # HEAD`, no branch name involved at all) and kept unconditionally, the same way
 # a locked or dirty tree is.
+[doc("Remove lane worktrees whose branch has landed on main.")]
 prune-worktrees dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1686,6 +1747,7 @@ prune-worktrees dir=".":
 # `loose` is detached, and `merged` is fast-forwarded into `main` before the
 # sweep runs, so its commit really is `main`'s ancestor. A guard that kept
 # everything would pass the first four and only the fifth catches it.
+[private]
 check-prune-worktrees-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1747,6 +1809,7 @@ check-prune-worktrees-selftest:
 # `free` there would be a claim this command cannot make. It prints `hub`, leaves
 # it out of the count, and says so when it is not parked and clean —
 # `just check-hub` is the one that fails over it (docs/decisions.md §60).
+[doc("Who is working where, right now. Run this before you touch a shared tree.")]
 lanes dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1836,6 +1899,7 @@ lanes dir=".":
 #
 # The fixture's hub is deliberately left on a branch, which is the state
 # `check-hub` rejects, so the warning line is exercised here too.
+[private]
 check-lanes-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1885,12 +1949,14 @@ check-lanes-selftest:
 #
 # **A repository with one worktree is exempt**, because then there is no hub and
 # no lane, only a checkout, and no second session to collide with. That is a
-# fresh clone, and it is the shape a CI checkout has — CI runs `check`, `lint`,
-# `test` and `deny` rather than `default` today, so this never fires there, but
-# the exemption is what would keep it green if it did. The exemption is
+# fresh clone, and it is the shape a CI checkout has. This is no longer a
+# prediction: CI runs the whole `gate` since 2026-09-07, so a runner reaches
+# this recipe, and run `34266469454` took the exemption and said so — *"is the
+# only worktree, so it is a checkout and not a hub"*. The exemption is
 # structural rather than an environment variable on purpose: one that has to be
 # set is one that gets set, while this lapses by itself the moment a second tree
 # exists, which is the moment ownership starts being a question.
+[doc("Nobody works in the hub: it owns .git and nothing else.")]
 check-hub dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1988,6 +2054,7 @@ check-hub dir=".":
 # dirt, then not at all once it is parked and clean. Reading the live repository
 # instead would prove nothing: it is in exactly one of these states at a time,
 # and a `check-hub` that had lost the ability to fail would pass every run.
+[private]
 check-hub-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
