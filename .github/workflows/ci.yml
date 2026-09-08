@@ -92,19 +92,28 @@
 # -iname '*.step' \) -printf '%s\n' | awk '{s+=$1} END {print s}'`.
 #
 # **This runs `just default` — the same command a human runs.** It ran `just
-# test` until 2026-09-07, which left the seventeen `check-*` recipes enforced on
-# every local run and on no runner. Mattias settled that as "switch to `just
-# default`, but after the first green"; asked afterwards which green he meant,
-# with one on a pull request and none yet on `main`, he answered: now.
+# test` until 2026-09-07, which left the `check-*` recipes enforced on every
+# local run and on no runner. Mattias settled that as "switch to `just default`,
+# but after the first green"; asked afterwards which green he meant, with one on
+# a pull request and none yet on `main`, he answered: now.
 #
 # The cost of "now" is that the run landing the switch changes two things at
-# once, so a red on it does not say which. What could be ruled out locally was:
-# sixteen of the seventeen `check-*` recipes were run in a fresh single-worktree
-# clone with `CI=true` — the shape this runner has, and the shape no local gate
-# has, since every worktree here sits beside a hub — and all sixteen pass.
-# `check-hub` is among them, so CLAUDE.md's exemption for a repository with one
-# worktree is tested rather than assumed. The seventeenth, `check-t-selftest`,
-# needs a build and was covered by the full local gate instead.
+# once, so a red on it does not say which. What could be ruled out locally was
+# ruled out: the `check-*` recipes were run in a fresh single-worktree clone with
+# `CI=true` — the shape this runner has, and the shape no local gate has, since
+# every worktree here sits beside a hub. `check-hub` passed there, so CLAUDE.md's
+# exemption for a repository with one worktree is tested rather than assumed.
+#
+# **That sweep is also where this header earns its own warning.** It ran against
+# seventeen `check-*` recipes and said so here. Within the hour `check-plugins`
+# made it **eighteen**, in the paragraph whose whole subject is numbers going
+# stale. Worse, the sweep could not have caught what the eighteenth broke: it
+# ran with this machine's plugins installed, so `check-plugins`, `check-hooks`
+# and `check-questions-selftest` all passed for a reason a runner does not have.
+# Pointing `CLAUDE_PLUGINS_ROOT` at an empty directory is what found it — exit 1
+# and two 127s. A green sweep is not evidence when the thing you are asking
+# about is what the environment supplies. Do not count the recipes here again;
+# `grep '^default:' justfile | tr ' ' '\n' | grep -c '^check-'` is the number.
 #
 # One step rather than four, and `check-corpus` deliberately twice. The single
 # step is what lets `check-default-runs-every-check` reach this file: a new
@@ -138,6 +147,43 @@ jobs:
       # value that comes out empty; it makes the whole workflow file invalid, and
       # the run then fails in 0 s having never started a job.
       - run: echo "RCAD_STEP_CORPUS=$RUNNER_TEMP/rcad-step-corpus" >> "$GITHUB_ENV"
+      # `just default` begins with `check-plugins`, and three of its recipes run
+      # scripts that live in the shared marketplace now rather than in `.claude/`.
+      # A runner has no Claude Code to install a plugin into, so it clones the
+      # marketplace and points `CLAUDE_PLUGINS_ROOT` at it — the same escape
+      # hatch `check-plugins` offers a human whose clone is somewhere else.
+      #
+      # Outside the checkout for the reason the corpus is: not this repo's to
+      # carry, and inside the working tree it would read as untracked.
+      #
+      # Pinned by commit, like the KiCad half of the corpus. Unpinned, a push to
+      # that repo could turn this one red with no commit here, and a green would
+      # stop meaning "this tree passes". Bump it deliberately.
+      #
+      # What this does **not** check is that a human's installed plugins match
+      # the pin: `check-plugins` tests that three directories exist, not which
+      # version they hold, so local and CI can disagree about the plugin half of
+      # a gate. That is a limit and not a gap — an installed plugin need not be a
+      # git checkout, so there is no version on the local side to compare.
+      # No credentials here, deliberately: the marketplace is a **public** repo,
+      # which Mattias settled on 2026-09-08 knowing it is the one public thing
+      # among `rcad` and `rscene`. The alternative was a fine-grained token in an
+      # Actions secret — the automatic `GITHUB_TOKEN` cannot read another repo —
+      # and a secret to rotate was judged the worse trade.
+      #
+      # The failure arm is here because of the order these two things happened
+      # in: the repo was created private, and a clone with no credentials against
+      # a private repo fails with `fatal: could not read Username for
+      # 'https://github.com'`, which names neither the repo nor the fix.
+      - run: |
+          if ! git clone --quiet https://github.com/mattiasgronlund/claude-questions.git "$RUNNER_TEMP/claude-plugins"; then
+            echo "Could not clone the plugin marketplace, and this clone carries"
+            echo "no credentials by design. If the repo is still private:"
+            echo "  gh repo edit mattiasgronlund/claude-questions --visibility public"
+            exit 1
+          fi
+          git -C "$RUNNER_TEMP/claude-plugins" checkout --quiet 952672e6a29722c7685a9106ddf8781197eebe51
+          echo "CLAUDE_PLUGINS_ROOT=$RUNNER_TEMP/claude-plugins/plugins" >> "$GITHUB_ENV"
       # mise installs the `cargo:` tools in parallel, and each one triggers
       # rustup to materialise the toolchain pinned in `rust-toolchain.toml`.
       # They race over the same `.partial` file in ~/.rustup/downloads and all

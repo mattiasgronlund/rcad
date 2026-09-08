@@ -37,6 +37,23 @@ and names the command that installs it. **A missing `guardrails` means the
 patching hook is not running at all** — the rule in "Editing files" below is
 then only prose, and it was written because prose alone did not hold.
 
+CI has no Claude Code to install a plugin into, so it takes the other route
+`check-plugins` names: it clones the marketplace to `$RUNNER_TEMP` at a **pinned
+commit** and sets `CLAUDE_PLUGINS_ROOT`. Pinned so a push there cannot turn this
+repo red without a commit here; bump it in `.github/workflows/ci.yml`
+deliberately. That repo is **public** — the one public thing among these repos,
+settled deliberately so the clone needs no secret. Nothing checks that your
+*installed* plugins match the pin.
+
+**That CI clones from GitHub is not a reason to repoint your marketplace at
+it.** `mattiasgronlund-local` is registered as a `directory` source, so it runs
+in place out of `~/git/mattiasgronlund/claude-questions` and
+`CLAUDE_PLUGINS_ROOT` resolves straight to that checkout. A `github` source
+installs to a version-stamped cache path instead
+(`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`), which moves on
+every version bump and takes `CLAUDE_PLUGINS_ROOT` with it. Clone it, read it,
+push to it — leave the source alone.
+
 What stays here is what is this repo's alone: the hub and worktree-create hooks,
 the status line **wrapper** (a plugin cannot supply a `statusLine`; only
 `settings.json` can, and it names a path), and
