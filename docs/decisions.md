@@ -19364,6 +19364,55 @@ finding: a verification is not exempt from the sample-set question just
 because it is a verification. "Did the check see both spellings" has to be
 asked again at every hop, including the hop whose job is to ask it.
 
+### 62.11 A correction that was written, correct, and could not reach anyone
+
+Every arm above is about a claim that was never able to be true. This one is
+about a claim that **was** repaired, on time, by someone who did the work — and
+went on spreading anyway, because a fix that has not landed cannot be read.
+
+On 2026-09-08 three sessions told the dispatcher that rcad's CI had never
+succeeded. One quoted "26 runs, 26 failures"; another said the next run would be
+"the interesting one" because none had ever gone green. Both false: three
+successes, two of them pushes to `main`, re-derived twice from `gh run list`.
+
+**Neither session was careless, and the path is the finding.** `origin/main`'s
+CLAUDE.md still said both things, because the correction sat gated and unlanded
+in `0a917e9`. One session then traced its own copy and found it had come from
+*another session*, not from the file. So the route was CLAUDE.md → session →
+session → dispatcher, and by the time the correction existed the error was
+replicating between agents without touching the document it came from.
+
+**Landing the fix does not retract what is already in three contexts.** It took
+two messages from the dispatcher and a third from a peer to catch up with a
+sentence that was already wrong when it was copied. A record that cannot be read
+is worse than no record, because it is trusted.
+
+That is a different shape from §62.8–62.10. Those are about a sample set that
+could only return one answer. This is about **latency**: the correction was
+written, was right, was gated, and was unreachable, while the error kept moving.
+The rule that falls out is not about sweeps at all — **a correction is not
+delivered when it is written, it is delivered when it lands.** Until then the
+old sentence is still the one being read, and anyone told the new one is holding
+it on your word rather than the record's.
+
+**The same day gave the duplicated-copy version of it.** "No `just default` run
+has gone green on `main`" was true when written and lived in three files —
+`ci.yml`'s header, §77.5, and CLAUDE.md. A green run made all three false at
+once, and two sessions between them had flagged only two of the three. Landing a
+repair in one copy leaves the others standing and *looking* authoritative. This
+is §64's rule arriving from the other direction: §64 says do not keep a second
+copy of a fact because it goes stale; here the going-stale had already happened
+and the cost was one more file that nobody had listed.
+
+**And it gives §62 the case it did not have: verification that worked.** The
+dispatcher was corrected twice that afternoon by peers who re-derived instead of
+reading, and both were right. §62.10 asked what a second opinion has to *do* to
+be one; the answer both times was that it recomputed. A peer session read one
+clippy log two ways — anchored grep 0, escapes stripped 83 — and settled §77.6's
+cause with a measurement the dispatcher's own reproduction had not produced.
+Cheap, independent, and pointed at the thing rather than at the argument about
+the thing.
+
 ## 63. One grammar, two readers that disagreed, recorded 2026-09-07
 
 §59 gave `open-questions.md` an address and left its grammar written twice: once
