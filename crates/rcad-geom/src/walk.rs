@@ -409,7 +409,8 @@ pub fn walk(
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on a
 /// degree-four run pick both loops or neither, and
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the crossing's size or a seed
-/// on it falls out of `f64`'s range.
+/// on it falls out of `f64`'s range — a conic's point at angle zero included,
+/// which is the one this used to hand back anyway (§74).
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose conic is not a
 /// curve — a plane that misses or grazes the ball it is named against — exactly
@@ -473,7 +474,22 @@ pub fn where_a_closed_crossing_starts(
         WhatARunLiesOn::Parabola(_) | WhatARunLiesOn::OneBranchOfAHyperbola(_) => {
             Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed)
         }
-        WhatARunLiesOn::Conic(conic) => Ok(conic.at(0.0)),
+        // **Asked of the point and not of the conic's size**, which is the
+        // guard [`walk`] has one step further on and it is not the same guard.
+        // A conic whose size overflowed skips the degenerate check in
+        // `what_a_run_between_these_two_lies_on` on purpose, and what comes
+        // through is a semi-axis of infinity — so `and · sin 0` is `∞ · 0`, and
+        // every coordinate of the start is `NaN`. Checking the size would catch
+        // that pair and leave a sufficiency claim over six conic builders and
+        // the direction vectors each of them scales; checking the answer leaves
+        // none (§74).
+        WhatARunLiesOn::Conic(conic) => {
+            let start = conic.at(0.0);
+            if !start.is_finite() {
+                return Err(Error::CannotWorkOutHowBigACrossingIs);
+            }
+            Ok(start)
+        }
     }
 }
 
