@@ -110,11 +110,15 @@ impl Model {
     ///
     /// This is what [`Assembly::commit`](crate::fuse::assemble::Assembly::commit)
     /// runs after every fuse, in every build. The full sweep costs a pass over
-    /// the whole model — measured here at 1.94 µs a face, twice over, which is
-    /// 15 times a fuse's own cost on a model of 5040 faces and under a percent
-    /// on a model the fuse built itself. That is the same cost §66.2 measured
-    /// at 3.4–4.4 µs a face on its own shapes, on planar ones instead.
-    /// Sweeping what did not change is all of that difference.
+    /// the whole model — 1.9 to 2.1 µs a face on three machines, twice over,
+    /// with no fixed cost worth naming. On a model of 5040 faces that is about
+    /// 20 ms against a fuse of two small blocks costing a millisecond or so,
+    /// and on a model the fuse built itself it is under a percent. Quote the
+    /// 20 ms and not a ratio: the same three machines put the fuse itself at
+    /// 0.82, 1.34 and 1.44 ms, which moves "how many times the fuse" from
+    /// fourteen to twenty-five. That is the same cost §66.2 measured at
+    /// 3.4–4.4 µs a face on its own shapes, on planar ones instead. Sweeping
+    /// what did not change is all of that difference.
     ///
     /// # Why asking only the new entities asks the same questions
     ///

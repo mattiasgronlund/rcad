@@ -19956,9 +19956,13 @@ post-write sweep did not: **the headline figure above does not cover a model
 holding geometry the fuse never touched.** "A model the fuse has already spent
 tens of milliseconds on" is true of the workloads §66.2 measured, where the
 fuse built the model itself and its own cost grows faster than the sweep's. Fuse
-two small blocks in a model of 5040 faces and the sweep is 15 times the fuse
-(§81.7). Worse, a whole-model sweep can *fail* for a solid the fuse never
-touched, because the coordinate range is a fold over every solid there is — now
+two small blocks in a model of 5040 faces and the sweep costs about 20 ms where
+the fuse costs a millisecond or so (§81.7) — quote the 20 ms and not a ratio,
+because three machines put the fuse itself at 0.82, 1.34 and 1.44 ms, which
+moves "how many times the fuse" from fourteen to twenty-five while the sweep's
+own 1.9–2.1 µs a face barely moves at all. Worse, a whole-model sweep can
+*fail* for a solid the fuse never touched, because the coordinate range is a
+fold over every solid there is — now
 a test in the tree (§81.5).
 
 So what runs after every fuse, in every build, is
