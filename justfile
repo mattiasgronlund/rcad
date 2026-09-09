@@ -1897,8 +1897,21 @@ check-fuzz-overnight-selftest:
     trap 'rm -rf "$dir"' EXIT
     mkdir -p "$dir/bin"
 
-    # Logs its whole command line and then sleeps out the slice it was given, so
-    # that a run's wall clock is the sum of what the recipe handed out.
+    # Logs its whole command line, then sleeps **half** the slice it was given.
+    #
+    # Half, and not all of it, is what keeps this arm from being a race. Sleeping
+    # the whole slice makes the four sleeps add up to the window by
+    # construction, which leaves nothing for the arm's own overhead — `timeout`
+    # around a nested `just`, four times over, about 1.2 s under load. `date +%s`
+    # truncates to whole seconds and hides that until it crosses a second
+    # boundary; then `(deadline - now) / left` truncates to 0 for the last
+    # target, it is skipped, and the night correctly exits 1 for a reason the
+    # fixture never meant to create. Four passes and a fail in five runs, on one
+    # tree, found by rcad-15 on 2026-09-09.
+    #
+    # It still has to scale with the slice rather than being a fixed nap, or the
+    # mutation this arm exists to catch — handing every target the whole window —
+    # would sleep the same amount as the correct recipe and go unnoticed.
     cat >"$dir/bin/cargo" <<'STUB'
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1908,7 +1921,11 @@ check-fuzz-overnight-selftest:
     esac
     for arg in "$@"; do
         case "$arg" in
-            -max_total_time=*) sleep "$(( ${arg#*=} + ${STUB_OVERRUN:-0} ))" ;;
+            -max_total_time=*)
+                half=$(( ${arg#*=} / 2 ))
+                [ "$half" -ge 1 ] || half=1
+                sleep "$(( half + ${STUB_OVERRUN:-0} ))"
+                ;;
         esac
     done
     for arg in "$@"; do
@@ -1930,21 +1947,26 @@ check-fuzz-overnight-selftest:
             {{just_executable()}} fuzz-overnight "$1" >"$dir/out" 2>&1
     }
 
-    # One: four targets inside a four-second window, with the second of them
-    # dying. Every one still runs, the slices add up to the window and not to
-    # four times it, and the run reports the failure rather than swallowing it.
+    # One: four targets inside a twelve-second window, with the second of them
+    # dying. Every one still runs, the run ends inside the window rather than
+    # four times past it, and it reports the failure rather than swallowing it.
+    #
+    # A correct recipe spends about 9 s here and the budget mutation about 24 s,
+    # so 16 separates them with room on both sides. There is deliberately no
+    # assertion on the sum of the granted slices: that sum legitimately exceeds
+    # the window, because a target finishing early hands what it did not use to
+    # the ones after it. It only looked like an invariant while the stub was
+    # consuming every second it was given.
     : >"$dir/log"
     started=$(date +%s)
     status=0
-    STUB_CRASH=no_step_file_makes_the_reader_panic run 4 || status=$?
+    STUB_CRASH=no_step_file_makes_the_reader_panic run 12 || status=$?
     elapsed=$(( $(date +%s) - started ))
     [ "$status" -ne 0 ] || fail "a target exited 1 and the night reported success"
     ran=$(grep -c 'fuzz run' "$dir/log" || true)
     [ "$ran" -eq 4 ] || fail "a crash in the second target left $ran of 4 targets run"
-    [ "$elapsed" -ge 4 ] || fail "a four-second window was over in $elapsed s, so nothing was fuzzed"
-    [ "$elapsed" -le 8 ] || fail "a four-second window took $elapsed s, so the window is a budget and not a deadline"
-    granted=$(grep -o 'max_total_time=[0-9]*' "$dir/log" | cut -d= -f2 | awk '{s += $1} END {print s + 0}')
-    [ "$granted" -le 4 ] || fail "four targets were granted $granted s out of a four-second window"
+    [ "$elapsed" -ge 4 ] || fail "a twelve-second window was over in $elapsed s, so nothing was fuzzed"
+    [ "$elapsed" -le 16 ] || fail "a twelve-second window took $elapsed s, so the window is a budget and not a deadline"
     grep -q 'TO LOOK AT.*fuzz-reader' "$dir/logs/latest" \
         || fail "the summary line does not name the target that died"
 
@@ -1957,9 +1979,11 @@ check-fuzz-overnight-selftest:
         || fail "-max_len=71 belongs to where_two_surfaces_cross and to nothing else"
 
     # Three: a clean night says so and exits 0. Without this, a recipe that
-    # always failed would satisfy every assertion above.
+    # always failed would satisfy every assertion above. No clock assertions
+    # here, so the window only has to be wide enough that every target gets a
+    # slice worth having.
     : >"$dir/log"
-    run 4 || fail "a night that found nothing exited non-zero"
+    run 8 || fail "a night that found nothing exited non-zero"
     grep -q 'nothing found' "$dir/logs/latest" \
         || fail "a clean night did not say so in the summary line"
     grep -q "$(git rev-parse --short HEAD) ([0-9]* days old)" "$dir/logs/latest" \
@@ -1968,13 +1992,18 @@ check-fuzz-overnight-selftest:
     # Four: when a target overruns, what is left of the window is what the rest
     # get — and when that is nothing, they are skipped and said to be skipped,
     # rather than each starting a fresh hour past the deadline.
+    #
+    # The overrun has to clear the whole window on its own, or the arithmetic
+    # leaves a second behind and the last target runs on it, which is right and
+    # is not what this case is about. Six and eight, so the first target is nine
+    # seconds into a six-second window when it returns.
     : >"$dir/log"
     started=$(date +%s)
     status=0
-    STUB_OVERRUN=5 run 4 || status=$?
+    STUB_OVERRUN=8 run 6 || status=$?
     elapsed=$(( $(date +%s) - started ))
     [ "$status" -ne 0 ] || fail "three targets were skipped and the night reported success"
-    [ "$elapsed" -le 12 ] || fail "an overrun in the first target let the rest run on for $elapsed s"
+    [ "$elapsed" -le 18 ] || fail "an overrun in the first target let the rest run on for $elapsed s"
     [ "$(grep -c 'fuzz run' "$dir/log")" -eq 1 ] \
         || fail "the window was spent by the first target and the rest ran anyway"
 
