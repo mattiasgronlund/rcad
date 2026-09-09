@@ -22474,8 +22474,10 @@ figures above are the first of those.
 
 ### 78.10 Two open items, named so nobody re-derives them
 
-Both are left open deliberately, and both are written out in enough detail to
-pick up cold.
+Both were left open deliberately, and both are written out in enough detail to
+pick up cold. **The first is closed now, by §80, and it closed the opposite way
+round from the way this subsection guessed the question.** The second is still
+open and is with Mattias.
 
 **One fuse went the wrong way at `b4890f1`.** Of today's 7 leaning-alike
 not-a-solid cases, six are members of the old 17 and one is new:
@@ -22493,6 +22495,20 @@ and this section does not guess** — it may be a limit, it may be a gap, and
 saying which needs the same kind of work §78.3 did for the 30. Deferred because
 of the shape of the outcome: not-a-solid is a refusal, so nothing corrupt is
 written while it stands. What it costs is that the 7 is not fully attributed.
+
+**Closed 2026-09-09 by §80, and the paragraph above is left standing because
+what it got wrong is the useful part.** It is both of §16.10's, one for each side
+of `b4890f1`: the old answer was a **gap** — two solids with a contact neither of
+them recorded, right volume, `validate` happy, because §4.3's checks are local
+and nothing was locally wrong — and `b4890f1` closed it. Today's refusal is a
+**limit**: nothing was undecidable at any policy, and a union with four faces
+along one edge is not something a `Model` can hold (§17.4's first row). So "this
+one went the other way" is true of the tally and wrong about the direction; a
+tally counts refusals, not mistakes. §80.4 has the mechanism — neither touching
+edge contained the other, so nothing split either one and the manifold check was
+never asked the right question — and §80.8 corrects `cc959c1` to `c66bdca`,
+which is `b4890f1`'s actual parent. §80.9 carries the one thing that stayed
+open, and it is a possibility with no consumer rather than a defect.
 
 **`Assembly::commit` self-checks nothing in a release build.** `was_sound` is
 
@@ -22661,3 +22677,331 @@ that `corpus/manifest.sha256` describes the corpus anyone actually has — that 
 `check-corpus`'s own job, and this only checks that it can say so. Nothing
 compares this repo's manifest with `rscene`'s, either; §12 there records that
 the two were compared by hand, once, and found identical at 367 lines.
+
+## 80. The fuse that went the other way was a gap closing, recorded 2026-09-09
+
+§78.10 left one fuse unattributed: a `Frame` and a `Comb` that answered before
+`b4890f1` and are not a solid after it, against `b4890f1`'s stated direction of
+fewer wrong answers. It refused to guess which of §16.10's two that refusal is,
+and said the guess would need the same work §78.3 did for the thirty.
+
+Seven lanes did that work. The answer is that the item is written the wrong way
+round: **`b4890f1` closed a gap, and what replaced the old answer is a limit.**
+The old answer was wrong — two solids touching along a segment that neither of
+them recorded — and it survived only because nothing split either edge, so the
+manifold check never saw the four faces it exists to see. That is
+§16.10's gap, and closing it is what `b4890f1` did. Today's refusal is
+§16.10's limit: no arithmetic gave up anywhere in it, and the answer the caller
+asked for is not one a `Model` can hold.
+
+### 80.1 Both halves of the verdict, in §16.10's own words
+
+§16.9's test, which §16.10 quotes: a refusal is a **limit** when the answer does
+not exist, and a **gap** when it does and the arithmetic could not reach it.
+§78.10 asked which one today's refusal is. It is worth asking of the old answer
+too, and asking both is what turns the item over.
+
+**The refusal is a limit.** Nothing was approximated on the way to it. The
+certified fuse comes back with a `ProvenanceLog` holding **0 records** in every
+argument order and both leans — asserted in the tree now, by
+`refusal_nothing_was_undecidable_about` in
+`crates/rcad-topo/tests/degenerate_fuses.rs`, which fails the test if the log is
+not empty. So there is no better arithmetic being waited on. And the answer a
+union would have to return does not exist here: four faces run along one
+stretch, `Model` means an edge is used by exactly two coedges, and §17.4's first
+row settles that a boolean does not get to change what a `Model` is on its way
+past. A limit is deferred, not fixed, and §17.7 row 8 already carries two other
+entries deferred for the same reason.
+
+**What `b4890f1` removed was a gap.** Before it, this pair fused to two separate
+solids that each looked fine on their own and together were not the union of
+anything: the contact segment appears twice, once in each solid, as two edges
+lying on top of each other with no record of the other. A caller asking for
+`A ∪ B` got a `Fused` back and could not tell. The right answer for this
+configuration — whatever it is — was reachable, and the code walked past it, so
+by §16.10's test the old behaviour was the gap and the fix was a fix.
+
+§78.10's sentence "this one went the other way" is therefore true of the
+*outcome* and wrong about the *direction*. It went from a wrong answer to a
+refusal, which is the direction §78.8 credits `b4890f1` with; it is only the
+not-a-solid tally that moved the unexpected way, because a tally counts refusals
+and not mistakes.
+
+### 80.2 What refuses today, and why no tolerance moves it
+
+`Error::ResultIsNotManifold { count: 4 }`, raised at
+`crates/rcad-topo/src/fuse/assemble.rs:562` — the only place in `crates/` that
+variant is constructed; every other match of the name is a doc comment.
+The stage is skin assembly: `Assembly::join_up_what_is_one_face`
+(`assemble.rs:518`) asks `Assembly::darts_along_each_edge` (`assemble.rs:545`)
+for the two darts on each edge, and the whole check is
+
+    <[Dart; 2]>::try_from(by.as_slice())
+        .map_err(|_| Error::ResultIsNotManifold { count: by.len() })
+
+**There is no number in that for a tolerance to move.** It compares a dart
+*count* against two. Lane A ran it under `Policy::tolerant` at `1e-12`, `1e-9`,
+`1e-6`, `1e-3`, `1e-1` and `1.0` and got the same refusal every time, which is
+what the code says should happen and is worth having been run rather than
+argued (§16.10). The same lane reports the refusal is identical in both argument
+orders, sheared and unsheared, and that both inputs validate under
+`Policy::certified()` before the fuse starts. `Assembly::commit` and
+`Model::validate` are never reached, so nothing is written — which is why
+§78.10 was right that leaving this open cost nothing but attribution.
+
+Two edges of the would-be answer carry four darts each. Unsheared they run
+`[0,3,2] → [0,2,2]` and `[0,1,2] → [0,2,2]`, which together are the whole
+contact segment (Lane A). The four faces along them are the frame's top cap at
+`z = 2`, the frame's left wall, the comb's bottom cap and the comb's right wall
+— two coplanar pairs facing opposite ways.
+
+The family harness maps this to `WhatCameBack::NotASolid`
+(`crates/rcad-topo/tests/fuses_that_must_agree.rs`), which is how it reaches the
+`*_IS_NOT_A_SOLID` bands §78.8 is about.
+
+### 80.3 The pair, worked out on paper
+
+Both shapes come out of the generators, and the first surprise is that the name
+lies. `Shape::Comb { teeth: 1, tooth_height: 3 }` is **not toothed**: `comb()`
+in `crates/rcad-topo/tests/pairs/mod.rs` computes `span = 2·1 − 1 = 1` and
+`top = 1 + 3 = 4`, runs its loop once, and returns `[(0,0), (1,0), (1,4),
+(0,4)]` — a plain 1×4 rectangle. `Shape::Frame { width: 5, depth: 3 }` is the
+rectangle `[0,5] × [0,3]` with the hole `[1,4] × [1,2]`.
+
+Extruded and placed as §78.10 records them, the frame is `z ∈ [0,2]` at the
+origin and the comb is `z ∈ [2,5]` at `[-1, 1, 2]`, so the comb's footprint is
+`x ∈ [-1,0]`, `y ∈ [1,5]`. Volumes follow: the frame is
+`(5·3 − 3·1) · 2 = 24` and the comb is `1·4·3 = 12`. The shear is unimodular,
+so neither changes.
+
+**They share no volume at all.** The footprints meet only at `x = 0`, the
+heights only at `z = 2`, the depths on `y ∈ [1,3]` — so the intersection is the
+segment `x = 0, 1 ≤ y ≤ 3, z = 2` and nothing more. The volumes and the segment
+are arithmetic anyone can redo, and the test in the tree asserts both ends of it.
+Lane B checked the segment is not an artefact of how the region is written down:
+exact membership stepped by ±1/8 about its midpoint gives two opposite closed
+quadrants meeting along a line, both regular closed, so
+`closure(interior(A ∪ B)) = A ∪ B` and no regularization argument deletes the
+contact.
+
+**The shear decides nothing here, and that is checkable rather than assumed.**
+`x_per_y: -1` has determinant 1 and integer entries, so every corner stays whole,
+and it fixes the direction `(1,0)`, so the y-normal faces and the z-caps keep
+exact unit normals. The two touching walls do not — `x = 0` becomes `x + y = 0`,
+whose unit normal `(1,1,0)/√2` is not an `f64`. But ON is settled by
+`Plane::agreement_with` on the coefficient 4-vectors (§17.4), and Lane B reports
+the two walls come out as `1x + 1y = 0` and `4x + 4y = 0`, exactly proportional,
+so all six minors are exactly zero. The unsheared twin is axis-aligned
+throughout and refuses identically, which is the demonstration rather than the
+argument: the test runs both leans.
+
+### 80.4 Why this overlap walked past a check the other one did not
+
+This is the mechanism, and it is the part §78.10 said needed working out.
+
+§17.7 row 8 already has a case of exactly this relation:
+`two_cubes_that_only_touch_along_part_of_an_edge` in
+`crates/rcad-topo/tests/degenerate_fuses.rs`, asserting `count: 4`. Lane E ran
+it at `c66bdca` and at `cc959c1`, and **it passes at both**. So one build
+refused row 8 for the cubes and answered it for the frame and the comb, off one
+catalogue row, and the difference is the shape of the overlap.
+
+In the cube pair the small cube's edge lies **wholly inside** the big cube's. A
+vertex therefore lands in the interior of the big edge, that edge splits, and
+the piece left over matches the small cube's edge end to end. One edge, four
+faces, refused.
+
+In the frame and the comb **neither edge contains the other**. The frame's edge
+at `x = 0, z = 2` runs `y ∈ [0,3]`; the comb's runs `y ∈ [1,5]`. They overlap on
+`y ∈ [1,3]` and each sticks out past the other, so **both** have to be cut —
+at `y = 1` and at `y = 3` — before there is a stretch that four faces share.
+Nothing cut either of them, so the two shells never met in the adjacency walk,
+the manifold check was asked about two ordinary edges instead of one shared one,
+and it answered correctly about the wrong question.
+
+`b4890f1` — "cuts: a solid's own planes cut its own faces" — is what supplies
+the missing cut. The frame's own hole plane at `y = 1` cuts the frame's own top
+cap, the frame's edge splits at `y = 1`, and from there the case is its
+neighbour's: the overlapping stretch is a single edge with four faces along it,
+and it refuses like the cubes do.
+
+That is why §78.8's aggregate and this case are not in tension. `b4890f1` did
+not make the kernel refuse more; it made it *notice* more, and one of the things
+it noticed was a contact that had been invisible in one of the two shapes it
+comes in.
+
+### 80.5 What the old answer was, and why `validate` could not see it
+
+Lane E's measurement, at `c66bdca` and at `cc959c1`, in all four cells
+(sheared/unsheared × either argument order). The union returned **two solids**:
+
+| | faces | edges | vertices | volume |
+|---|---|---|---|---|
+| the frame | 10 | 24 | 16 | 24 |
+| the comb | 6 | 12 | 8 | 12 |
+
+Every edge had exactly two coedges. The total volume was `36.000000000`, which
+is the true volume of the union. `Model::validate(&Policy::certified(), …)`
+returned `Ok` with an empty provenance log.
+
+Those counts are the inputs' own. **Nothing was cut, nothing was merged, and no
+edge in either solid recorded the other.** The contact appears as two distinct
+unsplit edges lying on top of each other — the comb's `(0,1,2) → (0,5,2)` and
+the frame's `(0,0,2) → (0,3,2)`. Each solid is locally manifold, so §4.3's rule
+that validity checks are local to touched entities is exactly what stopped
+`validate` from having an opinion: there is no entity you can point at that is
+wrong. The wrongness is between two solids that share a `Model` and do not know
+it.
+
+A caller could not tell from the numbers either. The volume is right. The face
+counts are right for each shape. The only symptom is the solid count, and "two"
+is a legitimate answer for a union whose arguments do not touch.
+
+### 80.6 The eleven that went the other way, checked against truth
+
+`b4890f1` turned **eleven fuse-instances — seven distinct configurations** —
+from not-a-solid into answers, and until Lane G nobody had checked whether those
+answers were right. §78.8's sentence "fewer answers are not solids because fewer
+answers are wrong" was the stated direction and not a measured one.
+
+G measured it without asking the kernel. The shear is unimodular and applied to
+both solids equally, so the boolean of the sheared footprints is the image of
+the unsheared one, with the same volume, piece count and cavity count; the
+shapes sit on the unit lattice, so every true volume is an exact integer. All
+eleven match that ground truth on volume, surface area, centroid, solid count
+and shell count, and `Model::validate` under a certified policy accepted every
+one. Two of the eleven are worth naming because they are the ones a sloppy
+implementation gets wrong: one is an intersection whose true answer is two
+face-disconnected lumps of volume 2 and 1, and the kernel returns exactly those
+two; and four are unions of inputs sharing zero volume, where merging into one
+solid is right only because the contact is two-dimensional — three shared unit
+squares face-on in each.
+
+**The messages split cleanly, and this is sharper than the aggregate.** All
+eleven that vanished said "an edge would have **1** faces along it" — a dangling
+face. The six that remain and the one that arrived say **4**. So `b4890f1`
+removed one symptom class outright and left the other untouched. §78.9 reports
+the fall as per-family factors between 0.375 and 0.85, which is what an
+aggregate can say; what actually happened is not a proportional thinning at all.
+
+Neither §78.8 nor §78.9 is wrong. Both are reading a rate, and neither claims
+anything per case. This section is the per-case reading they left for someone
+else, and it says: eleven answers checked against exact truth and all correct,
+one wrong answer replaced by a refusal, and no case anywhere in the audit that
+went from right to wrong.
+
+### 80.7 Seven instances, six configurations, and one seed
+
+Two things about the number 7 that a later reader would otherwise re-derive.
+
+**Seven fuse-instances are six distinct configurations**, because the strategy
+draws one configuration twice (Lane D). All seven fail with the same text, "an
+edge would have 4 faces along it"; all seven pair a `Frame` with something else;
+six are `Union` and one is `Difference`.
+
+**And the seven belongs to the shipped seed, not to the family.** Re-derived
+here, three runs of `how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses`:
+
+| seed | fuses | refused | not a solid |
+|---|---|---|---|
+| shipped | 429 | 24 (5.6%) | **7** (1.6%) |
+| `RCAD_SOAK_SEED=42` | 429 | 36 (8.4%) | **8** (1.9%) |
+| `RCAD_SOAK_SEED=999` | 429 | 30 (7.0%) | **7** (1.6%) |
+
+What holds across seeds is the band, `A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID:
+0.011..=0.049` (`crates/rcad-topo/tests/fuses_that_must_agree.rs:483`), which all
+three of those rates sit inside. §78.8 spends a subsection on where a count sits
+inside its band; the corollary here is that "the 7" is not a property of the
+kernel to be attributed at all — six of it are, one for each configuration, and
+the seventh is the strategy drawing one of them again.
+
+### 80.8 `cc959c1` names a sibling, not the commit before
+
+§78.10 says the pair "answered at `cc959c1`". It did — Lane E ran it there — but
+`cc959c1` is not the commit before `b4890f1`, and a later reader diffing the two
+will not find the change. Re-derived here:
+
+    git rev-parse b4890f1^          → c66bdca
+    git merge-base cc959c1 b4890f1  → c66bdca
+    git rev-list --count cc959c1..b4890f1 → 1
+    git rev-list --count b4890f1..cc959c1 → 9
+    git merge-base --is-ancestor cc959c1 b4890f1 → false
+
+So the two are **siblings off `c66bdca`**, nine commits apart the other way. The
+`1` that makes `cc959c1..b4890f1` look adjacent is a set difference and not an
+adjacency. The "before" witness is **`c66bdca`**, and it behaves the same as
+`cc959c1` on this pair, so §78.10's sentence costs nothing and is left standing
+with this correction beside it.
+
+Lane C found the boundary by `git bisect start f95bc32 cc959c1`, which converged
+in 9 steps with 0 skips on `b4890f1`, and then confirmed it directly rather than
+by bisect's inference: `c66bdca` answers, `b4890f1` refuses. C spot-probed four
+more commits across the untested half of the range plus HEAD — 14 direct probes
+in all, one flip, no reversal anywhere sampled.
+
+### 80.9 Two touching solids is a possibility with no consumer
+
+This is the one thing left open, and it is left open deliberately.
+
+`c66bdca` shows the kernel **can** deliver this union as two touching solids
+carrying exactly the right total volume. It never chose to. It arrived there by
+failing to notice a contact, in one of the two shapes that contact comes in, and
+the same build refused the other shape. So the old behaviour is not a design
+anybody could keep — it was inconsistent with itself off one catalogue row.
+
+But it does raise a question the catalogue has never been asked. §17.4's first
+row settles that a non-manifold *result* is refused, and §17.7 row 8 records the
+refusals that follow. Whether "two touching solids" should ever be an **answer**
+for row 8 — a `Fused` holding two solids whose boundaries meet on a set of
+measure zero, each individually manifold, and both aware of the contact — is a
+different question from the one those rows settle. It would change §17.4's first
+row, it would change §17.7's table, and it would have to cover the cube pair
+too, because half an answer for one row-8 shape and a refusal for the other is
+exactly the inconsistency `b4890f1` removed.
+
+**It is not decided here, and nothing in this section should be read as
+proposing it.** It has no named consumer (§13 rule 3), and §16.10's refinement of
+that rule permits deferring a *feature* while forbidding the deferral of a
+*gap* — this is the first of the two, because the refusal it would replace is a
+limit and not a gap (§80.1). It is with Mattias as an open question. What this
+section owes a later reader is only that the possibility exists and where the
+evidence for it is: §80.5's table.
+
+### 80.10 What this section re-derived, and what it took on a lane's word
+
+§78.11's habit, kept.
+
+**Re-derived from this tree while writing this section**, and re-derived by the
+suite on every `just gate` — the volumes 24 and 12, the edge extents `y ∈ [0,3]`
+and `y ∈ [1,5]`, the empty intersection, `ResultIsNotManifold { count: 4 }` in
+both argument orders and both leans, and the empty provenance log. Lane F's
+`two_solids_whose_touching_edges_each_run_past_the_other_cannot_be_united`
+asserts all of them, built out of the generators' own `Shape`s so it is §78.10's
+configuration and not a transcription of it. That test is the answer to §78.11's
+complaint about itself: this pair's figures are not one lane's measurement on
+one day.
+
+**Re-derived here by reading or by running, and cheap to redo** — the commit
+topology in §80.8; `assemble.rs:562` being the only construction site of the
+variant; `comb(1, 3)` being a 1×4 rectangle and `Frame { 5, 3 }` its rings; the
+volumes and the contact segment as arithmetic; and the three seed rows in §80.7.
+
+**Taken on a lane's word, needing instrumentation that is not checked in or a
+build of an archived commit:**
+
+- The tolerance sweep at six `Policy::tolerant` values, and the four-dart edges
+  `[0,3,2] → [0,2,2]` and `[0,1,2] → [0,2,2]` (Lane A).
+- The plane coefficients `1x + 1y = 0` and `4x + 4y = 0`, and the ±1/8
+  membership sampling about the segment's midpoint (Lane B).
+- The bisect: 9 steps, 0 skips, 14 direct probes (Lane C).
+- `423 fuses, 24 refused, 17 not a solid` at `c66bdca`; the seven being six
+  configurations drawn seven times; six `Union` and one `Difference` (Lane D).
+- Everything in §80.5 — the two-solid answer, its counts and volumes, the two
+  unsplit coincident edges, and `two_cubes_that_only_touch_along_part_of_an_edge`
+  passing at `c66bdca` and `cc959c1` (Lane E).
+- The whole of §80.6: eleven instances, seven configurations, the ground-truth
+  comparison, and the 1-versus-4 split in the messages (Lane G).
+
+The last two are the ones worth re-running if this is ever reopened, because
+§80.1's verdict rests on them: §80.5 is why the old answer was wrong, and §80.6
+is why `b4890f1` is not merely trading one wrong answer for another.
