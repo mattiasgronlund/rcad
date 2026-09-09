@@ -22509,9 +22509,10 @@ happy, because §4.3's checks are local and nothing was locally wrong. §16.10
 sorts refusals and does not reach a wrong answer; §80.1 declines to stretch it
 and says why. So "this one went the other way" is true of the tally and wrong
 about the direction; a tally counts refusals, not mistakes. §80.4 has the
-mechanism — neither touching edge contained the other, so nothing split either
-one and the manifold check was never asked the right question — and §80.8
-corrects `cc959c1` to `c66bdca`, which is `b4890f1`'s actual parent. §80.9
+mechanism — neither touching edge contained the other, and the pieces they were
+cut into did not line up, so the manifold check was never asked the right
+question — and §80.8 corrects `cc959c1` to `c66bdca`, which is `b4890f1`'s
+actual parent. §80.9
 carries the one thing that stayed open, and it is a possibility with no consumer
 rather than a defect.
 
@@ -22693,8 +22694,9 @@ and said the guess would need the same work §78.3 did for the thirty.
 Seven lanes did that work. The answer is that the item is written the wrong way
 round: **`b4890f1` fixed a missed refusal, and what replaced the old answer is a
 limit.** The old answer was wrong — two solids touching along a segment that
-neither of them recorded — and it survived only because nothing split either
-edge, so the manifold check never saw the four faces it exists to see. Today's
+neither of them recorded — and it survived because the two edges along that
+segment were cut in places that did not line up, so the manifold check never saw
+the four faces it exists to see (§80.4). Today's
 refusal is §16.10's limit: no arithmetic gave up anywhere in it, and the answer
 the caller asked for is not one a `Model` can hold. Only that half is one of
 §16.10's two. The other half is not a refusal at all, so §16.10's test does not
@@ -22843,17 +22845,48 @@ faces, refused.
 
 In the frame and the comb **neither edge contains the other**. The frame's edge
 at `x = 0, z = 2` runs `y ∈ [0,3]`; the comb's runs `y ∈ [1,5]`. They overlap on
-`y ∈ [1,3]` and each sticks out past the other, so **both** have to be cut —
-at `y = 1` and at `y = 3` — before there is a stretch that four faces share.
-Nothing cut either of them, so the two shells never met in the adjacency walk,
-the manifold check was asked about two ordinary edges instead of one shared one,
-and it answered correctly about the wrong question.
+`y ∈ [1,3]` and each sticks out past the other, so the two have to be cut into
+pieces that line up before four faces can share one edge. At `c66bdca` they were
+cut — and not into pieces that line up. Lane K read the arrangement out of an
+instrumented copy of that commit: 28 faces, and the line `x = 0, z = 2` carrying
+five edges with two faces each. The frame's are `(0,0,2) → (0,1,2)` and
+`(0,1,2) → (0,3,2)`; the comb's are `(0,1,2) → (0,2,2)`, `(0,3,2) → (0,2,2)` and
+`(0,3,2) → (0,5,2)`. So the frame ran `[1,3]` in one piece against the comb's
+`[1,2]` and `[2,3]`. One edge against two is two ordinary edges with two darts
+each: the two shells never met in the adjacency walk, and the manifold check
+answered correctly about the wrong question.
+
+**The cut that was missing is at `y = 2`, and the arithmetic says so before any
+instrument does.** The frame is `[0,5] × [0,3]` with the hole `[1,4] × [1,2]`
+(§80.3), so its own planes in `y` are `0`, `1`, `2` and `3`, and the comb's are
+`1` and `5`. Cutting a face by the *other* solid's planes was never off, so the
+comb's wall at `y = 1` always cut the frame's top cap and the frame's outer wall
+at `y = 3` always cut the comb's — which is why those two splits are already
+there at `c66bdca`, and why neither of them can be the one `b4890f1` supplies.
+`y = 2` is the far wall of the frame's **own** hole, and nothing of the comb
+lies on it: the comb's planes are `z = 2`, `z = 5`, `y = 1`, `y = 5`, `x = 0`
+and `x = -1`.
 
 `b4890f1` — "cuts: a solid's own planes cut its own faces" — is what supplies
-the missing cut. The frame's own hole plane at `y = 1` cuts the frame's own top
-cap, the frame's edge splits at `y = 1`, and from there the case is its
-neighbour's: the overlapping stretch is a single edge with four faces along it,
-and it refuses like the cubes do.
+it. At `b4890f1` and at today's `c4f29af` the picture is identical and it is not
+the one above: 46 faces, the frame's top cap and its wall at `x = 0` carrying
+twelve and ten distinct cut planes where they carried the comb's four, and among
+them the new one that matters, `0,-1,0|-2`. The contact then carries
+`(0,1,2) → (0,2,2)` and `(0,3,2) → (0,2,2)` with **four** faces each — the
+frame's `z = 2` and `x = 0` against the comb's — and it refuses like the cubes
+do. **Two edges, not one.** `count: 4` in the message is the dart count of the
+first edge reached and says nothing about how many there are; §80.2's two
+four-dart edges are these two.
+
+**And the loop bound is what does it, shown on today's tree rather than argued
+from an old one.** `git show b4890f1 -- crates/rcad-topo/src/fuse/cuts.rs`
+changes one loop: `for other in (one + 1)..solids.len()` becomes
+`for other in one..solids.len()`, with `let from = if one == other { mine + 1 }
+else { 0 }` inside it. Put that bound behind an environment switch in a copy of
+`c4f29af` and turn own-solid cuts off, and today's tree answers again: the
+arrangement falls from 46 faces back to 28 and the frame's cut list back to the
+comb's four planes. One loop bound, both directions, on current code — §80.10
+has Lane K's method and what it did not establish.
 
 That is why §78.8's aggregate and this case are not in tension. `b4890f1` did
 not make the kernel refuse more; it made it *notice* more, and one of the things
@@ -22874,10 +22907,15 @@ Every edge had exactly two coedges. The total volume was `36.000000000`, which
 is the true volume of the union. `Model::validate(&Policy::certified(), …)`
 returned `Ok` with an empty provenance log.
 
-Those counts are the inputs' own. **Nothing was cut, nothing was merged, and no
-edge in either solid recorded the other.** The contact appears as two distinct
-unsplit edges lying on top of each other — the comb's `(0,1,2) → (0,5,2)` and
-the frame's `(0,0,2) → (0,3,2)`. Each solid is locally manifold, so §4.3's rule
+Those counts are the inputs' own. **Nothing survives in the answer of any cut or
+any merge, and no edge in either solid records the other.** The contact appears
+as two distinct unsplit edges lying on top of each other — the comb's
+`(0,1,2) → (0,5,2)` and the frame's `(0,0,2) → (0,3,2)`. That is the *answer*,
+after `join_up_what_is_one_face` has folded the pieces back and dropped the
+corners that stopped being corners: the arrangement it was built from did carry
+cuts, five edges' worth on this line, and §80.4 is where that matters. Reading
+this table as the arrangement is the one way to misread it.
+Each solid is locally manifold, so §4.3's rule
 that validity checks are local to touched entities is exactly what stopped
 `validate` from having an opinion: there is no entity you can point at that is
 wrong. The wrongness is between two solids that share a `Model` and do not know
@@ -23038,7 +23076,34 @@ build of an archived commit:**
   passing at `c66bdca` and `cc959c1` (Lane E).
 - The whole of §80.6: eleven instances, seven configurations, the ground-truth
   comparison, and the 1-versus-4 split in the messages (Lane G).
+- The whole of §80.4's mechanism — the arrangement at `c66bdca` and at
+  `b4890f1`, the cut lists, and `y = 2` being the plane that arrives (Lane K).
+  This one is a **demonstration** and not a report, but the instrumentation that
+  makes it one is not in the tree, so it belongs in this column. The method:
+  copy the worktree (`rsync -a --exclude target --exclude .git --exclude
+  corpus`), `git archive` `c66bdca` and `b4890f1` into two more, and instrument
+  **only those copies** in two places — the end of `gather` in
+  `crates/rcad-topo/src/fuse/cuts.rs`, printing each baked face's plane and its
+  distinct cut planes, and `darts_along_each_edge` in `assemble.rs`, printing
+  every edge's endpoints and the planes of the faces claiming it, before the
+  `ResultIsNotManifold` map. The probe is Lane C's minimal one.
+- **The counterfactual was run on current code**, which is what makes §80.4 a
+  demonstration and not a story about an archived commit (Lane K). `b4890f1`'s
+  whole change to `cuts.rs` is one loop bound; behind an environment switch in a
+  copy of `c4f29af`, turning own-solid cuts off makes today's tree answer, drops
+  the arrangement from 46 faces to 28, and returns the frame's cut list to the
+  comb's four planes.
 
-The last two are the ones worth re-running if this is ever reopened, because
-§80.1's verdict rests on them: §80.5 is why the old answer was wrong, and §80.6
-is why `b4890f1` is not merely trading one wrong answer for another.
+Three things Lane K did not establish, so nothing above should be read as
+saying them. It ran the **unsheared** configuration only, taking §78.10's word
+that the shear makes no difference. It did not chase why the `y = 2` corner
+survives on the frame side once it exists, noting only that the refusal fires
+straight out of the arrangement, before any joining. And its two reports of
+"the contact edges" are at different stages — five arrangement edges at
+`c66bdca`, against the two unsplit edges §80.5 records in the committed
+*answer* for the counterfactual — so nothing here claims the counterfactual
+reproduces `c66bdca`'s arrangement edge for edge.
+
+Lane E's and Lane G's are the ones worth re-running if this is ever reopened,
+because §80.1's verdict rests on them: §80.5 is why the old answer was wrong,
+and §80.6 is why `b4890f1` is not merely trading one wrong answer for another.
