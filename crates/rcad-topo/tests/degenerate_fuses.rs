@@ -819,9 +819,9 @@ fn two_cubes_that_only_touch_along_part_of_an_edge() {
 /// `y = 3` and the comb's from `y = 1` to `y = 5`, so they share the middle and
 /// each sticks out past it. Both volumes are checked first, so a builder that
 /// quietly changed shape cannot pass its answer off as this overlap's. That is
-/// the shape of overlap nothing in this file pinned, and it is the one §78.10 says changed answer at `b4890f1`. What
-/// changed there is §80.4's to tell; nothing this test runs measures it, so
-/// nothing here restates it.
+/// the shape of overlap nothing in this file pinned, and it is the one §78.10
+/// says changed answer at `b4890f1`. What changed there is §80.4's to tell;
+/// nothing this test runs measures it, so nothing here restates it.
 ///
 /// The refusal is right for the same reason as its neighbour's. The two enclose
 /// no space between them — the certified intersection comes back with nothing in
@@ -879,8 +879,9 @@ fn two_solids_whose_touching_edges_each_run_past_the_other_cannot_be_united() {
             let why = refusal_nothing_was_undecidable_about(&mut model, &arguments, &tools);
             assert!(
                 matches!(why, Error::ResultIsNotManifold { count: 4 }),
-                "the frame's cap and wall and the comb's cap and wall all run along that stretch, \
-                 so the union should use one edge four times, leaning {leaning:?}: {why:?}"
+                "the frame's cap and wall and the comb's cap and wall all run along the stretch \
+                 the two share, so the union would use each edge along it four times, \
+                 leaning {leaning:?}: {why:?}"
             );
         }
 
