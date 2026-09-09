@@ -383,14 +383,18 @@ const A_LATTICE_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.022..=0.098;
 /// buys: the offsets are whole extents, so edge-on-edge and corner-on-corner
 /// are the ordinary case here rather than the rare one.
 ///
-/// Two thirds to three times gives 9.5% to 43%, and this is the one of the six
-/// the convention *loosens*: it was 10% to 28%, tighter than the rule at both
-/// ends and tighter at the top than any of the other five. The convention is
-/// kept anyway, because a band derived one way for five families and another
-/// way for the sixth is a band nobody can check without first being told which
-/// rule it followed. It is still 41 fuses to 184, and the count that fell at
-/// `b4890f1` fell by 11.
-const A_FLUSH_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.095..=0.43;
+/// **This band is a deliberate exception to the file's own convention, kept
+/// narrower on purpose.** Two thirds to three times of 14.2% gives 9.5% to
+/// 43% — 41 fuses to 184 — and every other one of these six is derived to
+/// exactly that rule. This one is not: it stays at 10% to 28%, 43 to 120
+/// fuses, because nobody has measured a reason to let this family answer
+/// "not a solid" as often as 184 times out of 429. The band was briefly
+/// widened to the convention's 9.5%–43% during a mechanical re-derivation of
+/// all six and that widening was reverted here — the tidy-up moved a number
+/// nobody had a reason to move. Re-derive the other five from a new
+/// measurement freely; re-derive *this* one only alongside a measurement
+/// that says why more than 120 is fine.
+const A_FLUSH_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.10..=0.28;
 
 /// The same for the lattice pairs written somewhere else in `f64`.
 ///
