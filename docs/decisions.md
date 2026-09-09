@@ -22658,12 +22658,30 @@ this recipe does not parse" arm, which prints `sha256sum`'s output raw and means
 to. A future case that reaches that arm must assert on it rather than be excused
 from the guard.
 
-`rscene`'s copy had the same hole in both trims, confirmed there by the same
-mutations. Their §12 bullet had said "the missing-file arm's `sed` ... so it
+`rscene`'s copy had the same hole in both trims. They ran the two mutations in
+their own tree and reported both green; that half is their word and not a run of
+ours, which is the distinction this repo owes on any claim about a tree it does
+not build. Their §12 bullet had said "the missing-file arm's `sed` ... so it
 prints its heading and not the file", which is the *printing* `sed` and is
 genuinely caught; the commit message on `9b8256f` said only "the missing-file
 arm's `sed`", and that arm has two. The ambiguity was theirs and the misreading
 mine, which is why the fifth mutation exists at all.
+
+They closed it on 2026-09-09 in `rscene`'s `d712f23`, with the same guard: same
+regex, same placement after the four cases, same caveat about the unparsed arm.
+That much was read off their tree rather than taken from their report — the
+`justfile` diff, not the commit message.
+
+`rscene [3568f9]` above is a **session**, not a commit; `git cat-file -t` on it
+fails in both repos, as it should, and so does `a57470`. Sessions are how a finding like this one arrives
+— it was said in conversation hours before either repo had a commit to point at
+— and git cannot attribute one, since every commit in both repos is authored by
+Mattias. So the file names the session, spends the ref knowing it dies with it,
+and puts the durable half in the argument beside it. `rcad [a57470]` appears the
+same way twice elsewhere. `rscene` reached the same rule from the other side
+after reading this one as a sha and running `git cat-file` on it: their §12
+spends `rcad-15` three times and now says, at `ca470be`, what kind of name that
+is.
 
 ### 79.4 Why it refuses instead of skipping
 
