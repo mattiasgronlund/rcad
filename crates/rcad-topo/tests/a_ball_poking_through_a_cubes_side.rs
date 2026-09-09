@@ -44,8 +44,11 @@ const A_BALL_POKING_THROUGH_A_CUBES_SIDE: &[u8] =
 /// The assert is the property and not the panic: on `2ca6916` this comes apart
 /// as a panic from `Model::check_touched_edge` in a debug build, and in a build
 /// with debug assertions off the same fuse gets as far as writing the broken
-/// shell into a scratch model. Either way, what is asked here is the only thing
-/// a caller can ask — `fuse` said `Ok`, so `validate` has to agree.
+/// shell into a scratch model. That difference between the two builds is gone —
+/// §66.3 put those checks in every build — but the reason for asking the
+/// property rather than the panic has not changed: what is asked here is the
+/// only thing a caller can ask, since `fuse` said `Ok`, so `validate` has to
+/// agree.
 #[test]
 fn uniting_them_does_not_walk_the_crossing_circle_twice_the_same_way() {
     let mut model = postcard::from_bytes::<Model>(A_BALL_POKING_THROUGH_A_CUBES_SIDE)
