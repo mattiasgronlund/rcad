@@ -451,8 +451,20 @@ release build the response is a panic only where the operation has already
 written into the caller's model and cannot take it back; where the check can be
 made *before* the write, the response is an `Err` that says "this kernel has a
 bug", which is a third door and not `Error::Undecidable`. What the row must
-never mean is what a release build actually does today — neither of the two,
-because the check does not run at all (§66.1).
+never mean is that a release build panics wherever a debug build does; the
+amendment above is the whole of this paragraph's point.
+
+Until §81 there was a worse misreading available and it was the one that
+mattered: that the row described what a release build did. It did neither of the
+two, because the check did not run at all (§66.1). That is closed — the four
+touched checks and the fuse's post-write check now run in every build (§81.1),
+and `mise exec -- just t -p rcad-topo --cargo-profile release -E
+'test(a_mutation_notices)'` runs its two `#[should_panic]` tests with debug
+assertions off and passes both, which is the closure demonstrated rather than
+argued. The row now describes something that happens in release. Which of the
+two doors it opens there is a separate question and only one of them is built:
+the panic is what the fuse and `place_solid` do today, and the pre-write `Err`
+waits on the scratch model §66.7's first item is about.
 
 ### 4.2 Error types
 
@@ -21750,9 +21762,11 @@ arm.
 *And "solids that fuse today" is not the set `validate` already refuses.* This
 paragraph reads as though a stricter `bake` could only refuse what
 `Model::validate` refuses anyway. Nothing gates `bake` behind `validate`.
-`bake()` is the first step of `Model::fused_under`; `Assembly::commit`'s
-`was_sound` self-check runs *after* it and is `cfg!(debug_assertions)`, so a
-release build runs no `validate()` inside `commit()` at all (§78.10); and
+`bake()` is the first step of `Model::fused_under`; the self-check
+`Assembly::commit` runs *after* it is `Model::check_what_was_just_written`,
+which asks eleven of the sweep's thirteen questions of the entities that one
+fuse wrote and of nothing else, so no build runs a `validate()` of the model
+inside `commit()` at all (§81.4); and
 `a_union_can_be_united_again_because_every_corner_of_it_still_has_three_planes`
 (`crates/rcad-topo/tests/fusing_solids.rs:799`) feeds one fuse's raw output
 straight into the next fuse's `bake()`. Whatever a stricter `bake` refuses, it
@@ -23439,11 +23453,27 @@ pays about ten microseconds.
 This is the half §66.3 got from a single workload, and the half where a
 different workload gives a different answer.
 
-**The sweep is linear in the whole model, not in the answer** — measured here at
-1.94 µs a face, and `commit` swept twice, once for `was_sound` and once for the
-post-check. §66.2 measured 3.4–4.4 µs a face for the same sweep on its own
-shapes. The two are not in conflict about the shape of the cost, which is what
-matters: linear in the model, whatever the constant.
+**The sweep is linear in the whole model, not in the answer** — 1.94 µs a face
+when this section was first written, and `commit` swept twice, once for
+`was_sound` and once for the post-check. §66.2 measured 3.4–4.4 µs a face for
+the same sweep on its own shapes. The two are not in conflict about the shape of
+the cost, which is what matters: linear in the model, whatever the constant.
+
+**Re-measured, because the two tables below did not fit each other.** The sweep
+is public, so this needs no source edit at all: `Model::validate` over a model of
+plain blocks, best of twenty runs after three warm ones, `--cargo-profile
+release`, on models of 240, 492, 1452, 4332 and 5040 faces, giving 0.487, 0.991,
+2.915, 8.661 and 10.049 ms. Least squares over those five: **1.99 µs a face,
+with a fitted fixed cost of 13 µs**. Per-face it never leaves 1.99–2.03, so the
+line goes through the origin for any purpose here — *there is no fixed
+per-sweep overhead*, which matters because a fixed overhead is the only thing
+that could have let a small model cost what the row below used to claim. The
+same run under the default test profile gives 0.491 / 0.979 / 2.833 / 8.435 /
+9.849 ms, within 3% of the release figures at every size. That the profile
+barely moves the sweep is worth writing down where the profile is the whole
+subject: `Cargo.toml` sets `opt-level = 2` under `[profile.test]` and carries no
+`[profile.release]` at all, and the sweep has no `debug_assertions` gate left in
+it — which is the difference that does remain between the two.
 
 **Where the fuse built the model itself, §66.3's reading holds.** A 60-union
 chain growing to 8046 faces came out *nominally faster* with the sweep on than
@@ -23452,18 +23482,42 @@ can go either way is that the fuse's own cost grows as about O(n^1.7) against
 the sweep's O(n). At that scale the sweep really is free, exactly as §66.3 says.
 
 **Where the model holds geometry the fuse never touched, it does not.** The
-fuse's own cost is then flat — 1.34 ms, because it is working on the same two
-small solids however much else is lying about — and the sweep is not:
+fuse's own cost is then flat, because it is working on the same two small solids
+however much else is lying about, and the sweep is not. Both halves re-measured
+here, same profile and same machine as the rate above: a union of two blocks
+overlapping by half, in a model grown around them, best of twelve rebuilds at
+each size, comes to 1.435 ms at 12 faces and 1.452 ms at 5052 — **flat to about
+1.2% over a 420× model**, which is what the local check bought. Against that
+1.44 ms, two sweeps cost:
 
-| Faces in the model | Sweep, against the fuse's own 1.34 ms |
-|---|---|
-| 240 | 1.3× |
-| 5040 | 15× |
+| Faces in the model | Two sweeps | Against the fuse's own flat 1.44 ms |
+|---|---|---|
+| 240 | 0.97 ms | 0.7× |
+| 5040 | 20.10 ms | 14× |
+
+**The 240 row used to say 1.3×, and that was wrong.** It is the one number in
+this section no linear rate can produce: 1.3 × 1.34 ms is 1.74 ms, which would
+have 240 faces sweeping for longer than the 492-face row of the before-and-after
+table below, whose gap says the same two sweeps take 1.72 ms there. Twice the
+model, the same cost, under a heading that says the sweep is linear in the whole
+model. Only a fixed per-sweep overhead of
+about 0.4 ms could hold both, and the fit above puts that overhead at 13 µs — so
+the row went, not the arithmetic around it. What it should have said all along
+is that at 240 faces the sweep costs *less* than the fuse it follows.
+
+The 5040 row survives, and the 15× it used to carry is not disturbed by the 14×
+above: that is one machine's fuse against another's, 1.94 µs a face against a
+1.34 ms fuse being 14.6× where 1.99 against 1.44 is 13.9×. §66.3 and
+`Model::check_what_was_just_written`'s doc comment both quote 15 times, and both
+still round to it.
 
 That is the case §66.2's headline figure does not cover, and it is why what went
 in is `check_what_was_just_written` and not `Model::validate`. §66.3's phrase "a
 model the fuse has already spent tens of milliseconds on" describes the first
-workload and quietly assumes it.
+workload and quietly assumes it. The corrected 240 row does not weaken that: a
+sweep can be cheaper than one fuse and still be the wrong shape, because it is
+the model and not the answer that it grows with, and the 5040 row is where that
+shows.
 
 **The cost, before and after**, per fuse of two fixed blocks in a model that
 grows around them:
@@ -23478,6 +23532,14 @@ Before, 4.8× over an 8.8× model — the fuse's cost was mostly not the fuse.
 After, flat, which is what "local" is supposed to mean. Those are the gate
 agent's numbers; the implementing lane's own run gave 2.68 / 6.37 / 17.50 before
 and 1.71 / 1.65 / 1.86 after, the same shape and the same conclusion.
+
+**That table checks out against the rate, and it is what says `commit` really
+swept twice.** Its own row gaps are the sweeping that went away: 1.72, 5.45 and
+16.35 ms, which over two sweeps is 1.75, 1.88 and 1.89 µs a face — against the
+1.99 measured directly above, on a machine that is not the one those rows came
+from. Read as *one* sweep the same gaps are 3.50, 3.75 and 3.77 µs a face,
+nearly double anything the sweep has ever been clocked at on its own. So the
+"twice" is not read off the source alone; the cost of the fuse says it too.
 
 The comparison is not quite like for like and it is worth saying which way it
 leans: "before" is the debug-gated code with its sweep forced on, so it includes
@@ -23608,11 +23670,16 @@ make or instrumentation that is not checked in:**
   the implementing lane and §66.2's 50–65. The `release`-profile run of the two
   un-gated `a_mutation_notices_…` tests failing with "test did not panic as
   expected" is likewise a build nothing keeps.
-- **1.94 µs a face** for the sweep, and that `commit` swept twice.
 - The **60-union chain** to 8046 faces coming out nominally faster with the
   sweep on, and the fuse's own cost growing as about O(n^1.7).
-- The **untouched-geometry row**: the fuse flat at 1.34 ms, the sweep 1.3× it at
-  240 faces and 15× at 5040.
+- The **sweep's per-face rate** and the **untouched-geometry row**. Both were
+  re-measured on a second machine on 2026-09-09 — 1.99 µs a face over five model
+  sizes with a fitted fixed cost of 13 µs, and the fuse flat at 1.435–1.452 ms
+  from 12 faces to 5052 — which is how the **1.3× at 240 faces was found to be
+  wrong** and replaced by 0.7×. Two machines now agree on the rate, on the
+  flatness and on the 5040 row. It is still a timing harness nothing keeps: the
+  workload is `Model::validate` and `Model::fuse` on plain blocks, which is
+  cheap to write again, and §81.7 says exactly how.
 - §81.7's **before-and-after table**, 3.79 / 7.15 / 18.07 → 2.07 / 1.70 / 1.72
   ms (the gate agent), with the implementing lane's 2.68 / 6.37 / 17.50 → 1.71 /
   1.65 / 1.86 beside it. Two runs on two machines agreeing about the shape is
