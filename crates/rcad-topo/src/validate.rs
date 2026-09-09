@@ -110,10 +110,11 @@ impl Model {
     ///
     /// This is what [`Assembly::commit`](crate::fuse::assemble::Assembly::commit)
     /// runs after every fuse, in every build. The full sweep costs a pass over
-    /// the whole model — 1.94 µs a face, twice over, which is 15 times a fuse's
-    /// own cost on a model of 5040 faces and under a percent on a model the fuse
-    /// built itself (`docs/decisions.md` §66.2). Sweeping what did not change is
-    /// all of that difference.
+    /// the whole model — measured here at 1.94 µs a face, twice over, which is
+    /// 15 times a fuse's own cost on a model of 5040 faces and under a percent
+    /// on a model the fuse built itself. That is the same cost §66.2 measured
+    /// at 3.4–4.4 µs a face on its own shapes, on planar ones instead.
+    /// Sweeping what did not change is all of that difference.
     ///
     /// # Why asking only the new entities asks the same questions
     ///
@@ -128,7 +129,7 @@ impl Model {
     /// and a new face can only be named by a new shell. The same argument covers
     /// orphans, wires, coedges and shells.
     ///
-    /// # The one question this does not ask
+    /// # The two questions this does not ask
     ///
     /// [`Model::check_dynamic_range`] is genuinely global: it folds the largest
     /// coordinate and the smallest feature over every solid in the model, so two
@@ -142,6 +143,15 @@ impl Model {
     /// `Assembly::check_dynamic_range` measures the answer's own coordinates
     /// against the answer's own shortest edge, behind `the_inputs_fit_in_f64`.
     ///
+    /// The second is [`ModelData::check_keys_resolve`], and it is left out
+    /// because there is nothing here for it to find: every key these checks
+    /// follow was minted by `write_into` microseconds earlier. Where this
+    /// function reaches into an arena it indexes it directly, so a key that did
+    /// not resolve would panic rather than come back as
+    /// [`Invalid::DanglingKey`] — which is the right answer under §4.1 for this
+    /// crate having broken its own arena, and not a question a caller's input
+    /// can raise.
+    ///
     /// **The tolerances are still the model's.** [`Model::allowed_wobble`] and
     /// [`Model::what_writing_a_point_down_costs`] both fold over every vertex in
     /// the model, so a face is judged here by exactly the number the full sweep
@@ -150,7 +160,8 @@ impl Model {
     ///
     /// # Errors
     ///
-    /// Whatever [`Model::validate`] refuses, less the coordinate range.
+    /// Whatever [`Model::validate`] refuses, less the coordinate range and the
+    /// keys-resolve pass.
     pub(crate) fn check_what_was_just_written(
         &self,
         written: &Written,

@@ -168,11 +168,12 @@ impl Model {
     /// crash (§17.4, §4.3).
     ///
     /// **The answer is checked in every build**, by
-    /// [`Model::check_what_was_just_written`], which asks the whole of
-    /// [`Model::validate`] of the entities this fuse wrote and nothing else. The
-    /// one question it leaves out is the model-wide coordinate range, because
-    /// that one can fail for where somebody else's solid sits; the local form of
-    /// it is asked above, of the answer's own coordinates. Before
+    /// [`Model::check_what_was_just_written`], which asks eleven of
+    /// [`Model::validate`]'s thirteen checks of the entities this fuse wrote and
+    /// nothing else. It leaves out the model-wide coordinate range, because that
+    /// one can fail for where somebody else's solid sits — the local form of it
+    /// is asked above, of the answer's own coordinates — and the keys-resolve
+    /// pass, which has nothing to find among keys minted moments earlier. Before
     /// `docs/decisions.md` §66.3 this check was `debug_assertions`-gated *and*
     /// skipped whenever the model did not already validate, so a release fuse
     /// looked at nothing.

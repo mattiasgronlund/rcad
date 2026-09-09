@@ -286,13 +286,15 @@ impl Assembly {
     /// (`docs/decisions.md` §66.2, §66.3).
     ///
     /// **The check is [`Model::check_what_was_just_written`], not
-    /// [`Model::validate`].** Twelve of the sweep's thirteen checks are asked of
-    /// the answer alone, which is the whole of what the fuse is answerable for;
-    /// the thirteenth, the model-wide coordinate range, is asked of the input
-    /// solids before the write instead ([`the_inputs_fit_in_f64`]) and of the
-    /// answer's own coordinates by [`Assembly::check_dynamic_range`]. That
-    /// function says why, and why a model-wide one here would report another
-    /// solid's placement as this fuse's bug.
+    /// [`Model::validate`].** Eleven of the sweep's thirteen checks are asked of
+    /// the answer alone, which is the whole of what the fuse is answerable for.
+    /// The model-wide coordinate range is asked of the input solids before the
+    /// write instead ([`the_inputs_fit_in_f64`]) and of the answer's own
+    /// coordinates by [`Assembly::check_dynamic_range`]; that function says why,
+    /// and why a model-wide one here would report another solid's placement as
+    /// this fuse's bug. The keys-resolve pass is the other one left out, and
+    /// [`Model::check_what_was_just_written`] says why there is nothing in a
+    /// just-written subgraph for it to find.
     ///
     /// [`the_inputs_fit_in_f64`]: super::the_inputs_fit_in_f64
     pub(crate) fn commit(
