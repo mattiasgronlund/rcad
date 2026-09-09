@@ -22746,7 +22746,18 @@ an owner and can least be asked for one: `just lanes` would print `free` all
 night beside a tree in use. The timer gets a worktree of its own, locked, with
 the reason `overnight fuzzing` — a lock held by a machine rather than a session.
 §76.4 says most worktrees carry no lock and names the ones that should; this is
-one of them, and the reason string is what tells a lock sweep to leave it alone.
+one of them.
+
+**The lock is what protects it, and the reason string protects nothing.**
+`prune-worktrees` and `clean-targets` skip any locked tree without reading why
+it is locked, so those are already safe. What the reason is for is the sweep
+that is done by hand: on 2026-09-09 a session cleared three stale locks and had
+to ask the other sessions one at a time whose was whose, because a lock date
+does not prove its owner is gone. A reason without the `agent ` prefix says *no
+session will ever answer for this one* — to a reader, and to nothing else.
+Making the prefix load-bearing in code would be a change to `prune-worktrees`,
+which is §76's business and not this section's; recorded here as the gap it is,
+rather than claimed as a property it has.
 
 Nothing advances that worktree to `main`, and nothing should: an unattended
 `git checkout` racing the lanes that merge into `main` is a write nobody
