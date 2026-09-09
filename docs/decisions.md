@@ -22790,6 +22790,19 @@ night the thing it backs up is broken. What caught it was
 `systemd-analyze --user verify`, in one line, before the file was ever
 installed. Verify the units; do not read them.
 
+The installed unit says it a second way, and this is the demonstration rather
+than the argument — `systemctl --user show rcad-fuzz.service`, with the fix in
+place:
+
+```
+TimeoutStartUSec=8h 10min
+RuntimeMaxUSec=infinity
+```
+
+8h 10min is the backstop doing its job. `infinity` on the line beside it is what
+the original spelling would have left behind, on a unit that loads without
+complaint and runs without one.
+
 There is deliberately **no `check-*` arm** running that verify, and the reason
 is §77's. The gate runs on a GitHub runner, `systemd-analyze` is not something
 this repo installs or pins, and the two ways to write such an arm are both the
