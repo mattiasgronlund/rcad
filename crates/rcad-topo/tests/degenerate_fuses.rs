@@ -814,19 +814,24 @@ fn two_cubes_that_only_touch_along_part_of_an_edge() {
 /// [`two_cubes_that_only_touch_along_part_of_an_edge`] above is row 8 of §17.7
 /// too, and it is not this case: there the small cube's edge lies wholly inside
 /// the big one's, so one edge splits and the piece of it that is left matches
-/// the other end for end. Here neither contains the other — the frame's edge and
-/// the comb's overlap in the middle and each sticks out past it — so **both**
-/// have to be cut before four faces can meet along one stretch. That is the
-/// shape of overlap nothing in this file pinned, and it is the one §78.10 says
-/// changed answer at `b4890f1`.
+/// the other end for end. Here neither contains the other, and the test says so
+/// before it fuses anything — unsheared, the frame's edge runs from `y = 0` to
+/// `y = 3` and the comb's from `y = 1` to `y = 5`, so they share the middle and
+/// each sticks out past it. Both volumes are checked first, so a builder that
+/// quietly changed shape cannot pass its answer off as this overlap's. That is
+/// the shape of overlap nothing in this file pinned, and it is the one §78.10 says changed answer at `b4890f1`. What
+/// changed there is §80.4's to tell; nothing this test runs measures it, so
+/// nothing here restates it.
 ///
 /// The refusal is right for the same reason as its neighbour's. The two enclose
 /// no space between them — the certified intersection comes back with nothing in
 /// it, which is asserted here rather than argued — so there is no volume for a
-/// union to get wrong. What there is instead is four faces along that stretch:
-/// the frame's top cap and its outer wall, against the comb's bottom cap and its
-/// own wall. An edge a `Model` can hold is used by two, and §17.4 settles that a
-/// boolean does not get to change what a model is on its way past.
+/// union to get wrong. What they do share is faces: where the two edges overlap,
+/// the frame's top cap and its outer wall run alongside the comb's bottom cap
+/// and its own wall. So the refusal is `ResultIsNotManifold` and the count it
+/// carries is 4, both ways round. An edge a `Model` can hold is used by two, and
+/// §17.4 settles that a boolean does not get to change what a model is on its
+/// way past.
 ///
 /// So this is §16.10's **limit** and not its **gap**. The log is empty every way
 /// round, so nothing was undecidable and no better arithmetic is being waited
