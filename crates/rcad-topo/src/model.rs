@@ -637,7 +637,8 @@ impl Model {
             .unwrap_or_else(|broken| panic!("a touched edge is broken: {broken}"));
     }
 
-    /// The check that runs in release builds too (decisions.md §4.3).
+    /// The slop check §4.3 budgets for every build — as, since §66.3, the
+    /// touched checks above are.
     ///
     /// An operation that meant to leave slop behind passes the amount its
     /// provenance accounts for. What this catches is slop that appeared with
