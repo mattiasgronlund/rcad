@@ -22757,11 +22757,13 @@ and not mistakes.
 `Error::ResultIsNotManifold { count: 4 }`, raised at
 `crates/rcad-topo/src/fuse/assemble.rs:562` — the only place in `crates/` that
 variant is constructed, which is what makes this refusal traceable to one line.
-`grep -rn ResultIsNotManifold crates/` gives 35 lines and none of the other 34
-builds one: 18 are doc comments, one is the variant's own declaration in
-`crates/rcad-topo/src/error.rs`, one is a string in the catalogue's table
-printer, and 14 are patterns matching it across five test files. Outside line
-562, `src/` names the variant only in doc comments.
+`grep -rn ResultIsNotManifold crates/` names it in plenty of other places and
+**none of them builds one**: the variant's own declaration in
+`crates/rcad-topo/src/error.rs`, one string in the catalogue's table printer,
+the patterns that match it in the topo test files, and doc comments everywhere.
+That is the durable claim and the grep re-checks it in a second; **a count of
+those lines is not durable, and this section proved it by carrying one that a
+single new doc comment falsified three commits later.**
 
 The stage is skin assembly: `Assembly::join_up_what_is_one_face`
 (`assemble.rs:518`) asks `Assembly::darts_along_each_edge` (`assemble.rs:545`)
@@ -22865,7 +22867,12 @@ at `y = 3` always cut the comb's — which is why those two splits are already
 there at `c66bdca`, and why neither of them can be the one `b4890f1` supplies.
 `y = 2` is the far wall of the frame's **own** hole, and nothing of the comb
 lies on it: the comb's planes are `z = 2`, `z = 5`, `y = 1`, `y = 5`, `x = 0`
-and `x = -1`.
+and `x = -1`. That leaves `y = 0`, the frame's other own-only plane, and it
+cuts nothing new because it is an endpoint of the frame's own edge rather than
+a point inside it. So `y = 2` is the only plane on this line whose cut
+other-solid cutting could not already have supplied — all four of the frame's
+`y` planes accounted for, which is what §16.10 asks of a claim shaped like
+this one.
 
 `b4890f1` — "cuts: a solid's own planes cut its own faces" — is what supplies
 it. At `b4890f1` and at today's `c4f29af` the picture is identical and it is not
@@ -22880,17 +22887,22 @@ four-dart edges are these two.
 
 **And the loop bound is what does it, shown on today's tree rather than argued
 from an old one.** `git show b4890f1 -- crates/rcad-topo/src/fuse/cuts.rs`
-changes one loop: `for other in (one + 1)..solids.len()` becomes
-`for other in one..solids.len()`, with `let from = if one == other { mine + 1 }
-else { 0 }` inside it. Put that bound behind an environment switch in a copy of
-`c4f29af` and turn own-solid cuts off, and today's tree does not merely answer
-again — **it builds `c66bdca`'s arrangement exactly.** Lane K diffed the whole
-dumped block rather than the lines it cared about: all 63 lines equal, edge for
-edge, same edge indices, both endpoint fields and both face planes on every one.
-The 28 faces are the same 28, and `x = 0, z = 2` carries the same five edges
-listed above. One loop bound, both directions, on current code — and for this
-pair nothing else that landed since `c66bdca` moves the arrangement at all.
-§80.10 has the method and what it did not establish.
+changes **two** loop bounds, and both are needed. The outer
+`for other in (one + 1)..solids.len()` becomes `for other in one..solids.len()`,
+which lets a solid meet itself; the inner `for theirs in 0..` becomes
+`for theirs in from..`, with `let from = if one == other { mine + 1 } else { 0 }`
+above it, which stops a face being cut against itself and stops each pair inside
+one solid arriving twice. The `let from` is dead without the inner change, so a
+reader given only the outer one has to work the rest out. Put both behind an
+environment switch in a copy of `c4f29af` and turn own-solid cuts off, and
+today's tree does not merely answer again — **it builds `c66bdca`'s arrangement
+exactly.** Lane K diffed the whole dumped block rather than the lines it cared
+about: all 63 lines equal, edge for edge, same edge indices, both endpoint
+fields and both face planes on every one. The 28 faces are the same 28, and
+`x = 0, z = 2` carries the same five edges listed above. Two loop bounds, both
+directions, on current code — and in the configuration Lane K probed, unsheared
+and one argument order, nothing else that landed since `c66bdca` moves this
+arrangement at all. §80.10 has the method and what it did not establish.
 
 That is why §78.8's aggregate and this case are not in tension. `b4890f1` did
 not make the kernel refuse more; it made it *notice* more, and one of the things
@@ -23056,7 +23068,20 @@ one day.
 **Re-derived here by reading or by running, and cheap to redo** — the commit
 topology in §80.8; `assemble.rs:562` being the only construction site of the
 variant; `comb(1, 3)` being a 1×4 rectangle and `Frame { 5, 3 }` its rings; the
-volumes and the contact segment as arithmetic; and the three seed rows in §80.7.
+volumes and the contact segment as arithmetic; the three seed rows in §80.7;
+and two more that belong here rather than in the column below.
+
+**§80.1's reading of row 8** — three entries, one of them refused, the
+catalogue's other `ResultIsNotManifold` in row 2 — off §17.7's table and
+`catalogue()` in `crates/rcad-topo/tests/degenerate_fuses.rs`. It is written
+down because a miscount of exactly this row is the one thing this section
+already got wrong once, and the two records that settle it disagree with
+nothing.
+
+**The `b4890f1` diff** — the two loop bounds, and the 96-and-37 that says the
+rest of the file's change is prose and tests. `git show b4890f1 --
+crates/rcad-topo/src/fuse/cuts.rs` is five seconds from this tree, so it is not
+anybody's word. Only the *run* of the counterfactual below is.
 
 **Taken on a lane's word, needing instrumentation that is not checked in or a
 build of an archived commit:**
@@ -23092,8 +23117,11 @@ build of an archived commit:**
   every edge's endpoints and the planes of the faces claiming it, before the
   `ResultIsNotManifold` map. The probe is Lane C's minimal one.
 - **The counterfactual was run on current code**, which is what makes §80.4 a
-  demonstration and not a story about an archived commit (Lane K). `b4890f1`'s
-  whole change to `cuts.rs` is one loop bound; behind an environment switch in a
+  demonstration and not a story about an archived commit (Lane K). The whole of
+  `b4890f1`'s **executable** change to `cuts.rs` is two loop bounds — the file's
+  diff is 96 insertions and 37 deletions, and the rest of it is the module
+  header, `gather`'s doc comment, five rewritten unit tests and two new test
+  helpers. Behind an environment switch in a
   copy of `c4f29af`, turning own-solid cuts off makes today's tree answer, drops
   the arrangement from 46 faces to 28 and **reproduces `c66bdca`'s arrangement
   exactly** — all 63 lines of the dumped block equal, edge for edge, same edge
@@ -23105,10 +23133,11 @@ build of an archived commit:**
         cargo test -p rcad-topo --test lane_k_probe -- --nocapture
 
 Two things Lane K did not establish, so nothing above should be read as saying
-them. It ran the **unsheared** configuration only, taking §78.10's word that the
-shear makes no difference. And it did not chase why the `y = 2` corner survives
-on the frame side once it exists, noting only that the refusal fires straight
-out of the arrangement, before any joining.
+them. It ran the **unsheared** configuration only, in one argument order, taking
+§78.10's word that the shear makes no difference and Lane F's test for the
+orders. And it did not chase why the `y = 2` corner survives on the frame side
+once it exists, noting only that the refusal fires straight out of the
+arrangement, before any joining.
 
 **The two stages are tied together by measurement, and it is worth keeping them
 apart in the reading.** An earlier listing of "the contact edges" as the two
@@ -23117,8 +23146,11 @@ block, not the arrangement: the label was wrong and the numbers were not.
 Joining folds the frame's `[0,1]` and `[1,3]` into one edge and the comb's
 `[1,2]`, `[2,3]` and `[3,5]` into one, dropping the corners at `y = 1`, `2` and
 `3` because they stopped being corners — and what is left is §80.5's committed
-answer. Five edges before, two after, at both trees. That is the distinction
-§80.5 warns about, now measured rather than inferred.
+answer. Five edges before, two after, **at `c66bdca` and at own-cuts-off
+`c4f29af`** — the two trees that answer. At `b4890f1` and at today's tree as it
+stands there is no "after" at all: the refusal comes out of
+`darts_along_each_edge` before anything is joined. That is the distinction §80.5
+warns about, now measured rather than inferred.
 
 Lane E's and Lane G's are the ones worth re-running if this is ever reopened,
 because §80.1's verdict rests on them: §80.5 is why the old answer was wrong,
