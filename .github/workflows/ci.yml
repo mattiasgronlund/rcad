@@ -237,6 +237,17 @@ jobs:
       # so a corpus that came back wrong is named in 0.15 s by the step next to
       # the cache, instead of after `just check` has spent minutes compiling.
       - run: mise exec -- just check-corpus
+      # `check-corpus-selftest` needs a locale that collates by dictionary
+      # order, because the collation bug it exists to catch is invisible under
+      # one that collates by codepoint — and a runner's ambient `C.UTF-8` is
+      # exactly that. The recipe finds such a locale by asking `sort` rather
+      # than by naming one, and **refuses** when there is none rather than
+      # skipping: three of its four cases stay green with the bug in place, so
+      # running only those would be worse than running nothing. This step is
+      # what makes sure there is one. `docs/decisions.md` §79.
+      - run: |
+          sudo apt-get install -y -qq locales
+          sudo locale-gen en_US.UTF-8
       # One step, because the whole value of it is that it is the same command a
       # human runs. Splitting `check`/`lint`/`test`/`deny` back out would buy
       # prettier step names and cost the property that `check-gate-runs-every-

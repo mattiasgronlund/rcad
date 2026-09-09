@@ -22070,6 +22070,53 @@ explicitly, so the identity trap was closed before anyone looked. The gap that
 remains is the one that has now bitten three times — an environment difference
 nobody has thought to remove yet.
 
+### 77.7 Three versions of the plugins, and the gate asserts a different one than CI
+
+§77.4 called it a limit that nothing checks a human's installed plugins against
+the CI pin. Measured on 2026-09-09, that limit is wider than the sentence
+suggests, and in a direction the sentence does not mention: **the two gates run
+different numbers of cases and neither says so.**
+
+`just check-questions-selftest` here runs 20 parser + 22 status line + 22 TUI =
+**64**, green. `ci.yml` clones the marketplace at `f5f2f483`; that tree's own
+`selftest.sh`, extracted with `git archive` and run, is 20 + 22 = **42**, green.
+Both greens, different suites, and the only difference in the output is a count
+nobody reads back. `rscene` measured the same two numbers on its own machine and
+runner the same day.
+
+Only `questions` diverges. `guardrails` is byte-identical between `f5f2f483` and
+the checkout, so `check-hooks` asserts the same 24 + 8 + 5 either way. "The pin
+is stale" and "the pinned suite is smaller" are different claims and only the
+second one is true.
+
+**Where the code being run actually comes from.** `plugins_root` defaults to
+`~/git/mattiasgronlund/claude-questions/plugins`, so every recipe here executes
+scripts straight out of that working tree — a push to the marketplace changes
+what `just gate` runs on this machine with no install step and no pin move. That
+is what makes the 42/64 gap appear without anyone deciding anything.
+
+`~/.claude` holds two other things and neither is the code: the declarations
+`check-declared.sh` reads, and — for `questions` alone — a leftover copy at
+`~/.claude/plugins/cache/mattiasgronlund-local/questions/0.1.0`, byte-identical
+to `952672e`. `installed_plugins.json` names cache paths for all three plugins
+at that sha, but the `guardrails` and `practices` directories it names **do not
+exist**. The hooks run anyway: a `sed -i` on a tracked `.md` was refused by our
+own hook while this was being written, and there is no cached `guardrails` for
+that to have come from. So a directory-source marketplace does run in place, as
+`CLAUDE.md` says, and the install metadata is a third number — `952672e` —
+describing neither what the gate runs nor what CI runs.
+
+Not established: which copy Claude Code loads the `questions` *skill* from, since
+that plugin is the one with both a cache copy and a checkout. The hooks question
+is settled by the probe; this one is not, and no claim is made.
+
+`rscene` fixed its half by bumping its pin and making the recipe print the sha it
+ran — `rscene` `0a97b18`, run `34327882376`, where the runner log now carries
+`questions cases from … (4728682)` beside the three counts. rcad has not done
+either. The pin here stays at `f5f2f483` until there is a reason of rcad's own to
+move it, and a wider pinned suite is such a reason; that it is also `rscene`'s
+reason does not make it rcad's.
+
 ## 78. A corner a few ulps from where its own planes cross, recorded 2026-09-09
 
 §75.2 made `the_place_the_model_points_at` choose between the places three
@@ -22497,3 +22544,102 @@ What *is* re-derived, every run: the shipped `how_often_*` refusal rates and the
 six `*_IS_NOT_A_SOLID` bands. Those suites assert their own numbers, so a green
 `just gate` is the statement that they have not moved. Nothing above is in that
 set.
+
+## 79. A gate arm that died without saying so, recorded 2026-09-09
+
+`check-corpus` (§44.10's companion, added when `corpus/fetch.sh` was) passed the
+first time it ran, on a corpus that was right. `rscene` runs a copy of it, and
+theirs was green while one of its three arms could not name a file at all. The
+recipe here is not exposed to that bug, and the selftest is here anyway; the
+difference between those two sentences is most of this section.
+
+### 79.1 What the arm was doing instead of working
+
+`rscene`'s copy sorted its two path lists `LC_ALL=C` and left the `comm` that
+compares them in the ambient locale. `comm` then reads its input as disordered,
+says so on stderr, and exits 1 — and under the recipe's own `set -euo pipefail`
+an `extra=$(comm …)` assignment that exits non-zero takes the whole recipe down.
+Their mutant run therefore named **nothing**, which read as three dead arms and
+was one abort before any arm could print. That misreading is worth more than the
+bug: an exit code standing in for an assertion is the layer the defect hid
+inside, and a suite that stops at the first fault hides the two behind it.
+
+Our copy has no `LC_ALL` on either sort or on the `comm`, so all three agree by
+construction and the arm works. That is a property of the recipe and not of the
+machine, which is the form of the claim that matters — "it depends on your
+locale" was how both of us first put it, and it is wrong.
+
+I also claimed the mixed configuration would produce a *silently* wrong answer
+at exit 0, reasoning that `comm`'s order check is a heuristic. That is reasoning
+and not a demonstration (§16.10). The search: all 256 subsets of eight names
+whose C and dictionary collations disagree, both sides C-sorted, every answer
+compared against the set difference computed independently. 255 warned; none was
+quiet and wrong; the one silent case was silent and correct. Withdrawn. What is
+demonstrated is that the mixed arm is *loud* and wrong — it emits names present
+in both lists — and that the recipe aborts rather than passing.
+
+### 79.2 Four mutations, each failing a different case
+
+`check-corpus-selftest` builds a synthetic six-file corpus and runs
+`check-corpus` against four copies of it. It touches no real corpus, so it runs
+on a machine that has never fetched one, and sits in `gate` beside
+`check-corpus` rather than behind it.
+
+Verified by mutating the production recipe, one mutation at a time, reverting
+between:
+
+| Mutation | What failed |
+|---|---|
+| `LC_ALL=C` added to both sorts, `comm` left ambient | the invented-file case, on the missing **name**, at exit code 1 |
+| the missing-file arm stops trimming `: FAILED open or read` | nothing — see §79.3 |
+| the invented-file arm's `ok=0` deleted | the same case, on the **exit code**, output naming the file and then saying `corpus matches … 5 files` |
+| the `.stp`/`.step` filter dropped from the walk | the `notes.txt` guard, in four places at once |
+
+The first and third are why both assertions exist. A mutation that leaves the
+exit code right and the name missing passes an exit-code check; a mutation that
+leaves the name right and the exit code wrong passes a name check. Neither
+assertion alone catches both, and this recipe now has one mutation for each
+direction on record rather than an argument that it might.
+
+The first mutation is the one that differs from `rscene`. There the selftest
+holds a fix; here there is no fix to delete, so proving the case is not vacuous
+means *adding* the bug. That asymmetry is worth stating rather than leaving a
+reader to assume the two repos' selftests verify the same thing.
+
+### 79.3 The mutation the ported suite did not catch
+
+Dropping the `sed` that trims `: FAILED open or read` off the missing-file arm's
+names left all four cases green. The arm then prints
+`nested/deep one.step: FAILED open or read`, and the case asserts the substrings
+`not on disk` and `nested/deep one.step` — both of which are still there. A
+needle is a substring, so no case built this way can tell a trimmed name from an
+untrimmed one.
+
+That is a mutation surviving a suite written to catch exactly this class, found
+by running it rather than by reading it — which is the whole argument for
+verifying by mutation restated one level up. The fix is a fifth guard beside the
+`notes.txt` one: no arm may leave `sha256sum`'s own wording in what it prints.
+With it, that mutation fails on the leaked line and the other three still fail
+where they did.
+
+`rscene`'s copy has the same hole. It is theirs to close; the case list came
+from there and this is the first thing this port sends back.
+
+### 79.4 Why it refuses instead of skipping
+
+The cases run under a locale that collates by dictionary order, found by asking
+`sort` rather than by naming `en_US.UTF-8`, and the recipe **exits 1** when no
+such locale exists. Under `C` or `C.UTF-8` — a runner's ambient locale — the
+collation is already the one the bug would force, so the case that catches it
+cannot fail. Three of four would still pass, which is worse than running none:
+a green that has quietly stopped asking the question is what §45 is about, and
+what §77 settled for a different gate arm on a different machine. `ci.yml` runs
+`locale-gen en_US.UTF-8` so the runner has one.
+
+### 79.5 What this does not cover
+
+The synthetic corpus is six files and the real one is 367. Nothing here checks
+that `corpus/manifest.sha256` describes the corpus anyone actually has — that is
+`check-corpus`'s own job, and this only checks that it can say so. Nothing
+compares this repo's manifest with `rscene`'s, either; §12 there records that
+the two were compared by hand, once, and found identical at 367 lines.

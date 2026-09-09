@@ -26,11 +26,11 @@ list:
     @{{ just_executable() }} --list --unsorted
 
 # The whole gate, and the same command CI runs. Named `gate` rather than
-# `test-all` because it is 19 checks, a lint and a `cargo-deny` around exactly
+# `test-all` because it is 20 checks, a lint and a `cargo-deny` around exactly
 # one `test` — and this repo already says "gated green", "a gate agent", "the
 # gate worktree". `test-all` would have shipped a false sentence on day one.
 [doc("Everything, in the order CI runs it. ~9 minutes.")]
-gate: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus lint test check-t-selftest deny
+gate: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -480,8 +480,8 @@ check-gate-runs-every-check:
     listed=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "19" ]; then \
-        echo "found $n check-* recipes, expected 19"; \
+    if [ "$n" != "20" ]; then \
+        echo "found $n check-* recipes, expected 20"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -1504,6 +1504,164 @@ check-corpus manifest="corpus/manifest.sha256":
         exit 1
     fi
     echo "corpus matches {{manifest}}: $(wc -l <"$manifest_abs") files, $root"
+
+# `check-corpus` above passed the first time it ran, on a corpus that was
+# right, and that proved less than it looked like: run against corpora that
+# were *wrong*, `rscene`'s copy of it named no file at all. These are the
+# mutations that found that, kept as a recipe, so the next thing to silence an
+# arm is caught by the gate rather than by somebody thinking to try it.
+# `rscene`'s `docs/decisions.md` §12 is the finding; §79 here is what porting
+# it to this repo changed. Written there and copied here, the same way
+# `corpus/fetch.sh` was and for the same reason: their §12 holds the case list.
+#
+# **A synthetic corpus of six files, not a hardlinked copy of the real one.**
+# Nothing here touches `RCAD_STEP_CORPUS`, which also means it runs on a
+# machine that has never fetched a corpus — so it sits in `gate` *beside*
+# `check-corpus` rather than behind it.
+#
+# **The filenames are the point.** `ab.stp`, `a-b.stp`, `aB.stp` and `a_c.stp`
+# sort one way by byte and another by dictionary. That difference is the only
+# thing that catches the bug this exists for: path lists sorted `LC_ALL=C`
+# against a `comm` left in the ambient locale, which reads its input as
+# disordered, exits 1, and takes the recipe down with `set -e`. Four ordinary
+# names collate identically under both and would pass with that bug in place.
+# `a_new.stp` is named to land *inside* the run where the two orders disagree,
+# between `a_c.stp` and `ab.stp` by byte and elsewhere by dictionary, because
+# `comm`'s order check only fires where it compares unequal lines.
+#
+# **This repo has no such bug to delete, and that is the difference from
+# `rscene`.** All three of `check-corpus`'s sorts and its one `comm` are
+# ambient, so they agree by construction and it is not exposed. There the
+# selftest holds a fix; here it is a tripwire for an edit nobody has made. So
+# the mutation that proves the fourth case is not vacuous is *adding*
+# `LC_ALL=C` to the two sorts above while leaving the `comm` alone — see §79.2
+# for what each mutation did.
+#
+# **One mutation at a time, and each case asserts the file its arm names**
+# rather than the exit code. One corpus carrying three faults stops after the
+# first under `set -e` and hides the other two; and an exit code standing in
+# for an assertion is the layer the original bug hid inside.
+[doc("check-corpus names the file for each way a corpus can be wrong.")]
+check-corpus-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    dictionary=""
+    for candidate in $(locale -a 2>/dev/null); do
+        case "$candidate" in C|C.*|POSIX) continue ;; esac
+        if [ "$(printf 'ab\na_c\n' | LC_ALL="$candidate" sort 2>/dev/null | head -1)" = "ab" ]; then
+            dictionary="$candidate"
+            break
+        fi
+    done
+    if [ -z "$dictionary" ]; then
+        echo "No locale here collates by dictionary order, so the case that"
+        echo "would catch a collation bug in check-corpus cannot run — and the"
+        echo "other three pass with that bug in place, which is worse than not"
+        echo "running them at all. docs/decisions.md section 79."
+        echo "  sudo locale-gen en_US.UTF-8 && sudo update-locale"
+        exit 1
+    fi
+
+    work=$(mktemp -d -- "${TMPDIR:-/tmp}/rcad-corpus-selftest.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+
+    pristine="$work/pristine"
+    mkdir -p "$pristine/nested"
+    for name in ab.stp a-b.stp aB.stp a_c.stp; do
+        printf 'ISO-10303-21;\n/* %s */\nEND-ISO-10303-21;\n' "$name" >"$pristine/$name"
+    done
+    printf 'ISO-10303-21;\nEND-ISO-10303-21;\n' >"$pristine/nested/deep one.step"
+    printf 'not a STEP file\n' >"$pristine/notes.txt"
+
+    manifest="$work/manifest.sha256"
+    (cd "$pristine" \
+        && find . -type f \( -iname '*.stp' -o -iname '*.step' \) -printf '%P\0' \
+        | LC_ALL=C sort -z | xargs -0 sha256sum) >"$manifest"
+
+    failed=0
+    every_output=""
+    check() {
+        local name=$1 root=$2 want_rc=$3
+        shift 3
+        local out rc needle
+        set +e
+        out=$(RCAD_STEP_CORPUS="$root" LC_ALL="$dictionary" \
+            {{ just_executable() }} check-corpus "$manifest" 2>&1)
+        rc=$?
+        set -e
+        every_output+="$out"$'\n'
+        if [ "$rc" -ne "$want_rc" ]; then
+            echo "FAIL  $name: check-corpus exited $rc, wanted $want_rc"
+            sed 's/^/        /' <<<"$out"
+            failed=1
+            return
+        fi
+        for needle in "$@"; do
+            if ! grep -qF -- "$needle" <<<"$out"; then
+                echo "FAIL  $name: nothing in the output named '$needle'"
+                sed 's/^/        /' <<<"$out"
+                failed=1
+                return
+            fi
+        done
+        echo "ok    $name"
+    }
+
+    mutate() {
+        local into="$work/$1"
+        rm -rf -- "$into"
+        cp -a -- "$pristine" "$into"
+        echo "$into"
+    }
+
+    # The happy path asserts two fragments rather than one sentence: this
+    # repo's success line reads "corpus matches <manifest>: 5 files, <root>",
+    # where `rscene`'s reads "5 files match". Copying their needle across gave
+    # a case that passes without checking anything — on the one arm that is
+    # supposed to be green, which is where nobody looks.
+    check "a corpus that matches its manifest" "$pristine" 0 "corpus matches" "5 files"
+
+    gone=$(mutate gone)
+    rm -- "$gone/nested/deep one.step"
+    check "a file the manifest names and disk lacks" "$gone" 1 \
+        "not on disk" "nested/deep one.step"
+
+    altered=$(mutate altered)
+    printf 'ISO-10303-21;\n/* not what it was */\nEND-ISO-10303-21;\n' >"$altered/aB.stp"
+    check "a file whose bytes changed" "$altered" 1 \
+        "do not match" "aB.stp"
+
+    grown=$(mutate grown)
+    printf 'ISO-10303-21;\nEND-ISO-10303-21;\n' >"$grown/a_new.stp"
+    check "a STEP file on disk the manifest never heard of" "$grown" 1 \
+        "does not name" "a_new.stp"
+
+    # `notes.txt` sits in all four corpora and is not a STEP file. If it ever
+    # surfaces in an arm, `check-corpus`'s walk has stopped agreeing with
+    # `files_under` in `crates/rcad-step/tests/every_file_in_the_corpus_reads.rs`,
+    # which is the list `corpus/manifest.sha256` is defined against.
+    if grep -qF 'notes.txt' <<<"$every_output"; then
+        echo "FAIL  a file that is not STEP was reported by some arm:"
+        grep -nF 'notes.txt' <<<"$every_output" | sed 's/^/        /'
+        failed=1
+    fi
+
+    # No arm may leave `sha256sum`'s own wording in what it prints. The four
+    # cases above cannot tell a trimmed name from an untrimmed one — a needle
+    # is a substring, and `nested/deep one.step` sits inside
+    # `nested/deep one.step: FAILED open or read` just as happily. Dropping the
+    # `sed` that trims the missing-file arm therefore passed all four when this
+    # was first ported, which is a mutation surviving a suite written to catch
+    # exactly that. `rscene`'s copy has the same hole; §79.3.
+    if grep -qE 'FAILED( open or read)?$' <<<"$every_output"; then
+        echo "FAIL  an arm printed sha256sum's wording rather than a bare name:"
+        grep -nE 'FAILED( open or read)?$' <<<"$every_output" | sed 's/^/        /'
+        failed=1
+    fi
+
+    [ "$failed" -eq 0 ] || exit 1
+    echo "check-corpus named its file in every case, under $dictionary"
 
 [doc("Formatting and clippy, warnings denied. Rust and TOML both.")]
 lint:
