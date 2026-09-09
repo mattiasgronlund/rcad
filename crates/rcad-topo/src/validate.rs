@@ -2532,6 +2532,7 @@ mod tests {
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
+    use super::Written;
     use super::{
         Decision, a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets,
         gradient_of, winding_of, winding_round,
@@ -2539,7 +2540,7 @@ mod tests {
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
     use crate::model::{FaceUse, ShellData, ShellUse, SolidData, VertexData, WireStep};
-    use crate::{Error, FaceView, Invalid, Model, SolidView, WireView};
+    use crate::{Error, FaceView, Invalid, Model, Result, SolidView, WireView};
 
     fn an_empty_model() -> Model {
         Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
@@ -2600,6 +2601,82 @@ mod tests {
             Err(Error::Invalid(broken)) => broken,
             other => panic!("the sweep should have refused this model, and gave {other:?}"),
         }
+    }
+
+    /// Everything in the model, named as though one operation had written it.
+    ///
+    /// The fuse hands [`Model::check_what_was_just_written`] the entities it
+    /// built; here the whole model is a stand-in for that, so what the check
+    /// asks and what the sweep asks can be compared on the same entities.
+    fn as_if_one_operation_wrote_it(model: &Model) -> Written {
+        Written {
+            vertices: model.data().vertices.keys().collect(),
+            edges: model.data().edges.keys().collect(),
+            coedges: model.data().coedges.keys().collect(),
+            wires: model.data().wires.keys().collect(),
+            faces: model.data().faces.keys().collect(),
+            shells: model.data().shells.keys().collect(),
+            solids: model.data().solids.keys().collect(),
+        }
+    }
+
+    fn what_the_commit_check_says(model: &Model, written: &Written) -> Result<()> {
+        model.check_what_was_just_written(written, &Policy::certified(), &mut ProvenanceLog::new())
+    }
+
+    /// The check has teeth: a wall turned round is caught by it and not only by
+    /// the sweep.
+    ///
+    /// This is `a_flat_face_used_reversed_is_caught`'s model asked the question
+    /// `Assembly::commit` asks. Without it nothing here would say the commit
+    /// check refuses anything at all — every other test of it asserts an absence
+    /// of a panic, which an empty check would also pass.
+    #[test]
+    fn the_check_a_commit_makes_catches_a_wall_turned_round() {
+        let mut model = a_cube();
+        let written = as_if_one_operation_wrote_it(&model);
+        what_the_commit_check_says(&model, &written).expect("a plain cube is sound");
+
+        let shell = model
+            .data_mut()
+            .shells
+            .values_mut()
+            .next()
+            .expect("a cube has a shell");
+        shell.faces[0].orient = Orientation::Reversed;
+
+        assert!(matches!(
+            what_the_commit_check_says(&model, &written),
+            Err(Error::Invalid(Invalid::AFlatFaceIsUsedReversed))
+        ));
+    }
+
+    /// And it is local: the same broken wall on a solid the operation did not
+    /// write goes unmentioned.
+    ///
+    /// Which is the whole point of the change — a fuse answers for what it
+    /// wrote, not for what it was handed (`docs/decisions.md` §66.3). The sweep
+    /// refuses this model; the commit check does not.
+    #[test]
+    fn the_check_a_commit_makes_says_nothing_about_a_solid_the_operation_did_not_write() {
+        let mut model = a_cube();
+        let written = as_if_one_operation_wrote_it(&model);
+        model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a second cube, which nothing here claims to have written");
+
+        let broken = model
+            .data()
+            .solids
+            .keys()
+            .nth(1)
+            .expect("the second cube is there");
+        let shell = model.data().solids[broken].shells[0].shell;
+        model.data_mut().shells[shell].faces[0].orient = Orientation::Reversed;
+
+        assert_eq!(refusal(&model), Invalid::AFlatFaceIsUsedReversed);
+        what_the_commit_check_says(&model, &written)
+            .expect("but the first cube is what was written, and it is still sound");
     }
 
     #[test]
