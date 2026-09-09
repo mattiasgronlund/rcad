@@ -692,8 +692,9 @@ fn derive_a_corner(
 /// read from the same constant rather than copied, because the two have to
 /// agree: a solid `Model::validate` accepts is one the fuse has to be able to
 /// bake. It is the width of the number and not a modelling tolerance —
-/// `Scale::RELATIVE_LINEAR_TOLERANCE` is seven orders of magnitude wider and
-/// would swallow corners somebody *placed* off their planes.
+/// `Scale::RELATIVE_LINEAR_TOLERANCE` is 70 369 times wider — not quite five
+/// orders of magnitude — and would swallow corners somebody *placed* off their
+/// planes.
 ///
 /// **This never places the point.** It picks among places the surfaces already
 /// agree on; the geometry comes from the meet, which is what keeps a wrong
