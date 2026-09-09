@@ -527,26 +527,30 @@ impl Model {
     ///
     /// A full [`Model::validate`] here would make a test that performs *n*
     /// operations cost O(n²) and the suite stops being runnable long before the
-    /// milestone that needs it (decisions.md §4.3).
+    /// milestone that needs it (decisions.md §4.3). These walk one solid rather
+    /// than the whole model, which is what keeps them out of that.
     ///
-    /// **These run in debug builds only, and that is now a choice about cost
-    /// rather than a difference in what a caller sees.** It was the second
-    /// thing until [`Model::check_shape_is_possible`] closed the door: a file
-    /// holding a wire that does not close read back cleanly, and
+    /// **They run in every build** (decisions.md §66.3). They ran in debug
+    /// builds only until then, and the shape that decided it is worth keeping:
+    /// a file holding a wire that does not close read back cleanly, and
     /// [`Model::place_solid`] on it crashed a debug-built caller and said
     /// nothing to a release-built one — the same bytes, two answers, decided by
-    /// how the caller happened to be compiled. A shape these can refuse cannot
-    /// be deserialized any more, so what is left for them to catch is a bug in
-    /// this crate, which is what a debug assertion is for.
+    /// how the caller happened to be compiled.
+    /// [`Model::check_shape_is_possible`] shut that door for deserialized
+    /// shapes, but not for a broken invariant this crate writes itself, and for
+    /// those the gate left a release build with neither of §4.1's two answers:
+    /// no panic, no `Err`, and a solid that does not validate handed back as
+    /// `Ok`. The cost §4.3 gated them for is the full sweep's and was never
+    /// measured for these; measured, it is 50–65 ns per face of the solid
+    /// handed in (decisions.md §66.2).
     ///
     /// # Panics
     ///
-    /// If any of them fail. Breaking one of these is a bug in this crate, and a
-    /// corrupt solid is worse than a crash.
+    /// If any of them fail, in every build. Breaking one of these is a bug in
+    /// this crate, and a corrupt solid is worse than a crash. Whether a release
+    /// build should instead record and return an internal error is a separate
+    /// question, still open in decisions.md §66.4.
     pub(crate) fn check_touched_solid(&self, slot: SolidSlot) {
-        if !cfg!(debug_assertions) {
-            return;
-        }
         let solid = self.data.solids.get(slot).expect("touched solid is gone");
         for used in &solid.shells {
             let shell = self
@@ -561,9 +565,6 @@ impl Model {
     }
 
     pub(crate) fn check_touched_face(&self, slot: FaceSlot) {
-        if !cfg!(debug_assertions) {
-            return;
-        }
         let face = self.data.faces.get(slot).expect("touched face is gone");
         assert!(!face.wires.is_empty(), "a face with no wires");
         for &wire in &face.wires {
@@ -572,9 +573,6 @@ impl Model {
     }
 
     pub(crate) fn check_touched_wire(&self, slot: WireSlot) {
-        if !cfg!(debug_assertions) {
-            return;
-        }
         let wire = self.data.wires.get(slot).expect("touched wire is gone");
         self.check_wire_closes(wire)
             .unwrap_or_else(|broken| panic!("a touched wire is broken: {broken}"));
@@ -629,9 +627,6 @@ impl Model {
     }
 
     pub(crate) fn check_touched_edge(&self, slot: EdgeSlot) {
-        if !cfg!(debug_assertions) {
-            return;
-        }
         let edge = self.data.edges.get(slot).expect("touched edge is gone");
         assert!(
             self.data.vertices.contains_key(edge.start)
@@ -1659,13 +1654,10 @@ mod tests {
         model.place_solid(cube, &a_movement());
     }
 
-    /// Only in debug, because the check this exercises is only there in debug.
-    /// [`Model::check_touched_wire`] returns at once without `debug_assertions`
-    /// — a full sweep per operation is what §4.3 keeps out of release — so in a
-    /// release profile the mutation below goes unnoticed and there is no panic
-    /// to expect.
+    /// In every build, because [`Model::check_touched_wire`] runs in every
+    /// build (decisions.md §66.3). Until then this test was `#[cfg(debug_assertions)]`
+    /// and a release profile let the mutation below through unnoticed.
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic(expected = "does not close")]
     fn a_mutation_notices_a_wire_that_no_longer_closes() {
         let (mut model, cube) = a_cube();
@@ -1681,10 +1673,9 @@ mod tests {
         model.place_solid(cube, &a_movement());
     }
 
-    /// Debug only, for the reason
+    /// Every build, for the reason
     /// [`a_mutation_notices_a_wire_that_no_longer_closes`] gives.
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic(expected = "exactly twice")]
     fn a_mutation_notices_an_edge_that_has_grown_a_third_coedge() {
         let (mut model, cube) = a_cube();
