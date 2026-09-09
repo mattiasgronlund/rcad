@@ -23050,8 +23050,14 @@ the other is exactly the inconsistency `b4890f1` removed.
 proposing it.** It has no named consumer (§13 rule 3), and §16.10's refinement of
 that rule permits deferring a *feature* while forbidding the deferral of a
 *gap* — this is the first of the two, because the refusal it would replace is a
-limit and not a gap (§80.1). It is with Mattias as an open question. What this
-section owes a later reader is only that the possibility exists and where the
+limit and not a gap (§80.1).
+
+**Asked and answered, 2026-09-09: the refusal stands.** Mattias's decision is
+that the possibility is recorded and not built — it has no named consumer, and
+§13 rule 3 says a part with no named consumer is not built. It is reserved
+rather than closed: if a consumer ever appears, deciding it is a unit of its
+own, and that unit inherits the whole of row 8, the cube pair included. What
+this section owes a later reader is that the possibility exists and where the
 evidence for it is: §80.5's table.
 
 ### 80.10 What this section re-derived, and what it took on a lane's word
