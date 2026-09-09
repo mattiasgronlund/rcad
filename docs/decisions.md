@@ -22497,18 +22497,23 @@ of the shape of the outcome: not-a-solid is a refusal, so nothing corrupt is
 written while it stands. What it costs is that the 7 is not fully attributed.
 
 **Closed 2026-09-09 by §80, and the paragraph above is left standing because
-what it got wrong is the useful part.** It is both of §16.10's, one for each side
-of `b4890f1`: the old answer was a **gap** — two solids with a contact neither of
-them recorded, right volume, `validate` happy, because §4.3's checks are local
-and nothing was locally wrong — and `b4890f1` closed it. Today's refusal is a
-**limit**: nothing was undecidable at any policy, and a union with four faces
-along one edge is not something a `Model` can hold (§17.4's first row). So "this
-one went the other way" is true of the tally and wrong about the direction; a
-tally counts refusals, not mistakes. §80.4 has the mechanism — neither touching
-edge contained the other, so nothing split either one and the manifold check was
-never asked the right question — and §80.8 corrects `cc959c1` to `c66bdca`,
-which is `b4890f1`'s actual parent. §80.9 carries the one thing that stayed
-open, and it is a possibility with no consumer rather than a defect.
+what it got wrong is the useful part.** Only one side of `b4890f1` is one of
+§16.10's two, and that is the side this subsection asked about. Today's refusal
+is a **limit**: nothing was undecidable at any policy, and a union with four
+faces along one edge is not something a `Model` can hold (§17.4's first row).
+The old behaviour is neither of the two, because it was not a refusal — it was a
+**missed refusal**, an answer written to a configuration §17.7 refuses, for one
+of the two shapes that relation comes in while the same build refused the other.
+Two solids with a contact neither of them recorded, right volume, `validate`
+happy, because §4.3's checks are local and nothing was locally wrong. §16.10
+sorts refusals and does not reach a wrong answer; §80.1 declines to stretch it
+and says why. So "this one went the other way" is true of the tally and wrong
+about the direction; a tally counts refusals, not mistakes. §80.4 has the
+mechanism — neither touching edge contained the other, so nothing split either
+one and the manifold check was never asked the right question — and §80.8
+corrects `cc959c1` to `c66bdca`, which is `b4890f1`'s actual parent. §80.9
+carries the one thing that stayed open, and it is a possibility with no consumer
+rather than a defect.
 
 **`Assembly::commit` self-checks nothing in a release build.** `was_sound` is
 
@@ -22678,7 +22683,7 @@ that `corpus/manifest.sha256` describes the corpus anyone actually has — that 
 compares this repo's manifest with `rscene`'s, either; §12 there records that
 the two were compared by hand, once, and found identical at 367 lines.
 
-## 80. The fuse that went the other way was a gap closing, recorded 2026-09-09
+## 80. The fuse that went the other way was a missed refusal, recorded 2026-09-09
 
 §78.10 left one fuse unattributed: a `Frame` and a `Comb` that answered before
 `b4890f1` and are not a solid after it, against `b4890f1`'s stated direction of
@@ -22686,20 +22691,22 @@ fewer wrong answers. It refused to guess which of §16.10's two that refusal is,
 and said the guess would need the same work §78.3 did for the thirty.
 
 Seven lanes did that work. The answer is that the item is written the wrong way
-round: **`b4890f1` closed a gap, and what replaced the old answer is a limit.**
-The old answer was wrong — two solids touching along a segment that neither of
-them recorded — and it survived only because nothing split either edge, so the
-manifold check never saw the four faces it exists to see. That is
-§16.10's gap, and closing it is what `b4890f1` did. Today's refusal is
-§16.10's limit: no arithmetic gave up anywhere in it, and the answer the caller
-asked for is not one a `Model` can hold.
+round: **`b4890f1` fixed a missed refusal, and what replaced the old answer is a
+limit.** The old answer was wrong — two solids touching along a segment that
+neither of them recorded — and it survived only because nothing split either
+edge, so the manifold check never saw the four faces it exists to see. Today's
+refusal is §16.10's limit: no arithmetic gave up anywhere in it, and the answer
+the caller asked for is not one a `Model` can hold. Only that half is one of
+§16.10's two. The other half is not a refusal at all, so §16.10's test does not
+reach it — §80.1 says why, and declines to stretch the word to cover it.
 
-### 80.1 Both halves of the verdict, in §16.10's own words
+### 80.1 Both halves of the verdict, and only one of them is §16.10's
 
 §16.9's test, which §16.10 quotes: a refusal is a **limit** when the answer does
 not exist, and a **gap** when it does and the arithmetic could not reach it.
 §78.10 asked which one today's refusal is. It is worth asking of the old answer
-too, and asking both is what turns the item over.
+too, and asking both is what turns the item over — but only the first question
+is the one §16.10 poses, because the old behaviour was not a refusal.
 
 **The refusal is a limit.** Nothing was approximated on the way to it. The
 certified fuse comes back with a `ProvenanceLog` holding **0 records** in every
@@ -22710,16 +22717,32 @@ not empty. So there is no better arithmetic being waited on. And the answer a
 union would have to return does not exist here: four faces run along one
 stretch, `Model` means an edge is used by exactly two coedges, and §17.4's first
 row settles that a boolean does not get to change what a `Model` is on its way
-past. A limit is deferred, not fixed, and §17.7 row 8 already carries two other
-entries deferred for the same reason.
+past. A limit is deferred, not fixed, and §17.7 row 8 already carries **one**
+other entry deferred for the same reason: "two cubes touching along part of an
+edge", refused `ResultIsNotManifold`. Row 8's other two entries — touching on a
+face, and touching at a corner — are answered, and the catalogue's second
+`ResultIsNotManifold` is in row 2, "two cubes catty-corner, sharing one whole
+edge". Both the table in §17.7 and `catalogue()` in
+`crates/rcad-topo/tests/degenerate_fuses.rs` say so.
 
-**What `b4890f1` removed was a gap.** Before it, this pair fused to two separate
-solids that each looked fine on their own and together were not the union of
-anything: the contact segment appears twice, once in each solid, as two edges
-lying on top of each other with no record of the other. A caller asking for
-`A ∪ B` got a `Fused` back and could not tell. The right answer for this
-configuration — whatever it is — was reachable, and the code walked past it, so
-by §16.10's test the old behaviour was the gap and the fix was a fix.
+**What `b4890f1` fixed was a missed refusal.** Before it, this pair fused to two
+separate solids that each looked fine on their own and together were not the
+union of anything: the contact segment appears twice, once in each solid, as two
+edges lying on top of each other with no record of the other. A caller asking for
+`A ∪ B` got a `Fused` back and could not tell. The kernel wrote an answer to a
+configuration §17.7 refuses, and it wrote it for one of the two shapes that
+relation comes in while refusing the other in the same build (§80.4).
+
+**§16.10 does not classify that half, and this section does not stretch it to.**
+Its test sorts **refusals** — a refusal is a limit when the answer does not exist
+and a gap when it does. The old behaviour was an *answer* where a refusal was
+right, which is the mirror image of that test and not a case of it. Nothing is
+lost by saying so. What §16.10's dichotomy is *for* is deciding which refusals
+§13 rule 3 may defer, and a wrong answer was never deferrable under any rule
+here — `CLAUDE.md`'s first principle is that correctness is paramount and a
+corrupt solid is worse than a crash. It needs no slot in that partition to be a
+defect, and giving it one would leave "gap" meaning nothing narrower than
+"wrong".
 
 §78.10's sentence "this one went the other way" is therefore true of the
 *outcome* and wrong about the *direction*. It went from a wrong answer to a
@@ -22731,7 +22754,13 @@ and not mistakes.
 
 `Error::ResultIsNotManifold { count: 4 }`, raised at
 `crates/rcad-topo/src/fuse/assemble.rs:562` — the only place in `crates/` that
-variant is constructed; every other match of the name is a doc comment.
+variant is constructed, which is what makes this refusal traceable to one line.
+`grep -rn ResultIsNotManifold crates/` gives 35 lines and none of the other 34
+builds one: 18 are doc comments, one is the variant's own declaration in
+`crates/rcad-topo/src/error.rs`, one is a string in the catalogue's table
+printer, and 14 are patterns matching it across five test files. Outside line
+562, `src/` names the variant only in doc comments.
+
 The stage is skin assembly: `Assembly::join_up_what_is_one_face`
 (`assemble.rs:518`) asks `Assembly::darts_along_each_edge` (`assemble.rs:545`)
 for the two darts on each edge, and the whole check is
@@ -22745,7 +22774,8 @@ for the two darts on each edge, and the whole check is
 what the code says should happen and is worth having been run rather than
 argued (§16.10). The same lane reports the refusal is identical in both argument
 orders, sheared and unsheared, and that both inputs validate under
-`Policy::certified()` before the fuse starts. `Assembly::commit` and
+`Policy::certified()` before the fuse starts — that last one on the lane's word
+only, since nothing in the tree checks it (§80.10). `Assembly::commit` and
 `Model::validate` are never reached, so nothing is written — which is why
 §78.10 was right that leaving this open cost nothing but attribution.
 
@@ -22951,13 +22981,13 @@ anybody could keep — it was inconsistent with itself off one catalogue row.
 
 But it does raise a question the catalogue has never been asked. §17.4's first
 row settles that a non-manifold *result* is refused, and §17.7 row 8 records the
-refusals that follow. Whether "two touching solids" should ever be an **answer**
-for row 8 — a `Fused` holding two solids whose boundaries meet on a set of
-measure zero, each individually manifold, and both aware of the contact — is a
-different question from the one those rows settle. It would change §17.4's first
-row, it would change §17.7's table, and it would have to cover the cube pair
-too, because half an answer for one row-8 shape and a refusal for the other is
-exactly the inconsistency `b4890f1` removed.
+one refusal that follows. Whether "two touching solids" should ever be an
+**answer** for row 8 — a `Fused` holding two solids whose boundaries meet on a
+set of measure zero, each individually manifold, and both aware of the contact
+— is a different question from the one those rows settle. It would change
+§17.4's first row, it would change §17.7's table, and it would have to cover
+the cube pair too, because half an answer for one row-8 shape and a refusal for
+the other is exactly the inconsistency `b4890f1` removed.
 
 **It is not decided here, and nothing in this section should be read as
 proposing it.** It has no named consumer (§13 rule 3), and §16.10's refinement of
@@ -22991,6 +23021,13 @@ build of an archived commit:**
 
 - The tolerance sweep at six `Policy::tolerant` values, and the four-dart edges
   `[0,3,2] → [0,2,2]` and `[0,1,2] → [0,2,2]` (Lane A).
+- That both inputs validate under `Policy::certified()` before the fuse starts
+  (Lane A, §80.2). **Nothing in the tree checks it**, and this bullet is here
+  because the claim read as re-derived until somebody looked:
+  `Configuration::build` and `Placed::built_after` in
+  `crates/rcad-topo/tests/pairs/mod.rs` never call `Model::validate`, and
+  neither does Lane F's test. The two `validate` calls in `degenerate_fuses.rs`
+  are on other pairs and on the *answer*, not the inputs.
 - The plane coefficients `1x + 1y = 0` and `4x + 4y = 0`, and the ±1/8
   membership sampling about the segment's midpoint (Lane B).
 - The bisect: 9 steps, 0 skips, 14 direct probes (Lane C).
