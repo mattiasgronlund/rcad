@@ -1,5 +1,5 @@
 [Unit]
-Description=rcad overnight fuzzing (docs/decisions.md §80)
+Description=rcad overnight fuzzing (docs/decisions.md §81)
 
 [Service]
 Type=oneshot
@@ -8,7 +8,7 @@ Type=oneshot
 # machine that lays its worktrees out the way this one does. The tree is not
 # `main`'s worktree and not the hub: `fuzz-overnight` refuses the hub outright,
 # and this one is locked with the reason `overnight fuzzing` so that a by-hand
-# lock sweep can see it belongs to a machine (§80.4).
+# lock sweep can see it belongs to a machine (§81.4).
 WorkingDirectory=%h/git/mattiasgronlund/rcad-nightly-fuzz
 
 # mise by absolute path. systemd starts without a profile, so `just`,

@@ -49,6 +49,11 @@ use rcad_geom::{Deflection, Isometry, PlaneAgreement, Point, Scale, Segment, Vec
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
+mod cones;
+mod pairs;
+
+use pairs::{Configuration, Elsewhere, Placed, Shape, Skew};
+
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
 }
@@ -801,6 +806,163 @@ fn two_cubes_that_only_touch_along_part_of_an_edge() {
 
     let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(volume_of(&model, bitten.solids()), 64.0);
+}
+
+/// The two touching edges **each run past the other**, and the union is refused
+/// all the same.
+///
+/// [`two_cubes_that_only_touch_along_part_of_an_edge`] above is row 8 of §17.7
+/// too, and it is not this case: there the small cube's edge lies wholly inside
+/// the big one's, so one edge splits and the piece of it that is left matches
+/// the other end for end. Here neither contains the other, and the test says so
+/// before it fuses anything — unsheared, the frame's edge runs from `y = 0` to
+/// `y = 3` and the comb's from `y = 1` to `y = 5`, so they share the middle and
+/// each sticks out past it. Both volumes are checked first, so a builder that
+/// quietly changed shape cannot pass its answer off as this overlap's. That is
+/// the shape of overlap nothing in this file pinned, and it is the one §78.10
+/// says changed answer at `b4890f1`. What changed there is §80.4's to tell;
+/// nothing this test runs measures it, so nothing here restates it.
+///
+/// The refusal is right for the same reason as its neighbour's. The two enclose
+/// no space between them — the certified intersection comes back with nothing in
+/// it, which is asserted here rather than argued — so there is no volume for a
+/// union to get wrong. What they do share is faces: where the two edges overlap,
+/// the frame's top cap and its outer wall run alongside the comb's bottom cap
+/// and its own wall. So the refusal is `ResultIsNotManifold` and the count it
+/// carries is 4, both ways round. An edge a `Model` can hold is used by two, and
+/// §17.4 settles that a boolean does not get to change what a model is on its
+/// way past.
+///
+/// So this is §16.10's **limit** and not its **gap**. The log is empty every way
+/// round, so nothing was undecidable and no better arithmetic is being waited
+/// on; the union a caller asked for is simply not a solid this kernel has
+/// anywhere to put.
+///
+/// The lean is run rather than described because §78.10 recorded the pair with a
+/// shear of `-1` and the claim about it is that the shear is beside the point.
+/// Leaning both solids the same way is an affine image of the flat pair, so it
+/// moves every wall off an axis without changing which edge meets which; running
+/// both says so instead of asking to be believed.
+#[test]
+fn two_solids_whose_touching_edges_each_run_past_the_other_cannot_be_united() {
+    for leaning in [Skew::none(), Skew { x_per_y: -1 }] {
+        let (mut model, solids) =
+            a_frame_and_a_comb_whose_touching_edges_each_run_past_the_other(leaning).build();
+        let (frame, comb) = (solids[0], solids[1]);
+        assert_eq!(
+            volume_of(&model, &[frame]),
+            24.0,
+            "five by three by two, less the one-by-three hole through it, leaning {leaning:?}"
+        );
+        assert_eq!(
+            volume_of(&model, &[comb]),
+            12.0,
+            "a comb of one tooth is a plain one by four, extruded three, leaning {leaning:?}"
+        );
+
+        let where_they_meet = |[from, to]: [i32; 2]| {
+            [from, to].map(|y| {
+                let [x, y] = leaning.corner([0, y]);
+                Point::new(f64::from(x), f64::from(y), 2.0)
+            })
+        };
+        assert!(
+            has_an_edge_from_end_to_end(&model, frame, where_they_meet([0, 3])),
+            "the frame's edge runs its whole depth and stops short of the comb, {leaning:?}"
+        );
+        assert!(
+            has_an_edge_from_end_to_end(&model, comb, where_they_meet([1, 5])),
+            "the comb's starts inside the frame's and runs out past it, {leaning:?}"
+        );
+
+        for (arguments, tools) in [([frame], [comb]), ([comb], [frame])] {
+            let why = refusal_nothing_was_undecidable_about(&mut model, &arguments, &tools);
+            assert!(
+                matches!(why, Error::ResultIsNotManifold { count: 4 }),
+                "the frame's cap and wall and the comb's cap and wall all run along the stretch \
+                 the two share, so the union would use each edge along it four times, \
+                 leaning {leaning:?}: {why:?}"
+            );
+        }
+
+        let shared = fused(&mut model, &[frame], &[comb], Rule::Intersection);
+        assert!(
+            shared.solids().is_empty(),
+            "they touch along a segment and share no space, leaning {leaning:?}"
+        );
+    }
+}
+
+/// §78.10's configuration, leaning both solids the same way by `leaning`.
+///
+/// Built as a [`Configuration`] out of the generators' own [`Shape`]s rather
+/// than written out again with this file's `block` helper, so that the pair the
+/// assertions are about is the pair the corpus draws and stays that pair if a
+/// shape's corners are ever redrawn.
+fn a_frame_and_a_comb_whose_touching_edges_each_run_past_the_other(leaning: Skew) -> Configuration {
+    Configuration {
+        solids: vec![
+            Placed {
+                shape: Shape::Frame { width: 5, depth: 3 },
+                skew: leaning,
+                height: 2,
+                at: [0, 0, 0],
+            },
+            Placed {
+                shape: Shape::Comb {
+                    teeth: 1,
+                    tooth_height: 3,
+                },
+                skew: leaning,
+                height: 3,
+                at: [-1, 1, 2],
+            },
+        ],
+        turn: None,
+        elsewhere: Elsewhere::here(),
+    }
+}
+
+/// Whether a solid has a straight edge with exactly those two ends, either way
+/// round.
+///
+/// Exactly, and not "runs through them": the claim it is used for is about how
+/// far each of the two edges reaches, so an edge that merely covers the stretch
+/// would answer the wrong question.
+fn has_an_edge_from_end_to_end(model: &Model, solid: SolidKey, [one, other]: [Point; 2]) -> bool {
+    edges_of(model, solid).into_iter().any(|edge| {
+        [edge.start(), edge.end()] == [one, other] || [edge.start(), edge.end()] == [other, one]
+    })
+}
+
+/// The refusal a certified union came back with, and its word that nothing in it
+/// had to be approximated.
+///
+/// [`refusal`] above does not look at the log, and here the log is half the
+/// claim: an empty one says the union was turned away for what the answer's
+/// topology is and not for arithmetic that ran out of room.
+fn refusal_nothing_was_undecidable_about(
+    model: &mut Model,
+    arguments: &[SolidKey],
+    tools: &[SolidKey],
+) -> Error {
+    let mut log = ProvenanceLog::new();
+    match model.fuse(
+        arguments,
+        tools,
+        Rule::Union,
+        &Policy::certified(),
+        &mut log,
+    ) {
+        Ok(fused) => panic!("expected a refusal, got {} solids", fused.solids().len()),
+        Err(why) => {
+            assert!(
+                log.is_empty(),
+                "a certified fuse of an exactly representable pair records nothing at all"
+            );
+            why
+        }
+    }
 }
 
 /// Two cubes that meet at exactly one point.

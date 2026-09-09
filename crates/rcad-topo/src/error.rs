@@ -140,7 +140,8 @@ pub enum Error {
     /// (decisions.md §17.4).
     #[error("the result would not be a solid: an edge would have {count} faces along it")]
     ResultIsNotManifold {
-        /// How many faces would meet along the worst edge.
+        /// How many faces would meet along the first bad edge found. The check
+        /// stops there, so a worse edge may be sitting further along.
         count: usize,
     },
 

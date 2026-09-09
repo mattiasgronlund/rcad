@@ -1689,7 +1689,7 @@ fuzz_log_root := env_var_or_default("RCAD_FUZZ_LOGS", env_var("HOME") / "rcad-fu
 
 # Where the overnight run accumulates what it finds worth keeping.
 #
-# **Outside the tree, and that is the whole of decision §80.** The corpus under
+# **Outside the tree, and that is the whole of decision §81.** The corpus under
 # `fuzz/corpus/` is tracked, 30 MB of it; eight hours a night would add
 # thousands of files to it, so the tree would be dirty every morning and every
 # lane would merge past a thousand-file commit it never read. So the tracked
@@ -1857,7 +1857,7 @@ fuzz-fuse duration="60" corpus_root="": (fuzz-target "two_solids_fused_by_a_stra
 # With no `corpus_root` — a hand-run `just fuzz 60` — libFuzzer gets no corpus
 # argument and writes to the tracked `fuzz/corpus/<target>` as it always has.
 # With one, that directory becomes the *second* argument and libFuzzer treats it
-# as a read-only seed, writing only to the first (§80).
+# as a read-only seed, writing only to the first (§81).
 [private]
 fuzz-target target duration corpus_root="" max_len="":
     #!/usr/bin/env bash
@@ -1949,7 +1949,7 @@ check-fuzz-overnight-selftest:
         || fail "the summary line does not name the target that died"
 
     # Two: the tracked corpus is a read-only seed and never the directory
-    # libFuzzer writes to, which is the whole of §80. Order is the only thing
+    # libFuzzer writes to, which is the whole of §81. Order is the only thing
     # that says so, and only `fuzz` carries `-max_len`.
     grep -q "run where_two_surfaces_cross $dir/corpus/where_two_surfaces_cross corpus/where_two_surfaces_cross " "$dir/log" \
         || fail "the night's own corpus is not first, so libFuzzer would write into the tracked one"
