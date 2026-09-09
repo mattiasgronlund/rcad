@@ -19938,6 +19938,25 @@ panic because it never looks. Once it looks, §4.1's panic is back by default, a
 Mattias's proposal is that release should instead record and return. §66.4 is
 where that stops being uniform.
 
+**Implemented 2026-09-09 by §81, two days late and not quite as written.** The
+four touched checks lost their gates exactly as this subsection says. The
+post-write sweep did not: **the headline figure above does not cover a model
+holding geometry the fuse never touched.** "A model the fuse has already spent
+tens of milliseconds on" is true of the workloads §66.2 measured, where the
+fuse built the model itself and its own cost grows faster than the sweep's. Fuse
+two small blocks in a model of 5040 faces and the sweep is 15 times the fuse
+(§81.7). Worse, a whole-model sweep can *fail* for a solid the fuse never
+touched, because the coordinate range is a fold over every solid there is — now
+a test in the tree (§81.5).
+
+So what runs after every fuse, in every build, is
+`Model::check_what_was_just_written`: eleven of the sweep's thirteen checks,
+asked of the entities the fuse wrote and of nothing else, with the sweep's own
+tolerances so that an answer it accepts is one `Model::validate` accepts. §81.4
+is the argument that this asks the same questions. The half separated out above
+is unchanged — the check still panics, and §66.7's first item is still what
+stands between it and an `Err`.
+
 ### 66.4 Which operations can return `Err`, and which cannot
 
 The line is not "does this operation document `# Atomic`". It is **can the check
@@ -20077,11 +20096,21 @@ nothing. What is *not* free is the check itself, and §66.2 is the answer to tha
 
 ### 66.7 What this leaves open
 
+**§81 closed none of these.** What it closed is §66.3 — the checks now run in
+every build — and running the check was always the half separated from what the
+check does when it fails. All four items below stand, with one sentence in the
+first of them corrected.
+
 **`Assembly::commit` needs a scratch model before the fuse's panic can become an
 `Err`.** §66.4 says why and says what shape it takes. Nobody has measured the
 copy — the sweep half is measured above and is free at a fuse's scale, and the
 copy is an unknown that is probably also free at that scale and certainly is not
-at `add_extrusion`'s.
+at `add_extrusion`'s. **Still open after §81**, which put the check in and left
+the `expect` where it was: Mattias chose the branch where a failure still panics,
+so the scratch-and-copy is unbuilt and unpriced. "The sweep half is free at a
+fuse's scale" is the sentence §81.7 corrects — it holds where the fuse built the
+model and not where the model holds geometry the fuse never touched, and the
+check that actually went in is local for that reason (§66.3's amendment).
 
 **Whether `place_solid` should roll back with the inverse isometry.** It can:
 `movement` is invertible. Whether an operation that discovers a broken solid
@@ -22476,8 +22505,8 @@ figures above are the first of those.
 
 Both were left open deliberately, and both are written out in enough detail to
 pick up cold. **The first is closed now, by §80, and it closed the opposite way
-round from the way this subsection guessed the question.** The second is still
-open and is with Mattias.
+round from the way this subsection guessed the question.** **The second is
+closed by §81, and it was not open when this was written.**
 
 **One fuse went the wrong way at `b4890f1`.** Of today's 7 leaning-alike
 not-a-solid cases, six are members of the old 17 and one is new:
@@ -22529,6 +22558,22 @@ Related in shape to §66: a promise the doc makes that the release build does no
 keep. Not changed here because it is a real decision with a cost on both sides —
 a full `validate` per commit is the quadratic sweep §4.3 exists to avoid — and it
 is not this lane's to make.
+
+**Closed 2026-09-09 by §81, and the paragraph above is left standing for the
+same reason the one above it is.** Not a real decision with a cost on both sides:
+**§66.3 had already decided it**, two days earlier and about this exact line,
+and §4.1's middle row and §4.3's first bullet had both carried the amendment
+since. What this paragraph did was read §4.3 as it stood *before* §66 amended
+it, and so re-open a settled question — "related in shape to §66" was closer to
+the truth than it reads, because it *is* §66, unimplemented.
+
+The observation itself is the useful part and none of it is wrong: `was_sound`
+really was a silencer and not a check, and the doc comment really did explain
+the conditional without mentioning the gate. §81.1 keeps both. Where the
+paragraph guessed at the cost it also guessed low-and-high at once — the sweep
+is not the quadratic one §4.3 is about *per operation*, and it is worse than
+§66.3 assumed on a model the fuse did not build. §81.7 measures both halves, and
+what went in is a local check for that reason.
 
 ### 78.11 The figures in this section that nothing re-derives
 
@@ -23182,3 +23227,401 @@ warns about, now measured rather than inferred.
 Lane E's and Lane G's are the ones worth re-running if this is ever reopened,
 because §80.1's verdict rests on them: §80.5 is why the old answer was wrong,
 and §80.6 is why `b4890f1` is not merely trading one wrong answer for another.
+
+---
+
+## 81. A fuse that was never asked what it wrote, recorded 2026-09-09
+
+§66.3 settled it in a paragraph: the four touched checks and `Assembly::commit`'s
+post-write check run in every build. §4.1's middle row and §4.3's first bullet
+were amended the same day to say so, and both still carry the amendment. The code
+was never changed. The four `if !cfg!(debug_assertions) { return; }` guards stayed
+exactly where §66.1 found them, and `commit`'s `was_sound` kept its
+`cfg!(debug_assertions) &&`.
+
+Two days later §78.10 walked into that same `was_sound` line from the other
+direction, did not connect it to §66, and wrote the question down again as open
+— "a real decision with a cost on both sides — a full `validate` per commit is
+the quadratic sweep §4.3 exists to avoid". That reads §4.3 as it stood *before*
+§66 amended it, and it re-opened a question that had been answered.
+
+Both halves of that sentence needed work, and only one of them was simply wrong.
+The question was not open. But the thing standing in the code really was the
+quadratic sweep, so "§66.3 said run it, so run it" would have shipped a
+whole-model `Model::validate` after every fuse — and this unit measured that
+choice and did not make it. What went in is a **local** check over the entities
+the fuse wrote, which is a different function from the one §66.3 named, arrived
+at by measurement rather than by merging §66's own words.
+
+### 81.1 What §66.3 decided, and what the code did instead
+
+§66.3 is fourteen lines and it decides two things. The four touched checks lose
+their `debug_assertions` gates, because they cost 50–65 ns a face of *one solid*
+and the O(n²) §4.3 gated them for is the full sweep's, not theirs. And
+`assemble.rs`'s post-write sweep runs in every build too, "one `Model::validate`
+of a model the fuse has already spent tens of milliseconds on".
+
+Neither happened. What a caller got instead is §66.1's answer, unchanged: in a
+release build a broken invariant produced neither of §4.1's two responses — no
+panic, no `Err`, and a solid that does not validate handed back as `Ok`.
+
+The second gate was worse than a gate. `was_sound` was
+
+    cfg!(debug_assertions) && model.validate(policy, &mut ProvenanceLog::new()).is_ok()
+
+and the check below it ran only `if was_sound`. Read as a check that is what it
+looks like; read as a **silencer** it is what it did. A model that did not
+already validate — for any reason, including one this fuse had nothing to do
+with — made `commit` skip its own post-check rather than complain about
+anything. So the one case where a fuse is most likely to be handed something
+odd is the case where nobody looked at what it wrote.
+
+The doc comment above it explained, at length and correctly, *why the check
+stands down when the model was not sound before the write*: a whole-model sweep
+would report somebody else's broken solid as this fuse's bug. That reason is
+real, it survives into what replaced it, and §81.5 is the test for it. What the
+comment never said is that the whole check was debug-only as well.
+
+### 81.2 Why the gate could never have seen it
+
+`Cargo.toml` has a `[profile.test]` and it sets `opt-level = 2` and nothing
+else, with a comment saying so deliberately: "`debug-assertions` and
+`overflow-checks` are separate settings and stay on, so every `debug_assert!`
+the kernel checks itself with still fires and no test verifies less than it
+did." There is no `[profile.release]` section at all.
+
+Which is exactly right for what that comment is about, and it means
+`cargo nextest run` **never builds the code path that ships**. Every
+`cfg!(debug_assertions)` in this crate reads `true` under the suite, in the
+optimised profile as much as the unoptimised one. A check gated on it is
+untested by construction, and so is its absence.
+
+The demonstration, and it is the reason this subsection exists rather than
+being an observation: the implementing lane deleted the fuse's self-check
+**entirely** — not the gate, the whole `if was_sound { … }` block — and the gate
+passed 1816 of 1816. That count is the suite as it stood before this unit's own
+tests went in; the tree this section is recorded on runs 1820, all passing.
+Nothing in the suite was holding that check in place. A
+gate cannot notice a check it never compiles, and this is what §16.10's
+sufficiency species looks like when the thing being trusted is the test suite
+itself.
+
+### 81.3 The two halves, as built
+
+**The touched checks.** The four early returns in `crates/rcad-topo/src/model.rs`
+are gone and `check_touched_solid`, `check_touched_face`, `check_touched_wire`
+and `check_touched_edge` run in every build, which is §66.3's first half taken
+literally because §66.2 had already priced it. Two unit tests in that file were
+`#[cfg(debug_assertions)]` for the sole reason that the check they exercise was;
+both lost the attribute and now run in whatever profile the suite is built in.
+
+**The fuse's post-write check.** `was_sound` is gone, and with it both its gate
+and its silence. In its place `Assembly::commit` calls a new
+`Model::check_what_was_just_written`, in every build, and `expect`s it:
+
+    model
+        .check_what_was_just_written(&written, policy, &mut ProvenanceLog::new())
+        .expect("a fuse writes a valid answer or does not write at all");
+
+`Written` grew the three lists it did not carry — coedges, wires and shells —
+because `write_into` was already minting them and only threw the slots away.
+
+The `expect` is deliberate and it is the branch Mattias chose. §66.5's
+`Error::TheKernelIsWrong` is not built here and §66.4 says why: `commit` writes
+into the caller's arena before anything checks it, so an `Err` would hand back
+an error *and* leave the orphans behind. Turning the panic into a return needs
+the scratch model §66.7's first item is about, and that is still unpriced. This
+unit made the check happen; it did not change what happens when it fails.
+
+### 81.4 Why asking only the new entities asks the same questions
+
+`Model::validate` runs thirteen checks. `check_what_was_just_written` runs
+eleven of them, over the written entities and nothing else, and the argument
+that this asks the same questions is structural rather than a hope.
+
+`Assembly::write_into` builds **every** entity fresh — vertices, edges, coedges,
+wires, faces, shells, solids — and links them by indices into its own local
+vectors. Nothing new points at anything old, and nothing old points at anything
+new. The written entities are therefore a piece of the arena on their own,
+closed under "refers to".
+
+That is what makes the sweep's *counting* loops local despite reading global.
+"Is this face used by exactly one shell" is a count over every shell in the
+model — but an untouched face's shells cannot have changed, and a new face can
+only be named by a new shell. The same argument carries the orphan check, and
+the used-once counts for coedges, wires, faces and shells alike.
+
+**The two that are left out, and why each is left out for its own reason.**
+
+`check_dynamic_range` is genuinely global and cannot be made local by this
+argument: it folds the largest coordinate and the smallest feature over every
+solid there is, so two solids that are each fine can be too far apart to compute
+between. Asked after the write it fails a fuse for where somebody else's solid
+sits, which is §81.5. The local form of the same question is asked, and asked
+*before* the write, by `Assembly::check_dynamic_range` behind
+`the_inputs_fit_in_f64` — the answer's own coordinates against the answer's own
+shortest edge.
+
+`check_keys_resolve` is left out because there is nothing here for it to find.
+Every key these checks follow was minted by `write_into` microseconds earlier,
+and where the local check reaches into an arena it indexes it directly, so a key
+that did not resolve panics rather than coming back as `Invalid::DanglingKey`.
+Under §4.1 that is the right response to this crate having broken its own arena,
+and it is not a question a caller's input can raise.
+
+### 81.5 The check that fired for somebody else's solid
+
+The whole-model sweep at commit is not merely expensive. It can **fail for a
+solid the fuse never touched**, and that is now a test in the tree rather than a
+paragraph: `crates/rcad-topo/tests/a_fuse_is_not_blamed_for_a_solid_it_never_touched.rs`.
+
+Three blocks, each 2 mm on a side. One sits at `1024`. Two sit at the origin,
+the second offset so it overlaps the first in one corner by exactly `2^-30`, so
+the union carries edges that short. Every number is exact, so
+`Policy::certified()` decides everything and a refusal would be a bug rather
+than the arithmetic giving up.
+
+The arithmetic, against `DynamicRange::LARGEST_SUPPORTED_RATIO` of `1e11`:
+
+| Asked of | Largest coordinate | Shortest feature | Ratio |
+|---|---|---|---|
+| The far block alone | 1026 | 2 | 513 |
+| The answer alone | just under 4 | `2^-30` | 4.3e9 |
+| The whole model | 1026 | `2^-30` | 1.1e12 |
+
+So the fuse's own pre-write range check passes, correctly, and a whole-model
+range check after the write does not. On the unchanged tree that is a panic:
+
+    a fuse writes a valid model or does not write at all:
+      Invalid(DynamicRangeTooWide { ratio: 1101659111424.0 })
+
+for a step cut near the origin and a block a thousand millimetres away that this
+fuse never looked at. `1026 × 2^30` is `1 101 659 111 424` exactly, which is the
+ratio in the message — the `1026` and not `1024` because the far block spans
+`1024` to `1026`.
+
+**The test is not a tautology, and the file says how it avoids being one.** A
+fuse that quietly failed to make a `2^-30` step would pass a test that only
+asserted `Ok`. So it asserts instead that the model afterwards is one
+`Model::validate` *refuses*, by name and with a ratio past the limit — the
+whole-model check firing, which is precisely what the commit-time sweep would
+have panicked on — with the fuse having answered and committed anyway. A second
+test runs the same fuse with nothing else in the model and requires both the
+answer and a full `validate` to pass, which is the control that says the refusal
+above is the far block's doing and not the step's.
+
+### 81.6 The touched checks were guarding something real
+
+`model.rs` carries two tests named `a_mutation_notices_…`: one swaps a wire's
+steps so the wire no longer closes, the other grows an edge a third coedge, and
+both then call `place_solid` and expect a panic. Both were `#[cfg(debug_assertions)]`,
+with a doc comment explaining that the check they exercise is not there in a
+release profile.
+
+With the gates still in place and the two attributes taken off,
+
+    mise exec -- just t -p rcad-topo --cargo-profile release -E 'test(a_mutation_notices)'
+
+fails with "test did not panic as expected". A release build walked straight
+past a wire whose steps had been swapped, reached through the public
+`place_solid`. That is the guard §66.1 said was missing, demonstrated on this
+tree rather than argued.
+
+The cost of putting it back was re-derived here at **48.0 ns per face** of the
+solid handed in. §66.2 measured 50–65 ns on its own shapes and the committed
+comment in `model.rs` still says 50–65; the implementing lane's own run gave
+42–53. Three measurements of the same quantity, agreeing to within the spread,
+and none of them large enough to argue about: `place_solid` on a 202-face solid
+pays about ten microseconds.
+
+### 81.7 What the sweep costs, and what went in instead
+
+This is the half §66.3 got from a single workload, and the half where a
+different workload gives a different answer.
+
+**The sweep is linear in the whole model, not in the answer** — measured here at
+1.94 µs a face, and `commit` swept twice, once for `was_sound` and once for the
+post-check. §66.2 measured 3.4–4.4 µs a face for the same sweep on its own
+shapes. The two are not in conflict about the shape of the cost, which is what
+matters: linear in the model, whatever the constant.
+
+**Where the fuse built the model itself, §66.3's reading holds.** A 60-union
+chain growing to 8046 faces came out *nominally faster* with the sweep on than
+off — the difference is under a percent and inside the noise, and the reason it
+can go either way is that the fuse's own cost grows as about O(n^1.7) against
+the sweep's O(n). At that scale the sweep really is free, exactly as §66.3 says.
+
+**Where the model holds geometry the fuse never touched, it does not.** The
+fuse's own cost is then flat — 1.34 ms, because it is working on the same two
+small solids however much else is lying about — and the sweep is not:
+
+| Faces in the model | Sweep, against the fuse's own 1.34 ms |
+|---|---|
+| 240 | 1.3× |
+| 5040 | 15× |
+
+That is the case §66.2's headline figure does not cover, and it is why what went
+in is `check_what_was_just_written` and not `Model::validate`. §66.3's phrase "a
+model the fuse has already spent tens of milliseconds on" describes the first
+workload and quietly assumes it.
+
+**The cost, before and after**, per fuse of two fixed blocks in a model that
+grows around them:
+
+| Faces in the model | Per fuse, before | Per fuse, after |
+|---|---|---|
+| 492 | 3.79 ms | 2.07 ms |
+| 1452 | 7.15 ms | 1.70 ms |
+| 4332 | 18.07 ms | 1.72 ms |
+
+Before, 4.8× over an 8.8× model — the fuse's cost was mostly not the fuse.
+After, flat, which is what "local" is supposed to mean. Those are the gate
+agent's numbers; the implementing lane's own run gave 2.68 / 6.37 / 17.50 before
+and 1.71 / 1.65 / 1.86 after, the same shape and the same conclusion.
+
+The comparison is not quite like for like and it is worth saying which way it
+leans: "before" is the debug-gated code with its sweep forced on, so it includes
+the `was_sound` sweep the release build never paid for. What the release build
+paid for before this unit was nothing at all, because it looked at nothing.
+
+### 81.8 The tolerance decision inside the decision
+
+`check_edges` and `check_faces` are local walks, but their tolerances are not
+local: `Model::allowed_wobble`, `Model::what_writing_a_plane_down_costs` and
+`Model::what_writing_a_point_down_costs` all read `Model::largest_coordinate`,
+an uncached fold over every vertex in the model, measured at 3.4 ns a vertex.
+
+So a local check has a choice, and it is a choice about *answers* and not about
+speed. Fold over the answer only and the tolerances get tighter, because the
+answer's largest coordinate is no larger than the model's — which would make the
+commit check **stricter** than `Model::validate`, and a fuse could then panic on
+an answer the public sweep is perfectly happy with. Cheaper, and it changes what
+is valid.
+
+The other way was taken. The three helpers now take the largest coordinate as an
+argument, and each caller folds once and hands it down. `check_what_was_just_written`
+therefore judges a face by exactly the number the full sweep would judge it by:
+**an answer it accepts is one `Model::validate` accepts, but for the coordinate
+range.** That equality is the whole reason the local check can stand in for the
+sweep, and it is worth more than the microseconds.
+
+The full sweep got cheaper as a side effect, because it had been folding more
+than once: `check_edges` went from two folds over every vertex to one, and
+`check_faces` from three to one.
+
+### 81.9 Three sentences that were false in every build
+
+Two doc comments and one reachability argument, all three corrected in code by
+this unit.
+
+**`Model::fuse` promised a panic nothing raises.** Its `# Panics` said it panics
+"if an input solid is broken in a way `Model::validate` rejects". Nothing has
+ever asked that question — not in debug, not in release. What a broken input
+actually does is trip an assert somewhere further in, under whatever name that
+site gives it, which is a different promise and the one now written down.
+
+**`was_sound` read as a check and behaved as a silencer**, which §81.1 has.
+
+**The doc comment on `check_no_flat_face_is_used_reversed` claimed the
+turned-round wall was reachable through the public API** — `validate.rs:663`
+before this unit moved it — and that claim was doing real work: it is what made
+the `AFlatFaceIsUsedReversed` check §16.11's kind rather than a hardening
+exercise.
+It is no longer true. `SolidBuilder::build` refuses that shape by name, and
+`building_a_solid_out_of_faces.rs` has asserted so all along — the test was
+there while the paragraph beside the check said the opposite. This is §16.10's
+unreachability species with the sign flipped: a claim that something *is*
+reachable, gone stale, and stale in the direction that makes an absence look
+better justified than it is.
+
+### 81.10 What this closes, what it does not, and what it opened
+
+**Closed.** §66.3 is implemented on both halves, with the local check standing
+in for the full sweep for the reason §81.7 measures. §78.10's second open item
+is closed by this section, and the paragraph there is left standing the way
+§78.10's first item's was, because what it got wrong is the useful part.
+
+**Still open, unchanged.** §66.7's first item — `Assembly::commit` needs a
+scratch model before the fuse's panic can become an `Err` — is not touched here.
+Mattias chose the branch where a failure still panics, and the scratch-and-copy
+is still unpriced. §66.7's other three items are untouched too: `place_solid`'s
+rollback, whether "valid" should depend on a policy, and the +7.9% on
+`add_extrusion` waiting for an importer to weigh it against.
+
+**Opened, and it is a correctness hole with a demonstration.** `key.rs`'s
+`ModelId` is `struct ModelId(u64)` fed by an atomic counter under
+`#[cfg(debug_assertions)]`, and `struct ModelId;` — a zero-sized type, every
+model carrying the same one — under `#[cfg(not(debug_assertions))]`. The comment
+says it plainly: "the check costs nothing and proves nothing". So in a release
+build a key from another live model resolves silently against whatever now sits
+in that slot. Three lines through the public API: `large.solid(one)` returns the
+wrong solid, and `large.fuse(&[one], …)` returns **`Ok`** with a union of two of
+`large`'s own solids, volume 1500 where the caller asked about a 1 mm³ cube.
+
+The reason it was a zero-sized type was cost, and the cost is not there. Making
+the id real grows the arena by **exactly zero** — nothing stored in a `Model`
+holds a key; every payload refers by slot — with peak RSS up 0.1% on a 231
+195-entity STEP import and about 2% on the paths that mint keys.
+
+It is with Mattias as its own unit, and the open question is not whether to fix
+it. It is **how a release-only behaviour gets a test at all**, since §81.2 is the
+answer for this one too: the gate runs the dev profile and cannot see it.
+
+### 81.11 What this section re-derived, and what it took on a lane's word
+
+§78.11's habit, kept, and §80.10's columns.
+
+**Re-derived from this tree while writing this section.** The thirteen checks in
+`Model::validate` and the eleven in `Model::check_what_was_just_written`, by
+reading both bodies at `crates/rcad-topo/src/validate.rs:92` and the function
+below it — the two left out are `check_keys_resolve` and `check_dynamic_range`,
+which is what §81.4 says. `Cargo.toml`'s `[profile.test]` setting `opt-level = 2`
+and nothing else, and the file having no `[profile.release]` at all. The four
+early returns gone from `model.rs` and the two `#[cfg(debug_assertions)]`
+attributes gone from the `a_mutation_notices_…` tests. `was_sound`'s exact old
+text and the `expect` that replaced it. The three tolerance helpers taking
+`largest_coordinate` as an argument, and `check_edges` folding once where it
+folded twice. `ModelId`'s two definitions at `crates/rcad-topo/src/key.rs:20`
+and `:38`.
+
+**Re-derived as arithmetic.** §81.5's whole table. `1026 × 2^30 =
+1 101 659 111 424`, which is the ratio in the panic message to the digit; `1026 /
+2 = 513` for the far block alone; `4 × 2^30 ≈ 4.3e9` for the answer alone. The
+test file asserts the shape of that refusal on every `just gate`, so the
+committed part of it is not one lane's measurement on one day.
+
+**Taken on a lane's or the gate agent's word, needing a build the suite does not
+make or instrumentation that is not checked in:**
+
+- The gate passing **1816/1816 with the fuse's self-check deleted entirely**
+  (the implementing lane). This is the load-bearing one in §81.2 and it is a
+  counterfactual build, so nothing in the tree can hold it.
+- The **panic on the unchanged tree** in §81.5 — the exact message and the exact
+  ratio, produced by reverting `assemble.rs` and `model.rs` in a scratch copy
+  and running the new test against them (the gate agent). The ratio is
+  re-derivable as arithmetic; that this is what the old code printed is not.
+- **48.0 ns a face** for the touched checks (the gate agent), against 42–53 from
+  the implementing lane and §66.2's 50–65. The `release`-profile run of the two
+  un-gated `a_mutation_notices_…` tests failing with "test did not panic as
+  expected" is likewise a build nothing keeps.
+- **1.94 µs a face** for the sweep, and that `commit` swept twice.
+- The **60-union chain** to 8046 faces coming out nominally faster with the
+  sweep on, and the fuse's own cost growing as about O(n^1.7).
+- The **untouched-geometry row**: the fuse flat at 1.34 ms, the sweep 1.3× it at
+  240 faces and 15× at 5040.
+- §81.7's **before-and-after table**, 3.79 / 7.15 / 18.07 → 2.07 / 1.70 / 1.72
+  ms (the gate agent), with the implementing lane's 2.68 / 6.37 / 17.50 → 1.71 /
+  1.65 / 1.86 beside it. Two runs on two machines agreeing about the shape is
+  the claim; neither is a benchmark in the tree.
+- **3.4 ns a vertex** for `Model::largest_coordinate`.
+- Everything in §81.10's last part: the three-line release-build demonstration
+  and its volume of 1500, the zero arena growth, the +0.1% peak RSS on a
+  231 195-entity STEP import and the ~2% on key-making paths.
+
+**What nobody established, so nothing above should be read as saying it.** No
+measurement here was taken on a model whose untouched geometry is *curved* —
+§81.7's flat-fuse rows are planar blocks, as §66.2's were. And the local
+check's equality with the sweep in §81.8 is an argument from the tolerances
+being the same numbers, plus §81.4's structural claim about `write_into`; it is
+not a differential run of both checks over a corpus. Either would be worth
+having if this is ever reopened.
