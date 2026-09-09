@@ -22883,10 +22883,14 @@ from an old one.** `git show b4890f1 -- crates/rcad-topo/src/fuse/cuts.rs`
 changes one loop: `for other in (one + 1)..solids.len()` becomes
 `for other in one..solids.len()`, with `let from = if one == other { mine + 1 }
 else { 0 }` inside it. Put that bound behind an environment switch in a copy of
-`c4f29af` and turn own-solid cuts off, and today's tree answers again: the
-arrangement falls from 46 faces back to 28 and the frame's cut list back to the
-comb's four planes. One loop bound, both directions, on current code — §80.10
-has Lane K's method and what it did not establish.
+`c4f29af` and turn own-solid cuts off, and today's tree does not merely answer
+again — **it builds `c66bdca`'s arrangement exactly.** Lane K diffed the whole
+dumped block rather than the lines it cared about: all 63 lines equal, edge for
+edge, same edge indices, both endpoint fields and both face planes on every one.
+The 28 faces are the same 28, and `x = 0, z = 2` carries the same five edges
+listed above. One loop bound, both directions, on current code — and for this
+pair nothing else that landed since `c66bdca` moves the arrangement at all.
+§80.10 has the method and what it did not establish.
 
 That is why §78.8's aggregate and this case are not in tension. `b4890f1` did
 not make the kernel refuse more; it made it *notice* more, and one of the things
@@ -23091,18 +23095,30 @@ build of an archived commit:**
   demonstration and not a story about an archived commit (Lane K). `b4890f1`'s
   whole change to `cuts.rs` is one loop bound; behind an environment switch in a
   copy of `c4f29af`, turning own-solid cuts off makes today's tree answer, drops
-  the arrangement from 46 faces to 28, and returns the frame's cut list to the
-  comb's four planes.
+  the arrangement from 46 faces to 28 and **reproduces `c66bdca`'s arrangement
+  exactly** — all 63 lines of the dumped block equal, edge for edge, same edge
+  indices, both endpoint fields and both face planes on every one. The probe
+  prints four blocks and all four match: the two input solids at 10 and 6 faces,
+  the arrangement at 28, and the assembly after joining at 16.
 
-Three things Lane K did not establish, so nothing above should be read as
-saying them. It ran the **unsheared** configuration only, taking §78.10's word
-that the shear makes no difference. It did not chase why the `y = 2` corner
-survives on the frame side once it exists, noting only that the refusal fires
-straight out of the arrangement, before any joining. And its two reports of
-"the contact edges" are at different stages — five arrangement edges at
-`c66bdca`, against the two unsplit edges §80.5 records in the committed
-*answer* for the counterfactual — so nothing here claims the counterfactual
-reproduces `c66bdca`'s arrangement edge for edge.
+      LANE_K_DUMP=1 LANE_K_NO_OWN_CUTS=1 mise exec -- \
+        cargo test -p rcad-topo --test lane_k_probe -- --nocapture
+
+Two things Lane K did not establish, so nothing above should be read as saying
+them. It ran the **unsheared** configuration only, taking §78.10's word that the
+shear makes no difference. And it did not chase why the `y = 2` corner survives
+on the frame side once it exists, noting only that the refusal fires straight
+out of the arrangement, before any joining.
+
+**The two stages are tied together by measurement, and it is worth keeping them
+apart in the reading.** An earlier listing of "the contact edges" as the two
+unsplit ones `(0,0,2) → (0,3,2)` and `(0,1,2) → (0,5,2)` was the post-join
+block, not the arrangement: the label was wrong and the numbers were not.
+Joining folds the frame's `[0,1]` and `[1,3]` into one edge and the comb's
+`[1,2]`, `[2,3]` and `[3,5]` into one, dropping the corners at `y = 1`, `2` and
+`3` because they stopped being corners — and what is left is §80.5's committed
+answer. Five edges before, two after, at both trees. That is the distinction
+§80.5 warns about, now measured rather than inferred.
 
 Lane E's and Lane G's are the ones worth re-running if this is ever reopened,
 because §80.1's verdict rests on them: §80.5 is why the old answer was wrong,
