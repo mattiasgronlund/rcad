@@ -19364,6 +19364,55 @@ finding: a verification is not exempt from the sample-set question just
 because it is a verification. "Did the check see both spellings" has to be
 asked again at every hop, including the hop whose job is to ask it.
 
+### 62.11 A correction that was written, correct, and could not reach anyone
+
+Every arm above is about a claim that was never able to be true. This one is
+about a claim that **was** repaired, on time, by someone who did the work — and
+went on spreading anyway, because a fix that has not landed cannot be read.
+
+On 2026-09-08 three sessions told the dispatcher that rcad's CI had never
+succeeded. One quoted "26 runs, 26 failures"; another said the next run would be
+"the interesting one" because none had ever gone green. Both false: three
+successes, two of them pushes to `main`, re-derived twice from `gh run list`.
+
+**Neither session was careless, and the path is the finding.** `origin/main`'s
+CLAUDE.md still said both things, because the correction sat gated and unlanded
+in `0a917e9`. One session then traced its own copy and found it had come from
+*another session*, not from the file. So the route was CLAUDE.md → session →
+session → dispatcher, and by the time the correction existed the error was
+replicating between agents without touching the document it came from.
+
+**Landing the fix does not retract what is already in three contexts.** It took
+two messages from the dispatcher and a third from a peer to catch up with a
+sentence that was already wrong when it was copied. A record that cannot be read
+is worse than no record, because it is trusted.
+
+That is a different shape from §62.8–62.10. Those are about a sample set that
+could only return one answer. This is about **latency**: the correction was
+written, was right, was gated, and was unreachable, while the error kept moving.
+The rule that falls out is not about sweeps at all — **a correction is not
+delivered when it is written, it is delivered when it lands.** Until then the
+old sentence is still the one being read, and anyone told the new one is holding
+it on your word rather than the record's.
+
+**The same day gave the duplicated-copy version of it.** "No `just default` run
+has gone green on `main`" was true when written and lived in three files —
+`ci.yml`'s header, §77.5, and CLAUDE.md. A green run made all three false at
+once, and two sessions between them had flagged only two of the three. Landing a
+repair in one copy leaves the others standing and *looking* authoritative. This
+is §64's rule arriving from the other direction: §64 says do not keep a second
+copy of a fact because it goes stale; here the going-stale had already happened
+and the cost was one more file that nobody had listed.
+
+**And it gives §62 the case it did not have: verification that worked.** The
+dispatcher was corrected twice that afternoon by peers who re-derived instead of
+reading, and both were right. §62.10 asked what a second opinion has to *do* to
+be one; the answer both times was that it recomputed. A peer session read one
+clippy log two ways — anchored grep 0, escapes stripped 83 — and settled §77.6's
+cause with a measurement the dispatcher's own reproduction had not produced.
+Cheap, independent, and pointed at the thing rather than at the argument about
+the thing.
+
 ## 63. One grammar, two readers that disagreed, recorded 2026-09-07
 
 §59 gave `open-questions.md` an address and left its grammar written twice: once
@@ -21638,24 +21687,69 @@ baked corner with the corner the model stored" fixed, and the overlap test is
 that comparison, made where §70.3 said it belonged — in the thing that
 re-derives, which is the only thing holding both points.
 
-**Still owed: the comparison as a refusal.** The overlap test runs only where
-there is a choice to make. A *single*-place triple is still taken without asking
-whether the model's corner is anywhere near it, so the ill-conditioned corner
-§70.3 describes — three surfaces at a grazing angle, a corner close to all three
-and far from where they cross — still passes. Making the test universal is one
-line and was not taken here, for a reason that is measurement and not taste:
-`re_deriving_the_corners_of_a_turned_cube_gives_boxes_that_hold_them` compares
-the two with `1e-12` of slack, which is evidence that the boxes do **not** always
-overlap on inputs this kernel already accepts, and turning that into
-`Invalid::VertexOffItsFacePlane` would refuse solids that fuse today. That is a
-refusal-rate change with its own measurement to do and its own family of
-alternatives to name (§16.10), and it is bigger than the lane it turned up in.
+**Was owed, and the three reasons it was left owing were all wrong.** What stood
+here said the overlap test could not be made universal, and gave three reasons
+for it. A *single*-place triple was indeed still taken without asking whether the
+model's corner was anywhere near it, so the ill-conditioned corner §70.3
+describes — three surfaces at a grazing angle, a corner close to all three and
+far from where they cross — did still pass. That much was true. Each of the three
+reasons was disproved by measurement in §78, which took the one line and is where
+the detail lives. The three corrections belong here, at the sentences that were
+wrong.
+
+*The evidence was not evidence.* This paragraph read the `1e-12` of slack in
+`re_deriving_the_corners_of_a_turned_cube_gives_boxes_that_hold_them` as a box
+that sometimes fails to overlap a box. It is not that comparison at all:
+`corners_as_stored` goes through `VertexView::point()`, which hands back three
+bare `f64` and no box, so the test holds a certified box against a plain point
+and the slack sits between those two. Set the slack to `0.0` and the test passes
+— **72 coordinates checked, every one strictly inside, worst margin 1.665e-16**.
+Two lanes measured that independently and the second corrected the first, which
+had reported 1.776e-15: that figure is the *largest* low-side margin, the
+loosest of the 72 and not the tightest. Whether a box can miss a box on curved or
+grazing-angle input is untouched by any of this — the `1e-12` was never evidence
+either way, in either direction.
+
+*The named error was the wrong one.* Refusing a single-place triple does not
+produce `Invalid::VertexOffItsFacePlane`. It leaves `derive_a_corner` with no
+placement at all, which is `Error::Undecidable` with a record naming
+`WHERE_THREE_SURFACES_MEET`. `VertexOffItsFacePlane` comes from the
+`side_of_surface` sweep further down the same function, and that sweep tests the
+**derived** point — a stored corner sitting off its own plane never reaches that
+arm.
+
+*And "solids that fuse today" is not the set `validate` already refuses.* This
+paragraph reads as though a stricter `bake` could only refuse what
+`Model::validate` refuses anyway. Nothing gates `bake` behind `validate`.
+`bake()` is the first step of `Model::fused_under`; `Assembly::commit`'s
+`was_sound` self-check runs *after* it and is `cfg!(debug_assertions)`, so a
+release build runs no `validate()` inside `commit()` at all (§78.10); and
+`a_union_can_be_united_again_because_every_corner_of_it_still_has_three_planes`
+(`crates/rcad-topo/tests/fusing_solids.rs:799`) feeds one fuse's raw output
+straight into the next fuse's `bake()`. Whatever a stricter `bake` refuses, it
+refuses on its own account and nothing upstream has filtered it first.
+
+**What the one line actually cost.** Bit for bit, 30 solids the kernel had
+already accepted, plus a changed reason for 3 already refused. With the stored
+corner given the room that writing it down costs, none — no published number
+moved. §78 has the sweep, the mechanism worked out in exact rational arithmetic,
+and the shape of the 33.
 
 Every `how_often_*_refuses.rs` suite still publishes the rate it published
 before — `mise exec -- just t -E 'test(/how_often/)'` is green, and those suites
 assert their own numbers, so green *is* the statement that nothing moved. That
-is what "a single place is taken exactly as before" predicts. `just default` is
-green at **1808 tests, 0 skipped**, up two from 1806 — the two new ones.
+is what "a single place is taken exactly as before" predicts. The whole gate was
+green at **1808 tests, 0 skipped** on this unit's tree, up two from 1806 — the
+two new ones. Read that paragraph as the record of this unit and not as the
+current shape of the code: a single place is no longer taken as before, and
+§78.7's sweep is why the rates are unmoved anyway.
+
+**That caveat was aimed at what the code does, and it did not reach the count or
+the command.** Both stood here in the present tense, which reads as a claim about
+today: the recipe was `just default` until 2026-09-08 and is `just gate` now, and
+the tree §78 closes on is at **1815 tests, 0 skipped**. Neither figure is a bound
+anything asserts — each is the record of the tree it was measured on, and the
+next unit's will differ again.
 
 ## 76. Two ways `prune-worktrees` removed the wrong tree, recorded 2026-09-08
 
@@ -21888,8 +21982,518 @@ plugin directories, the questions parser selftest, every other `check-*` recipe
 run on the runner exactly as they run here. Only "has Claude Code been told" is
 skipped, and only where there is no Claude Code to have been told.
 
-**No `just default` run has yet gone green on `main`.** The header of `ci.yml`
-says so and says to delete that paragraph when one does, rather than adding a
-sentence beside it. Prefer a claim a repair makes wrong to a number time makes
-wrong (§64) — and this section is not evidence of a green either. It is a
-local `just default` and an argument.
+**Run `34266469454`, push of `e8ae455`, is the first `just default` to go green
+on `main`.** It reported 1811 tests run, 1811 passed, 0 skipped — the same three
+numbers a local `just default` gave on the same tree, which is the agreement a
+runner exists to produce. It printed `no /home/runner/.claude, so no Claude Code
+to have been told about mattiasgronlund-local: the declaration check is skipped,
+not passed`, so the skip fired where it was meant to and said so.
+
+It took two more red runs to get there, and neither was about plugins. §77.6.
+
+### 77.6 A check that asked what kind of terminal it had
+
+Runs `34264306999` (push of `3e59648`) and `34265339769` (push of `5b2413e`).
+Both cleared `check-plugins` — the skip printed, the marketplace clone resolved
+— and both died one recipe later on the same line:
+
+    wildcard arms over our own enums: 5 (0 direct, 5 composite), expected 88
+
+**Zero direct is a parse breaking, not eighty-three match arms going away.**
+`ci.yml` sets `CARGO_TERM_COLOR: always`, so clippy writes
+
+    ESC[1m ESC[33m warning ESC[0m ESC[1m ": wildcard match will also match ..."
+
+and `check-wildcards` counted with `grep -c '^warning: wildcard match'`, anchored
+at the start of the line. The escape sits where the anchor is looking, and every
+direct warning stops matching at once.
+
+**The number looked like a tree state, which is why it cost two pushes.** The 5
+that survived are the composite arms, and they come from an `awk` pass over
+`.rs` files that colour never touches. So the recipe reported a plausible count
+and sent its reader to §40 to hunt for a new wildcard, rather than saying the
+count had failed. A check that can be wrong should fail in a way that names
+itself; this one failed in the vocabulary of a real defect.
+
+**Two people measured it, and the second measurement is the better one.** The
+dispatcher session reproduced the failure with `CARGO_TERM_COLOR=always just
+check-wildcards`, which gives the runner's line byte for byte. A peer session
+then read one clippy log two ways: anchored grep as the recipe writes it, 0;
+the same log with the escapes stripped, 83. 83 + 5 = 88, the pinned count. The
+first shows the failure happens; only the second shows the arms were in the log
+the whole time.
+
+**The fix is three parts and each does something the others do not.**
+`_wildcard-direct-count` takes the count out of the clippy run and strips ANSI
+before matching, so the answer is the same either way — the same split `t` and
+`_test-digest` already use, and for the reason the comment there gives: a parser
+kept apart from the run is one you can hold against logs whose answer is already
+known. `CARGO_TERM_COLOR=never` on the clippy call keeps the saved log readable,
+which matters because the failure branch greps `'^error'` out of it and was
+anchored the same way. And `0 direct` against a non-zero ledger now says the
+parse broke and names the log.
+
+**The test is the coloured line itself.** `check-wildcards-selftest` carries the
+same warning twice, once plain and once with the escapes `cargo clippy` actually
+emitted under `CARGO_TERM_COLOR=always` — captured from a real run, not guessed
+at. Both must count 2. Mutation-checked by taking the `sed` back out, which
+reports `read 0 warnings from coloured.log, expected 2`: the runner's own number.
+
+**This is the third instance in a day, and three is what makes it a rule.** Each
+one is a check that passed for a property of the environment it ran in rather
+than a property of the tree.
+
+- §77.1's pre-flight sweep pointed `CLAUDE_PLUGINS_ROOT` at a real clone on a
+  machine where the marketplace is registered.
+- §77.2's declaration arm asked a question that only has an answer where Claude
+  Code is installed, and every machine that ran it had one.
+- This one anchored a grep at `^` and was only ever run where cargo had no
+  terminal to colour for. A `$(...)` capture is not a tty, so a local green
+  earned the anchor a pass a runner never would.
+
+The technique that found all three is the same: **take away what the environment
+supplies and run it again.** Point the variable at an empty directory. Point
+`HOME` at one. Force the colour on. A green is evidence about the environment it
+ran in and about no other.
+
+One rule falls out of it that is worth stating on its own: **a recipe that parses
+a tool's output owns the format it parses.** Reading a format the ambient
+environment chooses is how a check ends up measuring the machine.
+
+**What a green still cannot cover.** After the fix, every non-compiling `check-*`
+recipe was run in a built runner shape — a plain `--no-local` clone with one
+worktree, colour forced on, `HOME` empty — and all passed, `check-hub` correctly
+answering that a lone checkout is not a hub. That is evidence and not proof:
+`check-kache-off-on-ci` forces `CI` both ways itself and is indifferent, and the
+four selftests that build their own repositories already pass `-c user.email`
+explicitly, so the identity trap was closed before anyone looked. The gap that
+remains is the one that has now bitten three times — an environment difference
+nobody has thought to remove yet.
+
+## 78. A corner a few ulps from where its own planes cross, recorded 2026-09-09
+
+§75.2 made `the_place_the_model_points_at` choose between the places three
+surfaces meet by asking which of them the model's own corner sits in. It asked
+that question only when there was more than one place to choose from. One place
+and it returned that place, unasked:
+
+    if let [only] = places {
+        return Some(*only);
+    }
+
+That is every corner of every flat solid, because three planes meet at one point
+or at none. The test §70.3 asked for was in the code and switched off across the
+whole polyhedral half of the kernel.
+
+§75.6 called making it universal "one line", said the line was not taken for a
+reason that was measurement and not taste, and gave three reasons. All three were
+wrong; §75.6 now carries the corrections at the sentences that were wrong. This
+is the unit that found that out by taking the line, and the two numbers it turns
+on are: bit for bit the line costs **30 solids the kernel had already accepted**,
+and with the stored corner given the room that writing it down cost it costs
+**nothing at all** — no published rate moved by a single fuse.
+
+### 78.1 A test skipped exactly where there was nothing to choose
+
+Two different questions were being run together, and only one of them goes quiet
+when there is a single place.
+
+*Which of these places is the corner* has no content when there is one place.
+That is what §75.2 wrote down — "one place and the model is not consulted at all
+— the surfaces gave a single answer and there is nothing to choose" — and it is
+true of the arithmetic.
+
+*Is this triple talking about this corner at all* has exactly as much content as
+ever. It is the question §70.3 asked for, and it was the one being skipped.
+
+The corner §70.3 describes is the one that shows the difference: three surfaces
+at a grazing angle, a corner close to all three and far from where they cross.
+The three surfaces do meet, at one place, and that place is nowhere near the
+corner the model wrote down. The guard took it without a word, and
+`derive_a_corner` then wrote the meet into the answer as if the model had agreed.
+
+### 78.2 What asking bit for bit cost, and what the number 33 is
+
+Take the guard out and change nothing else. **30 solids the kernel had already
+accepted are refused, and 3 that were already refused change the reason they
+give.** The skew corpus goes from 51 refused of 429 to 81 — 11.9% to 18.9%, over
+the 18% §22.4 publishes as its threshold, so the suite goes red and prints the
+number itself. That is where the counts in this section come from: the
+`how_often_*_refuses` suites assert their own rates, so a failure message is a
+measurement.
+
+**33 is the size of the "where three surfaces meet" bucket. It is not a count of
+newly-refused fuses.** That distinction was got wrong twice inside this unit —
+once in a commit message and once in a doc comment, both corrected — which is why
+it is spelled out rather than left to arithmetic. `WHERE_THREE_SURFACES_MEET` is
+what a corner nothing could place reports. 30 of the 33 are fuses that used to
+answer and now report it; 3 are fuses that already refused for some other reason
+and now refuse for this one. A reader who takes 33 as "33 more refusals" is off
+by three, and — worse than the three — has the wrong picture of what moved.
+
+### 78.3 All thirty are gaps, by §16.10's test
+
+§16.10 splits a refusal two ways. A **limit** is where the answer does not exist;
+a **gap** is where it does and the arithmetic could not reach it. Defer a limit,
+fix a gap. All 30 are gaps, and there are three separate things to show for it.
+
+**The answer exists, and no fat box is hiding it.** The triple places the corner
+in a box **one ulp wide**, and both boxes in the comparison — the meet's and the
+stored corner's — are certified enclosures of true points. Neither is wide enough
+to be papering over the disagreement. The two points genuinely differ.
+
+**Nothing here is undecidable.** `side_of_surface(surface, stored)` over all 99
+planes of the 33 corners gives **18 `Neg`, 15 `Pos`, 66 `Zero`** — and 18 + 15 =
+33, exactly one plane per corner coming back with a decided sign. A decided sign
+is a proof that the stored corner is off that plane, and the other two planes
+hold it exactly. Not one `Undecidable` in 99. The arithmetic could see the
+disagreement perfectly well; it was the comparison that threw the answer away,
+after which `derive_a_corner` had no placement left to report and said so.
+
+**And the answer thrown away was the right one.** It is the meet of the three
+planes, which is what §17.1 says a corner is. The thing a few ulps out of place is
+the corner the model wrote down, not the meet — §75.2's "the model's corner never
+places the point" cuts this way as well as the way it was written.
+
+Gaps, then, to be fixed rather than deferred.
+
+### 78.4 Where the few ulps come from, worked out exactly
+
+Not "a few ulps, probably rounding". Exact rational arithmetic over the six
+situations, which is small enough to do by hand.
+
+`build_side_face` pins a wall's plane through the **start** of its bottom edge.
+The offset is computed to make `n·p = off` hold at that one point. The corner at
+the *other* end of that edge inherits whatever `n·p` rounds to there, so it lies
+on the plane only up to a rounding — and the meet the three planes solve for sits
+a few ulps from the corner the model stored.
+
+The residual is exactly **±1/2⁵⁴, ±1/2⁵³ or ±1/2⁵²** in every one of the six, and
+the true meet lies **0.28 to 1.12 ulps** from the stored corner. Three of the six
+are under one ulp. That is the whole of the disagreement: it is the width of the
+number and nothing else.
+
+**The normal is not the culprit, and that was checked rather than assumed.** The
+tilted walls carry `(±1, ∓2, 0)/√5`, and the obvious suspect is the unit-length
+scaling doubling a rounding on the way in. It does not: `2·fl(1/√5)` and
+`fl(2/√5)` are equal bit for bit. The normal is as exact as an irrational normal
+gets, and the miss is entirely in the offset having been pinned at one end of an
+edge.
+
+### 78.5 The shape of the thirty-three
+
+The 33 are **11 configurations × 3 rules** — union, intersection, difference.
+Every one of them fails while baking an **input** solid, never the answer, which
+is why the rule makes no difference: the same corner of the same input is being
+re-derived whatever is being asked of it. So the 33 are really 11 facts wearing
+three hats each.
+
+Under those 11 are **six distinct (corner, three-plane) situations**, and all six
+look the same:
+
+- the corner is at `z = 0`, on the bottom cap, at small whole-number coordinates;
+- the three planes are the floor, one axis-aligned wall, and one tilted wall
+  whose normal is `(±1, ∓2, 0)/√5` — no other tilted normal appears in any of the
+  six, and a `skew ±1` wall appears in none of them;
+- the stored corner's box has **zero width in all three axes**. It is an exact
+  `f64` point, which is why "widen the meet's box" was never the fix here;
+- the miss is on the **x axis only**, and how far follows from §78.4 with no new
+  measurement. `build_side_face` (`crates/rcad-topo/src/build.rs:908`) pins the
+  wall through `ring[index]` with normal `(along_y, −along_x, 0)`, so the tilted
+  wall's `|n_x| = 1/√5` and the whole residual is taken up along x:
+  `|Δx| = |r| / |n_x| = |r|·√5`. The three residuals give **1.241e-16, 2.483e-16
+  and 4.965e-16**.
+
+**Say which ulp.** The corners sit at small whole-number coordinates in `[2, 4)`,
+where an ulp is `2⁻⁵¹ = 4.441e-16`, and **in ulps of the corner's own coordinate
+the three misses are 0.2795, 0.5590 and 1.1180** — exactly §78.4's "0.28 to 1.12
+ulps, three of the six under one". In ulps of 1.0, where an ulp is
+`2⁻⁵² = 2.220e-16`, the same three misses are **0.559, 1.118 and 2.236**. The two
+units differ by a factor of two, so a bare "n ulps" here says nothing.
+
+What stood in this bullet was "1.11e-16 to 4.44e-16 — 1 to 4 ulps of 1.0", and it
+was wrong twice over. It scaled the residual by **2** rather than √5 — 2 is
+`1/|n_x|` for no normal in the six — and then counted the result in units of
+`f64::EPSILON / 2 = 2⁻⁵³ = 1.11e-16`, which is half an ulp of 1.0 and not an ulp
+of anything.
+
+**`|skew| = 2` is necessary and nowhere near sufficient.** 99 of the 143
+configurations in the corpus contain a solid with a ±2 shear, and **11 of those
+99 hold a corner the bit-for-bit guard could not place**. Those 11 times the three
+rules are the whole 33-entry bucket — they are not 11 refusals on top of it, and
+the bucket is not 33 newly-refused fuses either: 30 of the 33 are fuses that used
+to answer and 3 were already refusing for another cause (§78.2). The tilted wall
+is the setting, not the cause; what picks out the 11 is which edge of which face
+got pinned where, and that is not a property of the shear.
+
+Across every call the guard used to cover: **10 632 single-place calls, 33
+misses, 0.31%.**
+
+### 78.6 The room, read from `validate.rs` rather than copied
+
+The fix widens the stored corner's box on every side by
+
+    MEASURING_SLACK × Plane::SIGNED_DISTANCE_ROUNDOFF × L
+
+and takes `MEASURING_SLACK` from `validate.rs` — which became `pub(crate)` for
+it, value unchanged at 16.0 — rather than writing 16.0 down a second time.
+
+That is the point of the fix and not an implementation detail. `check_flat_face`
+grants a corner exactly this allowance against exactly this disagreement, and **a
+solid `Model::validate` accepts has to be one the fuse can bake.** Two constants
+that happen to be equal make that true by coincidence, and a coincidence drifts:
+the next person to tune one has no way of knowing the other was leaning on it.
+
+`L` is **the corner's own size, floored at 1.0** — not the model's
+`largest_coordinate()`, the way `Model::what_writing_a_plane_down_costs` measures
+it. Two reasons, and the second is the one with a price.
+
+- There is no model here to ask. `the_place_the_model_points_at` is handed two
+  points, and threading a model down to it would be threading it for this alone.
+- Model-wide would hand a corner at the origin the room a corner a kilometre away
+  earned. One feature far out and the test is loosened everywhere.
+
+The price is real and worth naming: a small corner on a face whose *other*
+corners are huge was rounded by the big face's arithmetic and is granted the
+small corner's room. That triple then says nothing about it, and another has to
+place it; if none does, the fuse refuses. A refusal and never a wrong answer,
+which is the direction to be wrong in.
+
+**This is a tolerance, and the doc comment says so.** §75.2's "needs no
+tolerance, no constant and no policy" was true of what it was written about —
+comparing two certified boxes round two readings of one point. The model's corner
+and the model's surfaces are not two readings of one point. Both boxes have zero
+width when the arithmetic is exact, so *any* rounding at all is a miss, and there
+is no way to compare them without granting something. What keeps this from being
+a modelling tolerance is which number it is: the width of the arithmetic, not a
+distance anybody chose. `Scale::RELATIVE_LINEAR_TOLERANCE` is `1e-9`
+(`crates/rcad-geom/src/scale.rs:69`); the room granted here is
+`16 × 4 × f64::EPSILON = 1.421e-14` of `L`. That is **70 369× wider — not quite
+five orders of magnitude** — and it would swallow a corner somebody placed off
+its plane on purpose. §78.7 does the same division one subsection down with
+`1e-10`, a tenth as large, and gets 7 037×; the two agree because they are the
+same ratio ten apart.
+
+**"Seven orders of magnitude" stood here, and it is right about a different pair
+of quantities.** `allowed_wobble` (`crates/rcad-topo/src/validate.rs:1034`) reads
+`RELATIVE_LINEAR_TOLERANCE` against the largest coordinate, so it is about `1e-9`
+*relative*; a certified predicate errs at about `f64::EPSILON`, `2.2e-16`
+relative. That ratio is 4.5e6 — seven orders to the nearest power of ten, six and
+a half exactly. Neither quantity in it is the room this fix grants, so the two
+comparisons cannot stand in for one another.
+
+### 78.7 The factor, swept and not argued
+
+The 16 is not reasoned to. The corpus was re-run at each factor.
+
+| factor × `SIGNED_DISTANCE_ROUNDOFF` | `WHERE_THREE_SURFACES_MEET` | skew refusal rate |
+|---|---|---|
+| 0 (bit for bit) | 33 | 18.9% |
+| 0.25 | 6 | 13.3% |
+| 0.5 | 0 | 11.9% |
+| 1 | 0 | 11.9% |
+| 16 (shipped) | 0 | 11.9% |
+
+A gate agent re-derived the two boundary rows — 0.25 and 0.5 — independently,
+which is what makes the step between them a measurement rather than a typo.
+
+So the corpus needs **between 1 and 2 ε of `L`**, which is *less* than one bare
+`SIGNED_DISTANCE_ROUNDOFF`. Everything above 0.5 buys nothing that this corpus
+can see, and is headroom.
+
+The question worth asking is what the headroom costs, and the answer is that it
+is four orders of magnitude short of anything anyone would mind. A corner
+somebody placed `1e-10` off its plane is about **7 000×** the room 16 grants.
+Between "swallows a rounding" and "swallows a placement" there are four orders of
+magnitude of nothing at all, and 16 sits near the bottom of that gap — closer to
+the measured need than to the first thing it would be wrong to swallow.
+
+**No published number moved.** Every cell of the skew tally, and every
+`how_often_*` rate, came back to the value it had before any of this. Making the
+test universal is not a refusal-rate change; it is a hole closed at no measured
+cost.
+
+### 78.8 What a published bound is worth if nothing re-derives it
+
+This part was on nobody's list, and it is the part worth reading twice.
+
+While measuring the above, the corpus was found to have grown from **423 to 429**
+per family. The first guess was the generator, which is the wrong guess §38.8
+made and §39.6 corrected, and it was wrong again: the six new cases are two
+proptest regression seeds, checked in at `01e62c1` and `9b3a5fd`. The seed files
+*are* part of the corpus, so adding one seed grows every family at once.
+
+**Eleven figures across six doc comments were stale.** All six
+`*_IS_NOT_A_SOLID` counts had fallen, and they had fallen *together*, at one
+commit: `b4890f1`, "cuts: a solid's own planes cut its own faces". The direction
+is right — fewer answers are not solids because fewer answers are wrong — and
+**no band fired**.
+
+Not because the bands were unusually wide. End to end they were lattice
+`0.02..=0.10` at 5×, flush `0.10..=0.28` at 2.8×, elsewhere `0.02..=0.10` at 5×,
+turned `0.015..=0.09` at 6×, skew `0.005..=0.03` at 6× and leaning-alike
+`0.012..=0.08` at 6.67×. The replacements span 4.5×, so a sentence condemning the
+width condemns those too — and the flush band, kept as it was, is the *narrowest*
+of the six.
+
+What was wrong is **where the count sat inside the band**, which is a different
+number and the one that matters. Leaning-alike stood at 17 of 423 — 4.02% —
+against a lower end of 1.2%, so its count could fall to **30% of itself** before
+the band said a word. It fell to 41%, landed at 1.63%, and the band stayed quiet
+because 1.63% is still above 1.2%. A band drawn by the convention below has its
+lower end at two thirds of the count it was drawn around, so it speaks at any
+fall past 67%. That is the whole of the difference, and the fall factors in §78.9
+show it: of the six families, exactly two fell past two thirds — leaning-alike at
+0.41 and skew at 0.375 — and those are the two the archived re-run names below.
+
+They were re-derived to the convention this file already states for them,
+"roughly two thirds to three times", which makes every span 4.5×.
+`A_FLUSH_PAIR_IS_NOT_A_SOLID` is a deliberate exception, kept tighter at
+`0.10..=0.28`: the convention applied to it would have gone from 43–120 permitted
+fuses to 41–184, and no measurement asked for that loosening. A convention is not
+a reason to widen a band that is doing its job.
+
+The test of the new bands is whether they would have caught what got past the old
+ones, and that was measured on the archived trees rather than argued: under the
+new bands, **leaning-alike and skew would have fired at `b4890f1`**, and two more
+families came within one fuse of firing.
+
+**What that sentence means is the convention and not the shipped numbers**, and
+the difference is worth spelling out because the shipped numbers say the
+opposite. `A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID` ships as `0.011..=0.049`, which
+is the convention drawn around **today's** 7 of 429 — and the pre-`b4890f1` rate,
+17 of 423 or 4.02%, sits inside it. Run the shipped band on the archived tree and
+nothing fires; it cannot, because it was drawn around the count after the fall.
+The claim is about the convention: a band drawn by it around the count *at the
+time* has its lower end at 2.68%, and `b4890f1`'s 1.65% is below that.
+
+One more line, because the name misleads:
+`share_of_answers_that_were_not_solids_must_be_within` divides `not_a_solid` by
+`self.fuses`, not by the number of answers. A fuse that refused never got far
+enough for its answer to be judged, so the denominator counts cases the numerator
+structurally cannot reach. It is a share of fuses. §22.3's caveats say as much in
+prose about one family; the name says the opposite everywhere.
+
+### 78.9 §22.3's defect is not back, measured once and by nothing in the tree
+
+§22.3 records a shear applied as `S(ring) + at` instead of `S(ring + at)` — the
+image of nothing — whose symptom was a not-a-solid quietly becoming an ordinary
+solid. It was caught by a rate that did not add up. A rate is a weak instrument
+for it: the argument is that an affine map preserves incidence **exactly**, and a
+rate can only ever say that two numbers are close.
+
+So it was checked directly this time — **once, in a lane's scratchpad, and
+nothing in this repository re-derives it.** That is worth saying plainly, because
+it is §78.8's own subject two subsections up and this section would rather own it
+than smooth it. `a_pair_leaning_the_same_way()`
+(`crates/rcad-topo/tests/pairs/mod.rs:481`) is called from exactly one place,
+`crates/rcad-topo/tests/fuses_that_must_agree.rs:1423`, and builds each
+configuration **once**. The doubled build — each configuration again with
+`Skew::none()` — never left the scratchpad it was written in. Everything in the
+rest of this subsection is one lane's measurement at three commits, not a
+standing property of the tree, and §78.11 lists it with the rest.
+
+What that measurement said: build each leaning-alike configuration as drawn and
+again with `Skew::none()`, and the cell §22.3's bug lived in is **0 of 429 at all
+three commits**, as is its mirror. So, on this corpus, at those commits, measured
+once: the shear turned no not-a-solid into a solid and no solid into a
+not-a-solid. **"Incidence is preserved case by case" is what that supports — on
+this corpus, at these commits, measured once.** It is not a property anything
+re-checks, and the argument that an affine map preserves incidence exactly is
+still an argument.
+
+The rate did move, and it moved in a **different cell**, which is why the two
+numbers are not the contradiction they look like. Leaning-alike's not-a-solid
+rate fell from **4.0% to 1.6%**, and on identical configurations the unsheared
+build gives 12 not-a-solid answers where the sheared gives 7. **The missing 5 are
+exactly the cases the sheared fuse refused** — 12 = 7 + 5, with nothing
+unaccounted for. §22.3's cell is not-a-solid → **solid**; these 5 are
+not-a-solid → **refused**. A refused fuse never gets far enough for its answer to
+be judged (§78.8's denominator again), so the shear lowers the not-a-solid count
+by refusing, not by turning a not-a-solid into a solid. That is the opposite
+failure from §22.3's and it is benign.
+
+The fall was not proportional across families, and the split falls along the line
+anyone would draw in advance. **These factors are counts, not rates**: the
+not-a-solid count at `b4890f1` over the count at its parent, both on the same
+423-fuse corpus. Lattice 0.70, flush 0.85, elsewhere 0.71, turned 0.76 — against
+leaning-alike 0.41 and skew 0.375. **The two tilted-wall families fell about
+twice as far as the axis-aligned ones.**
+
+Turned shows why the unit has to be named. As counts it is 13 over 17, **0.76**.
+Today's rate over the parent's rate is a different question with a different
+answer: turned stands at 14 of 429 now, and `14/429 ÷ 17/423` is **0.81**. The
+figures above are the first of those.
+
+### 78.10 Two open items, named so nobody re-derives them
+
+Both are left open deliberately, and both are written out in enough detail to
+pick up cold.
+
+**One fuse went the wrong way at `b4890f1`.** Of today's 7 leaning-alike
+not-a-solid cases, six are members of the old 17 and one is new:
+
+    Union of
+      Frame { width: 5, depth: 3 }, height 2, at [0, 0, 0]
+      Comb { teeth: 1, tooth_height: 3 }, height 3, at [-1, 1, 2]
+      shear x_per_y: -1
+
+It answered at `cc959c1`, sheared and unsheared. It is not-a-solid now, sheared
+and unsheared, so the shear has nothing to do with it. `b4890f1`'s stated
+direction is that fewer answers are not solids because fewer answers are wrong,
+and this one went the other way. **Nobody has asked which of §16.10's two it is,
+and this section does not guess** — it may be a limit, it may be a gap, and
+saying which needs the same kind of work §78.3 did for the 30. Deferred because
+of the shape of the outcome: not-a-solid is a refusal, so nothing corrupt is
+written while it stands. What it costs is that the 7 is not fully attributed.
+
+**`Assembly::commit` self-checks nothing in a release build.** `was_sound` is
+
+    cfg!(debug_assertions) && model.validate(policy, &mut ProvenanceLog::new()).is_ok()
+
+so in release it is `false` and the `if was_sound { … }` block below it — the one
+whose `expect` reads "a fuse writes a valid model or does not write at all" —
+never runs. The doc comment above it explains *why the check is conditional on
+the model having been sound before the write*, which is a good reason and a
+different one; nothing there tells a reader the whole check is debug-only.
+Related in shape to §66: a promise the doc makes that the release build does not
+keep. Not changed here because it is a real decision with a cost on both sides —
+a full `validate` per commit is the quadratic sweep §4.3 exists to avoid — and it
+is not this lane's to make.
+
+### 78.11 The figures in this section that nothing re-derives
+
+§78.8's whole subject is a published number nobody re-derived, so this section
+closes by naming its own. A gate agent worked back through §78 from the tree and
+could not reach the following: each needs instrumentation that was never checked
+in, or a build of an archived commit. Read them as one lane's measurement on one
+day, not as standing properties.
+
+- **`18 Neg, 15 Pos, 66 Zero`** over the 99 planes of the 33 corners (§78.3).
+- **The residual being exactly ±1/2⁵⁴, ±1/2⁵³ or ±1/2⁵² in *every* one of the
+  six**, and the six situations sharing the shape §78.5 lists (§78.4, §78.5). The
+  arithmetic from a residual to a miss *is* re-derivable and is written out in
+  §78.5; the residuals themselves are not.
+- **`10 632` single-place calls, 33 misses, 0.31%** (§78.5).
+- **`99 of the 143`** configurations holding a ±2 shear, and the 11 among them
+  (§78.5).
+- **The bit-for-bit cost, 30 + 3 = 33** (§78.2). It was a suite failure message
+  when it was taken, and the guard it was taken without is back in, so nothing
+  prints it now.
+- **Every row of §78.7's sweep table.** The `0.25` and `0.5` rows were re-derived
+  independently by a gate agent, which is what makes the step between them a
+  measurement; no row is re-run by anything in the tree.
+- **`12 = 7 + 5` and the `0 of 429` cell at all three commits** (§78.9) — the
+  doubled build that produced them is not in the repository.
+- **The six fall factors** — lattice 0.70, flush 0.85, elsewhere 0.71, turned
+  0.76, leaning-alike 0.41, skew 0.375 (§78.9).
+- **Which families the new bands would have fired on at `b4890f1`**, and the two
+  that came within one fuse (§78.8). That needs archived trees.
+- **`1.665e-16`, the worst margin over 72 coordinates** (§75.6, and this unit
+  leans on it). The test is in the tree; the margin is not, because the test
+  ships `1e-12` of slack and reaching the figure means editing it to `0.0`.
+
+What *is* re-derived, every run: the shipped `how_often_*` refusal rates and the
+six `*_IS_NOT_A_SOLID` bands. Those suites assert their own numbers, so a green
+`just gate` is the statement that they have not moved. Nothing above is in that
+set.

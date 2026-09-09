@@ -1269,7 +1269,11 @@ pub(crate) fn every_side_of_the_skin_is_used_both_ways(mesh: &Mesh) -> Result<()
 /// constructors scale a normal to unit length on the way in. Sixteen is wide
 /// enough that ordinary construction never trips the check and narrow enough
 /// that a corner genuinely off its plane still does.
-const MEASURING_SLACK: f64 = 16.0;
+///
+/// The fuse's [`the_place_the_model_points_at`](crate::fuse) reads this same
+/// number rather than copying it, because the two checks have to agree: a solid
+/// this file lets through is one the fuse has to be able to bake (§75.6).
+pub(crate) const MEASURING_SLACK: f64 = 16.0;
 
 /// Every corner on the plane, the outer wire winding with the normal and the
 /// holes against it, so the material is on one consistent side.

@@ -40,7 +40,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    Isometry, MeetOfThree, Orientation, Point, Surface, WHERE_THREE_SURFACES_MEET,
+    Isometry, MeetOfThree, Orientation, Plane, Point, Surface, WHERE_THREE_SURFACES_MEET,
     meet_of_three_surfaces, where_a_corner_lands_after_moving,
 };
 use rcad_predicates::{
@@ -49,7 +49,7 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::key::{FaceSlot, VertexSlot};
-use crate::validate::side_of_surface;
+use crate::validate::{MEASURING_SLACK, side_of_surface};
 use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
 
 use super::assemble::{InputFace, joined_faces_of_an_input};
@@ -656,23 +656,45 @@ fn derive_a_corner(
 /// Which of the places three surfaces meet at this corner is, or `None` when
 /// this triple does not say.
 ///
-/// One place and there is nothing to choose: the surfaces gave a single answer
-/// and the model is not consulted at all. That is the whole of the flat case, so
-/// nothing about a solid made of planes turns on what follows.
+/// The model's own corner is what picks. It is a cached sample of where these
+/// surfaces meet (§17.1), moved into world coordinates and carrying the box that
+/// move cost, so **the place whose box overlaps it is the one**.
 ///
-/// More than one, and the model's own corner is what tells them apart. It is a
-/// cached sample of where these surfaces meet (§17.1), moved into world
-/// coordinates and carrying the box that move cost, so **the place whose box
-/// overlaps it is the one**. Two boxes are two certified enclosures of two true
-/// points, so an overlap test needs no tolerance and no policy — a pair that
-/// misses is a *proof* that the model's corner is not that meet, in the same
-/// shape as [`Bounds::provably_misses`].
+/// **A single place is asked the same question**, which is §75.6's "comparison
+/// as a refusal": the one thing the surfaces said is still only taken when the
+/// model's corner is somewhere it could be. Skipping the test where there is
+/// nothing to choose between meant a corner could sit anywhere at all and still
+/// be replaced by the meet without a word — the ill-conditioned corner of §70.3,
+/// three surfaces at a grazing angle and a corner far from where they cross.
 ///
 /// Two places that both overlap it are two answers to one question, and a triple
 /// where no place overlaps it at all is the model's corner and its surfaces
-/// disagreeing by more than either box allows. Both give `None`, and neither is
-/// a refusal: it is this triple saying nothing about this corner while another
-/// may still place it.
+/// disagreeing by more than the boxes and that room allow. Both give `None`, and
+/// neither is a refusal: it is this triple saying nothing about this corner while
+/// another may still place it.
+///
+/// # The stored corner is grown first, and that is a tolerance
+///
+/// It would be nicer if it were not. Two certified boxes round two true points
+/// need no tolerance to compare, and this test was written that way — but the
+/// model's corner and the model's surfaces are not two readings of one point.
+/// A face pins its plane through one corner, so every *other* corner of that
+/// face satisfies `n·p = off` only to a rounding, and the meet those planes
+/// solve to sits a few ulps from the corner the model wrote down. Both boxes
+/// have no width at all when the arithmetic is exact, so a few ulps is a miss,
+/// and asking for the corner bit for bit refused 30 solids the kernel had
+/// already accepted, plus changed the reason for 3 more that were refused
+/// already — the skew corpus went from 51 refused to 81 (§75.6).
+///
+/// So [`MEASURING_SLACK`] × [`Plane::SIGNED_DISTANCE_ROUNDOFF`] × the corner's
+/// own size is added to the stored box on every side. That is **the same
+/// allowance [`check_flat_face`](crate::validate) grants the same disagreement**,
+/// read from the same constant rather than copied, because the two have to
+/// agree: a solid `Model::validate` accepts is one the fuse has to be able to
+/// bake. It is the width of the number and not a modelling tolerance —
+/// `Scale::RELATIVE_LINEAR_TOLERANCE` is 70 369 times wider — not quite five
+/// orders of magnitude — and would swallow corners somebody *placed* off their
+/// planes.
 ///
 /// **This never places the point.** It picks among places the surfaces already
 /// agree on; the geometry comes from the meet, which is what keeps a wrong
@@ -681,13 +703,11 @@ fn the_place_the_model_points_at(
     places: &[PredicatePoint],
     where_the_model_puts_it: PredicatePoint,
 ) -> Option<PredicatePoint> {
-    if let [only] = places {
-        return Some(*only);
-    }
     let stored = where_the_model_puts_it.enclosure();
+    let room = what_writing_the_corner_down_cost(stored);
     let mut found = None;
     for place in places {
-        if !boxes_overlap(place.enclosure(), stored) {
+        if !boxes_overlap(place.enclosure(), stored, room) {
             continue;
         }
         if found.is_some() {
@@ -698,9 +718,36 @@ fn the_place_the_model_points_at(
     found
 }
 
-/// Whether two boxes have any point in common, sides included.
-fn boxes_overlap(one: [Interval; 3], other: [Interval; 3]) -> bool {
-    (0..3).all(|axis| one[axis].lo() <= other[axis].hi() && other[axis].lo() <= one[axis].hi())
+/// How far the model's stored corner can sit from where its own surfaces cross
+/// purely because a plane through one corner of a face misses the next one.
+///
+/// The size is the **corner's own**, not the model's largest coordinate the way
+/// [`Model::what_writing_a_plane_down_costs`](crate::validate) measures it.
+/// Nothing here has a model to ask — this is handed two points — and threading
+/// one down would hand a corner at the origin the room a corner a kilometre
+/// away earned, loosening the test everywhere one feature sits far out. The
+/// price is a corner near the origin on a face whose other corners are huge:
+/// the rounding there is the big face's and this grants the small corner's, so
+/// the triple says nothing and another has to place it. That is a refusal
+/// rather than a wrong answer, which is the direction to be wrong in.
+///
+/// Floored at one for the same reason [`select`](super::select) floors its own
+/// round-trip room: a corner at the origin still had a plane written down
+/// against it.
+fn what_writing_the_corner_down_cost(stored: [Interval; 3]) -> f64 {
+    let size = stored
+        .iter()
+        .map(|side| side.lo().abs().max(side.hi().abs()))
+        .fold(0.0, f64::max);
+    MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * size.max(1.0)
+}
+
+/// Whether two boxes have any point in common, sides included, once the second
+/// has been grown by `room` on every side.
+fn boxes_overlap(one: [Interval; 3], other: [Interval; 3], room: f64) -> bool {
+    (0..3).all(|axis| {
+        one[axis].lo() <= other[axis].hi() + room && other[axis].lo() - room <= one[axis].hi()
+    })
 }
 
 /// The place a provenance record names a set of surfaces by: where the first of
@@ -885,6 +932,30 @@ mod tests {
     /// longer `f64`. The box has to hold the stored corner all the same — the
     /// stored corner is the true one moved and rounded, and the box encloses the
     /// true one.
+    ///
+    /// A box against a bare point, not a box against a box: `corners_as_stored`
+    /// goes through `VertexView::point()`, which hands back three `f64`s and no
+    /// enclosure of its own. So containment is exact and is asserted with no
+    /// slack. All 72 checks — the eight corners, each reached from three faces,
+    /// times three axes — land strictly inside, the tightest by 1.665e-16, about
+    /// six ulps at that coordinate's size.
+    ///
+    /// The only thing here that is not the same on every machine is the `sin`
+    /// and `cos` of the turn, which come from the platform's libm and are not
+    /// correctly rounded. Everything after them is `+ - * /` and `sqrt`, which
+    /// IEEE-754 pins to the bit, and Rust does not fold a multiply and an add
+    /// into an `fma` by itself. An ulp of disagreement there cannot reach this
+    /// margin: stepping the angle one ulp at a time, containment holds for 331
+    /// steps either side of 0.7 before the first failure, and within ten steps
+    /// the tightest margin never falls below 8.3e-17.
+    ///
+    /// It is a measured property of this turn and not a law — 11 of the 840
+    /// angles swept do fail — so if this ever goes red, the assert names the
+    /// coordinate and the answer is a fresh measurement, not a bigger constant.
+    /// It asked for `± 1e-12` until 2026-09-09; that slack absorbed nothing, and
+    /// §75.6 read it as evidence that two certified boxes can fail to overlap on
+    /// inputs this kernel accepts, then declined a correct change on the
+    /// strength of it. §78 is what that cost.
     #[test]
     fn re_deriving_the_corners_of_a_turned_cube_gives_boxes_that_hold_them() {
         let (mut model, cube) = a_cube_of_side_two();
@@ -901,8 +972,8 @@ mod tests {
                     for axis in 0..3 {
                         let (lo, hi) = (box_of_it[axis].lo(), box_of_it[axis].hi());
                         assert!(
-                            lo - 1e-12 <= stored[axis] && stored[axis] <= hi + 1e-12,
-                            "the box {lo}..{hi} is nowhere near the stored {}",
+                            lo <= stored[axis] && stored[axis] <= hi,
+                            "the box {lo}..{hi} does not hold the stored {}",
                             stored[axis]
                         );
                     }

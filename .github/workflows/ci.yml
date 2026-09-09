@@ -1,24 +1,25 @@
-# **CI has been green, and every green so far ran `just test`, not `just
-# default`.** Re-derive rather than believe it: `gh run list --repo
-# mattiasgronlund/rcad --status success` for the greens, then
-# `git show <sha>:.github/workflows/ci.yml` for what each one actually ran. The
-# empty answer to that first command was the claim this header carried until
-# 2026-09-07.
+# **CI has been green, and `34266469454` is the first green that ran the whole
+# gate.** Push of `e8ae455`, 2026-09-08, 15m44s: 1811 tests run, 1811
+# passed, 0 skipped — the same three numbers a local `just gate` gave on the
+# same tree. Every green before it ran `just test`. Re-derive rather than
+# believe it: `gh run list --repo mattiasgronlund/rcad --status success` for the
+# greens, then `git show <sha>:.github/workflows/ci.yml` for what each one
+# actually ran. The empty answer to that first command was the claim this header
+# carried until 2026-09-07.
 #
-# **The switch to `just default` went red on its first run**, `34260645261`,
-# push of `02367fc`, in 31 s. This paragraph is here because the header two
-# paragraphs down instructs it: if the file changes and no run has gone green
-# since, say so rather than leaving a green sentence standing. `check-plugins`
-# asked a runner what Claude Code had been told and a runner has no Claude Code;
-# `3e59648` and `docs/decisions.md` §77 are the fix and the rule it settled.
-# When a `just default` run goes green on `main`, name it here and delete this
-# paragraph rather than adding to it.
+# **Getting there took three red runs, and only the first was about plugins.**
+# `34260645261` asked a runner what Claude Code had been told; `34264306999` and
+# `34265339769` counted colour codes instead of clippy warnings, because this
+# file sets `CARGO_TERM_COLOR: always` and the recipe anchored a grep at `^`.
+# `docs/decisions.md` §77 is the rule all three settled: a check can pass for a
+# property of the environment it runs in rather than of the tree, and the way to
+# find out is to take away what the environment supplies and run it again.
 #
 # **Do not write the tally here.** A count is stale on the next push, and the two
 # that stood in this header both went stale within a day. Name runs instead;
 # those keep. `34155345448` (2026-09-07) and `34255349804` (2026-09-08, sha
 # `41b7160`) are pushes to `main` that reported **1787** and **1806 tests run,
-# all passed, 0 skipped** — each the same three numbers a local `just default`
+# all passed, 0 skipped** — each the same three numbers a local `just gate`
 # gave on the same tree. That agreement is the whole point of a runner: before
 # it, every green here was one person running the gate locally and reporting it
 # honestly.
@@ -106,9 +107,9 @@
 # Measured, not copied: `find "$RCAD_STEP_CORPUS" -type f \( -iname '*.stp' -o
 # -iname '*.step' \) -printf '%s\n' | awk '{s+=$1} END {print s}'`.
 #
-# **This runs `just default` — the same command a human runs.** It ran `just
+# **This runs `just gate` — the same command a human runs.** It ran `just
 # test` until 2026-09-07, which left the `check-*` recipes enforced on every
-# local run and on no runner. Mattias settled that as "switch to `just default`,
+# local run and on no runner. Mattias settled that as "switch to `just gate`,
 # but after the first green"; asked afterwards which green he meant, with one on
 # a pull request and none yet on `main`, he answered: now.
 #
@@ -128,11 +129,11 @@
 # Pointing `CLAUDE_PLUGINS_ROOT` at an empty directory is what found it — exit 1
 # and two 127s. A green sweep is not evidence when the thing you are asking
 # about is what the environment supplies. Do not count the recipes here again;
-# `grep '^default:' justfile | tr ' ' '\n' | grep -c '^check-'` is the number.
+# `grep '^gate:' justfile | tr ' ' '\n' | grep -c '^check-'` is the number.
 #
 # One step rather than four, and `check-corpus` deliberately twice. The single
-# step is what lets `check-default-runs-every-check` reach this file: a new
-# `check-*` recipe joins `default` and is enforced here without anyone editing
+# step is what lets `check-gate-runs-every-check` reach this file: a new
+# `check-*` recipe joins `gate` and is enforced here without anyone editing
 # this workflow, which is the failure that recipe exists for. Splitting the four
 # back out would buy prettier step names and give that up.
 
@@ -162,8 +163,8 @@ jobs:
       # value that comes out empty; it makes the whole workflow file invalid, and
       # the run then fails in 0 s having never started a job.
       - run: echo "RCAD_STEP_CORPUS=$RUNNER_TEMP/rcad-step-corpus" >> "$GITHUB_ENV"
-      # `just default` begins with `check-plugins` — pinned there by
-      # `check-default-runs-every-check` since 2026-09-08, because it ran first
+      # `just gate` begins with `check-plugins` — pinned there by
+      # `check-gate-runs-every-check` since 2026-09-08, because it ran first
       # only by where it sat and this step's diagnosis depends on it — and three
       # of its recipes run scripts that live in the shared marketplace now
       # rather than in `.claude/`.
@@ -181,7 +182,7 @@ jobs:
       # Bumped from `952672e` to `f5f2f48` on 2026-09-08, and that bump is load
       # bearing rather than housekeeping: `f5f2f48` is where `check-declared.sh`
       # learned to skip on a machine with no Claude Code, which is what this
-      # runner is. Pinned back below it, `just default` goes red at
+      # runner is. Pinned back below it, `just gate` goes red at
       # `check-plugins`. `docs/decisions.md` §77.
       #
       # What this does **not** check is that a human's installed plugins match
@@ -231,14 +232,14 @@ jobs:
       # Runs on a cache hit too, and that is the point: the fetch checks what it
       # built, but a restored cache is bytes nobody looked at this run. 0.15 s.
       #
-      # `just default` below runs this same recipe, so this step is a duplicate
+      # `just gate` below runs this same recipe, so this step is a duplicate
       # and is kept deliberately: here it sits directly after the cache restore,
       # so a corpus that came back wrong is named in 0.15 s by the step next to
       # the cache, instead of after `just check` has spent minutes compiling.
       - run: mise exec -- just check-corpus
       # One step, because the whole value of it is that it is the same command a
       # human runs. Splitting `check`/`lint`/`test`/`deny` back out would buy
-      # prettier step names and cost the property that `check-default-runs-every-
-      # check` guards: a new `check-*` recipe joins `default` and is enforced
+      # prettier step names and cost the property that `check-gate-runs-every-
+      # check` guards: a new `check-*` recipe joins `gate` and is enforced
       # here without anyone editing this file.
-      - run: mise exec -- just default
+      - run: mise exec -- just gate

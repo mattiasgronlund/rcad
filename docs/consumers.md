@@ -329,7 +329,7 @@ on. Nothing in rcad changes on it.
   `Model::which_model_this_is()` above is one, asked for as `Model::id()`.
 - **The pin moves one way.** The consumer bumps its rev when it wants what
   landed. rcad never bumps it.
-- **No consumer in rcad's CI gate.** rcad's gate is `just default`. Coupling it
+- **No consumer in rcad's CI gate.** rcad's gate is `just gate`. Coupling it
   to a downstream repository means a downstream bug can turn rcad red, and a red
   that is not rcad's trains people to ignore red.
 - **Acceptance is rcad-side tests passing**, not the consumer compiling. A gap

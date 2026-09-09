@@ -164,7 +164,7 @@ const LONGER_CASES: u32 = 24;
 /// number is the same every time.
 ///
 /// A hundred and twenty-eight, and the ceiling is the clock and not the
-/// statistics. At this count each family is 423 fuses, the whole workspace suite
+/// statistics. At this count each family is 429 fuses, the whole workspace suite
 /// runs in about three seconds, and a soak at eighty times this corpus is what
 /// §17.7's precise figures come from. Raising the shipped number to a thousand
 /// was tried and reverted: it bought a fresh-seed spread of ±1.6 points instead
@@ -215,15 +215,15 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 ///
 /// Twenty-four per cent, chosen from measurement rather than from taste, and it
 /// is a threshold on a **deterministic** number: [`measured`] runs from a fixed
-/// seed, so the shipped corpus of 423 turned fuses refuses 96 of them, 22.70%,
+/// seed, so the shipped corpus of 429 turned fuses refuses 96 of them, 22.38%,
 /// every run on every machine. There is no sampling noise for the threshold to
-/// have to clear, so what it has to clear instead is ordinary drift — 1.3 points
-/// is six fuses — and what it has to catch is a regression. The three undeserved
+/// have to clear, so what it has to clear instead is ordinary drift — 1.6 points
+/// is seven fuses — and what it has to catch is a regression. The three undeserved
 /// refusals recorded so far are each worth several times that on their own: the
 /// two §17.7 names are about 3.5 points apiece, and §19.1's plane reader was
 /// worth 4.4, which is what took this number from 28 to 24 when it was fixed.
 ///
-/// **Six fuses is thin, and §39 says where the room went.** §38.8 read the
+/// **Seven fuses is thin, and §39 says where the room went.** §38.8 read the
 /// stale prose beside it — 20.71% of 420 — and put the difference down to the
 /// generator growing. Measured at M3's close the corpus was already 423 and the
 /// rate was **20.6%, 87 refusals**; it is 96 now, and the nine arrived at
@@ -234,7 +234,7 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 /// no property here noticed.
 ///
 /// The threshold is deliberately **not** re-derived for it. Twenty-four per cent
-/// still fires on anything 1.3 points above the measurement, which is well
+/// still fires on anything 1.6 points above the measurement, which is well
 /// inside the 3.5 points the smallest undeserved refusal on record was worth, so
 /// it is doing its job and doing it more sharply than it has to. What a red run
 /// asks for is the attribution above and not a bigger number — and a soak cannot
@@ -259,9 +259,9 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// unnoticed rather than as a target.
 ///
 /// Eighteen per cent. [`measured`] runs from a fixed seed, so the shipped corpus
-/// of 423 skew fuses refuses 51 of them, 12.06%, every run on every machine.
+/// of 429 skew fuses refuses 51 of them, 11.89%, every run on every machine.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
-/// drift — 5.9 points is twenty-five fuses, four times the headroom
+/// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
 /// a regression in the one family that reaches a branch nothing else does.
 ///
@@ -344,61 +344,143 @@ const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 106;
 /// How much of the lattice control comes back as something a `Model` cannot
 /// hold.
 ///
-/// Measured at 4.7% over the shipped corpus — 20 of 423 — and the band is
-/// roughly half to double that. Every one of them is the case §17.7's catalogue
-/// records by hand: two solids meeting along a whole edge would put four faces
-/// along it, and an edge belongs to exactly two.
-const A_LATTICE_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.02..=0.10;
+/// Measured at 3.3% over the shipped corpus — 14 of 429 — and the band is two
+/// thirds to three times that, 2.2% to 9.8%, rounded to two figures. **That is
+/// the convention all six of these bands are derived to**, and each of the
+/// other five says so and shows its own arithmetic. Every one of the 14 is the
+/// case §17.7's catalogue records by hand: two solids meeting along a whole
+/// edge would put four faces along it, and an edge belongs to exactly two.
+///
+/// The band is a tripwire, not a confidence interval — there is no sampling
+/// noise to cover, because [`measured`] runs from a fixed seed and gives the
+/// same 429 fuses on every machine. Two thirds to three times is a judgement
+/// about how far a real change may move one of these counts before somebody
+/// should look at it. In fuses, this one fires under 10 and over 42.
+///
+/// **When one of them moves, re-derive its band from the new measurement**
+/// rather than widening an end to take it in. Widening is how these six came to
+/// be set once, in August, and never looked at again: the fall recorded below
+/// moved every one of them, two of them by more than half, and no band fired.
+///
+/// **All six of these figures fell at `b4890f1`**, and they fell together.
+/// Measured on that commit and on its parent `cc959c1`, over the same 423-fuse
+/// corpus and with no refusal count moving: this family 20 to 14, the flush
+/// family 72 to 61, elsewhere 17 to 12, turned 17 to 13, leaning alike 17 to 7,
+/// skew 8 to 3. `b4890f1` is where a face began to be cut by its own solid's
+/// planes as well as the other's, and the fuse it was written for united to a
+/// solid one way round and to an edge with one face along it the other — which
+/// is this count exactly. Fewer answers are not solids because fewer answers are
+/// wrong.
+///
+/// The corpus going 423 to 429 is a **separate** move and a later one:
+/// `01e62c1` and `9b3a5fd` recorded a proptest seed each, and a replayed seed is
+/// three more fuses. Nothing since has moved any of the six.
+const A_LATTICE_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.022..=0.098;
 
 /// The same for the family built to share coordinates, which is full of them.
 ///
-/// Measured at 17.0% — 72 of 423 — which is what "deliberately degenerate"
+/// Measured at 14.2% — 61 of 429 — which is what "deliberately degenerate"
 /// buys: the offsets are whole extents, so edge-on-edge and corner-on-corner
 /// are the ordinary case here rather than the rare one.
+///
+/// **This band is a deliberate exception to the file's own convention, kept
+/// narrower on purpose.** Two thirds to three times of 14.2% gives 9.5% to
+/// 43% — 41 fuses to 184 — and every other one of these six is derived to
+/// exactly that rule. This one is not: it stays at 10% to 28%, 43 to 120
+/// fuses, because nobody has measured a reason to let this family answer
+/// "not a solid" as often as 184 times out of 429. The band was briefly
+/// widened to the convention's 9.5%–43% during a mechanical re-derivation of
+/// all six and that widening was reverted here — the tidy-up moved a number
+/// nobody had a reason to move. Re-derive the other five from a new
+/// measurement freely; re-derive *this* one only alongside a measurement
+/// that says why more than 120 is fine.
 const A_FLUSH_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.10..=0.28;
 
 /// The same for the lattice pairs written somewhere else in `f64`.
 ///
-/// Measured at 4.0% — 17 of 423 — against the lattice family's 4.7%, and the two
+/// Measured at 2.8% — 12 of 429 — against the lattice family's 3.3%, and the two
 /// are the same figure rather than two. The configurations are drawn from the
 /// same generator and the same seed, but this family draws two more numbers per
 /// case, so the two corpora are not the same 128 configurations. What is exactly
 /// the same is the reason: moving everything by a power of two cannot turn an
-/// answer into one a `Model` can hold or the other way about. Same band.
-const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.02..=0.10;
+/// answer into one a `Model` can hold or the other way about.
+///
+/// The band is its own, though, because the convention is applied to each
+/// family's own measurement: two thirds to three times 2.8% is 1.9% to 8.4%,
+/// which is 9 fuses to 36. The lattice family's band would have been a slightly
+/// higher one and reading either as the other's is what §17.7 forbids.
+const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.019..=0.084;
 
 /// The same for the turned family.
 ///
-/// Measured at 4.0% — 17 of 423 — lower than the lattice family's 4.7%, which it
-/// is a rotation of, because getting on for a quarter of that family's fuses
-/// refuse before they get far enough to find out whether the answer is a
-/// solid.
-const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.015..=0.09;
+/// Measured at 3.3% — 14 of 429 — which is the lattice family's count exactly,
+/// and this family is a rotation of that one. It used to be the lower of the two
+/// and no longer is, even though getting on for a quarter of this family's fuses
+/// still refuse before they get far enough to find out whether the answer is a
+/// solid. Do not read the equality as anything: this is the one of the six that
+/// the two seeds after `b4890f1` also moved, 13 on 423 and 10 on 426 before it
+/// landed on 14 on 429, so it went past the lattice family's count rather than
+/// settling on it. [`A_LATTICE_PAIR_IS_NOT_A_SOLID`] has the attribution.
+///
+/// Same count as the lattice family, so the convention gives the same band:
+/// 2.2% to 9.8%, 10 fuses to 42. It was 1.5% to 9%, a floor at under half the
+/// measurement and the loosest of the six. This family has been at 17 of 423,
+/// 13 of 423, 10 of 426 and now 14 of 429, and the old floor left room for all
+/// of them and half again.
+const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.022..=0.098;
 
 /// The same for the family whose outlines lean over.
 ///
-/// Measured at 1.9% over the shipped corpus — 8 of 423 — which is **two fifths**
-/// of the lattice family's 4.7%, and the reason is the point of the family. An
+/// Measured at 0.7% over the shipped corpus — 3 of 429 — which is **a fifth**
+/// of the lattice family's 3.3%, and the reason is the point of the family. An
 /// answer is not a solid here almost always because two solids meet along a
 /// whole edge and four faces would run along it, and that needs the two edges to
 /// be the same edge exactly. Leaning the two solids by different amounts is
 /// precisely what stops them sharing an edge. It is still the lowest of the six
 /// families by some way, and it is the only one where the ratio to the lattice
 /// family is what the family was built to be about.
-const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.005..=0.03;
+///
+/// Two thirds to three times 0.7% is 0.47% to 2.1%, and at a count of three
+/// those ends are two fuses and nine exactly. Rounding the floor to two figures
+/// rounds it up, which puts two fuses just outside, so in practice this row runs
+/// **three fuses to nine and fires if one of its three stops happening.** The
+/// end is left where the rounding put it rather than nudged down to take two
+/// fuses back in: the same rounding is applied to all twelve ends, and one end
+/// chosen a different way for comfort is the thing this re-derivation was for.
+///
+/// A band this tight is not a flake waiting to happen. [`measured`] runs from a
+/// fixed seed, so a count of three is a count of three on every machine, and
+/// nothing but a change to the kernel or to the corpus can move it. It was 0.5%
+/// to 3%, the same three fuses at the bottom and three more at the top.
+const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0047..=0.021;
 
 /// The same for its control, where both solids lean the same way.
 ///
-/// Measured at 4.0% — 17 of 423 — and it is the lattice family's 4.7% rather
-/// than the skew family's 1.9%, which is the arithmetic saying what the control
-/// claims. Leaning both solids by the same amount is an affine map of the whole
-/// pair, and an affine map preserves incidence exactly, so the edges that
-/// coincided still coincide and the answers that were not solids still are not.
-/// It does not land on 4.7% exactly because this family draws one more number
-/// per case, so the two corpora are not the same 128 configurations — the same
-/// caveat [`A_PAIR_ELSEWHERE_IS_NOT_A_SOLID`] carries — and because a fuse that
-/// refuses never gets far enough to find out whether its answer was a solid.
-const A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.012..=0.08;
+/// Measured at 1.6% — 7 of 429 — which sits between the lattice family's 3.3%
+/// and the skew family's 0.7% rather than on the lattice family's figure, where
+/// the arithmetic the control claims puts it. Leaning both solids by the same
+/// amount is an affine map of the whole pair, and an affine map preserves
+/// incidence exactly, so the edges that coincided still coincide and the answers
+/// that were not solids still are not. Two things pull it below 3.3%: this
+/// family draws one more number per case, so the two corpora are not the same
+/// 128 configurations — the same caveat [`A_PAIR_ELSEWHERE_IS_NOT_A_SOLID`]
+/// carries — and a fuse that refuses never gets far enough to find out whether
+/// its answer was a solid, which this family does 24 times. Whether those two
+/// account for the whole of a gap that is now half the count is not measured
+/// here; it was 17 against 20 when the figure was last taken. **§22.3 is the
+/// section to read beside this number**, because a gap between this row and the
+/// lattice row is what caught the bug that section records — 1.9% against 4.8%
+/// then, 1.6% against 3.3% now.
+///
+/// Two thirds to three times 1.6% is 1.1% to 4.9%, 5 fuses to 21. It was 1.2%
+/// to 8%, which is 6 to 34 — so the convention buys one more fuse of room below
+/// and takes thirteen away above. This row and the skew row are the two the
+/// convention would have caught at `b4890f1`: bands derived from the parent
+/// commit's own measurement, 4.0% here and 1.9% there, put floors at 2.7% and
+/// 1.3%, and `b4890f1` landed at 1.7% and 0.7%. Both trees were built and both
+/// rows measured; the other four stayed inside, the lattice and elsewhere rows
+/// by under a fuse.
+const A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.011..=0.049;
 
 #[test]
 fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
@@ -3420,7 +3502,7 @@ impl Tally {
         let share = self.not_a_solid.get() as f64 / self.fuses.get() as f64;
         assert!(
             band.contains(&share),
-            "{} of {} fuses came back not a solid ({:.1}%), outside the {:.0}%–{:.0}% \
+            "{} of {} fuses came back not a solid ({:.1}%), outside the {:.2}%–{:.2}% \
              this family has always given",
             self.not_a_solid.get(),
             self.fuses.get(),
