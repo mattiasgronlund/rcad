@@ -12,13 +12,15 @@
 //! **The numbers, and why they are exactly these.**
 //! [`DynamicRange::LARGEST_SUPPORTED_RATIO`] is `1e11`.
 //!
-//! - The far block sits at `1024`, and its own shortest edge is `2`. On its
-//!   own that is a ratio of about `513`.
+//! - The far block starts at `1024` and is `2` wide, so its largest
+//!   coordinate is `1026` and its shortest edge is `2`: a ratio of `513`.
 //! - The two blocks that are fused overlap in one corner by `2^-30`, so the
 //!   answer carries edges that short. Against the answer's own largest
 //!   coordinate, just under `4`, that is about `4.3e9` — inside the limit,
 //!   which is why `Assembly::check_dynamic_range` lets the fuse through.
-//! - Together they are `1024 / 2^-30`, about `1.1e12`, which is not.
+//! - Together — the far block's largest coordinate, `1026`, against the
+//!   answer's shortest edge, `2^-30` — the ratio is `1026 * 2^30`, exactly
+//!   `1_101_659_111_424`, about `1.1e12`, which is not.
 //!
 //! So before this change the fuse answered, wrote, and then panicked with
 //! `Invalid(DynamicRangeTooWide { ratio: 1101659111424.0 })` — for a step it cut
