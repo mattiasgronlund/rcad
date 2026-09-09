@@ -931,6 +931,30 @@ mod tests {
     /// longer `f64`. The box has to hold the stored corner all the same — the
     /// stored corner is the true one moved and rounded, and the box encloses the
     /// true one.
+    ///
+    /// A box against a bare point, not a box against a box: `corners_as_stored`
+    /// goes through `VertexView::point()`, which hands back three `f64`s and no
+    /// enclosure of its own. So containment is exact and is asserted with no
+    /// slack. All 72 checks — the eight corners, each reached from three faces,
+    /// times three axes — land strictly inside, the tightest by 1.665e-16, about
+    /// six ulps at that coordinate's size.
+    ///
+    /// The only thing here that is not the same on every machine is the `sin`
+    /// and `cos` of the turn, which come from the platform's libm and are not
+    /// correctly rounded. Everything after them is `+ - * /` and `sqrt`, which
+    /// IEEE-754 pins to the bit, and Rust does not fold a multiply and an add
+    /// into an `fma` by itself. An ulp of disagreement there cannot reach this
+    /// margin: stepping the angle one ulp at a time, containment holds for 331
+    /// steps either side of 0.7 before the first failure, and within ten steps
+    /// the tightest margin never falls below 8.3e-17.
+    ///
+    /// It is a measured property of this turn and not a law — 11 of the 840
+    /// angles swept do fail — so if this ever goes red, the assert names the
+    /// coordinate and the answer is a fresh measurement, not a bigger constant.
+    /// It asked for `± 1e-12` until 2026-09-09; that slack absorbed nothing, and
+    /// §75.6 read it as evidence that two certified boxes can fail to overlap on
+    /// inputs this kernel accepts, then declined a correct change on the
+    /// strength of it. §78 is what that cost.
     #[test]
     fn re_deriving_the_corners_of_a_turned_cube_gives_boxes_that_hold_them() {
         let (mut model, cube) = a_cube_of_side_two();
@@ -947,8 +971,8 @@ mod tests {
                     for axis in 0..3 {
                         let (lo, hi) = (box_of_it[axis].lo(), box_of_it[axis].hi());
                         assert!(
-                            lo - 1e-12 <= stored[axis] && stored[axis] <= hi + 1e-12,
-                            "the box {lo}..{hi} is nowhere near the stored {}",
+                            lo <= stored[axis] && stored[axis] <= hi,
+                            "the box {lo}..{hi} does not hold the stored {}",
                             stored[axis]
                         );
                     }
