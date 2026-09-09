@@ -21762,9 +21762,11 @@ arm.
 *And "solids that fuse today" is not the set `validate` already refuses.* This
 paragraph reads as though a stricter `bake` could only refuse what
 `Model::validate` refuses anyway. Nothing gates `bake` behind `validate`.
-`bake()` is the first step of `Model::fused_under`; `Assembly::commit`'s
-`was_sound` self-check runs *after* it and is `cfg!(debug_assertions)`, so a
-release build runs no `validate()` inside `commit()` at all (§78.10); and
+`bake()` is the first step of `Model::fused_under`; the self-check
+`Assembly::commit` runs *after* it is `Model::check_what_was_just_written`,
+which asks eleven of the sweep's thirteen questions of the entities that one
+fuse wrote and of nothing else, so no build runs a `validate()` of the model
+inside `commit()` at all (§81.4); and
 `a_union_can_be_united_again_because_every_corner_of_it_still_has_three_planes`
 (`crates/rcad-topo/tests/fusing_solids.rs:799`) feeds one fuse's raw output
 straight into the next fuse's `bake()`. Whatever a stricter `bake` refuses, it
