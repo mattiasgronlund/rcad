@@ -30,7 +30,7 @@ list:
 # one `test` — and this repo already says "gated green", "a gate agent", "the
 # gate worktree". `test-all` would have shipped a false sentence on day one.
 [doc("Everything, in the order CI runs it. ~9 minutes.")]
-gate: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest lint test check-t-selftest deny
+gate: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -480,8 +480,8 @@ check-gate-runs-every-check:
     listed=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "20" ]; then \
-        echo "found $n check-* recipes, expected 20"; \
+    if [ "$n" != "21" ]; then \
+        echo "found $n check-* recipes, expected 21"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -1678,6 +1678,134 @@ lint:
 deny:
     cargo deny check
 
+# The four fuzz recipes the overnight run takes, in the order it takes them.
+#
+# Recipe names rather than fuzz-target names, because what each target wants on
+# its command line is the recipe's business and not this list's.
+fuzz_all := "fuzz fuzz-reader fuzz-writer fuzz-fuse"
+
+# Where a night's logs go. One directory per date, plus a one-line `latest`.
+fuzz_log_root := env_var_or_default("RCAD_FUZZ_LOGS", env_var("HOME") / "rcad-fuzz-logs")
+
+# Where the overnight run accumulates what it finds worth keeping.
+#
+# **Outside the tree, and that is the whole of decision §80.** The corpus under
+# `fuzz/corpus/` is tracked, 30 MB of it; eight hours a night would add
+# thousands of files to it, so the tree would be dirty every morning and every
+# lane would merge past a thousand-file commit it never read. So the tracked
+# corpus is handed to libFuzzer as a *read-only seed* and the night's own
+# findings land here. What is worth keeping is promoted into `fuzz/corpus/` by
+# hand, which is a thing somebody decided rather than a thing that accrued.
+fuzz_corpus_root := env_var_or_default("RCAD_FUZZ_CORPUS", env_var("HOME") / "rcad-fuzz-corpus")
+
+# Fuzz every target in turn, inside a fixed window, unattended.
+#
+# `window` is seconds, and it is a *deadline* and not a budget: each target gets
+# an equal share of whatever is left when its turn comes, so a slow build or a
+# target that stops early is paid for out of the same window rather than added
+# to the end of it. The 08:10 in `rcad-fuzz.timer` is that deadline, and it is
+# real because the arithmetic is done against the clock each time round.
+#
+# A crash does not end the night. `cargo fuzz` exits non-zero and writes the
+# input to `fuzz/artifacts/<target>/` (ignored, so it survives a `git clean`
+# without dirtying anything), and a crash in the reader is no reason to cost the
+# fuse its hours — so each target is reported and the run carries on, failing at
+# the end if anything failed.
+#
+# Same nightly-compiler caveat as `fuzz` below.
+[doc("Fuzz all four targets in turn, inside a window in seconds. What the timer runs.")]
+fuzz-overnight window="28800":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # The same parse `check-hub` uses: git documents the main working tree as
+    # the first entry. An eight-hour job in the hub is the one kind of work that
+    # cannot be seen — `git worktree lock` refuses there, so `just lanes` would
+    # show `free` all night beside a tree somebody is using (docs/decisions.md
+    # §60). Give the timer a worktree of its own and lock it.
+    listing=$(git worktree list --porcelain)
+    hub=$(awk '/^worktree /{print $2; exit}' <<<"$listing")
+    if [ "$(grep -c '^worktree ' <<<"$listing")" -gt 1 ] \
+        && [ "$(git rev-parse --show-toplevel)" = "$hub" ]; then
+        echo "this is the hub, and nobody works in the hub: $hub"
+        echo "  an unattended run here can never be recorded as anyone's; point the"
+        echo "  timer at a locked worktree instead:"
+        echo "      git worktree add ../rcad-fuzz && git worktree lock ../rcad-fuzz --reason 'overnight fuzzing'"
+        exit 1
+    fi
+
+    deadline=$(( $(date +%s) + {{window}} ))
+    night="{{fuzz_log_root}}/$(date +%Y-%m-%d)"
+    mkdir -p "$night"
+
+    # What was fuzzed, in the summary line, because nothing here advances the
+    # worktree to `main` and nothing should: an unattended `git checkout` racing
+    # the lanes that merge into `main` is a write nobody reviewed. The cost of
+    # that is a timer that can sit on a commit for a month, which is a night
+    # that quietly proves nothing — so the age is printed rather than fixed, and
+    # whoever reads `latest` can see it has gone stale.
+    commit=$(git rev-parse --short HEAD)
+    age=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+    echo "fuzzing $commit ($age days old) until $(date -d "@$deadline" '+%H:%M:%S'), logs in $night"
+
+    # Built once, before the window is divided, so that the compiler comes out
+    # of the night as a whole and not out of whichever target went first.
+    if ! (cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
+            cargo +nightly fuzz build) >"$night/build.log" 2>&1; then
+        tail -n 20 "$night/build.log"
+        echo "the fuzz targets did not build, so nothing was fuzzed: $night/build.log"
+        echo "nightly is not pinned by this repo (docs/decisions.md §29.9); \`rustup toolchain install nightly\` is the usual answer"
+        printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
+        exit 1
+    fi
+
+    recipes=({{fuzz_all}})
+    left=${#recipes[@]}
+    to_look_at=()
+    for recipe in "${recipes[@]}"; do
+        slice=$(( (deadline - $(date +%s)) / left ))
+        left=$(( left - 1 ))
+        # No floor beyond "there is time left". A minimum worth starting would
+        # be a number nobody can defend — an 18 MB corpus takes seconds just to
+        # load, so the honest floor depends on the target — and it would make
+        # the window untestable at any size a test can afford to wait for.
+        if [ "$slice" -lt 1 ]; then
+            echo "$recipe: skipped, $slice s left in the window" | tee -a "$night/$recipe.log"
+            to_look_at+=("$recipe:no-time")
+            continue
+        fi
+        echo "$recipe: $slice s"
+        # libFuzzer's own `-timeout` bounds one input and not the process, and a
+        # target wedged outside the fuzzer's control would eat the whole night.
+        # The grace is for the corpus write on the way out.
+        status=0
+        timeout --kill-after=60 "$(( slice + 300 ))" \
+            {{just_executable()}} "$recipe" "$slice" "{{fuzz_corpus_root}}" \
+            >"$night/$recipe.log" 2>&1 || status=$?
+        case "$status" in
+            0) ;;
+            124|137)
+                echo "$recipe: overran its slice and was killed"
+                to_look_at+=("$recipe:overran") ;;
+            *)
+                echo "$recipe: exited $status — see $night/$recipe.log"
+                to_look_at+=("$recipe:crash") ;;
+        esac
+    done
+
+    if [ "${#to_look_at[@]}" -eq 0 ]; then
+        printf '%s  %s (%d days old)  %d targets, nothing found  %s\n' \
+            "$(date '+%Y-%m-%d %H:%M')" "$commit" "$age" "${#recipes[@]}" \
+            "$night" >"{{fuzz_log_root}}/latest"
+        echo "nothing found"
+        exit 0
+    fi
+    printf '%s  %s (%d days old)  %d targets, %d TO LOOK AT (%s)  %s\n' \
+        "$(date '+%Y-%m-%d %H:%M')" "$commit" "$age" "${#recipes[@]}" \
+        "${#to_look_at[@]}" "${to_look_at[*]}" "$night" >"{{fuzz_log_root}}/latest"
+    cat "{{fuzz_log_root}}/latest"
+    exit 1
+
 # The property fuzzer, over a pair of surfaces (docs/decisions.md §24.14).
 #
 # NOT part of `just gate`, and not because anybody chose to leave it out:
@@ -1686,29 +1814,19 @@ deny:
 # uses a compiler the repo does not pin. What runs on every commit is the same
 # property over the same decoder, in
 # `crates/rcad-geom/tests/every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs`.
-#
-# RUSTFLAGS has to be repeated: cargo-fuzz sets it as an environment variable,
-# and that shadows the `.cargo/config.toml` entry `inari` needs to build at all.
 [doc("Fuzz the predicates over a pair of surfaces. Needs a nightly compiler.")]
-fuzz duration="60":
-    cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
-        cargo +nightly fuzz run where_two_surfaces_cross -- \
-        -max_total_time={{duration}} -max_len=71
+fuzz duration="60" corpus_root="": (fuzz-target "where_two_surfaces_cross" duration corpus_root "71")
 
 # The Part 21 reader, over arbitrary bytes (docs/decisions.md §42.12 criterion 5).
 #
-# Same nightly-compiler caveat as `fuzz` above, and the same repeated RUSTFLAGS.
-# What runs on every commit instead is
-# `crates/rcad-step/tests/what_the_reader_refuses_and_by_what_name.rs`, which
-# covers the shapes somebody thought of; this covers the ones nobody did.
+# Same nightly-compiler caveat as `fuzz` above. What runs on every commit
+# instead is `crates/rcad-step/tests/what_the_reader_refuses_and_by_what_name.rs`,
+# which covers the shapes somebody thought of; this covers the ones nobody did.
 #
 # No `-max_len`, unlike `fuzz`: the reader's promise is about any length of
 # anything, and the truncation cases live at every length there is.
 [doc("Fuzz the Part 21 reader over arbitrary bytes.")]
-fuzz-reader duration="60":
-    cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
-        cargo +nightly fuzz run no_step_file_makes_the_reader_panic -- \
-        -max_total_time={{duration}}
+fuzz-reader duration="60" corpus_root="": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root)
 
 # The Part 21 writer, over an arbitrary `Model` (docs/decisions.md §42.12).
 #
@@ -1718,10 +1836,7 @@ fuzz-reader duration="60":
 # whatever `Model` comes out, sound or not, goes straight into
 # `rcad_step::write`, which owes an `Err` and never a panic either way.
 [doc("Fuzz the Part 21 writer over an arbitrary Model.")]
-fuzz-writer duration="60":
-    cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
-        cargo +nightly fuzz run no_model_makes_the_writer_panic -- \
-        -max_total_time={{duration}}
+fuzz-writer duration="60" corpus_root="": (fuzz-target "no_model_makes_the_writer_panic" duration corpus_root)
 
 # The fuse, over two arbitrary `Model`s (docs/decisions.md §17).
 #
@@ -1731,10 +1846,156 @@ fuzz-writer duration="60":
 # `fuzz/fuzz_targets/two_solids_fused_by_a_stranger.rs` for why two `Model`s
 # and not one cross-fused pair.
 [doc("Fuzz the fuse over two arbitrary Models.")]
-fuzz-fuse duration="60":
-    cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
-        cargo +nightly fuzz run two_solids_fused_by_a_stranger -- \
-        -max_total_time={{duration}}
+fuzz-fuse duration="60" corpus_root="": (fuzz-target "two_solids_fused_by_a_stranger" duration corpus_root)
+
+# The one place that knows how to start a fuzz target. The four recipes above
+# are its four call sites and differ only in the name and `-max_len`.
+#
+# RUSTFLAGS has to be repeated: cargo-fuzz sets it as an environment variable,
+# and that shadows the `.cargo/config.toml` entry `inari` needs to build at all.
+#
+# With no `corpus_root` — a hand-run `just fuzz 60` — libFuzzer gets no corpus
+# argument and writes to the tracked `fuzz/corpus/<target>` as it always has.
+# With one, that directory becomes the *second* argument and libFuzzer treats it
+# as a read-only seed, writing only to the first (§80).
+[private]
+fuzz-target target duration corpus_root="" max_len="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd fuzz
+    corpus=()
+    if [ -n "{{corpus_root}}" ]; then
+        mkdir -p "{{corpus_root}}/{{target}}"
+        corpus=("{{corpus_root}}/{{target}}" "corpus/{{target}}")
+    fi
+    RUSTFLAGS="-C target-cpu=x86-64-v3" \
+        cargo +nightly fuzz run {{target}} ${corpus[@]+"${corpus[@]}"} -- \
+        -max_total_time={{duration}} {{ if max_len == "" { "" } else { "-max_len=" + max_len } }}
+
+# Pins `fuzz-overnight` against a `cargo` it brings with it, because the real one
+# wants a sanitizer build and eight hours before it says anything at all. The
+# stub sleeps for exactly the time it was granted, so the clock the recipe
+# divides is a real clock and the whole thing still runs in about thirteen
+# seconds.
+#
+# Four things, and the first is the one that would otherwise cost a night in
+# silence: **the window is a deadline, not a budget.** A recipe that handed each
+# target the full window would pass every other assertion here and run four
+# times as long as it was told to, which nobody would notice until the fuzzer
+# was still going at lunch.
+#
+# The other three are each a way the night could quietly do nothing: a crash in
+# one target taking the other three down with it, the run reporting success
+# after a target died, and — the reason the hub case is here rather than trusted
+# to `check-hub` — a timer left pointing at the one tree whose owner cannot be
+# written down, where `just lanes` would show `free` all night (§60).
+[private]
+check-fuzz-overnight-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    mkdir -p "$dir/bin"
+
+    # Logs its whole command line and then sleeps out the slice it was given, so
+    # that a run's wall clock is the sum of what the recipe handed out.
+    cat >"$dir/bin/cargo" <<'STUB'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '%s\n' "$*" >>"$STUB_LOG"
+    case " $* " in
+        *" build "*) exit 0 ;;
+    esac
+    for arg in "$@"; do
+        case "$arg" in
+            -max_total_time=*) sleep "$(( ${arg#*=} + ${STUB_OVERRUN:-0} ))" ;;
+        esac
+    done
+    for arg in "$@"; do
+        if [ "$arg" = "${STUB_CRASH:-}" ]; then exit 1; fi
+    done
+    exit 0
+    STUB
+    chmod +x "$dir/bin/cargo"
+
+    fail() {
+        echo "fuzz-overnight drifted from its own fixtures: $1"
+        [ -f "$dir/log" ] && sed 's/^/    /' "$dir/log"
+        exit 1
+    }
+
+    run() {
+        STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+            RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+            {{just_executable()}} fuzz-overnight "$1" >"$dir/out" 2>&1
+    }
+
+    # One: four targets inside a four-second window, with the second of them
+    # dying. Every one still runs, the slices add up to the window and not to
+    # four times it, and the run reports the failure rather than swallowing it.
+    : >"$dir/log"
+    started=$(date +%s)
+    status=0
+    STUB_CRASH=no_step_file_makes_the_reader_panic run 4 || status=$?
+    elapsed=$(( $(date +%s) - started ))
+    [ "$status" -ne 0 ] || fail "a target exited 1 and the night reported success"
+    ran=$(grep -c 'fuzz run' "$dir/log" || true)
+    [ "$ran" -eq 4 ] || fail "a crash in the second target left $ran of 4 targets run"
+    [ "$elapsed" -ge 4 ] || fail "a four-second window was over in $elapsed s, so nothing was fuzzed"
+    [ "$elapsed" -le 8 ] || fail "a four-second window took $elapsed s, so the window is a budget and not a deadline"
+    granted=$(grep -o 'max_total_time=[0-9]*' "$dir/log" | cut -d= -f2 | awk '{s += $1} END {print s + 0}')
+    [ "$granted" -le 4 ] || fail "four targets were granted $granted s out of a four-second window"
+    grep -q 'TO LOOK AT.*fuzz-reader' "$dir/logs/latest" \
+        || fail "the summary line does not name the target that died"
+
+    # Two: the tracked corpus is a read-only seed and never the directory
+    # libFuzzer writes to, which is the whole of §80. Order is the only thing
+    # that says so, and only `fuzz` carries `-max_len`.
+    grep -q "run where_two_surfaces_cross $dir/corpus/where_two_surfaces_cross corpus/where_two_surfaces_cross " "$dir/log" \
+        || fail "the night's own corpus is not first, so libFuzzer would write into the tracked one"
+    [ "$(grep -c 'max_len=71' "$dir/log")" -eq 1 ] \
+        || fail "-max_len=71 belongs to where_two_surfaces_cross and to nothing else"
+
+    # Three: a clean night says so and exits 0. Without this, a recipe that
+    # always failed would satisfy every assertion above.
+    : >"$dir/log"
+    run 4 || fail "a night that found nothing exited non-zero"
+    grep -q 'nothing found' "$dir/logs/latest" \
+        || fail "a clean night did not say so in the summary line"
+    grep -q "$(git rev-parse --short HEAD) ([0-9]* days old)" "$dir/logs/latest" \
+        || fail "the summary line does not say which commit was fuzzed, so a timer left on a stale one reads as a good night"
+
+    # Four: when a target overruns, what is left of the window is what the rest
+    # get — and when that is nothing, they are skipped and said to be skipped,
+    # rather than each starting a fresh hour past the deadline.
+    : >"$dir/log"
+    started=$(date +%s)
+    status=0
+    STUB_OVERRUN=5 run 4 || status=$?
+    elapsed=$(( $(date +%s) - started ))
+    [ "$status" -ne 0 ] || fail "three targets were skipped and the night reported success"
+    [ "$elapsed" -le 12 ] || fail "an overrun in the first target let the rest run on for $elapsed s"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 1 ] \
+        || fail "the window was spent by the first target and the rest ran anyway"
+
+    # Five: the hub is refused before anything is built, so a timer pointed at
+    # it fails on the first night rather than on the night it matters.
+    hub="$dir/hub"
+    git init -q -b main "$hub"
+    cp justfile "$hub/justfile"
+    git -C "$hub" add justfile
+    git -C "$hub" -c user.email=t@t -c user.name=t commit -q -m "root"
+    git -C "$hub" worktree add -q --detach "$dir/lane"
+    : >"$dir/log"
+    status=0
+    (cd "$hub" && STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+        RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 4) >"$dir/out" 2>&1 || status=$?
+    [ "$status" -ne 0 ] || fail "the hub was handed an eight-hour job and took it"
+    grep -q 'nobody works in the hub' "$dir/out" \
+        || fail "the hub was refused without saying why: $(cat "$dir/out")"
+    [ ! -s "$dir/log" ] \
+        || fail "the hub was refused only after cargo had been run"
 
 [doc("The benchmarks.")]
 bench:
