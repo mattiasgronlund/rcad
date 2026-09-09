@@ -23523,10 +23523,10 @@ site gives it, which is a different promise and the one now written down.
 **`was_sound` read as a check and behaved as a silencer**, which §81.1 has.
 
 **The doc comment on `check_no_flat_face_is_used_reversed` claimed the
-turned-round wall was reachable through the public API** — `validate.rs:663`
-before this unit moved it — and that claim was doing real work: it is what made
-the `AFlatFaceIsUsedReversed` check §16.11's kind rather than a hardening
-exercise.
+turned-round wall was reachable through the public API** — `validate.rs:669`
+before this unit moved it, `:819` now — and that claim was doing real work: it
+is what made the `AFlatFaceIsUsedReversed` check §16.11's kind rather than a
+hardening exercise.
 It is no longer true. `SolidBuilder::build` refuses that shape by name, and
 `building_a_solid_out_of_faces.rs` has asserted so all along — the test was
 there while the paragraph beside the check said the opposite. This is §16.10's
@@ -23597,9 +23597,13 @@ make or instrumentation that is not checked in:**
   (the implementing lane). This is the load-bearing one in §81.2 and it is a
   counterfactual build, so nothing in the tree can hold it.
 - The **panic on the unchanged tree** in §81.5 — the exact message and the exact
-  ratio, produced by reverting `assemble.rs` and `model.rs` in a scratch copy
-  and running the new test against them (the gate agent). The ratio is
-  re-derivable as arithmetic; that this is what the old code printed is not.
+  ratio, produced by reverting `assemble.rs` and `validate.rs` in a scratch copy
+  and running the new test against them (the gate agent). Those are the two
+  files and no others: `6b94c13` never touched `model.rs`, and reverting
+  `assemble.rs` alone does not compile, because the new `validate.rs` reads the
+  `coedges`, `wires` and `shells` that `Written` grew. Reproduced a second time
+  on 2026-09-09. The ratio is re-derivable as arithmetic; that this is what the
+  old code printed is not.
 - **48.0 ns a face** for the touched checks (the gate agent), against 42–53 from
   the implementing lane and §66.2's 50–65. The `release`-profile run of the two
   un-gated `a_mutation_notices_…` tests failing with "test did not panic as
