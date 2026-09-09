@@ -23503,19 +23503,34 @@ model, the same cost, under a heading that says the sweep is linear in the whole
 model. Only a fixed per-sweep overhead of
 about 0.4 ms could hold both, and the fit above puts that overhead at 13 µs — so
 the row went, not the arithmetic around it. What it should have said all along
-is that at 240 faces the sweep costs *less* than the fuse it follows.
+is that at 240 faces the sweep is the same order as the fuse it follows, not a
+multiple of it.
+
+**Both columns of that table are ratios, and only the sweep half reproduces.** A
+third machine re-measuring from this description alone got the sweep to within
+3% — 0.490 ms at 240, 10.346 at 5040 — and the fuse at 0.816 ms, not 1.44. So
+its own ratios are 1.2× and 25×, on either side of the two above. The sweep is
+the reproducible half because the workload is stated exactly and blocks are
+blocks; the fuse's cost depends on the pair being united, which "two blocks
+overlapping by half" does not pin down. Read 0.7× and 14× as *this* machine's
+ratios. What survives every run is the shape: the sweep grows with the model and
+the fuse does not, so somewhere between 240 faces and 5040 the sweep passes the
+fuse and keeps going.
 
 The 5040 row survives, and the 15× it used to carry is not disturbed by the 14×
 above: that is one machine's fuse against another's, 1.94 µs a face against a
-1.34 ms fuse being 14.6× where 1.99 against 1.44 is 13.9×. §66.3 and
-`Model::check_what_was_just_written`'s doc comment both quote 15 times, and both
-still round to it.
+1.34 ms fuse being 14.6× where 1.99 against 1.44 is 13.9× and 2.05 against 0.82
+is 25×. §66.3 and `Model::check_what_was_just_written`'s doc comment both quote
+15 times. 14.6 rounds to it, 13.9 rounds to 14 and 25 rounds to neither: the
+figure is one machine's and the doc comment is the one that says whose, quoting
+the 1.94 µs a face it came from. §66.3's bare "15 times the fuse (§81.7)" is the
+loose one, and it is loose about the fuse and not about the sweep.
 
 That is the case §66.2's headline figure does not cover, and it is why what went
 in is `check_what_was_just_written` and not `Model::validate`. §66.3's phrase "a
 model the fuse has already spent tens of milliseconds on" describes the first
 workload and quietly assumes it. The corrected 240 row does not weaken that: a
-sweep can be cheaper than one fuse and still be the wrong shape, because it is
+sweep can be the price of one fuse and still be the wrong shape, because it is
 the model and not the answer that it grows with, and the 5040 row is where that
 shows.
 
@@ -23533,13 +23548,25 @@ After, flat, which is what "local" is supposed to mean. Those are the gate
 agent's numbers; the implementing lane's own run gave 2.68 / 6.37 / 17.50 before
 and 1.71 / 1.65 / 1.86 after, the same shape and the same conclusion.
 
-**That table checks out against the rate, and it is what says `commit` really
-swept twice.** Its own row gaps are the sweeping that went away: 1.72, 5.45 and
-16.35 ms, which over two sweeps is 1.75, 1.88 and 1.89 µs a face — against the
-1.99 measured directly above, on a machine that is not the one those rows came
-from. Read as *one* sweep the same gaps are 3.50, 3.75 and 3.77 µs a face,
-nearly double anything the sweep has ever been clocked at on its own. So the
-"twice" is not read off the source alone; the cost of the fuse says it too.
+**That table checks out against the rate, and it cannot say how many times
+`commit` swept.** Its own row gaps are the sweeping that went away: 1.72, 5.45
+and 16.35 ms, which over two sweeps is 1.75, 1.88 and 1.89 µs a face — against
+the 1.99 measured directly above, on a machine that is not the one those rows
+came from. Read as *one* sweep the same gaps are 3.50, 3.75 and 3.77 µs a face,
+and that reading is not absurd: §66.2 clocked this same sweep at **3.4–4.4 µs a
+face** on its own shapes — this section's opening paragraph says so, and
+`Model::check_what_was_just_written`'s doc comment repeats it — so a
+once-sweeping `commit` on *that* machine lands inside the range *that* machine
+published. The gaps fit
+"twice" at this machine's rate and "once" at the other's, and a rate that varies
+by two between machines is exactly what the pair of measurements shows. So the
+gaps corroborate the rate and settle nothing about the count.
+
+**The count is read off the source, and only off the source.** `git show
+6b94c13^:crates/rcad-topo/src/fuse/assemble.rs` has `commit` calling
+`Model::validate` twice — once into `was_sound` before the write, once after it,
+guarded by that first result. This was a gate agent's correction: the paragraph
+above it once claimed the arithmetic said "twice" on its own.
 
 The comparison is not quite like for like and it is worth saying which way it
 leans: "before" is the debug-gated code with its sweep forced on, so it includes
@@ -23676,10 +23703,20 @@ make or instrumentation that is not checked in:**
   re-measured on a second machine on 2026-09-09 — 1.99 µs a face over five model
   sizes with a fitted fixed cost of 13 µs, and the fuse flat at 1.435–1.452 ms
   from 12 faces to 5052 — which is how the **1.3× at 240 faces was found to be
-  wrong** and replaced by 0.7×. Two machines now agree on the rate, on the
-  flatness and on the 5040 row. It is still a timing harness nothing keeps: the
+  wrong** and replaced by 0.7×. A third run, a gate agent's, rebuilt the harness
+  from that description alone and got 0.490 / 1.014 / 2.999 / 8.852 / 10.346 ms
+  over the same five sizes — 2.05 µs a face, fitted fixed cost 7 µs, per-face
+  never leaving 2.04–2.07 — and the fuse flat at 0.816 ms on 12 faces against
+  0.818 on 5052, 0.2% over the same 420× model. Three machines now agree that
+  the rate is flat per face, that a fixed per-sweep cost is tens of microseconds
+  and not the 0.4 ms the old 240 row needed, and that the fuse does not notice
+  geometry it never touched. They do not agree on the fuse's absolute cost —
+  1.34, 1.44 and 0.82 ms — so the 240 row's 0.7× is the ratio on one of the
+  three and the 5040 row's 14× the ratio on that same one; the third machine's
+  own numbers give 1.2× and 25×. It is still a timing harness nothing keeps: the
   workload is `Model::validate` and `Model::fuse` on plain blocks, which is
-  cheap to write again, and §81.7 says exactly how.
+  cheap to write again, and §81.7 says exactly how — that description was enough
+  to reproduce it, which is the thing being claimed.
 - §81.7's **before-and-after table**, 3.79 / 7.15 / 18.07 → 2.07 / 1.70 / 1.72
   ms (the gate agent), with the implementing lane's 2.68 / 6.37 / 17.50 → 1.71 /
   1.65 / 1.86 beside it. Two runs on two machines agreeing about the shape is
