@@ -451,8 +451,20 @@ release build the response is a panic only where the operation has already
 written into the caller's model and cannot take it back; where the check can be
 made *before* the write, the response is an `Err` that says "this kernel has a
 bug", which is a third door and not `Error::Undecidable`. What the row must
-never mean is what a release build actually does today — neither of the two,
-because the check does not run at all (§66.1).
+never mean is that a release build panics wherever a debug build does; the
+amendment above is the whole of this paragraph's point.
+
+Until §81 there was a worse misreading available and it was the one that
+mattered: that the row described what a release build did. It did neither of the
+two, because the check did not run at all (§66.1). That is closed — the four
+touched checks and the fuse's post-write check now run in every build (§81.1),
+and `mise exec -- just t -p rcad-topo --cargo-profile release -E
+'test(a_mutation_notices)'` runs its two `#[should_panic]` tests with debug
+assertions off and passes both, which is the closure demonstrated rather than
+argued. The row now describes something that happens in release. Which of the
+two doors it opens there is a separate question and only one of them is built:
+the panic is what the fuse and `place_solid` do today, and the pre-write `Err`
+waits on the scratch model §66.7's first item is about.
 
 ### 4.2 Error types
 
