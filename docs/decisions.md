@@ -19230,3 +19230,88 @@ be done or cannot be reached (§16.10), and it finds those. What it cannot see i
 a claim that is true about everything it sampled and silent about what it did
 not. **The control for that is arithmetic, not reading**: a balance assertion,
 or a census one level finer than the claim.
+
+## 63. The fuzzer runs at night, recorded 2026-09-09
+
+`just fuzz-overnight` fuzzes all four targets in turn inside a fixed window, and
+a systemd user timer runs it from 00:10 to 08:10. It is the first thing in this
+repository that runs without somebody starting it.
+
+That is worth saying plainly, because it is not a second opinion. §44.10 says
+every green here is one person having run `just default` locally and reported it
+honestly, and no CI run has ever succeeded — 26 of 26 failures as of
+2026-09-07, the corpus being the blocker rather than the tool install. A nightly
+fuzz run does not change that. It is more hours against the same four targets,
+on the same machine, reported to the same person.
+
+### 63.1 Why the night's corpus lives outside the tree
+
+`fuzz/corpus/` is tracked, 30 MB across the four targets, and the tracked corpus
+is the point: §29.9's 562 minimised inputs include 32 written by hand and named
+for the configuration each one is. Eight hours a night would bury those under
+thousands nobody chose. Measured rather than guessed: the reader target wrote
+294 new inputs in its first sixty seconds against a fresh directory.
+
+So the tracked corpus is handed to libFuzzer as the **second** corpus argument,
+which makes it a read-only seed, and the night's own findings go to the first —
+`~/rcad-fuzz-corpus/<target>`, outside every worktree. Promotion into
+`fuzz/corpus/` stays a thing somebody decided.
+
+Order is the only thing that says which is which, so
+`check-fuzz-overnight-selftest` asserts the order rather than trusting it.
+
+### 63.2 The window is a deadline, not a budget
+
+Each target gets an equal share of *whatever is left when its turn comes*,
+computed against the clock each time round, rather than a quarter of the window
+computed once. A slow build, or a target that stops early, is paid for out of
+the same window instead of added to the end of it.
+
+The failure this prevents is silent and would have run until lunch: four targets
+each handed the full window is a recipe that passes every other assertion and
+takes four times as long as it was told to. The selftest runs a four-second
+window against a stub `cargo` that sleeps out exactly the slice it is granted,
+so the clock being divided is a real clock, and it fails the mutation.
+
+There is no minimum slice. A floor of "long enough to be worth starting" is a
+number nobody can defend — an 18 MB corpus takes seconds just to load, so the
+honest floor is per-target — and it would make the window untestable at any size
+a test can afford to wait for. A target is skipped when there is no time left,
+and said to be skipped.
+
+### 63.3 A crash does not end the night
+
+`cargo fuzz` exits non-zero and writes the input to `fuzz/artifacts/<target>/`,
+which is ignored (`fuzz/.gitignore:1`) and therefore survives a `git clean`
+without dirtying anything. A crash in the reader is no reason to cost the fuse
+its hours, so each target is reported and the run carries on, failing at the end
+if anything failed.
+
+### 63.4 Not in the hub, and not silently stale
+
+The recipe refuses to run in the hub, using the same parse `check-hub` does.
+§60's rule is that nobody works in the hub because `git worktree lock` refuses
+there, and an unattended eight-hour job is the one kind of work that most needs
+an owner and can least be asked for one: `just lanes` would print `free` all
+night beside a tree in use. The timer gets a worktree of its own, locked, with
+the reason `overnight fuzzing` — a lock held by a machine rather than a session,
+which is why it should survive a sweep of stale locks.
+
+Nothing advances that worktree to `main`, and nothing should: an unattended
+`git checkout` racing the lanes that merge into `main` is a write nobody
+reviewed. The cost is a timer that can sit on one commit for a month, fuzzing
+something nobody ships — §62's shape exactly, a run that completes and was
+settled before it started. So the commit and its age go in the summary line,
+where the staleness is visible instead of assumed. Advancing it is a person's
+`git -C ../rcad-nightly-fuzz checkout --detach main`.
+
+### 63.5 systemd rather than crontab
+
+`OnCalendar=*-*-* 00:10:00` with `RuntimeMaxSec=`, which is the outer backstop
+that makes 08:10 true even if the recipe misbehaves; a crontab line cannot stop
+itself and would need a second entry to do it. `Persistent=false`, because a
+missed midnight must not fire at ten in the morning and fuzz until six. The unit
+calls `mise` by absolute path: cron and systemd both start without a profile, so
+`just`, `cargo-fuzz` and the `RUSTC_WRAPPER=kache` that `mise.toml` sets are all
+absent from the environment, and cargo fails outright on a wrapper it cannot
+find (§8.1).
