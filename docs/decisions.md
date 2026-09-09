@@ -22769,10 +22769,34 @@ where the staleness is visible instead of assumed. Advancing it is a person's
 
 ### 80.5 systemd rather than crontab
 
-`OnCalendar=*-*-* 00:10:00` with `RuntimeMaxSec=`, which is the outer backstop
-that makes 08:10 true even if the recipe misbehaves; a crontab line cannot stop
-itself and would need a second entry to do it. `Persistent=false`, because a
-missed midnight must not fire at ten in the morning and fuzz until six.
+`tooling/systemd/rcad-fuzz.timer` and `.service`, installed by copying them into
+`~/.config/systemd/user/`. They are **in the tree**, and the reason is this
+section: it described two files no reader of the repo could open, which is the
+same shape as the sentence §80.4 had to withdraw. `%h` for the home directory is
+what makes them trackable, and it costs nothing — the worktree layout below it
+is this project's convention either way.
+
+`OnCalendar=*-*-* 00:10:00`, and `Persistent=false` because a missed midnight
+must not fire at ten in the morning and fuzz until six. `TimeoutStartSec=29400`
+is the outer backstop that makes 08:10 true even if the recipe misbehaves; a
+crontab line cannot stop itself and would need a second entry to do it.
+
+**That backstop was written as `RuntimeMaxSec=` and did nothing.** With
+`Type=oneshot` the whole run counts as *starting*, so `RuntimeMaxSec=` is
+ignored; `TimeoutStartSec=` is the knob that bounds `ExecStart`, and its default
+is infinity. Nothing in a night's output would have shown the difference —
+`fuzz-overnight` stops itself, so the backstop is only ever load-bearing on the
+night the thing it backs up is broken. What caught it was
+`systemd-analyze --user verify`, in one line, before the file was ever
+installed. Verify the units; do not read them.
+
+There is deliberately **no `check-*` arm** running that verify, and the reason
+is §77's. The gate runs on a GitHub runner, `systemd-analyze` is not something
+this repo installs or pins, and the two ways to write such an arm are both the
+failure §77 named: fail where the tool is missing and the gate breaks for a
+property of the machine, or skip there and the arm never runs on the only
+machine that runs it every push. So this is a two-file, run-it-yourself check,
+named here so the next person editing a unit knows the command exists.
 
 The unit calls `mise` by absolute path. cron and systemd both start without a
 profile, so `just`, `cargo-fuzz` and the `RUSTC_WRAPPER=kache` that `mise.toml`
