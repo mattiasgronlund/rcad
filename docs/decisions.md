@@ -22591,7 +22591,8 @@ between:
 | Mutation | What failed |
 |---|---|
 | `LC_ALL=C` added to both sorts, `comm` left ambient | the invented-file case, on the missing **name**, at exit code 1 |
-| the missing-file arm stops trimming `: FAILED open or read` | nothing — see §79.3 |
+| the missing-file arm stops trimming `: FAILED open or read` | nothing, until the fifth guard — §79.3 |
+| the mismatched arm stops trimming `: FAILED` | the same, and the same guard catches it |
 | the invented-file arm's `ok=0` deleted | the same case, on the **exit code**, output naming the file and then saying `corpus matches … 5 files` |
 | the `.stp`/`.step` filter dropped from the walk | the `notes.txt` guard, in four places at once |
 
@@ -22606,7 +22607,7 @@ holds a fix; here there is no fix to delete, so proving the case is not vacuous
 means *adding* the bug. That asymmetry is worth stating rather than leaving a
 reader to assume the two repos' selftests verify the same thing.
 
-### 79.3 The mutation the ported suite did not catch
+### 79.3 The two mutations the ported suite did not catch
 
 Dropping the `sed` that trims `: FAILED open or read` off the missing-file arm's
 names left all four cases green. The arm then prints
@@ -22616,14 +22617,31 @@ needle is a substring, so no case built this way can tell a trimmed name from an
 untrimmed one.
 
 That is a mutation surviving a suite written to catch exactly this class, found
-by running it rather than by reading it — which is the whole argument for
-verifying by mutation restated one level up. The fix is a fifth guard beside the
-`notes.txt` one: no arm may leave `sha256sum`'s own wording in what it prints.
-With it, that mutation fails on the leaked line and the other three still fail
-where they did.
+by running it rather than by reading it — the argument for verifying by mutation,
+restated one level up. The fix is a fifth guard beside the `notes.txt` one: no
+arm may leave `sha256sum`'s own wording in what it prints,
+`grep -qE 'FAILED( open or read)?$'` over every case's output.
 
-`rscene`'s copy has the same hole. It is theirs to close; the case list came
-from there and this is the first thing this port sends back.
+**`check-corpus` trims two suffixes, and only one of them had been run.**
+`: FAILED open or read` for a file that is gone, plain `: FAILED` for one whose
+bytes changed. The guard's regex covers both by construction, but covered and
+verified are different claims and this section asserted the second one from a
+run of the first. `rscene [3568f9]` said so, and it was right. Deleting the
+mismatched arm's trim: all four cases green, and with the guard,
+`FAIL an arm printed sha256sum's wording rather than a bare name: aB.stp: FAILED`.
+So both trims are now demonstrated rather than one demonstrated and one argued.
+
+The guard is safe only while no case exercises `check-corpus`'s "failed in a way
+this recipe does not parse" arm, which prints `sha256sum`'s output raw and means
+to. A future case that reaches that arm must assert on it rather than be excused
+from the guard.
+
+`rscene`'s copy had the same hole in both trims, confirmed there by the same
+mutations. Their §12 bullet had said "the missing-file arm's `sed` ... so it
+prints its heading and not the file", which is the *printing* `sed` and is
+genuinely caught; the commit message on `9b8256f` said only "the missing-file
+arm's `sed`", and that arm has two. The ambiguity was theirs and the misreading
+mine, which is why the fifth mutation exists at all.
 
 ### 79.4 Why it refuses instead of skipping
 

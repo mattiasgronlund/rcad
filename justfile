@@ -1650,10 +1650,15 @@ check-corpus-selftest:
     # No arm may leave `sha256sum`'s own wording in what it prints. The four
     # cases above cannot tell a trimmed name from an untrimmed one — a needle
     # is a substring, and `nested/deep one.step` sits inside
-    # `nested/deep one.step: FAILED open or read` just as happily. Dropping the
-    # `sed` that trims the missing-file arm therefore passed all four when this
+    # `nested/deep one.step: FAILED open or read` just as happily. Dropping
+    # either of `check-corpus`'s two trims therefore passed all four when this
     # was first ported, which is a mutation surviving a suite written to catch
-    # exactly that. `rscene`'s copy has the same hole; §79.3.
+    # exactly that. Both are verified against this guard in §79.3.
+    #
+    # It is safe only while no case exercises `check-corpus`'s "failed in a way
+    # this recipe does not parse" arm, which prints `sha256sum`'s output raw and
+    # means to. A case that reaches that arm must assert on it rather than be
+    # excused from this guard.
     if grep -qE 'FAILED( open or read)?$' <<<"$every_output"; then
         echo "FAIL  an arm printed sha256sum's wording rather than a bare name:"
         grep -nE 'FAILED( open or read)?$' <<<"$every_output" | sed 's/^/        /'
