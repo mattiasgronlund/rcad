@@ -58,7 +58,7 @@ use rcad_predicates::{
 };
 use smallvec::SmallVec;
 
-use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
+use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse, WireStep};
 use crate::validate::{
     a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
@@ -278,37 +278,37 @@ impl Assembly {
     ///
     /// # Panics
     ///
-    /// If the result breaks an invariant of the model — in debug builds, any
-    /// invariant [`Model::validate`] checks. A fuse invents topology that was in
-    /// no input, which puts it nearer an import than a mutation (§17.4), and a
-    /// corrupt solid is worse than a crash.
+    /// If what the fuse just wrote breaks an invariant of the model, in **every**
+    /// build. A fuse invents topology that was in no input, which puts it nearer
+    /// an import than a mutation (§17.4), and a corrupt solid is worse than a
+    /// crash. The gate that used to send this check to debug builds is gone, and
+    /// so is the sweep of the whole model it stood in front of
+    /// (`docs/decisions.md` §66.2, §66.3).
     ///
-    /// **Only when the model was sound before the write.** [`Model::validate`]
-    /// sweeps everything, including the parts of the model the fuse never
-    /// looked at, and a caller can build a model that does not pass it — the
-    /// sweep runs at test and import boundaries, not after every mutation
-    /// (§4.3). Panicking there would report somebody else's broken solid, or
-    /// somebody else's dynamic range, as this fuse's bug. What the panic
-    /// promises is that a fuse handed a sound model leaves a sound one.
+    /// **The check is [`Model::check_what_was_just_written`], not
+    /// [`Model::validate`].** Twelve of the sweep's thirteen checks are asked of
+    /// the answer alone, which is the whole of what the fuse is answerable for;
+    /// the thirteenth, the model-wide coordinate range, is asked of the input
+    /// solids before the write instead ([`the_inputs_fit_in_f64`]) and of the
+    /// answer's own coordinates by [`Assembly::check_dynamic_range`]. That
+    /// function says why, and why a model-wide one here would report another
+    /// solid's placement as this fuse's bug.
+    ///
+    /// [`the_inputs_fit_in_f64`]: super::the_inputs_fit_in_f64
     pub(crate) fn commit(
         &self,
         model: &mut Model,
         inherited: Option<Approximation>,
         policy: &Policy,
     ) -> Written {
-        let was_sound =
-            cfg!(debug_assertions) && model.validate(policy, &mut ProvenanceLog::new()).is_ok();
-
         let approximation_before = model.worst_approximation();
         let written = self.write_into(model, &self.solids, &self.runs);
         let worst = self.tag_everything_it_built(model, &written, inherited);
         model.assert_approximation_did_not_grow(approximation_before.max(worst));
 
-        if was_sound {
-            model
-                .validate(policy, &mut ProvenanceLog::new())
-                .expect("a fuse writes a valid model or does not write at all");
-        }
+        model
+            .check_what_was_just_written(&written, policy, &mut ProvenanceLog::new())
+            .expect("a fuse writes a valid answer or does not write at all");
         written
     }
 
@@ -1252,6 +1252,8 @@ impl Assembly {
             })
             .collect();
 
+        let mut all_coedges: Vec<CoedgeSlot> = Vec::new();
+        let mut all_wires: Vec<WireSlot> = Vec::new();
         let mut faces: Vec<FaceSlot> = Vec::new();
         for face in &self.faces {
             let mut wires: SmallVec<[WireSlot; 1]> = SmallVec::new();
@@ -1263,7 +1265,9 @@ impl Assembly {
                     } else {
                         Orientation::Reversed
                     };
-                    steps.push(WireStep::Along(model.add_coedge(edges[side.edge], turn)));
+                    let coedge = model.add_coedge(edges[side.edge], turn);
+                    all_coedges.push(coedge);
+                    steps.push(WireStep::Along(coedge));
                     // A whole closed surface is cut open along a seam, and a
                     // seam ends where the surface pinches to a point. The
                     // boundary has to go somewhere between arriving at a pole
@@ -1273,7 +1277,9 @@ impl Assembly {
                         steps.push(WireStep::Pole(vertices[self.stops_at(side)]));
                     }
                 }
-                wires.push(model.add_wire_of_steps(steps));
+                let wire = model.add_wire_of_steps(steps);
+                all_wires.push(wire);
+                wires.push(wire);
             }
             faces.push(model.add_face(face.surface, wires));
         }
@@ -1312,7 +1318,10 @@ impl Assembly {
         Written {
             vertices,
             edges,
+            coedges: all_coedges,
+            wires: all_wires,
             faces,
+            shells,
             solids,
         }
     }
@@ -1377,7 +1386,10 @@ const ONE_SHELL_INSIDE_ANOTHER: &str = "one shell inside another";
 pub(crate) struct Written {
     pub(crate) vertices: Vec<VertexSlot>,
     pub(crate) edges: Vec<EdgeSlot>,
+    pub(crate) coedges: Vec<CoedgeSlot>,
+    pub(crate) wires: Vec<WireSlot>,
     pub(crate) faces: Vec<FaceSlot>,
+    pub(crate) shells: Vec<ShellSlot>,
     pub(crate) solids: Vec<SolidSlot>,
 }
 

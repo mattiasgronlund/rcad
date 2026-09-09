@@ -84,7 +84,7 @@ use crate::Model;
 use crate::{EdgeKey, Error, Result, SolidKey, VertexKey};
 
 mod arrange;
-mod assemble;
+pub(crate) mod assemble;
 mod bake;
 mod cuts;
 mod history;
@@ -162,11 +162,25 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If a key came from another model, if an input solid is broken in a way
-    /// [`Model::validate`] rejects, or — in debug builds — if the answer this
-    /// wrote is not itself valid. A fuse invents topology that was in no input,
-    /// which puts it nearer an import than a mutation, and a corrupt solid is
-    /// worse than a crash (§17.4, §4.3).
+    /// If a key came from another model, or if the answer this wrote is not
+    /// itself valid. A fuse invents topology that was in no input, which puts it
+    /// nearer an import than a mutation, and a corrupt solid is worse than a
+    /// crash (§17.4, §4.3).
+    ///
+    /// **The answer is checked in every build**, by
+    /// [`Model::check_what_was_just_written`], which asks the whole of
+    /// [`Model::validate`] of the entities this fuse wrote and nothing else. The
+    /// one question it leaves out is the model-wide coordinate range, because
+    /// that one can fail for where somebody else's solid sits; the local form of
+    /// it is asked above, of the answer's own coordinates. Before
+    /// `docs/decisions.md` §66.3 this check was `debug_assertions`-gated *and*
+    /// skipped whenever the model did not already validate, so a release fuse
+    /// looked at nothing.
+    ///
+    /// **An input broken in a way [`Model::validate`] rejects is not checked, in
+    /// any build.** This used to say it panicked; nothing here has ever asked.
+    /// What a broken input does is trip an assert somewhere further in, under
+    /// whatever name that site gives it.
     pub fn fuse(
         &mut self,
         arguments: &[SolidKey],
@@ -210,9 +224,10 @@ impl Model {
         // The last question the answer itself can be asked, and the only one
         // neither input could have been asked instead: a fuse invents features
         // — the sliver where two nearly-flush faces meet — and a sliver has no
-        // lower size short of zero. `Assembly::commit` writes and then asserts
-        // the model is still valid, so an answer `Model::validate` would reject
-        // has to be refused here or it is a crash.
+        // lower size short of zero. It is asked here rather than after the write
+        // because `Assembly::commit`'s check is the only one that does not ask
+        // it: a range is a fold over the whole model, and the answer's own is
+        // what this fuse is answerable for.
         if the_inputs_fit_in_f64(self, arguments, tools)? {
             assembly.check_dynamic_range(policy, log)?;
         }
@@ -231,10 +246,11 @@ impl Model {
 /// [`DynamicRange::LARGEST_SUPPORTED_RATIO`] before anything is fused, and
 /// `Model::validate` already says so; uniting it with a copy of itself is a
 /// perfectly good answer and refusing it here would report somebody else's
-/// dynamic range as this fuse's bug. That is the same guard
-/// [`Assembly::commit`] puts on its own after-the-write check, taken over the
-/// input solids instead of the whole model so that it stays local to the
-/// entities this operation touched (§4.3).
+/// dynamic range as this fuse's bug. It is taken over the input solids rather
+/// than over the whole model so that it stays local to the entities this
+/// operation touched (§4.3) — the same reason
+/// [`Model::check_what_was_just_written`] leaves the model-wide range out of
+/// what it asks after the write.
 ///
 /// Chords only, on both sides, where `Model::validate` also takes the radii of
 /// curved faces. A face of the answer keeps its ancestor's surface bit for bit
