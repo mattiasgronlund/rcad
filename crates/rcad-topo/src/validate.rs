@@ -817,7 +817,7 @@ impl Model {
     /// answer.
     ///
     /// **Not reachable through the public API, and a file cannot carry it in
-    /// either — both doors this paragraph used to say were open are shut.**
+    /// either — every door this paragraph used to say was open is shut.**
     /// [`SolidBuilder::add_shell`](crate::SolidBuilder::add_shell) takes an
     /// [`Orientation`] per face and documents `Reversed` as a STEP
     /// `same_sense = false`, and its own door reads the stored turns too, so a
@@ -828,10 +828,17 @@ impl Model {
     /// [`Model::check_shape_is_possible`], which calls this very check, before
     /// the bytes become a `Model` at all — this file's own
     /// `a_file_with_a_wall_turned_round_never_becomes_a_model` measures that
-    /// refusal directly. So this is a hardening exercise and not §16.11's
-    /// kind: no caller reaches it any more. What still earns the check its
-    /// place is the paragraph above — a bug in the fuse itself, not a caller,
-    /// could still slip a turned-round wall past both doors, and
+    /// refusal directly. Nor can a solid be turned round after it is built:
+    /// the only public way to move one is
+    /// [`Model::place_solid`](crate::Model::place_solid), which takes an
+    /// `Isometry` — never a scale and never a mirror — and the rest of the
+    /// public mutations set approximation tags. `Model::add_shell` and
+    /// `Model::add_solid` are `pub(crate)`, so building and reading a file
+    /// are the whole surface. So this is a
+    /// hardening exercise and not §16.11's kind: no caller reaches it any
+    /// more. What still earns the check its place is the paragraph above — a
+    /// bug in the fuse itself, not a caller, could still slip a turned-round
+    /// wall past all three doors, and
     /// [`Model::check_what_was_just_written`] is what turns that into a panic
     /// rather than a model that commits without validating.
     ///
