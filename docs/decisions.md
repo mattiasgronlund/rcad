@@ -22763,7 +22763,10 @@ variant is constructed, which is what makes this refusal traceable to one line.
 the patterns that match it in the topo test files, and doc comments everywhere.
 That is the durable claim and the grep re-checks it in a second; **a count of
 those lines is not durable, and this section proved it by carrying one that a
-single new doc comment falsified three commits later.**
+single new doc comment falsified.** The falsifying commit was written on a
+sibling branch of the one that published the count, so the two were true apart
+and false the moment they merged — which is the ordinary case in this repo, not
+a mishap.
 
 The stage is skin assembly: `Assembly::join_up_what_is_one_face`
 (`assemble.rs:518`) asks `Assembly::darts_along_each_edge` (`assemble.rs:545`)
@@ -23121,9 +23124,9 @@ build of an archived commit:**
   `b4890f1`'s **executable** change to `cuts.rs` is two loop bounds — the file's
   diff is 96 insertions and 37 deletions, and the rest of it is the module
   header, `gather`'s doc comment, five rewritten unit tests and two new test
-  helpers. Behind an environment switch in a
-  copy of `c4f29af`, turning own-solid cuts off makes today's tree answer, drops
-  the arrangement from 46 faces to 28 and **reproduces `c66bdca`'s arrangement
+  helpers. Behind an environment switch in a copy of `c4f29af`, turning
+  own-solid cuts off makes today's tree answer, drops the arrangement from 46
+  faces to 28 and **reproduces `c66bdca`'s arrangement
   exactly** — all 63 lines of the dumped block equal, edge for edge, same edge
   indices, both endpoint fields and both face planes on every one. The probe
   prints four blocks and all four match: the two input solids at 10 and 6 faces,
