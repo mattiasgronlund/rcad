@@ -34,6 +34,6 @@ lockfile = true
 # which is the same spelling the line below already told people to use.
 # `just check-kache-off-on-ci` holds both halves.
 #
-# To build without the cache for a run: `RUSTC_WRAPPER= just default`.
+# To build without the cache for a run: `RUSTC_WRAPPER= just gate`.
 [env]
 RUSTC_WRAPPER = '{% if get_env(name="CI", default="") == "" %}kache{% endif %}'

@@ -70,6 +70,8 @@
 //!    counted separately and reported, because that is a fact about our filters
 //!    and not about the geometry.
 
+// `pairs` describes its frustum through `cones::a_frustum`.
+mod cones;
 mod pairs;
 
 use std::cell::Cell;

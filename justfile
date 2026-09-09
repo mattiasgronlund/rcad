@@ -7,7 +7,30 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
-default: check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-default-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-fuzz-overnight-selftest lint test check-t-selftest deny
+# `just` with no arguments runs the **first** recipe in this file, not one named
+# `default` — so putting the listing here is what makes a bare `just` show you
+# what there is, and `just gate` the thing you actually wait nine minutes for.
+#
+# `--unsorted` keeps the file's own order, which is grouped by subject. Sorted
+# alphabetically the ten `check-*` recipes lead and `gate` lands under `g`,
+# between `fuzz-writer` and `lanes`.
+#
+# Every listed recipe carries a `[doc("...")]`. Without one, `just` takes the
+# **last line of the comment block above the recipe** as its description, and
+# every comment block here is an argument several paragraphs long — so the
+# listing was 35 rows of fragments torn out of mid-sentence, `check-decisions #
+# at merge time, which is the expensive place to find it.` among them.
+# `[private]` hides the nine `*-selftest` recipes, which nobody types.
+[doc("Everything this repo can do, one line each. Bare `just` runs this.")]
+list:
+    @{{ just_executable() }} --list --unsorted
+
+# The whole gate, and the same command CI runs. Named `gate` rather than
+# `test-all` because it is 20 checks, a lint and a `cargo-deny` around exactly
+# one `test` — and this repo already says "gated green", "a gate agent", "the
+# gate worktree". `test-all` would have shipped a false sentence on day one.
+[doc("Everything, in the order CI runs it. ~9 minutes.")]
+gate: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest lint test check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -28,6 +51,7 @@ default: check check-enums check-wildcards check-wildcards-selftest check-ignore
 # ones that forgot got four silent skips rather than a failure.
 export RCAD_STEP_CORPUS := env_var_or_default("RCAD_STEP_CORPUS", parent_directory(parent_directory(`git rev-parse --path-format=absolute --git-common-dir`)) / "rcad-step-corpus")
 
+[doc("Type-check the whole workspace, tests and benches included.")]
 check:
     cargo check --workspace --all-targets
 
@@ -156,27 +180,68 @@ check:
 # one at 90: a test-only label mapper over `rcad_topo::Error`, naming the five
 # refusals that file has actually seen and answering "an unexpected refusal" for
 # the rest. Reaching the arm is the finding, not the pass.
-wildcard_arms := "92"
+#     lane-record-enclosure  after §73's narrowing  83 direct + 5 composite = 88
+#
+# Four go away and none arrive. Three are `holds.rs` 318, 377 and 550, where a
+# `Decision` reached `gave_up_…` through a wildcard; `Record::new` takes an
+# `f64` now, so each arm has to name `Undecidable` to get one, and the wildcard
+# below it can only be reached by a variant that does not exist yet
+# (`docs/decisions.md` §73.3). The fourth is `validate.rs:281`, and it was a
+# false positive the ledger was carrying: the arm above it read
+# `decision @ Decision::Undecidable { .. }`, and clippy does not see a `@`
+# binding as covering the variant. Written plainly as
+# `Decision::Undecidable { enclosure }` — which is what the narrowing wanted
+# anyway — the same match stops warning. The arm itself did not move.
+wildcard_arms := "88"
 
+[doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
-    @find crates -name lib.rs -path '*/src/*' -exec touch {} +
-    @out=$(cargo clippy --workspace --all-targets -- \
-            -W clippy::wildcard_enum_match_arm 2>&1) \
-        || { echo "$out" | grep '^error' | head -5; \
-             echo "clippy did not finish, so this counted nothing"; exit 1; }; \
-    direct=$(echo "$out" | grep -c '^warning: wildcard match'); \
-    files=$(find crates -name '*.rs' \( -path '*/src/*' -o -path '*/tests/*' \
-            -o -path '*/benches/*' -o -path '*/examples/*' \)); \
-    enums=$(grep -hoE '^[ \t]*pub enum [A-Za-z0-9_]+' $(find crates -path '*/src/*' -name '*.rs') \
-            | awk '{print $NF}' | sort -u | paste -sd'|'); \
-    composite=$(awk -v enums="$enums" -f crates/rcad-step/tools/composite_wildcards.awk $files \
-            | grep '^COUNT=' | cut -d= -f2); \
-    found=$((direct + composite)); \
-    if [ "$found" != "{{wildcard_arms}}" ]; then \
-        echo "wildcard arms over our own enums: $found ($direct direct, $composite composite), expected {{wildcard_arms}}"; \
-        echo "a new one, or a new variant reaching an old one — see docs/decisions.md §40"; \
-        exit 1; \
+    #!/usr/bin/env bash
+    set -uo pipefail
+    find crates -name lib.rs -path '*/src/*' -exec touch {} +
+    mkdir -p target
+    log=target/last-wildcard-clippy.log
+    if ! CARGO_TERM_COLOR=never cargo clippy --workspace --all-targets -- \
+            -W clippy::wildcard_enum_match_arm > "$log" 2>&1; then
+        grep '^error' "$log" | head -5
+        echo "clippy did not finish, so this counted nothing"
+        echo "full log: $log"
+        exit 1
     fi
+    direct=$({{ just_executable() }} _wildcard-direct-count "$log")
+    files=$(find crates -name '*.rs' \( -path '*/src/*' -o -path '*/tests/*' \
+            -o -path '*/benches/*' -o -path '*/examples/*' \))
+    enums=$(grep -hoE '^[ \t]*pub enum [A-Za-z0-9_]+' $(find crates -path '*/src/*' -name '*.rs') \
+            | awk '{print $NF}' | sort -u | paste -sd'|')
+    composite=$(awk -v enums="$enums" -f crates/rcad-step/tools/composite_wildcards.awk $files \
+            | grep '^COUNT=' | cut -d= -f2)
+    found=$((direct + composite))
+    if [ "$found" = "{{wildcard_arms}}" ]; then
+        exit 0
+    fi
+    echo "wildcard arms over our own enums: $found ($direct direct, $composite composite), expected {{wildcard_arms}}"
+    if [ "$direct" = "0" ] && [ "{{wildcard_arms}}" != "0" ]; then
+        echo "0 direct is the parse breaking, not the arms going away: clippy ran and"
+        echo "nothing it printed was matched. Read $log before touching the ledger."
+        exit 1
+    fi
+    echo "a new one, or a new variant reaching an old one — see docs/decisions.md §40"
+    exit 1
+
+# The direct half of the count, kept apart from the clippy run so
+# `check-wildcards-selftest` can hold it against logs whose answer is already
+# known — the same split as `t` and `_test-digest`, for the same reason.
+#
+# ANSI escapes come off before anything is matched. `ci.yml` sets
+# `CARGO_TERM_COLOR=always`, which puts an escape in front of every `warning:`,
+# and every `^`-anchored pattern here then matches nothing at all. Run
+# 34264306999 counted 0 of 83 that way and took `main` red while this machine
+# stayed green, because cargo colours nothing when its stdout is a `$(...)`
+# rather than a terminal. Stripping is what makes the count the same answer
+# either way; `CARGO_TERM_COLOR=never` above is what keeps the saved log
+# readable when a human opens it.
+_wildcard-direct-count log:
+    @sed 's/\x1b\[[0-9;]*m//g' '{{ log }}' | grep -c '^warning: wildcard match' || true
 
 # Pins the composite-wildcard scan against fixtures it does not read off the
 # tree, so it stays proven even on a tree where nothing real trips it.
@@ -191,6 +256,7 @@ check-wildcards:
 # and never `Toy::B`, so each is one variant short — 1 apiece, 3 in all — not
 # because three sites were found, but because three fixtures each leave one
 # of `Toy`'s two variants uncovered.
+[private]
 check-wildcards-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -258,6 +324,22 @@ check-wildcards-selftest:
         exit 1
     fi
 
+    # The direct half, against the same line with and without cargo's colours.
+    # The escapes below are the bytes `cargo clippy` actually emitted under
+    # `CARGO_TERM_COLOR=always` on 2026-09-08, not a guess at their shape.
+    w='wildcard match will also match any future added variants'
+    printf 'warning: %s\n' "$w" "$w" > "$dir/plain.log"
+    printf '\033[1m\033[33mwarning\033[0m\033[1m: %s\033[0m\n' "$w" "$w" > "$dir/coloured.log"
+    for f in plain coloured; do
+        got=$({{ just_executable() }} _wildcard-direct-count "$dir/$f.log")
+        if [ "$got" != "2" ]; then
+            echo "_wildcard-direct-count read $got warnings from $f.log, expected 2"
+            echo "a count that only works on one of these is a count that only"
+            echo "works off a runner — see the comment on the recipe"
+            exit 1
+        fi
+    done
+
 # How many tests are marked `#[ignore]` today. Move it with the commit that
 # moves the tree, the same way `wildcard_arms` above works.
 #
@@ -283,8 +365,9 @@ ignored_tests := "0"
 # has to match says which of the two happened.
 #
 # `test-ignored` below is what actually runs them, and it is not part of
-# `default`: today's one ignored test **fails**, which is why it is ignored, so
-# a `default` that ran it would be red on purpose.
+# `gate`: today's one ignored test **fails**, which is why it is ignored, so
+# a `gate` that ran it would be red on purpose.
+[doc("How many tests are marked #[ignore]; fails when the count moves.")]
 check-ignored:
     @out=$(cargo nextest list --workspace --run-ignored ignored-only 2>/dev/null) \
         || { echo "nextest could not list the ignored tests, so this counted nothing"; exit 1; }; \
@@ -298,6 +381,7 @@ check-ignored:
 
 # Run them. Fails loudly if the selection is empty rather than reporting a run
 # of no tests as a pass.
+[doc("Run the #[ignore]d tests. They fail; that is why they are ignored.")]
 test-ignored:
     @if [ "{{ignored_tests}}" = "0" ]; then \
         echo "no test is marked #[ignore], so there is nothing here to run"; \
@@ -308,17 +392,23 @@ test-ignored:
 # The hook that refuses shell patching of a .rs file, against its own cases
 # (docs/decisions.md §50.8).
 #
-# It is in `default` because the hook fails in the direction that is hard to
+# It is in `gate` because the hook fails in the direction that is hard to
 # notice: a pattern that stops matching lets the thing through silently, which
 # is the same failure mode the hook exists to prevent. Two of its cases are
 # drafts of itself that were wrong — a commit message describing the rule, and
 # a recipe whose own body writes .rs fixtures — and five more came from the
 # 2026-09-05 session review: three shapes it let through, two it wrongly
 # refused in the scratchpad.
+#
+# The hook and most of its cases now live in the `guardrails` plugin, shared
+# with `rscene`. What stayed here is `patching-cases.local.json`: the cases that
+# name *this* repo — a `crates/rcad-*` path, `docs/decisions.md`, a `just`
+# recipe of ours. The plugin's runner appends it and fails loudly if the file is
+# named and missing, because a repo's own cases quietly not running is exactly
+# the drift the plugin was made to end.
+[doc("The hooks against their own cases: shell patching, context budget, worktrees.")]
 check-hooks:
-    @.claude/hooks/check-patching-hook.sh
-    @.claude/hooks/check-context-budget.sh
-    @.claude/hooks/check-statusline.sh
+    @{{guardrails_plugin}}/bin/selftest.sh .claude/patching-cases.local.json
     @.claude/hooks/check-worktree-create.sh
     @.claude/hooks/check-session-start-hub.sh
 
@@ -332,6 +422,7 @@ check-hooks:
 # It reads `mise env` rather than the file, because the file is a template and
 # what breaks CI is the value mise computes, not the text. That also means this
 # fails if the template stops parsing, which the eye does not catch.
+[doc("kache wraps rustc here, and wraps nothing on a runner.")]
 check-kache-off-on-ci:
     @on=$(CI=true mise env | sed -n 's/^export RUSTC_WRAPPER=//p' | tr -d "\"'"); \
     off=$(env -u CI mise env | sed -n 's/^export RUSTC_WRAPPER=//p' | tr -d "\"'"); \
@@ -347,11 +438,15 @@ check-kache-off-on-ci:
         exit 1; \
     fi
 
-# `default` runs the four recipes CI runs and every `check-*` there is, which is
-# what CLAUDE.md publishes and so is a claim that wants a test (§15.6).
+# `gate` runs `check`, `lint`, `test`, `deny` and every `check-*` there is,
+# which is what CLAUDE.md publishes and so is a claim that wants a test (§15.6).
+#
+# Since 2026-09-07 CI runs `gate` itself rather than those four separately,
+# which makes this recipe the thing that carries a new `check-*` onto the runner:
+# wire one into `gate` and it is enforced there with no edit to `ci.yml`.
 #
 # The failure it is really for is the other direction: a `check-*` recipe
-# written, committed and never wired into `default` is a check nobody runs, and
+# written, committed and never wired into `gate` is a check nobody runs, and
 # nothing else in this tree would notice. That has never happened, which is not
 # the same as being prevented.
 #
@@ -360,24 +455,39 @@ check-kache-off-on-ci:
 # stops matching empties both at once and two empty sets compare equal — the
 # recipe would pass having compared nothing, and an empty diff prints nothing,
 # which reads exactly like success. `check-ignored` says the same thing about
-# itself a hundred lines up. It is not hypothetical: renaming `default`, which
-# is under discussion, breaks the anchor on the second line below.
+# itself a hundred lines up. It is not hypothetical, and it has now happened:
+# renaming `default` to `gate` broke the anchor on the second line below, the
+# pinned count is what turned that into a failure rather than a silent pass, and
+# both arms were re-checked by mutation afterwards rather than by running green.
 #
 # So bumping the number is how a new `check-*` recipe gets added, deliberately,
 # in the commit that adds it.
-check-default-runs-every-check:
+#
+# The last arm pins `check-plugins` **first**, which the three above could not:
+# both sides of every comparison here are `sort -u`, so this recipe was blind to
+# order by construction. CLAUDE.md publishes "first thing in `just gate`" and
+# `ci.yml` leans on it, and a published claim wants a test (§15.6) — it had none,
+# and `check-plugins` ran first only because of where it happened to sit.
+#
+# What the order buys is the error message. Without plugins `check-plugins` exits
+# 1 and names the install command, while `check-hooks` and
+# `check-questions-selftest` exit **127** on a missing `selftest.sh` — no
+# message, no remedy, and the failure a CI log explains worst. Found by rcad-c2,
+# who also noticed that nothing held the ordering it depends on.
+[doc("Every check-* recipe is in `gate`, and check-plugins is first.")]
+check-gate-runs-every-check:
     @defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
-    listed=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
-    others=$(grep -m1 '^default:' justfile | sed 's/^default: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
+    listed=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
+    others=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "17" ]; then \
-        echo "found $n check-* recipes, expected 17"; \
+    if [ "$n" != "21" ]; then \
+        echo "found $n check-* recipes, expected 21"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
     fi; \
     if [ "$defined" != "$listed" ]; then \
-        echo "these check-* recipes are defined but not run by default:"; \
+        echo "these check-* recipes are defined but not run by gate:"; \
         printf '%s\n' "$defined" | while read -r r; do \
             printf '%s\n' "$listed" | grep -qx "$r" || echo "  $r"; \
         done; \
@@ -385,12 +495,23 @@ check-default-runs-every-check:
         exit 1; \
     fi; \
     if [ "$others" != "check deny lint test " ]; then \
-        echo "default's non-check-* recipes are '$others', expected 'check deny lint test '"; \
-        echo "CLAUDE.md says default runs the four CI runs and every check-* besides"; \
+        echo "gate's non-check-* recipes are '$others', expected 'check deny lint test '"; \
+        echo "CLAUDE.md says gate runs these four and every check-* besides"; \
         echo "change that sentence in the same commit, or this is now false"; \
+        exit 1; \
+    fi; \
+    first=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -m1 .); \
+    if [ "$first" != "check-plugins" ]; then \
+        echo "gate runs '$first' first, expected 'check-plugins'"; \
+        echo "CLAUDE.md says check-plugins runs first thing in just gate, and"; \
+        echo "ci.yml leans on it: with no plugins, check-hooks and"; \
+        echo "check-questions-selftest exit 127 on a missing selftest.sh, which is"; \
+        echo "the failure a runner explains worst, while check-plugins exits 1 and"; \
+        echo "names the command that installs them"; \
         exit 1; \
     fi
 
+[doc("Every public enum is #[non_exhaustive] or says it is exhaustive on purpose.")]
 check-enums:
     @! awk '/^$/ {ok = 0} \
             /^#\[non_exhaustive\]/ {ok = 1} \
@@ -419,6 +540,7 @@ decisions_file := "docs/decisions.md"
 # no line *offsets* here. The sections are numbered, `just decision 49.6`
 # addresses one by its number, and an offset would be a second address for the
 # same section that goes stale the moment anybody inserts a paragraph.
+[doc("The map of docs/decisions.md: every section, and what it costs to read.")]
 decisions-toc:
     @awk '/^## [0-9]/ { \
              if (num != "") printf "  %-5s %-56s %4d lines\n", num, title, n; \
@@ -440,6 +562,7 @@ decisions-toc:
 # reads as "the decisions say nothing about this", which is the opposite of what
 # an unknown number means, and it is the same failure `check-ignored` above
 # guards against: an empty selection looks exactly like a clean pass.
+[doc("One section of docs/decisions.md by number: `just decision 49.6`.")]
 decision want:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -512,6 +635,7 @@ decision want:
 # **No match fails rather than printing nothing**, for the same reason `decision`
 # fails on a number that does not exist: an empty answer here reads as "the
 # decisions say nothing about this", and that is a claim a typo can forge.
+[doc("Which sections mention this? Answers in section numbers, not line numbers.")]
 decisions-find pattern:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -563,6 +687,16 @@ decisions-find pattern:
 # case rather than the unlucky one. It happened while §57 was being written
 # (§57.4), and nothing in this file noticed; the collision was found by hand,
 # at merge time, which is the expensive place to find it.
+#
+# **A `## N.` lower than the one before it, and a `### N.M` sitting under the
+# wrong `## N.`, are two more ways to go silently unreachable.** A renumbering
+# that moves later sections down leaves the file out of order if a stray
+# earlier one is missed, and a subsection typed by hand during that renumbering
+# can end up under the wrong parent — `### 64.3` left under `## 69.` after 64
+# was renumbered to 67 is the shape it takes, and it happened four times in one
+# session and was only caught by grepping for it. Neither is a duplicate, so
+# the check above passes both. `docs/decisions.md` §71.
+[doc("Every heading in docs/decisions.md can be reached by its number.")]
 check-decisions:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -585,11 +719,37 @@ check-decisions:
         exit 1
     fi
 
+    order=$(awk '
+        /^## [0-9]/ {
+            rest = $0; sub(/^#+ /, "", rest)
+            p = index(rest, " "); n = substr(rest, 1, p - 1) + 0
+            if (n < top) print FNR ": ## " n " comes after ## " top
+            top = n; lastsub = 0
+            next
+        }
+        /^### [0-9]/ {
+            rest = $0; sub(/^#+ /, "", rest)
+            p = index(rest, " "); id = substr(rest, 1, p - 1)
+            split(id, parts, ".")
+            subtop = parts[1] + 0; subnum = parts[2] + 0
+            if (subtop != top)
+                print FNR ": ### " id " is not under its own ## " top
+            else if (subnum < lastsub)
+                print FNR ": ### " id " comes after ### " top "." lastsub
+            lastsub = subnum
+        }' "{{decisions_file}}")
+    if [ -n "$order" ]; then
+        echo "$order"
+        echo "^ decisions.md section numbers are out of order (docs/decisions.md §71)"
+        exit 1
+    fi
+
 # Pins the lookup against fixtures rather than against the real file, so it stays
 # proven on a tree where the real §1.1 has been rewritten.
 #
 # `#### ` inside the fixture is the case worth having: it is a heading, and a
 # lookup that stops at any heading would cut §1.1 in half without saying so.
+[private]
 check-decisions-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -687,6 +847,41 @@ check-decisions-selftest:
         echo "two subsections numbered 1.1 passed check-decisions"; exit 1
     fi
 
+    # Descending: §1 lands after §2, which a renumbering that skips one section
+    # leaves behind.
+    cat > "$dir/descending.md" <<'MD'
+    ## 2. Second
+    ## 1. First
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/descending.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "## 1. after ## 2. passed check-decisions"; exit 1
+    fi
+
+    # Descending within a section: §1.1 lands after §1.2.
+    cat > "$dir/descending-sub.md" <<'MD'
+    ## 1. First
+    ### 1.2 Beta
+    ### 1.1 Alpha
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/descending-sub.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "### 1.1 after ### 1.2 passed check-decisions"; exit 1
+    fi
+
+    # Wrong parent: §1.2 is left under §2 by a renumbering, exactly the way
+    # `### 64.3` ended up under `## 69.` in the real file.
+    cat > "$dir/wrong-parent.md" <<'MD'
+    ## 1. First
+    ### 1.1 Alpha
+    ## 2. Second
+    ### 1.2 Beta
+    MD
+    if {{just_executable()}} --set decisions_file "$dir/wrong-parent.md" \
+        check-decisions >/dev/null 2>&1; then
+        echo "### 1.2 under ## 2. passed check-decisions"; exit 1
+    fi
+
 # One item of Rust source, by its name, with its doc comment and attributes.
 #
 #     just src arrange_faces
@@ -709,6 +904,7 @@ check-decisions-selftest:
 # not where rustfmt would put it this fails and says so**, rather than printing
 # to the end of the file — an item that runs on for 7 000 lines is the failure
 # this whole recipe is against.
+[doc("One item of Rust source by name, with its doc comment: `just src Decision`.")]
 src want filter="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -795,6 +991,7 @@ src want filter="":
 # stays proven on a day the real `arrange_faces` is rewritten. `git ls-files` is
 # what the recipe searches, so the fixture is a real index — `git add` with no
 # commit is enough for that, and needs no identity configured.
+[private]
 check-src-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -867,6 +1064,7 @@ check-src-selftest:
         echo "src accepted something that is not an item name"; exit 1
     fi
 
+[doc("The whole test suite, and the doc tests.")]
 test:
     cargo nextest run --workspace
     cargo test --workspace --doc
@@ -875,6 +1073,21 @@ test:
 # scratchpad and never in the tree. Overridable so the selftest can point at a
 # directory it builds itself, rather than at whatever sessions are live today.
 questions_root := env_var_or_default("CLAUDE_QUESTIONS_ROOT", env_var_or_default("TMPDIR", "/tmp") / ("claude-" + `id -u`))
+
+# The parser, the hooks and the shared skills live in plugins and not in this
+# repo, because a copy in each repo is a copy that goes stale: `rscene` carried
+# a parser that still dropped the second label of a paired entry months after
+# the fix landed here.
+#
+# `$HOME`-relative and overridable rather than absolute, so a clone somewhere
+# else still resolves. A **directory**-source marketplace is what makes this
+# path stable at all — a github source installs under
+# `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`, and a recipe
+# naming that breaks on the next version bump in the direction of "no questions
+# found", which is the failure this whole apparatus exists to prevent.
+plugins_root := env_var_or_default("CLAUDE_PLUGINS_ROOT", home_directory() / "git/mattiasgronlund/claude-questions/plugins")
+questions_plugin := env_var_or_default("CLAUDE_QUESTIONS_PLUGIN", plugins_root / "questions")
+guardrails_plugin := env_var_or_default("CLAUDE_GUARDRAILS_PLUGIN", plugins_root / "guardrails")
 
 # One open question, in full, by the hash the status line prints beside it.
 #
@@ -888,160 +1101,159 @@ questions_root := env_var_or_default("CLAUDE_QUESTIONS_ROOT", env_var_or_default
 # and shell mode then charges the model for every line of it on every later
 # turn. That is the same arithmetic that put the status line here to begin with.
 #
-# **The middle form is also the format check.** It reads labels exactly as
-# `statusline.sh` does, so an entry the status line would silently drop shows up
-# here as missing. That is not hypothetical: an entry may carry two labels when
-# one answer settles both, `**Q7 / Q11**`, and reading only the first is how Q11
-# and Q27 stayed open and invisible through 2026-09-06.
+# **The middle form is also the format check.** It and `statusline.sh` are the
+# same parser — `.claude/questions.py` — so an entry one of them would drop
+# cannot be one the other shows. They used to be two implementations of one
+# grammar held in step by a comment, and they disagreed: an entry carrying two
+# labels, `**Q7 / Q11**`, counted as one, and Q11 and Q27 stayed open and
+# invisible through 2026-09-06.
+#
+# Nothing is ever dropped. An entry whose label does not parse is listed as `??`
+# with its line number rather than skipped, because a question that vanishes is
+# the one failure this cannot have.
 #
 # There is deliberately no recipe that *writes* a question. A body is paragraphs
 # of prose with backticks and `§` refs in it, so passing one as a shell argument
 # costs what `Edit` costs and echoes the whole thing back on top; and marking one
 # answered is a substitution, which is the quiet-failure shape §50.8 is about.
+[doc("One open question in full, by the hash the status line prints.")]
 question hash="" label="":
     #!/usr/bin/env bash
     set -euo pipefail
-    shopt -s nullglob
+    q="{{questions_plugin}}/bin/questions.py"
 
-    root="{{questions_root}}"
-    files=("$root"/*/*/scratchpad/open-questions.md)
-    if [ ${#files[@]} -eq 0 ]; then
-        echo "no session under $root has an open-questions.md" >&2
-        exit 1
+    if [ -z "{{hash}}" ]; then
+        exec python3 "$q" sessions "{{questions_root}}"
+    fi
+    file=$(python3 "$q" find "{{questions_root}}" "{{hash}}")
+
+    if [ -n "{{label}}" ]; then
+        exec python3 "$q" entry "$file" "{{label}}"
     fi
 
-    # The labels of an entry, read the way statusline.sh reads them: the whole
-    # run right after the checkbox, so `**Q7 / Q11**` is two questions, not one.
-    # `rest` is left holding the heading text.
-    read_labels='
-        function labels_of(line,   out, lab) {
-            sub(/^- \[[ x]\][[:space:]]*/, "", line)
-            sub(/^\*+/, "", line)
-            out = ""
-            while (match(line, /^[A-Z]+[0-9]+/)) {
-                lab = substr(line, 1, RLENGTH)
-                line = substr(line, RLENGTH + 1)
-                out = (out == "" ? lab : out " " lab)
-                if (!sub(/^\**[[:space:]]*\/[[:space:]]*\**/, "", line)) break
-            }
-            sub(/^\**[[:space:]]*(—|-)?[[:space:]]*/, "", line)
-            rest = line
-            return out
-        }
-    '
+    python3 "$q" labels "$file"
 
-    session_of() { basename "$(dirname "$(dirname "$1")")"; }
-    open_count() { awk "$read_labels"'
-        /^[[:space:]]*```/ { fence = !fence; next }
-        fence { next }
-        /^- \[ \]/ { if (labels_of($0) != "") n += split(labels_of($0), a, " ") }
-        END { print n + 0 }' "$1"; }
-
-    hash="${1:-}"
-    if [ -z "$hash" ]; then
-        for f in "${files[@]}"; do
-            n=$(open_count "$f")
-            [ "$n" -gt 0 ] || continue
-            slug=$(basename "$(dirname "$(dirname "$(dirname "$f")")")")
-            printf '%s\t  %-6.6s %3d open  %s  %s\n' \
-                "$(stat -c %Y "$f")" "$(session_of "$f")" "$n" \
-                "$(date -d "@$(stat -c %Y "$f")" +%H:%M)" "${slug##*-}"
-        done | sort -rn | cut -f2-
-        exit 0
+    # A violation is announced but not spelled out here, because the listing is
+    # what you came for and a wall of grammar notes underneath it is not.
+    n=$(python3 "$q" check "$file" | grep -c . || true)
+    if [ "$n" -gt 0 ]; then
+        printf '\n  ⚠ %d grammar violation(s) — just question-check {{hash}}\n' "$n"
     fi
 
-    # A prefix that matches two sessions is not a question anyone can answer, so
-    # it fails rather than picking the newer and looking like it worked.
-    matched=()
-    for f in "${files[@]}"; do
-        case "$(session_of "$f")" in "$hash"*) matched+=("$f") ;; esac
-    done
-    if [ ${#matched[@]} -eq 0 ]; then
-        echo "no session under $root starts with $hash — try 'just question'" >&2
-        exit 1
-    fi
-    if [ ${#matched[@]} -gt 1 ]; then
-        echo "$hash matches ${#matched[@]} sessions:" >&2
-        for f in "${matched[@]}"; do echo "  $(session_of "$f")" >&2; done
-        exit 2
-    fi
-    file="${matched[0]}"
-
-    label="${2:-}"
-    if [ -z "$label" ]; then
-        awk "$read_labels"'
-            /^[[:space:]]*```/ { fence = !fence; next }
-            fence { next }
-            /^- \[[ x]\]/ {
-                labels = labels_of($0)
-                if (labels == "") next
-                state = (substr($0, 4, 1) == "x") ? "done" : "open"
-                gsub(/ /, ", ", labels)
-                printf "  %-11s %-4s  %.66s\n", labels, state, rest
-            }' "$file"
-        exit 0
-    fi
-
-    # The body is every line up to the next entry, so an indented paragraph
-    # belongs to the question above it and a blank line does not end it.
-    got=$(awk -v want="$label" "$read_labels"'
-        /^- \[[ x]\]/ {
-            on = 0
-            n = split(labels_of($0), a, " ")
-            for (i = 1; i <= n; i++) if (a[i] == want) on = 1
-        }
-        on' "$file")
-    if [ -z "$got" ]; then
-        echo "$hash has no question labelled $label — try 'just question $hash'" >&2
-        exit 1
-    fi
-    printf '%s\n' "$got"
-
-# Pins `question` against a scratchpad it builds itself, so it stays proven on a
-# machine where no session happens to be live.
+# The grammar violations in one session's file, in full.
 #
-# The case worth having is the **paired label**: an entry addressed as both Q7
-# and Q11 must be reachable by either, and must count as two open questions and
-# not one. That is the bug this recipe was written next to.
-check-questions-selftest:
+# **It takes a hash rather than checking everything, and that is the exemption
+# mechanism.** A list of grandfathered sessions would outlive what it names —
+# `/tmp` is swept at 30 days, so every id in such a list dangles within a month —
+# and it would be a second record beside the thing itself, which is the shape
+# §60 rejected for the hub. A dead session's file cannot be fixed, so judging it
+# is noise nobody can act on; a live session's can, so it is judged.
+[doc("The grammar violations in one session's question file, named in full.")]
+question-check hash:
     #!/usr/bin/env bash
     set -euo pipefail
+    q="{{questions_plugin}}/bin/questions.py"
+    file=$(python3 "$q" find "{{questions_root}}" "{{hash}}")
+    exec python3 "$q" check "$file"
+
+# The grammar's own 20 cases live with the parser, in the `questions` plugin.
+# What is left here is the seam: that the plugin is where this repo thinks it
+# is, and that `just question` — which is this repo's recipe, not the plugin's —
+# still reads a file end to end and still announces a violation under the
+# listing. The footer is rcad's, so rcad tests it.
+#
+# Keeping the recipe's name is deliberate: `check-gate-runs-every-check`
+# counts `check-*` recipes and this one moving out of that set would be a
+# silent change to a number that exists to be loud.
+[private]
+check-questions-selftest:
+    @{{questions_plugin}}/bin/selftest.sh
+
+# The three plugins this repo's `.claude/` was emptied into, checked for being
+# where the recipes above think they are.
+#
+# It is its own recipe rather than a guard inside each caller because the answer
+# is the same for all of them and it is four lines of install instructions. It
+# runs early in `gate` so a missing plugin says so once, in words, instead of
+# three times as "no such file or directory".
+#
+# `practices` ships only skills, so nothing here runs it — its directory
+# existing is the whole check. A skill that fails to load fails visibly, in the
+# session, which is not true of a hook or a parser.
+#
+# **Two questions, and the first one alone was not enough.** Where the files are
+# is the bootstrap and has to be asked here, because it is what runs when the
+# plugin is missing. Whether Claude Code has been *told* about them is a
+# different question, and `rscene` answered it the hard way on 2026-09-08: three
+# plugin directories present, this recipe green, and nothing loaded — no hooks,
+# no skills, no message saying so. A directory is not an install.
+#
+# The second question is asked by the plugin, because the answer is the same for
+# both repos and the copy is what goes stale. It cannot prove *this* session
+# loaded anything — settings are read at session start — so it rules out the
+# silent case and says exactly that rather than claiming more.
+[doc("The three Claude plugins are on disk, and Claude Code has been told.")]
+check-plugins:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    missing=0
+    for p in "{{questions_plugin}}" "{{guardrails_plugin}}" "{{plugins_root}}/practices"; do
+        [ -d "$p" ] && continue
+        echo "not where this repo expects it: $p"
+        missing=1
+    done
+    if [ "$missing" -eq 1 ]; then
+        echo
+        echo "install them with:"
+        echo "  /plugin marketplace add ~/git/mattiasgronlund/claude-questions"
+        echo "  /plugin install questions@mattiasgronlund-local"
+        echo "  /plugin install guardrails@mattiasgronlund-local"
+        echo "  /plugin install practices@mattiasgronlund-local"
+        echo "or point CLAUDE_PLUGINS_ROOT at your checkout's plugins directory"
+        exit 1
+    fi
+    echo "3 plugins, all where this repo expects them"
+    # On disk is not installed: clone the marketplace and never register it and
+    # the files are all there while a session loads no hooks and no skills.
+    # `rscene` hit exactly that. So this asks Claude Code whether it has been
+    # *told* about them, which is a different question from the loop above.
+    #
+    # It skips where there is no Claude Code to have been told, and says so
+    # rather than passing quietly. That guard used to be four lines here; it is
+    # in the script now, with a selftest, because it is the same guard `rscene`
+    # needs and a copy per repo is a copy that goes stale. `docs/decisions.md`
+    # §77.
+    "{{guardrails_plugin}}/bin/check-declared.sh" mattiasgronlund-local questions guardrails practices
+
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
-    mkdir -p "$dir/-slug-rcad/76640573-f351-4e74/scratchpad"
+    scratch="$dir/-slug-rcad/76640573-f351-4e74/scratchpad"
+    mkdir -p "$scratch"
     printf '%s\n' \
         '- [ ] **Q7 / Q11** — a floor unit with no record' \
         '' \
-        '  An indented body that belongs to Q7, mentioning M5 and Q99 in passing.' \
+        '  An indented body, mentioning M5 in passing.' \
         '' \
-        '- [x] **Q24** — settled, and must not be counted as open' \
-        '- [ ] **K1** — a lane keeps its own letter' \
-        > "$dir/-slug-rcad/76640573-f351-4e74/scratchpad/open-questions.md"
+        '- [ ] **Q1** — options in prose, so the footer has something to count: (a) or (b)?' \
+        > "$scratch/open-questions.md"
     j="{{just_executable()}} --set questions_root $dir"
 
     got=$($j question)
-    want="  766405   3 open  $(date -d "@$(stat -c %Y "$dir/-slug-rcad/76640573-f351-4e74/scratchpad/open-questions.md")" +%H:%M)  rcad"
+    want="  766405   3 open  $(date -d "@$(stat -c %Y "$scratch/open-questions.md")" +%H:%M)  rcad"
     [ "$got" = "$want" ] || { echo "the session list drifted:"; \
         echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
 
-    got=$($j question 766405 | awk '{ $1 = $1; print }')
-    want=$(printf '%s\n' "Q7, Q11 open a floor unit with no record" \
-        "Q24 done settled, and must not be counted as open" \
-        "K1 open a lane keeps its own letter")
-    [ "$got" = "$want" ] || { echo "the label listing drifted:"; \
-        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
-
-    [ "$($j question 766405 Q7)" = "$($j question 766405 Q11)" ] \
-        || { echo "a paired label is not reachable by both of its names"; exit 1; }
-    $j question 766405 Q11 | grep -q 'indented body' \
-        || { echo "the body did not come back with the question"; exit 1; }
-    if $j question 766405 Q11 | grep -q 'Q24'; then
-        echo "the entry ran on into the one after it"; exit 1
-    fi
-
-    if $j question 766405 Q99 >/dev/null 2>&1; then
-        echo "a label mentioned in a body was addressable as a question"; exit 1
-    fi
+    # Captured before it is matched: `grep -q` closes the pipe on its first
+    # hit, and under `pipefail` that SIGPIPE reads exactly like the listing
+    # having failed.
+    listing=$($j question 766405)
+    grep -q 'Q7, Q11' <<<"$listing" \
+        || { echo "the listing did not reach the plugin's parser"; exit 1; }
+    grep -q '⚠ 1 grammar violation' <<<"$listing" \
+        || { echo "the listing did not announce the violation it found"; exit 1; }
+    entry=$($j question 766405 Q11)
+    grep -q 'indented body' <<<"$entry" \
+        || { echo "an entry did not come back in full"; exit 1; }
     if $j question zzzz >/dev/null 2>&1; then
         echo "a hash matching no session was accepted"; exit 1
     fi
@@ -1069,6 +1281,7 @@ check-questions-selftest:
 # `--no-capture` streams instead. It exists to watch output as it happens, and
 # it also changes nextest's format, so digesting it would defeat the flag and
 # misread it at the same time.
+[doc("One test or a few, with the corpus and the build cache in place.")]
 t *args:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1123,6 +1336,7 @@ _test-digest log status:
 # The third fixture has no summary at all, which is what a compile error looks
 # like. It is the case where the head and not the tail is the useful end: rustc
 # reports the first error first, and every later one may be its consequence.
+[private]
 check-t-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1196,7 +1410,7 @@ check-t-selftest:
 
     # The documented example, run for real, because it is the one that was broken.
     # It is here rather than beside the fixtures because it needs the test
-    # binaries, which is why `default` runs this recipe after `test`.
+    # binaries, which is why `gate` runs this recipe after `test`.
     got=$({{ just_executable() }} t -E 'test(/a_cube_comes_back_sound_and_measuring_the_same/)')
     case "$got" in
     *"1 test run: 1 passed"*)
@@ -1206,11 +1420,261 @@ check-t-selftest:
         ;;
     esac
 
+# `corpus/fetch.sh` rebuilds the STEP corpus from upstream, so a runner can have
+# one without this repo carrying 133 MiB of other people's CAD files. The pins
+# live in the script and the evidence behind them in `corpus/sources.md`.
+#
+# It refuses a destination that is not empty, which is the whole safety story: a
+# corpus is somebody's only copy, it is in no git repository, and a mistyped
+# path must not be a way to lose it. So rebuilding over an existing corpus means
+# deleting it first, deliberately.
+#
+# Rebuilds the STEP corpus from upstream into `RCAD_STEP_CORPUS`.
+[doc("Rebuild the STEP corpus from upstream into RCAD_STEP_CORPUS.")]
+fetch-corpus destination=RCAD_STEP_CORPUS:
+    ./corpus/fetch.sh "{{destination}}"
+
+# CI fetches the STEP corpus (see `RCAD_STEP_CORPUS` above) with that script
+# rather than having it on disk, so "CI is green" and "my machine is green" have
+# to mean the same corpus. `corpus/manifest.sha256` pins the
+# sha256 of every `.stp`/`.step` file the test suite reads (`files_under` in
+# `crates/rcad-step/tests/every_file_in_the_corpus_reads.rs` — the walk that
+# picks those two extensions, case-insensitively, and nothing else); this
+# recipe is what checks a corpus against it.
+#
+# `sha256sum --check` already tells missing and altered apart in its own
+# output — a listed file it could not open ends its line "FAILED open or
+# read", one it read but that hashed wrong just ends "FAILED" — so this reads
+# that rather than re-implementing it. What it cannot tell us is a `.stp`/
+# `.step` file on disk the manifest never heard of, which means the corpus
+# grew since the manifest was made; that half is a plain `find` against the
+# manifest's own path list.
+#
+# Checks the STEP corpus on this machine against `corpus/manifest.sha256`.
+[doc("The STEP corpus on this machine matches corpus/manifest.sha256.")]
+check-corpus manifest="corpus/manifest.sha256":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$RCAD_STEP_CORPUS"
+    if [ ! -d "$root" ]; then
+        echo "RCAD_STEP_CORPUS points at $root, which is not a directory"
+        exit 1
+    fi
+    if [ ! -f "{{manifest}}" ]; then
+        echo "{{manifest}} does not exist"
+        exit 1
+    fi
+    manifest_abs=$(readlink -f "{{manifest}}")
+
+    set +e
+    out=$(cd "$root" && sha256sum --check --quiet "$manifest_abs" 2>&1)
+    rc=$?
+    set -e
+
+    missing=$(grep ': FAILED open or read$' <<<"$out" | sed 's/: FAILED open or read$//' || true)
+    mismatched=$(grep -v ': FAILED open or read$' <<<"$out" | grep ': FAILED$' | sed 's/: FAILED$//' || true)
+
+    manifest_paths=$(cut -c67- "$manifest_abs" | sort)
+    disk_paths=$(cd "$root" && find . -type f \( -iname '*.stp' -o -iname '*.step' \) -printf '%P\n' | sort)
+    extra=$(comm -13 <(echo "$manifest_paths") <(echo "$disk_paths"))
+
+    ok=1
+    if [ -n "$missing" ]; then
+        ok=0
+        echo "named in {{manifest}} but not on disk under $root:"
+        sed 's/^/  /' <<<"$missing"
+    fi
+    if [ -n "$mismatched" ]; then
+        ok=0
+        echo "on disk under $root but the contents do not match {{manifest}}:"
+        sed 's/^/  /' <<<"$mismatched"
+    fi
+    if [ -n "$extra" ]; then
+        ok=0
+        echo "STEP files on disk under $root that {{manifest}} does not name:"
+        sed 's/^/  /' <<<"$extra"
+        echo "the corpus grew; regenerate {{manifest}} to cover the new files"
+    fi
+    if [ "$ok" -eq 1 ] && [ "$rc" -ne 0 ]; then
+        echo "sha256sum --check failed in a way this recipe does not parse:"
+        sed 's/^/  /' <<<"$out"
+        exit 1
+    fi
+    if [ "$ok" -eq 0 ]; then
+        exit 1
+    fi
+    echo "corpus matches {{manifest}}: $(wc -l <"$manifest_abs") files, $root"
+
+# `check-corpus` above passed the first time it ran, on a corpus that was
+# right, and that proved less than it looked like: run against corpora that
+# were *wrong*, `rscene`'s copy of it named no file at all. These are the
+# mutations that found that, kept as a recipe, so the next thing to silence an
+# arm is caught by the gate rather than by somebody thinking to try it.
+# `rscene`'s `docs/decisions.md` §12 is the finding; §79 here is what porting
+# it to this repo changed. Written there and copied here, the same way
+# `corpus/fetch.sh` was and for the same reason: their §12 holds the case list.
+#
+# **A synthetic corpus of six files, not a hardlinked copy of the real one.**
+# Nothing here touches `RCAD_STEP_CORPUS`, which also means it runs on a
+# machine that has never fetched a corpus — so it sits in `gate` *beside*
+# `check-corpus` rather than behind it.
+#
+# **The filenames are the point.** `ab.stp`, `a-b.stp`, `aB.stp` and `a_c.stp`
+# sort one way by byte and another by dictionary. That difference is the only
+# thing that catches the bug this exists for: path lists sorted `LC_ALL=C`
+# against a `comm` left in the ambient locale, which reads its input as
+# disordered, exits 1, and takes the recipe down with `set -e`. Four ordinary
+# names collate identically under both and would pass with that bug in place.
+# `a_new.stp` is named to land *inside* the run where the two orders disagree,
+# between `a_c.stp` and `ab.stp` by byte and elsewhere by dictionary, because
+# `comm`'s order check only fires where it compares unequal lines.
+#
+# **This repo has no such bug to delete, and that is the difference from
+# `rscene`.** All three of `check-corpus`'s sorts and its one `comm` are
+# ambient, so they agree by construction and it is not exposed. There the
+# selftest holds a fix; here it is a tripwire for an edit nobody has made. So
+# the mutation that proves the fourth case is not vacuous is *adding*
+# `LC_ALL=C` to the two sorts above while leaving the `comm` alone — see §79.2
+# for what each mutation did.
+#
+# **One mutation at a time, and each case asserts the file its arm names**
+# rather than the exit code. One corpus carrying three faults stops after the
+# first under `set -e` and hides the other two; and an exit code standing in
+# for an assertion is the layer the original bug hid inside.
+[doc("check-corpus names the file for each way a corpus can be wrong.")]
+check-corpus-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    dictionary=""
+    for candidate in $(locale -a 2>/dev/null); do
+        case "$candidate" in C|C.*|POSIX) continue ;; esac
+        if [ "$(printf 'ab\na_c\n' | LC_ALL="$candidate" sort 2>/dev/null | head -1)" = "ab" ]; then
+            dictionary="$candidate"
+            break
+        fi
+    done
+    if [ -z "$dictionary" ]; then
+        echo "No locale here collates by dictionary order, so the case that"
+        echo "would catch a collation bug in check-corpus cannot run — and the"
+        echo "other three pass with that bug in place, which is worse than not"
+        echo "running them at all. docs/decisions.md section 79."
+        echo "  sudo locale-gen en_US.UTF-8 && sudo update-locale"
+        exit 1
+    fi
+
+    work=$(mktemp -d -- "${TMPDIR:-/tmp}/rcad-corpus-selftest.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+
+    pristine="$work/pristine"
+    mkdir -p "$pristine/nested"
+    for name in ab.stp a-b.stp aB.stp a_c.stp; do
+        printf 'ISO-10303-21;\n/* %s */\nEND-ISO-10303-21;\n' "$name" >"$pristine/$name"
+    done
+    printf 'ISO-10303-21;\nEND-ISO-10303-21;\n' >"$pristine/nested/deep one.step"
+    printf 'not a STEP file\n' >"$pristine/notes.txt"
+
+    manifest="$work/manifest.sha256"
+    (cd "$pristine" \
+        && find . -type f \( -iname '*.stp' -o -iname '*.step' \) -printf '%P\0' \
+        | LC_ALL=C sort -z | xargs -0 sha256sum) >"$manifest"
+
+    failed=0
+    every_output=""
+    check() {
+        local name=$1 root=$2 want_rc=$3
+        shift 3
+        local out rc needle
+        set +e
+        out=$(RCAD_STEP_CORPUS="$root" LC_ALL="$dictionary" \
+            {{ just_executable() }} check-corpus "$manifest" 2>&1)
+        rc=$?
+        set -e
+        every_output+="$out"$'\n'
+        if [ "$rc" -ne "$want_rc" ]; then
+            echo "FAIL  $name: check-corpus exited $rc, wanted $want_rc"
+            sed 's/^/        /' <<<"$out"
+            failed=1
+            return
+        fi
+        for needle in "$@"; do
+            if ! grep -qF -- "$needle" <<<"$out"; then
+                echo "FAIL  $name: nothing in the output named '$needle'"
+                sed 's/^/        /' <<<"$out"
+                failed=1
+                return
+            fi
+        done
+        echo "ok    $name"
+    }
+
+    mutate() {
+        local into="$work/$1"
+        rm -rf -- "$into"
+        cp -a -- "$pristine" "$into"
+        echo "$into"
+    }
+
+    # The happy path asserts two fragments rather than one sentence: this
+    # repo's success line reads "corpus matches <manifest>: 5 files, <root>",
+    # where `rscene`'s reads "5 files match". Copying their needle across gave
+    # a case that passes without checking anything — on the one arm that is
+    # supposed to be green, which is where nobody looks.
+    check "a corpus that matches its manifest" "$pristine" 0 "corpus matches" "5 files"
+
+    gone=$(mutate gone)
+    rm -- "$gone/nested/deep one.step"
+    check "a file the manifest names and disk lacks" "$gone" 1 \
+        "not on disk" "nested/deep one.step"
+
+    altered=$(mutate altered)
+    printf 'ISO-10303-21;\n/* not what it was */\nEND-ISO-10303-21;\n' >"$altered/aB.stp"
+    check "a file whose bytes changed" "$altered" 1 \
+        "do not match" "aB.stp"
+
+    grown=$(mutate grown)
+    printf 'ISO-10303-21;\nEND-ISO-10303-21;\n' >"$grown/a_new.stp"
+    check "a STEP file on disk the manifest never heard of" "$grown" 1 \
+        "does not name" "a_new.stp"
+
+    # `notes.txt` sits in all four corpora and is not a STEP file. If it ever
+    # surfaces in an arm, `check-corpus`'s walk has stopped agreeing with
+    # `files_under` in `crates/rcad-step/tests/every_file_in_the_corpus_reads.rs`,
+    # which is the list `corpus/manifest.sha256` is defined against.
+    if grep -qF 'notes.txt' <<<"$every_output"; then
+        echo "FAIL  a file that is not STEP was reported by some arm:"
+        grep -nF 'notes.txt' <<<"$every_output" | sed 's/^/        /'
+        failed=1
+    fi
+
+    # No arm may leave `sha256sum`'s own wording in what it prints. The four
+    # cases above cannot tell a trimmed name from an untrimmed one — a needle
+    # is a substring, and `nested/deep one.step` sits inside
+    # `nested/deep one.step: FAILED open or read` just as happily. Dropping
+    # either of `check-corpus`'s two trims therefore passed all four when this
+    # was first ported, which is a mutation surviving a suite written to catch
+    # exactly that. Both are verified against this guard in §79.3.
+    #
+    # It is safe only while no case exercises `check-corpus`'s "failed in a way
+    # this recipe does not parse" arm, which prints `sha256sum`'s output raw and
+    # means to. A case that reaches that arm must assert on it rather than be
+    # excused from this guard.
+    if grep -qE 'FAILED( open or read)?$' <<<"$every_output"; then
+        echo "FAIL  an arm printed sha256sum's wording rather than a bare name:"
+        grep -nE 'FAILED( open or read)?$' <<<"$every_output" | sed 's/^/        /'
+        failed=1
+    fi
+
+    [ "$failed" -eq 0 ] || exit 1
+    echo "check-corpus named its file in every case, under $dictionary"
+
+[doc("Formatting and clippy, warnings denied. Rust and TOML both.")]
 lint:
     cargo fmt --all -- --check
     taplo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
 
+[doc("cargo-deny: advisories, bans, licences, sources. No LGPL at runtime.")]
 deny:
     cargo deny check
 
@@ -1225,7 +1689,7 @@ fuzz_log_root := env_var_or_default("RCAD_FUZZ_LOGS", env_var("HOME") / "rcad-fu
 
 # Where the overnight run accumulates what it finds worth keeping.
 #
-# **Outside the tree, and that is the whole of decision §63.** The corpus under
+# **Outside the tree, and that is the whole of decision §80.** The corpus under
 # `fuzz/corpus/` is tracked, 30 MB of it; eight hours a night would add
 # thousands of files to it, so the tree would be dirty every morning and every
 # lane would merge past a thousand-file commit it never read. So the tracked
@@ -1249,6 +1713,7 @@ fuzz_corpus_root := env_var_or_default("RCAD_FUZZ_CORPUS", env_var("HOME") / "rc
 # the end if anything failed.
 #
 # Same nightly-compiler caveat as `fuzz` below.
+[doc("Fuzz all four targets in turn, inside a window in seconds. What the timer runs.")]
 fuzz-overnight window="28800":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1343,12 +1808,13 @@ fuzz-overnight window="28800":
 
 # The property fuzzer, over a pair of surfaces (docs/decisions.md §24.14).
 #
-# NOT part of `just default`, and not because anybody chose to leave it out:
+# NOT part of `just gate`, and not because anybody chose to leave it out:
 # `cargo-fuzz` builds with a sanitizer that needs a nightly compiler and
 # `rust-toolchain.toml` pins a stable one, so this is the one recipe here that
 # uses a compiler the repo does not pin. What runs on every commit is the same
 # property over the same decoder, in
 # `crates/rcad-geom/tests/every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs`.
+[doc("Fuzz the predicates over a pair of surfaces. Needs a nightly compiler.")]
 fuzz duration="60" corpus_root="": (fuzz-target "where_two_surfaces_cross" duration corpus_root "71")
 
 # The Part 21 reader, over arbitrary bytes (docs/decisions.md §42.12 criterion 5).
@@ -1359,6 +1825,7 @@ fuzz duration="60" corpus_root="": (fuzz-target "where_two_surfaces_cross" durat
 #
 # No `-max_len`, unlike `fuzz`: the reader's promise is about any length of
 # anything, and the truncation cases live at every length there is.
+[doc("Fuzz the Part 21 reader over arbitrary bytes.")]
 fuzz-reader duration="60" corpus_root="": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root)
 
 # The Part 21 writer, over an arbitrary `Model` (docs/decisions.md §42.12).
@@ -1368,6 +1835,7 @@ fuzz-reader duration="60" corpus_root="": (fuzz-target "no_step_file_makes_the_r
 # `postcard::from_bytes` — the same route a stranger's saved file takes — and
 # whatever `Model` comes out, sound or not, goes straight into
 # `rcad_step::write`, which owes an `Err` and never a panic either way.
+[doc("Fuzz the Part 21 writer over an arbitrary Model.")]
 fuzz-writer duration="60" corpus_root="": (fuzz-target "no_model_makes_the_writer_panic" duration corpus_root)
 
 # The fuse, over two arbitrary `Model`s (docs/decisions.md §17).
@@ -1377,6 +1845,7 @@ fuzz-writer duration="60" corpus_root="": (fuzz-target "no_model_makes_the_write
 # its own solids against each other — see
 # `fuzz/fuzz_targets/two_solids_fused_by_a_stranger.rs` for why two `Model`s
 # and not one cross-fused pair.
+[doc("Fuzz the fuse over two arbitrary Models.")]
 fuzz-fuse duration="60" corpus_root="": (fuzz-target "two_solids_fused_by_a_stranger" duration corpus_root)
 
 # The one place that knows how to start a fuzz target. The four recipes above
@@ -1388,7 +1857,8 @@ fuzz-fuse duration="60" corpus_root="": (fuzz-target "two_solids_fused_by_a_stra
 # With no `corpus_root` — a hand-run `just fuzz 60` — libFuzzer gets no corpus
 # argument and writes to the tracked `fuzz/corpus/<target>` as it always has.
 # With one, that directory becomes the *second* argument and libFuzzer treats it
-# as a read-only seed, writing only to the first (§63).
+# as a read-only seed, writing only to the first (§80).
+[private]
 fuzz-target target duration corpus_root="" max_len="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1419,6 +1889,7 @@ fuzz-target target duration corpus_root="" max_len="":
 # after a target died, and — the reason the hub case is here rather than trusted
 # to `check-hub` — a timer left pointing at the one tree whose owner cannot be
 # written down, where `just lanes` would show `free` all night (§60).
+[private]
 check-fuzz-overnight-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1478,7 +1949,7 @@ check-fuzz-overnight-selftest:
         || fail "the summary line does not name the target that died"
 
     # Two: the tracked corpus is a read-only seed and never the directory
-    # libFuzzer writes to, which is the whole of §63. Order is the only thing
+    # libFuzzer writes to, which is the whole of §80. Order is the only thing
     # that says so, and only `fuzz` carries `-max_len`.
     grep -q "run where_two_surfaces_cross $dir/corpus/where_two_surfaces_cross corpus/where_two_surfaces_cross " "$dir/log" \
         || fail "the night's own corpus is not first, so libFuzzer would write into the tracked one"
@@ -1526,9 +1997,11 @@ check-fuzz-overnight-selftest:
     [ ! -s "$dir/log" ] \
         || fail "the hub was refused only after cargo had been run"
 
+[doc("The benchmarks.")]
 bench:
     cargo bench --workspace
 
+[doc("Format the Rust and the TOML in place.")]
 fmt:
     cargo fmt --all
     taplo fmt
@@ -1555,6 +2028,7 @@ fmt:
 # you are standing in, because you are using it, and any **locked** tree, because
 # a lock means an agent is working in there and deleting its `target/` mid-build
 # is exactly the interruption the lock exists to prevent.
+[doc("Strip target/ from every worktree git knows about. Skips locked ones.")]
 clean-targets dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1592,6 +2066,7 @@ clean-targets dir=".":
 # the sweep from the lane: the **hub's** must go, because it is the biggest and
 # the old path glob never reached it, the **locked** one must survive, and the
 # tree the sweep is standing in must survive.
+[private]
 check-clean-targets-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1633,10 +2108,25 @@ check-clean-targets-selftest:
 # worktree is provably safe, and this repo learned the hard way that nothing
 # reclaims them on its own: the harness sweep keeps any worktree holding unpushed
 # commits, so with no remote configured it kept all 38 for ever (§50.8).
-prune-worktrees:
+#
+# Two defects, both demonstrated before either fix was written (§76). First,
+# `main` is an ancestor of itself, so the tree holding it used to fall through
+# to `remove` like any merged lane — this actually happened on 2026-09-08. It
+# gets its own check, ahead of the ancestry test, because §60 says `main` lives
+# in a worktree and never the hub; this recipe honoring that is not optional.
+# Second, a detached tree reports its branch as the literal string `HEAD`, and
+# resolving that string as a ref used to go through whichever tree the command
+# was standing in — from the tree holding `main`, `HEAD` resolved to `main`
+# itself, trivially an ancestor, so a clean detached tree was removed no matter
+# what it held. Its commits sit on no branch, so nothing else protects them: a
+# detached tree is now judged by its own commit (`git -C "$tree" rev-parse
+# HEAD`, no branch name involved at all) and kept unconditionally, the same way
+# a locked or dirty tree is.
+[doc("Remove lane worktrees whose branch has landed on main.")]
+prune-worktrees dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
-    repo=$(git rev-parse --show-toplevel)
+    repo=$(git -C "{{dir}}" rev-parse --show-toplevel)
     kept=0
     # A lock means an agent is working in there right now — git holds one for the
     # life of the agent and releases it on exit. Never force past it: the pid in
@@ -1646,22 +2136,79 @@ prune-worktrees:
     for tree in $(git -C "$repo" worktree list --porcelain | awk '/^worktree /{print $2}'); do
         [ "$tree" = "$repo" ] && continue
         branch=$(git -C "$tree" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        commit=$(git -C "$tree" rev-parse HEAD 2>/dev/null || echo "")
+        name="$branch"
+        [ "$branch" = "HEAD" ] && name="detached at $(git -C "$tree" rev-parse --short HEAD 2>/dev/null || echo "$commit")"
         if grep -qxF "$tree" <<<"$locked"; then
             echo "kept (locked, an agent is using it): $tree"
             kept=$((kept + 1))
         elif [ -n "$(git -C "$tree" status --porcelain 2>/dev/null)" ]; then
             echo "kept (uncommitted changes): $tree"
             kept=$((kept + 1))
-        elif [ -z "$branch" ] || ! git -C "$repo" merge-base --is-ancestor "$branch" main 2>/dev/null; then
-            echo "kept (not merged into main): $tree [$branch]"
+        elif [ "$branch" = "main" ]; then
+            echo "kept (holds main, which a worktree carries by rule, never the hub -- §60): $tree"
+            kept=$((kept + 1))
+        elif [ "$branch" = "HEAD" ]; then
+            echo "kept (detached; its commits are on no branch, so nothing else protects them): $tree [$name]"
+            kept=$((kept + 1))
+        elif [ -z "$commit" ] || ! git -C "$repo" merge-base --is-ancestor "$commit" main 2>/dev/null; then
+            echo "kept (not merged into main): $tree [$name]"
             kept=$((kept + 1))
         else
             git -C "$repo" worktree remove --force "$tree"
-            echo "removed: $tree"
+            echo "removed: $tree [$name]"
         fi
     done
     git -C "$repo" worktree prune
     echo "$kept worktree(s) kept; their branches are untouched either way"
+
+# Pins the two defects fixed above (§76) — `prune-worktrees` had no selftest at
+# all, which is exactly how both survived to be found live.
+#
+# The fixture builds five worktrees off a throwaway `main` and runs the sweep
+# from a sixth, so `main`'s own tree is judged rather than skipped as "the tree
+# you are standing in". `held` is locked, `dirty` carries an uncommitted file,
+# `loose` is detached, and `merged` is fast-forwarded into `main` before the
+# sweep runs, so its commit really is `main`'s ancestor. A guard that kept
+# everything would pass the first four and only the fifth catches it.
+[private]
+check-prune-worktrees-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'git -C "$dir/main" worktree unlock "$dir/held" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    git init -q -b main "$dir/main"
+    git -C "$dir/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m root
+    git -C "$dir/main" worktree add -q "$dir/runner" -b runner
+    git -C "$dir/main" worktree add -q "$dir/held" -b held
+    git -C "$dir/main" worktree add -q "$dir/merged" -b merged
+    git -C "$dir/main" worktree add -q "$dir/dirty" -b dirty
+    git -C "$dir/main" worktree add -q --detach "$dir/loose"
+    git -C "$dir/merged" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "landed work"
+    git -C "$dir/main" merge -q merged
+    echo change >"$dir/dirty/uncommitted.txt"
+    git -C "$dir/main" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/held"
+    got=$(just prune-worktrees "$dir/runner")
+    fail() {
+        echo "prune-worktrees drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    [ -d "$dir/main" ] || fail "the worktree holding main was removed"
+    [ -d "$dir/held" ] || fail "a locked worktree was removed while an agent was using it"
+    [ -d "$dir/dirty" ] || fail "a worktree with uncommitted changes was removed"
+    [ -d "$dir/loose" ] || fail "a clean detached worktree was removed"
+    [ ! -d "$dir/merged" ] || fail "a clean lane branch merged into main was not removed"
+    grep -qF "kept (holds main" <<<"$got" \
+        || fail "the tree holding main was not given its own kept reason"
+    grep -qF "kept (locked, an agent is using it): $dir/held" <<<"$got" \
+        || fail "the locked worktree was not reported as kept"
+    grep -qF "kept (uncommitted changes): $dir/dirty" <<<"$got" \
+        || fail "the dirty worktree was not reported as kept"
+    grep -qF "kept (detached" <<<"$got" \
+        || fail "the detached worktree was not reported as kept"
+    grep -qF "removed: $dir/merged" <<<"$got" \
+        || fail "a merged lane branch was not reported as removed"
 
 # Who is working where, right now. Run this before you touch a shared tree.
 #
@@ -1686,6 +2233,7 @@ prune-worktrees:
 # `free` there would be a claim this command cannot make. It prints `hub`, leaves
 # it out of the count, and says so when it is not parked and clean —
 # `just check-hub` is the one that fails over it (docs/decisions.md §60).
+[doc("Who is working where, right now. Run this before you touch a shared tree.")]
 lanes dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1775,6 +2323,7 @@ lanes dir=".":
 #
 # The fixture's hub is deliberately left on a branch, which is the state
 # `check-hub` rejects, so the warning line is exercised here too.
+[private]
 check-lanes-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1824,12 +2373,14 @@ check-lanes-selftest:
 #
 # **A repository with one worktree is exempt**, because then there is no hub and
 # no lane, only a checkout, and no second session to collide with. That is a
-# fresh clone, and it is the shape a CI checkout has — CI runs `check`, `lint`,
-# `test` and `deny` rather than `default` today, so this never fires there, but
-# the exemption is what would keep it green if it did. The exemption is
+# fresh clone, and it is the shape a CI checkout has. This is no longer a
+# prediction: CI runs the whole `gate` since 2026-09-07, so a runner reaches
+# this recipe, and run `34266469454` took the exemption and said so — *"is the
+# only worktree, so it is a checkout and not a hub"*. The exemption is
 # structural rather than an environment variable on purpose: one that has to be
 # set is one that gets set, while this lapses by itself the moment a second tree
 # exists, which is the moment ownership starts being a question.
+[doc("Nobody works in the hub: it owns .git and nothing else.")]
 check-hub dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1927,6 +2478,7 @@ check-hub dir=".":
 # dirt, then not at all once it is parked and clean. Reading the live repository
 # instead would prove nothing: it is in exactly one of these states at a time,
 # and a `check-hub` that had lost the ability to fail would pass every run.
+[private]
 check-hub-selftest:
     #!/usr/bin/env bash
     set -euo pipefail

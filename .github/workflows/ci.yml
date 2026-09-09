@@ -1,20 +1,56 @@
-# **No CI run has ever succeeded.** Re-derive rather than believe this line:
-# `gh run list --repo mattiasgronlund/rcad`. It is written as a fact only a fix
-# can falsify, because the two counts that stood here before both went stale
-# within the day, one of them in this file.
+# **CI has been green, and `34266469454` is the first green that ran the whole
+# gate.** Push of `e8ae455`, 2026-09-08, 15m44s: 1811 tests run, 1811
+# passed, 0 skipped — the same three numbers a local `just gate` gave on the
+# same tree. Every green before it ran `just test`. Re-derive rather than
+# believe it: `gh run list --repo mattiasgronlund/rcad --status success` for the
+# greens, then `git show <sha>:.github/workflows/ci.yml` for what each one
+# actually ran. The empty answer to that first command was the claim this header
+# carried until 2026-09-07.
 #
-# Two paragraphs of this header have now been wrong. It opened "This workflow
-# has never run. There is no remote and no CI (`git remote -v` is empty)", which
-# was true when written and went false without a commit — and its replacement
-# said the runs "all failed in 11–25 seconds without reaching a single check",
-# written on 2026-09-07 from the first page of `gh run list` and **false**: run
-# `33916660058` took 11m28s, and passed `just check` and `just lint`. A page of
-# ten, every row a push to `main`, could only return the answer it returned.
+# **Getting there took three red runs, and only the first was about plugins.**
+# `34260645261` asked a runner what Claude Code had been told; `34264306999` and
+# `34265339769` counted colour codes instead of clippy warnings, because this
+# file sets `CARGO_TERM_COLOR: always` and the recipe anchored a grep at `^`.
+# `docs/decisions.md` §77 is the rule all three settled: a check can pass for a
+# property of the environment it runs in rather than of the tree, and the way to
+# find out is to take away what the environment supplies and run it again.
+#
+# **Do not write the tally here.** A count is stale on the next push, and the two
+# that stood in this header both went stale within a day. Name runs instead;
+# those keep. `34155345448` (2026-09-07) and `34255349804` (2026-09-08, sha
+# `41b7160`) are pushes to `main` that reported **1787** and **1806 tests run,
+# all passed, 0 skipped** — each the same three numbers a local `just gate`
+# gave on the same tree. That agreement is the whole point of a runner: before
+# it, every green here was one person running the gate locally and reporting it
+# honestly.
+#
+# Name the commit whenever you say "CI is green", because runs are not
+# interchangeable. The first success was a pull request — `origin/main` plus two
+# corpus commits, containing none of the thirteen queued behind it — so it proved
+# the fetch and almost nothing else. For a day "CI is green" and "the work is
+# covered" were separately true and separately false.
+#
+# Three of this header's claims have gone false, and two of them were errors.
+# It opened "This workflow has never run. There is no remote and no CI (`git
+# remote -v` is empty)", which was true when written and went false without a
+# commit — and its replacement said the runs "all failed in 11–25 seconds
+# without reaching a single check", written on 2026-09-07 from the first page of
+# `gh run list` and **false**: run `33916660058` took 11m28s, and passed `just
+# check` and `just lint`. A page of ten, every row a push to `main`, could only
+# return the answer it returned.
+#
+# The third is the design working, not a fourth mistake. "No CI run has ever
+# succeeded" replaced two failure counts that had gone stale within a day, and
+# was worded so that only a fix could falsify it. A fix did. Prefer a sentence
+# a repair makes wrong to a number time makes wrong.
 # So: if you change what this file does, change this header in the same commit,
 # and re-derive anything numeric rather than copying it forward.
 #
-# Three faults, in the order a run meets them. Two are fixed and the third is
-# the whole remaining problem.
+# Three faults, in the order a run meets them. All three are fixed in this file
+# and all three fixes have now been watched working on a runner, which is what
+# the green above is. Until `34155345448` this paragraph had to say that the
+# third was still unproven; if the file changes and no run has gone green since,
+# say so here rather than leaving this sentence standing.
 #
 # **1. A rustup component race, fixed below by `rustup show`.** mise installs
 # the six `[tools]` in parallel and each one triggers rustup to materialise the
@@ -46,7 +82,8 @@
 # kache fix working on a runner with fault 1 still in front of it, which is the
 # one thing PR #1 could not show, having fixed both at once.
 #
-# **3. `just test` needs a STEP corpus, and is now the only thing failing.**
+# **3. The tests need a STEP corpus, and it was the last fault standing.**
+# Fixed and demonstrated: `34155345448` fetched one and ran 1787 tests on it.
 # **Seven** test files in
 # `rcad-step` read `RCAD_STEP_CORPUS` — an earlier version of this header said
 # four, and so do two other places; the count is `grep -rln RCAD_STEP_CORPUS
@@ -56,16 +93,49 @@
 # variable, so a runner does not reach the "not set" message — it fails a line
 # later on a path that does not exist.
 #
-# That failure is the mechanism working, not a bug to route around. The corpus
-# is 375 MB of third-party files and is deliberately not in this tree, so a
-# runner has to fetch or cache it, and **no fetching mechanism is built here**.
-# How it should get one is an open question with Mattias, not something for a
-# passing lane to decide.
+# That failure is the mechanism working, not a bug to route around. The fix is
+# `corpus/fetch.sh`, which rebuilds the corpus from upstream — NIST pinned by
+# zip checksum, KiCad pinned by commit — and is run above behind the Actions
+# cache. `corpus/sources.md` is the evidence that a fresh download is the same
+# bytes; `corpus/manifest.sha256` pins all 367 files; `just check-corpus`
+# compares a corpus against it and runs here on a cache hit as well as a miss.
 #
-# Note also that this runs `just test` rather than `just default`, so
-# `check-enums`, `check-wildcards` and `check-wildcards-selftest` are not
-# enforced here even though they gate every local run. That predates the corpus
-# question and wants settling at the same time.
+# **The size figure in this header used to say 375 MB and that was misleading.**
+# 375 MB is the corpus directory on disk, companion CATPart, SLDPRT, pdf and jpg
+# files included. The tests open `.stp` and `.step` and nothing else, so what a
+# runner needs is **367 files and 133.4 MiB**, fetched in about 119 MiB.
+# Measured, not copied: `find "$RCAD_STEP_CORPUS" -type f \( -iname '*.stp' -o
+# -iname '*.step' \) -printf '%s\n' | awk '{s+=$1} END {print s}'`.
+#
+# **This runs `just gate` — the same command a human runs.** It ran `just
+# test` until 2026-09-07, which left the `check-*` recipes enforced on every
+# local run and on no runner. Mattias settled that as "switch to `just gate`,
+# but after the first green"; asked afterwards which green he meant, with one on
+# a pull request and none yet on `main`, he answered: now.
+#
+# The cost of "now" is that the run landing the switch changes two things at
+# once, so a red on it does not say which. What could be ruled out locally was
+# ruled out: the `check-*` recipes were run in a fresh single-worktree clone with
+# `CI=true` — the shape this runner has, and the shape no local gate has, since
+# every worktree here sits beside a hub. `check-hub` passed there, so CLAUDE.md's
+# exemption for a repository with one worktree is tested rather than assumed.
+#
+# **That sweep is also where this header earns its own warning.** It ran against
+# seventeen `check-*` recipes and said so here. Within the hour `check-plugins`
+# made it **eighteen**, in the paragraph whose whole subject is numbers going
+# stale. Worse, the sweep could not have caught what the eighteenth broke: it
+# ran with this machine's plugins installed, so `check-plugins`, `check-hooks`
+# and `check-questions-selftest` all passed for a reason a runner does not have.
+# Pointing `CLAUDE_PLUGINS_ROOT` at an empty directory is what found it — exit 1
+# and two 127s. A green sweep is not evidence when the thing you are asking
+# about is what the environment supplies. Do not count the recipes here again;
+# `grep '^gate:' justfile | tr ' ' '\n' | grep -c '^check-'` is the number.
+#
+# One step rather than four, and `check-corpus` deliberately twice. The single
+# step is what lets `check-gate-runs-every-check` reach this file: a new
+# `check-*` recipe joins `gate` and is enforced here without anyone editing
+# this workflow, which is the failure that recipe exists for. Splitting the four
+# back out would buy prettier step names and give that up.
 
 name: CI
 
@@ -83,6 +153,62 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The corpus lives outside the checkout on purpose: 367 fetched files
+      # inside the working tree would read as untracked to everything that looks
+      # at `git status`, and the corpus is deliberately not this repo's to carry.
+      #
+      # Set in a step rather than in the `env:` block above, because `runner` is
+      # not one of the contexts a workflow-level `env` may name — only `github`,
+      # `inputs` and `vars` are. Writing `${{ runner.temp }}` up there is not a
+      # value that comes out empty; it makes the whole workflow file invalid, and
+      # the run then fails in 0 s having never started a job.
+      - run: echo "RCAD_STEP_CORPUS=$RUNNER_TEMP/rcad-step-corpus" >> "$GITHUB_ENV"
+      # `just gate` begins with `check-plugins` — pinned there by
+      # `check-gate-runs-every-check` since 2026-09-08, because it ran first
+      # only by where it sat and this step's diagnosis depends on it — and three
+      # of its recipes run scripts that live in the shared marketplace now
+      # rather than in `.claude/`.
+      # A runner has no Claude Code to install a plugin into, so it clones the
+      # marketplace and points `CLAUDE_PLUGINS_ROOT` at it — the same escape
+      # hatch `check-plugins` offers a human whose clone is somewhere else.
+      #
+      # Outside the checkout for the reason the corpus is: not this repo's to
+      # carry, and inside the working tree it would read as untracked.
+      #
+      # Pinned by commit, like the KiCad half of the corpus. Unpinned, a push to
+      # that repo could turn this one red with no commit here, and a green would
+      # stop meaning "this tree passes". Bump it deliberately.
+      #
+      # Bumped from `952672e` to `f5f2f48` on 2026-09-08, and that bump is load
+      # bearing rather than housekeeping: `f5f2f48` is where `check-declared.sh`
+      # learned to skip on a machine with no Claude Code, which is what this
+      # runner is. Pinned back below it, `just gate` goes red at
+      # `check-plugins`. `docs/decisions.md` §77.
+      #
+      # What this does **not** check is that a human's installed plugins match
+      # the pin: `check-plugins` tests that three directories exist, not which
+      # version they hold, so local and CI can disagree about the plugin half of
+      # a gate. That is a limit and not a gap — an installed plugin need not be a
+      # git checkout, so there is no version on the local side to compare.
+      # No credentials here, deliberately: the marketplace is a **public** repo,
+      # which Mattias settled on 2026-09-08 knowing it is the one public thing
+      # among `rcad` and `rscene`. The alternative was a fine-grained token in an
+      # Actions secret — the automatic `GITHUB_TOKEN` cannot read another repo —
+      # and a secret to rotate was judged the worse trade.
+      #
+      # The failure arm is here because of the order these two things happened
+      # in: the repo was created private, and a clone with no credentials against
+      # a private repo fails with `fatal: could not read Username for
+      # 'https://github.com'`, which names neither the repo nor the fix.
+      - run: |
+          if ! git clone --quiet https://github.com/mattiasgronlund/claude-questions.git "$RUNNER_TEMP/claude-plugins"; then
+            echo "Could not clone the plugin marketplace, and this clone carries"
+            echo "no credentials by design. If the repo is still private:"
+            echo "  gh repo edit mattiasgronlund/claude-questions --visibility public"
+            exit 1
+          fi
+          git -C "$RUNNER_TEMP/claude-plugins" checkout --quiet f5f2f483deb966263b6201dc4b9a6905ca3fb6dc
+          echo "CLAUDE_PLUGINS_ROOT=$RUNNER_TEMP/claude-plugins/plugins" >> "$GITHUB_ENV"
       # mise installs the `cargo:` tools in parallel, and each one triggers
       # rustup to materialise the toolchain pinned in `rust-toolchain.toml`.
       # They race over the same `.partial` file in ~/.rustup/downloads and all
@@ -93,7 +219,38 @@ jobs:
         with:
           experimental: true
       - uses: Swatinem/rust-cache@v2
-      - run: mise exec -- just check
-      - run: mise exec -- just lint
-      - run: mise exec -- just test
-      - run: mise exec -- just deny
+      # Keyed on the manifest and the script together: change either what the
+      # corpus is or how it is built, and the cached copy stops being the one
+      # this commit means.
+      - uses: actions/cache@v4
+        id: step-corpus
+        with:
+          path: ${{ runner.temp }}/rcad-step-corpus
+          key: step-corpus-${{ hashFiles('corpus/manifest.sha256', 'corpus/fetch.sh') }}
+      - if: steps.step-corpus.outputs.cache-hit != 'true'
+        run: ./corpus/fetch.sh "$RCAD_STEP_CORPUS"
+      # Runs on a cache hit too, and that is the point: the fetch checks what it
+      # built, but a restored cache is bytes nobody looked at this run. 0.15 s.
+      #
+      # `just gate` below runs this same recipe, so this step is a duplicate
+      # and is kept deliberately: here it sits directly after the cache restore,
+      # so a corpus that came back wrong is named in 0.15 s by the step next to
+      # the cache, instead of after `just check` has spent minutes compiling.
+      - run: mise exec -- just check-corpus
+      # `check-corpus-selftest` needs a locale that collates by dictionary
+      # order, because the collation bug it exists to catch is invisible under
+      # one that collates by codepoint — and a runner's ambient `C.UTF-8` is
+      # exactly that. The recipe finds such a locale by asking `sort` rather
+      # than by naming one, and **refuses** when there is none rather than
+      # skipping: three of its four cases stay green with the bug in place, so
+      # running only those would be worse than running nothing. This step is
+      # what makes sure there is one. `docs/decisions.md` §79.
+      - run: |
+          sudo apt-get install -y -qq locales
+          sudo locale-gen en_US.UTF-8
+      # One step, because the whole value of it is that it is the same command a
+      # human runs. Splitting `check`/`lint`/`test`/`deny` back out would buy
+      # prettier step names and cost the property that `check-gate-runs-every-
+      # check` guards: a new `check-*` recipe joins `gate` and is enforced
+      # here without anyone editing this file.
+      - run: mise exec -- just gate

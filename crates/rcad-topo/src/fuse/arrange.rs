@@ -95,7 +95,8 @@ use super::{
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] when a curve the face is cut by
 /// is one nothing here can put points in order along, and
 /// [`Error::Invalid`](crate::Error::Invalid) when the face turns out to be
-/// broken — two of its corners in the same place, say.
+/// broken — two of its corners in the same place, or a piece left bounded by
+/// two straight sides, which enclose no area (§67).
 ///
 /// # Panics
 ///
@@ -831,12 +832,14 @@ impl<'f> Arrangement<'f> {
 
     /// The pieces: the cells the face's boundary winds once round.
     ///
+    /// # Errors
+    ///
+    /// [`Invalid::WireTooShort`] if a piece is bounded by fewer than three
+    /// straight sides — see [`Arrangement::wire_from`].
+    ///
     /// # Panics
     ///
-    /// If a piece has no sides at all, or if a flat piece has fewer than three
-    /// straight ones. Two straight lines enclose no area, so a piece like that
-    /// is a zero-area face, which §17.4 prevents rather than filters: reaching
-    /// here means the splitter is wrong.
+    /// If a piece has no sides at all.
     fn pieces(&self) -> Result<Vec<Piece>> {
         if self.arcs.is_empty() {
             return Ok(vec![self.the_whole_surface()?]);
@@ -2890,12 +2893,13 @@ impl<'f> Arrangement<'f> {
         Stretches { axis, spans }
     }
 
+    /// # Errors
+    ///
+    /// Whatever [`Arrangement::wire_from`] makes of each of the piece's walks.
+    ///
     /// # Panics
     ///
-    /// If the piece has no wires, or if a wire made only of straight sides has
-    /// fewer than three of them. Two straight lines enclose no area, so a piece
-    /// like that is a zero-area face, which §17.4 prevents rather than filters:
-    /// reaching here means the splitter is wrong.
+    /// If the piece has no wires.
     fn piece_from(&self, cell: usize) -> Result<Piece> {
         let mut cycles = self.cells[cell].clone();
         // A flat piece has an outer wire and holes, and `Model::validate` reads
@@ -2932,25 +2936,36 @@ impl<'f> Arrangement<'f> {
             .map(|half_edge| lump[self.cycle_of[half_edge]])
     }
 
-    /// # Panics
+    /// # Errors
     ///
-    /// If a wire made only of straight sides has fewer than three of them. Two
-    /// straight lines enclose no area. **Two sides one of which bends do**, and
-    /// that is the whole reason this asks
+    /// [`Invalid::WireTooShort`] if a wire made only of straight sides has fewer
+    /// than three of them. Two straight lines enclose no area. **Two sides one
+    /// of which bends do**, and that is the whole reason this asks
     /// [`HowItRuns::runs_straight`] rather than the "does not close" it used to:
     /// a block wall cuts a cone in a hyperbola, and the piece that hyperbola
     /// leaves against the wall's own edge is a wire of two sides.
+    ///
+    /// **A refusal and not an assert, because the input decides it and not this
+    /// crate.** Two crossings that are the same line are folded into one before
+    /// the walk ([`Arrangement::crossing_like`]), so two straight sides between
+    /// one pair of nodes means two lines that are *not* the same and yet share
+    /// both ends — which is what a solid whose walls carry each other's planes
+    /// bakes into, and what the corner-folding does to two lines closer together
+    /// than the numbers beside them can show. Neither is a broken invariant
+    /// here: the piece is one no face could be, so the fuse says so and leaves
+    /// the model alone (§67, and §38.2 for the same call one bug earlier).
     fn wire_from(&self, cycle: usize) -> Result<Vec<FaceMeet>> {
         let all_straight = self.cycles[cycle].iter().all(|&half_edge| {
             self.crossings[self.arcs[half_edge / 2].crossing]
                 .order
                 .runs_straight()
         });
-        assert!(
-            !all_straight || self.cycles[cycle].len() >= 3,
-            "a piece bounded by straight sides has at least three of them, this one has {}",
-            self.cycles[cycle].len()
-        );
+        if all_straight && self.cycles[cycle].len() < 3 {
+            return Err(Invalid::WireTooShort {
+                count: self.cycles[cycle].len(),
+            }
+            .into());
+        }
         self.cycles[cycle]
             .iter()
             .map(|&half_edge| {

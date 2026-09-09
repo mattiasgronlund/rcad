@@ -4,7 +4,7 @@
 //!
 //! `fuzz/fuzz_targets/where_two_surfaces_cross.rs` is the `cargo-fuzz` target,
 //! and it needs a nightly compiler for its sanitizer. `rust-toolchain.toml`
-//! pins a stable one (§8.1), so **`just default` does not run it** — `just fuzz`
+//! pins a stable one (§8.1), so **`just gate` does not run it** — `just fuzz`
 //! does, on a toolchain a person asked for. `docs/decisions.md` §29 records that
 //! plainly rather than leaving it to be discovered.
 //!

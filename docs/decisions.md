@@ -446,6 +446,14 @@ The roadmap says "never panic, return `EvalError`" (§4.5). `CLAUDE.md` says
 | Broken internal invariant — edge with three coedges, key resolving to a freed slot, approximation grew | **panic** | It is a bug; emitting a corrupt solid is worse than dying |
 | Cannot decide | `Decision::Undecidable` | It is a result, not a failure |
 
+**The middle row is amended by §66.** It still holds in a debug build. In a
+release build the response is a panic only where the operation has already
+written into the caller's model and cannot take it back; where the check can be
+made *before* the write, the response is an `Err` that says "this kernel has a
+bug", which is a third door and not `Error::Undecidable`. What the row must
+never mean is what a release build actually does today — neither of the two,
+because the check does not run at all (§66.1).
+
 ### 4.2 Error types
 
 `thiserror` enums per crate. No `anyhow` in library code. A `#[non_exhaustive]
@@ -464,6 +472,10 @@ O(n²) and the suite stops being runnable long before M4.
 
 - **After every mutation, in debug**: cheap checks on *touched entities only* —
   keys resolve, coedge count, orientation agrees, approximation did not grow.
+  **Amended by §66: "in debug" is withdrawn and they run always.** The O(n²)
+  above is the full sweep's and was never measured for these; measured, they cost
+  50–65 ns per face of the solid they are handed and the full sweep costs 3.4–4.4
+  µs per face of the whole model (§66.2).
 - **At test and import boundaries**: full `Model::validate()`, public API, called
   by `proptest` and by anyone importing untrusted data.
 - **Always, including release**: the approximation-growth check. One comparison,
@@ -741,6 +753,7 @@ slips, it slips there.
 | `ProvenanceSink` streaming | On demand | §5 — no caller yet |
 | Branded lifetimes for cross-model keys | Indefinitely | Debug-checked model id is the pragmatic fix |
 | A `&Policy` on `where_a_closed_crossing_starts` | A consumer that fuses tolerantly | §13 — the gap is real and nothing named is standing on it |
+| `check-front-door` (a check that no test or bench under `crates/rcad` imports `rcad_geom` directly) | On demand | §13 rule 3 — the one violation found is already fixed by hand; nothing yet needs it enforced |
 
 **Amended 2026-08-30.** §1.7 inserts M2.5, and the planar fuse is where scratch
 allocation first becomes measurable — candidate pair lists, split pieces, image
@@ -809,6 +822,24 @@ and half a dozen test files call, for a caller nobody has named — which is
 exactly the trade §13 exists to settle. The doc comment tells such a caller to
 check itself against the door rather than against the census, and that sentence
 is the deferral's mitigation.
+
+**Amended 2026-09-07: a `check-front-door` recipe is deferred, not built, and
+the gap it would close is real.** The rule is that a consumer of `rcad` goes
+through the front door — no test or bench under `crates/rcad` should import
+`rcad_geom`, or any crate underneath the facade, directly. One did:
+`crates/rcad/tests/coordinates_that_span_too_wide_a_range.rs` reached past the
+facade for `DynamicRange`, which the facade did not re-export. `5692a7f` added
+the re-export and `50a5fb7` swapped the import for it. Measured before the
+pair, `grep -rn "rcad_geom::" crates/rcad/tests crates/rcad/benches` gives 1
+hit — that file, importing `DynamicRange`; measured at `50a5fb7`, 0.
+
+**Nothing prevents it recurring.** No recipe in `justfile`, no lint, and no
+test asserts that count stays at 0 — a future test file can add the same
+import and `just default` will not see it. The lane that found and fixed the
+gap declined to build the recipe, citing §13 rule 3: no named consumer beyond
+the one violation it would have caught, no build. Mattias's answer, asked for
+directly: defer the recipe, record the gap. So the gap is known, the check is
+deliberately not built, and the answer to "can this recur" is yes.
 
 ---
 
@@ -19231,36 +19262,3455 @@ a claim that is true about everything it sampled and silent about what it did
 not. **The control for that is arithmetic, not reading**: a balance assertion,
 or a census one level finer than the claim.
 
-## 63. The fuzzer runs at night, recorded 2026-09-09
+### 62.8 Six instances, three of them from inside the work of writing this section
+
+The two arms above are the mechanism, found in a test file's own sampling. This
+week it also fired in prose, about the tools this project reads its own state
+through — and it fired a third time inside the sessions doing the finding.
+Mattias asked for the count; it moved twice while the question was open, which
+belongs in the record beside the instances themselves. There are six.
+
+1. **Four became seven, in two files.** `justfile` and `CLAUDE.md` both said
+   four `rcad-step` test files skip without a corpus. `grep -rln
+   RCAD_STEP_CORPUS --include=*.rs` gives seven, and none of them skip —
+   `every_file_in_the_corpus_reads.rs:149` panics rather than passing, on
+   purpose, with the message "this test does not skip on a missing corpus."
+   Fixed in `fe602b8`.
+2. **A header outlived the sentence it opened with.** `.github/workflows/ci.yml`
+   opened "This workflow has never run. There is no remote and no CI." `origin`
+   had pointed at GitHub for at least a day by the time that sentence was still
+   being read as current. Fixed in `1f880ea`.
+3. **"Ten consecutive failures, every one in the tool install, none reaching a
+   check."** `fe602b8` wrote that into `CLAUDE.md`, read off `gh run list`'s
+   first page — ten rows, every one a push to `main`, the only branch this
+   repository's CI runs on. Run `33916660058` sits on that same page: it took
+   11m28s and passed `just check` and `just lint` before failing on the corpus.
+   `949ea07` corrected it by counting all 26: zero successes, ever — a fact
+   only a fix can falsify, where a count goes stale on the next push.
+4. **The same sentence, in a different file, independently, within the hour.**
+   `1f880ea` wrote "fired on ten pushes to `main` … every one failed in 11–25
+   seconds without reaching a single check" into `ci.yml`'s own header — the
+   same first page, read by the session correcting the *previous* false
+   header. `bb90345` corrected it, in its own words: "That was false, and it
+   was mine."
+5. **A handoff document dropped its own `Q22`.** A session's list of its own
+   open questions, kept in its scratchpad, silently lost one entry and read as
+   complete. The scratchpad dies with the session by design (this file's own
+   "Never in the tree"), so this instance is not re-checkable the way the other
+   five are — it stands on the session's contemporaneous report and nothing
+   else.
+6. **375 MB is the directory; the tests read 133.4 MiB of it.** `ci.yml` and a
+   session's notes called the corpus "375 MB of third-party files," and `du -sh`
+   on the corpus directory does give `375M` — true, of the directory.
+   `every_file_in_the_corpus_reads.rs:175-180` opens only `.stp` and `.step`,
+   case-insensitively. Counted directly: the corpus holds 520 files, of which
+   367 are `.stp`/`.step` totalling 139867388 bytes (133.4 MiB); the other 153
+   — `.pdf`, `.prt`, `.SLDPRT`, `.CATPart`, `.ipt` and others — are never opened
+   by a test.
+
+Three and four are the sharpest pair, and worth naming on their own: **`gh run
+list` defaults to one page, and for a repository whose CI runs only on pushes
+to `main`, that page is every push to `main`.** The natural invocation and the
+blind invocation are the same invocation — §62.3's "the obvious choice and the
+blind choice were the same choice," said about a tool instead of a float, and
+it took two sessions saying it independently inside one hour to notice.
+
+### 62.9 Two more, in tooling rather than prose
+
+A run of `mise exec -- just default` was still in progress when a watcher timed
+out on it and grepped `gh run view --log-failed` anyway. On a run that has not
+finished, that grep returns nothing, so it printed "no failure found" about a
+job that had not failed — it had not run its course yet. The rule this earns,
+in its own words rather than a repeat of "assert both directions": **an
+observable that reads empty in the failure case cannot be the whole test**,
+because it reads exactly as empty when the run is simply not done.
+
+Run `34150494501` came back `conclusion: failure` after 0 seconds — `createdAt`
+and `updatedAt` are the same second, `jobs` is empty, and
+`repos/mattiasgronlund/rcad/commits/47264160.../check-runs` gives
+`total_count: 0`. That is not a fast failure, it is a run that never started —
+its push, `4726416`, carried a workflow file GitHub could not schedule a job
+from — and there is nothing to annotate. A 0 s failure and a failing step want
+reading differently, and the trap under both is the same one: the evidence that
+would tell them apart is missing in exactly the case you need it.
+
+### 62.10 A verification that inherited the claim's own blind spot
+
+This crate's own name is spelled two ways — `rcad_geom` in code, `rcad-geom` in
+prose about paths and dependencies — and `CLAUDE.md` says so in words. The trap
+was already named. Two sessions walked into it anyway, from opposite
+directions, inside a day.
+
+Re-derived at `de7a932` (branch `facade-range-check-pairing`): `grep -rn
+"rcad_geom" crates/rcad/tests crates/rcad/benches` gives 3; `grep -rnE
+"rcad_geom|rcad-geom" crates/rcad/tests crates/rcad/benches` gives 7, across 5
+files. Of the 7, 4 spell it with a hyphen and are invisible to the narrower
+grep.
+
+**Not the same shape as §62.1/§62.2.** Those were a sweep whose sample set
+could not reach the answer it needed. Here a number had already been checked
+once: a stale claim of "prose in five places" was re-measured down to 3, and
+that re-measurement is what `de7a932`'s own commit message publishes. The
+grep behind it was `rcad_geom` alone — the same underscore-only blind spot the
+claim it was correcting already had. **Checking a number is supposed to be the
+activity that catches this, and the check inherited the error instead of
+catching it.** `rcad-51` caught it only by reproducing the grep rather than
+reading the commit — a third pass, and the only one of the three that
+recomputed instead of trusting the pass before it.
+
+The chain is a claim, a verification that repeats the claim's own error, and a
+third pass that catches it only because it recomputed. That is the sharper
+finding: a verification is not exempt from the sample-set question just
+because it is a verification. "Did the check see both spellings" has to be
+asked again at every hop, including the hop whose job is to ask it.
+
+### 62.11 A correction that was written, correct, and could not reach anyone
+
+Every arm above is about a claim that was never able to be true. This one is
+about a claim that **was** repaired, on time, by someone who did the work — and
+went on spreading anyway, because a fix that has not landed cannot be read.
+
+On 2026-09-08 three sessions told the dispatcher that rcad's CI had never
+succeeded. One quoted "26 runs, 26 failures"; another said the next run would be
+"the interesting one" because none had ever gone green. Both false: three
+successes, two of them pushes to `main`, re-derived twice from `gh run list`.
+
+**Neither session was careless, and the path is the finding.** `origin/main`'s
+CLAUDE.md still said both things, because the correction sat gated and unlanded
+in `0a917e9`. One session then traced its own copy and found it had come from
+*another session*, not from the file. So the route was CLAUDE.md → session →
+session → dispatcher, and by the time the correction existed the error was
+replicating between agents without touching the document it came from.
+
+**Landing the fix does not retract what is already in three contexts.** It took
+two messages from the dispatcher and a third from a peer to catch up with a
+sentence that was already wrong when it was copied. A record that cannot be read
+is worse than no record, because it is trusted.
+
+That is a different shape from §62.8–62.10. Those are about a sample set that
+could only return one answer. This is about **latency**: the correction was
+written, was right, was gated, and was unreachable, while the error kept moving.
+The rule that falls out is not about sweeps at all — **a correction is not
+delivered when it is written, it is delivered when it lands.** Until then the
+old sentence is still the one being read, and anyone told the new one is holding
+it on your word rather than the record's.
+
+**The same day gave the duplicated-copy version of it.** "No `just default` run
+has gone green on `main`" was true when written and lived in three files —
+`ci.yml`'s header, §77.5, and CLAUDE.md. A green run made all three false at
+once, and two sessions between them had flagged only two of the three. Landing a
+repair in one copy leaves the others standing and *looking* authoritative. This
+is §64's rule arriving from the other direction: §64 says do not keep a second
+copy of a fact because it goes stale; here the going-stale had already happened
+and the cost was one more file that nobody had listed.
+
+**And it gives §62 the case it did not have: verification that worked.** The
+dispatcher was corrected twice that afternoon by peers who re-derived instead of
+reading, and both were right. §62.10 asked what a second opinion has to *do* to
+be one; the answer both times was that it recomputed. A peer session read one
+clippy log two ways — anchored grep 0, escapes stripped 83 — and settled §77.6's
+cause with a measurement the dispatcher's own reproduction had not produced.
+Cheap, independent, and pointed at the thing rather than at the argument about
+the thing.
+
+## 63. One grammar, two readers that disagreed, recorded 2026-09-07
+
+§59 gave `open-questions.md` an address and left its grammar written twice: once
+in the `question` recipe and once in `statusline.sh`, kept in step by a comment
+in the justfile asserting that they matched. They did not, and §59.2 is the entry
+where that cost two open questions. This section is the fix — one parser, a
+grammar strict enough to be checked, and four bugs the work turned up — together
+with what a census of every question file said, which corrected two of the
+recommendations that led to it.
+
+It is the first of three stages. The other two are named in §63.7 and neither is
+built.
+
+### 63.1 The comment was the only thing holding them together
+
+Two implementations of one grammar have no single answer to "is this entry
+open". The justfile said so out loud — *it reads labels exactly as
+`statusline.sh` does* — which is a claim about two pieces of code that nothing
+executed. §15.6 wants a test for a published bound; the same rule applied here
+would have wanted one for a published *equality*, and there was none.
+
+`.claude/questions.py` is now the answer and both callers shell into it. The
+grammar cannot disagree with itself because there is one of it. That is the whole
+of the design; everything below is what the rewrite exposed.
+
+### 63.2 What 227 entries said, and what it corrected
+
+The corpus at the time of writing: **30 files, 227 entries, 111 answered and 116
+open**, across `rcad`, its worktrees and `rscene`. Two findings changed decisions
+that had already been argued for on other grounds.
+
+**Options are rare and were never marked.** Seventeen entries of 227 offer
+lettered options at all, and **not one** wrote them as their own lines — eleven
+inline only, six inline with a marked line beside them. The complaint that
+started this work was that finding what `(a)` meant took reading the paragraph it
+was buried in, and that is not a rendering problem: nothing can lift out of prose
+what was never marked. But the case for the rule was overstated in the asking as
+"the whole reason", when it governs 7.5% of entries.
+
+**An answer almost never names a letter.** Four of 111 answered entries do. Free
+text is not the escape hatch beside the letter, it is the normal case, which
+inverts what a sidecar of answers (§63.7) should treat as its primary field.
+
+Two more, both of which became reader bugs rather than format proposals: **all 30
+files open with an H1** and eight use `##` sections, which no reader knew about;
+and **the recommendation is not last** — of the 117 entries carrying one, 44 have
+content after it, and 110 entries carry none at all. `➡️` and `→ *recommend`
+are both live, 46 to 68. The grammar takes `➡️`, and the reader takes both
+forever, because rewriting 68 entries buys nothing.
+
+### 63.3 A `- [ ]` line is never dropped
+
+The awk skipped any entry whose label it could not parse. Both readers did, so
+the count and the listing agreed with each other and were both wrong. Two such
+entries were live in the corpus — `**handoff Q1**`, whose label does not match
+the pattern at all, and `**Q1–Q10**`, an en-dash range that yields `Q1` and
+silently discards nine.
+
+This is §59.2's failure mode and not a new one: *the line looked complete and was
+not*. The rule that replaces it is absolute — **anything starting `- [ ]` is
+reported**, as `??` with its line number in the listing and as `??×n` in the
+status line, and counted as open. A grammar whose violations are invisible is not
+enforced; it is described.
+
+Two more entry-ending bugs, each with a case in `check-questions-selftest`:
+
+- **A fenced example truncated the body.** Two of the three read paths tracked
+  fences and the body extractor did not. The format is documented *as* a fenced
+  entry, so an entry quoting the format broke the reader meant to show it.
+- **A `##` heading was swallowed** into the entry above it, in ten entries. The
+  file that first proposed this grammar became the eleventh within a turn of
+  being written, which is how it was found.
+
+### 63.4 No list of grandfathered sessions
+
+The proposal on the table was a file naming the sessions written before the
+grammar, exempt from it. It is not built, and the reason is the one §60 used for
+the hub: **do not invent a second record beside the thing itself.**
+
+A list of session ids also outlives what it names. `/usr/lib/tmpfiles.d/tmp.conf`
+sweeps `/tmp` at `30d`, so every id in such a list dangles within a month — a
+file that grows forever and describes nothing.
+
+What replaces it is scope, not exemption: `just question-check` takes a session
+hash and judges one file, which is the caller's own. A dead session's file cannot
+be fixed, so judging it produces noise nobody can act on. A live session's can,
+so it is judged — including a session older than the grammar, which is right,
+because it is the one case that can still comply.
+
+### 63.5 Python, and it was faster than what it replaced
+
+`mise.toml` pins only `cargo:` tools and CLAUDE.md says never install a tool ad
+hoc. This installs nothing: stdlib only, one file, system `python3`.
+
+The expected objection was cost on a status line that redraws every five seconds.
+Measured, it goes the other way. `just question` with no arguments took **368 ms**
+because it spawned one `awk` per file over 30 files; one Python process over the
+same 30 is **19 ms**. `statusline.sh` went from **27.8 ms to 15.6 ms**, because it
+forked `awk`, `stat`, `date` and `printf` repeatedly and a fork costs more than an
+interpreter start.
+
+The claim that a scripting language is the slow choice was true of the *language*
+and silent about the *process count*, which is §62's shape in a smaller key.
+
+### 63.6 The checker's two false positives, both found by running it here
+
+Written, then run against the file of the session that wrote it. Both times it
+was wrong before it was right:
+
+- It flagged `→ answered: **(a)**` on every settled entry, reading an answer that
+  names its letter as an offer of unmarked options. Answered entries are now
+  exempt from the option rules.
+- Then it passed an entry that marked `(a)` and left `(b)`, `(c)` and `(d)` in
+  the prose beneath it — the rule fired only when *no* option was marked. Any
+  lettered mention left over after the marked ones are subtracted is now the
+  violation.
+
+`option(s)` and `transformed(m)` are both in the corpus and neither is an option,
+so a mention needs a non-word character before the parenthesis, and the letters
+stop at `(h)` — the largest set anyone has written is four, and `(i)` is as
+likely to be a roman numeral as a ninth choice.
+
+### 63.7 What is not built
+
+Deliberately, and each with the consumer that would justify it (§13):
+
+- **A plugin repo.** The reader is already cross-repo — it globs every session
+  under the questions root, and the slug column exists to say which repo each
+  came from — while its home is one repo's justfile. `rscene` has written seven
+  question files and contains the string `question` in no recipe. The extraction
+  is stage 2, and its consumer is the next time `rscene` needs to read its own
+  questions.
+- **A TUI, and a sidecar of prepared answers.** Stage 3. The design decision it
+  waits on is already settled: answers go in a sidecar `answers.md` and the TUI
+  never writes `open-questions.md`, because the session appends to that file
+  while the answers are being typed and one of the two writers would lose
+  silently.
+- **A write-time hook.** `check-patching-hook.sh` shows the shape and it would
+  catch a violation in the turn that wrote it rather than the turn that reads it
+  back. It is not built because a rejecting hook costs a retry every time it
+  fires, false positives included, and §63.6 is the only evidence about that rate
+  — two, both in the first hour.
+- **A recipe that writes a question.** Unchanged from §59.3.
+
+### 63.8 What is still uncaught
+
+The repo column of `just question` prints the last dash-separated word of the
+session slug, so a worktree named `dispatch-2` shows as `2`. It is wrong in the
+awk this replaced and wrong in the same way now; it was left alone because
+changing it changes output that the selftest pins, and no session has ever failed
+to find its own file because of it.
+
+Nothing checks that CLAUDE.md's description of the grammar matches the parser.
+`check-default-runs-every-check` exists because a claim in CLAUDE.md wants a test
+(§15.6), and this is the same kind of claim with no such test. It has not drifted
+yet, which is the only reason.
+
+---
+
+## 64. Three plugins, and the copy that went stale, recorded 2026-09-08
+
+§63 built one parser and named three stages. This is stage 2: the parser, the two
+hooks and the nine shared skills leave `.claude/` and become plugins that `rcad`
+and `rscene` both install from one marketplace.
+
+§63.7 deferred it under §13 — a part with no named consumer is not built — and
+named the consumer as "the next time `rscene` needs to read its own questions".
+The consumer turned up as a defect rather than a wish. `rscene`'s copy of the
+parser still dropped the second label of a paired entry, months after §59.2 fixed
+that here. Nobody was going to notice, because the thing that would have noticed
+was the copy.
+
+`.claude/` lost **1 659 lines and kept 41** (`927eb58`, 18 files). What is left is
+seven files, and §64.4 is the argument for each one.
+
+### 64.1 What was actually duplicated
+
+Eight files were shared between the two repos and every one of them differed. Six
+were pure drift with `rcad` newer, and those moved whole. Two were mixed, each for
+a different reason, and the two are what the design had to answer:
+
+- `hooks/patching-cases.json` — the cases `rcad` added for variable expansion are
+  drift, but every example path names its own repo's crates: `rcad-geom` and
+  `rcad-topo` against `rscene-core` and `rscene-wgpu`.
+- `skills/delegating/SKILL.md` — 137 lines apart, the widest of the eight, and
+  nearly all of that is drift. Except one paragraph: `rscene` wires its compile
+  cache through the justfile rather than mise's `[env]`, and said so by
+  contrasting itself with `rcad`.
+
+So a file can be almost entirely shared and still carry a fact that belongs to one
+repo. "Move it to a plugin" does not answer that on its own, and a design that
+ignores it produces a shared file that lies to one of its two readers.
+
+### 64.2 The plugin ships machinery, the repo ships facts
+
+The split is on the line that already existed. Shared machinery goes in the
+plugin. A repo fact goes in that repo's `CLAUDE.md`, which is where repo facts
+already live, or — where a *tool* has to read it rather than a person — in one
+overlay file the tool loads beside its own data.
+
+That is `.claude/patching-cases.local.json`: **3 cases** naming `rcad` crates,
+`docs/decisions.md` and a `just` recipe of ours, appended to the plugin's **24**
+repo-neutral ones. `just check-hooks` passes the overlay path to the plugin's
+selftest, which runs **27 patching cases and 8 context-budget cases**.
+
+**A named overlay that cannot be read is an error, not a skip.** The selftest
+takes the path as an argument and fails when it is named and unreadable. The
+alternative — carry on with the core cases — passes while testing something other
+than what the repo asked for, which is the shape of failure this whole section
+exists to remove.
+
+Two designs were rejected. **Parameterising** the shared files, with crate names
+injected from repo-local config, invents a configuration language for two files.
+**Leaving those two per-repo** and moving the other six leaves `delegating`
+forked at its 137-line spread, which is the drift that motivated the work.
+
+### 64.3 Three plugins, not one
+
+`questions` (6 files, 902 lines), `guardrails` (9 files, 599 lines) and
+`practices` (10 files, 978 lines), all in one marketplace.
+
+Three manifests is the whole cost, and it buys what a marketplace is for: a repo
+enables what it wants. One plugin would also have meant renaming `questions` —
+already built, committed and passing its selftest — into something that also held
+the patching hook and the delegating skill, before it had been installed once.
+
+The split is by what the thing is, not by who wrote it:
+
+- **`questions`** — the parser, the status line, the `asking-questions` skill.
+- **`guardrails`** — the two hooks: no in-place shell patching of tracked files,
+  and the context budget that asks for a handoff.
+- **`practices`** — the nine shared skills, `code-quality` and `delegating` among
+  them.
+
+### 64.4 What a repo cannot give away
+
+Four hooks stay because they are this repo's rules and nobody else's: the hub
+rule (§60) and the worktree-create hook, with a check beside each.
+
+`settings.json` stays because it is the file that names all the others, and a
+plugin does not ship one. It is the seventh file and the only one that is not a
+choice.
+
+The overlay stays for the reason in §64.2.
+
+**The status line stays as a wrapper**, 31 lines that find the plugin and `exec`
+into it. A plugin ships commands, agents, skills, hooks and MCP servers;
+`statusLine` is a settings key, and a plugin ships no settings. So `settings.json`
+names a path, and something has to be at that path. The wrapper prints the install
+command instead of the status line when the plugin is missing, because a status
+line that silently prints nothing is how a missing plugin would otherwise look.
+
+That last claim rests on the manifest schema, not on an experiment: nobody wrote a
+plugin that declares a status line and watched it fail to load. §16.10 wants the
+demonstration, and this is the one claim in this section without one.
+
+### 64.5 A directory is not an install
+
+`just check-plugins` runs first in `just default` and it started by testing
+`[ -d "$p" ]` for each plugin. That is not an install test, and `rscene` proved
+it: three plugin directories present, `check-plugins` green, **nothing loaded** —
+no hooks, no skills, and no message saying so.
+
+The directory test stays, because it is the bootstrap and it is what has to run
+when the plugin is missing. What it now calls afterwards is
+`guardrails/bin/check-declared.sh`, which asks the second question — has Claude
+Code been *told* about these? — and takes either answer:
+
+- `enabledPlugins` in any of the three settings files, the declarative form, which
+  is what a non-interactive session can write;
+- an entry in `installed_plugins.json`, which is what the interactive
+  `/plugin install` panel writes.
+
+Either alone counts. An empty `installed_plugins.json` is **not** evidence of "not
+installed", and reading it that way is a mistake that was made during this work.
+
+The check is explicit about its limit: **it cannot prove the running session
+loaded anything**, because settings are read at session start, so a declaration
+written mid-session is true in the file and not yet true in the session reading
+it. It rules out the silent case — never declared at all — and says so rather than
+claiming more.
+
+The declaration went in `~/.claude/settings.json`, at user scope, so it covers
+both repos with no edit in either tree.
+
+**The ordering inside `just default` was load-bearing and unheld.** With
+`CLAUDE_PLUGINS_ROOT` pointed at an empty directory, `check-plugins` exits 1 and
+names the install command, while `check-hooks` and `check-questions-selftest` exit
+**127** each — a bare "command not found", which is the failure a CI log explains
+worst. `check-default-runs-every-check` counts the **18** `check-*` recipes and
+was blind to their order by construction: both sides of every comparison in it are
+`sort -u`. It now asserts that `default`'s first dependency is `check-plugins`.
+Those numbers were measured by the session that wrote that fix, not here.
+
+### 64.6 Deleting a file races with improving it
+
+Taking a file out of a repo is a delete, and a delete merges cleanly against
+somebody else's improvement by throwing it away.
+
+It happened once here. `skills/testing/SKILL.md` was deleted for the move while a
+lane added a five-line paragraph to it on `main`; the merge offered modify/delete,
+and taking the delete would have dropped the paragraph with nothing to show that
+it had. The fix was to port the paragraph into the plugin **first**, check it byte
+for byte against `main`'s version, and only then take the delete.
+
+The rule that follows: when a file leaves this repo, diff the copy that is landing
+against the tip of `main`, not against the revision the extraction started from.
+Nine files moved; one of them had changed underneath in the days it took.
+
+### 64.7 The shared skill was wrong in both repos at once
+
+`delegating` told every lane that `isolation: "worktree"` branches from the
+primary worktree's HEAD. It branches from **`origin/<default-branch>`** — the
+`worktree.baseRef` default, `fresh`, which the settings schema describes as
+"branches from `origin/<default-branch>` for a clean tree".
+
+**So a repo that does not push is a repo whose lanes work in the past, by exactly
+the amount it has not pushed.** `rcad`'s local `main` was 40 commits ahead of
+`origin/main` when this was found, so a lane dispatched that day started before
+this section's own work — nine deleted skill directories still present, no
+`check-plugins` to say otherwise — and nothing in the lane's own output would have
+said so.
+
+`rscene` found it, and the evidence is what makes it a measurement rather than a
+story: two lanes were handed trees at `52b212b`, which is `rscene`'s `origin/main`
+exactly.
+
+Both halves were done. `main` was pushed (`3511c7e..41b7160`, gap now zero), and
+`worktree.baseRef` is `"head"` in `.claude/settings.json` (`e09a134`).
+
+Neither half replaces the `delegating` rule of naming the base sha in the brief
+and having the lane report back both the sha it landed on and the sha it checked
+out — a rule this file does not otherwise record, which is why it is written out
+here rather than pointed at.
+Pushing does not hold, because `main` runs ahead again the moment anyone lands
+anything — in this repo, four sessions in a day. And `"head"` only swaps "the last
+pushed commit" for "whatever HEAD is", which is somebody's work in flight as often
+as not: while one session listed five branch tips for a merge, **three of them
+moved between one command and the next**.
+
+This is the case for the extraction, stated twice over. The claim was wrong in
+`rcad` and wrong in `rscene`, because it was the same paragraph copied; it was
+fixed once. It is also the case against: a shared skill is a single point of being
+wrong everywhere, and nothing here would have caught it. A lane in `rscene`
+noticing its base sha did.
+
+### 64.8 Why this section is §64
+
+§71.1 records that §64 and §65 are the gap a renumbering left behind — three lane
+briefs held those numbers while `main` landed its own §63 underneath them — and
+§57.8 already rules that a gap is not a defect. So this is not a reserved slot
+being claimed; it is a hole being filled, and `check-decisions` accepts it because
+the numbers still ascend in file order.
+
+It is placed here rather than at the end because it is stage 2 of §63 and reads
+directly after it. **The cost is that this is the first section whose date runs
+behind its neighbours'** — recorded 2026-09-08, sitting above six sections
+recorded 2026-09-07. Section numbers in this file are not a timeline and this
+entry is the proof. Read the dates in the headings.
+
+### 64.9 What is not built, and what is still uncaught
+
+Stage 3 is unchanged from §63.7 and unbuilt: a TUI, with answers in a sidecar
+`answers.md` that the TUI writes and `open-questions.md` that it never does. So
+are the write-time hook and the recipe that writes a question.
+
+New with this section:
+
+- **The GitHub repo is not the install path.** The marketplace is registered as a
+  *directory* source pointing at the local checkout, so a plugin runs in place and
+  `CLAUDE_PLUGINS_ROOT` resolves straight to it. Repointing at the `github` source
+  would move the plugins to a version-stamped cache path and break that variable
+  on the next version bump. The repo is a backup and a CI host. Its own CI went
+  green in 13 seconds on the first run, which is worth recording only because
+  `rcad`'s had never gone green at all until the day before.
+- **Nothing checks `CLAUDE.md`'s "Three plugins" prose against the marketplace
+  manifest.** This is the same untested claim §63 closed with, one file further
+  out: a plugin renamed or added leaves the prose wrong and nothing fails.
+- **Nothing checks that the two repos' overlays stay disjoint from the core
+  cases.** A case duplicated into an overlay is tested twice and removed once.
+- **`check-declared.sh` cannot see what the running session loaded**, per §64.5,
+  and there is no evidence about how often that gap matters, because the only way
+  it has been observed is the `rscene` case where nothing was declared at all.
+
+---
+
+## 66. What a release build hands back when the kernel is wrong, recorded 2026-09-07
+
+§4.1 gives a broken internal invariant one response, a panic, and the reason is
+that emitting a corrupt solid is worse than dying. §4.3 then wrote "in debug"
+beside the checks that would notice, and gave a reason about **test-suite
+runtime**: a full sweep after every operation makes an *n*-operation test O(n²).
+
+Those two sentences are about different things and the second quietly became the
+policy for the first. In a release build `Model::check_touched_solid` and its
+three siblings open with `if !cfg!(debug_assertions) { return; }`
+(`crates/rcad-topo/src/model.rs:547, 564, 575, 632`) and
+`Assembly::commit`'s post-write sweep is gated the same way
+(`crates/rcad-topo/src/fuse/assemble.rs:300`). So the release answer to a broken
+invariant is neither of §4.1's two: no panic, no `Err`, and a solid that does not
+validate comes back as `Ok`. §61 is that bug found by a fuzzer and fixed at the
+door; this section is about the door being the only thing that was between it and
+a caller.
+
+The proposal this section settles is Mattias's: keep the panic in debug, and in
+release record enough for a post-mortem and return an error that says *internal
+error*. What follows measures the reason §4.3 gave, so that the policy is decided
+by a number rather than by an argument about a different check.
+
+### 66.1 What a release build does today, replayed
+
+Three runs of one harness against `a6f03b8`, built with plain `cargo build
+--release` — the release profile has `debug-assertions` off, and
+`.cargo/config.toml` supplies the `-C target-cpu=x86-64-v3` that `inari` needs,
+so no `RUSTFLAGS` is involved and nothing clobbers it. The harness is the fuzz
+target's own decode and split (`fuzz/fuzz_targets/two_solids_fused_by_a_stranger.rs`),
+with the one difference that it **keeps** the fuse's answer instead of doing
+`let _ =` on it, and asks `Model::validate` about every model the fuse called
+`Ok`.
+
+- **341 crash artifacts** from the two soak trees: 12 halves reached the fuse, 7
+  answered `Ok`, and **0** of those fail `Model::validate`. §61 and the four
+  lanes merged into `a6f03b8` closed what was there.
+- **The 9 975-input corpus** (4 835 + 5 140 across the same two trees): 2 923
+  halves reached the fuse, 1 060 answered `Ok`, and **0** of those fail
+  `Model::validate` *under the policy the fuse itself ran under*.
+- The same 1 060, validated a second time under `Policy::certified()`: **16**
+  fail, all sixteen fused under `Policy::tolerant`, **fifteen under
+  `Rule::Difference` and one under `Rule::Union`**, ten with a span of `inf`.
+  The complaint is always `Invalid::DynamicRangeTooWide`.
+
+  The rule count was first written here as thirteen, which was wrong. The rule
+  is the input's first byte mod 3 (`fuzz_targets/two_solids_fused_by_a_stranger.rs:97`),
+  and fifteen of the sixteen carry `0xb9` against `2fb467fc`'s `0x84` — counted
+  off the bytes, twice, by two people who did not share a harness.
+
+**Those 16 are not a release-build hole, and saying so is the point of measuring
+them.** They were carried as an unexplained residue — sixteen wrong answers on
+both trees, unchanged by the fixes. What the second validation shows is that they
+are the *same* answer read under a stricter policy than the one that produced it:
+`Assembly::commit` sweeps under the operation's own `policy` (`assemble.rs:300`
+and `:309`), so a debug build accepts these too, and a debug build and a release
+build agree about all sixteen. Nothing here is decided by how the caller was
+compiled.
+
+What they do show is a separate thing worth its own row: **"valid" is not a
+property of a model on its own.** A `Policy::tolerant` fuse can build a solid
+whose coordinates span `inf` and both the fuse and `Model::validate` will call it
+sound, and the same model handed to a certified caller is broken. That is left
+open in §66.7.
+
+### 66.2 What the touched checks cost in release — the measurement
+
+Three release binaries from the same tree, differing only in a forced-on gate,
+run interleaved so that machine noise falls on all three alike, best of five:
+
+| Workload | Today | Touched checks on | Both on |
+|---|---|---|---|
+| 144 unions of cubes, growing to a 98-face solid | 7.349 s | 7.817 s | 7.712 s |
+| 200 000 `place_solid` on a 202-face solid | 3.03 ms | 2.001 s | 2.019 s |
+| 2 000 `add_extrusion` of a 62-face solid | 112.8 ms | 113.6 ms | 115.0 ms |
+
+The extrusion row is the only one where five runs are not enough — the gap is
+smaller than the spread — so it was run again on its own, fifteen interleaved
+pairs, giving 103.7 ms against 111.9 ms. That is the figure quoted below.
+
+"Touched checks on" replaces the four `!cfg!(debug_assertions)` guards with
+`false`. "Both on" also removes the `cfg!(debug_assertions) &&` from
+`assemble.rs:300`, so the fuse sweeps the whole model twice per call in release
+as well.
+
+Two figures come out of that, and they are what the whole argument turns on.
+
+**The touched checks cost 50–65 ns per face of the solid they are handed.**
+`place_solid` does nothing else at all — it rewrites one isometry per shell — so
+it isolates them: 15.2 ns per call becomes 10.0 µs on a 202-face solid, which is
+49 ns a face. `add_extrusion`, timed on its own over fifteen interleaved pairs,
+goes from 51.9 µs to 56.0 µs per 62-face solid, which is 66 ns a face.
+
+**The full sweep costs 3.4–4.4 µs per face of the whole model.** Measured with
+no source edit at all, since `Model::validate` is public: 209 µs at 62 faces,
+2.14 ms at 620, 22.9 ms at 6 200, 108 ms at 24 800. Linear, as it should be.
+
+So the checks §4.3 sent to debug are **seventy times cheaper per face** than the
+sweep §4.3's O(n²) is about, and they are taken over *one solid* rather than over
+the whole model, which is the half that makes them not quadratic at all. On a
+model of 400 solids a sweep per operation is 108 ms and a touched check is 4 µs:
+a factor of 25 000, and only one of the two grows with the model.
+
+What that buys, per operation:
+
+- **A fuse: 0.01%.** 51 ms per union in the chain above, against about 5 µs of
+  checking. The measured +6.4% is smaller than the baseline's own spread across
+  five runs (7.35 s to 9.17 s), so the honest statement is that it is below this
+  machine's noise floor, and the per-face figure says why.
+- **Building a solid from scratch: +7.9%.** The one real cost. `add_extrusion`
+  spends 52 µs on a 62-face solid and 4.1 µs of checking is a visible fraction of
+  it. This is the number that would show up in an importer.
+- **`Model::place_solid`: ×660.** 15.2 ns becomes 10.0 µs. In ratio this is
+  enormous and in absolute terms it is ten microseconds on a 202-face solid, so
+  an application moving a solid sixty times a second spends 0.06% of a frame on
+  it. It is still the one call where the checks are the entire cost, and a
+  transform-heavy loop over a large assembly is where somebody would notice.
+
+**§4.3's stated reason does not survive this.** "The test suite becomes
+quadratic" is true of `Model::validate` and false of the touched checks; it was
+never measured for them, and measured it is between nothing and eight percent.
+A decision about test-suite runtime is not a decision about what a released
+kernel hands a caller, and this is the number that says so.
+
+### 66.3 So the checks run always, and then the question is what they do
+
+The gates go. `check_touched_solid`, `check_touched_face`, `check_touched_wire`
+and `check_touched_edge` run in every build, at 50–65 ns a face, and
+`assemble.rs:300`'s post-write sweep runs in every build too — it is one
+`Model::validate` of a model the fuse has already spent tens of milliseconds on,
+and both binaries above say it is free at that scale.
+
+That is the half of the proposal the number decides on its own, and it is worth
+separating from the half it does not: **running the check is not the same
+decision as what the check does when it fails.** Today a release build cannot
+panic because it never looks. Once it looks, §4.1's panic is back by default, and
+Mattias's proposal is that release should instead record and return. §66.4 is
+where that stops being uniform.
+
+### 66.4 Which operations can return `Err`, and which cannot
+
+The line is not "does this operation document `# Atomic`". It is **can the check
+be made before anything the caller can see has changed** — structural
+confinement, not a paragraph about blast radius. Every entry point that mutates a
+`Model`, with where its commit is:
+
+| Entry point | Where it writes | Verdict |
+|---|---|---|
+| `SolidBuilder::build` (`builder.rs:320`) | scratch `Model`, swept, then the caller's | **Convert.** Structural |
+| `Model::fuse` (`fuse/mod.rs:149`) | the caller's model, `assemble.rs:303` | Panic, until it gets a scratch |
+| `Model::add_cube` (`build.rs:495`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::add_extrusion` (`build.rs:533`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::add_round_bar` (`build.rs:623`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::add_ball` (`build.rs:719`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::add_bar_cut_off_by` (`build.rs:805`) | the caller's model, additive | Panic, until it gets a scratch |
+| `Model::place_solid` (`model.rs:280`) | existing entities, in place | **Panic.** Nothing to undo it with |
+| `Model::set_vertex_approximation` (`model.rs:308`) | one field, in place | **Panic** |
+| `Model::set_edge_approximation` (`model.rs:337`) | one field, in place | **Panic** |
+| `Model::set_face_approximation` (`model.rs:381`) | one field, in place | **Panic** |
+
+`SolidBuilder::build` is the only one that is already right, and it is worth
+reading because it is the shape every other row wants: it writes the draft into a
+`Model::new(model.scale())`, runs the full sweep on *that*, returns the sweep's
+`Err` if it fails, and only then writes into the caller's model
+(`builder.rs:330-340`). Its `check_touched_solid` on the real model afterwards is
+a second write of a description that just passed a full sweep, so it should never
+fire — and if it did, the caller's model would already have it.
+
+**The fuse is not confined the way it looks, and this is the correction that cost
+the most to find.** `Model::fuse` documents `# Atomic` — "the whole answer is
+worked out in scratch and written in one go. Any `Err` leaves the model
+byte-identical" — and it is true of every error the operation raises, because
+`Scratch`, `Assembly` and `Chosen` are plain data and every refusal happens
+before `commit`. The scratch `Model` at `assemble.rs:1112` is **not** the answer
+being built: it is a throwaway used to ask which shell nests inside which, by
+measuring volumes. `Assembly::commit` takes `model: &mut Model` and
+`write_into(model, …)` at `assemble.rs:303` writes straight into the caller's
+arena. The sweep at `:309` that would catch a corrupt answer runs **after** that
+write.
+
+So converting the fuse's panic to an `Err` today would hand the caller an error
+*and* leave the corrupt solid in their model. The write is purely additive —
+`write_into` only calls `add_vertex`, `add_edge_running`, `add_coedge`,
+`add_wire_of_steps`, `add_face`, `add_shell`, `add_solid`, and the doc comment's
+"nothing is removed from the arena" holds — so the *inputs* survive. That is not
+enough: the orphan entities stay in the arena, and every later `Model::validate`
+fails on them. An `Err` that permanently poisons the model is worse than the
+panic, not better.
+
+**Nothing in this crate can undo a write.** `grep -n '\.remove(' crates/rcad-topo/src/`
+returns thirteen hits and every one is either a test helper reaching through
+`data_mut()` or `serialize.rs` tidying a model it is still building. There is no
+rollback and no arena free-list walk, so "additive" does not mean "undoable".
+
+The fix is the shape `SolidBuilder::build` already has, and the same measurement
+pays for it: `Assembly::commit` writes into a scratch `Model`, sweeps it, and
+copies into the caller's only if the sweep passed. The cost is one extra copy of
+the answer's entities plus one sweep of a model the size of the answer, against a
+fuse that costs 51 ms. The `add_*` builders in `build.rs` are the same change,
+and they are the ones where 66.2's +7.9% would matter — an importer that pays a
+scratch-and-copy per solid pays more than 4 µs. That is a real trade and it is
+why those rows say "until", not "never".
+
+`place_solid` is the one row where the answer is a settled panic. It overwrites
+`used.loc` on every shell of an existing solid before checking anything
+(`model.rs:289-293`), and the previous isometries are gone. The inverse isometry
+would restore them — `movement` is invertible or `Isometry::translation` would
+not have built it — so this is a *gap* and not a *limit* in §16.10's sense, and
+§66.7 keeps it open rather than closing it with a paragraph. Until somebody
+writes that, there is nothing to return an `Err` *to*: the model is already
+wrong.
+
+### 66.5 Two doors, and why they must not be one
+
+`Error::Undecidable { records }` means the arithmetic honestly could not settle
+something, and a caller is *supposed* to answer it by retrying under a more
+tolerant policy — that is what `Policy` is for and what §4.2 says the variant is.
+"This kernel has a bug" arriving through that same door puts the retry loop on
+top of a computation that is already wrong, and a tolerant retry is exactly the
+thing most likely to accept the wrong answer. So the two must be
+distinguishable without reading a string.
+
+**A new variant on `Error`, not a new error type.** `Error::TheKernelIsWrong`,
+carrying an owned report. Considered and rejected: a separate `KernelBug` type
+returned as `Result<T, Either<Error, KernelBug>>` from every entry point. It is
+the more honest shape in the type system and it is worse here, because every
+public entry point already returns `Result<_, Error>`, a second type forces a sum
+at every call site in `rcad` and in every consumer, and the `From` impl that
+would make that bearable is precisely the place the two get merged back into one
+again. `Error` is `#[non_exhaustive]` (§40), so adding the variant is not a
+breaking change, and the wildcard-arm rule means every existing match keeps
+compiling while `just check-wildcards` still names what is unhandled.
+
+**The name must not be able to be read as a refusal.** `Error::Internal` is what
+this would usually be called and it is the wrong name here, because a caller
+skimming variants sorts them into "the input was bad", "it could not decide" and
+"something else", and "something else" is where a retry loop puts its default
+arm. The variant says what happened to *the kernel*, not to the request.
+
+**What a caller does with it: report it, and do not retry.** In that order and
+nothing else. Retrying under a tolerant policy re-runs an operation whose
+intermediate state is already known to be wrong. Retrying under the *same* policy
+is deterministic and will fail the same way. Falling back to another operation
+uses a model that may already hold what the check tripped on. The doc comment on
+the variant says this, and so does its `Display`, because the string is what ends
+up in somebody's bug report.
+
+### 66.6 Where the post-mortem record goes, and what it costs when nothing is wrong
+
+`ProvenanceLog` is the obvious sink and it is the wrong one, for the same reason
+§66.5 gives about the door. It is a `Vec<Record>` of decisions the arithmetic
+could not certify (§5), it is what `Error::Undecidable` carries, and
+`log.worst_wobble` is read to *decide* whether an operation refuses
+(`fuse/mod.rs:183`). A kernel bug written into it is a record that reads as one
+more undecided decision, and any consumer summing wobble over the log would be
+summing a bug into a tolerance. It also breaks the rule the log exists to keep:
+provenance is recorded per decision, and a broken invariant is not a decision.
+
+So the variant carries its own owned report, built only on the failing branch:
+
+- **Which check tripped**, as a name, not a formatted sentence.
+- **Which entities**, as the keys the check was handed — a `SolidKey` and the
+  `EdgeKey` under it, say. Keys, because they are what a caller can hand back and
+  what a later `Model::validate` will name too.
+- **The operation's `ProvenanceLog` as it stood**, moved in rather than pointed
+  at. §5's reason for splitting the log off the model is that a pointer into a
+  log dangles the moment the model changes, and a report that outlives the
+  operation is exactly that case. It is a move of a `Vec` that the operation was
+  about to drop.
+
+**The cost when nothing goes wrong is zero, and it is zero for the same reason
+`ProvenanceLog` is.** The report is a struct built inside the `else` of a check
+that passed; a certified operation constructs nothing, allocates nothing and logs
+nothing. What is *not* free is the check itself, and §66.2 is the answer to that:
+50–65 ns a face, always, in every build.
+
+### 66.7 What this leaves open
+
+**`Assembly::commit` needs a scratch model before the fuse's panic can become an
+`Err`.** §66.4 says why and says what shape it takes. Nobody has measured the
+copy — the sweep half is measured above and is free at a fuse's scale, and the
+copy is an unknown that is probably also free at that scale and certainly is not
+at `add_extrusion`'s.
+
+**Whether `place_solid` should roll back with the inverse isometry.** It can:
+`movement` is invertible. Whether an operation that discovers a broken solid
+should put the *previous* broken-in-a-different-way state back is not obvious,
+and §4.1's answer for an in-place mutation is still a panic until somebody argues
+the other side.
+
+**Whether "valid" should depend on a policy at all.** §66.1's sixteen are one
+model that `Model::validate` calls sound under `Policy::tolerant` and broken
+under `Policy::certified()`, with a coordinate span of `inf` in ten of them. That
+is not a release-build question and it is not answered here, but a solid that is
+valid only for the caller who made it is a thing a file format has to have an
+opinion about, and `Invalid::DynamicRangeTooWide` is where that opinion would go.
+
+**The +7.9% on `add_extrusion` has no consumer to weigh it against.** It is
+measured on a synthetic loop of 2 000 extrusions. Whether it matters is a
+question for the importer, and §13's rule says the answer waits for the importer
+to exist rather than being guessed here.
+
+---
+
+## 67. A piece bounded by two straight sides, recorded 2026-09-07
+
+`two_solids_fused_by_a_stranger` — the fuzz target that reaches `Model::fuse`
+with a stranger's bytes — crashed `arrange.rs`:
+
+```
+a piece bounded by straight sides has at least three of them, this one has 2
+```
+
+The assert's own doc comment said why it could not be reached: *"Two straight
+lines enclose no area, so a piece like that is a zero-area face, which §17.4
+prevents rather than filters: reaching here means the splitter is wrong."* It was
+wrong the way §16.10 says such sentences go wrong — true about the splitter and
+silent about the input.
+
+### 67.1 What the bytes are
+
+Two blocks ten across, a long way apart, and the second one has two of its walls
+written down carrying planes that are not theirs. Its `x = 5` wall carries the
+plane of its `y = 5.1865234375` wall, leaned by `1.8e-304`; its `x = 15` wall
+carries the plane `x = -5`. The corners the model stores are a perfectly ordinary
+box.
+
+Two things had to fail to see it, and both are load-bearing:
+
+**`Model::validate` measures the corners and allows the model's own declared
+size.** `Model::allowed_wobble` is `Scale::default_linear_tolerance` plus what
+writing a plane down costs, and the first of those is the model's `nominal_size`
+times `Scale::RELATIVE_LINEAR_TOLERANCE`. These bytes declare a part
+`1.8446744073709552e21` mm across — two hundred light-years — which buys
+`1.8e12` mm of room off a plane. The two walls are twenty and ten out and walk
+straight through.
+
+**The fuse does not measure the corners at all.** `bake::derive_a_corner` builds
+each corner afresh as the meet of three of the surfaces around it and then checks
+that every surface around it passes through *that* point. A solid whose planes
+agree with each other and whose stored corners are somewhere else is
+self-consistent under that check, so it bakes — into a different solid. Here the
+baked bottom face is a quadrilateral with a corner at `x = -5.5e304`, and two of
+its four sides run along two lines that meet at one of its corners and are
+`9e-304` apart at the next one along, which no `f64` beside a coordinate of five
+can show. The walk comes back with a cycle of two straight sides.
+
+`Arrangement::crossing_like` is why the two lines stay two. It folds two
+different partners that cut a face in the *same* line into one crossing, by an
+exact determinant on stored coefficients (`relation_of_two_lines`). Two planes a
+hair apart are not the same line, so nothing folds them, and the two-sided cycle
+is what is left.
+
+### 67.2 The judgement: a refusal, not an assert
+
+CLAUDE.md's rule is panic on a broken internal invariant, `Err` on bad caller
+input. A cycle of two straight sides is the second, and §38.2 already made this
+exact call one bug earlier — *two arcs lying on top of each other hit an assert;
+coincident input is data, not a broken invariant*.
+
+`wire_from` now returns `Invalid::WireTooShort { count }`. That is not a new name
+for the rule: it is the one `Model::validate` and `SolidBuilder::add_wire`
+already state — *three steps, or one edge that closes already, or two different
+edges that are not both straight*. The condition the assert tested is that rule
+exactly, so the refusal reuses it rather than inventing a synonym.
+
+It is a **limit** and not a gap (§16.10). The piece is a sliver whose two corners
+are `9e-304` apart beside coordinates of five: no scaling reaches it, because the
+ratio is `1e-304` and an `f64` carries sixteen digits at a point. The answer does
+not exist in the arithmetic the kernel is built on, so it is refused rather than
+approximated.
+
+### 67.3 Only the tolerant draw ever saw it
+
+`crates/rcad-topo/tests/a_piece_of_a_face_bounded_by_two_straight_sides.rs`
+carries both halves. Under `Policy::certified()` the same fuse never reaches the
+walk — it gives up on `where two planes cross` for two of the leaning planes and
+returns `Error::Undecidable`. It takes a policy with slop to approximate that
+crossing and carry on into an arrangement built on it, and the corpus entry drew
+`Policy::tolerant(1.8e21)`.
+
+That is worth writing down because it is the shape of what the target is for. The
+target's own header argues that a model that *passes* `validate` might still
+crash `fuse`; the answer is yes, and the route was neither of the two the header
+guessed at. It was the model's declared `Scale` — a number nothing measures
+against anything — widening two separate checks at once.
+
+### 67.4 What is still owed, and not done here
+
+Two things, both outside this lane's files, both reported rather than made:
+
+**`Model::fuse`'s `# Errors` list does not mention this refusal.** It already
+names `Error::Invalid` for three other reasons, so the variant class is
+documented and the sentence is missing rather than wrong. `fuse/mod.rs`.
+
+**Nothing compares a baked corner with the corner the model stored.** That is the
+hole the bytes went through, and it is a real one: `bake` reconstructs geometry
+the caller supplied and never checks the reconstruction against what was
+supplied. Whether that check belongs in `bake` or in `validate` — and whether
+`allowed_wobble` should scale with a number the model declares about itself at
+all — is a decision, not a patch, and it wants its own lane.
+
+### 67.5 What the test carries, and why it carries bytes
+
+The test replays the corpus entry's bytes rather than describing the solid
+through `SolidBuilder`. That is a deliberate second choice. Four hand-built
+versions were tried — a block with a leaned wall, a block with a wall wearing its
+neighbour's plane, two blocks a subnormal apart, and a sweep over both the lean
+and the slop — and every one of them was refused somewhere *else* first:
+`AFaceMeetsItsNeighbourOnItsOwnSurface`, `ResultIsNotManifold { count: 1 }`,
+`CannotTellTheCellsOfAFaceApart`, and a winding the sweep could not decide. Each
+refusal is correct; none of them is this bug. A hand-built pair that differs from
+the failing one in a way nobody noticed is the `fuse-debugging` skill's own named
+trap, and the bytes are the one description that cannot drift.
+
+### 67.6 §70 took the driver away, and three corrections to what is above
+
+§67.4 filed *"nothing compares a baked corner with the corner the model stored"*
+and *"whether `allowed_wobble` should scale with a number the model declares
+about itself at all"* as owed work. §70 took the second half: the allowance is
+now the smaller of what the model declares and what its own corners show. The
+consequence for this section is that **its own test lost its driver.** The corpus
+entry no longer gets past the sweep, so nothing here reaches the walk any more.
+
+The refusal in `wire_from` is unchanged and still right. What changed is that
+today it is guarded by a refusal upstream rather than by a test that drives it,
+and the test file now says that in as many words instead of quietly passing.
+
+**Correction one: three walls are out, not two.** §67.1 counts twenty and ten.
+Measured on `2d84b9b`, the worst corner of each wall that is off its own plane
+is `20`, `10` and `0.3593845367340691` — three walls. The third was missed
+because it is small enough to read as noise beside the other two and is not.
+
+**Correction two: the number in the refusal is a witness, not a maximum.** The
+sweep returns `VertexOffItsFacePlane { distance: 9.536734069115482e-6 }` on these
+bytes, which is *none of those three walls*. `check_flat_face` returns on the
+first corner it finds outside the allowance, walking faces in stored order, so
+the distance it carries is whichever corner it happened to reach first. Reading
+it as "how bad is the worst" is wrong, and `the_sweep_names_a_witness_and_not_the_worst_wall`
+now pins both halves. The allowance these are measured against is
+`1e-9 × 10.359375 = 1.0359375e-8`, the largest coordinate the model actually has.
+
+**Correction three: §67.5's census is softer than it reads.**
+`Plane::from_coefficients` takes `a * x + b * y + c * z + d = 0`, so its fourth
+number is *minus* the offset — and every hand-built reconstruction in §67.5 fed
+it the offset. Those solids were the wrong shape, and the old `allowed_wobble`
+was wide enough to let them through the builder without saying so. So of the four
+refusals §67.5 lists, an unknown share were refusing a mistake rather than
+refusing this bug. The conclusion §67.5 drew from them — carry the bytes — was
+right for a different reason than the one given: the bytes cannot drift, and a
+reconstruction that is silently ten units wrong is exactly the drift.
+
+### 67.7 What can still reach the walk, and what is only a census
+
+With the sign fixed, a solid whose wall carries a hair of lean **builds and
+passes the tightened sweep**: normal `(-1e-100, 1, 0)` on a wall at `y = 5` puts
+that wall's own corners `1e-99` off it, which is nothing beside a coordinate of
+ten. So the ingredient the two-sided walk needs is still legal, and
+`two_walls_a_hair_apart_are_caught_before_the_walk_gets_a_two_sided_piece` builds
+it: two knives whose far walls sit at `y = 5`, one plain and one leaned, cutting
+one face in two lines that meet at `x = 0` and are `1e-99` apart at `x = 10`.
+
+It does not reach the walk. Under `Policy::tolerant` it is
+`TwoCurvesTouchWithoutCrossing`; under `Policy::certified` it is
+`Error::Undecidable` on the two planes. Both are correct, and both are upstream.
+
+**This is a census, not a demonstration, and the difference matters here more
+than usual.** Nine shapes have now been tried across §67 and this section — four
+in §67.5, five here — against six distinct refusals. That is evidence the walk is
+hard to reach. It is not the demonstration §16.10 asks for before writing *this
+cannot happen*, and §67 is the section that made §16.10's point about the
+original assert, so it is the last place to weaken it. What can be said exactly:
+
+> The walk needs two crossings that are two different lines sharing both nodes.
+> `crossing_like` folds same-line partners, so the two lines are genuinely
+> different and meet at one point; the second shared node exists only because the
+> arrangement could not tell two points apart. Every construction tried that
+> produces two planes that near is stopped by `TwoCurvesTouchWithoutCrossing`,
+> `CannotTellTheCellsOfAFaceApart` or an undecided plane crossing first.
+
+Nothing rules out a fourth arrangement of those same ingredients that slips
+between all three. So the refusal stays, unweakened, and the file that used to
+drive it now guards §70's cap instead — which is the other thing §67 asked for.
+
+### 67.8 One more §16.10-shaped doc claim, next door
+
+`bake.rs:535-538` says the stored corner is what picks between multiple meet
+points when a triple of surfaces has more than one. The code consults no stored
+corner: `let [only] = places.as_slice() else { continue; }` passes over every
+multi-place triple without looking. That is a filter described and not written,
+in the same function §67.1 blames for never comparing a baked corner with a
+stored one — and the two are the same gap seen twice. Not fixed here; `bake.rs`
+is not this lane's file.
+
+---
+
+## 68. Sixteen answers only the policy that built them calls valid, recorded 2026-09-07
+
+Sixteen halves out of a 9 975-input `two_solids_fused_by_a_stranger` corpus fuse
+to `Ok` and then fail `Model::validate` under `Policy::certified()`, always with
+`Invalid::DynamicRangeTooWide`. This section is what the sixteen turned out to
+be, and why the answer is a sentence in a doc comment and a test rather than a
+new refusal.
+
+The short version: **all sixteen fused under `Policy::tolerant`, all sixteen
+validate under that same tolerant policy, and it is the fuse and not the caller
+that made the span wide.** Nothing contradicted itself and nothing was
+corrupted. What the sixteen are is the shadow of a sentence nobody had written
+down: *"valid" is a property of a model and a policy, not of a model on its
+own.*
+
+  65.1    The measurement, all sixteen                            48 lines
+  65.2    The exit check is live, and the policy stood it down     31 lines
+  65.3    Why not at the door                                      18 lines
+  65.4    Why not a refusal past the point the tag stops meaning anything   58 lines
+  65.5    Atomicity was never at risk here                         16 lines
+  65.6    What was written instead, and what is left open          36 lines
+
+### 68.1 The measurement, all sixteen
+
+For each corpus entry the fuzz target's own decode was replayed, the model's
+span measured before the fuse and again after, and the model swept a second time
+under `Policy::certified()`. Span is the model's largest located coordinate over
+its shortest open-edge chord — the two numbers `Model::check_dynamic_range`
+measures, without the radii, because every face in all sixteen is a plane.
+
+| # | corpus entry | half | rule | span in | span out |
+|---|---|---|---|---|---|
+| 1 | `05a2c9cf` | second | Difference | `1.5` | `inf` |
+| 2 | `1c2757f6` | first | Difference | `1.5` | `inf` |
+| 3 | `24ad8af5` | second | Difference | `1.5` | `inf` |
+| 4 | `2fb467fc` | first | **Union** | `1.0` | `1.8328898507823975e252` |
+| 5 | `310b77d5` | first | Difference | `1.5` | `inf` |
+| 6 | `3c405544` | second | Difference | `1.5000053564996183` | `3.2766741885823735e246` |
+| 7 | `3c7a0cd6` | second | Difference | `1.5` | `inf` |
+| 8 | `3c7c9338` | first | Difference | `1.5` | `7.308985508549999e289` |
+| 9 | `75d25a59` | second | Difference | `1.5` | `inf` |
+| 10 | `7e19c77c` | first | Difference | `1.5` | `4.50920175892576e111` |
+| 11 | `875b4288` | first | Difference | `1.5` | `inf` |
+| 12 | `909f5d0c` | first | Difference | `1.5` | `inf` |
+| 13 | `98d5bb7a` | second | Difference | `1.5` | `inf` |
+| 14 | `bd34edca` | second | Difference | `1.5` | `4.323455642275676e17` |
+| 15 | `f91807c9` | first | Difference | `1.5000000000042746` | `8.426686567238631e307` |
+| 16 | `fb4102cd` | second | Difference | `1.5` | `inf` |
+
+Fifteen `Difference` and one `Union`. Every one of the fifteen has
+`split == solids.len()`, so `tools` is empty and `A \ nothing` is the union of
+both argument solids — the sixteen are all unions, and thirteen of them are two
+ten-millimetre blocks.
+
+**Every input span is between `1.0` and `1.5000053564996183`**, three orders
+inside `DynamicRange::LARGEST_SUPPORTED_RATIO`. **Every output span is at least
+`4.323455642275676e17`.** And the largest coordinate is *unchanged by the fuse
+in all sixteen* — `15.0` in and `15.0` out for fifteen of them,
+`2.3611832414348226e21` both ways for the Union. So the whole growth is at the
+bottom: the fuse built a short edge, and every one of them is the sliver
+`Assembly::check_dynamic_range` was written for. The narrowest,
+`4.323455642275676e17`, is two ten-millimetre blocks one of which is tilted by
+about `7e-18` radians, and its sliver is `3.469446951953614e-17` across.
+
+### 68.2 The exit check is live, and the policy stood it down
+
+The reading these sixteen invite is that the answer's range was never measured.
+It was. `fuse/mod.rs` measures it at the exit, one line before the only mutation
+of the whole operation:
+
+```rust
+if the_inputs_fit_in_f64(self, arguments, tools)? {
+    assembly.check_dynamic_range(policy, log)?;
+}
+```
+
+`the_inputs_fit_in_f64` is the guard that keeps a fuse from being blamed for a
+range its caller handed it, and §68.1 says it passes for all sixteen — their
+inputs span `1.5`. So `Assembly::check_dynamic_range` ran on all sixteen answers
+and measured exactly the spans in the table. What it did with them is
+`DynamicRange::check_under_policy`, and that is where the policy enters:
+`Severity::Fail` returns `Error::DynamicRangeTooWide`, `Severity::Warn` pushes a
+record and hands back an `Approximation` for the caller to hang on what it
+builds. `Policy::tolerant` carries `Warn`.
+
+`a_certified_fuse_of_the_very_same_pair_refuses_the_answer_it_would_have_built`
+is the control: the identical pair of blocks under `Policy::certified()` comes
+back `Err(Invalid::DynamicRangeTooWide { ratio: 4.323455642275676e17 })`, which
+is the same number the tolerant fuse wrote a model for. One pair, two policies,
+two outcomes, and neither is wrong.
+
+### 68.3 Why not at the door
+
+Because the measurement rules it out, and this is the whole reason the
+measurement was the deliverable. Refusing a fuse whose *inputs* span too wide a
+range would have to refuse a span of `1.5`, which is two ordinary blocks — every
+fuse in the kernel. Nothing about any of the sixteen inputs is out of range, out
+of the ordinary, or even slightly unusual: they are hundred-millimetre-scale
+boxes.
+
+That is also what `the_inputs_fit_in_f64`'s doc comment already says, in the
+other direction — a frame at `2^40` with millimetre walls is out of range before
+anything is fused, and refusing *that* here would report somebody else's dynamic
+range as this fuse's bug. The sixteen are the mirror case and they land the same
+way: the door is not where this belongs.
+
+### 68.4 Why not a refusal past the point the tag stops meaning anything
+
+This is the candidate that is actually tempting, and it needs an argument rather
+than a shrug.
+
+There is a principled line short of "tolerant never refuses". `Severity::Warn`
+hands back `Approximation::new(self.coordinate_spacing(), Cause::TolerantFallback)`,
+and `coordinate_spacing` is `largest_coordinate_magnitude * f64::EPSILON` with
+its own doc saying **"no feature smaller than this can be told apart from the
+one next to it"**. So once the span passes `1.0 / f64::EPSILON` — `4.5036e15` —
+the tag a tolerant policy hands back is *wider than the feature it is describing*.
+At entry 14 the tag is `15.0 * f64::EPSILON`, about `3.33e-15`, hung on a sliver
+`3.469446951953614e-17` across: the tag says the edge might not exist. All
+sixteen are past that line; the narrowest, `4.32e17`, is by a factor of 96.
+
+Four reasons that line is not taken here, in order of weight.
+
+**It contradicts a decision that is already taken and already tested.**
+`a_fuse_that_builds_a_sliver.rs::the_edge_across_a_sliver_is_as_long_as_the_sliver_is`
+fuses two blocks a `1e-200` hair apart under a tolerant policy and asserts the
+fuse *writes* the answer, with the sliver edge exactly one hair long and not
+`0.0`. Its span is `1.5e201`. Taking the line above turns that test's subject
+into a refusal, which is a change to what `Policy::tolerant` means and not a bug
+fix. §16.10 asks which of *limit* and *gap* a refusal would be; this one is
+neither, because there is no refusal to justify — the answer exists, `f64` holds
+every coordinate of it exactly, and the model round-trips.
+
+**It belongs in `rcad-geom`, not in one operation.** The line is a property of
+`DynamicRange::check_under_policy` — the place where a span meets a severity —
+and putting it in `Assembly::check_dynamic_range` would give the fuse a
+strictness `Model::validate` does not share, which is a second way for two parts
+of the kernel to disagree about the same model. That file is owned by neither
+this lane nor this section.
+
+**It would move published refusal rates and nobody has measured what it costs.**
+`how_often_a_fuse_with_a_cone_refuses.rs`, `how_often_a_curved_fuse_refuses.rs`
+and `how_often_a_fuse_with_a_torus_refuses.rs` publish numbers that a new
+tolerant refusal moves. A line drawn from sixteen fuzz inputs, without that
+measurement, is a number chosen for the inputs that produced it.
+
+**The failure it would prevent has not been shown to exist.** A caller who fuses
+tolerantly and then tightens the policy gets a *refusal*, not a wrong answer. All
+sixteen were swept a third time under the policy their own fuse ran under, and
+**sixteen of sixteen pass**. Not one of them is a model that its own strictness
+calls broken; the split is entirely between two strictnesses, and the stricter of
+the two refuses rather than answering. There is no case here of a tolerant answer
+being silently wrong at the strictness it was built for.
+
+### 68.5 Atomicity was never at risk here
+
+Worth recording because it is the first thing to check about any refusal in a
+fuse, and the answer is clean. `Assembly::check_dynamic_range` is called at
+`fuse/mod.rs:196` and `Assembly::commit` — the first and only mutation of the
+whole operation — at `fuse/mod.rs:200`. So the refusal that exists lands four
+lines before anything is written and the model is byte-identical, which is what
+`Model::fuse`'s **Atomic** section promises.
+`a_certified_fuse_of_the_very_same_pair_refuses_the_answer_it_would_have_built`
+asserts the model still holds its two input solids after the refusal.
+
+Any refusal added later at this same point inherits that for free. A refusal
+that had to land *after* `commit` would not, and would be a different section.
+
+### 68.6 What was written instead, and what is left open
+
+Two things, and no change to what anything computes.
+
+**`Model::fuse` now says what `Ok` promises.** It promised "the answer is valid";
+it now says the answer passes `Model::validate` under `policy` and under no
+other, that a tolerant fuse therefore writes solids a later certified caller is
+told are broken, and that both readings are correct. The sentence that was
+missing is the one this section opens with, and a caller reaching for
+`Policy::tolerant` is where it is worth reading.
+
+**`a_model_only_the_policy_that_built_it_calls_valid.rs` measures it.** One
+model, unchanged, accepted by the tolerant sweep and refused by the certified
+one, at a span of `1.5e201` and again at `4.323455642275676e17` — the second so
+that `inf` cannot be read as "the numbers were absurd". Beside them the two
+halves of §68.1's verdict: that the inputs span `1.5` and the answer the fuse
+builds spans `4.32e17`, and that the certified fuse of the same pair refuses.
+
+One thing found on the way and left where it was found: **a pair of translated
+blocks cannot be made to span `inf`.** At a hair of `2.78e-308` the tolerant fuse
+comes back `Undecidable` instead, because *where three surfaces meet* is an area,
+an area is two such hairs multiplied, and that underflows to nothing — the
+enclosure comes back `inf` and the wobble gate refuses. The corpus's ten `inf`
+answers got past that by carrying their hair in a plane's own coefficients
+instead — `fb4102cd` has a normal of `[6.3e-322, -1.0, 0.0]` at an offset of
+`3.16e-321` — where no area is ever formed from two of them. Nobody has asked
+what else that asymmetry reaches.
+
+**Left open:** whether `Policy::tolerant` should refuse a span past
+`1.0 / f64::EPSILON`, where the tag it hands back stops being narrower than the
+feature it describes. §68.4 says why this lane did not take it; it is a
+`rcad-geom` change, and what it needs is the refusal-rate measurement nobody has
+made.
+
+---
+
+## 69. A refusal that named the wrong decision, recorded 2026-09-07
+
+A soak of `two_solids_fused_by_a_stranger` crashed `Model::fuse` in
+`Record::new`:
+
+```
+thread '<unnamed>' panicked at crates/rcad-predicates/src/provenance.rs:190:17:
+orient3d: a certified outcome does not get a provenance record
+```
+
+That assert enforces §5 — *detailed records only on non-certified outcomes* —
+so a certified `orient3d` arriving with a record is a contradiction, and exactly
+one of the two sides of it is wrong. **The caller is wrong.** The assert stands
+untouched and §5 stands untouched; what is recorded here is the evidence that
+settled it, so that the next person to meet this crash does not widen the assert
+to make it go away.
+
+### 69.1 What actually reached the assert
+
+The walk in `crates/rcad-topo/src/holds.rs` holds *two* decisions at the point
+it refuses and reports only one of them:
+
+```rust
+match crossing(sides[index], sides[next], along) {
+    Some(count) => winding += count,
+    None => return Err(gave_up_turning_a_corner(point, sides[index])),   // line 322
+}
+```
+
+`crossing` returns `None` only through `above_the_line(from_side)?` or
+`above_the_line(to_side)?`, and `above_the_line` returns `None` only for
+`Decision::Undecidable`. So reaching that arm proves *one of the two sides* was
+undecidable — and the arm hands over `sides[index]` whichever one it was.
+
+The reproducer takes the other branch. A probe printed at the refusal, on the
+crashing input:
+
+```
+index=1 next=2
+sides[index] = Neg
+sides[next]  = Undecidable { enclosure: 3.6537540933272573e47 }
+along        = Pos
+from  = Point([0.0, 0.0, 0.0])
+to    = Point([0.0, 4.243991582e-314, 2.3611832414348226e21])
+point = Exact([-0.0, 1.770887431076117e21, 5.902958103587057e20])
+```
+
+and a second probe in `Record::new` itself printed what it was then asked to
+record:
+
+```
+predicate=orient3d level=Exact outcome=Neg
+inputs=[Exact([-0.0, 1.770887431076117e21, 5.902958103587057e20])]
+measures=Volume
+```
+
+`outcome=Neg` is the certified answer about corner 1. The refusal is about
+corner 2. Both probes were temporary and neither is in the tree.
+
+That input is §3.5's spread and nothing more exotic: coordinates around `1e21`
+sitting beside a `4.2e-314` subnormal, so the interval on the determinant is
+`3.7e47` wide and no scaling brings both ends into range at once. The
+undecidable side is honest. Only the record made about it is not.
+
+### 69.2 Why this is the caller's bug and not the assert's
+
+The tempting reading is the other one: the *walk* gave up while this particular
+predicate was certified, so perhaps a certified outcome may legitimately carry a
+record after all. It may not, and the reason is arithmetic rather than taste.
+
+A `Record` has an `enclosure`, and `Record::new` takes it out of the `Decision`
+because that is the only place it exists. A certified `Neg` has no enclosure —
+there is no interval that straddled zero, because nothing straddled zero. A
+record built from one would have to invent the field, and `worst_wobble` would
+then be a maximum over a number nobody measured. §15.3 is the same mistake one
+level down: an enclosure whose units nobody can recover is not a smaller record,
+it is a wrong one.
+
+The record the walk actually wants already exists and is one line away:
+`sides[next]` carries `Undecidable { enclosure: 3.65e47 }`, which is exactly the
+number a reader of the refusal needs. Naming the certified neighbour throws away
+a measurement that was in hand.
+
+So this is a **gap and not a limit** in §16.10's terms — the answer exists, and
+the code reached past it.
+
+### 69.3 The other one in the same function, and it is reachable
+
+Twelve lines up:
+
+```rust
+Decision::Zero => match lies_between(from, corners[next], point) {
+    Some(true) => return Ok(None),
+    Some(false) => (),
+    None => return Err(gave_up_turning_a_corner(point, along)),          // line 315
+},
+```
+
+`along` is bound to `Decision::Zero` by the arm it is in, so this call **cannot**
+be given anything but a certified outcome: reaching it panics every time.
+
+**It is reachable, and the demonstration is a test rather than a paragraph**
+(§16.10). `SolidView::classify_uncertain_point` is public and takes a
+`rcad_predicates::Point`, whose `Constructed([Interval; 3])` variant is public
+and whose `Interval::new` is public — so *any* box is a caller's to hand over,
+and no fuse, no fuzzer and no spread is needed to get one here.
+`a_refusal_no_predicate_made_must_not_be_recorded_as_one` is that box: it lies
+along the outline's first side with its `y` and `z` exact, so every `orient3d`
+about it certifies and `along` is exactly `Zero`, and it runs a millimetre past
+the corner at the far end, so the ordering cannot be settled. It panicked on
+`314b453` under `Policy::certified()`.
+
+The first note here said the reachability "was not demonstrated and is not
+claimed either way", which was the right thing to write and the wrong thing to
+leave. §16.10 asks the question of the **public API** rather than of today's
+callers, and the public API answers it in one line.
+
+**The fix is a different constructor, not a different argument.** Nothing was
+undecided by a predicate: what could not be settled is the *ordering* of a box
+against the ends of a side, which §17.4 answers by comparing one axis and asks
+no predicate at all. So `gave_up_ordering_along_a_side` records the ordering
+under its own name, at `Level::Interval`, with the overhang as its enclosure and
+`Measures::Length` as its units — and `lies_between` now hands that overhang back
+(`Result<bool, f64>`) instead of throwing away the only measurement of the
+refusal there is. Filing it as an `orient3d` of `Measures::Volume` would have put
+a width in units nothing on this path worked in, which is §15.3's mistake with
+the degree wrong instead of the level.
+
+### 69.4 Why the signature admits the mistake
+
+`Record::new` takes an `outcome: Decision`, and three of that type's four values
+are always a bug there. The type is wider than the contract, and the contract is
+kept by a runtime assert that every call site has to remember — sixteen of them
+outside tests, across three crates, on this tip.
+
+Narrowing it — `Record::new(…, enclosure: f64, …)`, with the caller made to
+destructure the `Undecidable` it claims to have — would move both faults above
+to compile time, because neither call site can produce an `f64` it does not have.
+That is the shape of the fix worth taking, and it is deliberately **not** taken
+here: it changes every call site in `rcad-topo` and `rcad-geom`, which is a unit
+of work rather than a bug fix, and §13's rule is that it waits for the consumer
+that names it.
+
+**The consumer has now arrived** — it is the `holds.rs` fix in §69.1 and §69.3,
+and it is the reason this paragraph is an argument for the change rather than a
+note that nothing needs it. It still did not happen in this lane, because the
+call sites it touches run through files another lane held open at the time. It is
+its own unit, and this section is its case.
+
+### 69.5 The other fifteen, and the one held up by a distant invariant
+
+Every other production call site was read, because "one caller got it wrong" is
+worth nothing without knowing whether the rest did too. The fifteen away from
+`holds.rs` are all safe, and mostly for the dull reason: seven build the
+`Undecidable` themselves out of an `f64` and never take a `Decision` at all,
+five sit inside a `Decision::Undecidable { .. }` match arm — `validate.rs:272`
+binds it as `decision @ Decision::Undecidable { .. }`, which is what makes it
+proof against the two guard arms above it — and three (`orient2d.rs:98`,
+`orient3d.rs:110`, `intersect.rs:2713`) sit behind an
+`if decision.is_certified() { return … }`.
+
+The sixteenth site is `holds.rs:639`, the one inside `gave_up`, and five callers
+reach it. Lines 315 and 322 are §69.1 and §69.3. Lines 277 and 545 destructure
+`Undecidable` on the spot and are fine. Line 372 is fine too, and is worth
+naming because it is *correct for a reason that is not local to it*:
+
+```rust
+match side {
+    Decision::Zero => on_its_boundary = true,
+    settled if settled == inwards => (),
+    Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+    other => return Err(gave_up_on_a_side(&trimming.surface, point, other)),
+}
+```
+
+A guard arm can fall through, so `Pos | Neg` alone would not prove `other` is
+undecidable — it does, but only because `inwards` came from
+`the_side_this_face_lies_on`, which writes `found = Some(side)` inside its
+`Decision::Pos | Decision::Neg` arm and nowhere else. The day that function
+learns to return `Some(Undecidable)`, this line starts panicking, and nothing in
+the file says so. Same shape as line 322: a `Decision` whose certifiedness is
+argued at a distance rather than destructured on the spot. §69.4's narrowing
+would settle this one too.
+
+**No guard was added there**, and that is the decision rather than an omission.
+There is no bug at line 372 today; a guard would defend against one that does
+not exist and would put a second, quieter copy of the invariant beside the real
+one. What the hazard needs is to be *written down*, which is this paragraph, and
+to be settled by the type — which is §69.4. The name to look it up by: **a
+certifiedness argued in another function**.
+
+### 69.6 What it took to reproduce this without a fuzzer
+
+The fuzzer needed a model whose coordinates ran from `4.2e-314` to `2.4e21`, and
+neither test here needs a spread at all. Two things stood between a hand-built
+model and the walk, and both are worth knowing before writing the next test that
+has to reach it.
+
+**A box on a spoke grazes both of its neighbours.** The walk is only asked about
+a point already on the face's plane, and the way a polygon says so is one of the
+triangles fanned from its first corner reporting that the ray starts on it. Every
+fan triangle beside a spoke has that spoke for an edge, so a box sitting on a
+spoke makes both of them refuse and neither can report anything — the walk is
+never entered and the crash never happens. What fixes it is a **corner that
+points back into the outline**: the fan then overlaps itself, and a spoke runs
+through the middle of a triangle that is not beside it. That triangle answers.
+`OUTLINE`'s `[6, 0]` is that corner, and it does the same work in both tests.
+
+**A certified policy cannot get past the first corner.** The spoke from the first
+corner to itself is a determinant with two equal rows — exactly zero, and interval
+arithmetic cannot see that it is zero, because it does not know the two rows are
+the same. So a *constructed* point refuses there and the walk stops having named
+the undecided corner correctly, which is not the bug. The fuzzer's point was
+`Exact`, which is why it got past. A hand-built box gets past instead by being
+resolved: under `Policy::tolerant` a narrow enough enclosure reads as `Zero`.
+
+That turns the test into an arithmetic problem with a real window. The budget is
+`64 · ε · working_size`, which is `1.42e-12` at 100 mm, and a volume's enclosure
+converts to a wobble as `enclosure / working_size²` (§15.3) — so the first
+corner's enclosure has to come in at or under `1.42e-8` and the spoke's has to
+come in over it. Both are linear in the width of the box, so shrinking the box
+moves them together and separates nothing. What separates them is **moving one
+corner and not the other**, because a spoke's enclosure grows with how far out
+its corner sits: `[160, -80]` is ten times out, and the two enclosures measure
+
+```
+first corner  9.600000794307562e-9     resolves    (wobble 9.6e-13 ≤ 1.42e-12)
+spoke         2.560002485552104e-7     does not    (wobble 2.56e-11)
+```
+
+a factor of about 27, with the budget between them. In plain terms: a fifth of a
+nanometre of doubt about a point on a 160 mm part — an ordinary amount for a
+constructed point to carry — and one corner of the outline far enough away that
+the same doubt is twenty-seven times too much when asked about *that* corner.
+
+Both numbers were measured. The first was also predicted, by scaling an earlier
+probe, and the prediction was wrong by a factor of four — which is why the
+measured pair is what is written here.
+
+## 70. A model that decides how closely it will be checked, recorded 2026-09-07
+
+§67.4 left two questions open and called them a decision rather than a patch.
+This is the decision. One of them turned out to have a fix and the other turned
+out to be answered by measurement rather than by taste.
+
+### 70.1 The number a file was allowed to write about itself
+
+`Model::allowed_wobble` is how far off its own plane a face's corner may sit,
+and it was two things added:
+
+```
+Scale::default_linear_tolerance()   +   what_writing_a_plane_down_costs()
+= nominal_size × 1e-9                   = 16 × SIGNED_DISTANCE_ROUNDOFF
+                                          × largest_coordinate()
+```
+
+The second term is measured — `largest_coordinate` walks the model's own
+corners. The first was **declared**: `Scale` is a field of the model, so it
+arrives with the file, and a file that says how big it is has thereby said how
+closely it will be checked. That is a self-certifying input, and the fuzzer
+found it.
+
+Measured on §67's corpus entry, `crash-7d309176caedc7140756f167d7db5e7740eff1c3`
+bytes `2382..4763`, decoded and swept:
+
+```
+nominal_size            1.8446744073709552e21     declared
+default_linear_tolerance  1.8446744073709553e12   declared × 1e-9
+largest coordinate        1.0359375e1             measured over its corners
+faces off their own plane  3.593845367340691e-1, 1e1, 2e1
+Model::validate           passes
+```
+
+Two hundred light-years of declaration, ten millimetres of block, and twenty
+millimetres of wobble walking through a check that thought it had `1.8e12` to
+play with.
+
+### 70.2 The fix, and the family of alternatives it beat
+
+**`allowed_wobble`'s first term is now the smaller of what the model says and
+what its corners show.** In `crates/rcad-topo/src/validate.rs`:
+
+```rust
+let what_the_model_says = self.scale().default_linear_tolerance();
+let what_its_corners_show = Scale::RELATIVE_LINEAR_TOLERANCE * self.largest_coordinate();
+what_the_model_says.min(what_its_corners_show) + self.what_writing_a_plane_down_costs()
+```
+
+§16.10 asks for the family, not a paragraph. Five scalings were on the table.
+
+**(a) Leave it.** The hole is unbounded: `nominal_size` is any positive finite
+`f64`, so a stranger buys `1e300` of room for the cost of one field.
+
+**(b) Drop `Scale` and scale on `largest_coordinate` alone.** This closes the
+overstating direction and opens the understating one: a model declaring `1` with
+one vertex parked at `1e21` would then *earn* `1e12` of wobble on the geometry
+beside the origin. Measured, not argued — `crash-f984851…` is a model whose
+largest coordinate really is `2.3611832414348226e21`.
+
+**(c) An absolute floor or cap in millimetres.** This is the thing `Scale`
+exists to avoid. A number in millimetres cannot be right for a bracket and for a
+bridge at once, and §15.6 would want the bound demonstrated for both.
+
+**(d) Refuse the model outright when `nominal_size` and `largest_coordinate`
+disagree by more than some ratio.** A second threshold to argue about, and it
+refuses models that are merely mis-declared rather than broken. The ratio on
+§67's entry is `1.8e20`; on `crash-f984851…` it is `100`, and that second one is
+an ordinary overstatement that nothing should refuse.
+
+**(e) The minimum, which is what was taken.** It is the tightest of (a) and (b)
+in both directions at once and introduces no new number: `min` is not a
+threshold. What it costs a legitimate model is the case where the declaration
+honestly exceeds the geometry — a model holding one small fragment of a large
+part. That model's tolerance drops to what its own corners earn, and the
+direction is the safe one `what_writing_a_point_down_costs` already picked: too
+small a budget refuses a sound corner, too large a one accepts a corner nobody
+placed.
+
+**So: yes, it may scale with a number the model declares — but never with that
+number alone, and never above what the model's own corners show.**
+
+### 70.3 Where the missing comparison goes: `bake`, measured
+
+§67.4's other question: nothing compares a baked corner with the corner the
+model stored, and does that check belong in `bake` or in `validate`?
+
+**`bake`.** Two reasons, one structural and one measured.
+
+The structural one is that with §70.2 in place `validate` *already makes* the
+comparison for every well-conditioned corner: a corner within `allowed_wobble`
+of all three planes through it is within that of their meet. What survives is
+the ill-conditioned case — three surfaces at a grazing angle, where a corner
+close to all three can still be far from where they cross. That is a question
+about a *re-derivation*, and only the thing that re-derives has both points to
+compare. `validate` does not re-derive corners and has no reason to start.
+
+The measured one is what re-deriving costs. On this machine, `Policy::certified`:
+
+```
+Plane::signed_distance_to                            3 ns
+meet_of_three_surfaces, three perpendicular planes  571 ns
+Model::validate over one block                    13.519 µs
+Model::fuse of two blocks                          1.353 ms
+```
+
+The distance is what the sweep pays per corner per face today and the meet is
+what a re-derivation would pay per corner per triple — 190 times dearer. A box's
+eight corners are eight triples, `4.6 µs`, which is a **34% increase on the whole
+sweep** of that box. And `derive_a_corner` tries *every* triple, so the cost is
+cubic in the faces round a corner where the distance check is linear: a corner
+where six faces meet is twenty meets, `11.4 µs`, most of one sweep for one
+corner. §4.3 says the full sweep runs at every import and test boundary; this is
+the shape of cost it was written about.
+
+The comparison itself is one line where it belongs. `place_a_corner` already
+holds `model.data().vertices[slot].point` (`bake.rs:500`) and `derive_a_corner`
+returns the rebuilt point beside it. **This is not done here** — it is a fuse
+change with its own test to write, and the lane that did §70.2 ran out of budget
+before it. It is owed, and it is owed to `bake.rs`.
+
+While reading for that: `derive_a_corner`'s doc comment says "the stored corner
+is what says which: it is a cached sample of the truth (§17.1), so the box it
+falls inside is the one. Two boxes that both hold it are two answers to one
+question and the triple is passed over." The code consults no stored corner at
+all — it takes `let [only] = places.as_slice() else { continue; }`, passing over
+*every* multi-place triple regardless of where the stored corner sits. The
+sentence describes a filter that is not there, which is the §16.10 shape again.
+
+### 70.4 What this refuses now, and what it still does not
+
+Both of this session's crash reproducers were replayed against the fix with
+`cargo +nightly fuzz run two_solids_fused_by_a_stranger <path>`. Both run clean,
+as they did before — but one of them now stops a stage earlier:
+
+`crash-7d309176caedc7140756f167d7db5e7740eff1c3` is **refused at the sweep**,
+which is the gate the fuzz target runs before it fuses at all:
+`Invalid(VertexOffItsFacePlane { distance: 9.536734069115482e-6 })`, against a
+budget that fell from `1.8446744073709553e12` to `1.0359375e-8`. The fuse it
+crashed is never reached.
+
+`crash-f984851ca89020e1ff939c087667a0aa86bc352d` is **unchanged**. It declares
+`2.3611832414348226e23` with a largest coordinate of `2.3611832414348226e21`, so
+the cap tightens its budget from `2.3611832414348228e14` to
+`2.3611832414348228e12` — and its faces sit at most `4.021529366771898e-87` off
+their own planes, so it passes as it should. §69's refusal is what that one was
+about and this does not touch it.
+
+**What is still open.** `largest_coordinate` is model-wide, so a model holding
+one solid with a corner at `1e21` still buys `1e12` of wobble for a second,
+small solid beside the origin. Narrowing it per face or per solid was
+considered and not taken: a part's tolerance is a property of the part, and a
+face near the origin of a large part is entitled to the large part's tolerance.
+Closing that needs the §70.3 comparison, not a smaller radius.
+
+### 70.5 Two tests it moves, and why they were not adjusted
+
+`crates/rcad-topo/tests/a_piece_of_a_face_bounded_by_two_straight_sides.rs` —
+§67's own test file — carries §67's bytes and asserts, at line 88, that *"the
+sweep lets these blocks through, which is how they reach the fuse"*. §70.2 makes
+that false, which is the point of §70.2. Both tests in that file fail on the
+premise rather than on the assertion:
+
+```
+a_wall_wearing_its_neighbours_plane_is_refused_and_does_not_crash_the_fuse   FAIL
+a_certified_policy_gives_up_before_it_gets_that_far                          FAIL
+  the sweep lets these blocks through, which is how they reach the fuse:
+  Invalid(VertexOffItsFacePlane { distance: 9.536734069115482e-6 })
+```
+
+They were left failing rather than edited. What §67 tested is still worth
+testing — a two-sided piece is a refusal and not an assert — and the bytes are
+no longer a way to reach it, so somebody has to decide whether that file gets a
+model that reaches the walk another way or whether the assert's own test is
+enough. That is §67's lane's call, not this one's.
+
+---
+
+## 71. `check-decisions` learns order, recorded 2026-09-07
+
+`check-decisions` (§57.8) already refused two sections sharing a number. It said
+nothing about a section landing in the wrong place, and two ways to land in the
+wrong place happened on the same day.
+
+### 71.1 The two shapes
+
+A duplicate and an out-of-order section look alike at a glance — both are a
+number that does not say what it should — but they are different mistakes with
+different causes, and the file carried both on 2026-09-07.
+
+**The duplicate.** Two sessions each appended a `## 62.` hours apart — one "What
+a release build hands back when the kernel is wrong", one "A sweep that could
+only ever return one answer" — because each read "the next free number" off a
+tree that disagreed with the other about what was next. Nothing noticed until
+the merge, and the merge was resolved by taking one side of the file whole,
+which silently dropped two amendments the other side had made to §4.1 and §4.3.
+That second loss was caught by a line count, not by reading it.
+
+**Out of order.** Three lane briefs were given §63, §64, §65 while `main` landed
+its own §63 underneath them. They were renumbered to §67, §68, §69 by hand, and
+the renumbering is why the file now reads 61, 62, 63, 66, 67, 68, 69 — a gap is
+what a renumbering leaves behind, and §57.8's own doc comment already says a gap
+is not a defect. What the renumbering also left, four times over in one session,
+was a `### 64.3` still sitting under the new `## 69.` after its own `## 64.`
+had become `## 67.` — a subsection typed once and never moved when its parent's
+number changed underneath it. That was caught by grepping for it by hand, which
+is the same expensive place §57.8 was written to move the duplicate check away
+from.
+
+### 71.2 What `check-decisions` checks now
+
+Two more passes, after the existing format and duplicate checks and before
+either exits:
+
+- **Descending is an error.** A `## N.` lower than the `## N.` before it in file
+  order.
+- **A misnested subsection is an error.** A `### N.M` whose `N` does not match
+  the `## N.` it currently sits under, or whose `M` is lower than the `### N.M`
+  before it within that same section.
+
+Gaps are still fine, at both levels — nothing here re-litigates §57.8's own
+point, and the real file's 61, 62, 63, 66, 67, 68, 69 is exactly what a correct
+file with a gap looks like, so it is the fixture the check has to pass rather
+than one of the ones it has to fail.
+
+### 71.3 Fixtures, not the real file
+
+`check-decisions-selftest` proves five broken shapes against small fixture
+files built for the purpose, the same way §57.8's own selftest proved the
+duplicate check: the two duplicate checks §57.8 already had (a repeated `##`
+and a repeated `###`), plus the three this section adds (a descending `##`, a
+`###` descending within its own section, and a `###` sitting under the wrong
+`##`). Editing the real `docs/decisions.md` to demonstrate a defect would be
+demonstrating the defect into the file that must not have it.
+
+---
+
+## 72. The line where a tolerant tag stops meaning anything, measured, recorded 2026-09-07
+
+§68.4 left one thing open: whether `Policy::tolerant` should **refuse** a span
+past `1.0 / f64::EPSILON` — `4.5036e15` — where the tolerance tag it hands back
+stops being narrower than the feature it is describing. It gave four reasons for
+not taking the line, and said what the argument was missing: the refusal-rate
+measurement nobody had made.
+
+The measurement is here. **The answer is that the line should not be taken**, and
+one of §68.4's four reasons is withdrawn on the way, because the measurement says
+it was never a cost at all.
+
+### 72.1 The three published rates, before and after
+
+The change measured is three lines at the top of `DynamicRange::check_under_policy`'s
+`Severity::Warn` arm, in `crates/rcad-geom/src/scale.rs`:
+
+```rust
+if self.ratio > 1.0 / f64::EPSILON {
+    return Err(Error::DynamicRangeTooWide { ratio: self.ratio });
+}
+```
+
+Both runs are one command:
+
+```
+mise exec -- just t -E 'test(/how_often_a_certified_fuse_with_a_cone_in_it_refuses/)
+  + test(/how_often_a_certified_fuse_with_a_torus_in_it_refuses/)
+  + test(/how_often_a_certified_fuse_of_a_turned_curved_pair_refuses/)' --no-capture
+```
+
+| rate | before | after |
+|---|---|---|
+| turned curved pair, 384 fuses | 0.0% | 0.0% |
+| a frustum against a corner-up cube, 96 | 90.6% | 90.6% |
+| a pointed cone against a corner-up cube, 96 | 81.2% | 81.2% |
+| a frustum against a block, 96 | 93.8% | 93.8% |
+| a frustum against a bar, 96 | 100.0% | 100.0% |
+| two frustums on one axis, 96 | 100.0% | 100.0% |
+| a bend against a slab square to the axis, 96 | 100.0% | 100.0% |
+| a round bar against a slab square to the axis, 96 | 75.0% | 75.0% |
+| a bend against a wedge through the axis, 96 | 100.0% | 100.0% |
+| a round bar against a wedge through the axis, 96 | 0.0% | 0.0% |
+| a bend against a bar through the hole, 96 | 100.0% | 100.0% |
+| a round bar against a bar through the hole, 96 | 0.0% | 0.0% |
+| a bend against a ball in the bend, 96 | 100.0% | 100.0% |
+| a round bar against a ball in the bend, 96 | 100.0% | 100.0% |
+| a bend against a second bend, 96 | 100.0% | 100.0% |
+
+Not a percentage moved, and not a *name* moved either: all four of the cone's
+corner-up breakdown, all four of the frustum-against-a-block breakdown, every
+count identical.
+
+**They cannot move, and the reason is one line of `Policy`.** All three files
+fuse under `Policy::certified()`, and `Policy::certified` sets
+`dynamic_range_check: Severity::Fail`. The line lives in the `Severity::Warn`
+arm. `Policy::tolerant` is the only constructor in the crate that asks for
+`Warn`, and none of the three ever builds one — the word `tolerant` does not
+appear in any of the three files.
+
+So **§68.4's third reason is withdrawn.** "It would move published refusal rates
+and nobody has measured what it costs" was a fair thing to say without the
+measurement, and with the measurement it is false: the cost to the published
+rates is exactly zero, by construction and in fact. A future argument for this
+line does not have to answer it.
+
+### 72.2 What does move: four tests, and every one of them is about this
+
+`mise exec -- just t` — the whole suite, 1800 tests — with the same three lines
+in place:
+
+```
+Summary [27.378s] 1332/1800 tests run: 1328 passed, 4 failed, 0 skipped
+```
+
+The run stops at the first failures, so 1332 is what got as far as running, not a
+count of what passes. The four are:
+
+- `a_fuse_that_builds_a_sliver::the_edge_across_a_sliver_is_as_long_as_the_sliver_is`
+- `a_model_only_the_policy_that_built_it_calls_valid::a_tolerant_fuse_writes_a_sliver_only_a_tolerant_sweep_calls_valid`
+- `a_model_only_the_policy_that_built_it_calls_valid::the_two_sweeps_split_the_same_way_a_long_way_from_overflow`
+- `a_model_only_the_policy_that_built_it_calls_valid::the_inputs_span_one_and_a_half_and_the_answer_the_fuse_builds_spans_far_more`
+
+There is no collateral damage anywhere in the kernel. What breaks is four tests
+whose whole subject is this behaviour, three of them written by §68 itself to
+record it. That is not a bill to be weighed against a benefit; it is four
+statements that the line is wrong, and taking the line means answering them
+rather than paying for them.
+
+So **§68.4's first reason is now the whole of the case against**, and it is
+unchanged: `the_edge_across_a_sliver_is_as_long_as_the_sliver_is` deliberately
+pins that a tolerant fuse *writes* a `1e-200` sliver, at a span of `1.5e201`.
+
+### 72.3 Nothing past the line came back wrong, and the family looks empty
+
+§68.4's fourth reason — "the failure it would prevent has not been shown to
+exist" — is the one §16.10 says needs a demonstration rather than a paragraph.
+Four shapes were built and fused both ways round under `Policy::tolerant(100.0)`,
+and every answer measured against a closed form. Two ten-millimetre blocks, the
+second at `(5, hair, 5)`, so the union is `1750 - 75·hair` mm³ and every hair
+here is far too small to move that from `1750.0`.
+
+| | span of the answer | shortest edge | volume, `[low, high]` | volume, `[high, low]` |
+|---|---|---|---|---|
+| A. hair `3.469446951953614e-17` at the origin | `4.323455642275676e17` | `3.469446951953614e-17` | `1750.0` | `1750.0` |
+| B. hair `1e-200` at the origin | `1.5e201` | `1e-200` | `1750.0` | `1750.0` |
+| C. A, whole pair moved `2^40` along `x` | `3.1691265006138082e28` | `3.469446951953614e-17` | `1750.0` | `1750.0` |
+| D. A, whole pair moved `2^40` along `y` | `2.199023255572e11` | `5.0` | `1750.0` | `1750.0` |
+
+Exact, in every cell, at every order. And a *second* tolerant operation on the
+wide answer is exact too: cutting A's and B's answers with a 30 mm block covering
+everything above `y = 5` leaves `875.0` mm³ against a closed form of
+`500 + 75·(5 - hair)`, which is `875.0`.
+
+**C and D together are why.** C is seven thousand billion times past the line —
+`3.17e28` against `4.5e15` — and bit-for-bit right, because the largest
+coordinate is on `x` and the hair is on `y`, where the coordinates are small and
+`f64` has digits to spare. D is the same pair with the hair moved *onto* the big
+coordinate, and `2^40 + 3.469446951953614e-17` is `2^40`: the hair is rounded
+away before anything is fused, there is no sliver to build, and **the span falls
+back to `2.2e11` with a shortest edge of `5.0`** — an ordinary model.
+
+That is the shape of the argument, and it is a property of `f64` rather than of
+these four shapes. Two distinct `f64` near a magnitude `L` differ by at least
+`ulp(L)`, which is about `L · f64::EPSILON`. So a chord of length `h` whose two
+ends differ on an axis where both are near `L` has `h ≳ L · f64::EPSILON`, and
+`L / h ≲ 1 / f64::EPSILON` — *at* the line, never past it. **Past the line, the
+short feature's ends must agree exactly on every axis where they are large, and
+differ only where they are small.** There is no third case. The reason the
+answers above are exact is the reason they had to be.
+
+**What this does not show.** It is a demonstration over translated blocks with
+flat faces, plus one second operation. It says nothing about a hair carried in a
+plane's own coefficients rather than in a translation — §68.6's `fb4102cd`, with
+a normal of `[6.3e-322, -1.0, 0.0]` — where the small number never becomes a
+coordinate difference at all and the argument above does not reach. Nor does it
+cover curved faces, where a coordinate is the *output* of a construction and the
+short chord's ends need not be a difference of two stored numbers. Those are the
+two places to look if anyone wants to reopen this; what is settled is that the
+straightforward reading of "the tag is wider than the feature" does not produce a
+wrong answer, and the reason it does not is structural.
+
+So the fourth reason is upgraded rather than repeated: not "no case has been
+shown", but "here is why the case cannot be built out of coordinate differences,
+and here are the two families that argument does not cover".
+
+### 72.4 The verdict
+
+**No.** `Policy::tolerant` keeps warning past `1.0 / f64::EPSILON` rather than
+refusing. Of §68.4's four reasons, the third is withdrawn as measured-at-zero,
+and the other three stand:
+
+1. Four tests pin the opposite, deliberately, and three of them are §68's own.
+2. It belongs in `check_under_policy` — that much §68.4 had right, and this
+   lane put it there to measure it — but `Model::fuse` and `Model::validate`
+   would then agree on a refusal that nothing has shown is earned.
+3. *Withdrawn.* Zero of the three published rates move; all three are certified,
+   and the line only touches `Warn`.
+4. Every answer past the line measured exact, at spans up to `3.17e28`, and the
+   arithmetic says why.
+
+The honest reading of §68.4's observation is that the tag is **conservative**
+rather than meaningless. `coordinate_spacing` is a whole-model bound —
+`largest_coordinate_magnitude · f64::EPSILON` — hung on a feature that lives
+where the coordinates are small. A bound that is loose is a bound; it never
+claims the feature is missing, only that nothing smaller than that is
+*guaranteed* to be resolved anywhere in the model. Refusing on it would be
+refusing an answer `f64` holds exactly, which §16.10 calls a gap and not a limit,
+and this kernel does not manufacture gaps.
+
+`DynamicRange::LARGEST_SUPPORTED_RATIO` stays the one number that decides, at
+`1e11`, with `Severity` deciding how loud to be about crossing it. No second
+threshold inside the warn band.
+
+### 72.5 What would reopen it
+
+A demonstration, in the shape §16.10 asks for: one tolerant fuse past the line
+whose answer is *wrong* — not merely wide — measured against a closed form or
+against the same fuse asked the other way round. The two families 72.3 does not
+cover are where to look. A rate measurement is no longer owed; 72.1 is it.
+
+## 73. A record that cannot be born certified, recorded 2026-09-08
+
+§69.4 named the change and did not take it: `Record::new` took an
+`outcome: Decision`, three of whose four values were always a bug in that
+position, and the contract was kept by a runtime assert that sixteen production
+call sites had to remember. Two of them forgot, and §69.1 and §69.3 are the
+faults that came of it.
+
+This is that change. The constructor now takes `enclosure: f64` and builds the
+`Undecidable` itself:
+
+```rust
+pub fn new(
+    predicate: &'static str,
+    inputs: &[Point],
+    level: Level,
+    enclosure: f64,
+    measures: Measures,
+) -> Self {
+    Self {
+        predicate,
+        inputs: inputs.to_vec(),
+        level,
+        outcome: Decision::Undecidable { enclosure },
+        enclosure,
+        measures,
+        approximation: None,
+    }
+}
+```
+
+The `panic!` §69 leaned on is gone, and nothing can reach where it stood: a
+caller with a `Decision` in hand has to destructure it to get the `f64`, and the
+only arm that yields one is `Undecidable`.
+
+### 73.1 What did *not* change
+
+**The `outcome` field stays.** It is what a policy writes a sign into —
+`Record::resolve_to` sets it, and `Record::outcome` says it "starts out
+`Decision::Undecidable` and becomes a sign if a policy resolved it". Only the
+*parameter* narrowed. The invariant "a record is born undecidable" moved out of
+a runtime assert and into the constructor's own body, where no caller is asked
+to remember it.
+
+**The mirror assert in `resolve_to` stays too**, and for the opposite reason: it
+checks that resolving *produces* a certified sign, which is a claim about the
+policy rather than about the caller's destructuring, and no type here makes it
+by construction.
+
+### 73.2 The three sites that leaned on an early return
+
+§69.5 grouped the sixteen. The seven that already had an `f64` in hand got
+shorter — `Decision::Undecidable { enclosure: slop }` became `slop`. The five in
+a `Decision::Undecidable { .. }` match arm changed `..` to `enclosure` and passed
+it on; `validate.rs`'s `decision @ Decision::Undecidable { .. }` binding is gone,
+because there is nothing left that wants the whole `Decision`.
+
+The interesting three were `orient2d.rs:98`, `orient3d.rs:110` and
+`intersect.rs:2713`, all behind
+
+```rust
+if decision.is_certified() {
+    return decision;
+}
+```
+
+All three destructure on the spot now, and the early return is the `else`:
+
+```rust
+let Decision::Undecidable { enclosure } = decision else {
+    return decision;
+};
+```
+
+No site needed an `unreachable!`, and none needed a made-up number. Every one of
+the sixteen had the enclosure available where it stood; what it lacked was a
+signature that asked for it.
+
+### 73.3 `holds.rs`, and the certifiedness argued in another function
+
+§69.5 named this hazard and left it standing on purpose: the match arm in
+`what_a_curved_face_holds` was correct only because `the_side_this_face_lies_on`
+happens to write `found = Some(side)` inside its `Decision::Pos | Decision::Neg`
+arm and nowhere else. Before:
+
+```rust
+match side {
+    Decision::Zero => on_its_boundary = true,
+    settled if settled == inwards => (),
+    Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+    other => return Err(gave_up_on_a_side(&trimming.surface, point, other)),
+}
+```
+
+`other` is a `Decision`, a guard arm above it can fall through, and the
+certifiedness of what reached `gave_up_on_a_side` was argued a function away.
+After:
+
+```rust
+match side {
+    Decision::Zero => on_its_boundary = true,
+    settled if settled == inwards => (),
+    Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+    Decision::Undecidable { enclosure } => {
+        return Err(gave_up_on_a_side(&trimming.surface, point, enclosure));
+    }
+    other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+}
+```
+
+The distant argument is now **unnecessary for this line's safety**. Whatever
+`the_side_this_face_lies_on` learns to return, `inwards` only affects which of
+the arms a `Pos`, `Neg` or `Zero` takes — and none of those three can reach the
+refusal, because the arm that reaches it names `Undecidable` and the wildcard
+below it is `panic!`. The day that function returns `Some(Undecidable)`, this
+loop treats a matching undecided side as "inside" rather than panicking in
+`Record::new`; that is a different bug, and a worse-behaved one, so the distant
+argument still earns its paragraph in §69.5 — it just no longer holds up a
+record.
+
+The narrowing travelled the whole way down: `gave_up`, `gave_up_on_a_side` and
+`gave_up_turning_a_corner` all take an `f64` now, which is what forced each of
+the five callers to destructure. `whichever_of_them_was_not_read` returns `f64`
+instead of `Decision`; its `assert!` became a `let … else { panic! }` on the
+same invariant, one arm rather than two, and it no longer has a second copy of
+itself waiting inside `Record::new`.
+
+Three wildcard arms became `panic!` where they had been `return Err(gave_up…)`.
+That is not a new refusal being invented: those arms are now reachable only by a
+`Decision` variant that does not exist yet, which §40 says is a stop rather than
+a guess.
+
+### 73.4 The test, and what it does not prove
+
+The old failure was a runtime panic; the new one is a compile error, which no
+running test can exercise. So there are two, and they prove different halves.
+
+The compile-time half is a `compile_fail` doctest on `Record::new`, paired with
+an identical one that is not `compile_fail`. The pair is the point: same five
+lines, same imports, only the fourth argument differs — `1e-30` in the one that
+compiles, `Decision::Pos` in the one that must not. A `compile_fail` doctest
+passes when the snippet fails to build *for any reason*, including a typo in an
+import, so on its own it proves almost nothing. Its twin passing is what rules
+that out. Compiled directly, the failing snippet gives:
+
+```
+error[E0308]: mismatched types
+ --> src/main.rs:4:68
+  |
+4 |     let record = Record::new("orient3d", &origin, Level::Interval, Decision::Pos, Measures::Volume);
+  |                  -----------                                       ^^^^^^^^^^^^^ expected `f64`, found `Decision`
+```
+
+The runtime half replaces `a_certified_outcome_may_not_be_recorded`, which had
+no panic left to catch. `a_record_is_born_undecidable` asserts that a fresh
+record's `outcome()` is `Decision::Undecidable` carrying the enclosure it was
+handed. **That test does not prove the compile-time property.** It would pass
+just as well against the old signature. It is there because the field is still
+a `Decision` and still mutable through `resolve_to`, so "born undecidable" is
+worth pinning as behaviour and not only as a type.
+
+Neither test proves the sixteen call sites are right. Nothing is asked to: the
+signature is, which is the whole of what §69.4 wanted.
+
+## 74. A vertex placed at `NaN`, recorded 2026-09-08
+
+`where_a_closed_crossing_starts` ended its conic arm in `Ok(conic.at(0.0))` with
+nothing between that point and the caller. The question put to this lane was
+whether that `Ok` could carry a point that is not a place.
+
+**It could, and the input is three lines long.** A pipe of radius `1e300` about
+the z axis, against the plane `Plane::from_point_and_normal(origin, (1, 0,
+1e-20))`, on a run stated as `RightRoundWhereItsFacesCross`, answered
+`Ok(Point([NaN, NaN, NaN]))`. Both surfaces are ones `Cylinder::new` and
+`Plane::from_point_and_normal` accept, both public; the function is public and
+re-exported from `rcad`. This is §16.10's public-API door and not a walk through
+today's callers.
+
+### 74.1 Why the degenerate check let it past
+
+`what_a_run_between_these_two_lies_on` refuses a conic that shrank to a point,
+and it asks that question **only of a conic whose size is finite** — deliberately,
+because an overflowed conic arrives looking exactly like a shrunk one and has a
+different and better name one step later (`CannotWorkOutHowBigACrossingIs`, a gap
+rather than a limit). `walk` takes that step: `deviation = ROUNDOFF · size` is
+infinite, and it refuses.
+
+`where_a_closed_crossing_starts` never took it. It has no bound to publish, so
+there was nothing there to notice the infinity, and the two public doors onto one
+crossing disagreed about whether it could be answered at all.
+
+The `NaN` rather than an honest infinity comes from `Conic::at`:
+
+```text
+at(0) = centre + across·cos 0 + and·sin 0
+```
+
+`sin 0` is exactly `0.0`, and the ellipse a nearly-parallel plane cuts out of a
+pipe is stretched down the slope by `‖n‖ / |n·w|` — so `and` is a semi-axis of
+infinity, `∞ · 0` is `NaN`, and the `NaN` reaches every coordinate through the
+sum.
+
+### 74.2 What the caller saw
+
+`rcad-topo`'s `fuse::arrange` takes this answer at two places. At
+`arrange.rs:3509` an `Err` is folded into `ACrossingThisCannotBeOrderedAlong`, so
+only an `Ok` gets through — and an `Ok` here was a `NaN` triple handed straight
+to `PredicatePoint::from`, which is §27.7's mistake: an exact triple made of
+noise, offered to a predicate as something to certify a sign about.
+
+At `arrange.rs:1305` the answer goes to `where_the_crossing_starts`, whose first
+line is
+
+```rust
+assert!(
+    from.is_finite(),
+    "a closed crossing is walked between two surfaces built from finite numbers, so where it \
+     starts is a real place"
+);
+```
+
+with a doc comment saying "a seed that is not a place is a bug in the walk". That
+sentence was right about whose bug it is and wrong about it being impossible. It
+is exactly the shape §16.10 warns about: an argument for an absence, well
+written, and deflecting scrutiny in proportion. Its premise — *the surfaces were
+built from finite numbers* — is true and does not carry the conclusion, because
+what overflowed is not a surface's own number but a ratio of two of them.
+
+**Not demonstrated here: that a `Model::fuse` reaches that assert.** Getting
+there needs a fuse whose arrangement holds a plane face and a pipe face crossing
+in an ellipse this stretched, with no node already on the crossing, and building
+one was outside this lane. What is demonstrated is the function's own answer,
+which is the door §16.10 asks about.
+
+### 74.3 The fix, and why it is on the point and not on the size
+
+One check, in the conic arm:
+
+```rust
+let start = conic.at(0.0);
+if !start.is_finite() {
+    return Err(Error::CannotWorkOutHowBigACrossingIs);
+}
+Ok(start)
+```
+
+The name is the one `walk` gives the identical pair, and the one this function's
+own `# Errors` section already promised — "when the crossing's size **or a seed
+on it** falls out of `f64`'s range" — so the doc was true of the quartic arm and
+false of the conic arm, and this makes it true of both. It is a **gap**: the same
+pipe and plane written a hundred orders of magnitude down start at a whole
+number, so what ran out is `f64`'s exponent and not the answer's existence.
+
+The obvious alternative was to mirror `walk` — refuse when
+`the_size_it_was_worked_out_from()` is not finite. It catches this pair too, and
+**it is sound today**: the enumeration was done, and all six conic builders put
+both semi-axis *scalars* into `how_big_this_is`'s list and scale them by vectors
+of length one, so a finite size does imply a finite start.
+
+It was not taken because that sentence is a **sufficiency claim** (§16.10's third
+species) and the point check is not. The claim ranges over six builders and the
+provenance of every direction vector each of them uses, and **this lane got it
+wrong on the first pass**, which is the evidence that it is not free to maintain.
+Two of the six — `the_two_meridian_circles` and
+`the_two_circles_a_cone_and_a_pipe_cut` — scale by `up = along/‖along‖²`, which is
+not a unit vector on its face; a torus axis written `(1e-200, 1e-200, 1e-200)`
+squares to `3e-400`, which is zero in `f64`, so `up` would be infinite while the
+two radii in the size list stayed exactly what the caller wrote. That was written
+down here as a demonstrated hole, a test was written for it, and the test failed:
+the refusal that came back was `CannotNameWhichPieceOfACrossingThisIs` and not
+`CannotWorkOutHowBigACrossingIs`, because `Axis::new` scales every direction to
+length one — and so does the `TryFrom` a deserialized axis goes through — so
+`‖along‖²` is one and `up` is `along`. The fact that rescues the claim lives two
+files away from the builder that depends on it.
+
+So: the size guard holds, on a chain that has to be re-walked whenever a builder
+is added or a direction stops being unit. The point guard is one line, is the
+property the caller actually needs, and has nothing to re-walk.
+`every_axis_a_caller_can_build_has_a_direction_of_length_one` in the test file
+pins the step that was misread, so the next reader finds it checked rather than
+asserted.
+
+§69.5's objection to a guard on a branch nothing can reach does not apply here:
+this branch was reached, with a printed `Ok(Point([NaN, NaN, NaN]))` before the
+change and a named `Err` after it, on the same input.
+
+### 74.4 What was tested, and what the boundary does not cover
+
+`crates/rcad-geom/tests/where_a_closed_crossing_starts_is_a_place_or_a_refusal.rs`.
+
+`a_conic_too_big_to_hold_a_point_is_refused_and_the_same_pair_smaller_starts_somewhere`
+pins the pair above, and asserts the other half of the gap: the same pipe at
+`1e200` starts at a finite point away from the origin, and `walk` agrees with
+this function on both radii.
+
+`every_conic_crossing_this_answers_starts_at_a_place` sweeps six configurations
+through all four conic builders at every tenth power of two from `2⁻⁵⁰⁰` to
+`2⁵⁰⁰`, both ways round: 1,096 of 1,212 asks start at a place and 116 refuse, and
+every `Ok` is checked for being finite. Both counts are held to a floor, so a
+change that turns the sweep into all-refusals fails it.
+
+`every_axis_a_caller_can_build_has_a_direction_of_length_one` is the third, and
+it is 74.3's own correction rather than a check on this function.
+
+**What that boundary does not cover**, named rather than left silent:
+
+- **Placements far from the origin whose differences are small.** The sweep
+  scales whole configurations, which is the case one power of two fixes; the
+  case it cannot fix (§16.9's limit) is not in it.
+- **Degree-four pairs.** A ball against a pipe and two leaning pipes leave
+  through `the_seed_this_run_is_picked_up_at`, not through `Conic::at`, and
+  `a_quartic_picked_up_at` already refuses a seed that is not a point.
+- **The two circle-picking builders.** A plane against a torus and a coaxial cone
+  against a pipe refuse a run with no picker on it as a tie before any of this is
+  reached, so the sweep says nothing about them. They carry a guard of their own
+  in `which_of_these_circles_this_run_is`, which asks the centre and both
+  semi-axes directly.
+- **Underflow.** A conic whose size runs off the *bottom* of `f64` is a different
+  question. `has_an_angle_round_it` asks `Vector::length` rather than
+  `length_squared` precisely so that a bar of radius `1e-200` is told apart from
+  a circle of no radius, and nothing found here moves that.
+
+## 75. The corner the model was holding all along, recorded 2026-09-08
+
+### 75.1 A paragraph describing a filter that was not there
+
+`derive_a_corner` in `crates/rcad-topo/src/fuse/bake.rs` carried this sentence:
+
+> Three surfaces can meet at more than one point, and the stored corner is what
+> says which: it is a cached sample of the truth (§17.1), so the box it falls
+> inside is the one. Two boxes that both hold it are two answers to one question
+> and the triple is passed over.
+
+The solving loop was:
+
+```rust
+let Ok(MeetOfThree::At(places)) =
+    meet_of_three_surfaces([&triple[0], &triple[1], &triple[2]], policy, log)
+else {
+    continue;
+};
+let [only] = places.as_slice() else {
+    continue;
+};
+```
+
+`let [only] … else { continue }` passes over **every** multi-place triple, not
+the ambiguous ones the paragraph describes. And the function could not have done
+what the paragraph said: `vertex: VertexKey` was read once in the whole body, to
+be copied into the returned `BakedCorner`, so the loop that places the point had
+no stored corner to consult. §70.3 spotted this while measuring something else
+and called it "the §16.10 shape again".
+
+**It is a gap and not a limit.** The answer exists: two planes and a pipe cross
+at both ends of a chord, `MeetOfThree::At` hands back both boxes, and which of
+them a corner is, is a fact the model has been holding since it was built. A
+corner like that could only be placed by some *other* triple round it, and
+refused as `Error::Undecidable` when there was none — a representable answer
+turned away.
+
+The consumer is named, so §13 does not defer it: the fuzz target
+`two_solids_fused_by_a_stranger` decodes an arbitrary model, and a stranger's
+solid is under no obligation to keep its curved corners on well-conditioned
+triples. Nothing this milestone *builds* has such a corner — every builder in
+`build.rs` makes curved corners with exactly two surfaces round them (a cap
+circle) and flat ones with three — which is why the demonstration below is a
+unit test on the three surfaces and not a solid.
+
+### 75.2 The fix: an overlap of two boxes, which needs no tolerance
+
+`the_place_the_model_points_at` is the whole of it.
+
+One place and the model is not consulted at all — the surfaces gave a single
+answer and there is nothing to choose. That is every corner of every flat solid,
+because three planes meet at one point or at none, so nothing about the
+polyhedral half of the kernel turns on any of what follows.
+
+More than one, and the place whose box **overlaps** the box the model's own
+corner is in is the one. Both are certified enclosures of true points, so:
+
+- the comparison needs no tolerance, no constant and no policy — it is
+  `lo <= other.hi && other.lo <= hi` per axis, the same shape as
+  `Bounds::provably_misses`;
+- a pair that misses is a **proof** that the model's corner is not that meet,
+  not a hint that it is far from it.
+
+That is what the trap in this lane's brief asked for. §70 is about a model that
+declares how closely it will be checked; nothing here reads a number the model
+declares, and nothing here scales with one.
+
+Two places overlapping, or none overlapping, both give `None`: the first is two
+answers to one question, the second is the model's corner and its surfaces
+disagreeing by more than either box allows. **Neither is a refusal.** It is that
+triple saying nothing about this corner while another may still place it, which
+is the same standing `MeetOfThree::Nowhere` and `MoreThanAPoint` already had
+(§34.9).
+
+**The model's corner never places the point.** It selects among places the
+surfaces already agree on, and the geometry comes from the meet. A wrong cached
+corner therefore cannot move a right answer — the worst it can do is fail to
+pick, which costs a refusal and never a wrong solid. That is the §17.1 reading
+of "cached sample" taken seriously in both directions.
+
+**The doc now matches the code, and the change went that way round.** The
+paragraph as written was true of the design and false of the code, so the code
+moved. Two sentences were added rather than rewritten: that a single place is
+taken without consulting anything, and that no place overlapping is also a pass.
+Neither was in the original and both are behaviour a reader has to know.
+
+### 75.3 Where the model's corner comes from, and an assert that moved
+
+`place_a_corner` already worked out where the model puts a corner — that is what
+a corner with fewer than three surfaces round it *is*, read out and moved (§31.3,
+§34.6). It is now `where_the_model_puts_a_corner`, and the two-surface answer and
+the three-surface selector are the same call:
+
+- placement is `Isometry::identity()` → the stored triple, exactly, because a box
+  round a move that rounded nothing would turn an exact corner inexact and that is
+  the whole of §17.7's lattice control;
+- otherwise `where_a_corner_lands_after_moving`, whose box is what the move cost,
+  through `as_exact_as_it_is`.
+
+Two things follow that are worth writing down.
+
+**The placement assert now covers both routes.** `bake`'s doc has always said it
+panics when the faces round one corner sit at different placements, and the
+assert lived inside the fewer-than-three branch, so the documented panic was only
+half enforced. It is now in `where_the_model_puts_a_corner`, which both routes
+call. A corner in two places at once has no world position for anything to
+select against; a solid like that is broken rather than awkward, and §4.3's
+"corrupt is worse than a crash" is why this is an assert and not an `Err`.
+
+**The joined-face path pays for it too.** `corner_of_every_vertex_left` handles a
+solid whose coplanar faces were joined on the way in, and it now builds the same
+`PlacedSurface` set as the ordinary route to get each corner. That is work it did
+not do before and it buys nothing on that path — everything there is a plane, so
+the selection is never consulted. It was taken anyway, because the alternative is
+`derive_a_corner` having a second contract for one caller, and a second spelling
+of one question is how two callers come to disagree (the argument
+`side_of_surface` is already written on).
+
+### 75.4 A prune, and why it changes no answer
+
+The search stops at the first triple that solves to an exact point:
+
+```rust
+if point.uncertainty() == 0.0 {
+    break 'every_triple;
+}
+```
+
+This is not an approximation of the old behaviour, it is the old behaviour. The
+widths were compared with `<`, so once `best` held a box of no width no later
+triple could displace it; the loop was running `meet_of_three_surfaces` for
+triples whose answers it had already decided to throw away. §70.3's cost argument
+is that `derive_a_corner` is cubic in the faces round a corner — twenty meets for
+a corner where six faces meet — and this makes the well-conditioned case stop at
+the first.
+
+It bites on nothing this milestone builds. Every corner of every solid in the
+suite has exactly three faces round it, so there is exactly one triple and
+nothing to break out of. It is written for the corner §70.3 named and the fuzzer
+can reach.
+
+### 75.5 The benchmark, re-run
+
+§70.3's four numbers, re-measured on this machine with a throwaway probe (a
+crate under the session scratchpad that path-depends on this worktree, built
+`--release`, each figure the mean of a warmed loop). Nine runs of the binary,
+alternating between the base `bake.rs` and this one:
+
+```
+                                                    §70.3     measured here
+Plane::signed_distance_to                            3 ns     1.6 – 8.8 ns
+meet_of_three_surfaces, three perpendicular planes  571 ns     549 – 743 ns
+Model::validate over one block                   13.519 µs     11.2 – 13.4 µs
+Model::fuse of two blocks                         1.353 ms     1.29 – 1.39 ms
+```
+
+`Model::validate` and `Model::fuse` land on §70.3's numbers. The two nanosecond
+figures do not settle to a single value on this machine — `signed_distance_to`
+reads between 1.6 ns and 8.8 ns depending on what the surrounding loop got
+hoisted, and `meet_of_three_surfaces` swung 30% between two runs of the *same*
+binary. **So the 190:1 ratio in §70.3 is not reproducible to two figures here**
+and nothing below is argued from it; what survives re-measurement is the order,
+which is two to three hundred times, and §70.3's conclusion rests on that.
+
+The 34% figure survives too, and gets worse rather than better: eight corners of
+one block at one triple each is `8 × 549 ns = 4.4 µs` against a sweep of
+`11.2 µs`, which is 39%.
+
+**Before and after this section, `Model::fuse` of two blocks:**
+
+```
+base 41b7160    1.347 ms   1.389 ms   1.288 ms
+this section    1.386 ms   1.307 ms   1.302 ms
+```
+
+Indistinguishable, and that is the expected result rather than a lucky one: a
+block's corners have three faces each, so the prune has nothing to break out of
+and the only added work is one `where_a_corner_lands_after_moving` per corner of
+a placed solid — sixteen calls against a millisecond. **The consultation is free
+on the shape the kernel builds today**, which is what makes it affordable to put
+in the path of every corner rather than behind a flag.
+
+The command, for whoever re-runs it:
+
+```
+mise exec -- cargo build --release --manifest-path <scratchpad>/corner-cost/Cargo.toml
+<scratchpad>/corner-cost/target/release/corner-cost
+```
+
+The probe is not checked in. It measures four things across three crates and
+would be a fifth `benches/` file for one paragraph; §13's rule about a part with
+no named consumer covers a benchmark as well as a feature. What is checked in is
+this section, which is what the next reader needs.
+
+### 75.6 What §70.3 owed, and what is still owed
+
+§70.3 owed two things to `bake.rs`. This settles one and a half of them.
+
+**Settled: the consultation.** `derive_a_corner` reads the model's corner, the
+doc and the code agree, and there is a test either way — a corner the model
+places at one of two poles, and a corner whose box holds both and is therefore
+passed over.
+
+**Settled: the comparison, as a selector.** §70.3 wanted "nothing compares a
+baked corner with the corner the model stored" fixed, and the overlap test is
+that comparison, made where §70.3 said it belonged — in the thing that
+re-derives, which is the only thing holding both points.
+
+**Was owed, and the three reasons it was left owing were all wrong.** What stood
+here said the overlap test could not be made universal, and gave three reasons
+for it. A *single*-place triple was indeed still taken without asking whether the
+model's corner was anywhere near it, so the ill-conditioned corner §70.3
+describes — three surfaces at a grazing angle, a corner close to all three and
+far from where they cross — did still pass. That much was true. Each of the three
+reasons was disproved by measurement in §78, which took the one line and is where
+the detail lives. The three corrections belong here, at the sentences that were
+wrong.
+
+*The evidence was not evidence.* This paragraph read the `1e-12` of slack in
+`re_deriving_the_corners_of_a_turned_cube_gives_boxes_that_hold_them` as a box
+that sometimes fails to overlap a box. It is not that comparison at all:
+`corners_as_stored` goes through `VertexView::point()`, which hands back three
+bare `f64` and no box, so the test holds a certified box against a plain point
+and the slack sits between those two. Set the slack to `0.0` and the test passes
+— **72 coordinates checked, every one strictly inside, worst margin 1.665e-16**.
+Two lanes measured that independently and the second corrected the first, which
+had reported 1.776e-15: that figure is the *largest* low-side margin, the
+loosest of the 72 and not the tightest. Whether a box can miss a box on curved or
+grazing-angle input is untouched by any of this — the `1e-12` was never evidence
+either way, in either direction.
+
+*The named error was the wrong one.* Refusing a single-place triple does not
+produce `Invalid::VertexOffItsFacePlane`. It leaves `derive_a_corner` with no
+placement at all, which is `Error::Undecidable` with a record naming
+`WHERE_THREE_SURFACES_MEET`. `VertexOffItsFacePlane` comes from the
+`side_of_surface` sweep further down the same function, and that sweep tests the
+**derived** point — a stored corner sitting off its own plane never reaches that
+arm.
+
+*And "solids that fuse today" is not the set `validate` already refuses.* This
+paragraph reads as though a stricter `bake` could only refuse what
+`Model::validate` refuses anyway. Nothing gates `bake` behind `validate`.
+`bake()` is the first step of `Model::fused_under`; `Assembly::commit`'s
+`was_sound` self-check runs *after* it and is `cfg!(debug_assertions)`, so a
+release build runs no `validate()` inside `commit()` at all (§78.10); and
+`a_union_can_be_united_again_because_every_corner_of_it_still_has_three_planes`
+(`crates/rcad-topo/tests/fusing_solids.rs:799`) feeds one fuse's raw output
+straight into the next fuse's `bake()`. Whatever a stricter `bake` refuses, it
+refuses on its own account and nothing upstream has filtered it first.
+
+**What the one line actually cost.** Bit for bit, 30 solids the kernel had
+already accepted, plus a changed reason for 3 already refused. With the stored
+corner given the room that writing it down costs, none — no published number
+moved. §78 has the sweep, the mechanism worked out in exact rational arithmetic,
+and the shape of the 33.
+
+Every `how_often_*_refuses.rs` suite still publishes the rate it published
+before — `mise exec -- just t -E 'test(/how_often/)'` is green, and those suites
+assert their own numbers, so green *is* the statement that nothing moved. That
+is what "a single place is taken exactly as before" predicts. The whole gate was
+green at **1808 tests, 0 skipped** on this unit's tree, up two from 1806 — the
+two new ones. Read that paragraph as the record of this unit and not as the
+current shape of the code: a single place is no longer taken as before, and
+§78.7's sweep is why the rates are unmoved anyway.
+
+**That caveat was aimed at what the code does, and it did not reach the count or
+the command.** Both stood here in the present tense, which reads as a claim about
+today: the recipe was `just default` until 2026-09-08 and is `just gate` now, and
+the tree §78 closes on is at **1815 tests, 0 skipped**. Neither figure is a bound
+anything asserts — each is the record of the tree it was measured on, and the
+next unit's will differ again.
+
+## 76. Two ways `prune-worktrees` removed the wrong tree, recorded 2026-09-08
+
+`just prune-worktrees` (§50.8) removes a worktree once it is clean and its
+branch is an ancestor of `main`. Two ways that test picked the wrong tree, both
+found in the same afternoon, and it had no selftest at all — `clean-targets`,
+the sibling recipe right above it in the `justfile`, has had one since it was
+written (`check-clean-targets-selftest`); `prune-worktrees` did not.
+
+### 76.1 The tree holding `main` is an ancestor of itself
+
+`main` is trivially an ancestor of itself, so the worktree that had `main`
+checked out fell through the same test as any merged lane branch and was
+force-removed. This is not a hypothetical: it happened on 2026-09-08. The
+sweep removed `rcad-worktrees/wave-1`, where `main` was checked out, leaving
+`main` checked out nowhere — the exact state §60 exists to prevent. It was put
+back with `git worktree add …/wave-1 main`.
+
+The fix is a check ahead of the ancestry test: a worktree whose branch is
+literally `main` is kept, with its own reason in the output, because §60
+already settled that `main` lives in a worktree and never the hub — this
+recipe agreeing with that rule is not a judgement call left to ancestry.
+
+### 76.2 A detached worktree was judged by whichever tree you stood in
+
+`git rev-parse --abbrev-ref HEAD` returns the literal string `HEAD` for a
+worktree checked out detached, not a branch name. The old recipe then asked
+`git -C "$repo" merge-base --is-ancestor "HEAD" main`, and `$repo` came from
+`git rev-parse --show-toplevel` with no `-C`, which from a linked worktree
+returns *that* worktree, not the hub. Standing in the tree holding `main` — the
+natural place right after a merge — `"HEAD"` resolves there to `main` itself,
+trivially its own ancestor. Every clean detached worktree would have been
+removed, whatever commit it actually held.
+
+This had not happened yet when it was found, and it is worse than §76.1: a
+branch survives a worktree's removal because the branch still exists and still
+names its commits (the sweep never deletes branches, only worktrees). A
+detached tree has no branch. Its commits are anchored only by that worktree's
+`HEAD`, and removing the worktree removes the anchor — a commit not otherwise
+reachable becomes collectible. `rcad-worktrees/bend-s-slide`, detached and
+clean, was exactly this shape the day this was found.
+
+The fix judges a worktree by its own commit, not a name resolved through
+whatever directory the command happens to run from: `git -C "$tree" rev-parse
+HEAD` reads it straight from the tree in question. That also retires the old
+`[ -z "$branch" ]` guard — it was meant to catch exactly this case and never
+did, because `HEAD` is not empty. A detached tree is now recognized directly
+(`branch = "HEAD"`) and kept unconditionally, the same way a locked or dirty
+one is, rather than run through the ancestry test at all — a commit reachable
+from `main` today does not make the anchor disposable, since nothing but that
+worktree's `HEAD` names it as safe to keep. `prune-worktrees` also gained a
+`dir="."` argument, matching `clean-targets`, so a selftest can point it at a
+fixture instead of the repo it runs in.
+
+### 76.3 What let both survive
+
+Neither defect was reasoned out from reading the recipe; §76.1 was read off the
+worktree list after the fact, and §76.2 was found by working out git's
+worktree semantics by hand, not by a test failing. `check-prune-worktrees-selftest`
+now pins five outcomes against one fixture: the tree holding `main` survives,
+a locked tree survives, a dirty tree survives, a clean detached tree survives,
+and — because a guard that keeps everything passes the first four for free and
+proves nothing — a clean lane branch actually merged into `main` is removed.
+It is wired into `default` next to `check-clean-targets-selftest`, so a
+`prune-worktrees` change without a passing selftest is a red `just default`,
+not a quiet gap noticed only when it next deletes the wrong tree.
+
+### 76.4 Most trees carry no lock, and that is not a hook failure
+
+`rcad-51` lost its worktree twice, and the obvious suspects — `prune-worktrees`
+above, or the hook that is supposed to write the lock — are both innocent. The
+cause is arithmetic about dates.
+
+The lock became the ownership record in `925669a`, 2026-09-06 02:09. It is
+written by `.claude/hooks/worktree-create.sh`, and `git show
+925669a^:.claude/hooks/worktree-create.sh` has no `worktree lock` line at all
+where `925669a`'s has one. So every worktree older than that morning was
+created by a hook that could not have locked it, and 15 of the 23 here are:
+from `rcad-fuzz` on 2026-09-01 through `spike-floor` at 20:24 on 2026-09-05.
+None of them carries a lock, none of them ever could have, and a clean one of
+them sitting on a branch already merged is removed correctly by a recipe with
+no way to know anyone wanted it. **A missing lock on a tree older than
+2026-09-06 is expected**; it is evidence of nothing.
+
+Dates read off the mtime of each tree's `gitdir` file, which is a proxy and
+worth one check rather than an assumption: for all five locked trees the ISO
+timestamp inside the lock reason equals that mtime to the second — `fuzz-fuse-soak`
+locked `2026-09-07T09:39:42Z` against an mtime of 11:39:42.48 +0200, and the
+same for `dispatch-2`, `hub-rule`, `fuse-skin-validation` and `questions-grammar`.
+Five for five is not a proof, but a proxy that agrees with the only independent
+record available is worth more than one that was never compared to anything.
+
+**Three trees younger than the rule carry no lock either, and they are the
+interesting ones.** `agent-aa03cabfcfa3d9101` (2026-09-06 09:13),
+`fuzz-verify-main` (2026-09-07 14:43) and `wave-1` (2026-09-08 18:56). The
+mechanism is that the hook is a *tracked file, read from the session's own
+checkout*: a session working in a tree whose HEAD predates `925669a` runs the
+version with no lock in it, however new the worktree it is creating. And a tree
+made by hand with `git worktree add` never runs the hook at all — which is what
+the two named lanes are. So the rule's start date is not one instant across the
+repo; it arrives in each session as that session's checkout catches up.
+
+`wave-1` is the one to notice: it holds **`main`**. §76.1 is why that is safe
+today — the recipe keeps the tree holding `main` — but the ownership record and
+the guard now disagree about which trees are protected, and only the guard is
+tested. That is a gap and not a limit: it is reachable, and the fix is a lock,
+not a paragraph.
+
+Not written down: which session left `agent-aa03cabfcfa3d9101` unlocked. The
+mechanism above explains it and one bad hook run explains it equally well, and
+nothing here distinguishes them. `rcad [a57470]` declined to claim it, and so
+does this.
+
+## 77. A gate that asks about the machine it runs on, recorded 2026-09-08
+
+`check-plugins` asks two questions. Are the three plugin directories there, and
+has Claude Code been *told* about them. The first is about this checkout and a
+runner can answer it. The second is about a Claude Code installation, and a
+runner has none — so on CI it is not a question with a wrong answer, it is a
+question with no answer at all.
+
+That difference had never come up, because until 2026-09-08 CI ran `just test`.
+The first push that ran the whole gate died on it.
+
+### 77.1 The first `just default` on a runner, red in 31 seconds
+
+Run `34260645261`, the push of `02367fc`. It printed `3 plugins, all where this
+repo expects them` — so the marketplace clone worked and `CLAUDE_PLUGINS_ROOT`
+resolved — and then failed on the arm after it: `marketplace
+mattiasgronlund-local is not registered`, and all three plugins `on disk but
+not declared to Claude Code`.
+
+**The three greens above it do not cover this and never could.** They ran
+`just test`: `git show d5bb95a:.github/workflows/ci.yml` ends `- run: mise exec
+-- just test`, and `d5bb95a` already contained the commit that added the
+declaration arm. So `02367fc` is the first `main` commit whose runner reached
+it. Saying "CI is green" was true and covered nothing here, which is the same
+shape §62 records — a sweep that could only ever return one answer.
+
+The pre-flight sweep that was supposed to catch exactly this missed it by one
+line. It pointed `CLAUDE_PLUGINS_ROOT` at an empty directory, which fails the
+*presence* arm and stops there, one line above the arm that broke. Pointing it
+at a real clone passed — on a machine that has the marketplace registered,
+which is the reason a runner does not have.
+
+### 77.2 The predicate is the config directory, not `CI`
+
+Three predicates were on the table and two of them are worse.
+
+`CI` was the first draft and is wrong in both directions: a human who exports it
+loses the check silently, and a runner that does not set it gets a red nobody
+can act on. It is a proxy for the thing rather than the thing.
+
+**The config directory is the thing.** `~/.claude` *is* the installation —
+`settings.json`, `plugins/known_marketplaces.json`,
+`plugins/installed_plugins.json` are all inside it — so its absence is not
+evidence that there is no Claude Code, it is what "no Claude Code" means. Any
+machine a person works on has one, so the skip cannot quietly fire there. That
+argument came from the peer session that landed `3e59648`, which fixed the red
+in the `justfile` within the hour; this section keeps the argument and moves
+where it lives (§77.3).
+
+One correction to it. `CLAUDE_CONFIG_DIR` moves that directory, and the guard
+and the file reads have to agree on where it is — which they could not while
+`$HOME/.claude` was written out in four separate places and the guard asked
+about a fifth. It is one `config` variable now, and two of the five selftest
+cases are that agreement in its two halves.
+
+**And it skips out loud.** Printing what it did not do rather than reporting a
+pass it did not earn is §45's lesson: the corpus tests used to print "skipping"
+and return green, and a green suite had then never read a real file. Skipping
+and passing are both exit `0`, so the selftest checks the words too — without
+that, an unconditional `exit 0` at the top of the script passes every
+exit-code case.
+
+### 77.3 Declaring the plugins in the tracked settings file, and why not
+
+The obvious alternative was to commit an `enabledPlugins` block to
+`.claude/settings.json` so the runner could read the declaration out of its own
+checkout. `/plugin install` had in fact already written a partial one there,
+which is how the option came up at all.
+
+It is refused on two counts, and the second is the one that settles it.
+
+`enabledPlugins` alone does not pass: the marketplace arm is separate and needs
+`extraKnownMarketplaces` beside it. And `has($m)` is that arm's entire test, so
+a placeholder value passes while asserting nothing — which is precisely the
+failure `check-declared.sh` exists to catch, reintroduced in the file meant to
+satisfy it. Measured against a throwaway repo root with an empty home, by the
+peer session, before either of us wrote anything.
+
+The deeper count: **it would be green for a reason the runner does not have.**
+Declaring a plugin to a machine with no Claude Code enables nothing. The line
+would say something true about this repo's intent and nothing about the runner,
+and it would land for anyone cloning, naming a marketplace id that means
+nothing to them.
+
+The same rewrite had also deleted `worktree.baseRef: "head"` (`e09a134`) as
+collateral. Restoring that is repair, not a settings change; dropping the
+`enabledPlugins` block put the file back to what is committed.
+
+### 77.4 The guard lives in the plugin, not in the justfile
+
+Both repos ask this question, so the guard belongs where the question is
+implemented. `3e59648` put four lines in `rcad`'s `check-plugins`; this moves
+them into `check-declared.sh` and takes them back out of the `justfile`, which
+leaves one copy instead of two — §64's whole subject, and `rscene` is the repo
+that found the silent-plugin case in the first place.
+
+`check-declared-selftest.sh` holds five cases and joins `bin/selftest.sh`, which
+`just check-hooks` already runs and `just default` already gates. The cases are
+not symmetric on purpose. **The direction that matters is the human one**: a
+skip that leaks off a runner turns the check off for everybody and nothing says
+so, which is the silent case the check was written for, restored by its own
+fix. The runner direction is there because a test of one direction is a test of
+neither.
+
+Checked against mutants rather than by reading: the guard removed fails two
+cases, the guard made unconditional fails three, and `CLAUDE_CONFIG_DIR`
+ignored fails the two that exist for it.
+
+The pin in `ci.yml` moved from `952672e` to `f5f2f48` in the same commit, and
+that bump is load bearing rather than housekeeping — pinned below it, the
+runner has no skip and `just default` is red again.
+
+### 77.5 What a CI green now covers
+
+Everything a local green covers except one arm, and the arm is named. The three
+plugin directories, the questions parser selftest, every other `check-*` recipe
+run on the runner exactly as they run here. Only "has Claude Code been told" is
+skipped, and only where there is no Claude Code to have been told.
+
+**Run `34266469454`, push of `e8ae455`, is the first `just default` to go green
+on `main`.** It reported 1811 tests run, 1811 passed, 0 skipped — the same three
+numbers a local `just default` gave on the same tree, which is the agreement a
+runner exists to produce. It printed `no /home/runner/.claude, so no Claude Code
+to have been told about mattiasgronlund-local: the declaration check is skipped,
+not passed`, so the skip fired where it was meant to and said so.
+
+It took two more red runs to get there, and neither was about plugins. §77.6.
+
+### 77.6 A check that asked what kind of terminal it had
+
+Runs `34264306999` (push of `3e59648`) and `34265339769` (push of `5b2413e`).
+Both cleared `check-plugins` — the skip printed, the marketplace clone resolved
+— and both died one recipe later on the same line:
+
+    wildcard arms over our own enums: 5 (0 direct, 5 composite), expected 88
+
+**Zero direct is a parse breaking, not eighty-three match arms going away.**
+`ci.yml` sets `CARGO_TERM_COLOR: always`, so clippy writes
+
+    ESC[1m ESC[33m warning ESC[0m ESC[1m ": wildcard match will also match ..."
+
+and `check-wildcards` counted with `grep -c '^warning: wildcard match'`, anchored
+at the start of the line. The escape sits where the anchor is looking, and every
+direct warning stops matching at once.
+
+**The number looked like a tree state, which is why it cost two pushes.** The 5
+that survived are the composite arms, and they come from an `awk` pass over
+`.rs` files that colour never touches. So the recipe reported a plausible count
+and sent its reader to §40 to hunt for a new wildcard, rather than saying the
+count had failed. A check that can be wrong should fail in a way that names
+itself; this one failed in the vocabulary of a real defect.
+
+**Two people measured it, and the second measurement is the better one.** The
+dispatcher session reproduced the failure with `CARGO_TERM_COLOR=always just
+check-wildcards`, which gives the runner's line byte for byte. A peer session
+then read one clippy log two ways: anchored grep as the recipe writes it, 0;
+the same log with the escapes stripped, 83. 83 + 5 = 88, the pinned count. The
+first shows the failure happens; only the second shows the arms were in the log
+the whole time.
+
+**The fix is three parts and each does something the others do not.**
+`_wildcard-direct-count` takes the count out of the clippy run and strips ANSI
+before matching, so the answer is the same either way — the same split `t` and
+`_test-digest` already use, and for the reason the comment there gives: a parser
+kept apart from the run is one you can hold against logs whose answer is already
+known. `CARGO_TERM_COLOR=never` on the clippy call keeps the saved log readable,
+which matters because the failure branch greps `'^error'` out of it and was
+anchored the same way. And `0 direct` against a non-zero ledger now says the
+parse broke and names the log.
+
+**The test is the coloured line itself.** `check-wildcards-selftest` carries the
+same warning twice, once plain and once with the escapes `cargo clippy` actually
+emitted under `CARGO_TERM_COLOR=always` — captured from a real run, not guessed
+at. Both must count 2. Mutation-checked by taking the `sed` back out, which
+reports `read 0 warnings from coloured.log, expected 2`: the runner's own number.
+
+**This is the third instance in a day, and three is what makes it a rule.** Each
+one is a check that passed for a property of the environment it ran in rather
+than a property of the tree.
+
+- §77.1's pre-flight sweep pointed `CLAUDE_PLUGINS_ROOT` at a real clone on a
+  machine where the marketplace is registered.
+- §77.2's declaration arm asked a question that only has an answer where Claude
+  Code is installed, and every machine that ran it had one.
+- This one anchored a grep at `^` and was only ever run where cargo had no
+  terminal to colour for. A `$(...)` capture is not a tty, so a local green
+  earned the anchor a pass a runner never would.
+
+The technique that found all three is the same: **take away what the environment
+supplies and run it again.** Point the variable at an empty directory. Point
+`HOME` at one. Force the colour on. A green is evidence about the environment it
+ran in and about no other.
+
+One rule falls out of it that is worth stating on its own: **a recipe that parses
+a tool's output owns the format it parses.** Reading a format the ambient
+environment chooses is how a check ends up measuring the machine.
+
+**What a green still cannot cover.** After the fix, every non-compiling `check-*`
+recipe was run in a built runner shape — a plain `--no-local` clone with one
+worktree, colour forced on, `HOME` empty — and all passed, `check-hub` correctly
+answering that a lone checkout is not a hub. That is evidence and not proof:
+`check-kache-off-on-ci` forces `CI` both ways itself and is indifferent, and the
+four selftests that build their own repositories already pass `-c user.email`
+explicitly, so the identity trap was closed before anyone looked. The gap that
+remains is the one that has now bitten three times — an environment difference
+nobody has thought to remove yet.
+
+### 77.7 Three versions of the plugins, and the gate asserts a different one than CI
+
+§77.4 called it a limit that nothing checks a human's installed plugins against
+the CI pin. Measured on 2026-09-09, that limit is wider than the sentence
+suggests, and in a direction the sentence does not mention: **the two gates run
+different numbers of cases and neither says so.**
+
+`just check-questions-selftest` here runs 20 parser + 22 status line + 22 TUI =
+**64**, green. `ci.yml` clones the marketplace at `f5f2f483`; that tree's own
+`selftest.sh`, extracted with `git archive` and run, is 20 + 22 = **42**, green.
+Both greens, different suites, and the only difference in the output is a count
+nobody reads back. `rscene` measured the same two numbers on its own machine and
+runner the same day.
+
+Only `questions` diverges. `guardrails` is byte-identical between `f5f2f483` and
+the checkout, so `check-hooks` asserts the same 24 + 8 + 5 either way. "The pin
+is stale" and "the pinned suite is smaller" are different claims and only the
+second one is true.
+
+**Where the code being run actually comes from.** `plugins_root` defaults to
+`~/git/mattiasgronlund/claude-questions/plugins`, so every recipe here executes
+scripts straight out of that working tree — a push to the marketplace changes
+what `just gate` runs on this machine with no install step and no pin move. That
+is what makes the 42/64 gap appear without anyone deciding anything.
+
+`~/.claude` holds two other things and neither is the code: the declarations
+`check-declared.sh` reads, and — for `questions` alone — a leftover copy at
+`~/.claude/plugins/cache/mattiasgronlund-local/questions/0.1.0`, byte-identical
+to `952672e`. `installed_plugins.json` names cache paths for all three plugins
+at that sha, but the `guardrails` and `practices` directories it names **do not
+exist**. The hooks run anyway: a `sed -i` on a tracked `.md` was refused by our
+own hook while this was being written, and there is no cached `guardrails` for
+that to have come from. So a directory-source marketplace does run in place, as
+`CLAUDE.md` says, and the install metadata is a third number — `952672e` —
+describing neither what the gate runs nor what CI runs.
+
+Not established: which copy Claude Code loads the `questions` *skill* from, since
+that plugin is the one with both a cache copy and a checkout. The hooks question
+is settled by the probe; this one is not, and no claim is made.
+
+`rscene` fixed its half by bumping its pin and making the recipe print the sha it
+ran — `rscene` `0a97b18`, run `34327882376`, where the runner log now carries
+`questions cases from … (4728682)` beside the three counts. rcad has not done
+either. The pin here stays at `f5f2f483` until there is a reason of rcad's own to
+move it, and a wider pinned suite is such a reason; that it is also `rscene`'s
+reason does not make it rcad's.
+
+## 78. A corner a few ulps from where its own planes cross, recorded 2026-09-09
+
+§75.2 made `the_place_the_model_points_at` choose between the places three
+surfaces meet by asking which of them the model's own corner sits in. It asked
+that question only when there was more than one place to choose from. One place
+and it returned that place, unasked:
+
+    if let [only] = places {
+        return Some(*only);
+    }
+
+That is every corner of every flat solid, because three planes meet at one point
+or at none. The test §70.3 asked for was in the code and switched off across the
+whole polyhedral half of the kernel.
+
+§75.6 called making it universal "one line", said the line was not taken for a
+reason that was measurement and not taste, and gave three reasons. All three were
+wrong; §75.6 now carries the corrections at the sentences that were wrong. This
+is the unit that found that out by taking the line, and the two numbers it turns
+on are: bit for bit the line costs **30 solids the kernel had already accepted**,
+and with the stored corner given the room that writing it down cost it costs
+**nothing at all** — no published rate moved by a single fuse.
+
+### 78.1 A test skipped exactly where there was nothing to choose
+
+Two different questions were being run together, and only one of them goes quiet
+when there is a single place.
+
+*Which of these places is the corner* has no content when there is one place.
+That is what §75.2 wrote down — "one place and the model is not consulted at all
+— the surfaces gave a single answer and there is nothing to choose" — and it is
+true of the arithmetic.
+
+*Is this triple talking about this corner at all* has exactly as much content as
+ever. It is the question §70.3 asked for, and it was the one being skipped.
+
+The corner §70.3 describes is the one that shows the difference: three surfaces
+at a grazing angle, a corner close to all three and far from where they cross.
+The three surfaces do meet, at one place, and that place is nowhere near the
+corner the model wrote down. The guard took it without a word, and
+`derive_a_corner` then wrote the meet into the answer as if the model had agreed.
+
+### 78.2 What asking bit for bit cost, and what the number 33 is
+
+Take the guard out and change nothing else. **30 solids the kernel had already
+accepted are refused, and 3 that were already refused change the reason they
+give.** The skew corpus goes from 51 refused of 429 to 81 — 11.9% to 18.9%, over
+the 18% §22.4 publishes as its threshold, so the suite goes red and prints the
+number itself. That is where the counts in this section come from: the
+`how_often_*_refuses` suites assert their own rates, so a failure message is a
+measurement.
+
+**33 is the size of the "where three surfaces meet" bucket. It is not a count of
+newly-refused fuses.** That distinction was got wrong twice inside this unit —
+once in a commit message and once in a doc comment, both corrected — which is why
+it is spelled out rather than left to arithmetic. `WHERE_THREE_SURFACES_MEET` is
+what a corner nothing could place reports. 30 of the 33 are fuses that used to
+answer and now report it; 3 are fuses that already refused for some other reason
+and now refuse for this one. A reader who takes 33 as "33 more refusals" is off
+by three, and — worse than the three — has the wrong picture of what moved.
+
+### 78.3 All thirty are gaps, by §16.10's test
+
+§16.10 splits a refusal two ways. A **limit** is where the answer does not exist;
+a **gap** is where it does and the arithmetic could not reach it. Defer a limit,
+fix a gap. All 30 are gaps, and there are three separate things to show for it.
+
+**The answer exists, and no fat box is hiding it.** The triple places the corner
+in a box **one ulp wide**, and both boxes in the comparison — the meet's and the
+stored corner's — are certified enclosures of true points. Neither is wide enough
+to be papering over the disagreement. The two points genuinely differ.
+
+**Nothing here is undecidable.** `side_of_surface(surface, stored)` over all 99
+planes of the 33 corners gives **18 `Neg`, 15 `Pos`, 66 `Zero`** — and 18 + 15 =
+33, exactly one plane per corner coming back with a decided sign. A decided sign
+is a proof that the stored corner is off that plane, and the other two planes
+hold it exactly. Not one `Undecidable` in 99. The arithmetic could see the
+disagreement perfectly well; it was the comparison that threw the answer away,
+after which `derive_a_corner` had no placement left to report and said so.
+
+**And the answer thrown away was the right one.** It is the meet of the three
+planes, which is what §17.1 says a corner is. The thing a few ulps out of place is
+the corner the model wrote down, not the meet — §75.2's "the model's corner never
+places the point" cuts this way as well as the way it was written.
+
+Gaps, then, to be fixed rather than deferred.
+
+### 78.4 Where the few ulps come from, worked out exactly
+
+Not "a few ulps, probably rounding". Exact rational arithmetic over the six
+situations, which is small enough to do by hand.
+
+`build_side_face` pins a wall's plane through the **start** of its bottom edge.
+The offset is computed to make `n·p = off` hold at that one point. The corner at
+the *other* end of that edge inherits whatever `n·p` rounds to there, so it lies
+on the plane only up to a rounding — and the meet the three planes solve for sits
+a few ulps from the corner the model stored.
+
+The residual is exactly **±1/2⁵⁴, ±1/2⁵³ or ±1/2⁵²** in every one of the six, and
+the true meet lies **0.28 to 1.12 ulps** from the stored corner. Three of the six
+are under one ulp. That is the whole of the disagreement: it is the width of the
+number and nothing else.
+
+**The normal is not the culprit, and that was checked rather than assumed.** The
+tilted walls carry `(±1, ∓2, 0)/√5`, and the obvious suspect is the unit-length
+scaling doubling a rounding on the way in. It does not: `2·fl(1/√5)` and
+`fl(2/√5)` are equal bit for bit. The normal is as exact as an irrational normal
+gets, and the miss is entirely in the offset having been pinned at one end of an
+edge.
+
+### 78.5 The shape of the thirty-three
+
+The 33 are **11 configurations × 3 rules** — union, intersection, difference.
+Every one of them fails while baking an **input** solid, never the answer, which
+is why the rule makes no difference: the same corner of the same input is being
+re-derived whatever is being asked of it. So the 33 are really 11 facts wearing
+three hats each.
+
+Under those 11 are **six distinct (corner, three-plane) situations**, and all six
+look the same:
+
+- the corner is at `z = 0`, on the bottom cap, at small whole-number coordinates;
+- the three planes are the floor, one axis-aligned wall, and one tilted wall
+  whose normal is `(±1, ∓2, 0)/√5` — no other tilted normal appears in any of the
+  six, and a `skew ±1` wall appears in none of them;
+- the stored corner's box has **zero width in all three axes**. It is an exact
+  `f64` point, which is why "widen the meet's box" was never the fix here;
+- the miss is on the **x axis only**, and how far follows from §78.4 with no new
+  measurement. `build_side_face` (`crates/rcad-topo/src/build.rs:908`) pins the
+  wall through `ring[index]` with normal `(along_y, −along_x, 0)`, so the tilted
+  wall's `|n_x| = 1/√5` and the whole residual is taken up along x:
+  `|Δx| = |r| / |n_x| = |r|·√5`. The three residuals give **1.241e-16, 2.483e-16
+  and 4.965e-16**.
+
+**Say which ulp.** The corners sit at small whole-number coordinates in `[2, 4)`,
+where an ulp is `2⁻⁵¹ = 4.441e-16`, and **in ulps of the corner's own coordinate
+the three misses are 0.2795, 0.5590 and 1.1180** — exactly §78.4's "0.28 to 1.12
+ulps, three of the six under one". In ulps of 1.0, where an ulp is
+`2⁻⁵² = 2.220e-16`, the same three misses are **0.559, 1.118 and 2.236**. The two
+units differ by a factor of two, so a bare "n ulps" here says nothing.
+
+What stood in this bullet was "1.11e-16 to 4.44e-16 — 1 to 4 ulps of 1.0", and it
+was wrong twice over. It scaled the residual by **2** rather than √5 — 2 is
+`1/|n_x|` for no normal in the six — and then counted the result in units of
+`f64::EPSILON / 2 = 2⁻⁵³ = 1.11e-16`, which is half an ulp of 1.0 and not an ulp
+of anything.
+
+**`|skew| = 2` is necessary and nowhere near sufficient.** 99 of the 143
+configurations in the corpus contain a solid with a ±2 shear, and **11 of those
+99 hold a corner the bit-for-bit guard could not place**. Those 11 times the three
+rules are the whole 33-entry bucket — they are not 11 refusals on top of it, and
+the bucket is not 33 newly-refused fuses either: 30 of the 33 are fuses that used
+to answer and 3 were already refusing for another cause (§78.2). The tilted wall
+is the setting, not the cause; what picks out the 11 is which edge of which face
+got pinned where, and that is not a property of the shear.
+
+Across every call the guard used to cover: **10 632 single-place calls, 33
+misses, 0.31%.**
+
+### 78.6 The room, read from `validate.rs` rather than copied
+
+The fix widens the stored corner's box on every side by
+
+    MEASURING_SLACK × Plane::SIGNED_DISTANCE_ROUNDOFF × L
+
+and takes `MEASURING_SLACK` from `validate.rs` — which became `pub(crate)` for
+it, value unchanged at 16.0 — rather than writing 16.0 down a second time.
+
+That is the point of the fix and not an implementation detail. `check_flat_face`
+grants a corner exactly this allowance against exactly this disagreement, and **a
+solid `Model::validate` accepts has to be one the fuse can bake.** Two constants
+that happen to be equal make that true by coincidence, and a coincidence drifts:
+the next person to tune one has no way of knowing the other was leaning on it.
+
+`L` is **the corner's own size, floored at 1.0** — not the model's
+`largest_coordinate()`, the way `Model::what_writing_a_plane_down_costs` measures
+it. Two reasons, and the second is the one with a price.
+
+- There is no model here to ask. `the_place_the_model_points_at` is handed two
+  points, and threading a model down to it would be threading it for this alone.
+- Model-wide would hand a corner at the origin the room a corner a kilometre away
+  earned. One feature far out and the test is loosened everywhere.
+
+The price is real and worth naming: a small corner on a face whose *other*
+corners are huge was rounded by the big face's arithmetic and is granted the
+small corner's room. That triple then says nothing about it, and another has to
+place it; if none does, the fuse refuses. A refusal and never a wrong answer,
+which is the direction to be wrong in.
+
+**This is a tolerance, and the doc comment says so.** §75.2's "needs no
+tolerance, no constant and no policy" was true of what it was written about —
+comparing two certified boxes round two readings of one point. The model's corner
+and the model's surfaces are not two readings of one point. Both boxes have zero
+width when the arithmetic is exact, so *any* rounding at all is a miss, and there
+is no way to compare them without granting something. What keeps this from being
+a modelling tolerance is which number it is: the width of the arithmetic, not a
+distance anybody chose. `Scale::RELATIVE_LINEAR_TOLERANCE` is `1e-9`
+(`crates/rcad-geom/src/scale.rs:69`); the room granted here is
+`16 × 4 × f64::EPSILON = 1.421e-14` of `L`. That is **70 369× wider — not quite
+five orders of magnitude** — and it would swallow a corner somebody placed off
+its plane on purpose. §78.7 does the same division one subsection down with
+`1e-10`, a tenth as large, and gets 7 037×; the two agree because they are the
+same ratio ten apart.
+
+**"Seven orders of magnitude" stood here, and it is right about a different pair
+of quantities.** `allowed_wobble` (`crates/rcad-topo/src/validate.rs:1034`) reads
+`RELATIVE_LINEAR_TOLERANCE` against the largest coordinate, so it is about `1e-9`
+*relative*; a certified predicate errs at about `f64::EPSILON`, `2.2e-16`
+relative. That ratio is 4.5e6 — seven orders to the nearest power of ten, six and
+a half exactly. Neither quantity in it is the room this fix grants, so the two
+comparisons cannot stand in for one another.
+
+### 78.7 The factor, swept and not argued
+
+The 16 is not reasoned to. The corpus was re-run at each factor.
+
+| factor × `SIGNED_DISTANCE_ROUNDOFF` | `WHERE_THREE_SURFACES_MEET` | skew refusal rate |
+|---|---|---|
+| 0 (bit for bit) | 33 | 18.9% |
+| 0.25 | 6 | 13.3% |
+| 0.5 | 0 | 11.9% |
+| 1 | 0 | 11.9% |
+| 16 (shipped) | 0 | 11.9% |
+
+A gate agent re-derived the two boundary rows — 0.25 and 0.5 — independently,
+which is what makes the step between them a measurement rather than a typo.
+
+So the corpus needs **between 1 and 2 ε of `L`**, which is *less* than one bare
+`SIGNED_DISTANCE_ROUNDOFF`. Everything above 0.5 buys nothing that this corpus
+can see, and is headroom.
+
+The question worth asking is what the headroom costs, and the answer is that it
+is four orders of magnitude short of anything anyone would mind. A corner
+somebody placed `1e-10` off its plane is about **7 000×** the room 16 grants.
+Between "swallows a rounding" and "swallows a placement" there are four orders of
+magnitude of nothing at all, and 16 sits near the bottom of that gap — closer to
+the measured need than to the first thing it would be wrong to swallow.
+
+**No published number moved.** Every cell of the skew tally, and every
+`how_often_*` rate, came back to the value it had before any of this. Making the
+test universal is not a refusal-rate change; it is a hole closed at no measured
+cost.
+
+### 78.8 What a published bound is worth if nothing re-derives it
+
+This part was on nobody's list, and it is the part worth reading twice.
+
+While measuring the above, the corpus was found to have grown from **423 to 429**
+per family. The first guess was the generator, which is the wrong guess §38.8
+made and §39.6 corrected, and it was wrong again: the six new cases are two
+proptest regression seeds, checked in at `01e62c1` and `9b3a5fd`. The seed files
+*are* part of the corpus, so adding one seed grows every family at once.
+
+**Eleven figures across six doc comments were stale.** All six
+`*_IS_NOT_A_SOLID` counts had fallen, and they had fallen *together*, at one
+commit: `b4890f1`, "cuts: a solid's own planes cut its own faces". The direction
+is right — fewer answers are not solids because fewer answers are wrong — and
+**no band fired**.
+
+Not because the bands were unusually wide. End to end they were lattice
+`0.02..=0.10` at 5×, flush `0.10..=0.28` at 2.8×, elsewhere `0.02..=0.10` at 5×,
+turned `0.015..=0.09` at 6×, skew `0.005..=0.03` at 6× and leaning-alike
+`0.012..=0.08` at 6.67×. The replacements span 4.5×, so a sentence condemning the
+width condemns those too — and the flush band, kept as it was, is the *narrowest*
+of the six.
+
+What was wrong is **where the count sat inside the band**, which is a different
+number and the one that matters. Leaning-alike stood at 17 of 423 — 4.02% —
+against a lower end of 1.2%, so its count could fall to **30% of itself** before
+the band said a word. It fell to 41%, landed at 1.63%, and the band stayed quiet
+because 1.63% is still above 1.2%. A band drawn by the convention below has its
+lower end at two thirds of the count it was drawn around, so it speaks at any
+fall past 67%. That is the whole of the difference, and the fall factors in §78.9
+show it: of the six families, exactly two fell past two thirds — leaning-alike at
+0.41 and skew at 0.375 — and those are the two the archived re-run names below.
+
+They were re-derived to the convention this file already states for them,
+"roughly two thirds to three times", which makes every span 4.5×.
+`A_FLUSH_PAIR_IS_NOT_A_SOLID` is a deliberate exception, kept tighter at
+`0.10..=0.28`: the convention applied to it would have gone from 43–120 permitted
+fuses to 41–184, and no measurement asked for that loosening. A convention is not
+a reason to widen a band that is doing its job.
+
+The test of the new bands is whether they would have caught what got past the old
+ones, and that was measured on the archived trees rather than argued: under the
+new bands, **leaning-alike and skew would have fired at `b4890f1`**, and two more
+families came within one fuse of firing.
+
+**What that sentence means is the convention and not the shipped numbers**, and
+the difference is worth spelling out because the shipped numbers say the
+opposite. `A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID` ships as `0.011..=0.049`, which
+is the convention drawn around **today's** 7 of 429 — and the pre-`b4890f1` rate,
+17 of 423 or 4.02%, sits inside it. Run the shipped band on the archived tree and
+nothing fires; it cannot, because it was drawn around the count after the fall.
+The claim is about the convention: a band drawn by it around the count *at the
+time* has its lower end at 2.68%, and `b4890f1`'s 1.65% is below that.
+
+One more line, because the name misleads:
+`share_of_answers_that_were_not_solids_must_be_within` divides `not_a_solid` by
+`self.fuses`, not by the number of answers. A fuse that refused never got far
+enough for its answer to be judged, so the denominator counts cases the numerator
+structurally cannot reach. It is a share of fuses. §22.3's caveats say as much in
+prose about one family; the name says the opposite everywhere.
+
+### 78.9 §22.3's defect is not back, measured once and by nothing in the tree
+
+§22.3 records a shear applied as `S(ring) + at` instead of `S(ring + at)` — the
+image of nothing — whose symptom was a not-a-solid quietly becoming an ordinary
+solid. It was caught by a rate that did not add up. A rate is a weak instrument
+for it: the argument is that an affine map preserves incidence **exactly**, and a
+rate can only ever say that two numbers are close.
+
+So it was checked directly this time — **once, in a lane's scratchpad, and
+nothing in this repository re-derives it.** That is worth saying plainly, because
+it is §78.8's own subject two subsections up and this section would rather own it
+than smooth it. `a_pair_leaning_the_same_way()`
+(`crates/rcad-topo/tests/pairs/mod.rs:481`) is called from exactly one place,
+`crates/rcad-topo/tests/fuses_that_must_agree.rs:1423`, and builds each
+configuration **once**. The doubled build — each configuration again with
+`Skew::none()` — never left the scratchpad it was written in. Everything in the
+rest of this subsection is one lane's measurement at three commits, not a
+standing property of the tree, and §78.11 lists it with the rest.
+
+What that measurement said: build each leaning-alike configuration as drawn and
+again with `Skew::none()`, and the cell §22.3's bug lived in is **0 of 429 at all
+three commits**, as is its mirror. So, on this corpus, at those commits, measured
+once: the shear turned no not-a-solid into a solid and no solid into a
+not-a-solid. **"Incidence is preserved case by case" is what that supports — on
+this corpus, at these commits, measured once.** It is not a property anything
+re-checks, and the argument that an affine map preserves incidence exactly is
+still an argument.
+
+The rate did move, and it moved in a **different cell**, which is why the two
+numbers are not the contradiction they look like. Leaning-alike's not-a-solid
+rate fell from **4.0% to 1.6%**, and on identical configurations the unsheared
+build gives 12 not-a-solid answers where the sheared gives 7. **The missing 5 are
+exactly the cases the sheared fuse refused** — 12 = 7 + 5, with nothing
+unaccounted for. §22.3's cell is not-a-solid → **solid**; these 5 are
+not-a-solid → **refused**. A refused fuse never gets far enough for its answer to
+be judged (§78.8's denominator again), so the shear lowers the not-a-solid count
+by refusing, not by turning a not-a-solid into a solid. That is the opposite
+failure from §22.3's and it is benign.
+
+The fall was not proportional across families, and the split falls along the line
+anyone would draw in advance. **These factors are counts, not rates**: the
+not-a-solid count at `b4890f1` over the count at its parent, both on the same
+423-fuse corpus. Lattice 0.70, flush 0.85, elsewhere 0.71, turned 0.76 — against
+leaning-alike 0.41 and skew 0.375. **The two tilted-wall families fell about
+twice as far as the axis-aligned ones.**
+
+Turned shows why the unit has to be named. As counts it is 13 over 17, **0.76**.
+Today's rate over the parent's rate is a different question with a different
+answer: turned stands at 14 of 429 now, and `14/429 ÷ 17/423` is **0.81**. The
+figures above are the first of those.
+
+### 78.10 Two open items, named so nobody re-derives them
+
+Both are left open deliberately, and both are written out in enough detail to
+pick up cold.
+
+**One fuse went the wrong way at `b4890f1`.** Of today's 7 leaning-alike
+not-a-solid cases, six are members of the old 17 and one is new:
+
+    Union of
+      Frame { width: 5, depth: 3 }, height 2, at [0, 0, 0]
+      Comb { teeth: 1, tooth_height: 3 }, height 3, at [-1, 1, 2]
+      shear x_per_y: -1
+
+It answered at `cc959c1`, sheared and unsheared. It is not-a-solid now, sheared
+and unsheared, so the shear has nothing to do with it. `b4890f1`'s stated
+direction is that fewer answers are not solids because fewer answers are wrong,
+and this one went the other way. **Nobody has asked which of §16.10's two it is,
+and this section does not guess** — it may be a limit, it may be a gap, and
+saying which needs the same kind of work §78.3 did for the 30. Deferred because
+of the shape of the outcome: not-a-solid is a refusal, so nothing corrupt is
+written while it stands. What it costs is that the 7 is not fully attributed.
+
+**`Assembly::commit` self-checks nothing in a release build.** `was_sound` is
+
+    cfg!(debug_assertions) && model.validate(policy, &mut ProvenanceLog::new()).is_ok()
+
+so in release it is `false` and the `if was_sound { … }` block below it — the one
+whose `expect` reads "a fuse writes a valid model or does not write at all" —
+never runs. The doc comment above it explains *why the check is conditional on
+the model having been sound before the write*, which is a good reason and a
+different one; nothing there tells a reader the whole check is debug-only.
+Related in shape to §66: a promise the doc makes that the release build does not
+keep. Not changed here because it is a real decision with a cost on both sides —
+a full `validate` per commit is the quadratic sweep §4.3 exists to avoid — and it
+is not this lane's to make.
+
+### 78.11 The figures in this section that nothing re-derives
+
+§78.8's whole subject is a published number nobody re-derived, so this section
+closes by naming its own. A gate agent worked back through §78 from the tree and
+could not reach the following: each needs instrumentation that was never checked
+in, or a build of an archived commit. Read them as one lane's measurement on one
+day, not as standing properties.
+
+- **`18 Neg, 15 Pos, 66 Zero`** over the 99 planes of the 33 corners (§78.3).
+- **The residual being exactly ±1/2⁵⁴, ±1/2⁵³ or ±1/2⁵² in *every* one of the
+  six**, and the six situations sharing the shape §78.5 lists (§78.4, §78.5). The
+  arithmetic from a residual to a miss *is* re-derivable and is written out in
+  §78.5; the residuals themselves are not.
+- **`10 632` single-place calls, 33 misses, 0.31%** (§78.5).
+- **`99 of the 143`** configurations holding a ±2 shear, and the 11 among them
+  (§78.5).
+- **The bit-for-bit cost, 30 + 3 = 33** (§78.2). It was a suite failure message
+  when it was taken, and the guard it was taken without is back in, so nothing
+  prints it now.
+- **Every row of §78.7's sweep table.** The `0.25` and `0.5` rows were re-derived
+  independently by a gate agent, which is what makes the step between them a
+  measurement; no row is re-run by anything in the tree.
+- **`12 = 7 + 5` and the `0 of 429` cell at all three commits** (§78.9) — the
+  doubled build that produced them is not in the repository.
+- **The six fall factors** — lattice 0.70, flush 0.85, elsewhere 0.71, turned
+  0.76, leaning-alike 0.41, skew 0.375 (§78.9).
+- **Which families the new bands would have fired on at `b4890f1`**, and the two
+  that came within one fuse (§78.8). That needs archived trees.
+- **`1.665e-16`, the worst margin over 72 coordinates** (§75.6, and this unit
+  leans on it). The test is in the tree; the margin is not, because the test
+  ships `1e-12` of slack and reaching the figure means editing it to `0.0`.
+
+What *is* re-derived, every run: the shipped `how_often_*` refusal rates and the
+six `*_IS_NOT_A_SOLID` bands. Those suites assert their own numbers, so a green
+`just gate` is the statement that they have not moved. Nothing above is in that
+set.
+
+## 79. A gate arm that died without saying so, recorded 2026-09-09
+
+`check-corpus` (§44.10's companion, added when `corpus/fetch.sh` was) passed the
+first time it ran, on a corpus that was right. `rscene` runs a copy of it, and
+theirs was green while one of its three arms could not name a file at all. The
+recipe here is not exposed to that bug, and the selftest is here anyway; the
+difference between those two sentences is most of this section.
+
+### 79.1 What the arm was doing instead of working
+
+`rscene`'s copy sorted its two path lists `LC_ALL=C` and left the `comm` that
+compares them in the ambient locale. `comm` then reads its input as disordered,
+says so on stderr, and exits 1 — and under the recipe's own `set -euo pipefail`
+an `extra=$(comm …)` assignment that exits non-zero takes the whole recipe down.
+Their mutant run therefore named **nothing**, which read as three dead arms and
+was one abort before any arm could print. That misreading is worth more than the
+bug: an exit code standing in for an assertion is the layer the defect hid
+inside, and a suite that stops at the first fault hides the two behind it.
+
+Our copy has no `LC_ALL` on either sort or on the `comm`, so all three agree by
+construction and the arm works. That is a property of the recipe and not of the
+machine, which is the form of the claim that matters — "it depends on your
+locale" was how both of us first put it, and it is wrong.
+
+I also claimed the mixed configuration would produce a *silently* wrong answer
+at exit 0, reasoning that `comm`'s order check is a heuristic. That is reasoning
+and not a demonstration (§16.10). The search: all 256 subsets of eight names
+whose C and dictionary collations disagree, both sides C-sorted, every answer
+compared against the set difference computed independently. 255 warned; none was
+quiet and wrong; the one silent case was silent and correct. Withdrawn. What is
+demonstrated is that the mixed arm is *loud* and wrong — it emits names present
+in both lists — and that the recipe aborts rather than passing.
+
+### 79.2 Four mutations, each failing a different case
+
+`check-corpus-selftest` builds a synthetic six-file corpus and runs
+`check-corpus` against four copies of it. It touches no real corpus, so it runs
+on a machine that has never fetched one, and sits in `gate` beside
+`check-corpus` rather than behind it.
+
+Verified by mutating the production recipe, one mutation at a time, reverting
+between:
+
+| Mutation | What failed |
+|---|---|
+| `LC_ALL=C` added to both sorts, `comm` left ambient | the invented-file case, on the missing **name**, at exit code 1 |
+| the missing-file arm stops trimming `: FAILED open or read` | nothing, until the fifth guard — §79.3 |
+| the mismatched arm stops trimming `: FAILED` | the same, and the same guard catches it |
+| the invented-file arm's `ok=0` deleted | the same case, on the **exit code**, output naming the file and then saying `corpus matches … 5 files` |
+| the `.stp`/`.step` filter dropped from the walk | the `notes.txt` guard, in four places at once |
+
+The first and third are why both assertions exist. A mutation that leaves the
+exit code right and the name missing passes an exit-code check; a mutation that
+leaves the name right and the exit code wrong passes a name check. Neither
+assertion alone catches both, and this recipe now has one mutation for each
+direction on record rather than an argument that it might.
+
+The first mutation is the one that differs from `rscene`. There the selftest
+holds a fix; here there is no fix to delete, so proving the case is not vacuous
+means *adding* the bug. That asymmetry is worth stating rather than leaving a
+reader to assume the two repos' selftests verify the same thing.
+
+### 79.3 The two mutations the ported suite did not catch
+
+Dropping the `sed` that trims `: FAILED open or read` off the missing-file arm's
+names left all four cases green. The arm then prints
+`nested/deep one.step: FAILED open or read`, and the case asserts the substrings
+`not on disk` and `nested/deep one.step` — both of which are still there. A
+needle is a substring, so no case built this way can tell a trimmed name from an
+untrimmed one.
+
+That is a mutation surviving a suite written to catch exactly this class, found
+by running it rather than by reading it — the argument for verifying by mutation,
+restated one level up. The fix is a fifth guard beside the `notes.txt` one: no
+arm may leave `sha256sum`'s own wording in what it prints,
+`grep -qE 'FAILED( open or read)?$'` over every case's output.
+
+**`check-corpus` trims two suffixes, and only one of them had been run.**
+`: FAILED open or read` for a file that is gone, plain `: FAILED` for one whose
+bytes changed. The guard's regex covers both by construction, but covered and
+verified are different claims and this section asserted the second one from a
+run of the first. `rscene [3568f9]` said so, and it was right. Deleting the
+mismatched arm's trim: all four cases green, and with the guard,
+`FAIL an arm printed sha256sum's wording rather than a bare name: aB.stp: FAILED`.
+So both trims are now demonstrated rather than one demonstrated and one argued.
+
+The guard is safe only while no case exercises `check-corpus`'s "failed in a way
+this recipe does not parse" arm, which prints `sha256sum`'s output raw and means
+to. A future case that reaches that arm must assert on it rather than be excused
+from the guard.
+
+`rscene`'s copy had the same hole in both trims. They ran the two mutations in
+their own tree and reported both green; that half is their word and not a run of
+ours, which is the distinction this repo owes on any claim about a tree it does
+not build. Their §12 bullet had said "the missing-file arm's `sed` ... so it
+prints its heading and not the file", which is the *printing* `sed` and is
+genuinely caught; the commit message on `9b8256f` said only "the missing-file
+arm's `sed`", and that arm has two. The ambiguity was theirs and the misreading
+mine, which is why the fifth mutation exists at all.
+
+They closed it on 2026-09-09 in `rscene`'s `d712f23`, with the same guard: same
+regex, same placement after the four cases, same caveat about the unparsed arm.
+That much was read off their tree rather than taken from their report — the
+`justfile` diff, not the commit message.
+
+`rscene [3568f9]` above is a **session**, not a commit; `git cat-file -t` on it
+fails in both repos, as it should, and so does `a57470`. Sessions are how a finding like this one arrives
+— it was said in conversation hours before either repo had a commit to point at
+— and git cannot attribute one, since every commit in both repos is authored by
+Mattias. So the file names the session, spends the ref knowing it dies with it,
+and puts the durable half in the argument beside it. `rcad [a57470]` appears the
+same way twice elsewhere. `rscene` reached the same rule from the other side
+after reading this one as a sha and running `git cat-file` on it: their §12
+spends `rcad-15` three times and now says, at `ca470be`, what kind of name that
+is.
+
+### 79.4 Why it refuses instead of skipping
+
+The cases run under a locale that collates by dictionary order, found by asking
+`sort` rather than by naming `en_US.UTF-8`, and the recipe **exits 1** when no
+such locale exists. Under `C` or `C.UTF-8` — a runner's ambient locale — the
+collation is already the one the bug would force, so the case that catches it
+cannot fail. Three of four would still pass, which is worse than running none:
+a green that has quietly stopped asking the question is what §45 is about, and
+what §77 settled for a different gate arm on a different machine. `ci.yml` runs
+`locale-gen en_US.UTF-8` so the runner has one.
+
+### 79.5 What this does not cover
+
+The synthetic corpus is six files and the real one is 367. Nothing here checks
+that `corpus/manifest.sha256` describes the corpus anyone actually has — that is
+`check-corpus`'s own job, and this only checks that it can say so. Nothing
+compares this repo's manifest with `rscene`'s, either; §12 there records that
+the two were compared by hand, once, and found identical at 367 lines.
+
+## 80. The fuzzer runs at night, recorded 2026-09-09
 
 `just fuzz-overnight` fuzzes all four targets in turn inside a fixed window, and
 a systemd user timer runs it from 00:10 to 08:10. It is the first thing in this
 repository that runs without somebody starting it.
 
-That is worth saying plainly, because it is not a second opinion. §44.10 says
-every green here is one person having run `just default` locally and reported it
-honestly, and no CI run has ever succeeded — 26 of 26 failures as of
-2026-09-07, the corpus being the blocker rather than the tool install. A nightly
-fuzz run does not change that. It is more hours against the same four targets,
-on the same machine, reported to the same person.
+What it adds is **hours, and not a second opinion.** §29.9 is the reason there
+is anything to add: `cargo-fuzz` builds with a sanitizer that wants a nightly
+compiler and `rust-toolchain.toml` pins a stable one, so the gate does not fuzz
+and never has. CI runs `just gate` on every push and has been green since
+`34266469454` (§77.6), and none of those 1811 tests is one of these four
+targets. The night is the only place they run at length, on the same machine and
+reported to the same person.
 
-### 63.1 Why the night's corpus lives outside the tree
+### 80.1 Why the night's corpus lives outside the tree
 
 `fuzz/corpus/` is tracked, 30 MB across the four targets, and the tracked corpus
 is the point: §29.9's 562 minimised inputs include 32 written by hand and named
 for the configuration each one is. Eight hours a night would bury those under
-thousands nobody chose. Measured rather than guessed: the reader target wrote
+thousands nobody chose. Measured rather than guessed — the reader target wrote
 294 new inputs in its first sixty seconds against a fresh directory.
 
 So the tracked corpus is handed to libFuzzer as the **second** corpus argument,
-which makes it a read-only seed, and the night's own findings go to the first —
+which makes it a read-only seed, and the night's own findings go to the first:
 `~/rcad-fuzz-corpus/<target>`, outside every worktree. Promotion into
 `fuzz/corpus/` stays a thing somebody decided.
 
-Order is the only thing that says which is which, so
+Order is the only thing that says which directory is which, so
 `check-fuzz-overnight-selftest` asserts the order rather than trusting it.
 
-### 63.2 The window is a deadline, not a budget
+### 80.2 The window is a deadline, not a budget
 
 Each target gets an equal share of *whatever is left when its turn comes*,
 computed against the clock each time round, rather than a quarter of the window
@@ -19271,7 +22721,7 @@ The failure this prevents is silent and would have run until lunch: four targets
 each handed the full window is a recipe that passes every other assertion and
 takes four times as long as it was told to. The selftest runs a four-second
 window against a stub `cargo` that sleeps out exactly the slice it is granted,
-so the clock being divided is a real clock, and it fails the mutation.
+so the clock being divided is a real clock, and it fails that mutation.
 
 There is no minimum slice. A floor of "long enough to be worth starting" is a
 number nobody can defend — an 18 MB corpus takes seconds just to load, so the
@@ -19279,7 +22729,7 @@ honest floor is per-target — and it would make the window untestable at any si
 a test can afford to wait for. A target is skipped when there is no time left,
 and said to be skipped.
 
-### 63.3 A crash does not end the night
+### 80.3 A crash does not end the night
 
 `cargo fuzz` exits non-zero and writes the input to `fuzz/artifacts/<target>/`,
 which is ignored (`fuzz/.gitignore:1`) and therefore survives a `git clean`
@@ -19287,15 +22737,16 @@ without dirtying anything. A crash in the reader is no reason to cost the fuse
 its hours, so each target is reported and the run carries on, failing at the end
 if anything failed.
 
-### 63.4 Not in the hub, and not silently stale
+### 80.4 Not in the hub, and not silently stale
 
 The recipe refuses to run in the hub, using the same parse `check-hub` does.
 §60's rule is that nobody works in the hub because `git worktree lock` refuses
 there, and an unattended eight-hour job is the one kind of work that most needs
 an owner and can least be asked for one: `just lanes` would print `free` all
 night beside a tree in use. The timer gets a worktree of its own, locked, with
-the reason `overnight fuzzing` — a lock held by a machine rather than a session,
-which is why it should survive a sweep of stale locks.
+the reason `overnight fuzzing` — a lock held by a machine rather than a session.
+§76.4 says most worktrees carry no lock and names the ones that should; this is
+one of them, and the reason string is what tells a lock sweep to leave it alone.
 
 Nothing advances that worktree to `main`, and nothing should: an unattended
 `git checkout` racing the lanes that merge into `main` is a write nobody
@@ -19305,13 +22756,15 @@ settled before it started. So the commit and its age go in the summary line,
 where the staleness is visible instead of assumed. Advancing it is a person's
 `git -C ../rcad-nightly-fuzz checkout --detach main`.
 
-### 63.5 systemd rather than crontab
+### 80.5 systemd rather than crontab
 
 `OnCalendar=*-*-* 00:10:00` with `RuntimeMaxSec=`, which is the outer backstop
 that makes 08:10 true even if the recipe misbehaves; a crontab line cannot stop
 itself and would need a second entry to do it. `Persistent=false`, because a
-missed midnight must not fire at ten in the morning and fuzz until six. The unit
-calls `mise` by absolute path: cron and systemd both start without a profile, so
-`just`, `cargo-fuzz` and the `RUSTC_WRAPPER=kache` that `mise.toml` sets are all
-absent from the environment, and cargo fails outright on a wrapper it cannot
-find (§8.1).
+missed midnight must not fire at ten in the morning and fuzz until six.
+
+The unit calls `mise` by absolute path. cron and systemd both start without a
+profile, so `just`, `cargo-fuzz` and the `RUSTC_WRAPPER=kache` that `mise.toml`
+sets are all absent from the environment, and cargo fails outright on a wrapper
+it cannot find (§8.1). That is the failure this would most likely have had, and
+it would have arrived as a silent non-zero exit at ten past midnight.

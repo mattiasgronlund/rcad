@@ -40,14 +40,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    Isometry, MeetOfThree, Orientation, Point, Surface, WHERE_THREE_SURFACES_MEET,
+    Isometry, MeetOfThree, Orientation, Plane, Point, Surface, WHERE_THREE_SURFACES_MEET,
     meet_of_three_surfaces, where_a_corner_lands_after_moving,
 };
-use rcad_predicates::{Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{
+    Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
+};
 use smallvec::SmallVec;
 
 use crate::key::{FaceSlot, VertexSlot};
-use crate::validate::side_of_surface;
+use crate::validate::{MEASURING_SLACK, side_of_surface};
 use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
 
 use super::assemble::{InputFace, joined_faces_of_an_input};
@@ -257,7 +259,7 @@ fn bake_one_solid(
     if solid.is_wholly_flat()
         && let Some(joined) = joined_faces_of_an_input(model, solid, log)?
     {
-        return bake_the_joined_faces(model, key, &joined, policy, log);
+        return bake_the_joined_faces(model, key, solid, &joined, policy, log);
     }
 
     let surfaces = surface_of_every_face(model, solid);
@@ -282,11 +284,12 @@ fn bake_one_solid(
 fn bake_the_joined_faces(
     model: &Model,
     key: SolidKey,
+    solid: SolidView<'_>,
     joined: &[InputFace],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedSolid> {
-    let corners = corner_of_every_vertex_left(model, joined, policy, log)?;
+    let corners = corner_of_every_vertex_left(model, solid, joined, policy, log)?;
 
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
@@ -331,10 +334,12 @@ fn bake_the_joined_faces(
 /// corner of a closed solid and has at least three faces round it.
 fn corner_of_every_vertex_left(
     model: &Model,
+    solid: SolidView<'_>,
     joined: &[InputFace],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BTreeMap<VertexSlot, BakedCorner>> {
+    let surfaces = surface_of_every_face(model, solid);
     let mut around: BTreeMap<VertexSlot, (VertexKey, Vec<Surface>)> = BTreeMap::new();
     for face in joined {
         let mut its_corners: BTreeMap<VertexSlot, VertexKey> = BTreeMap::new();
@@ -352,13 +357,18 @@ fn corner_of_every_vertex_left(
 
     around
         .into_iter()
-        .map(|(slot, (vertex, surfaces))| {
+        .map(|(slot, (vertex, planes))| {
             assert!(
-                surfaces.len() >= 3,
+                planes.len() >= 3,
                 "a corner of a closed solid has at least three faces round it, this one has {}",
-                surfaces.len()
+                planes.len()
             );
-            Ok((slot, derive_a_corner(vertex, surfaces, policy, log)?))
+            let stored = where_the_model_puts_a_corner(
+                model,
+                slot,
+                &faces_around_a_vertex(model, vertex, &surfaces),
+            )?;
+            Ok((slot, derive_a_corner(vertex, stored, planes, policy, log)?))
         })
         .collect()
 }
@@ -479,6 +489,8 @@ fn place_a_corner(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedCorner> {
+    let where_the_model_puts_it = where_the_model_puts_a_corner(model, slot, around)?;
+
     let mut distinct: Vec<Surface> = Vec::with_capacity(around.len());
     for face in around {
         if !distinct.contains(&face.placed) {
@@ -486,28 +498,53 @@ fn place_a_corner(
         }
     }
     if distinct.len() >= 3 {
-        return derive_a_corner(vertex, distinct, policy, log);
+        return derive_a_corner(vertex, where_the_model_puts_it, distinct, policy, log);
     }
+    Ok(BakedCorner {
+        vertex,
+        point: where_the_model_puts_it,
+        around: distinct,
+    })
+}
 
+/// Where the model itself says a corner is, once its solid's placement has been
+/// applied — the box it is really known to be inside.
+///
+/// This is a **cached sample** of where the surfaces round it meet (§17.1) and
+/// never the answer: [`place_a_corner`] returns it only for a corner with fewer
+/// than three surfaces round it, where the whole of a shared curve satisfies
+/// them and there is nothing to solve, and [`derive_a_corner`] reads it only to
+/// tell two meeting points apart.
+///
+/// # Errors
+///
+/// Whatever [`where_a_corner_lands_after_moving`] makes of a corner, a placement
+/// or a surface holding a number that is not finite.
+///
+/// # Panics
+///
+/// If the faces round one corner are at different placements. Then the corner
+/// has two places at once, and a solid like that is broken rather than awkward.
+fn where_the_model_puts_a_corner(
+    model: &Model,
+    slot: VertexSlot,
+    around: &[PlacedSurface],
+) -> Result<PredicatePoint> {
     let movement = around[0].movement;
     assert!(
         around.iter().all(|face| face.movement == movement),
         "the faces round one corner are at different placements, so the corner is in two places"
     );
-    // A pole of a ball has one face round it and one surface, and its box is
-    // that surface's rounding counted once for each of the two chains the bound
-    // is derived over. Handing the same surface twice is what says so.
     let stored = model.data().vertices[slot].point;
     // A solid standing where it was built is not moved at all, and a box round
     // a move that rounded nothing would turn an exact corner into an inexact
     // one — which is the whole of §17.7's lattice control.
     if movement == Isometry::identity() {
-        return Ok(BakedCorner {
-            vertex,
-            point: PredicatePoint::from(stored.coordinates()),
-            around: distinct,
-        });
+        return Ok(PredicatePoint::from(stored.coordinates()));
     }
+    // A pole of a ball has one face round it and one surface, and its box is
+    // that surface's rounding counted once for each of the two chains the bound
+    // is derived over. Handing the same surface twice is what says so.
     let on = [around[0].stored, around[around.len() - 1].stored];
     // The width of the box is the whole of what the move cost, and the
     // `Approximation` beside it says the same number a second time. §34.9's trap
@@ -515,11 +552,7 @@ fn place_a_corner(
     // the one thing that must not happen is the two drifting apart — and the way
     // to make that impossible is to keep only one of them.
     let (point, _) = where_a_corner_lands_after_moving(stored, [&on[0], &on[1]], &movement)?;
-    Ok(BakedCorner {
-        vertex,
-        point: as_exact_as_it_is(point),
-        around: distinct,
-    })
+    Ok(as_exact_as_it_is(point))
 }
 
 /// Solve a corner from the surfaces around it (§17.1, §31.3).
@@ -532,10 +565,16 @@ fn place_a_corner(
 /// and neither of those is a refusal (§34.9), it is that triple saying it does
 /// not place this corner while another may.
 ///
-/// Three surfaces can meet at more than one point, and the stored corner is what
-/// says which: it is a cached sample of the truth (§17.1), so the box it falls
-/// inside is the one. Two boxes that both hold it are two answers to one
-/// question and the triple is passed over.
+/// Three surfaces can meet at more than one point — two planes and a pipe cross
+/// at both ends of a chord — and `where_the_model_puts_it` is what says which of
+/// them this corner is. See [`the_place_the_model_points_at`] for how it picks
+/// and when it declines to.
+///
+/// The search stops at the first triple that solves to an exact point, because
+/// no later triple can beat a box of no width and the loop is cubic in the faces
+/// round the corner (§70.3). That is the same answer the whole sweep gave: the
+/// widths are compared with `<`, so a second exact triple never displaced the
+/// first anyway.
 ///
 /// A surface that comes back [`Decision::Pos`] or [`Decision::Neg`] has *proved*
 /// the corner is somewhere else, which means the input's corners and its
@@ -549,12 +588,13 @@ fn place_a_corner(
 /// [`WHERE_THREE_SURFACES_MEET_HERE`].
 fn derive_a_corner(
     vertex: VertexKey,
+    where_the_model_puts_it: PredicatePoint,
     around: Vec<Surface>,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedCorner> {
-    let mut best: Option<([Surface; 3], PredicatePoint)> = None;
-    for first in 0..around.len() {
+    let mut best: Option<PredicatePoint> = None;
+    'every_triple: for first in 0..around.len() {
         for second in (first + 1)..around.len() {
             for third in (second + 1)..around.len() {
                 let triple = [around[first], around[second], around[third]];
@@ -563,17 +603,21 @@ fn derive_a_corner(
                 else {
                     continue;
                 };
-                let [only] = places.as_slice() else {
+                let Some(place) = the_place_the_model_points_at(&places, where_the_model_puts_it)
+                else {
                     continue;
                 };
-                let point = as_exact_as_it_is(*only);
-                if best.is_none_or(|(_, best)| point.uncertainty() < best.uncertainty()) {
-                    best = Some((triple, point));
+                let point = as_exact_as_it_is(place);
+                if best.is_none_or(|best| point.uncertainty() < best.uncertainty()) {
+                    best = Some(point);
+                }
+                if point.uncertainty() == 0.0 {
+                    break 'every_triple;
                 }
             }
         }
     }
-    let Some((_, point)) = best else {
+    let Some(point) = best else {
         return Err(gave_up(
             WHERE_THREE_SURFACES_MEET,
             &[middle_of_the_places(&around)],
@@ -606,6 +650,103 @@ fn derive_a_corner(
         vertex,
         point,
         around,
+    })
+}
+
+/// Which of the places three surfaces meet at this corner is, or `None` when
+/// this triple does not say.
+///
+/// The model's own corner is what picks. It is a cached sample of where these
+/// surfaces meet (§17.1), moved into world coordinates and carrying the box that
+/// move cost, so **the place whose box overlaps it is the one**.
+///
+/// **A single place is asked the same question**, which is §75.6's "comparison
+/// as a refusal": the one thing the surfaces said is still only taken when the
+/// model's corner is somewhere it could be. Skipping the test where there is
+/// nothing to choose between meant a corner could sit anywhere at all and still
+/// be replaced by the meet without a word — the ill-conditioned corner of §70.3,
+/// three surfaces at a grazing angle and a corner far from where they cross.
+///
+/// Two places that both overlap it are two answers to one question, and a triple
+/// where no place overlaps it at all is the model's corner and its surfaces
+/// disagreeing by more than the boxes and that room allow. Both give `None`, and
+/// neither is a refusal: it is this triple saying nothing about this corner while
+/// another may still place it.
+///
+/// # The stored corner is grown first, and that is a tolerance
+///
+/// It would be nicer if it were not. Two certified boxes round two true points
+/// need no tolerance to compare, and this test was written that way — but the
+/// model's corner and the model's surfaces are not two readings of one point.
+/// A face pins its plane through one corner, so every *other* corner of that
+/// face satisfies `n·p = off` only to a rounding, and the meet those planes
+/// solve to sits a few ulps from the corner the model wrote down. Both boxes
+/// have no width at all when the arithmetic is exact, so a few ulps is a miss,
+/// and asking for the corner bit for bit refused 30 solids the kernel had
+/// already accepted, plus changed the reason for 3 more that were refused
+/// already — the skew corpus went from 51 refused to 81 (§75.6).
+///
+/// So [`MEASURING_SLACK`] × [`Plane::SIGNED_DISTANCE_ROUNDOFF`] × the corner's
+/// own size is added to the stored box on every side. That is **the same
+/// allowance [`check_flat_face`](crate::validate) grants the same disagreement**,
+/// read from the same constant rather than copied, because the two have to
+/// agree: a solid `Model::validate` accepts is one the fuse has to be able to
+/// bake. It is the width of the number and not a modelling tolerance —
+/// `Scale::RELATIVE_LINEAR_TOLERANCE` is 70 369 times wider — not quite five
+/// orders of magnitude — and would swallow corners somebody *placed* off their
+/// planes.
+///
+/// **This never places the point.** It picks among places the surfaces already
+/// agree on; the geometry comes from the meet, which is what keeps a wrong
+/// cached corner from moving a right one.
+fn the_place_the_model_points_at(
+    places: &[PredicatePoint],
+    where_the_model_puts_it: PredicatePoint,
+) -> Option<PredicatePoint> {
+    let stored = where_the_model_puts_it.enclosure();
+    let room = what_writing_the_corner_down_cost(stored);
+    let mut found = None;
+    for place in places {
+        if !boxes_overlap(place.enclosure(), stored, room) {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(*place);
+    }
+    found
+}
+
+/// How far the model's stored corner can sit from where its own surfaces cross
+/// purely because a plane through one corner of a face misses the next one.
+///
+/// The size is the **corner's own**, not the model's largest coordinate the way
+/// [`Model::what_writing_a_plane_down_costs`](crate::validate) measures it.
+/// Nothing here has a model to ask — this is handed two points — and threading
+/// one down would hand a corner at the origin the room a corner a kilometre
+/// away earned, loosening the test everywhere one feature sits far out. The
+/// price is a corner near the origin on a face whose other corners are huge:
+/// the rounding there is the big face's and this grants the small corner's, so
+/// the triple says nothing and another has to place it. That is a refusal
+/// rather than a wrong answer, which is the direction to be wrong in.
+///
+/// Floored at one for the same reason [`select`](super::select) floors its own
+/// round-trip room: a corner at the origin still had a plane written down
+/// against it.
+fn what_writing_the_corner_down_cost(stored: [Interval; 3]) -> f64 {
+    let size = stored
+        .iter()
+        .map(|side| side.lo().abs().max(side.hi().abs()))
+        .fold(0.0, f64::max);
+    MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * size.max(1.0)
+}
+
+/// Whether two boxes have any point in common, sides included, once the second
+/// has been grown by `room` on every side.
+fn boxes_overlap(one: [Interval; 3], other: [Interval; 3], room: f64) -> bool {
+    (0..3).all(|axis| {
+        one[axis].lo() <= other[axis].hi() + room && other[axis].lo() - room <= one[axis].hi()
     })
 }
 
@@ -688,12 +829,12 @@ fn face_across(model: &Model, mine: FaceSlot, edge: EdgeKey) -> Option<FaceSlot>
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Isometry, Point, Scale, Surface, Vector};
-    use rcad_predicates::{Policy, ProvenanceLog};
+    use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Sphere, Surface, Vector};
+    use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 
-    use super::{Bounds, bake};
+    use super::{Bounds, bake, derive_a_corner};
     use crate::VertexKey;
-    use crate::{Model, SolidKey};
+    use crate::{Error, Model, SolidKey};
 
     fn a_cube_of_side_two() -> (Model, SolidKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -791,6 +932,30 @@ mod tests {
     /// longer `f64`. The box has to hold the stored corner all the same — the
     /// stored corner is the true one moved and rounded, and the box encloses the
     /// true one.
+    ///
+    /// A box against a bare point, not a box against a box: `corners_as_stored`
+    /// goes through `VertexView::point()`, which hands back three `f64`s and no
+    /// enclosure of its own. So containment is exact and is asserted with no
+    /// slack. All 72 checks — the eight corners, each reached from three faces,
+    /// times three axes — land strictly inside, the tightest by 1.665e-16, about
+    /// six ulps at that coordinate's size.
+    ///
+    /// The only thing here that is not the same on every machine is the `sin`
+    /// and `cos` of the turn, which come from the platform's libm and are not
+    /// correctly rounded. Everything after them is `+ - * /` and `sqrt`, which
+    /// IEEE-754 pins to the bit, and Rust does not fold a multiply and an add
+    /// into an `fma` by itself. An ulp of disagreement there cannot reach this
+    /// margin: stepping the angle one ulp at a time, containment holds for 331
+    /// steps either side of 0.7 before the first failure, and within ten steps
+    /// the tightest margin never falls below 8.3e-17.
+    ///
+    /// It is a measured property of this turn and not a law — 11 of the 840
+    /// angles swept do fail — so if this ever goes red, the assert names the
+    /// coordinate and the answer is a fresh measurement, not a bigger constant.
+    /// It asked for `± 1e-12` until 2026-09-09; that slack absorbed nothing, and
+    /// §75.6 read it as evidence that two certified boxes can fail to overlap on
+    /// inputs this kernel accepts, then declined a correct change on the
+    /// strength of it. §78 is what that cost.
     #[test]
     fn re_deriving_the_corners_of_a_turned_cube_gives_boxes_that_hold_them() {
         let (mut model, cube) = a_cube_of_side_two();
@@ -807,8 +972,8 @@ mod tests {
                     for axis in 0..3 {
                         let (lo, hi) = (box_of_it[axis].lo(), box_of_it[axis].hi());
                         assert!(
-                            lo - 1e-12 <= stored[axis] && stored[axis] <= hi + 1e-12,
-                            "the box {lo}..{hi} is nowhere near the stored {}",
+                            lo <= stored[axis] && stored[axis] <= hi,
+                            "the box {lo}..{hi} does not hold the stored {}",
                             stored[axis]
                         );
                     }
@@ -943,5 +1108,91 @@ mod tests {
             }
         }
         assert!(anything_was_built, "a turned bar's corners are boxes");
+    }
+
+    /// Two planes crossing in the z axis and a ball of radius one round the
+    /// origin meet at **both poles**, and nothing about the three surfaces says
+    /// which pole a corner is. The model does, and this is the pair of runs that
+    /// shows it is really read: the same three surfaces, two stored corners, two
+    /// different answers.
+    ///
+    /// Everything here is a whole number, so the oracle is exact: the answer is
+    /// `(0, 0, ±1)` bit for bit and not near it. Before this consulted the
+    /// model, both runs came back `Error::Undecidable` — the one triple has two
+    /// places, and `[only]` passed over every triple that had.
+    fn three_surfaces_that_meet_at_both_poles() -> (Model, VertexKey, Vec<Surface>) {
+        let (model, cube) = a_cube_of_side_two();
+        let vertex = corners_as_stored(&model, cube)[0].0;
+        let cutting = |normal| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), normal)
+                    .expect("an axis direction is a unit normal"),
+            )
+        };
+        let around = vec![
+            cutting(Vector::new(1.0, 0.0, 0.0)),
+            cutting(Vector::new(0.0, 1.0, 0.0)),
+            Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a ball of radius one")),
+        ];
+        (model, vertex, around)
+    }
+
+    #[test]
+    fn a_corner_that_three_surfaces_place_at_two_poles_is_the_pole_the_model_stored() {
+        let (_model, vertex, around) = three_surfaces_that_meet_at_both_poles();
+        let mut log = ProvenanceLog::new();
+
+        let at_each_pole = [1.0, -1.0].map(|up| {
+            derive_a_corner(
+                vertex,
+                PredicatePoint::from([0.0, 0.0, up]),
+                around.clone(),
+                &Policy::certified(),
+                &mut log,
+            )
+            .expect("the model says which pole this corner is")
+        });
+
+        assert_eq!(
+            at_each_pole[0].point.exact_coordinates(),
+            Some([0.0, 0.0, 1.0])
+        );
+        assert_eq!(
+            at_each_pole[1].point.exact_coordinates(),
+            Some([0.0, 0.0, -1.0])
+        );
+        assert!(
+            log.is_empty(),
+            "picking between two places proves a miss and never fudges one"
+        );
+    }
+
+    /// The other half of the sentence: a corner the model cannot separate is
+    /// passed over rather than guessed at.
+    ///
+    /// A corner moved by a big placement comes back as a box, and a box wide
+    /// enough to hold both poles is two answers to one question. The one triple
+    /// there is says nothing, so nothing places this corner and the operation
+    /// has nothing to return.
+    #[test]
+    fn a_corner_whose_box_holds_both_poles_places_nothing() {
+        let (_model, vertex, around) = three_surfaces_that_meet_at_both_poles();
+        let mut log = ProvenanceLog::new();
+        let both_poles_at_once = PredicatePoint::Constructed(
+            [0; 3].map(|_| Interval::new(-2.0, 2.0).expect("a box round both poles")),
+        );
+
+        let refused = derive_a_corner(
+            vertex,
+            both_poles_at_once,
+            around,
+            &Policy::certified(),
+            &mut log,
+        );
+
+        assert!(
+            matches!(refused, Err(Error::Undecidable { .. })),
+            "two places both holding the stored corner is not an answer, it was {refused:?}"
+        );
     }
 }

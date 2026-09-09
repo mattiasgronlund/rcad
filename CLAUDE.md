@@ -11,6 +11,71 @@ Always use the code-quality skill when coding. Big work goes to lanes in a
 worktree — the `delegating` skill has the mechanics, and only whoever is
 dispatching needs them.
 
+## Three plugins, and what this repo keeps
+
+`.claude/` used to hold the hooks, the shared skills and a copy of the questions
+parser. All three moved into the `mattiasgronlund-local` marketplace, shared with
+`rscene`, because a copy in each repo is a copy that goes stale — and one did:
+`rscene`'s parser still dropped the second label of a paired entry months after
+the fix landed here.
+
+```
+/plugin marketplace add ~/git/mattiasgronlund/claude-questions
+/plugin install questions@mattiasgronlund-local
+/plugin install guardrails@mattiasgronlund-local
+/plugin install practices@mattiasgronlund-local
+```
+
+- **`questions`** — the parser, the status line, and the `asking-questions` skill.
+- **`guardrails`** — the two hooks: no in-place shell patching, and the context
+  budget that asks for a handoff.
+- **`practices`** — the nine shared skills, `code-quality` and `delegating`
+  among them.
+
+`just check-plugins` fails, first thing in `just gate`, when one is missing,
+and names the command that installs it. **A missing `guardrails` means the
+patching hook is not running at all** — the rule in "Editing files" below is
+then only prose, and it was written because prose alone did not hold.
+
+CI has no Claude Code to install a plugin into, so it takes the other route
+`check-plugins` names: it clones the marketplace to `$RUNNER_TEMP` at a **pinned
+commit** and sets `CLAUDE_PLUGINS_ROOT`. Pinned so a push there cannot turn this
+repo red without a commit here; bump it in `.github/workflows/ci.yml`
+deliberately. That repo is **public** — the one public thing among these repos,
+settled deliberately so the clone needs no secret. Nothing checks that your
+*installed* plugins match the pin.
+
+**That CI clones from GitHub is not a reason to repoint your marketplace at
+it.** `mattiasgronlund-local` is registered as a `directory` source, so it runs
+in place out of `~/git/mattiasgronlund/claude-questions` and
+`CLAUDE_PLUGINS_ROOT` resolves straight to that checkout. A `github` source
+installs to a version-stamped cache path instead
+(`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`), which moves on
+every version bump and takes `CLAUDE_PLUGINS_ROOT` with it. Clone it, read it,
+push to it — leave the source alone.
+
+What stays here is what is this repo's alone: the hub and worktree-create hooks,
+the status line **wrapper** (a plugin cannot supply a `statusLine`; only
+`settings.json` can, and it names a path), and
+`.claude/patching-cases.local.json` — the patching cases that name `rcad`
+crates, `docs/decisions.md`, and a `just` recipe of ours. `just check-hooks`
+appends that overlay to the plugin's own cases and fails loudly if it is named
+and missing.
+
+**A bare `just` lists the recipes, one line each** — `just` runs the first
+recipe in the file, and that is `list`. Every listed recipe carries a real
+sentence, so start there rather than reading the `justfile`.
+
+**Recipes the shared skills refer to.** `delegating` and `handoff` are written
+against this repo and say so; these are the commands they name. `just lanes`
+lists the worktrees and who holds each. **`just gate` is the whole gate**, and
+what CI runs — it was called `just default` until 2026-09-08, so an older
+document or a session's memory may still say that. `just check-hub` is the hub
+rule. `just clean-targets` then `just prune-worktrees` reclaims disk, in that
+order. The compile cache is wired through mise's `[env]`
+as `RUSTC_WRAPPER = "kache"`, which a non-interactive shell does not inherit —
+so every `cargo` and `just` in a lane's brief needs a `mise exec --` prefix.
+
 ## Nobody works in the hub
 
 `/home/mattias/git/mattiasgronlund/rcad` is the **hub**. It owns `.git` and
@@ -33,7 +98,7 @@ Parked on a detached HEAD, `main` is checkable out — and lockable — in a
 worktree like any lane.
 
 `just check-hub` fails when the hub has a branch checked out or work left in it,
-and it is in `just default`. A repository with one worktree is exempt, because a
+and it is in `just gate`. A repository with one worktree is exempt, because a
 lone checkout is not a hub. `docs/decisions.md` §60.
 
 `docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
@@ -106,12 +171,39 @@ line, the body under it, the recommendation last:
   The body, as many paragraphs as it takes. Backticks, `§` refs and file:line
   belong here; this is the argument, not a summary of it.
 
+  - **(a)** the first option, on a line of its own
+  - **(b)** the second
+
   ➡️ *Recommend (a), because …*
 ```
 
 The checkbox line carries the label and the heading, and everything indented
 under it belongs to that question. `- [x]` and `→ answered: …` when the answer
 comes.
+
+**Options go on their own lines, lettered from `(a)` with no gaps.** Nothing can
+lift out of prose an option that was never marked, and until 2026-09-07 nothing
+was: 17 of 227 entries offered options and not one of them wrote the options as
+lines, which is why finding what `(a)` meant took reading the paragraph it was
+buried in. The heading, the option lines and the `➡️` line are the grammar; the
+body between them is free prose that no tool interprets.
+
+**`just question-check <hash>` names every violation, and it is your own file you
+run it on.** There is no list of grandfathered sessions: `/tmp` is swept at 30
+days, so a list of session ids would dangle within a month, and it would be a
+second record beside the thing itself (§60). A dead session's file cannot be
+fixed, so nothing judges it; yours can, so run this in the turn you write a
+question. `just question <hash>` announces a count of violations under the
+listing without spelling them out.
+
+Nothing is ever dropped: an entry whose label does not parse is listed as `??`
+with its line number, and shows in the status line as `??×1`. The `asking-questions`
+skill has the full grammar and the shapes that break it.
+
+**The parser and that skill are not in this repo.** They live in the `questions`
+plugin, because a copy in each repo is a copy that goes stale — `rscene` carried
+one that still dropped the second label of a paired entry months after the fix
+landed here. So do the hooks and the shared skills; see "Three plugins" below.
 
 **Read one back with `just question`, never with `!cat`.** The status line shows
 the open labels collapsed, after the session's hash — `❓ 766405 K1-K4, Q2,
@@ -152,24 +244,56 @@ after the prose.
 (`cargo-nextest`, `cargo-deny`, `taplo`, `just`). Run things through
 `just`. Never install a tool ad hoc.
 
-**CI runs four recipes — `check`, `lint`, `test`, `deny`.** `just default` runs
-those four and every `check-*` besides, so the `check-*` recipes gate your run
-and nothing else; a CI green would not cover them.
+**CI runs `just gate` — the same command you run.** One gate step since
+2026-09-07, so every `check-*` recipe is enforced on the runner too. Before that
+it ran four recipes and the `check-*` ones gated nothing but your own machine.
 
-It has never had to. **No CI run has ever succeeded.** Check that rather than
-believe it — `gh run list --repo mattiasgronlund/rcad` — because a failure count
-written here would be false on the next push, while "never succeeded" can only
-be falsified by a fix. On 2026-09-07 that was 26 runs and 26 failures.
+**One arm is not the same there, and it is the only one.** `check-plugins` asks
+Claude Code whether the plugins are *declared* and not merely on disk; a runner
+has no config directory for that to be a question about, so it prints that it
+skipped and carries on. Everything else — the three directories, the parser
+selftest, every other `check-*` — runs on the runner exactly as it runs here.
+The skip is in `check-declared.sh` rather than in the `justfile`, so `rscene`
+gets the same one; `docs/decisions.md` §77.
 
-What stops it is **not** the tool install, though every push to `main` dies
-there. PR #1 (`ci-kache-bootstrap`, 2026-09-05) fixed the install and got
-through: `just check` passed, `just lint` passed, and `just test` ran 925 of
-1582 tests with all 925 passing before the run was cancelled by the one that
-failed — `RCAD_STEP_CORPUS is not set`. **The corpus is the blocker. The install
-is only what a push to `main` hits first.**
+**`34266469454` is the first whole-gate green on `main`**, push of `e8ae455`
+(the recipe was still called `default` when it ran). Every green before it ran `just test`, so check what a run actually
+ran — `git show <sha>:.github/workflows/ci.yml` — before treating an older green
+as covering the `check-*` recipes.
 
-Until that changes, every green in this repo is one person having run
-`just default` locally and reported it honestly. There is no second opinion.
+**Three red runs came first, and only the first was about plugins.** The other
+two counted colour codes instead of clippy warnings: `ci.yml` sets
+`CARGO_TERM_COLOR: always` and `check-wildcards` anchored its grep at `^`. All
+three are the same shape — a check passing for a property of the environment it
+ran in rather than of the tree — and the way to find one is to take away what
+the environment supplies and run it again. `docs/decisions.md` §77.6.
+
+**CI is green, and the commit it was green on matters more than the word.**
+Check rather than believe — `gh run list --repo mattiasgronlund/rcad --status
+success` — because the empty answer that command used to give is what this
+paragraph said before.
+
+**Read that answer as a list and never write the tally down here.** A count goes
+stale on the next push, which is exactly why the sentence this replaced said
+"never succeeded" rather than "26 of 26" — and the count that stood beside it
+*was* stale within a day, twice. A named run does not go stale. Three to know,
+all pushes to `main`, each reporting the same three numbers as `just gate` on
+the same tree: `34155345448` at 1787 tests, `34255349804` at 1806 after the fuse
+fuzz work landed, and `34266469454` at 1811 — the last of those the first run
+that put the whole gate on a runner rather than `just test`.
+
+The other green is a pull request build that contained almost none of the work
+queued behind it. For a day "CI is green" and "the work is covered" were both
+true statements about this repo and both useless without a sha. Say which
+commit.
+
+Three faults kept every earlier run red — the tool install, a rustup race, and
+the missing STEP corpus, cleared in that order, the last by `corpus/fetch.sh`.
+`.github/workflows/ci.yml` carries all three and the evidence for each fix.
+
+So there is a second opinion now, and it agreed the first time it could. That is
+not licence to skip `just gate` before handing work over: the runner only
+sees what was pushed, and a merge you have not made is not in it.
 
 **`just t <args>` runs one test or a few.** Everything after the name goes to
 nextest: `just t how_often_a_fuse_with_a_cone_refuses`, `just t -p rcad-geom`,

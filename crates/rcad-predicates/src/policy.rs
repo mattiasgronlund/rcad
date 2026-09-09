@@ -360,7 +360,7 @@ mod tests {
             "orient3d",
             &[Point::from([0.0, 0.0, 0.0])],
             Level::Interval,
-            Decision::Undecidable { enclosure },
+            enclosure,
             measures,
         )
     }
