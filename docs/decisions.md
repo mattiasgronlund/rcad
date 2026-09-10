@@ -446,13 +446,19 @@ The roadmap says "never panic, return `EvalError`" (§4.5). `CLAUDE.md` says
 | Broken internal invariant — edge with three coedges, key resolving to a freed slot, approximation grew | **panic** | It is a bug; emitting a corrupt solid is worse than dying |
 | Cannot decide | `Decision::Undecidable` | It is a result, not a failure |
 
-**The middle row is amended by §66.** It still holds in a debug build. In a
-release build the response is a panic only where the operation has already
-written into the caller's model and cannot take it back; where the check can be
-made *before* the write, the response is an `Err` that says "this kernel has a
-bug", which is a third door and not `Error::Undecidable`. What the row must
-never mean is that a release build panics wherever a debug build does; the
-amendment above is the whole of this paragraph's point.
+**The middle row is amended by §66, and the amendment is rewritten by §87.** The
+row holds where the operation has already written into the caller's model and
+cannot take it back. Where the check can be made *before* the write, the
+response is an `Err` that says "this kernel has a bug" —
+`Error::TheFuseWroteABrokenAnswer`, a third door and not `Error::Undecidable`.
+
+**Which door it is does not depend on the build.** §66's wording said "in a
+release build the response is a panic only where…", and that was written when
+the check did not run in a release build at all (§66.1). It does now (§82.1),
+and §87 makes the fuse answer `Err` in both builds rather than panicking in one
+and refusing in the other. A kernel that reports its own bug differently
+depending on how the caller happened to compile it is the shape §82.1 was
+written to close, and a `cfg!(debug_assertions)` in the answer would reopen it.
 
 Until §82 there was a worse misreading available and it was the one that
 mattered: that the row described what a release build did. It did neither of the
@@ -461,10 +467,18 @@ touched checks and the fuse's post-write check now run in every build (§82.1),
 and `mise exec -- just t -p rcad-topo --cargo-profile release -E
 'test(a_mutation_notices)'` runs its two `#[should_panic]` tests with debug
 assertions off and passes both, which is the closure demonstrated rather than
-argued. The row now describes something that happens in release. Which of the
+argued. The row now describes something that happens in release. ~~Which of the
 two doors it opens there is a separate question and only one of them is built:
 the panic is what the fuse and `place_solid` do today, and the pre-write `Err`
-waits on the scratch model §66.7's first item is about.
+waits on the scratch model §66.7's first item is about.~~
+
+**Both doors are built now (§87).** The fuse takes the `Err` one: it works its
+answer out in a throwaway model and refuses before the caller's arena is
+touched. `place_solid` keeps the panic, because it overwrites existing entities
+in place and has nothing to work out in a throwaway — §66.7's second item, still
+open. The fuse itself still panics for the two things that fire *after* its real
+write (§87.4), so the line this row draws now runs through one function twice
+over rather than between two functions.
 
 ### 4.2 Error types
 
@@ -19983,7 +19997,7 @@ confinement, not a paragraph about blast radius. Every entry point that mutates 
 | Entry point | Where it writes | Verdict |
 |---|---|---|
 | `SolidBuilder::build` (`builder.rs:320`) | scratch `Model`, swept, then the caller's | **Convert.** Structural |
-| `Model::fuse` (`fuse/mod.rs:149`) | the caller's model, `assemble.rs:303` | Panic, until it gets a scratch |
+| `Model::fuse` (`fuse/mod.rs:149`) | ~~the caller's model, `assemble.rs:303`~~ throwaway `Model`, swept, then the caller's (§87) | ~~Panic, until it gets a scratch~~ **Converted, §87** |
 | `Model::add_cube` (`build.rs:495`) | the caller's model, additive | Panic, until it gets a scratch |
 | `Model::add_extrusion` (`build.rs:533`) | the caller's model, additive | Panic, until it gets a scratch |
 | `Model::add_round_bar` (`build.rs:623`) | the caller's model, additive | Panic, until it gets a scratch |
@@ -20030,12 +20044,22 @@ rollback and no arena free-list walk, so "additive" does not mean "undoable".
 
 The fix is the shape `SolidBuilder::build` already has, and the same measurement
 pays for it: `Assembly::commit` writes into a scratch `Model`, sweeps it, and
-copies into the caller's only if the sweep passed. The cost is one extra copy of
-the answer's entities plus one sweep of a model the size of the answer, against a
-fuse that costs 51 ms. The `add_*` builders in `build.rs` are the same change,
+writes into the caller's only if the sweep passed. The cost is one extra *write*
+of the answer's entities plus one sweep of a model the size of the answer,
+against a fuse that costs 51 ms. The `add_*` builders in `build.rs` are the same change,
 and they are the ones where 66.2's +7.9% would matter — an importer that pays a
 scratch-and-copy per solid pays more than 4 µs. That is a real trade and it is
 why those rows say "until", not "never".
+
+> **Amended 2026-09-10, §87.** The fuse row is built. "Copies" is the word this
+> paragraph gets wrong and the precedent it cites in the same breath gets right:
+> `SolidBuilder::build` writes its description twice rather than copying, and so
+> does `Assembly::commit` now. `Assembly::write_into` reads nothing out of the
+> model it writes into and names no entity that was already there, which is what
+> makes a second call available; §87.5's second test demonstrates that the two
+> writes agree rather than arguing it. Costed at 45.1 µs on a 12-face answer and
+> 84.6 µs on a 23-face one (§87.7), not at the 51 ms this paragraph budgeted
+> against. The five `add_*` rows still say "until" and §87.8 says why.
 
 `place_solid` is the one row where the answer is a settled panic. It overwrites
 `used.loc` on every shell of an existing solid before checking anything
@@ -20117,16 +20141,24 @@ every build — and running the check was always the half separated from what th
 check does when it fails. All four items below stand, with one sentence in the
 first of them corrected.
 
-**`Assembly::commit` needs a scratch model before the fuse's panic can become an
-`Err`.** §66.4 says why and says what shape it takes. Nobody has measured the
-copy — the sweep half is measured above and is free at a fuse's scale, and the
-copy is an unknown that is probably also free at that scale and certainly is not
-at `add_extrusion`'s. **Still open after §82**, which put the check in and left
-the `expect` where it was: Mattias chose the branch where a failure still panics,
-so the scratch-and-copy is unbuilt and unpriced. "The sweep half is free at a
-fuse's scale" is the sentence §82.7 corrects — it holds where the fuse built the
-model and not where the model holds geometry the fuse never touched, and the
-check that actually went in is local for that reason (§66.3's amendment).
+**~~`Assembly::commit` needs a scratch model before the fuse's panic can become
+an `Err`.~~ Closed by §87.** §66.4 says why and says what shape it takes. Nobody
+has measured the copy — the sweep half is measured above and is free at a fuse's
+scale, and the copy is an unknown that is probably also free at that scale and
+certainly is not at `add_extrusion`'s. **Still open after §82**, which put the
+check in and left the `expect` where it was: Mattias chose the branch where a
+failure still panics, so the scratch-and-copy is unbuilt and unpriced. "The
+sweep half is free at a fuse's scale" is the sentence §82.7 corrects — it holds
+where the fuse built the model and not where the model holds geometry the fuse
+never touched, and the check that actually went in is local for that reason
+(§66.3's amendment).
+
+> **Amended 2026-09-10, §87.** Built, and "nobody has measured the copy" is now
+> false twice over. There is no copy — the fuse calls `write_into` a second time
+> — and it is measured: 45.1 µs on a 12-face answer against a fuse of 1.477 ms,
+> 84.6 µs on a 23-face answer against 31.52 ms, the sweep half of it linear at
+> 3.21 µs a face (§87.7). A broken answer is `Error::TheFuseWroteABrokenAnswer`
+> and the caller's model is untouched. The three items below this one all stand.
 
 **Whether `place_solid` should roll back with the inverse isometry.** It can:
 `movement` is invertible. Whether an operation that discovers a broken solid
@@ -23410,6 +23442,24 @@ choice and did not make it. What went in is a **local** check over the entities
 the fuse wrote, which is a different function from the one §66.3 named, arrived
 at by measurement rather than by merging §66's own words.
 
+> **Amended 2026-09-10, §87.** `Model::check_what_was_just_written` is deleted.
+> §87 has the fuse build its answer in a throwaway model and sweep *that* with
+> the whole of `Model::validate`, which left this function with one caller: its
+> own unit test.
+>
+> **§82.4's argument is moot, not wrong.** It argued that eleven of the sweep's
+> thirteen checks asked of the written entities ask the same questions as
+> thirteen asked of the whole model, and that argument holds. A throwaway model
+> holding only the answer simply *is* the set of entities §82.4 argued about, so
+> the whole sweep of it asks those questions without anything being cut by hand
+> — and the two that were cut come back, each for its own reason (§87.6).
+> §82.5's objection to the coordinate range does not apply to a model that holds
+> nothing but the answer; §87.3 handles the one case where it still refuses.
+>
+> §82.7's measurements stand and are what §87.7 is quoted against. What §82
+> chose and §87 changes is the *other* half — §82 put the check in and left the
+> `expect` where it was, so a broken answer still crashed after being written.
+
 ### 82.1 What §66.3 decided, and what the code did instead
 
 §66.3 is fourteen lines and it decides two things. The four touched checks lose
@@ -24558,3 +24608,254 @@ on it is how a downstream crate writes the assertion.
 The test suites use `.expect("this model made the key")` at every one of their
 sites, one wording everywhere, so that a reader learns it once and a `grep`
 finds all of them.
+
+## 87. The fuse builds its answer twice, recorded 2026-09-10
+
+§66.7's first item, closed. `Assembly::commit` builds the whole answer in a
+throwaway `Model` of its own, sweeps that with the whole of `Model::validate`,
+and writes into the caller's model only if the sweep is clean. A broken answer
+is now `Error::TheFuseWroteABrokenAnswer` and the caller's model is
+byte-identical to what it was.
+
+The shape is `SolidBuilder::build`'s, which §66.4's table already named as the
+one row that was right. Nothing here is new engineering; what took the work was
+deciding which of the sweep's questions the throwaway should be allowed to ask,
+and who is to blame for each answer.
+
+**It also deletes `Model::check_what_was_just_written`**, which §82 had built
+five days earlier. That is not a reversal of §82 and §87.6 says why: §82 cut
+eleven of the sweep's thirteen checks out by hand to make the sweep local to
+what the fuse wrote, and a model holding only the answer is local for free.
+
+### 87.1 What was wrong with the old shape
+
+```rust
+let written = self.write_into(model, &self.solids, &self.runs);
+let worst = self.tag_everything_it_built(model, &written, inherited);
+model.assert_approximation_did_not_grow(approximation_before.max(worst));
+
+model
+    .check_what_was_just_written(&written, policy, &mut ProvenanceLog::new())
+    .expect("a fuse writes a valid answer or does not write at all");
+```
+
+The `expect` is the last line of the operation and the write is the first. A
+fuse that built something broken had already put it in the caller's arena when
+the panic fired, and §66.4 established that nothing in this crate can take a
+write back. The panic was therefore the *only* thing standing between the caller
+and a model that no longer validates — which is precisely §4.1's "crash >
+corrupt" doing its job, and precisely the case §66.4 wanted a scratch model for
+so that the crash would not be needed.
+
+The second thing wrong with it was quieter: the sweep's records went into a
+`ProvenanceLog::new()` that was dropped on the next line. `SolidBuilder::build`
+drains its scratch sweep's records into the caller's log; `commit` threw them
+away.
+
+### 87.2 Thirteen decisions, in the order they bite
+
+1. `commit` builds into `Model::new(model.scale())`, tags that throwaway, sweeps
+   it with `Model::validate`, and only then calls `write_into` a second time
+   into the caller's model.
+2. **Write twice.** Not a copy and not a graft. `Assembly::write_into` is a pure
+   function of `&self`, the lumps and the runs: it reads nothing out of the model
+   it writes into and names no entity that was already there. That is what makes
+   a second call available, and it is the same reason `SolidBuilder::build`
+   calls its own `write_into` twice rather than copying.
+3. The throwaway is checked with the **whole** `Model::validate`, not with a
+   local subset. It holds the answer and nothing else, so a whole-model sweep of
+   it is already local — and it gets back the two checks the local one left out.
+4. `commit` returns `Result<Written>`. It no longer panics on a broken answer in
+   **either** build. There is no `cfg!(debug_assertions)` split; §4.1's
+   two-door wording was written when the check did not run in release at all.
+5. The `Err` is a new `Error` variant, `TheFuseWroteABrokenAnswer`, wrapping the
+   `Invalid` the sweep produced. `Error::Invalid` already means "your description
+   was bad" where `SolidBuilder::build` returns it, and overloading it would make
+   "we have a bug" and "you gave us a bad shape" the same value.
+6. **The blame is not blanket** — §87.3.
+7. `commit` takes a `&mut ProvenanceLog` so the throwaway sweep's records reach
+   the caller's log, drained through a local log the way `SolidBuilder::build`
+   drains `mine` into `log`.
+8. After the real write, `check_touched_solid` runs on the solids just written.
+   `SolidBuilder::build` does exactly this. It is not redundancy: nothing else
+   looks at what the caller actually ends up with, and it is what guards the
+   second write.
+9. `assert_approximation_did_not_grow` stays where it is, after the real write,
+   and stays a panic. It compares against the caller's model's worst
+   approximation *before* the write, so a fresh throwaway has nothing honest to
+   compare. §87.4 draws the line this leaves.
+10. `Model::check_what_was_just_written` is deleted, with its two unit tests and
+    `check_approximation_ordering_of` — §87.6.
+11. Two new tests, both of which fail without the change — §87.5.
+12. `a_fuse_is_not_blamed_for_a_solid_it_never_touched.rs` passes untouched. Its
+    module doc now says the property holds *structurally* rather than naming the
+    deleted function as what is asked instead.
+13. `build.rs`'s five `add_*` builders keep their post-write panic. They are the
+    same change and §66.4's "until" still applies to them; §87.8.
+
+### 87.3 The one refusal that is not this kernel's fault
+
+`Invalid::DynamicRangeTooWide` out of the throwaway sweep travels as itself and
+is **not** wrapped as a kernel bug.
+
+`Assembly::check_dynamic_range` asks the answer's own range before either write,
+but only behind `if the_inputs_fit_in_f64(self, arguments, tools)?`. When the
+inputs do not fit `f64` that check is skipped — so for exactly those inputs the
+throwaway sweep is the first thing to see a too-wide answer. A too-wide answer
+out of too-wide inputs is where the caller's solids sit, not arithmetic gone
+wrong here, and `Error::TheFuseWroteABrokenAnswer` would blame the fuse for a
+model it was handed. That is §66.3's rule, arriving at a new site.
+
+Everything else the sweep refuses is a shape this crate built and cannot stand
+behind. Refusals that are not about the model at all — `Error::Undecidable`
+where a predicate gave up on the answer, `Error::Geometry` where the range could
+not be measured — travel unchanged, because "the kernel wrote something broken"
+is not what they say.
+
+**This changes what two existing tests measure, and both are outside the files
+this unit owns.** `a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses`
+fuses a frame at `2^40` and at `2^50` with a copy of itself, and
+`a_pair_of_towers_a_hundred_powers_of_ten_shorter_is_settled_and_measured`
+fuses towers a hundred powers of ten apart. Both have inputs that already fail
+`the_inputs_fit_in_f64`, both used to answer `Ok` because the local check left
+the range out, and both now refuse:
+`Invalid(DynamicRangeTooWide { ratio: 1.099511627779e12 })` and
+`Invalid(DynamicRangeTooWide { ratio: 2e200 })`. The first test's own doc
+already said "past about `2^37` the model is outside
+`DynamicRange::LARGEST_SUPPORTED_RATIO` and a validate boundary says so"; what
+changes is that the fuse now says so too, at the moment it builds the answer,
+instead of leaving it for the caller's next `Model::validate`.
+
+### 87.4 What is still a panic, and why the operation is not wholly atomic
+
+Two things fire after the real write and both stay panics:
+
+- `assert_approximation_did_not_grow`, for the reason in decision 9.
+- `check_touched_solid` on each written solid.
+
+Reaching either means the answer that swept clean did not survive being written
+a second time — which is this crate corrupting its own arena, not a broken
+answer. §4.1's middle row is the right response to that and always was.
+
+So `Model::fuse`'s `# Atomic` promise holds up to those two and no further, and
+`commit`'s `# Panics` says so in as many words. A doc comment that claimed
+whole-operation atomicity would be the kind of sentence §16.10 exists to stop:
+the claim is *nearly* true, and the honest form names the two cases where it is
+not rather than rounding them off.
+
+### 87.5 The two tests, and what each demonstrates
+
+`an_answer_whose_wire_does_not_close_is_refused_and_nothing_is_written` builds
+an `Assembly` by hand — a triangle whose second face walks all three edges
+forwards instead of backwards, so every edge is still used by two coedges
+running opposite ways and the wire is the one thing wrong with it — hands it to
+`commit`, and asks for both halves: the new `Err`, and a model whose seven
+arenas are exactly the length they were.
+
+`Assembly`, `commit` and `write_into` are all `pub(crate)`, so this has to be a
+unit test inside `src/` rather than an integration test.
+
+Its teeth were measured rather than assumed. Made to write before sweeping, it
+reports the seven arena lengths as `[11, 15, 30, 8, 8, 2, 2]` against
+`[8, 12, 24, 6, 6, 1, 1]` — the three corners, three edges, six coedges, two
+wires, two faces, shell and solid of the broken answer, left behind in a model
+that started as one plain cube.
+
+`the_same_answer_is_written_into_an_empty_model_and_into_a_busy_one` is the
+demonstration decision 2's claim needs. CLAUDE.md's §16.10 rule says a claim
+that something cannot happen needs a demonstration and not a paragraph, and
+"the second write writes the same answer as the first" is that kind of claim —
+everything in §87 rests on it. One union of two cubes is committed into an empty
+model and into the model that holds both inputs, and the two answers are
+compared by position within `Written`, since the slots cannot match.
+
+### 87.6 Why deleting §82's check is not undoing §82
+
+§82.4's argument was that asking eleven of the sweep's thirteen checks of the
+written entities asks the same questions as asking all thirteen of the whole
+model, and it was a good argument. §87 does not contradict it. It makes it
+**moot**: a throwaway model holding only the answer *is* the set of entities
+§82.4 argued about, so the whole sweep of it asks exactly the questions the
+hand-cut eleven asked, plus the two that were cut.
+
+The two that were cut come back for free and for the right reason:
+
+- `check_dynamic_range` was cut because it folds over every solid in the model
+  and would blame a fuse for where somebody else's solid sits. Folded over a
+  model holding only the answer it *is* the answer's own range, so §82.5's
+  objection does not apply to it — and §87.3 handles the one case where it
+  refuses.
+- `check_keys_resolve` was cut because there was nothing in a just-written
+  subgraph for it to find. That is still true, and running it costs a pass over
+  arenas that hold only the answer.
+
+What §82 built therefore had one caller left after this change — its own unit
+test — which made it dead in everything that ships. `check_approximation_ordering_of`
+went with it, and `Written` lost the three arenas nobody reads any more: a solid
+names its shells, which name their faces, which name their wires, which name
+their coedges, so listing them again was a second copy of what the arena says.
+
+`Model::check_touched_solid` also moved **out** of `Assembly::write_into`, where
+it had been running on each solid as it was built. Left there it put a panic in
+front of all three of `write_into`'s calls — including the throwaway one whose
+whole job is to turn a broken answer into an `Err`. `commit` asks it of the real
+write instead, which is where it guards something.
+
+### 87.7 What it costs, measured
+
+Release, on this machine, best over every call in the run after warmups. The
+harness was a throwaway integration test that timed `Model::fuse` end to end,
+with a temporary probe inside `commit` timing the throwaway block and the sweep
+within it, run as:
+
+```
+mise exec -- cargo nextest run --release -p rcad-topo \
+    -E 'test(measure_the_fuse)' --no-capture
+```
+
+| Answer | Whole fuse | Throwaway build + tag + sweep | Sweep alone |
+|---|---|---|---|
+| 12 faces (two cubes, one moved along the diagonal) | 1.477 ms | 45.1 µs, **+3.06%** | 38.5 µs |
+| 23 faces (two 10-step staircase prisms, one raised) | 31.52 ms | 84.6 µs, **+0.27%** | 73.9 µs |
+
+**The sweep is linear in the answer and the constant is 3.21 µs a face**, which
+is what the two rows agree on to three figures: 38 544 ns over 12 faces and
+73 871 ns over 23 both come out at 3 212 ns. The build-and-tag half is the rest,
+about 0.5 µs a face.
+
+Two things this table does not say, and neither should be read into it. It is
+**pure addition** — measured against a `commit` with the throwaway block taken
+out and nothing put back, so it does not net off `check_what_was_just_written`,
+which this unit deleted and which asked eleven of the same thirteen questions of
+the same entities. The real cost of §87 against the code it replaced is
+therefore smaller than these numbers, and by an amount nobody has measured. And
+the percentages are a share of *this* fuse, whose cost grows much faster than
+its answer does: the 23-face row's fuse is 21× the 12-face row's while its
+answer is 1.9×. Quote the microseconds a face; the percentage is about which
+shape you picked.
+
+Subtraction on the whole fuse was tried first and abandoned: two runs of the
+same shipped code differed by 1.4 ms on the 23-face shape, which is fourteen
+times the effect being measured. That is why the probe went inside `commit`.
+
+### 87.8 What this closes, and what it leaves
+
+**Closed: §66.7's first item.** "Nobody has measured the copy" is no longer
+true, and there is no copy — there are two writes. §66.4's costing sentence is
+amended in place to say so.
+
+**Not closed: the five `add_*` builders in `build.rs`.** They are the same
+change and the same shape, and §66.4's rows still say "Panic, until it gets a
+scratch". The reason they wait is §66.2's +7.9% on `add_extrusion`, measured on
+a synthetic loop of 2 000 extrusions — a fuse pays this cost against
+milliseconds and an extrusion pays it against microseconds. §13's rule stands:
+the consumer that would weigh that trade is the importer, and it does not exist
+yet.
+
+**Not closed: `place_solid`.** It writes in place and has nothing to write into
+a throwaway, so §66.7's second item — whether it should roll back with the
+inverse isometry — is untouched by this and stays open.
+
+**Not closed: whether "valid" should depend on a policy at all.** §66.7's third
+item. §87.3 makes it slightly sharper by putting `Invalid::DynamicRangeTooWide`
+on a new path, but it does not answer it.
