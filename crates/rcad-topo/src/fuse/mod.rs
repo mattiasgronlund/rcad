@@ -167,22 +167,26 @@ impl Model {
     /// for it. Such a key answered `Ok` naming no solids at all until §84, and
     /// panicked between §84 and §86.
     ///
+    /// [`Error::TheFuseWroteABrokenAnswer`] if the answer this built does not
+    /// validate. That is a bug here rather than bad input, and it used to be a
+    /// panic — but the answer is now built in a throwaway model and swept there,
+    /// so a caller who sees it has a model exactly as it was, and there is
+    /// nothing corrupt for a crash to protect (`docs/decisions.md` §87, which
+    /// amends §4.1 and §66.4). **The answer is swept in every build**, by the
+    /// whole of [`Model::validate`]: the throwaway holds the answer and nothing
+    /// else, which is what makes a whole-model sweep of it local to what this
+    /// fuse wrote. Before §66.3 the check was `debug_assertions`-gated *and*
+    /// skipped whenever the model did not already validate, so a release fuse
+    /// looked at nothing; §66.3 made it run always, and §87 made it a refusal.
+    ///
     /// # Panics
     ///
-    /// If the answer this wrote is not itself valid. A fuse invents topology
-    /// that was in no input, which puts it nearer an import than a mutation,
-    /// and a corrupt solid is worse than a crash (§17.4, §4.3).
-    ///
-    /// **The answer is checked in every build**, by
-    /// [`Model::check_what_was_just_written`], which asks eleven of
-    /// [`Model::validate`]'s thirteen checks of the entities this fuse wrote and
-    /// nothing else. It leaves out the model-wide coordinate range, because that
-    /// one can fail for where somebody else's solid sits — the local form of it
-    /// is asked above, of the answer's own coordinates — and the keys-resolve
-    /// pass, which has nothing to find among keys minted moments earlier. Before
-    /// `docs/decisions.md` §66.3 this check was `debug_assertions`-gated *and*
-    /// skipped whenever the model did not already validate, so a release fuse
-    /// looked at nothing.
+    /// If the answer that swept clean does not survive being written a second
+    /// time into the caller's model. **So the "Atomic" promise above holds up to
+    /// that panic and no further** — it fires after the write, with the answer
+    /// already in the model. It stays a panic because reaching it means the two
+    /// writes disagreed, which is this crate corrupting its own arena (§17.4,
+    /// §4.3).
     ///
     /// **An input broken in a way [`Model::validate`] rejects is not checked, in
     /// any build.** This used to say it panicked; nothing here has ever asked.
@@ -235,16 +239,21 @@ impl Model {
         // The last question the answer itself can be asked, and the only one
         // neither input could have been asked instead: a fuse invents features
         // — the sliver where two nearly-flush faces meet — and a sliver has no
-        // lower size short of zero. It is asked here rather than after the write
-        // because `Assembly::commit`'s check is the only one that does not ask
-        // it: a range is a fold over the whole model, and the answer's own is
-        // what this fuse is answerable for.
+        // lower size short of zero. `Assembly::commit`'s sweep of the throwaway
+        // model asks the same question, so this is not the only place it is
+        // asked; it is asked here as well for three reasons the sweep cannot
+        // give. It reads `policy`, so a lenient caller gets the record where a
+        // strict one gets the refusal. It refuses before *either* write, where
+        // the sweep costs a whole answer built first. And it blames the caller:
+        // a refusal from here is `Invalid::DynamicRangeTooWide` as itself, which
+        // is why `Assembly::whose_fault_a_swept_answer_is` has to let that one
+        // variant past unwrapped when the sweep is the first to see it.
         if the_inputs_fit_in_f64(self, arguments, tools)? {
             assembly.check_dynamic_range(policy, log)?;
         }
 
         let inherited = worst_tag_of_the_inputs(self, arguments, tools);
-        let written = assembly.commit(self, inherited, policy);
+        let written = assembly.commit(self, inherited, policy, log)?;
         Ok(history_of(self, &scratch, &assembly, &written))
     }
 }
@@ -259,9 +268,8 @@ impl Model {
 /// perfectly good answer and refusing it here would report somebody else's
 /// dynamic range as this fuse's bug. It is taken over the input solids rather
 /// than over the whole model so that it stays local to the entities this
-/// operation touched (§4.3) — the same reason
-/// [`Model::check_what_was_just_written`] leaves the model-wide range out of
-/// what it asks after the write.
+/// operation touched (§4.3) — the same reason [`Assembly::commit`] sweeps a
+/// throwaway model holding only the answer rather than the caller's whole one.
 ///
 /// Chords only, on both sides, where `Model::validate` also takes the radii of
 /// curved faces. A face of the answer keeps its ancestor's surface bit for bit
@@ -269,9 +277,11 @@ impl Model {
 /// inputs: were it the smallest thing about either, both measures would come
 /// out the same and this would report the inputs as not fitting, which only
 /// ever makes the check below stand down. Leaving the radii out is therefore
-/// the stricter of the two, not a hole — and a model whose radius is what puts
-/// it out of range fails `Model::validate` going in, which is what already
-/// stops [`Assembly::commit`] asserting on it.
+/// the stricter of the two, not a hole. A model whose radius is what puts it
+/// out of range fails `Model::validate` going in, and the sweep of the
+/// throwaway answer says so again on the way out — as
+/// [`Invalid::DynamicRangeTooWide`] and not as this kernel's bug, which is the
+/// one refusal [`Assembly::whose_fault_a_swept_answer_is`] lets past unwrapped.
 ///
 /// # Errors
 ///

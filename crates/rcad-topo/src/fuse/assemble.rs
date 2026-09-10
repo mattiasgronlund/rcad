@@ -4,8 +4,10 @@
 //! half-applied boolean is the corrupt solid §4.1 would rather crash than emit,
 //! so every question that can be answered `Err` — is the result a manifold, is
 //! any shell inside out, which shell is a void of which — is settled before
-//! [`Assembly::commit`] touches the model, and `commit` itself only calls arena
-//! primitives that cannot fail.
+//! [`Assembly::commit`] touches the model. `commit` builds the answer in a
+//! throwaway model of its own and sweeps that, so the last question of all —
+//! is what we built even valid — is answered before the caller's arena is
+//! touched too (`docs/decisions.md` §87).
 //!
 //! # How the pieces find each other
 //!
@@ -263,10 +265,27 @@ impl Assembly {
         }
     }
 
-    /// Write the result into the model, once.
+    /// Build the answer twice: once in a throwaway model, to find out whether it
+    /// is sound, and then — only if it is — in the caller's.
     ///
-    /// The first and only mutation of the whole operation. Everything that could
-    /// have refused has already refused.
+    /// **A refusal leaves `model` untouched, down to the last slot.** That is the
+    /// whole point of the second write, and it is the shape
+    /// [`SolidBuilder::build`](crate::SolidBuilder::build) already had: the
+    /// answer used to go straight into the caller's arena and be judged
+    /// afterwards, so a broken one was already in their model when the panic
+    /// fired, and nothing in this crate rolls back (`docs/decisions.md` §87).
+    ///
+    /// [`Assembly::write_into`] reads nothing out of the model it writes into and
+    /// names no entity that was already there, so writing it twice writes the
+    /// same answer twice; `the_two_writes_agree` measures that rather than
+    /// asserting it (§16.10).
+    ///
+    /// **The throwaway model is swept whole, by [`Model::validate`].** It holds
+    /// the answer and nothing else, so a whole-model sweep of it is already local
+    /// to what this fuse wrote — which is what §66.3 wanted and had to hand-cut
+    /// eleven checks out of the sweep to get. Sweeping it whole gets the other
+    /// two back: the keys-resolve pass, and the model-wide coordinate range,
+    /// which over a model holding only the answer *is* the answer's own range.
     ///
     /// New corners are tagged with how wide their box is, as
     /// [`Cause::ConstructedPoint`] — representation wobble, which is reported and
@@ -274,44 +293,87 @@ impl Assembly {
     /// carries at least the worst tag the inputs carried: a face cut by a face
     /// that was only known to a millimetre is only known to a millimetre itself,
     /// and §17.2 is explicit that a certified fuse carries an input's tag through
-    /// rather than refusing it.
+    /// rather than refusing it. The throwaway is tagged the same way before it is
+    /// swept, because the sweep asks whether a face claims less slop than its own
+    /// edges and an untagged answer would be a different question.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::TheFuseWroteABrokenAnswer`] if the sweep refuses the answer,
+    /// which is a bug here and not bad input — but a bug that costs the caller
+    /// nothing, since nothing was written. [`Invalid::DynamicRangeTooWide`]
+    /// travels as itself instead: see [`whose_fault_a_swept_answer_is`].
+    ///
+    /// Whatever else the sweep says, unchanged — [`Error::Undecidable`] where a
+    /// predicate gave up on the answer, and [`Error::Geometry`] where its
+    /// coordinate range could not be measured at all.
     ///
     /// # Panics
     ///
-    /// If what the fuse just wrote breaks an invariant of the model, in **every**
-    /// build. A fuse invents topology that was in no input, which puts it nearer
-    /// an import than a mutation (§17.4), and a corrupt solid is worse than a
-    /// crash. The gate that used to send this check to debug builds is gone, and
-    /// so is the sweep of the whole model it stood in front of
-    /// (`docs/decisions.md` §66.2, §66.3).
+    /// If the answer that swept clean does not survive the second write, or if
+    /// writing it made the model's worst approximation grow past what this fuse
+    /// accounted for. **The operation is atomic up to those two, and no
+    /// further**: both fire after the real write, so a caller who sees either
+    /// has the answer in their model. They are kept as panics because reaching
+    /// them means the two writes disagreed, which is corruption in this crate
+    /// rather than a broken answer (§4.1, §87).
     ///
-    /// **The check is [`Model::check_what_was_just_written`], not
-    /// [`Model::validate`].** Eleven of the sweep's thirteen checks are asked of
-    /// the answer alone, which is the whole of what the fuse is answerable for.
-    /// The model-wide coordinate range is asked of the input solids before the
-    /// write instead ([`the_inputs_fit_in_f64`]) and of the answer's own
-    /// coordinates by [`Assembly::check_dynamic_range`]; that function says why,
-    /// and why a model-wide one here would report another solid's placement as
-    /// this fuse's bug. The keys-resolve pass is the other one left out, and
-    /// [`Model::check_what_was_just_written`] says why there is nothing in a
-    /// just-written subgraph for it to find.
-    ///
-    /// [`the_inputs_fit_in_f64`]: super::the_inputs_fit_in_f64
+    /// [`whose_fault_a_swept_answer_is`]: Assembly::whose_fault_a_swept_answer_is
+    /// [`Assembly::write_into`]: Assembly::write_into
     pub(crate) fn commit(
         &self,
         model: &mut Model,
         inherited: Option<Approximation>,
         policy: &Policy,
-    ) -> Written {
+        log: &mut ProvenanceLog,
+    ) -> Result<Written> {
+        let mut throwaway = Model::new(model.scale());
+        let rehearsal = self.write_into(&mut throwaway, &self.solids, &self.runs);
+        self.tag_everything_it_built(&mut throwaway, &rehearsal, inherited);
+        let mut mine = ProvenanceLog::new();
+        let swept = throwaway.validate(policy, &mut mine);
+        mine.drain_into(log);
+        swept.map_err(Self::whose_fault_a_swept_answer_is)?;
+
         let approximation_before = model.worst_approximation();
         let written = self.write_into(model, &self.solids, &self.runs);
         let worst = self.tag_everything_it_built(model, &written, inherited);
         model.assert_approximation_did_not_grow(approximation_before.max(worst));
+        for &solid in &written.solids {
+            model.check_touched_solid(solid);
+        }
+        Ok(written)
+    }
 
-        model
-            .check_what_was_just_written(&written, policy, &mut ProvenanceLog::new())
-            .expect("a fuse writes a valid answer or does not write at all");
-        written
+    /// Whether a sweep refusing the answer is this kernel's bug or the caller's
+    /// geometry.
+    ///
+    /// **[`Invalid::DynamicRangeTooWide`] is the caller's, and it is the only
+    /// one.** [`Assembly::check_dynamic_range`] asks the same question before
+    /// either write, but only behind [`the_inputs_fit_in_f64`] — so when the
+    /// inputs are *already* too wide to resolve, that check is skipped and this
+    /// sweep is the first thing to see the answer's range. An answer too wide
+    /// out of inputs too wide is where the caller's solids sit, not arithmetic
+    /// gone wrong here, and wrapping it as a kernel bug would blame the fuse for
+    /// a model it was handed.
+    ///
+    /// Everything else the sweep refuses is a shape this crate built and cannot
+    /// stand behind. Refusals that are not about the model at all — a predicate
+    /// giving up, a range that could not be measured — travel unchanged, because
+    /// "the kernel wrote something broken" is not what they say.
+    ///
+    /// [`the_inputs_fit_in_f64`]: super::the_inputs_fit_in_f64
+    fn whose_fault_a_swept_answer_is(refused: Error) -> Error {
+        if matches!(
+            refused,
+            Error::Invalid(Invalid::DynamicRangeTooWide { .. })
+        ) {
+            return refused;
+        }
+        match refused {
+            Error::Invalid(broken) => Error::TheFuseWroteABrokenAnswer { broken },
+            other => other,
+        }
     }
 
     /// One face per kept piece, and the corners and edges they share.
@@ -1231,13 +1293,15 @@ impl Assembly {
 
     /// Build every entity of the result in `model`, in a fixed order.
     ///
-    /// Used twice: once on a scratch model, to ask which shell is inside which,
-    /// and once on the caller's model, which is the commit.
+    /// Used three times: once on a scratch model to ask which shell is inside
+    /// which, once on a throwaway model to find out whether the answer sweeps
+    /// clean, and once on the caller's model, which is the commit.
     ///
-    /// # Panics
-    ///
-    /// If what it just built breaks one of the invariants checked on touched
-    /// entities. That is a bug here, not bad input.
+    /// **It judges nothing.** [`Model::check_touched_solid`] used to run here on
+    /// each solid as it was built, which put a panic in front of every one of
+    /// those three writes — including the throwaway one whose whole job is to
+    /// turn a broken answer into an [`Error`] (`docs/decisions.md` §87).
+    /// [`Assembly::commit`] asks it of the real write instead.
     fn write_into(&self, model: &mut Model, lumps: &[Lump], runs: &[EdgeRun]) -> Written {
         let vertices: Vec<VertexSlot> = self
             .corners
@@ -1311,9 +1375,7 @@ impl Assembly {
                     orient: Orientation::Forward,
                 })
                 .collect();
-            let solid = model.add_solid(used);
-            model.check_touched_solid(solid);
-            solids.push(solid);
+            solids.push(model.add_solid(used));
         }
 
         Written {

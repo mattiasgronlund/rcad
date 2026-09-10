@@ -132,6 +132,31 @@ pub enum Error {
     #[error("the model is broken: {0}")]
     Invalid(#[from] Invalid),
 
+    /// This kernel built an answer that does not validate, and threw it away
+    /// rather than hand it over.
+    ///
+    /// **This is a bug here, not bad input.** It is separate from
+    /// [`Error::Invalid`], which is what a caller gets when the *description*
+    /// they gave was unsound — [`SolidBuilder::build`](crate::SolidBuilder::build)
+    /// returns that for a corner off its own plane. Reading either as the other
+    /// sends the reader looking in the wrong place, so they are two variants.
+    ///
+    /// A fuse works its answer out in a throwaway model and sweeps that
+    /// (`docs/decisions.md` §87), so a caller who sees this has a model exactly
+    /// as it was before the call. What it means is that a fuse gave up where it
+    /// used to crash: §4.1 wants a panic for a broken invariant, and this is the
+    /// case §66.4 asked to be carved out of that — nothing is corrupt, because
+    /// nothing was written.
+    ///
+    /// [`Invalid::DynamicRangeTooWide`] never arrives wrapped in here. An answer
+    /// too wide to resolve is the caller's geometry rather than this kernel's
+    /// arithmetic, so it travels as itself; §87 has the argument.
+    #[error("this kernel built an answer that does not validate, and wrote nothing: {broken}")]
+    TheFuseWroteABrokenAnswer {
+        /// What the sweep of the throwaway model refused the answer for.
+        broken: Invalid,
+    },
+
     /// A serialized model was written by a different version of this format.
     #[error("this model was written in format version {found}, and we read version {expected}")]
     WrongFormatVersion {
