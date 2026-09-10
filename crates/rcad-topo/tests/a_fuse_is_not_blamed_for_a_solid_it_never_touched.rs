@@ -8,14 +8,19 @@
 //! where **somebody else's** solid sits as this fuse's bug
 //! (`docs/decisions.md` §66.3).
 //!
-//! **The sweep is a whole `Model::validate` again, and the property still
-//! holds — structurally rather than by a list of exceptions.** §66.3 cut eleven
-//! of the thirteen checks out of the sweep by hand to get locality; §87 gets it
-//! back for free by building the answer in a throwaway model and sweeping
-//! *that*. The far block was never written into the throwaway, so no fold over
-//! it can reach the far block, and there is no list of left-out checks to keep
-//! honest. What this test measures is that structural fact: run it against a
-//! sweep of the caller's model and the fuse refuses.
+//! **The sweep is `Model::validate` less one check, and the property holds
+//! structurally rather than by a list of exceptions.** §66.3 cut eleven of the
+//! thirteen checks out of the sweep by hand to get locality; §87 builds the
+//! answer in a throwaway model and sweeps *that*, which gets locality for
+//! free — the far block was never written into the throwaway, so no fold over
+//! the throwaway can reach it.
+//!
+//! The one check left out is the coordinate range itself, and it is left out
+//! for a different reason than locality: [`Assembly::check_dynamic_range`] asks
+//! it before the write, behind a guard that keeps a certified fuse able to
+//! settle enormous-but-exact geometry (§87.3). What this test measures is the
+//! structural fact: run it against a sweep of the caller's model and the fuse
+//! refuses.
 //!
 //! **The numbers, and why they are exactly these.**
 //! [`DynamicRange::LARGEST_SUPPORTED_RATIO`] is `1e11`.
