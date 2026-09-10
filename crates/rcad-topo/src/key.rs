@@ -25,8 +25,12 @@ slotmap::new_key_type! {
 /// grows the model by zero bytes; only keys in flight and the transient maps a
 /// mesh or a fuse builds get wider. On the biggest model in the STEP corpus
 /// that reads — 20 312 entities out of `PinHeader_2x39_P2.54mm_Horizontal.step`
-/// — parse, import, validate and mesh moved inside their own run-to-run spread
-/// and peak resident memory moved 0.1%.
+/// — parse, import, validate and mesh each moved inside their own run-to-run
+/// spread over five release runs a side, and peak resident memory went from a
+/// median 51 400 kB to 51 552 kB with the whole second range, 51 440–51 596,
+/// inside the first, 51 240–51 624. Parse touches no key at all and moved by as
+/// much as the rest, which is what says the numbers are the machine and not the
+/// change.
 ///
 /// What the zero-sized version bought instead was a release build in which
 /// `slot_in` waved every foreign key through, silently and against the doc
