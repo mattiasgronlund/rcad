@@ -107,7 +107,11 @@ fn a_lens_between_two_balls(
     assert_eq!(solids.len(), 1, "a lens is one solid");
     let lens = solids[0];
     assert_eq!(
-        model.solid(lens).faces().count(),
+        model
+            .solid(lens)
+            .expect("this model made the key")
+            .faces()
+            .count(),
         2,
         "a lens has one face on each ball"
     );
@@ -211,6 +215,7 @@ fn which_ball_walks_the_shared_circle_changes_nothing() {
         let radii = |model: &Model, solid| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .faces()
                 .map(|face| match face.surface() {
                     Surface::Sphere(ball) => ball.radius(),
@@ -352,6 +357,7 @@ fn meshed(model: &Model, solid: SolidKey, how_fine: f64) -> Mesh {
     let mut log = ProvenanceLog::new();
     let mesh = model
         .solid(solid)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(how_fine).expect("a positive length"),
             &Policy::certified(),
@@ -386,7 +392,7 @@ fn the_worst_each_face_really_strays(
     solid: SolidKey,
     mesh: &Mesh,
 ) -> Vec<(f64, f64)> {
-    let view = model.solid(solid);
+    let view = model.solid(solid).expect("this model made the key");
     let mut worst = Vec::new();
     for face in view.faces() {
         let Surface::Sphere(ball) = face.surface() else {

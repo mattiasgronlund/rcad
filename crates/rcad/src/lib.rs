@@ -84,7 +84,7 @@
 //! // ignored and nothing here is approximated.
 //! let how_fine = Deflection::for_scale(scale);
 //! let measured = model
-//!     .solid(cube)
+//!     .solid(cube)?
 //!     .measure(how_fine, &Policy::certified(), &mut log)?;
 //! assert_eq!(measured.volume(), 1000.0);
 //! assert_eq!(measured.surface_area(), 600.0);
@@ -95,7 +95,7 @@
 //!
 //! let policy = Policy::certified();
 //! match model
-//!     .solid(cube)
+//!     .solid(cube)?
 //!     .classify_point(Point::new(5.0, 5.0, 5.0), &policy, &mut log)
 //! {
 //!     Containment::Inside => {}
@@ -309,7 +309,7 @@
 //! let [(_, key)] = import.solids() else {
 //!     panic!("one solid written is one solid read back")
 //! };
-//! let measured = import.model().solid(*key).measure(
+//! let measured = import.model().solid(*key)?.measure(
 //!     Deflection::for_scale(scale),
 //!     &Policy::certified(),
 //!     &mut log,

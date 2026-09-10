@@ -18,7 +18,7 @@ fn walking_down_from_a_solid_reaches_every_corner_of_the_cube() {
     let (model, cube) = a_cube_of_side_two();
 
     let mut corners: Vec<[f64; 3]> = Vec::new();
-    for shell in model.solid(cube).shells() {
+    for shell in model.solid(cube).expect("this model made the key").shells() {
         for face in shell.faces() {
             for wire in face.wires() {
                 for coedge in wire.coedges() {
@@ -37,7 +37,7 @@ fn walking_down_from_a_solid_reaches_every_corner_of_the_cube() {
 fn every_coedge_ends_where_the_next_one_starts() {
     let (model, cube) = a_cube_of_side_two();
 
-    for face in model.solid(cube).faces() {
+    for face in model.solid(cube).expect("this model made the key").faces() {
         for wire in face.wires() {
             let points: Vec<Point> = wire.coedges().map(|coedge| coedge.end().point()).collect();
             let starts: Vec<Point> = wire
@@ -56,6 +56,7 @@ fn the_shell_of_a_cube_hands_out_a_reference_for_every_face() {
     let (model, cube) = a_cube_of_side_two();
     let shell = model
         .solid(cube)
+        .expect("this model made the key")
         .shells()
         .next()
         .expect("a cube has a skin");
@@ -73,7 +74,12 @@ fn the_shell_of_a_cube_hands_out_a_reference_for_every_face() {
 #[test]
 fn a_reference_carries_the_placement_it_was_made_with() {
     let (model, cube) = a_cube_of_side_two();
-    let face = model.solid(cube).faces().next().expect("a cube has faces");
+    let face = model
+        .solid(cube)
+        .expect("this model made the key")
+        .faces()
+        .next()
+        .expect("a cube has faces");
     let shift = Isometry::translation(Vector::new(1.0, 2.0, 3.0)).expect("a finite shift");
 
     let reference = rcad_topo::FaceRef::new(face.key(), shift, Orientation::Reversed);
@@ -134,37 +140,75 @@ fn a_round_bars_closed_cap_edges_have_no_segment_and_do_not_panic() {
 #[test]
 fn a_key_taken_from_a_view_leads_back_to_the_same_thing() {
     let (model, cube) = a_cube_of_side_two();
-    let face = model.solid(cube).faces().next().expect("a cube has faces");
+    let face = model
+        .solid(cube)
+        .expect("this model made the key")
+        .faces()
+        .next()
+        .expect("a cube has faces");
 
     let wire = face.outer_wire();
     assert_eq!(wire.face(), Some(face.key()));
-    assert_eq!(model.wire(wire.key()).coedge_count(), wire.coedge_count());
+    assert_eq!(
+        model
+            .wire(wire.key())
+            .expect("this model made the key")
+            .coedge_count(),
+        wire.coedge_count()
+    );
 
     let coedge = wire.coedges().next().expect("a wire has coedges");
     assert_eq!(coedge.wire(), Some(wire.key()));
     assert_eq!(
-        model.coedge(coedge.key()).start().point(),
+        model
+            .coedge(coedge.key())
+            .expect("this model made the key")
+            .start()
+            .point(),
         coedge.start().point()
     );
 
     let vertex = coedge.start();
-    assert_eq!(model.vertex(vertex.key()).point(), vertex.point());
-    assert_eq!(model.vertex(vertex.key()).edges().count(), 3);
+    assert_eq!(
+        model
+            .vertex(vertex.key())
+            .expect("this model made the key")
+            .point(),
+        vertex.point()
+    );
+    assert_eq!(
+        model
+            .vertex(vertex.key())
+            .expect("this model made the key")
+            .edges()
+            .count(),
+        3
+    );
 
     let shell = model
         .solid(cube)
+        .expect("this model made the key")
         .shells()
         .next()
         .expect("a cube has a skin");
-    assert_eq!(model.shell(shell.key()).face_count(), 6);
-    assert_eq!(model.solid(cube).key(), cube);
+    assert_eq!(
+        model
+            .shell(shell.key())
+            .expect("this model made the key")
+            .face_count(),
+        6
+    );
+    assert_eq!(
+        model.solid(cube).expect("this model made the key").key(),
+        cube
+    );
 }
 
 #[test]
 fn a_face_broken_into_triangles_covers_its_whole_area() {
     let (model, cube) = a_cube_of_side_two();
 
-    for face in model.solid(cube).faces() {
+    for face in model.solid(cube).expect("this model made the key").faces() {
         let mut area = Vector::zero();
         face.for_each_triangle(|[a, b, c]| {
             area = area + (b - a).cross(c - a) * 0.5;
@@ -180,6 +224,7 @@ fn a_cube_fits_inside_the_box_round_its_own_corners() {
 
     let (low, high) = model
         .solid(cube)
+        .expect("this model made the key")
         .box_around_its_corners()
         .expect("a cube has corners");
 

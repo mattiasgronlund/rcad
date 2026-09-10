@@ -133,7 +133,15 @@ fn warning_instead_of_failing_is_the_only_change_this_frustum_needs() {
     let mut log = ProvenanceLog::new();
     let solid = cones::a_frustum_under(&mut model, SLOPE, NEAR, FAR, &asked_to_warn, &mut log)
         .expect("a caller who asked for a warning gets the solid");
-    assert_eq!(model.solid(solid).faces().count(), 3, "two caps and a wall");
+    assert_eq!(
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        3,
+        "two caps and a wall"
+    );
 
     assert_eq!(
         log.len(),

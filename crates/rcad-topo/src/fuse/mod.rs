@@ -159,12 +159,13 @@ impl Model {
     /// a face left a piece bounded by two straight sides, which enclose no area
     /// and so describe no face — [`Invalid::WireTooShort`], and §67 for why that
     /// is the input's fault and not the splitter's.
+    ///
     /// [`Error::KeyFromAnotherModel`] when one of `arguments` or `tools` was
-    /// made by a different model — asked of every key in both lists **before
-    /// any other work**, so that the one case a fuse can rule out for nothing
-    /// is ruled out where the "Atomic" promise above is trivially kept (§86).
-    /// It answered `Ok` naming no solids at all until §84, and panicked between
-    /// §84 and §86.
+    /// made by a different model. It is asked of every key in both lists
+    /// **before any other work**, which is the one refusal a fuse can reach
+    /// without arithmetic and makes the "Atomic" promise above trivially true
+    /// for it. Such a key answered `Ok` naming no solids at all until §84, and
+    /// panicked between §84 and §86.
     ///
     /// # Panics
     ///

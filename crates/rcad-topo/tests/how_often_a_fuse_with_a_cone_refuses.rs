@@ -193,12 +193,14 @@ fn a_pair(family: Family, draw: &mut Draw) -> Option<(Model, SolidKey, SolidKey)
             let side = draw.whole(4, 9);
             let cube = a_block(&mut model, [side; 3], Vector::new(0.0, 0.0, 0.0))?;
             let up = draw.whole(1, far as i64 - 1);
-            model.place_solid(
-                cube,
-                &Isometry::translation(Vector::new(0.0, 0.0, up))
-                    .ok()?
-                    .compose(&stood_on_its_corner()),
-            );
+            model
+                .place_solid(
+                    cube,
+                    &Isometry::translation(Vector::new(0.0, 0.0, up))
+                        .ok()?
+                        .compose(&stood_on_its_corner()),
+                )
+                .ok()?;
             (model, cone, cube)
         }
         Family::AFrustumAgainstABlock => {
@@ -460,18 +462,20 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
 fn a_cube_on_its_corner_leans_every_one_of_its_planes_across_a_shallow_cone() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let cube = a_block(&mut model, [6.0; 3], Vector::new(0.0, 0.0, 0.0)).expect("a cube");
-    model.place_solid(
-        cube,
-        &Isometry::translation(Vector::new(0.0, 0.0, 5.0))
-            .expect("a shift")
-            .compose(&stood_on_its_corner()),
-    );
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(0.0, 0.0, 5.0))
+                .expect("a shift")
+                .compose(&stood_on_its_corner()),
+        )
+        .expect("this model made the key");
 
     let cone = rcad_geom::Surface::from(
         rcad_geom::Cone::new(rcad_geom::Axis::z(), 0.5).expect("a positive slope"),
     );
     let mut leans = Vec::new();
-    for face in model.solid(cube).faces() {
+    for face in model.solid(cube).expect("this model made the key").faces() {
         let flat = face
             .surface()
             .as_plane()
@@ -516,7 +520,9 @@ fn a_frustum_swallowed_by_a_cube_comes_back_the_same_frustum() {
     let cone = a_frustum(&mut model, 0.5, 4.0, 8.0);
     let cube = a_block(&mut model, [40.0; 3], Vector::new(-20.0, -20.0, -20.0))
         .expect("a cube big enough to swallow the frustum");
-    model.place_solid(cube, &stood_on_its_corner());
+    model
+        .place_solid(cube, &stood_on_its_corner())
+        .expect("this model made the key");
 
     let answer = model
         .fuse(&[cone], &[cube], Rule::Intersection, &policy, &mut log)
@@ -530,6 +536,7 @@ fn a_frustum_swallowed_by_a_cube_comes_back_the_same_frustum() {
     let how_fine = rcad_geom::Deflection::of(0.002).expect("a positive length");
     let measured = model
         .solid(pieces[0])
+        .expect("this model made the key")
         .measure(how_fine, &policy, &mut ProvenanceLog::new())
         .expect("the answer measures");
 
@@ -585,6 +592,7 @@ fn a_frustum_taken_apart_through_views_and_described_again_is_the_same_frustum()
     let [one, other] = [built, rebuilt].map(|solid| {
         model
             .solid(solid)
+            .expect("this model made the key")
             .measure(how_fine, &policy, &mut ProvenanceLog::new())
             .expect("both measure")
     });
@@ -598,7 +606,8 @@ fn a_frustum_taken_apart_through_views_and_described_again_is_the_same_frustum()
     let cut = |which: SolidKey| {
         let mut copy = model.clone();
         let cube = a_block(&mut copy, [5.0; 3], Vector::new(0.0, 0.0, 0.0)).expect("a cube");
-        copy.place_solid(cube, &stood_on_its_corner());
+        copy.place_solid(cube, &stood_on_its_corner())
+            .expect("this model made the key");
         let answer = copy
             .fuse(
                 &[which],
@@ -615,6 +624,7 @@ fn a_frustum_taken_apart_through_views_and_described_again_is_the_same_frustum()
             .map(|&piece| {
                 let measured = copy
                     .solid(piece)
+                    .expect("this model made the key")
                     .measure(how_fine, &policy, &mut ProvenanceLog::new())
                     .expect("each piece measures");
                 (
@@ -648,7 +658,7 @@ fn a_grid_of_points_is_classified_the_way_the_cone_says() {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let solid = a_frustum(&mut model, 0.5, 4.0, 8.0);
-    let view = model.solid(solid);
+    let view = model.solid(solid).expect("this model made the key");
 
     let inside = |at: Point| {
         let height = at.z();
@@ -759,12 +769,14 @@ fn a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike() 
             let Some(cube) = a_block(&mut model, [side; 3], Vector::new(0.0, 0.0, 0.0)) else {
                 continue;
             };
-            model.place_solid(
-                cube,
-                &Isometry::translation(Vector::new(0.0, 0.0, up))
-                    .expect("a finite shift")
-                    .compose(&stood_on_its_corner()),
-            );
+            model
+                .place_solid(
+                    cube,
+                    &Isometry::translation(Vector::new(0.0, 0.0, up))
+                        .expect("a finite shift")
+                        .compose(&stood_on_its_corner()),
+                )
+                .expect("this model made the key");
             for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
                 for (arguments, tools) in [([solid], [cube]), ([cube], [solid])] {
                     if which == 0 {
@@ -847,7 +859,7 @@ fn uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_as
                     copy.validate(&policy, &mut ProvenanceLog::new())?;
                     let mut corners: Vec<[u64; 3]> = Vec::new();
                     for piece in keys {
-                        for face in copy.solid(piece).faces() {
+                        for face in copy.solid(piece)?.faces() {
                             for wire in face.wires() {
                                 for at in wire.points() {
                                     corners.push(at.coordinates().map(f64::to_bits));
@@ -931,12 +943,14 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
 
     let skin = model
         .solid(cone)
+        .expect("this model made the key")
         .faces()
         .find(|face| matches!(face.surface(), rcad_geom::Surface::Cone(_)))
         .expect("a frustum has a cone face")
         .surface();
     let wall = model
         .solid(block)
+        .expect("this model made the key")
         .faces()
         .map(|face| face.surface())
         .find(|surface| {

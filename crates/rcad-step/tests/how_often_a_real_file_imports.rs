@@ -73,6 +73,7 @@ fn every_file_this_kernel_wrote_itself_imports() {
                     let measured = import
                         .model()
                         .solid(*key)
+                        .expect("this model made the key")
                         .measure(
                             Deflection::for_scale(import.model().scale()),
                             &Policy::certified(),
@@ -299,7 +300,12 @@ fn how_big_it_is(import: &Import) -> [f64; 3] {
     let mut least = [f64::INFINITY; 3];
     let mut most = [f64::NEG_INFINITY; 3];
     for (_, key) in import.solids() {
-        let Some((low, high)) = import.model().solid(*key).box_around_it() else {
+        let Some((low, high)) = import
+            .model()
+            .solid(*key)
+            .expect("this model made the key")
+            .box_around_it()
+        else {
             continue;
         };
         for axis in 0..3 {

@@ -44,7 +44,12 @@ fn two_cubes_at_the_same_place_share_space() {
     assert!(the_boxes_meet(&model, one, other));
     let answer = model
         .solid(one)
-        .shares_space_with(model.solid(other), &policy, &mut log);
+        .expect("this model made the key")
+        .shares_space_with(
+            model.solid(other).expect("this model made the key"),
+            &policy,
+            &mut log,
+        );
     assert_eq!(answer, SharedSpace::Shared);
 
     let refused = model.check_no_two_solids_share_space(&policy, &mut log);
@@ -74,7 +79,12 @@ fn a_cube_wholly_inside_a_bigger_one_shares_its_space() {
 
     let answer = model
         .solid(big)
-        .shares_space_with(model.solid(small), &policy, &mut log);
+        .expect("this model made the key")
+        .shares_space_with(
+            model.solid(small).expect("this model made the key"),
+            &policy,
+            &mut log,
+        );
     assert_eq!(answer, SharedSpace::Shared);
 
     let refused = model.check_no_two_solids_share_space(&policy, &mut log);
@@ -110,7 +120,12 @@ fn two_cubes_stacked_face_to_face_share_no_space() {
     );
     let answer = model
         .solid(below)
-        .shares_space_with(model.solid(above), &policy, &mut log);
+        .expect("this model made the key")
+        .shares_space_with(
+            model.solid(above).expect("this model made the key"),
+            &policy,
+            &mut log,
+        );
     assert_eq!(answer, SharedSpace::NothingFound);
 
     model
@@ -133,7 +148,12 @@ fn two_cubes_plainly_apart_share_no_space() {
 
     let answer = model
         .solid(here)
-        .shares_space_with(model.solid(far), &policy, &mut log);
+        .expect("this model made the key")
+        .shares_space_with(
+            model.solid(far).expect("this model made the key"),
+            &policy,
+            &mut log,
+        );
     assert_eq!(answer, SharedSpace::Apart);
 
     model
@@ -180,7 +200,12 @@ fn two_bars_crossing_in_a_plus_share_space_and_this_pass_does_not_see_it() {
     assert!(the_boxes_meet(&model, long, across));
     let answer = model
         .solid(long)
-        .shares_space_with(model.solid(across), &policy, &mut log);
+        .expect("this model made the key")
+        .shares_space_with(
+            model.solid(across).expect("this model made the key"),
+            &policy,
+            &mut log,
+        );
     assert_eq!(
         answer,
         SharedSpace::NothingFound,
@@ -209,7 +234,12 @@ fn two_balls_at_the_same_place_share_space_and_this_pass_does_not_see_it() {
     assert!(the_boxes_meet(&model, one, other));
     let answer = model
         .solid(one)
-        .shares_space_with(model.solid(other), &policy, &mut log);
+        .expect("this model made the key")
+        .shares_space_with(
+            model.solid(other).expect("this model made the key"),
+            &policy,
+            &mut log,
+        );
     assert_eq!(
         answer,
         SharedSpace::NothingFound,
@@ -247,9 +277,14 @@ fn a_bar(model: &mut Model, corners: [[f64; 2]; 4], height: f64, bottom: f64) ->
 /// the pass says different things about them. That is what makes the two tests
 /// a pair rather than a repetition.
 fn the_boxes_meet(model: &Model, one: SolidKey, other: SolidKey) -> bool {
-    let mine = model.solid(one).box_around_it().expect("a cube has a box");
+    let mine = model
+        .solid(one)
+        .expect("this model made the key")
+        .box_around_it()
+        .expect("a cube has a box");
     let theirs = model
         .solid(other)
+        .expect("this model made the key")
         .box_around_it()
         .expect("a cube has a box");
     (0..3).all(|axis| {
@@ -269,10 +304,12 @@ fn a_cube_of_side(model: &mut Model, side: f64, at: Vector) -> SolidKey {
         .add_cube(side, &policy, &mut log)
         .expect("a cube with a positive side");
     assert!(log.is_empty(), "a whole-number cube approximates nothing");
-    model.place_solid(
-        cube,
-        &Isometry::translation(at).expect("a finite placement"),
-    );
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(at).expect("a finite placement"),
+        )
+        .expect("this model made the key");
     cube
 }
 

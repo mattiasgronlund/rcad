@@ -240,7 +240,7 @@ pub fn describe_again(model: &Model, solid: SolidKey) -> rcad_topo::Result<Solid
     use rcad_geom::Isometry;
     use rcad_topo::{DraftEdge, DraftVertex, EdgeKey, VertexKey, WireStepView};
 
-    let view = model.solid(solid);
+    let view = model.solid(solid)?;
     let mut shells = view.shells();
     let shell = shells.next().expect("a solid has a shell");
     assert!(shells.next().is_none(), "these solids have one shell each");
@@ -253,7 +253,7 @@ pub fn describe_again(model: &Model, solid: SolidKey) -> rcad_topo::Result<Solid
 
     for reference in shell.face_refs() {
         assert_eq!(reference.location(), Isometry::identity());
-        let face = model.face(reference.face());
+        let face = model.face(reference.face())?;
         let mut wires = Vec::new();
         for wire in face.wires() {
             let mut steps = Vec::new();
@@ -263,7 +263,7 @@ pub fn describe_again(model: &Model, solid: SolidKey) -> rcad_topo::Result<Solid
                 };
                 // `CoedgeView::edge` turns the edge the way the coedge uses it,
                 // so its ends are the coedge's ends and not the edge's own.
-                let stored = model.edge(coedge.edge().key());
+                let stored = model.edge(coedge.edge().key())?;
                 let described = match edges.get(&stored.key()) {
                     Some(&described) => described,
                     None => {

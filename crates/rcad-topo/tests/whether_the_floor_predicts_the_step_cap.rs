@@ -109,7 +109,7 @@ fn a_bar(radius: f64, height: f64, out: f64) -> (Model, SolidKey) {
 #[test]
 fn a_tolerant_caller_is_refused_by_the_floor_and_not_by_the_walk() {
     let (model, bar) = a_bar(1.0, 2.0, 0.0);
-    let answer = model.solid(bar).mesh(
+    let answer = model.solid(bar).expect("this model made the key").mesh(
         Deflection::of(1e-300).expect("a positive length"),
         &Policy::tolerant(100.0),
         &mut ProvenanceLog::new(),
@@ -190,6 +190,7 @@ fn the_fallback_a_bar_a_billion_units_out_already_had_says_the_same_thing() {
     let (model, bar) = a_bar(1.0, 5.0, 1e9);
     let mesh = model
         .solid(bar)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(1e-300).expect("a positive length"),
             &Policy::tolerant(1e12),

@@ -32,6 +32,7 @@ fn a_cube_rotated_by_a_third_of_a_turn_has_the_same_volume_and_area() {
     let (mut model, cube) = a_cube_of_side_two();
     let before = model
         .solid(cube)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -40,9 +41,12 @@ fn a_cube_rotated_by_a_third_of_a_turn_has_the_same_volume_and_area() {
         .expect("a solid this size measures");
 
     let turn = a_third_of_a_turn_about_a_slanted_axis();
-    model.place_solid(cube, &turn);
+    model
+        .place_solid(cube, &turn)
+        .expect("this model made the key");
     let after = model
         .solid(cube)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -64,7 +68,9 @@ fn a_cube_rotated_by_a_third_of_a_turn_has_the_same_volume_and_area() {
 fn a_rotated_cube_is_still_a_sound_solid() {
     let (mut model, cube) = a_cube_of_side_two();
 
-    model.place_solid(cube, &a_third_of_a_turn_about_a_slanted_axis());
+    model
+        .place_solid(cube, &a_third_of_a_turn_about_a_slanted_axis())
+        .expect("this model made the key");
 
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
@@ -83,6 +89,7 @@ fn moving_a_plate_with_a_hole_leaves_its_volume_alone() {
         .expect("a plate three thick");
     let before = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -90,9 +97,12 @@ fn moving_a_plate_with_a_hole_leaves_its_volume_alone() {
         )
         .expect("a solid this size measures");
 
-    model.place_solid(solid, &a_third_of_a_turn_about_a_slanted_axis());
+    model
+        .place_solid(solid, &a_third_of_a_turn_about_a_slanted_axis())
+        .expect("this model made the key");
     let after = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -113,14 +123,21 @@ fn moving_a_solid_twice_is_the_same_as_moving_it_once_with_both_movements() {
     let turn = a_third_of_a_turn_about_a_slanted_axis();
 
     let (mut step_by_step, first) = a_cube_of_side_two();
-    step_by_step.place_solid(first, &shift);
-    step_by_step.place_solid(first, &turn);
+    step_by_step
+        .place_solid(first, &shift)
+        .expect("this model made the key");
+    step_by_step
+        .place_solid(first, &turn)
+        .expect("this model made the key");
 
     let (mut all_at_once, second) = a_cube_of_side_two();
-    all_at_once.place_solid(second, &turn.compose(&shift));
+    all_at_once
+        .place_solid(second, &turn.compose(&shift))
+        .expect("this model made the key");
 
     let stepped = step_by_step
         .solid(first)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -129,6 +146,7 @@ fn moving_a_solid_twice_is_the_same_as_moving_it_once_with_both_movements() {
         .expect("a solid this size measures");
     let together = all_at_once
         .solid(second)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -143,11 +161,14 @@ fn the_middle_of_a_placed_cube_moves_with_it() {
     let (mut model, cube) = a_cube_of_side_two();
     let shift = Isometry::translation(Vector::new(100.0, 0.0, 0.0)).expect("a finite shift");
 
-    model.place_solid(cube, &shift);
+    model
+        .place_solid(cube, &shift)
+        .expect("this model made the key");
 
     assert_eq!(
         model
             .solid(cube)
+            .expect("this model made the key")
             .measure(
                 a_deflection(),
                 &Policy::certified(),
@@ -172,6 +193,7 @@ fn a_bigger_cube_holds_the_cube_of_its_side() {
     assert_eq!(
         model
             .solid(small)
+            .expect("this model made the key")
             .measure(
                 a_deflection(),
                 &Policy::certified(),
@@ -184,6 +206,7 @@ fn a_bigger_cube_holds_the_cube_of_its_side() {
     assert_eq!(
         model
             .solid(large)
+            .expect("this model made the key")
             .measure(
                 a_deflection(),
                 &Policy::certified(),
@@ -219,6 +242,7 @@ fn a_cube_too_big_to_measure_is_refused_in_words_rather_than_by_panicking() {
 
         let refusal = model
             .solid(cube)
+            .expect("this model made the key")
             .measure(
                 a_deflection(),
                 &Policy::certified(),
@@ -253,6 +277,7 @@ fn a_cube_whose_area_overflowed_the_old_sum_gets_its_area_and_middle_anyway() {
 
         let measured = model
             .solid(cube)
+            .expect("this model made the key")
             .measure(
                 a_deflection(),
                 &Policy::certified(),
@@ -379,6 +404,7 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
             let mut log = ProvenanceLog::new();
             let measured = model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(
                     Deflection::of(how_fine).expect("a length"),
                     &Policy::certified(),
@@ -415,7 +441,9 @@ fn a_turned_cube_of_side_three() -> (Model, SolidKey) {
     let cube = model
         .add_cube(3.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube of side three");
-    model.place_solid(cube, &a_third_of_a_turn_about_a_slanted_axis());
+    model
+        .place_solid(cube, &a_third_of_a_turn_about_a_slanted_axis())
+        .expect("this model made the key");
     (model, cube)
 }
 
@@ -433,7 +461,9 @@ fn a_plate_with_a_hole() -> (Model, SolidKey) {
 
 fn a_turned_plate_with_a_hole() -> (Model, SolidKey) {
     let (mut model, ring) = a_plate_with_a_hole();
-    model.place_solid(ring, &a_third_of_a_turn_about_a_slanted_axis());
+    model
+        .place_solid(ring, &a_third_of_a_turn_about_a_slanted_axis())
+        .expect("this model made the key");
     (model, ring)
 }
 
@@ -457,10 +487,12 @@ fn a_notched_extrusion() -> (Model, SolidKey) {
 
 fn a_cube_a_long_way_out() -> (Model, SolidKey) {
     let (mut model, cube) = a_cube_of_side_two();
-    model.place_solid(
-        cube,
-        &Isometry::translation(Vector::new(1e6, -3.5e5, 7.25e4)).expect("a shift"),
-    );
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(1e6, -3.5e5, 7.25e4)).expect("a shift"),
+        )
+        .expect("this model made the key");
     (model, cube)
 }
 
@@ -493,6 +525,7 @@ fn a_ball() -> (Model, SolidKey) {
 fn measured(model: &Model, solid: SolidKey, how_fine: f64) -> Measurement {
     model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             Deflection::of(how_fine).expect("a length"),
             &Policy::certified(),
@@ -700,7 +733,7 @@ fn judging_a_meshed_centroid_against_the_policy_would_refuse_every_ball() {
     );
 
     let would_need = how_fine * budget / wobble;
-    let refusal = model.solid(ball).mesh(
+    let refusal = model.solid(ball).expect("this model made the key").mesh(
         Deflection::of(would_need).expect("a length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
@@ -725,7 +758,9 @@ fn a_bar_measured_where_it_was_put_agrees_with_one_at_the_origin() {
     let (mut model, bar) = a_round_bar();
     let at_the_origin = measured(&model, bar, 0.01);
 
-    model.place_solid(bar, &a_third_of_a_turn_about_a_slanted_axis());
+    model
+        .place_solid(bar, &a_third_of_a_turn_about_a_slanted_axis())
+        .expect("this model made the key");
     let moved = measured(&model, bar, 0.01);
 
     let apart = (moved.volume() - at_the_origin.volume()).abs();

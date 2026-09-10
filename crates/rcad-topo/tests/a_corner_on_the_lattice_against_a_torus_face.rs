@@ -42,6 +42,7 @@ fn a_point_through_the_hole_of_a_bend_is_decided_rather_than_refused() {
     let mut log = ProvenanceLog::new();
     let result = model
         .solid(solid)
+        .expect("this model made the key")
         .classify_point(point, &Policy::certified(), &mut log);
 
     assert_eq!(

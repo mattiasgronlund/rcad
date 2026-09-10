@@ -27,7 +27,7 @@ fn a_quarter_bend_built_face_by_face_is_a_solid() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a sound bend");
 
-    let view = model.solid(solid);
+    let view = model.solid(solid).expect("this model made the key");
     assert_eq!(view.faces().count(), 3, "two caps and one torus face");
     let on_a_ring = view
         .faces()
@@ -57,6 +57,7 @@ fn a_quarter_bend_measures_the_closed_form_within_the_published_bound() {
 
     let measured = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             Deflection::of(0.002).expect("a positive length"),
             &policy,
@@ -149,17 +150,21 @@ fn a_bend_moved_far_out_stays_inside_its_bound_and_slips_further_than_a_bar() {
     let at_the_origin = a_quarter_bend(&mut here, 4.0, 1.0);
     let measured_here = here
         .solid(at_the_origin)
+        .expect("this model made the key")
         .measure(deflection, &policy, &mut log)
         .expect("a bend measures");
 
     let mut there = Model::new(a_working_size());
     let moved = a_quarter_bend(&mut there, 4.0, 1.0);
-    there.place_solid(
-        moved,
-        &Isometry::translation(Vector::new(1000.0, -2000.0, 3000.0)).expect("a finite shift"),
-    );
+    there
+        .place_solid(
+            moved,
+            &Isometry::translation(Vector::new(1000.0, -2000.0, 3000.0)).expect("a finite shift"),
+        )
+        .expect("this model made the key");
     let measured_there = there
         .solid(moved)
+        .expect("this model made the key")
         .measure(deflection, &policy, &mut log)
         .expect("a moved bend measures");
 
@@ -175,6 +180,7 @@ fn a_bend_moved_far_out_stays_inside_its_bound_and_slips_further_than_a_bar() {
         .expect("a bar");
     let bar_measured_here = bar_here
         .solid(straight)
+        .expect("this model made the key")
         .measure(deflection, &policy, &mut log)
         .expect("a bar measures");
     let mut bar_there = Model::new(a_working_size());
@@ -185,12 +191,15 @@ fn a_bend_moved_far_out_stays_inside_its_bound_and_slips_further_than_a_bar() {
             &Isometry::translation(Vector::new(0.0, 0.0, -1.0)).expect("a finite shift"),
         )
         .expect("a bar");
-    bar_there.place_solid(
-        moved_bar,
-        &Isometry::translation(Vector::new(1000.0, -2000.0, 3000.0)).expect("a finite shift"),
-    );
+    bar_there
+        .place_solid(
+            moved_bar,
+            &Isometry::translation(Vector::new(1000.0, -2000.0, 3000.0)).expect("a finite shift"),
+        )
+        .expect("this model made the key");
     let bar_measured_there = bar_there
         .solid(moved_bar)
+        .expect("this model made the key")
         .measure(deflection, &policy, &mut log)
         .expect("a moved bar measures");
     let bar_slipped = (bar_measured_here.volume() - bar_measured_there.volume()).abs();
@@ -230,6 +239,7 @@ fn a_model_holding_a_bend_reads_back_at_the_version_that_was_already_there() {
     let how_fine = Deflection::of(0.01).expect("a positive length");
     let before = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(how_fine, &policy, &mut log)
         .expect("a bend measures");
 

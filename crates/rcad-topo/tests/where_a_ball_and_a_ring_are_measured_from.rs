@@ -147,7 +147,7 @@ fn how_fine_a_bend_with_this_tube_is_cut(tube: f64) -> f64 {
 /// ask for a deflection three hundred decades under anything and the mesher
 /// hands back the closest it could have cut.
 fn how_fine_a_mesh_of_it_is_cut(model: &Model, solid: SolidKey) -> f64 {
-    let refused: Result<Mesh, Error> = model.solid(solid).mesh(
+    let refused: Result<Mesh, Error> = model.solid(solid).expect("this model made the key").mesh(
         Deflection::of(1e-300).expect("a positive length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),

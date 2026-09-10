@@ -186,6 +186,7 @@ fn dropping_the_seam_does_not_move_anything_in_or_out() {
     let where_it_is = |solid, point| {
         model
             .solid(solid)
+            .expect("this model made the key")
             .classify_point(point, &Policy::certified(), &mut ProvenanceLog::new())
     };
     for (what, point, in_the_round_one, in_the_flat_one) in [
@@ -292,6 +293,7 @@ struct HowTheWallIsBounded {
 fn how_the_wall_is_bounded(model: &Model, solid: SolidKey) -> HowTheWallIsBounded {
     let mut walls = model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .filter(|face| matches!(face.surface(), Surface::Cylinder(_)));
     let wall = walls.next().expect("this solid has a cylindrical face");
@@ -325,6 +327,7 @@ fn the_one_with_a_round_wall(model: &Model, answer: &Fused) -> SolidKey {
         .filter(|&solid| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .faces()
                 .any(|face| matches!(face.surface(), Surface::Cylinder(_)))
         })
@@ -351,6 +354,7 @@ fn the_other_solid(answer: &Fused, one: SolidKey) -> SolidKey {
 fn measure(model: &Model, solid: SolidKey) -> rcad_topo::Measurement {
     model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),

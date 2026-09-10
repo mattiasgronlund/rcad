@@ -108,8 +108,8 @@ fn a_pair(family: Family, draw: &mut Draw) -> Option<(Model, SolidKey, SolidKey)
     if let Family::Turned = family {
         let axis = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).ok()?;
         let turn = Isometry::rotation(&axis, 0.1 + draw.fraction()).ok()?;
-        model.place_solid(block, &turn);
-        model.place_solid(curved, &turn);
+        model.place_solid(block, &turn).ok()?;
+        model.place_solid(curved, &turn).ok()?;
     }
     Some((model, block, curved))
 }
@@ -286,7 +286,7 @@ fn a_bar_notched_by_a_turned_block(draw: &mut Draw) -> Option<(Model, SolidKey, 
     let up = 3.0 + draw.fraction();
     let across = Isometry::translation(Vector::new(0.5, -0.5, up)).ok()?;
     let turn = Isometry::rotation(&Axis::z(), 0.05 + draw.fraction()).ok()?;
-    model.place_solid(block, &across.compose(&turn));
+    model.place_solid(block, &across.compose(&turn)).ok()?;
     Some((model, bar, block))
 }
 
@@ -312,10 +312,12 @@ fn a_bar_notched_by_a_block_is_decided_and_records_nothing() {
     let block = model
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a small block");
-    model.place_solid(
-        block,
-        &Isometry::translation(Vector::new(1.0, -1.0, 3.0)).expect("a shift"),
-    );
+    model
+        .place_solid(
+            block,
+            &Isometry::translation(Vector::new(1.0, -1.0, 3.0)).expect("a shift"),
+        )
+        .expect("this model made the key");
 
     let mut log = ProvenanceLog::new();
     let fused = model

@@ -16,6 +16,7 @@ fn classify(model: &Model, solid: SolidKey, point: Point) -> Containment {
     let mut log = ProvenanceLog::new();
     let answer = model
         .solid(solid)
+        .expect("this model made the key")
         .classify_point(point, &Policy::certified(), &mut log);
     assert!(
         log.is_empty(),
@@ -239,6 +240,7 @@ fn classifying_a_grid_on_several_threads_agrees_with_doing_it_one_at_a_time() {
                         .map(|&point| {
                             shared
                                 .solid(cube)
+                                .expect("this model made the key")
                                 .classify_point(point, &Policy::certified(), &mut log)
                         })
                         .collect::<Vec<_>>()
@@ -375,10 +377,10 @@ fn a_point_whose_box_straddles_a_face_of_a_cube_cannot_be_placed() {
     );
 
     let mut log = ProvenanceLog::new();
-    let answer =
-        model
-            .solid(cube)
-            .classify_uncertain_point(on_the_top_face, &Policy::certified(), &mut log);
+    let answer = model
+        .solid(cube)
+        .expect("this model made the key")
+        .classify_uncertain_point(on_the_top_face, &Policy::certified(), &mut log);
 
     let Containment::Undecidable { enclosure } = answer else {
         panic!("a box straddling the top face cannot be placed, but got {answer:?}");
@@ -399,11 +401,10 @@ fn a_tolerant_policy_puts_that_same_point_on_the_skin_and_says_so_in_the_log() {
     let policy = Policy::tolerant(100.0);
 
     let mut log = ProvenanceLog::new();
-    let answer = model.solid(cube).classify_uncertain_point(
-        a_meet_straddling_the_top_of_the_cube(),
-        &policy,
-        &mut log,
-    );
+    let answer = model
+        .solid(cube)
+        .expect("this model made the key")
+        .classify_uncertain_point(a_meet_straddling_the_top_of_the_cube(), &policy, &mut log);
 
     assert_eq!(answer, Containment::OnBoundary);
 
@@ -444,17 +445,20 @@ fn the_exact_way_in_and_the_general_one_give_the_same_answers() {
 
     for point in sample_grid() {
         let mut through_the_wrapper = ProvenanceLog::new();
-        let wrapped =
-            model
-                .solid(cube)
-                .classify_point(point, &Policy::certified(), &mut through_the_wrapper);
+        let wrapped = model
+            .solid(cube)
+            .expect("this model made the key")
+            .classify_point(point, &Policy::certified(), &mut through_the_wrapper);
 
         let mut through_the_general_one = ProvenanceLog::new();
-        let general = model.solid(cube).classify_uncertain_point(
-            PredicatePoint::from(point.coordinates()),
-            &Policy::certified(),
-            &mut through_the_general_one,
-        );
+        let general = model
+            .solid(cube)
+            .expect("this model made the key")
+            .classify_uncertain_point(
+                PredicatePoint::from(point.coordinates()),
+                &Policy::certified(),
+                &mut through_the_general_one,
+            );
 
         assert_eq!(wrapped, general, "at {point:?}");
         assert_eq!(
@@ -486,6 +490,7 @@ fn a_point_with_a_coordinate_that_cannot_be_bounded_cannot_be_placed() {
         let mut log = ProvenanceLog::new();
         let answer = model
             .solid(cube)
+            .expect("this model made the key")
             .classify_point(point, &Policy::certified(), &mut log);
         assert!(
             matches!(answer, Containment::Undecidable { .. }),
@@ -498,6 +503,7 @@ fn classify_uncertain(model: &Model, solid: SolidKey, point: PredicatePoint) -> 
     let mut log = ProvenanceLog::new();
     let answer = model
         .solid(solid)
+        .expect("this model made the key")
         .classify_uncertain_point(point, &Policy::certified(), &mut log);
     assert!(
         log.is_empty(),

@@ -29,6 +29,7 @@ fn meshed(model: &Model, solid: SolidKey, deflection: f64) -> Mesh {
     let mut log = ProvenanceLog::new();
     let mesh = model
         .solid(solid)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(deflection).expect("a positive length"),
             &Policy::certified(),
@@ -65,7 +66,12 @@ fn meshed(model: &Model, solid: SolidKey, deflection: f64) -> Mesh {
 /// 4. Every triangle names a face this solid actually has, no triangle stands on
 ///    one point twice, and no point is in the table without being in a triangle.
 fn the_mesh_closes_up(model: &Model, solid: SolidKey, mesh: &Mesh, deflection: f64) {
-    let faces: HashSet<_> = model.solid(solid).faces().map(|face| face.key()).collect();
+    let faces: HashSet<_> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.key())
+        .collect();
     let mut times_used: HashMap<(u32, u32), i32> = HashMap::new();
     for triangle in mesh.triangles() {
         assert!(
@@ -153,7 +159,7 @@ fn euler_characteristic_of(model: &Model, solid: SolidKey) -> i64 {
     let mut corners = HashSet::new();
     let mut edges = HashSet::new();
     let mut faces = 0_i64;
-    for face in model.solid(solid).faces() {
+    for face in model.solid(solid).expect("this model made the key").faces() {
         faces += 2 - face.wire_count() as i64;
         for wire in face.wires() {
             for coedge in wire.coedges() {
@@ -316,6 +322,7 @@ fn an_edges_points_are_worked_out_once_and_both_faces_along_it_name_the_same_one
 
     let wall = model
         .solid(bar)
+        .expect("this model made the key")
         .faces()
         .find(|face| face.surface().as_plane().is_none())
         .expect("the bar has a wall");
@@ -608,6 +615,7 @@ fn a_ball_asked_for_a_rough_picture_gets_a_rough_ball_and_not_an_empty_mesh() {
         );
         let measured = model
             .solid(ball)
+            .expect("this model made the key")
             .measure(
                 Deflection::of(deflection).expect("a length"),
                 &Policy::certified(),
@@ -730,7 +738,12 @@ fn every_triangle_names_the_face_it_came_from() {
         .iter()
         .map(|triangle| triangle.face())
         .collect();
-    let has: HashSet<_> = model.solid(bar).faces().map(|face| face.key()).collect();
+    let has: HashSet<_> = model
+        .solid(bar)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.key())
+        .collect();
     assert_eq!(covered, has, "every face is stood in for and no other");
 }
 
@@ -762,10 +775,10 @@ fn a_bar_too_thin_for_its_own_squares_is_refused_rather_than_asserted_against() 
         let ordinary = model
             .add_round_bar(radius, 10.0, &Isometry::identity())
             .expect("a positive radius");
-        let outcome =
-            model
-                .solid(ordinary)
-                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
+        let outcome = model
+            .solid(ordinary)
+            .expect("this model made the key")
+            .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
         assert!(
             !matches!(outcome, Err(Error::Geometry(_))),
             "a bar of radius {radius} is walked, and got {outcome:?}"
@@ -776,10 +789,11 @@ fn a_bar_too_thin_for_its_own_squares_is_refused_rather_than_asserted_against() 
         let thin = model
             .add_round_bar(radius, 10.0, &Isometry::identity())
             .expect("a positive finite radius is a bar this builder makes");
-        let refusal =
-            model
-                .solid(thin)
-                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
+        let refusal = model.solid(thin).expect("this model made the key").mesh(
+            deflection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
         assert!(
             matches!(
                 refusal,
@@ -814,7 +828,7 @@ fn a_ball_a_long_way_out_cannot_be_meshed_as_finely_as_one_at_the_origin() {
         )
         .expect("a unit ball a long way out");
 
-    let refusal = model.solid(far).mesh(
+    let refusal = model.solid(far).expect("this model made the key").mesh(
         Deflection::of(asked).expect("a length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
@@ -830,6 +844,7 @@ fn a_ball_a_long_way_out_cannot_be_meshed_as_finely_as_one_at_the_origin() {
     // The control: the same ball at the origin, the same question, an answer.
     let mesh = model
         .solid(near)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(asked).expect("a length"),
             &Policy::certified(),
@@ -1023,9 +1038,11 @@ fn a_tolerant_caller_gets_the_finest_mesh_the_arithmetic_reaches() {
 
     assert!(
         matches!(
-            model
-                .solid(bar)
-                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new()),
+            model.solid(bar).expect("this model made the key").mesh(
+                deflection,
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
             Err(Error::DeflectionBelowWhatAMeshCanReach { .. })
         ),
         "a certified caller is refused a deflection under the floor"
@@ -1033,6 +1050,7 @@ fn a_tolerant_caller_gets_the_finest_mesh_the_arithmetic_reaches() {
 
     let mesh = model
         .solid(bar)
+        .expect("this model made the key")
         .mesh(
             deflection,
             &Policy::tolerant(1e9),
@@ -1082,7 +1100,7 @@ fn a_deflection_needing_more_points_than_can_be_held_is_refused() {
         .add_ball(1.0, &Isometry::identity())
         .expect("a unit ball");
 
-    let refusal = model.solid(ball).mesh(
+    let refusal = model.solid(ball).expect("this model made the key").mesh(
         Deflection::of(1e-12).expect("a length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
@@ -1127,7 +1145,7 @@ fn every_size_of_bar_and_ball_at_every_coarseness_meshes_into_a_closed_surface()
                     let bar = model
                         .add_round_bar(radius, height, placement)
                         .expect("a bar");
-                    if let Ok(mesh) = model.solid(bar).mesh(
+                    if let Ok(mesh) = model.solid(bar).expect("this model made the key").mesh(
                         deflection,
                         &Policy::certified(),
                         &mut ProvenanceLog::new(),
@@ -1138,7 +1156,7 @@ fn every_size_of_bar_and_ball_at_every_coarseness_meshes_into_a_closed_surface()
                 }
                 let mut model = a_model();
                 let ball = model.add_ball(radius, placement).expect("a ball");
-                if let Ok(mesh) = model.solid(ball).mesh(
+                if let Ok(mesh) = model.solid(ball).expect("this model made the key").mesh(
                     deflection,
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
@@ -1218,6 +1236,7 @@ fn a_block_with_a_round_hole_meshes_into_a_closed_surface() {
             // a wall wound the wrong way takes its own volume off twice.
             let measured = model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(
                     Deflection::of(0.01).expect("a length"),
                     &Policy::certified(),
@@ -1270,10 +1289,12 @@ fn a_ball_cut_by_a_plane_meshes_into_a_closed_surface() {
             .add_cube(20.0, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("a block round it");
         let below = if keep_above { cut_at } else { cut_at - 20.0 };
-        model.place_solid(
-            block,
-            &Isometry::translation(Vector::new(-10.0, -10.0, below)).expect("a shift"),
-        );
+        model
+            .place_solid(
+                block,
+                &Isometry::translation(Vector::new(-10.0, -10.0, below)).expect("a shift"),
+            )
+            .expect("this model made the key");
 
         let mut log = ProvenanceLog::new();
         let fused = model
@@ -1305,6 +1326,7 @@ fn a_ball_cut_by_a_plane_meshes_into_a_closed_surface() {
         let should_be = core::f64::consts::PI * height * height * (3.0 * RADIUS - height) / 3.0;
         let measured = model
             .solid(solid)
+            .expect("this model made the key")
             .measure(
                 Deflection::of(0.01).expect("a length"),
                 &Policy::certified(),
@@ -1372,10 +1394,12 @@ fn a_bar_notched_by_a_block_meshes_into_a_closed_surface() {
             let block = model
                 .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
                 .expect("a small block");
-            model.place_solid(
-                block,
-                &Isometry::translation(Vector::new(1.0, -1.0, 3.0)).expect("a shift"),
-            );
+            model
+                .place_solid(
+                    block,
+                    &Isometry::translation(Vector::new(1.0, -1.0, 3.0)).expect("a shift"),
+                )
+                .expect("this model made the key");
             block
         };
 
@@ -1407,6 +1431,7 @@ fn a_bar_notched_by_a_block_meshes_into_a_closed_surface() {
         let should_be = core::f64::consts::PI * RADIUS * RADIUS * 8.0 - taken;
         let measured = model
             .solid(solid)
+            .expect("this model made the key")
             .measure(
                 Deflection::of(0.001).expect("a length"),
                 &Policy::certified(),
@@ -1466,10 +1491,12 @@ fn a_boolean_that_cuts_nothing_off_a_bar_does_not_make_it_much_coarser_to_mesh()
     let block = model
         .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a block eight across");
-    model.place_solid(
-        block,
-        &Isometry::translation(Vector::new(50.0, 0.0, a_billion)).expect("a long way"),
-    );
+    model
+        .place_solid(
+            block,
+            &Isometry::translation(Vector::new(50.0, 0.0, a_billion)).expect("a long way"),
+        )
+        .expect("this model made the key");
     let fused = model
         .fuse(
             &[bar],
@@ -1508,6 +1535,7 @@ fn a_boolean_that_cuts_nothing_off_a_bar_does_not_make_it_much_coarser_to_mesh()
     assert!(before < asked, "the bar itself meshes at {asked}");
     let mesh = model
         .solid(cut)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(asked).expect("a length"),
             &Policy::certified(),
@@ -1523,7 +1551,7 @@ fn a_boolean_that_cuts_nothing_off_a_bar_does_not_make_it_much_coarser_to_mesh()
 /// refusal is the only way a caller can find out, which is why
 /// [`Error::DeflectionBelowWhatAMeshCanReach`] carries it.
 fn the_finest_mesh_this_solid_can_be_asked_for(model: &Model, solid: SolidKey) -> f64 {
-    let refusal = model.solid(solid).mesh(
+    let refusal = model.solid(solid).expect("this model made the key").mesh(
         Deflection::of(1e-30).expect("a positive length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
@@ -1542,6 +1570,7 @@ fn the_finest_mesh_this_solid_can_be_asked_for(model: &Model, solid: SolidKey) -
 fn volume_of(model: &Model, solid: SolidKey) -> f64 {
     model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             Deflection::of(0.01).expect("a length"),
             &Policy::certified(),

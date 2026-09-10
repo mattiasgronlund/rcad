@@ -28,6 +28,7 @@ fn a_cube_this_kernel_wrote_is_read_back_through_the_facade_alone() {
     let measured = import
         .model()
         .solid(*key)
+        .expect("this model made the key")
         .measure(Deflection::for_scale(scale), &Policy::certified(), &mut log)
         .expect("a cube measures");
     assert_eq!(

@@ -110,6 +110,7 @@ fn shapes_whose_volume_is_known() -> (Model, Vec<(String, SolidKey, f64, f64)>) 
 fn measured(model: &Model, solid: SolidKey, how_fine: f64) -> Measurement {
     model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             Deflection::of(how_fine).expect("a length"),
             &Policy::certified(),
@@ -424,6 +425,7 @@ fn a_certified_mesh_never_strays_further_than_the_deflection_it_was_asked_for() 
         for how_fine in HOW_FINE {
             let deviation = model
                 .solid(solid)
+                .expect("this model made the key")
                 .mesh(
                     Deflection::of(how_fine).expect("a length"),
                     &Policy::certified(),
@@ -595,6 +597,7 @@ fn what_each_curved_face_reached(
 ) -> Vec<WhatOneFaceReached> {
     let mesh = model
         .solid(solid)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(how_fine).expect("a length"),
             &Policy::certified(),
@@ -603,6 +606,7 @@ fn what_each_curved_face_reached(
         .unwrap_or_else(|why| panic!("meshing at a deflection of {how_fine}: {why}"));
     model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .filter(|face| !matches!(face.surface(), Surface::Plane(_)))
         .map(|face| WhatOneFaceReached {
@@ -672,10 +676,12 @@ fn shapes_whose_faces_run_past_their_own_corners() -> Vec<(String, Model, SolidK
     for slope in [0.25, 0.125, 0.0625] {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let cone = cones::a_pointed_cone(&mut model, slope, 8.0);
-        model.place_solid(
-            cone,
-            &Isometry::translation(Vector::new(0.0, 0.0, -8.0)).expect("a shift"),
-        );
+        model
+            .place_solid(
+                cone,
+                &Isometry::translation(Vector::new(0.0, 0.0, -8.0)).expect("a shift"),
+            )
+            .expect("this model made the key");
         shapes.push((
             format!("a cone of slope {slope} hanging below its own rim"),
             model,
@@ -687,10 +693,12 @@ fn shapes_whose_faces_run_past_their_own_corners() -> Vec<(String, Model, SolidK
     for (near, far) in [(0.125, 0.25), (0.25, 0.28125)] {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let frustum = cones::a_frustum(&mut model, 8.0, near, far);
-        model.place_solid(
-            frustum,
-            &Isometry::translation(Vector::new(-8.0 * far, 0.0, 0.0)).expect("a shift"),
-        );
+        model
+            .place_solid(
+                frustum,
+                &Isometry::translation(Vector::new(-8.0 * far, 0.0, 0.0)).expect("a shift"),
+            )
+            .expect("this model made the key");
         shapes.push((
             format!("a squat frustum from {near} to {far} slid onto its own seam"),
             model,
@@ -704,10 +712,12 @@ fn shapes_whose_faces_run_past_their_own_corners() -> Vec<(String, Model, SolidK
         let block = model
             .add_cube(8.0, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("a block eight across");
-        model.place_solid(
-            block,
-            &Isometry::translation(Vector::new(-4.0, -4.0, -8.0)).expect("a shift"),
-        );
+        model
+            .place_solid(
+                block,
+                &Isometry::translation(Vector::new(-4.0, -4.0, -8.0)).expect("a shift"),
+            )
+            .expect("this model made the key");
         let ball = model
             .add_ball(
                 3.0,

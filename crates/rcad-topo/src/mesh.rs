@@ -4102,13 +4102,14 @@ mod tests {
             )
             .expect("a bar meshes");
 
-        let bottom: Vec<EdgeView<'_>> = every_use_of_an_edge_of(model.solid(bar).expect("this model made the key"))
-            .into_iter()
-            .filter(|edge| {
-                edge.is_closed().expect("a bar's edges are all readable")
-                    && edge.start().point().coordinates()[2] == 0.0
-            })
-            .collect();
+        let bottom: Vec<EdgeView<'_>> =
+            every_use_of_an_edge_of(model.solid(bar).expect("this model made the key"))
+                .into_iter()
+                .filter(|edge| {
+                    edge.is_closed().expect("a bar's edges are all readable")
+                        && edge.start().point().coordinates()[2] == 0.0
+                })
+                .collect();
         assert_eq!(
             bottom.len(),
             2,
@@ -4211,7 +4212,8 @@ mod tests {
                 "a corner of a solid this mesh was not cut from"
             );
         }
-        for edge in every_use_of_an_edge_of(model.solid(another).expect("this model made the key")) {
+        for edge in every_use_of_an_edge_of(model.solid(another).expect("this model made the key"))
+        {
             assert!(mesh.points_along_edge(edge.key()).is_empty());
         }
     }
@@ -4245,10 +4247,11 @@ mod tests {
         };
 
         let meshed_bar = cut(bar);
-        let seam: Vec<EdgeView<'_>> = every_use_of_an_edge_of(model.solid(bar).expect("this model made the key"))
-            .into_iter()
-            .filter(|edge| !edge.is_closed().expect("a bar's edges are all readable"))
-            .collect();
+        let seam: Vec<EdgeView<'_>> =
+            every_use_of_an_edge_of(model.solid(bar).expect("this model made the key"))
+                .into_iter()
+                .filter(|edge| !edge.is_closed().expect("a bar's edges are all readable"))
+                .collect();
         assert_eq!(seam.len(), 2, "the seam, used twice by the wall");
         assert!(
             meshed_bar.along_edge.contains_key(&seam[0].key()),

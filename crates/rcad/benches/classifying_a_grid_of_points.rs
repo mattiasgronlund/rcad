@@ -38,7 +38,7 @@ const THREAD_COUNTS: [usize; 5] = [1, 2, 4, 8, 12];
 
 fn classifying_a_grid_of_points(criterion: &mut Criterion) {
     let (model, plate) = plate_with_holes();
-    let solid = model.solid(plate);
+    let solid = model.solid(plate).expect("this model made the key");
     let points = grid_over(solid, POINTS_PER_SIDE);
 
     report_what_the_grid_hit_and_whether_the_threads_agree(&points, solid);

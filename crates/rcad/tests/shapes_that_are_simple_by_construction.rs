@@ -47,7 +47,7 @@ proptest! {
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
 
         let flat_area = area_of(&profile);
-        let measured = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
+        let measured = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         let expected_volume = flat_area * height;
         prop_assert!(

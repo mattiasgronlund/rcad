@@ -282,6 +282,7 @@ fn how_much_it_holds(model: &Model, solids: &[SolidKey], how_fine: Deflection) -
         .map(|&solid| {
             let measured = model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
                 .expect("a solid this size measures");
             (measured.volume(), measured.volume_error())

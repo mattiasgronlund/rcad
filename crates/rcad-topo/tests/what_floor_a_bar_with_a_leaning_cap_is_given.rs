@@ -121,7 +121,7 @@ fn the_four_leaning_bars_are_not_given_one_floor_between_them() {
 /// caller gets for asking below it.
 fn the_floor_under(lean: f64) -> f64 {
     let (model, bar) = a_bar_cut_off_leaning(lean);
-    let refused = model.solid(bar).mesh(
+    let refused = model.solid(bar).expect("this model made the key").mesh(
         Deflection::of(FINER_THAN_ANY_OF_THEM_CAN_BE_CUT).expect("a positive length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),

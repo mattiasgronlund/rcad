@@ -133,6 +133,7 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         .map(|&solid| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(
                     a_deflection(),
                     &Policy::certified(),
@@ -147,7 +148,7 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
 /// Every corner of a solid, once each.
 fn corners_of(model: &Model, solid: SolidKey) -> Vec<Point> {
     let mut corners = Vec::new();
-    for face in model.solid(solid).faces() {
+    for face in model.solid(solid).expect("this model made the key").faces() {
         for wire in face.wires() {
             for corner in wire.points() {
                 if !corners.contains(&corner) {
@@ -165,7 +166,7 @@ fn corners_of(model: &Model, solid: SolidKey) -> Vec<Point> {
 fn edges_of(model: &Model, solid: SolidKey) -> Vec<Segment> {
     let mut seen = Vec::new();
     let mut edges = Vec::new();
-    for face in model.solid(solid).faces() {
+    for face in model.solid(solid).expect("this model made the key").faces() {
         for wire in face.wires() {
             for coedge in wire.coedges() {
                 let edge = coedge.edge();
@@ -196,6 +197,7 @@ fn edges_through(model: &Model, solid: SolidKey, point: Point) -> Vec<Segment> {
 fn areas_of(model: &Model, solid: SolidKey) -> Vec<f64> {
     model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .map(|face| {
             let mut vector_area = Vector::zero();
@@ -215,7 +217,7 @@ fn areas_of(model: &Model, solid: SolidKey) -> Vec<f64> {
 /// commit is a broken invariant that panics.
 fn nothing_in_it_is_degenerate(model: &Model, solids: &[SolidKey]) {
     for &solid in solids {
-        for face in model.solid(solid).faces() {
+        for face in model.solid(solid).expect("this model made the key").faces() {
             for wire in face.wires() {
                 for coedge in wire.coedges() {
                     let edge = coedge.edge();
@@ -247,7 +249,7 @@ fn nothing_in_it_is_degenerate(model: &Model, solids: &[SolidKey]) {
 /// so only faces that are two different faces are compared.
 fn no_face_of_it_is_half_of_another(model: &Model, solids: &[SolidKey]) {
     for &solid in solids {
-        for face in model.solid(solid).faces() {
+        for face in model.solid(solid).expect("this model made the key").faces() {
             for wire in face.wires() {
                 for coedge in wire.coedges() {
                     for neighbour in coedge.edge().neighbouring_faces() {
@@ -255,7 +257,12 @@ fn no_face_of_it_is_half_of_another(model: &Model, solids: &[SolidKey]) {
                             continue;
                         }
                         assert_ne!(
-                            face.plane().agreement_with(&model.face(neighbour).plane()),
+                            face.plane().agreement_with(
+                                &model
+                                    .face(neighbour)
+                                    .expect("this model made the key")
+                                    .plane()
+                            ),
                             PlaneAgreement::SameWay,
                             "two faces sharing an edge lie on one plane facing one way, \
                              so they are one face and should have been joined"
@@ -293,8 +300,23 @@ fn two_cubes_sharing_a_whole_face_unite_into_one_box() {
 
     assert_eq!(united.solids().len(), 1);
     let solid = united.solids()[0];
-    assert_eq!(model.solid(solid).shells().count(), 1);
-    assert_eq!(model.solid(solid).faces().count(), 6, "a box has six faces");
+    assert_eq!(
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .shells()
+            .count(),
+        1
+    );
+    assert_eq!(
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        6,
+        "a box has six faces"
+    );
     let mut areas = areas_of(&model, solid);
     areas.sort_by(f64::total_cmp);
     assert_eq!(
@@ -330,7 +352,14 @@ fn taking_a_cube_off_the_face_of_another_takes_nothing_away() {
     let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
 
     assert_eq!(bitten.solids().len(), 1);
-    assert_eq!(model.solid(bitten.solids()[0]).faces().count(), 6);
+    assert_eq!(
+        model
+            .solid(bitten.solids()[0])
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        6
+    );
     assert_eq!(volume_of(&model, bitten.solids()), 8.0);
 }
 
@@ -354,7 +383,9 @@ fn two_slabs_whose_faces_are_coplanar_and_half_overlap_unite() {
     let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
 
     assert_eq!(united.solids().len(), 1);
-    let solid = model.solid(united.solids()[0]);
+    let solid = model
+        .solid(united.solids()[0])
+        .expect("this model made the key");
     assert_eq!(solid.shells().count(), 1);
     assert_eq!(volume_of(&model, united.solids()), 64.0);
     nothing_in_it_is_degenerate(&model, united.solids());
@@ -416,7 +447,14 @@ fn two_cubes_sharing_one_whole_edge_still_intersect_and_subtract() {
 
     let bitten = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(bitten.solids().len(), 1);
-    assert_eq!(model.solid(bitten.solids()[0]).faces().count(), 6);
+    assert_eq!(
+        model
+            .solid(bitten.solids()[0])
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        6
+    );
     assert_eq!(volume_of(&model, bitten.solids()), 8.0);
 }
 
@@ -455,7 +493,14 @@ fn a_corner_landing_inside_a_face_is_absorbed_into_that_face() {
 
     assert_eq!(united.solids().len(), 1);
     let solid = united.solids()[0];
-    assert_eq!(model.solid(solid).shells().count(), 1);
+    assert_eq!(
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .shells()
+            .count(),
+        1
+    );
     assert_eq!(volume_of(&model, united.solids()), 112.0);
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
@@ -464,11 +509,10 @@ fn a_corner_landing_inside_a_face_is_absorbed_into_that_face() {
     let corners = corners_of(&model, solid);
     for landed in [Point::new(2.0, 2.0, 0.0), Point::new(2.0, 2.0, 4.0)] {
         assert_eq!(
-            model.solid(solid).classify_point(
-                landed,
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            ),
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .classify_point(landed, &Policy::certified(), &mut ProvenanceLog::new()),
             Containment::OnBoundary,
             "the corner that landed on a face is still on the skin of the answer"
         );
@@ -495,7 +539,9 @@ fn what_two_cubes_offset_by_a_corner_share_is_the_column_under_it() {
     let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
 
     assert_eq!(shared.solids().len(), 1);
-    let solid = model.solid(shared.solids()[0]);
+    let solid = model
+        .solid(shared.solids()[0])
+        .expect("this model made the key");
     assert_eq!(solid.shells().count(), 1);
     assert_eq!(solid.faces().count(), 6, "the shared part is a box");
     assert_eq!(volume_of(&model, shared.solids()), 16.0);
@@ -544,6 +590,7 @@ fn a_corner_landing_partway_along_an_edge_is_absorbed_into_one_straight_edge() {
     assert_eq!(
         model
             .solid(solid)
+            .expect("this model made the key")
             .classify_point(landed, &Policy::certified(), &mut ProvenanceLog::new()),
         Containment::OnBoundary,
         "the corner that landed on an edge is still on the skin of the answer"
@@ -656,7 +703,14 @@ fn a_cut_a_millionth_of_the_way_in_keeps_the_sliver_it_leaves() {
 
     assert_eq!(shared.solids().len(), 1);
     let slab = shared.solids()[0];
-    assert_eq!(model.solid(slab).faces().count(), 6);
+    assert_eq!(
+        model
+            .solid(slab)
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        6
+    );
     assert_eq!(volume_of(&model, shared.solids()), 16.0 * A_SLIVER);
 
     let mut areas = areas_of(&model, slab);
@@ -696,9 +750,20 @@ fn a_cube_wholly_inside_another_under_all_three_rules() {
 
     let united = fused(&mut model, &pair.arguments, &pair.tools, Rule::Union);
     assert_eq!(united.solids().len(), 1);
-    assert_eq!(model.solid(united.solids()[0]).shells().count(), 1);
     assert_eq!(
-        model.solid(united.solids()[0]).faces().count(),
+        model
+            .solid(united.solids()[0])
+            .expect("this model made the key")
+            .shells()
+            .count(),
+        1
+    );
+    assert_eq!(
+        model
+            .solid(united.solids()[0])
+            .expect("this model made the key")
+            .faces()
+            .count(),
         6,
         "a cut is by a plane, so the inner cube's four walls do cross all six faces of the outer \
          one and each comes back in nine pieces — but a cut where the solid it belongs to is \
@@ -718,14 +783,32 @@ fn a_cube_wholly_inside_another_under_all_three_rules() {
 
     let shared = fused(&mut model, &pair.arguments, &pair.tools, Rule::Intersection);
     assert_eq!(shared.solids().len(), 1);
-    assert_eq!(model.solid(shared.solids()[0]).shells().count(), 1);
-    assert_eq!(model.solid(shared.solids()[0]).faces().count(), 6);
+    assert_eq!(
+        model
+            .solid(shared.solids()[0])
+            .expect("this model made the key")
+            .shells()
+            .count(),
+        1
+    );
+    assert_eq!(
+        model
+            .solid(shared.solids()[0])
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        6
+    );
     assert_eq!(volume_of(&model, shared.solids()), 8.0);
 
     let hollow = fused(&mut model, &pair.arguments, &pair.tools, Rule::Difference);
     assert_eq!(hollow.solids().len(), 1);
     assert_eq!(
-        model.solid(hollow.solids()[0]).shells().count(),
+        model
+            .solid(hollow.solids()[0])
+            .expect("this model made the key")
+            .shells()
+            .count(),
         2,
         "the skin of the block and the skin of the bubble in it"
     );
@@ -767,7 +850,14 @@ fn two_cubes_that_only_touch_on_a_face() {
         1,
         "a shared face joins them into one solid"
     );
-    assert_eq!(model.solid(united.solids()[0]).shells().count(), 1);
+    assert_eq!(
+        model
+            .solid(united.solids()[0])
+            .expect("this model made the key")
+            .shells()
+            .count(),
+        1
+    );
     assert_eq!(volume_of(&model, united.solids()), 72.0);
     nothing_in_it_is_degenerate(&model, united.solids());
 

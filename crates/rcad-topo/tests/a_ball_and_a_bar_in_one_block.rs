@@ -135,7 +135,7 @@ fn a_ball_and_a_bar_that_miss_each_other_fuse_into_one_block() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the answer is a valid solid");
 
-    let solid = model.solid(solids[0]);
+    let solid = model.solid(solids[0]).expect("this model made the key");
     assert_eq!(
         solid.faces().count(),
         11,
@@ -265,6 +265,7 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         .map(|&solid| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(
                     Deflection::of(A_DEFLECTION).expect("a fiftieth of a millimetre is a length"),
                     &Policy::certified(),

@@ -52,6 +52,7 @@ fn a_ball_placed(at: &Isometry) -> (Model, SolidKey) {
 fn runs_of(model: &Model, solid: SolidKey) -> Vec<EdgeRun> {
     model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .flat_map(|face| {
             face.wires()
@@ -177,12 +178,16 @@ fn a_cube_reads_the_same_runs_wherever_it_is_put() {
         "a cube is bounded by straight edges"
     );
 
-    model.place_solid(
-        cube,
-        &Isometry::rotation(&Axis::z(), 0.7)
-            .expect("a finite angle")
-            .compose(&Isometry::translation(Vector::new(3.0, 5.0, 7.0)).expect("a finite shift")),
-    );
+    model
+        .place_solid(
+            cube,
+            &Isometry::rotation(&Axis::z(), 0.7)
+                .expect("a finite angle")
+                .compose(
+                    &Isometry::translation(Vector::new(3.0, 5.0, 7.0)).expect("a finite shift"),
+                ),
+        )
+        .expect("this model made the key");
 
     assert_eq!(runs_of(&model, cube), before);
 }

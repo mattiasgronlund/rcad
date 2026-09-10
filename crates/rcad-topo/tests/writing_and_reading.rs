@@ -27,6 +27,7 @@ fn a_cube_comes_back_sound_and_measuring_the_same() {
         .expect("a cube of side two");
     let before = model
         .solid(cube)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -69,6 +70,7 @@ fn a_plate_with_two_holes_comes_back_sound_and_measuring_the_same() {
         .expect("a plate two thick");
     let before = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -102,12 +104,15 @@ fn a_placed_solid_comes_back_where_it_was_put() {
     let cube = model
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube of side two");
-    model.place_solid(
-        cube,
-        &Isometry::translation(Vector::new(30.0, -5.0, 7.0)).expect("a finite shift"),
-    );
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(30.0, -5.0, 7.0)).expect("a finite shift"),
+        )
+        .expect("this model made the key");
     let before = model
         .solid(cube)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),

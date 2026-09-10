@@ -69,6 +69,7 @@ fn how_far_off_the_surface(surface: &Surface, point: Point) -> f64 {
 fn how_far_inside_a_triangle_it_strays(model: &Model, solid: SolidKey, mesh: &Mesh) -> f64 {
     let surface_of: Vec<_> = model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .map(|face| (face.key(), face.surface()))
         .collect();
@@ -230,6 +231,7 @@ fn no_triangle_of_a_curved_mesh_strays_further_than_the_deflection_it_was_cut_at
             let mesh = shape
                 .model
                 .solid(shape.solid)
+                .expect("this model made the key")
                 .mesh(
                     Deflection::of(asked).expect("a length"),
                     &Policy::certified(),

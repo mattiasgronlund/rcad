@@ -69,7 +69,7 @@ fn a_block_flush_against_a_frame_unites_to_the_same_solid_either_way_round() {
             1,
             "the two overlap, so their union is one lump"
         );
-        let solid = model.solid(solids[0]);
+        let solid = model.solid(solids[0]).expect("this model made the key");
         assert_eq!(solid.shells().count(), 1, "nothing is hollowed out");
         let measure = solid
             .measure(

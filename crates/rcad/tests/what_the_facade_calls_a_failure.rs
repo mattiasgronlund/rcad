@@ -27,7 +27,7 @@ fn one_question_mark_works_on_all_three_layers_underneath() {
         let cube = model.add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())?;
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
         Ok(model
-            .solid(cube)
+            .solid(cube)?
             .measure(
                 a_deflection(),
                 &Policy::certified(),
@@ -172,10 +172,10 @@ fn a_classification_that_lands_on_the_skin_is_an_answer_and_not_an_error() {
         .expect("a cube of side two");
     let mut log = ProvenanceLog::new();
 
-    let answer =
-        model
-            .solid(cube)
-            .classify_point(Point::new(0.0, 0.0, 0.0), &Policy::certified(), &mut log);
+    let answer = model
+        .solid(cube)
+        .expect("this model made the key")
+        .classify_point(Point::new(0.0, 0.0, 0.0), &Policy::certified(), &mut log);
 
     match answer {
         Containment::OnBoundary => {}

@@ -120,7 +120,9 @@ fn the_mesh_lands_bit_for_bit_on_an_apex_that_reads_exactly_zero() {
         for far in THE_SIZES {
             let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
             let solid = a_pointed_cone(&mut model, SLOPE, far);
-            model.place_solid(solid, &placement);
+            model
+                .place_solid(solid, &placement)
+                .expect("this model made the key");
 
             let apex = the_apex_a_consumer_reads(&model, solid);
             assert_eq!(
@@ -327,6 +329,7 @@ fn the_shifts() -> [Isometry; 4] {
 fn the_apex_a_consumer_reads(model: &Model, solid: SolidKey) -> Point {
     let mut apexes = model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .filter_map(|face| match face.surface() {
             Surface::Cone(cone) => Some(cone.apex()),
@@ -348,6 +351,7 @@ fn how_far_each_mesh_point_is_from(
 ) -> Vec<f64> {
     model
         .solid(solid)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(deflection).expect("a positive length"),
             &Policy::certified(),
@@ -367,10 +371,11 @@ fn how_far_each_mesh_point_is_from(
 /// complaint. That is `docs/decisions.md` §56.7's "half of demand 4".
 fn the_floor_under_the_mesh_of(model: &Model, solid: SolidKey) -> f64 {
     let asked = Deflection::of(f64::MIN_POSITIVE).expect("the smallest positive length there is");
-    match model
-        .solid(solid)
-        .mesh(asked, &Policy::certified(), &mut ProvenanceLog::new())
-    {
+    match model.solid(solid).expect("this model made the key").mesh(
+        asked,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) {
         Err(Error::DeflectionBelowWhatAMeshCanReach { closest, .. }) => closest,
         other => panic!("asking for a mesh no arithmetic could cut gave {other:?}"),
     }

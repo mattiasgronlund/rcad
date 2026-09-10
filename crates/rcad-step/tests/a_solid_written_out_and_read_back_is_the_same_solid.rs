@@ -351,10 +351,12 @@ impl Covered {
         let deflection = the_same_mesh_on_both_sides();
         let here = model
             .solid(built)
+            .expect("this model made the key")
             .measure(deflection, &policy, &mut log)
             .unwrap_or_else(|why| panic!("{called} does not measure: {why}"));
         let back = there
             .solid(read_back)
+            .expect("this model made the key")
             .measure(deflection, &policy, &mut log)
             .unwrap_or_else(|why| panic!("{called} does not measure after the round trip: {why}"));
         assert_eq!(here.volume(), back.volume(), "{called}: volume");
@@ -447,7 +449,7 @@ fn cut_by_a_third_solid(
         .into_iter()
         .map(|piece| {
             scratch
-                .solid(piece)
+                .solid(piece)?
                 .measure(deflection, &policy, &mut ProvenanceLog::new())
         })
         .collect()

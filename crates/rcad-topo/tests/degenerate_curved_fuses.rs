@@ -194,6 +194,7 @@ fn volume_of_at(model: &Model, solids: &[SolidKey], deflection: f64) -> f64 {
         .map(|&solid| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(
                     Deflection::of(deflection).expect("a fiftieth of a millimetre is a length"),
                     &Policy::certified(),
@@ -335,7 +336,9 @@ fn a_ball_that_nothing_cuts_comes_back_whole() {
         Side::Under,
     );
 
-    let skin = model.solid(kept.solids()[0]);
+    let skin = model
+        .solid(kept.solids()[0])
+        .expect("this model made the key");
     assert_eq!(skin.faces().count(), 1, "a ball is one face");
     let wires: Vec<_> = skin
         .faces()
@@ -806,11 +809,14 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
     );
     for (solid, named) in [(cone, "the frustum"), (wedge, "the wedge")] {
         assert_eq!(
-            model.solid(solid).classify_point(
-                Point::new(0.0, 0.0, 9.0),
-                &policy,
-                &mut ProvenanceLog::new()
-            ),
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .classify_point(
+                    Point::new(0.0, 0.0, 9.0),
+                    &policy,
+                    &mut ProvenanceLog::new()
+                ),
             Containment::Inside,
             "(0, 0, 9) is inside {named}"
         );
@@ -1144,7 +1150,9 @@ fn a_ball_cut_through_its_middle_by_a_plane_off_its_polar_axis_is_answered() {
         .expect("a ball of radius four");
     let knife = block(&mut model, [12.0, 12.0, 12.0], Vector::new(-6.0, -6.0, 0.0));
     let axis = Axis::new(Point::origin(), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
-    model.place_solid(knife, &Isometry::rotation(&axis, 0.4).expect("a lean"));
+    model
+        .place_solid(knife, &Isometry::rotation(&axis, 0.4).expect("a lean"))
+        .expect("this model made the key");
     let leaning = fused(&mut model, &Pair::of(ball, knife), Rule::Intersection);
     assert_eq!(leaning.solids().len(), 1);
     measures(
@@ -1197,6 +1205,7 @@ fn a_block_with_a_round_hole_through_it_is_bounded_by_whole_circles() {
 
     let closed = model
         .solid(drilled.solids()[0])
+        .expect("this model made the key")
         .faces()
         .flat_map(|face| face.wires())
         .flat_map(|wire| wire.coedges())
@@ -1471,7 +1480,14 @@ fn a_cut_a_millionth_thick_across_a_bar_keeps_the_disc_it_leaves() {
 
     let disc = fused(&mut model, &pair, Rule::Intersection);
     assert_eq!(disc.solids().len(), 1);
-    assert_eq!(model.solid(disc.solids()[0]).faces().count(), 3);
+    assert_eq!(
+        model
+            .solid(disc.solids()[0])
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        3
+    );
     measures(
         volume_of(&model, disc.solids()),
         PI * 4.0 * A_SLIVER,
@@ -1507,7 +1523,14 @@ fn a_bar_wholly_inside_a_block_unites_and_intersects() {
     let pair = a_bar_wholly_inside_a_block(&mut model);
     let united = fused(&mut model, &pair, Rule::Union);
     assert_eq!(united.solids().len(), 1);
-    assert_eq!(model.solid(united.solids()[0]).faces().count(), 6);
+    assert_eq!(
+        model
+            .solid(united.solids()[0])
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        6
+    );
     assert_eq!(
         volume_of(&model, united.solids()),
         512.0,
@@ -1546,7 +1569,9 @@ fn hollowing_a_block_out_with_a_bar_inside_it_leaves_a_bubble() {
     let hollowed = fused(&mut model, &pair, Rule::Difference);
 
     assert_eq!(hollowed.solids().len(), 1, "one solid with a void in it");
-    let solid = model.solid(hollowed.solids()[0]);
+    let solid = model
+        .solid(hollowed.solids()[0])
+        .expect("this model made the key");
     assert_eq!(
         solid.shells().count(),
         2,
@@ -1594,7 +1619,9 @@ fn a_blind_hole_is_committed_and_not_only_arranged() {
     let drilled = fused(&mut model, &Pair::of(solid, bar), Rule::Difference);
 
     assert_eq!(drilled.solids().len(), 1);
-    let hollowed = model.solid(drilled.solids()[0]);
+    let hollowed = model
+        .solid(drilled.solids()[0])
+        .expect("this model made the key");
     assert_eq!(hollowed.shells().count(), 1, "a blind hole is one shell");
     assert_eq!(
         hollowed.faces().count(),
@@ -1659,7 +1686,11 @@ fn a_ball_wholly_inside_a_block_answers_all_three_rules() {
     let hollowed = fused(&mut model, &pair, Rule::Difference);
     assert_eq!(hollowed.solids().len(), 1);
     assert_eq!(
-        model.solid(hollowed.solids()[0]).shells().count(),
+        model
+            .solid(hollowed.solids()[0])
+            .expect("this model made the key")
+            .shells()
+            .count(),
         2,
         "the block's own skin and the bubble inside it"
     );
@@ -1838,7 +1869,9 @@ fn a_turned_notched_bar_is_refused_for_want_of_an_order_along_a_crossing() {
         let axis = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("an axis");
         let turn = Isometry::rotation(&axis, 0.4).expect("a share of a turn");
         for &solid in pair.arguments.iter().chain(&pair.tools) {
-            model.place_solid(solid, &turn);
+            model
+                .place_solid(solid, &turn)
+                .expect("this model made the key");
         }
         let why = refusal(&mut model, &pair, Rule::Difference, &policy);
         assert_eq!(what_it_gave_up_on(&why), "order along a crossing");
@@ -2287,7 +2320,7 @@ fn a_ball_cut_one_unit_from_its_centre(
         .add_cube(20.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a block round it");
     let put_it = placement.compose(&Isometry::translation(shift).expect("a shift"));
-    model.place_solid(block, &put_it);
+    model.place_solid(block, &put_it)?;
     model.fuse(
         &[ball],
         &[block],

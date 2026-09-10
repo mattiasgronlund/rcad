@@ -281,7 +281,15 @@ fn the_frustum_on_the_accepted_side_is_a_solid_that_certifies_clean(far: f64, ri
         .validate(&Policy::certified(), &mut log)
         .expect("and the sweep says the same about it a second time");
     assert!(log.is_empty(), "still nothing approximated");
-    assert_eq!(model.solid(solid).faces().count(), 3, "two caps and a wall");
+    assert_eq!(
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        3,
+        "two caps and a wall"
+    );
 }
 
 fn a_working_size(far: f64) -> Scale {

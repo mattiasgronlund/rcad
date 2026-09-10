@@ -20,10 +20,12 @@ fn cube(model: &mut Model, side: f64, at: Vector) -> SolidKey {
     let cube = model
         .add_cube(side, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube");
-    model.place_solid(
-        cube,
-        &Isometry::translation(at).expect("a finite placement"),
-    );
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(at).expect("a finite placement"),
+        )
+        .expect("this model made the key");
     cube
 }
 
@@ -56,6 +58,7 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         .map(|&solid| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(
                     a_deflection(),
                     &Policy::certified(),
@@ -139,7 +142,7 @@ fn a_cube_with_a_smaller_one_taken_out_of_the_middle_is_one_solid_with_a_void() 
     let hollow = fuse(&mut model, &[block], &[bubble], Rule::Difference);
 
     assert_eq!(hollow.len(), 1);
-    let solid = model.solid(hollow[0]);
+    let solid = model.solid(hollow[0]).expect("this model made the key");
     assert_eq!(
         solid.shells().count(),
         2,
@@ -264,7 +267,11 @@ fn every_face_of_the_answer_has_exactly_one_input_face_behind_it() {
         .expect("two lattice-aligned cubes unite");
 
     assert_eq!(fused.generated_faces().count(), 0);
-    let images: usize = model.solid(fused.solids()[0]).faces().count();
+    let images: usize = model
+        .solid(fused.solids()[0])
+        .expect("this model made the key")
+        .faces()
+        .count();
     assert_eq!(images, model.face_count() - faces_before);
     assert!(images > 0);
 }
@@ -301,9 +308,16 @@ fn a_certified_fuse_over_a_tagged_input_succeeds_and_the_answer_keeps_the_tag() 
 
     assert!(log.is_empty(), "nothing here had to be approximated");
     assert!(model.worst_approximation() >= 1e-6);
-    for face in model.solid(fused.solids()[0]).faces() {
+    for face in model
+        .solid(fused.solids()[0])
+        .expect("this model made the key")
+        .faces()
+    {
         assert_eq!(
-            model.face(face.key()).approximation(),
+            model
+                .face(face.key())
+                .expect("this model made the key")
+                .approximation(),
             Some(tag),
             "a face cut by a face known only to a millionth is known no better"
         );
@@ -329,11 +343,19 @@ fn the_input_keys_still_work_and_a_face_nothing_reaches_comes_through_once() {
         .expect("two cubes that are nowhere near each other");
 
     for solid in [one, other] {
-        for face in model.solid(solid).faces() {
-            let images = fused.images_of_face(face.key());
+        for face in model.solid(solid).expect("this model made the key").faces() {
+            let images = fused
+                .images_of_face(face.key())
+                .expect("this model made the key");
             assert_eq!(images.len(), 1);
             assert_ne!(images[0], face.key());
-            assert_eq!(model.face(images[0]).plane(), face.plane());
+            assert_eq!(
+                model
+                    .face(images[0])
+                    .expect("this model made the key")
+                    .plane(),
+                face.plane()
+            );
         }
     }
     assert_eq!(fused.deleted_faces().count(), 0);
@@ -367,17 +389,27 @@ fn every_face_of_an_answer_names_the_input_face_it_was_cut_from() {
         .expect("a block with a bubble taken out of it");
 
     let mut images = 0;
-    for face in model.solid(block).faces() {
-        let mine = fused.images_of_face(face.key()).len();
+    for face in model.solid(block).expect("this model made the key").faces() {
+        let mine = fused
+            .images_of_face(face.key())
+            .expect("this model made the key")
+            .len();
         assert_eq!(
             mine, 1,
             "the pieces the bubble's planes cut this side into are all still one face"
         );
         images += mine;
     }
-    for face in model.solid(bubble).faces() {
+    for face in model
+        .solid(bubble)
+        .expect("this model made the key")
+        .faces()
+    {
         assert_eq!(
-            fused.images_of_face(face.key()).len(),
+            fused
+                .images_of_face(face.key())
+                .expect("this model made the key")
+                .len(),
             1,
             "every face of the bubble becomes one face of the hole's skin"
         );
@@ -385,21 +417,35 @@ fn every_face_of_an_answer_names_the_input_face_it_was_cut_from() {
     }
     assert_eq!(
         images,
-        model.solid(fused.solids()[0]).faces().count(),
+        model
+            .solid(fused.solids()[0])
+            .expect("this model made the key")
+            .faces()
+            .count(),
         "every face of the answer is the image of exactly one input face"
     );
     assert_eq!(fused.deleted_faces().count(), 0);
 
     for vertex in corners_of(&model, bubble) {
-        assert_eq!(fused.images_of_vertex(vertex).len(), 1);
+        assert_eq!(
+            fused
+                .images_of_vertex(vertex)
+                .expect("this model made the key")
+                .len(),
+            1
+        );
     }
 }
 
 /// Every corner of a solid, once each.
 fn corners_of(model: &Model, solid: SolidKey) -> Vec<VertexKey> {
     let mut corners = Vec::new();
-    for face in model.solid(solid).faces() {
-        for wire in model.face(face.key()).wires() {
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        for wire in model
+            .face(face.key())
+            .expect("this model made the key")
+            .wires()
+        {
             for coedge in wire.coedges() {
                 let corner = coedge.start().key();
                 if !corners.contains(&corner) {
@@ -429,9 +475,16 @@ fn a_face_that_is_swallowed_whole_has_no_image() {
         )
         .expect("a bubble inside a block adds nothing to it");
 
-    for face in model.solid(bubble).faces() {
+    for face in model
+        .solid(bubble)
+        .expect("this model made the key")
+        .faces()
+    {
         assert!(
-            fused.images_of_face(face.key()).is_empty(),
+            fused
+                .images_of_face(face.key())
+                .expect("this model made the key")
+                .is_empty(),
             "a face inside the other solid is not on the boundary of the union"
         );
     }
@@ -450,8 +503,12 @@ fn a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_
     let axis = Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(1.0, 2.0, 3.0))
         .expect("a direction with length");
     let turn = Isometry::rotation(&axis, 0.7).expect("a rotation");
-    model.place_solid(one, &turn);
-    model.place_solid(other, &turn);
+    model
+        .place_solid(one, &turn)
+        .expect("this model made the key");
+    model
+        .place_solid(other, &turn)
+        .expect("this model made the key");
 
     let mut log = ProvenanceLog::new();
     let fused = model
@@ -654,8 +711,12 @@ fn a_turned_solid_with_a_bit_identical_copy_taken_away_leaves_nothing() {
     let axis =
         Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction with length");
     let turn = Isometry::rotation(&axis, core::f64::consts::TAU / 64.0).expect("a rotation");
-    model.place_solid(one, &turn);
-    model.place_solid(other, &turn);
+    model
+        .place_solid(one, &turn)
+        .expect("this model made the key");
+    model
+        .place_solid(other, &turn)
+        .expect("this model made the key");
 
     let nothing = model
         .fuse(
@@ -693,7 +754,11 @@ fn uniting_two_ells_flush_against_each_other_gives_the_same_faces_either_way_rou
     let forwards = fuse(&mut model, &[one], &[other], Rule::Union);
     assert_eq!(forwards.len(), 1);
     assert_eq!(
-        model.solid(forwards[0]).faces().count(),
+        model
+            .solid(forwards[0])
+            .expect("this model made the key")
+            .faces()
+            .count(),
         8,
         "an ell of one thickness has a top, a bottom and six walls"
     );
@@ -753,7 +818,7 @@ type WrittenFace = (Vec<u64>, Vec<Vec<[u64; 3]>>);
 fn faces_of(model: &Model, solids: &[SolidKey]) -> Vec<WrittenFace> {
     let mut written: Vec<WrittenFace> = solids
         .iter()
-        .flat_map(|&solid| model.solid(solid).faces())
+        .flat_map(|&solid| model.solid(solid).expect("this model made the key").faces())
         .map(|face| {
             let plane = face
                 .plane()
@@ -808,7 +873,11 @@ fn a_union_can_be_united_again_because_every_corner_of_it_still_has_three_planes
 
     let again = fuse(&mut model, &first, &[third], Rule::Union);
     assert_eq!(
-        model.solid(first[0]).faces().count(),
+        model
+            .solid(first[0])
+            .expect("this model made the key")
+            .faces()
+            .count(),
         6,
         "two boxes overlapping along one axis unite into a box"
     );
@@ -954,7 +1023,11 @@ fn a_solid_with_a_profile_point_in_the_middle_of_a_wall_fuses_with_one_it_does_n
             Rule::Union => {
                 assert_eq!(answer.len(), 2, "nothing joined them, so they stay two");
                 assert_eq!(volume_of(&model, &answer), 4.0 + 1.0);
-                let walls: usize = model.solid(answer[0]).faces().count();
+                let walls: usize = model
+                    .solid(answer[0])
+                    .expect("this model made the key")
+                    .faces()
+                    .count();
                 assert_eq!(
                     walls, 6,
                     "the two side faces on one plane came through as the one face they are"
@@ -1049,7 +1122,12 @@ fn both_input_faces_that_were_joined_on_the_way_in_name_the_face_they_became() {
     let mut model = a_model();
     let lumpy = a_box_with_a_point_in_the_middle_of_two_of_its_walls(&mut model, [0.0, 0.0]);
     let plain = cube(&mut model, 1.0, Vector::new(5.0, 5.0, 0.0));
-    let walls: Vec<FaceKey> = model.solid(lumpy).faces().map(|face| face.key()).collect();
+    let walls: Vec<FaceKey> = model
+        .solid(lumpy)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.key())
+        .collect();
     assert_eq!(
         walls.len(),
         8,
@@ -1068,7 +1146,7 @@ fn both_input_faces_that_were_joined_on_the_way_in_name_the_face_they_became() {
 
     let mut faces_of_the_answer: Vec<FaceKey> = Vec::new();
     for wall in walls {
-        let images = fused.images_of_face(wall);
+        let images = fused.images_of_face(wall).expect("this model made the key");
         assert_eq!(images.len(), 1, "no wall of the input was lost");
         if !faces_of_the_answer.contains(&images[0]) {
             faces_of_the_answer.push(images[0]);

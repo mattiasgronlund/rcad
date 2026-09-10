@@ -1655,12 +1655,21 @@ mod tests {
         }
     }
 
+    /// The whole suite for this lives in
+    /// `tests/a_key_from_another_model.rs`, which asks it of all eleven public
+    /// doors and of a key of every kind. This one is here so that the crate's
+    /// own tests fail too if the id ever stops being compared.
     #[test]
-    #[should_panic(expected = "made by a different model")]
     fn a_key_from_one_model_may_not_be_used_on_another() {
         let (_first, cube) = a_cube();
         let (second, _) = a_cube();
-        let _ = second.solid(cube);
+
+        let refused = second.solid(cube).map(|_| ());
+
+        assert!(
+            matches!(refused, Err(Error::KeyFromAnotherModel { entity }) if entity == "solid"),
+            "expected a foreign-key refusal, got {refused:?}"
+        );
     }
 
     #[test]

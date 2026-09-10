@@ -272,12 +272,17 @@ fn round_trip_one(name: &str, source: &Model) -> Outcome {
     for (&here_key, &back_key) in source_solids.iter().zip(&there_solids) {
         let here = match source
             .solid(here_key)
+            .expect("this model made the key")
             .measure(deflection, &policy, &mut log)
         {
             Ok(measured) => measured,
             Err(why) => return Outcome::Failed(format!("does not measure: {why}")),
         };
-        let back = match there.solid(back_key).measure(deflection, &policy, &mut log) {
+        let back = match there
+            .solid(back_key)
+            .expect("this model made the key")
+            .measure(deflection, &policy, &mut log)
+        {
             Ok(measured) => measured,
             Err(why) => {
                 return Outcome::Failed(format!("does not measure after the round trip: {why}"));
@@ -329,7 +334,11 @@ fn fuse_against_a_third_solid(
     back_key: SolidKey,
     deflection: Deflection,
 ) -> FuseComparison {
-    let Some((low, high)) = source.solid(here_key).box_around_it() else {
+    let Some((low, high)) = source
+        .solid(here_key)
+        .expect("this model made the key")
+        .box_around_it()
+    else {
         return FuseComparison::NothingToCompare {
             because: "the solid has no bounding box",
         };
@@ -439,7 +448,7 @@ fn cut_by_a_centered_box(
         .into_iter()
         .map(|piece| {
             scratch
-                .solid(piece)
+                .solid(piece)?
                 .measure(deflection, &policy, &mut ProvenanceLog::new())
         })
         .collect::<rcad_topo::Result<Vec<_>>>()?;

@@ -382,7 +382,7 @@ fn both_ways_round(
     };
 
     for &solid in &answer {
-        lattice.place_solid(solid, &turn);
+        lattice.place_solid(solid, &turn)?;
     }
 
     let fused_then_turned = Totals::of(&lattice, &answer);
@@ -570,6 +570,7 @@ fn how_much_a_lost_contact_can_add(still: &Configuration, turned: &Configuration
 fn each_face_of(model: &Model, solid: SolidKey) -> Vec<(Surface, f64)> {
     model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .map(|face| {
             let mut area = 0.0;
@@ -771,7 +772,7 @@ impl Totals {
         let mut largest_coordinate = 0.0f64;
 
         for &solid in solids {
-            let solid = model.solid(solid);
+            let solid = model.solid(solid).expect("this model made the key");
             let measure = solid
                 .measure(
                     a_deflection(),

@@ -221,10 +221,11 @@ fn a_ball_meshed_far_from_the_origin_leaves_the_log_empty_and_says_so_on_the_mes
                 let mut model = a_model();
                 let ball = model.add_ball(RADIUS, &placement).expect("a ball");
                 let mut log = ProvenanceLog::new();
-                let Ok(mesh) = model
-                    .solid(ball)
-                    .mesh(deflection, &Policy::certified(), &mut log)
-                else {
+                let Ok(mesh) = model.solid(ball).expect("this model made the key").mesh(
+                    deflection,
+                    &Policy::certified(),
+                    &mut log,
+                ) else {
                     continue;
                 };
                 assert!(
@@ -252,6 +253,7 @@ fn meshed_ball(radius: f64, placement: &Isometry, deflection: f64) -> Option<Mes
     let ball = model.add_ball(radius, placement).expect("a ball");
     model
         .solid(ball)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(deflection).expect("a length"),
             &Policy::certified(),

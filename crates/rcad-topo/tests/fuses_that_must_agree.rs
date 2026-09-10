@@ -2000,6 +2000,7 @@ fn how_much_it_holds(model: &Model, solids: &[SolidKey], how_fine: Deflection) -
         .map(|&solid| {
             let measured = model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
                 .expect("a solid this size measures");
             (measured.volume(), measured.volume_error())
@@ -2360,11 +2361,13 @@ fn every_frustum_of_the_family_has_skin_inside_the_block_and_skin_outside_it() {
 
         let (low, high) = model
             .solid(block)
+            .expect("this model made the key")
             .box_around_it()
             .expect("a cube has faces to measure");
         let (low, high) = (low.coordinates(), high.coordinates());
         let skin = model
             .solid(frustum)
+            .expect("this model made the key")
             .mesh(
                 a_deflection(),
                 &Policy::certified(),
@@ -2713,7 +2716,9 @@ fn shifted((mut model, keys): (Model, Vec<SolidKey>), shift: &Movement) -> (Mode
     let away = Isometry::translation(Vector::new(shift.shift[0], shift.shift[1], shift.shift[2]))
         .expect("a whole-number shift");
     for &key in &keys {
-        model.place_solid(key, &away);
+        model
+            .place_solid(key, &away)
+            .expect("this model made the key");
     }
     (model, keys)
 }
@@ -3234,7 +3239,7 @@ fn every_surface_of_the_answer_is_a_surface_of_an_input(
 ) -> Result<(), TestCaseError> {
     let mut theirs: BTreeSet<Vec<u64>> = BTreeSet::new();
     for &solid in inputs {
-        for face in model.solid(solid).faces() {
+        for face in model.solid(solid).expect("this model made the key").faces() {
             let surface = face.surface();
             theirs.insert(WhatItSitsOn::of(&surface).written_out());
             if let Some(plane) = surface.as_plane() {
@@ -3247,7 +3252,7 @@ fn every_surface_of_the_answer_is_a_surface_of_an_input(
     }
 
     for &solid in answer {
-        for face in model.solid(solid).faces() {
+        for face in model.solid(solid).expect("this model made the key").faces() {
             let surface = face.surface();
             if !theirs.contains(&WhatItSitsOn::of(&surface).written_out()) {
                 return Err(TestCaseError::fail(format!(
@@ -3624,6 +3629,7 @@ fn volume_at(model: &Model, solids: &[SolidKey], deflection: Deflection) -> f64 
         .map(|&solid| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
                 .expect("a solid this size measures")
                 .volume()
@@ -3639,7 +3645,7 @@ fn invariants_of(model: &Model, solids: &[SolidKey]) -> Vec<Measured> {
     let mut measured: Vec<Measured> = solids
         .iter()
         .map(|&solid| {
-            let solid = model.solid(solid);
+            let solid = model.solid(solid).expect("this model made the key");
             let measure = solid
                 .measure(
                     a_deflection(),
@@ -3825,6 +3831,7 @@ fn answer_of(model: &Model, solids: &[SolidKey]) -> Answer {
             .map(|&solid| {
                 model
                     .solid(solid)
+                    .expect("this model made the key")
                     .faces()
                     .map(|face| Face {
                         sits: WhatItSitsOn::of(&face.surface()),

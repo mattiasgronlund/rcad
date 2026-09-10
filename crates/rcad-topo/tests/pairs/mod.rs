@@ -714,7 +714,9 @@ impl Configuration {
         if let Some(turn) = self.turn {
             let turn = turn.isometry();
             for &key in &keys {
-                model.place_solid(key, &turn);
+                model
+                    .place_solid(key, &turn)
+                    .expect("this model made the key");
             }
         }
         (model, keys)
@@ -1484,15 +1486,17 @@ impl FrustumAndBlock {
             )
             .expect("a whole-number cube");
         let frustum = a_frustum(&mut model, self.slope(), self.near(), self.far());
-        model.place_solid(
-            frustum,
-            &Isometry::translation(Vector::new(
-                f64::from(self.at[0]),
-                f64::from(self.at[1]),
-                -1.0 - self.near(),
-            ))
-            .expect("a whole-number shift"),
-        );
+        model
+            .place_solid(
+                frustum,
+                &Isometry::translation(Vector::new(
+                    f64::from(self.at[0]),
+                    f64::from(self.at[1]),
+                    -1.0 - self.near(),
+                ))
+                .expect("a whole-number shift"),
+            )
+            .expect("this model made the key");
         (model, vec![block, frustum])
     }
 

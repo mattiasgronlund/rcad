@@ -89,25 +89,32 @@ fn a_working_size() -> Scale {
 fn a_pointed_cone_placed(placement: &Isometry) -> (Model, SolidKey) {
     let mut model = Model::new(a_working_size());
     let solid = a_pointed_cone(&mut model, SLOPE, HOW_FAR_UP_THE_BASE_SITS);
-    model.place_solid(solid, placement);
+    model
+        .place_solid(solid, placement)
+        .expect("this model made the key");
     (model, solid)
 }
 
 /// The apex of the solid's one cone face, read the way a consumer reads it:
 /// through a located [`FaceView`](rcad_topo::FaceView), placement composed in.
 fn the_apex_a_consumer_reads(model: &Model, solid: SolidKey) -> Point {
-    let mut apexes = model.solid(solid).faces().filter_map(|face| {
-        match face.surface() {
-            Surface::Cone(cone) => Some(cone.apex()),
-            // A pointed cone's other face is its base cap. The kinds this kernel
-            // holds are named out so that a sixth surface arriving here is a
-            // panic rather than a silent "not a cone".
-            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_) => {
-                None
+    let mut apexes = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .filter_map(|face| {
+            match face.surface() {
+                Surface::Cone(cone) => Some(cone.apex()),
+                // A pointed cone's other face is its base cap. The kinds this kernel
+                // holds are named out so that a sixth surface arriving here is a
+                // panic rather than a silent "not a cone".
+                Surface::Plane(_)
+                | Surface::Sphere(_)
+                | Surface::Cylinder(_)
+                | Surface::Torus(_) => None,
+                other => panic!("a pointed cone has no {other:?} face"),
             }
-            other => panic!("a pointed cone has no {other:?} face"),
-        }
-    });
+        });
     let apex = apexes.next().expect("a pointed cone has a cone face");
     assert!(apexes.next().is_none(), "and it has only the one");
     apex
@@ -142,6 +149,7 @@ fn every_placement_puts_a_mesh_point_on_the_apex(family: &str, placements: &[Iso
         let apex = the_apex_a_consumer_reads(&model, solid);
         let mesh = model
             .solid(solid)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(0.01).expect("a positive length"),
                 &policy,

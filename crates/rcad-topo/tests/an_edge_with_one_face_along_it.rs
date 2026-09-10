@@ -297,8 +297,12 @@ fn a_box_and_a_taller_one(turn: Option<Isometry>) -> (Model, SolidKey, SolidKey)
     let cube = box_from([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], &mut model);
     let taller = box_from([0.0, 0.0, 0.0], [1.0, 1.0, 2.0], &mut model);
     if let Some(turn) = turn {
-        model.place_solid(cube, &turn);
-        model.place_solid(taller, &turn);
+        model
+            .place_solid(cube, &turn)
+            .expect("this model made the key");
+        model
+            .place_solid(taller, &turn)
+            .expect("this model made the key");
     }
     (model, cube, taller)
 }
@@ -366,6 +370,7 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         .map(|&solid| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(
                     Deflection::of(0.1).expect("a tenth of a millimetre is a length"),
                     &Policy::certified(),

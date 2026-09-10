@@ -61,6 +61,7 @@ fn a_file_whose_area_is_all_in_its_arcs_imports_and_measures_what_it_says() {
     let measured = import
         .model()
         .solid(*plate)
+        .expect("this model made the key")
         .measure(
             rcad_geom::Deflection::of(0.001).expect("a fine mesh"),
             &policy,

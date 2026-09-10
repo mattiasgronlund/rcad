@@ -396,7 +396,7 @@ fn no_box_of_planes_can_close_round_a_torus_axis_without_a_quartic() {
         [("a slab", slab, 2, 0, 4), ("a wedge", wedge, 2, 2, 1)]
     {
         let mut counted = [0usize; 3];
-        for face in model.solid(solid).faces() {
+        for face in model.solid(solid).expect("this model made the key").faces() {
             let Surface::Plane(flat) = face.surface() else {
                 panic!("{named} is made of planes");
             };

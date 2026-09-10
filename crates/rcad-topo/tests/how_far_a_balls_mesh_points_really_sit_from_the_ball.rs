@@ -92,6 +92,7 @@ fn a_certified_balls_mesh_points_sit_on_the_sphere_and_the_log_stays_empty() {
                 let mut log = ProvenanceLog::new();
                 let mesh = model
                     .solid(ball)
+                    .expect("this model made the key")
                     .mesh(
                         Deflection::of(how_fine).expect("a length"),
                         &Policy::certified(),
@@ -145,6 +146,7 @@ fn the_sag_in_the_middle_of_a_triangle_is_large_but_never_past_the_stated_deviat
             let mut log = ProvenanceLog::new();
             let mesh = model
                 .solid(ball)
+                .expect("this model made the key")
                 .mesh(
                     Deflection::of(how_fine).expect("a length"),
                     &Policy::certified(),
@@ -195,6 +197,7 @@ fn a_quarter_of_a_radius_of_sag_is_what_a_deflection_near_the_radius_buys() {
         let how_fine = f64::from(step) * 0.05;
         let mesh = model
             .solid(ball)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(how_fine).expect("a length"),
                 &Policy::certified(),

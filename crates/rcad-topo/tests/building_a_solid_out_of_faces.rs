@@ -181,10 +181,12 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let deflection = Deflection::for_scale(model.scale());
     let one = model
         .solid(built)
+        .expect("this model made the key")
         .measure(deflection, &policy, &mut log)
         .expect("the bend the rings module built measures");
     let other = model
         .solid(rebuilt)
+        .expect("this model made the key")
         .measure(deflection, &policy, &mut log)
         .expect("and so does the one described again");
     assert_eq!(one.volume(), other.volume(), "volume");
@@ -196,11 +198,13 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     // it overlaps the first without being a plain duplicate of it.
     let a_turned_bend_of_the_same_ring_and_tube = |model: &mut Model| -> SolidKey {
         let second = a_quarter_bend(model, 4.0, 1.0);
-        model.place_solid(
-            second,
-            &Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_4)
-                .expect("a quarter turn is a real angle"),
-        );
+        model
+            .place_solid(
+                second,
+                &Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_4)
+                    .expect("a quarter turn is a real angle"),
+            )
+            .expect("this model made the key");
         second
     };
     let refusal_of_built =
@@ -456,10 +460,12 @@ fn the_same_numbers(
 
     let one = model
         .solid(built)
+        .expect("this model made the key")
         .measure(deflection, &policy, &mut log)
         .expect("the solid the kernel built measures");
     let other = model
         .solid(rebuilt)
+        .expect("this model made the key")
         .measure(deflection, &policy, &mut log)
         .expect("and so does the one described again");
     assert_eq!(one.volume(), other.volume(), "volume");
@@ -530,7 +536,7 @@ fn cut_by_a_third_solid(
         .into_iter()
         .map(|piece| {
             scratch
-                .solid(piece)
+                .solid(piece)?
                 .measure(deflection, &policy, &mut ProvenanceLog::new())
         })
         .collect()
@@ -571,7 +577,7 @@ impl<'m> Walk<'m> {
     }
 
     fn describe_again(self, run_of: &dyn Fn(EdgeView<'_>) -> EdgeRun) -> Result<SolidBuilder> {
-        let view = self.model.solid(self.solid);
+        let view = self.model.solid(self.solid)?;
         let mut shells = view.shells();
         let shell = shells.next().expect("a solid has a shell");
         assert!(shells.next().is_none(), "these solids have one shell each");
@@ -592,7 +598,7 @@ impl<'m> Walk<'m> {
                 Isometry::identity(),
                 "this walk reads stored geometry, so each face sits at the identity"
             );
-            let face = self.model.face(reference.face());
+            let face = self.model.face(reference.face())?;
             let mut wires = Vec::new();
             for wire in face.wires() {
                 let mut steps = Vec::new();
@@ -635,7 +641,7 @@ impl<'m> Walk<'m> {
                 // so its ends are the coedge's ends and not the edge's own.
                 // Reading the stored pair back means asking the model for the
                 // edge on its own account.
-                let stored = self.model.edge(coedge.edge().key());
+                let stored = self.model.edge(coedge.edge().key())?;
                 let described = match edges.get(&stored.key()) {
                     Some(&described) => described,
                     None => {

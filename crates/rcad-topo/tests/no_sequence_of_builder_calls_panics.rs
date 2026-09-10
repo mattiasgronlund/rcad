@@ -282,6 +282,7 @@ fn the_same_cube_described_in_any_order_is_the_same_cube() {
         );
         let measured = model
             .solid(cube)
+            .expect("this model made the key")
             .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
             .expect("a polyhedron measures over its own fan");
         assert_eq!(measured.volume(), 1.0);

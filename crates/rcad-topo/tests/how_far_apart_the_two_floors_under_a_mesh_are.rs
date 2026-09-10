@@ -203,7 +203,7 @@ fn a_bar_leaves_the_walk_room_to_place_a_point_where_a_ball_leaves_it_none() {
 
 /// The cutting floor, taken off the public refusal and off nothing else.
 fn how_fine_a_mesh_of_it_is_cut(model: &Model, solid: SolidKey) -> f64 {
-    let refused = model.solid(solid).mesh(
+    let refused = model.solid(solid).expect("this model made the key").mesh(
         Deflection::of(FINER_THAN_ANYTHING_CAN_BE_CUT).expect("a positive length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
@@ -257,7 +257,7 @@ fn the_guard_is_what_refuses(model: &Model, solid: SolidKey, asked: f64) -> bool
 }
 
 fn what_meshing_it_at(model: &Model, solid: SolidKey, asked: f64) -> Result<Mesh, Error> {
-    model.solid(solid).mesh(
+    model.solid(solid)?.mesh(
         Deflection::of(asked).expect("a positive length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),

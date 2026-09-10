@@ -15,6 +15,14 @@
 //! the wrong reason. The two tests below are that test, and the id is a real
 //! counter in every build now (`docs/decisions.md` §82.10).
 //!
+//! **What these two ask has moved once and what they guard has not.** §86 made
+//! a foreign key an `Err` where §84 had made it a panic, so they read the
+//! refusal instead of catching a crash. The reason they live here is the same
+//! either way: both answers come out of a comparison that a zero-sized id makes
+//! true whichever models the two came from, and a debug build cannot see that.
+//! `tests/a_key_from_another_model.rs` asks the same of every public door and
+//! runs in the ordinary suite.
+//!
 //! # Adding a test here
 //!
 //! Write it in this file. `just check-release-build` names this file and this
@@ -38,7 +46,7 @@
 
 use rcad_geom::{Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 /// One millimetre cube, and a block a thousand times its size.
 ///
@@ -65,22 +73,26 @@ fn these_tests_are_built_with_the_debug_assertions_off() {
     );
 }
 
-/// Reading a solid out of a model with another model's key panics.
+/// Reading a solid out of a model with another model's key is refused.
 ///
 /// Both keys name slot zero of their own model, so before `ModelId` became a
 /// real number in every build this call did not fail. It handed back the ten
 /// millimetre block: `SolidView::measure` on it answered 1000 mm³ where the
 /// caller's key named a one millimetre cube of 1 mm³. Nothing said so.
 #[test]
-#[should_panic(expected = "this solid key was made by a different model")]
 fn a_solid_key_from_another_model_names_a_stranger_and_must_not_be_taken() {
     let (_mine, cube) = a_model_holding_one_block(SMALL);
     let (theirs, _block) = a_model_holding_one_block(LARGE);
 
-    let _ = theirs.solid(cube);
+    let refused = theirs.solid(cube).map(|_| ());
+
+    assert!(
+        matches!(refused, Err(Error::KeyFromAnotherModel { entity }) if entity == "solid"),
+        "expected a foreign-key refusal, got {refused:?}"
+    );
 }
 
-/// A fuse handed another model's solid panics, rather than answering `Ok`.
+/// A fuse handed another model's solid refuses, rather than answering `Ok`.
 ///
 /// This is the one that mattered. `fuse` takes its arguments by key, so the
 /// zero-sized id let a caller ask for the union of a stranger's cube with this
@@ -89,17 +101,23 @@ fn a_solid_key_from_another_model_names_a_stranger_and_must_not_be_taken() {
 /// solids at all; the cube was never looked at. A wrong answer wearing `Ok` is
 /// the shape `CLAUDE.md`'s "crash > corrupt" is about.
 #[test]
-#[should_panic(expected = "this solid key was made by a different model")]
 fn a_fuse_given_another_models_solid_must_not_answer_ok() {
     let (_mine, cube) = a_model_holding_one_block(SMALL);
     let (mut theirs, block) = a_model_holding_one_block(LARGE);
 
-    let _ = theirs.fuse(
-        &[cube],
-        &[block],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
+    let refused = theirs
+        .fuse(
+            &[cube],
+            &[block],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map(|_| ());
+
+    assert!(
+        matches!(refused, Err(Error::KeyFromAnotherModel { entity }) if entity == "solid"),
+        "expected a foreign-key refusal, got {refused:?}"
     );
 }
 

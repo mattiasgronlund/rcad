@@ -306,11 +306,12 @@ impl Rung {
 /// would never appear.
 fn how_a_mesh_answered(shape: &Shape, deflection: f64) -> Rung {
     let asked = Deflection::of(deflection).expect("a positive length");
-    match shape.model.solid(shape.solid).mesh(
-        asked,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    ) {
+    match shape
+        .model
+        .solid(shape.solid)
+        .expect("this model made the key")
+        .mesh(asked, &Policy::certified(), &mut ProvenanceLog::new())
+    {
         Ok(mesh) => Rung::Meshed(mesh.triangles().len()),
         Err(why) => Rung::Refused(what_it_refused(&why)),
     }

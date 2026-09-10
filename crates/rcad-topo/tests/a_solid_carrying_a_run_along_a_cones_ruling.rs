@@ -235,6 +235,7 @@ fn a_solid_whose_sides_are_a_cones_rulings_passes_the_full_sweep() {
 
     let apex_runs = model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .flat_map(|face| face.wires())
         .flat_map(|wire| wire.coedges())
@@ -254,7 +255,7 @@ fn a_solid_whose_sides_are_a_cones_rulings_passes_the_full_sweep() {
         "the two side edges are runs a plane through the apex named"
     );
 
-    for face in model.solid(solid).faces() {
+    for face in model.solid(solid).expect("this model made the key").faces() {
         for wire in face.wires() {
             for coedge in wire.coedges() {
                 let edge = coedge.edge();
@@ -295,6 +296,7 @@ fn a_solid_carrying_apex_runs_meshes_to_half_a_frustums_volume() {
 
     let measured = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             Deflection::of(0.002).expect("a positive length"),
             &policy,
@@ -343,12 +345,14 @@ fn an_arc_trimmed_face_refuses_point_in_solid_by_name_and_a_closed_one_does_not(
 
     let answer = model
         .solid(half)
+        .expect("this model made the key")
         .classify_point(inside_both, &policy, &mut log);
     let Containment::CannotFollowAFacesTrimming { face } = answer else {
         panic!("half a frustum: expected a named refusal, got {answer:?}");
     };
     let trimmed_by_an_arc = model
         .face(face)
+        .expect("this model made the key")
         .wires()
         .flat_map(|wire| wire.coedges())
         .any(|coedge| {
@@ -362,12 +366,13 @@ fn an_arc_trimmed_face_refuses_point_in_solid_by_name_and_a_closed_one_does_not(
         trimmed_by_an_arc,
         "the refusal names the face whose outline it could not walk, and what it could not walk \
          is an arc: {:?}",
-        model.face(face).surface()
+        model.face(face).expect("this model made the key").surface()
     );
 
     assert_eq!(
         model
             .solid(whole)
+            .expect("this model made the key")
             .classify_point(inside_both, &policy, &mut log),
         Containment::Inside,
         "the whole frustum, same cone and same builder, is decided — so what stops the half is \

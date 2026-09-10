@@ -20,7 +20,7 @@
 //! // A cube is a polyhedron, so this deflection is ignored and the fan is summed.
 //! let how_fine = Deflection::for_scale(scale);
 //! let before = model
-//!     .solid(cube)
+//!     .solid(cube)?
 //!     .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())?;
 //!
 //! let bytes = postcard::to_allocvec(&model)?;
@@ -41,8 +41,10 @@
 //! claim that the model is flat arrays.
 //!
 //! The keys a caller is holding do **not** survive the trip. The model that
-//! comes back is a different model with its own identity, and in debug builds
-//! using an old key against it panics.
+//! comes back is a different model with its own identity, and using an old key
+//! against it is refused — [`Error::KeyFromAnotherModel`](crate::Error), in
+//! every build. It panicked in every build between §84 and §86 and in debug
+//! builds only before that.
 //!
 //! **A file that names an entity the arenas do not hold is refused here**, not
 //! left for [`Model::validate`] to find. Every level of the model points at the

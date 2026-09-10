@@ -117,10 +117,11 @@ fn a_tolerant_caller_is_told_exactly_what_a_certified_one_is_told() {
         for asked in DEFLECTIONS {
             let deflection = Deflection::of(asked).expect("a positive length");
 
-            let certified =
-                model
-                    .solid(bar)
-                    .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
+            let certified = model.solid(bar).expect("this model made the key").mesh(
+                deflection,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
             let Err(Error::DeflectionBelowWhatAMeshCanReach {
                 asked: certified_asked,
                 closest: certified_floor,
@@ -132,10 +133,11 @@ fn a_tolerant_caller_is_told_exactly_what_a_certified_one_is_told() {
                 );
             };
 
-            let tolerant =
-                model
-                    .solid(bar)
-                    .mesh(deflection, &a_tolerant_caller(), &mut ProvenanceLog::new());
+            let tolerant = model.solid(bar).expect("this model made the key").mesh(
+                deflection,
+                &a_tolerant_caller(),
+                &mut ProvenanceLog::new(),
+            );
             let Err(Error::DeflectionBelowWhatAMeshCanReach {
                 asked: tolerant_asked,
                 closest: tolerant_floor,
@@ -197,7 +199,7 @@ fn the_floor_under_a_deflection_runs_away_with_the_lean_it_stands_for() {
             &a_tolerant_caller(),
             &mut ProvenanceLog::new(),
         );
-        let refused = model.solid(bar).mesh(
+        let refused = model.solid(bar).expect("this model made the key").mesh(
             Deflection::of(DEFLECTIONS[0]).expect("a positive length"),
             &Policy::certified(),
             &mut ProvenanceLog::new(),
@@ -278,7 +280,10 @@ fn nothing_is_waved_through_before_the_floor_turns_a_caller_away() {
         ("a certified caller", Policy::certified()),
     ] {
         let mut log = ProvenanceLog::new();
-        let refused = model.solid(bar).mesh(deflection, &policy, &mut log);
+        let refused = model
+            .solid(bar)
+            .expect("this model made the key")
+            .mesh(deflection, &policy, &mut log);
         assert!(
             matches!(refused, Err(Error::DeflectionBelowWhatAMeshCanReach { .. })),
             "{who} asking below the floor was refused with {refused:?}"
@@ -315,6 +320,7 @@ fn the_text_a_tolerant_caller_is_left_holding() {
 
     let tolerant = model
         .solid(bar)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(DEFLECTIONS[0]).expect("a positive length"),
             &a_tolerant_caller(),

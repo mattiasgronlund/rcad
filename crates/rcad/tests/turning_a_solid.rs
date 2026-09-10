@@ -55,6 +55,7 @@ fn a_cube_turned_a_quarter_of_the_way_round_the_z_axis_is_still_the_same_cube() 
         .expect("a cube of side ten");
     let before = model
         .solid(cube)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -64,12 +65,15 @@ fn a_cube_turned_a_quarter_of_the_way_round_the_z_axis_is_still_the_same_cube() 
     assert_eq!(before.volume(), 1000.0);
 
     let quarter = Isometry::rotation(&Axis::z(), FRAC_PI_2).expect("a quarter turn");
-    model.place_solid(cube, &quarter);
+    model
+        .place_solid(cube, &quarter)
+        .expect("this model made the key");
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("turning a cube leaves it a cube");
     let after = model
         .solid(cube)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -95,11 +99,11 @@ proptest! {
         movement in an_arbitrary_movement(),
     ) {
         let (mut model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
+        let before = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
-        model.place_solid(solid, &movement);
+        model.place_solid(solid, &movement)?;
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
-        let after = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
+        let after = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         prop_assert!(
             drift(after.volume(), before.volume()) <= SLACK_AFTER_A_GENERAL_TURN,
@@ -122,10 +126,10 @@ proptest! {
         movement in an_arbitrary_movement(),
     ) {
         let (mut model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").centroid();
+        let before = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").centroid();
 
-        model.place_solid(solid, &movement);
-        let after = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").centroid();
+        model.place_solid(solid, &movement)?;
+        let after = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").centroid();
 
         // The centroid is a moment divided by the volume, so it carries the
         // volume's relative error, and it is a position rather than a ratio —
@@ -151,11 +155,11 @@ proptest! {
             .expect("a whole number of quarter turns");
 
         let (mut model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
+        let before = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
-        model.place_solid(solid, &turn);
+        model.place_solid(solid, &turn)?;
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
-        let after = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
+        let after = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         prop_assert!(
             drift(after.volume(), before.volume()) <= SLACK_AFTER_A_QUARTER_TURN,
@@ -195,6 +199,7 @@ fn drift(measured: f64, expected: f64) -> f64 {
 fn reach_of(model: &Model, solid: SolidKey) -> f64 {
     let (low, high) = model
         .solid(solid)
+        .expect("this model made the key")
         .box_around_its_corners()
         .expect("an extrusion has faces");
     largest_coordinate(low).max(largest_coordinate(high))

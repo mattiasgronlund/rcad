@@ -50,6 +50,7 @@ fn the_middle_of_a_bars_wall_is_on_its_skin() {
     assert_eq!(
         model
             .solid(bar)
+            .expect("this model made the key")
             .classify_point(on_the_wall, &Policy::certified(), &mut log),
         Containment::OnBoundary
     );
@@ -71,27 +72,32 @@ fn a_point_a_hair_inside_a_balls_skin_is_inside_it() {
     let mut log = ProvenanceLog::new();
 
     assert_eq!(
-        model.solid(ball).classify_point(
-            Point::new(0.0, 0.0, RADIUS.next_down()),
-            &Policy::certified(),
-            &mut log
-        ),
+        model
+            .solid(ball)
+            .expect("this model made the key")
+            .classify_point(
+                Point::new(0.0, 0.0, RADIUS.next_down()),
+                &Policy::certified(),
+                &mut log
+            ),
         Containment::Inside
     );
     assert_eq!(
-        model.solid(ball).classify_point(
-            Point::new(0.0, 0.0, RADIUS.next_up()),
-            &Policy::certified(),
-            &mut log
-        ),
+        model
+            .solid(ball)
+            .expect("this model made the key")
+            .classify_point(
+                Point::new(0.0, 0.0, RADIUS.next_up()),
+                &Policy::certified(),
+                &mut log
+            ),
         Containment::Outside
     );
     assert_eq!(
-        model.solid(ball).classify_point(
-            Point::new(0.0, 0.0, RADIUS),
-            &Policy::certified(),
-            &mut log
-        ),
+        model
+            .solid(ball)
+            .expect("this model made the key")
+            .classify_point(Point::new(0.0, 0.0, RADIUS), &Policy::certified(), &mut log),
         Containment::OnBoundary,
         "a pole is a corner of the one face, and the face holds it"
     );
@@ -114,19 +120,25 @@ fn a_point_in_the_bulge_a_bar_makes_away_from_its_corners_is_inside_it() {
     let mut log = ProvenanceLog::new();
 
     assert_eq!(
-        model.solid(bar).classify_point(
-            Point::new(-2.0, 0.0, HEIGHT / 2.0),
-            &Policy::certified(),
-            &mut log
-        ),
+        model
+            .solid(bar)
+            .expect("this model made the key")
+            .classify_point(
+                Point::new(-2.0, 0.0, HEIGHT / 2.0),
+                &Policy::certified(),
+                &mut log
+            ),
         Containment::Inside
     );
     assert_eq!(
-        model.solid(bar).classify_point(
-            Point::new(-4.0, 0.0, HEIGHT / 2.0),
-            &Policy::certified(),
-            &mut log
-        ),
+        model
+            .solid(bar)
+            .expect("this model made the key")
+            .classify_point(
+                Point::new(-4.0, 0.0, HEIGHT / 2.0),
+                &Policy::certified(),
+                &mut log
+            ),
         Containment::Outside
     );
     assert!(log.records().is_empty(), "{:?}", log.records());
@@ -144,11 +156,14 @@ fn a_point_on_a_bars_cylinder_past_its_cap_is_outside_the_bar() {
 
     for beyond in [-1.0, HEIGHT + 1.0] {
         assert_eq!(
-            model.solid(bar).classify_point(
-                Point::new(0.0, RADIUS, beyond),
-                &Policy::certified(),
-                &mut log
-            ),
+            model
+                .solid(bar)
+                .expect("this model made the key")
+                .classify_point(
+                    Point::new(0.0, RADIUS, beyond),
+                    &Policy::certified(),
+                    &mut log
+                ),
             Containment::Outside,
             "at height {beyond}"
         );
@@ -172,6 +187,7 @@ fn the_middle_of_a_round_cap_is_on_the_skin_and_the_rest_of_its_plane_is_not() {
     assert_eq!(
         model
             .solid(bar)
+            .expect("this model made the key")
             .classify_point(Point::new(0.5, 0.5, 0.0), &Policy::certified(), &mut log),
         Containment::OnBoundary,
         "inside the bottom cap's circle"
@@ -179,6 +195,7 @@ fn the_middle_of_a_round_cap_is_on_the_skin_and_the_rest_of_its_plane_is_not() {
     assert_eq!(
         model
             .solid(bar)
+            .expect("this model made the key")
             .classify_point(Point::new(4.0, 4.0, 0.0), &Policy::certified(), &mut log),
         Containment::Outside,
         "on the cap's plane and well outside its circle"
@@ -206,10 +223,10 @@ fn a_grid_of_points_against_a_bar_and_a_ball_is_decided_and_records_nothing() {
                         f64::from(j) / 2.0 + 0.125,
                         f64::from(k) / 2.0 + 0.125,
                     );
-                    let placed =
-                        model
-                            .solid(solid)
-                            .classify_point(at, &Policy::certified(), &mut log);
+                    let placed = model
+                        .solid(solid)
+                        .expect("this model made the key")
+                        .classify_point(at, &Policy::certified(), &mut log);
                     assert!(
                         matches!(
                             placed,
@@ -250,6 +267,7 @@ fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
         let mut log = ProvenanceLog::new();
         let mesh = model
             .solid(solid)
+            .expect("this model made the key")
             .mesh(fine, &Policy::certified(), &mut log)
             .expect("a bar and a ball both mesh");
         // What the mesh of a face promises is that every point of the face is
@@ -262,7 +280,7 @@ fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
         let near = 4.0 * mesh.deviation().magnitude();
         let far = 10.0 * near;
 
-        for face in model.solid(solid).faces() {
+        for face in model.solid(solid).expect("this model made the key").faces() {
             let surface = face.surface();
             if surface.as_plane().is_some() {
                 continue;
@@ -285,6 +303,7 @@ fn whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face() {
                     .fold(f64::INFINITY, f64::min);
                 let by_the_face = model
                     .solid(solid)
+                    .expect("this model made the key")
                     .face_holds_the_point(
                         face.key(),
                         sample.coordinates().into(),
@@ -470,7 +489,9 @@ fn a_turned_bar_and_ball_are_placed_as_surely_as_a_lattice_one() {
         (a_ball as fn() -> (Model, SolidKey), "ball"),
     ] {
         let (mut model, solid) = make();
-        model.place_solid(solid, &turn);
+        model
+            .place_solid(solid, &turn)
+            .expect("this model made the key");
         let placed = solid;
         let mut log = ProvenanceLog::new();
         let mut counted = 0;
@@ -482,10 +503,10 @@ fn a_turned_bar_and_ball_are_placed_as_surely_as_a_lattice_one() {
                         f64::from(j) / 2.0 + 0.125,
                         f64::from(k) / 2.0 + 0.125,
                     );
-                    let where_it_sits =
-                        model
-                            .solid(placed)
-                            .classify_point(at, &Policy::certified(), &mut log);
+                    let where_it_sits = model
+                        .solid(placed)
+                        .expect("this model made the key")
+                        .classify_point(at, &Policy::certified(), &mut log);
                     assert!(
                         matches!(
                             where_it_sits,

@@ -61,6 +61,7 @@ fn a_prism_over_a_triangle_that_provably_turns_anticlockwise_has_a_positive_volu
 
     let measured = model
         .solid(prism)
+        .expect("this model made the key")
         .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
         .expect("a prism over a triangle with area encloses space");
     assert!(
@@ -122,10 +123,10 @@ fn no_prism_over_a_triangle_with_area_is_refused_for_having_none() {
             .add_extrusion(&profile, 1.0, &Isometry::identity())
             .expect("a prism one unit tall");
         built += 1;
-        if let Err(complaint) =
-            model
-                .solid(prism)
-                .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
+        if let Err(complaint) = model
+            .solid(prism)
+            .expect("this model made the key")
+            .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
         {
             refused.push((one, other, nudged, format!("{complaint:?}")));
         }
@@ -174,6 +175,7 @@ fn a_square_rod_down_a_diagonal_holds_the_space_its_own_cross_section_says() {
 
     let measured = model
         .solid(rod)
+        .expect("this model made the key")
         .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
         .expect("a rod with a square cross section encloses space");
     let held = across * across;

@@ -283,6 +283,7 @@ fn the_coarser_grid_needs_a_point_back_in_the_middle_of_every_cell_round_the_equ
 fn mesh_of(model: &Model, ball: SolidKey, asked: f64) -> Mesh {
     model
         .solid(ball)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(asked).expect("a length"),
             &Policy::certified(),

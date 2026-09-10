@@ -53,6 +53,7 @@ fn measure(text: &str) -> (f64, f64, [f64; 3]) {
     let measured = import
         .model()
         .solid(*key)
+        .expect("this model made the key")
         .measure(
             Deflection::of(1.0).expect("a block is flat, so nothing is meshed"),
             &Policy::certified(),

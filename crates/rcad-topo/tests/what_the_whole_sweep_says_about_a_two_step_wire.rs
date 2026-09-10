@@ -93,6 +93,7 @@ fn a_flat_two_step_face_that_bounds_nothing_is_not_caught_by_anything() {
     assert_eq!(
         model
             .solid(solid)
+            .expect("this model made the key")
             .shells()
             .flat_map(|shell| shell.faces())
             .filter(|face| face.outer_wire().step_count() == 2)

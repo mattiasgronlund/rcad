@@ -68,6 +68,7 @@ fn a_frustum_measures_the_closed_form_within_the_published_bound() {
     let (small, big, height) = (2.0f64, 4.0f64, 4.0f64);
     let measured = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             Deflection::of(0.002).expect("a positive length"),
             &policy,
@@ -173,6 +174,7 @@ fn a_pointed_cone_meshes_and_measures_its_closed_form() {
     let deflection = 0.01;
     let measured = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(
             Deflection::of(deflection).expect("a positive length"),
             &policy,
@@ -269,6 +271,7 @@ fn a_pointed_cone_is_stopped_by_how_many_points_a_patch_holds_and_no_longer_by_i
         let asked = Deflection::of(how_fine).expect("a positive length");
         let triangles = model
             .solid(solid)
+            .expect("this model made the key")
             .mesh(asked, &policy, &mut log)
             .unwrap_or_else(|why| {
                 panic!("a pointed cone meshes at a deflection of {how_fine}: {why}")
@@ -277,6 +280,7 @@ fn a_pointed_cone_is_stopped_by_how_many_points_a_patch_holds_and_no_longer_by_i
             .len();
         let measured = model
             .solid(solid)
+            .expect("this model made the key")
             .measure(asked, &policy, &mut log)
             .expect("what meshed measures");
         let short_by = volume - measured.volume();
@@ -312,7 +316,10 @@ fn a_pointed_cone_is_stopped_by_how_many_points_a_patch_holds_and_no_longer_by_i
     // nothing else that moves — so a refusal here is a refusal all the way down.
     for too_fine in [5.0e-6, 1.0e-6] {
         let asked = Deflection::of(too_fine).expect("a positive length");
-        let refused = model.solid(solid).mesh(asked, &policy, &mut log);
+        let refused = model
+            .solid(solid)
+            .expect("this model made the key")
+            .mesh(asked, &policy, &mut log);
         let Err(rcad_topo::Error::CannotMeshAFace {
             why: rcad_mesh::CannotTriangulate::MoreTrianglesThanAPatchWillHold { would_need },
             ..
@@ -445,6 +452,7 @@ fn a_model_holding_a_cone_reads_back_at_the_version_that_was_already_there() {
     let how_fine = Deflection::of(0.01).expect("a positive length");
     let before = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(how_fine, &policy, &mut log)
         .expect("a frustum measures");
 
@@ -499,6 +507,7 @@ fn a_frustum_turned_about_its_own_axis_measures_what_it_did_before() {
     let how_fine = Deflection::of(0.01).expect("a positive length");
     let before = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(how_fine, &policy, &mut log)
         .expect("a frustum measures");
 
@@ -506,9 +515,12 @@ fn a_frustum_turned_about_its_own_axis_measures_what_it_did_before() {
         .expect("a quarter turn about z");
     let mut moved = Model::new(a_working_size());
     let there = a_frustum(&mut moved, 0.5, 4.0, 8.0);
-    moved.place_solid(there, &turned);
+    moved
+        .place_solid(there, &turned)
+        .expect("this model made the key");
     let after = moved
         .solid(there)
+        .expect("this model made the key")
         .measure(how_fine, &policy, &mut log)
         .expect("and so does the turned one");
 

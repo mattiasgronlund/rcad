@@ -61,6 +61,7 @@ fn the_plate_encloses_what_its_two_half_circles_say() {
 
     let measured = model
         .solid(plate)
+        .expect("this model made the key")
         .measure(
             rcad_geom::Deflection::of(0.001).expect("a fine mesh"),
             &policy,
@@ -89,6 +90,7 @@ fn the_plates_four_flat_corners_are_all_on_the_x_axis() {
 
     let flat: Vec<Vec<[f64; 3]>> = model
         .solid(plate)
+        .expect("this model made the key")
         .shells()
         .flat_map(|shell| shell.faces())
         .filter(|face| matches!(face.surface(), Surface::Plane(flat) if flat.normal().components()[2] != 0.0))

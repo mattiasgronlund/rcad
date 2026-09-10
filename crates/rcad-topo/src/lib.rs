@@ -40,7 +40,7 @@
 //!
 //! // A cube is a polyhedron: the deflection is ignored, its own fan is summed,
 //! // and all three error terms come back exactly zero.
-//! let measured = model.solid(cube).measure(
+//! let measured = model.solid(cube)?.measure(
 //!     Deflection::for_scale(scale),
 //!     &Policy::certified(),
 //!     &mut log,
@@ -54,7 +54,7 @@
 //!
 //! let policy = Policy::certified();
 //! let middle = model
-//!     .solid(cube)
+//!     .solid(cube)?
 //!     .classify_point(Point::new(1.0, 1.0, 1.0), &policy, &mut log);
 //! assert_eq!(middle, Containment::Inside);
 //! assert!(log.is_empty(), "nothing had to be approximated");

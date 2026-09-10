@@ -560,6 +560,7 @@ fn the_mesh_that_comes_back_out_there_is_twice_the_ball_across() {
     let (model, ball) = a_ball_out_there(1.0, ODD);
     let mesh = model
         .solid(ball)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(COARSE).expect("a positive length"),
             &Policy::certified(),
@@ -608,7 +609,7 @@ fn along_z(out: f64) -> String {
             &Isometry::translation(Vector::new(0.0, 0.0, out)).expect("a finite placement"),
         )
         .expect("a ball out there");
-    match model.solid(ball).mesh(
+    match model.solid(ball).expect("this model made the key").mesh(
         Deflection::of(COARSE).expect("a positive length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
@@ -624,7 +625,7 @@ fn try_to_mesh(
     deflection: f64,
 ) -> Result<rcad_topo::Mesh, rcad_topo::Error> {
     let (model, ball) = a_ball_out_there(radius, out);
-    model.solid(ball).mesh(
+    model.solid(ball)?.mesh(
         Deflection::of(deflection).expect("a positive length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),

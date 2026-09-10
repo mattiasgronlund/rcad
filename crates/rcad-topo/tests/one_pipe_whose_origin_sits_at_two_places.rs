@@ -214,6 +214,7 @@ fn what_the_union_says(upper_axis_origin: f64) -> [String; 2] {
                 .map(|solid| {
                     let mut faces: Vec<String> = model
                         .solid(*solid)
+                        .expect("this model made the key")
                         .faces()
                         .map(|face| format!("{:?}", face.surface()))
                         .collect();

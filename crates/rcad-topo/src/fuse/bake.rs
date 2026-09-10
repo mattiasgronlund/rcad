@@ -858,11 +858,7 @@ mod tests {
     /// — which is what the baked surfaces have been moved by too.
     fn corners_as_stored(model: &Model, solid: SolidKey) -> Vec<(VertexKey, [f64; 3])> {
         let mut corners = Vec::new();
-        for face in model
-            .solid(solid)
-            .expect("this model made the key")
-            .faces()
-        {
+        for face in model.solid(solid).expect("this model made the key").faces() {
             for wire in face.wires() {
                 for coedge in wire.coedges() {
                     corners.push((coedge.start().key(), coedge.start().point().coordinates()));

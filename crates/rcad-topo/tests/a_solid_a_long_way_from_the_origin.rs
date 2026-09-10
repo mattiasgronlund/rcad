@@ -166,6 +166,7 @@ fn the_largest_cube_that_fits_measures_its_volume_area_and_middle() {
 
     let measured = model
         .solid(cube)
+        .expect("this model made the key")
         .measure(
             a_deflection(),
             &Policy::certified(),
@@ -235,6 +236,7 @@ fn a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses() {
             .map(|&solid| {
                 model
                     .solid(solid)
+                    .expect("this model made the key")
                     .measure(
                         a_deflection(),
                         &Policy::certified(),

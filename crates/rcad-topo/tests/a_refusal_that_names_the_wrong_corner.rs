@@ -83,11 +83,10 @@ fn a_walk_that_cannot_read_one_corner_must_not_report_the_one_beside_it() {
     let on_the_spoke = a_flat_box([3.0, 3.0], [-1.5 - 2e-10, -1.5 + 2e-10], HEIGHT);
 
     let mut log = ProvenanceLog::new();
-    let answer = model.solid(prism).classify_uncertain_point(
-        on_the_spoke,
-        &Policy::tolerant(100.0),
-        &mut log,
-    );
+    let answer = model
+        .solid(prism)
+        .expect("this model made the key")
+        .classify_uncertain_point(on_the_spoke, &Policy::tolerant(100.0), &mut log);
 
     let Containment::Undecidable { enclosure } = answer else {
         panic!("a point on a spoke nobody can read is not placeable, and got {answer:?}");
@@ -118,11 +117,10 @@ fn a_refusal_no_predicate_made_must_not_be_recorded_as_one() {
     let past_the_corner = a_flat_box([5.0, 7.0], [0.0, 0.0], HEIGHT);
 
     let mut log = ProvenanceLog::new();
-    let answer = model.solid(prism).classify_uncertain_point(
-        past_the_corner,
-        &Policy::certified(),
-        &mut log,
-    );
+    let answer = model
+        .solid(prism)
+        .expect("this model made the key")
+        .classify_uncertain_point(past_the_corner, &Policy::certified(), &mut log);
 
     let Containment::Undecidable { enclosure } = answer else {
         panic!("a box reaching past the end of a side is not placeable, and got {answer:?}");

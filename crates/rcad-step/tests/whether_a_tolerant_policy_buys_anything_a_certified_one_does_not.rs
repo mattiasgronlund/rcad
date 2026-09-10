@@ -519,7 +519,11 @@ fn import_sweep_and_mesh(bytes: &[u8], policy: &Policy, working_size: f64) -> Wh
                     let mut triangles = 0;
                     let mut refused = None;
                     for (_, key) in import.solids() {
-                        match model.solid(*key).mesh(deflection, policy, &mut log) {
+                        match model
+                            .solid(*key)
+                            .expect("this model made the key")
+                            .mesh(deflection, policy, &mut log)
+                        {
                             Ok(mesh) => triangles += mesh.triangles().len(),
                             Err(why) => {
                                 refused = Some(format!("the mesher: {}", first_line(&why)));

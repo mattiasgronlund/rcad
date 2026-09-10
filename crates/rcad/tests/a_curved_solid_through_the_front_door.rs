@@ -32,6 +32,7 @@ fn a_bar_meshes_and_measures_from_the_front_door() {
     let how_fine = Deflection::of(0.01).expect("a hundredth of a millimetre");
     let mesh: Mesh = model
         .solid(bar)
+        .expect("this model made the key")
         .mesh(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a bar this size meshes");
     assert!(mesh.deviation().magnitude() <= how_fine.length());
@@ -46,6 +47,7 @@ fn a_bar_meshes_and_measures_from_the_front_door() {
 
     let measured = model
         .solid(bar)
+        .expect("this model made the key")
         .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("and measures");
     let exact = core::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
@@ -79,6 +81,7 @@ fn a_cube_measured_from_the_front_door_approximates_nothing() {
 
     let measured = model
         .solid(cube)
+        .expect("this model made the key")
         .measure(
             Deflection::of(1e9).expect("a length nothing here reads"),
             &Policy::certified(),
@@ -105,7 +108,7 @@ fn a_caller_can_read_which_refusal_the_triangulator_gave() {
     // patch will hold, and coarse enough that its boundary does not — which is
     // the band where the refusal a caller has to read comes from the
     // triangulator rather than from the walk or the floor.
-    let refusal = model.solid(ball).mesh(
+    let refusal = model.solid(ball).expect("this model made the key").mesh(
         Deflection::of(1e-6).expect("a length"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
@@ -160,6 +163,7 @@ fn a_bar_cut_off_at_an_angle_is_built_and_meshed_from_the_front_door() {
     let how_fine = Deflection::of(0.01).expect("a hundredth of a millimetre");
     let mesh: Mesh = model
         .solid(bar)
+        .expect("this model made the key")
         .mesh(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("and meshes");
     assert!(mesh.deviation().magnitude() <= how_fine.length());
@@ -177,6 +181,7 @@ fn a_bar_cut_off_at_an_angle_is_built_and_meshed_from_the_front_door() {
     // holds: the slice taken off one side is the slice added to the other.
     let measured = model
         .solid(bar)
+        .expect("this model made the key")
         .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("and weighs something");
     let upright = core::f64::consts::PI * RADIUS * RADIUS * HEIGHT;

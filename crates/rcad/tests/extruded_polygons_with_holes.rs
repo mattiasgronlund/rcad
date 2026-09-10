@@ -49,10 +49,10 @@ proptest! {
 
         model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
 
-        let measured = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
+        let measured = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
         prop_assert!(measured.volume() > 0.0, "volume {}", measured.volume());
         prop_assert!(measured.surface_area() > 0.0);
-        prop_assert_eq!(model.solid(solid).shells().count(), 1);
+        prop_assert_eq!(model.solid(solid)?.shells().count(), 1);
     }
 
     #[test]
@@ -64,7 +64,7 @@ proptest! {
 
         let expected = area_of(&profile) * height;
         prop_assert!(expected > 0.0, "the shoelace area came out {expected}");
-        let measured = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").volume();
+        let measured = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").volume();
         prop_assert!(
             (measured - expected).abs() <= SLACK * expected,
             "volume {measured} against a shoelace area times height of {expected}"
@@ -81,7 +81,7 @@ proptest! {
         // The walls stand on the holes as well as on the outline, which is why
         // the perimeter is the total round every loop.
         let expected = 2.0 * area_of(&profile) + perimeter_of(&profile) * height;
-        let measured = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").surface_area();
+        let measured = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").surface_area();
         prop_assert!(
             (measured - expected).abs() <= SLACK * expected,
             "surface area {measured} against two caps plus walls of {expected}"
@@ -94,7 +94,7 @@ proptest! {
         height in 0.5f64..=6.0,
     ) {
         let (model, solid) = extruded(&profile, height);
-        let before = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
+        let before = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures");
 
         let bytes = postcard::to_allocvec(&model)?;
         let read_back: Model = postcard::from_bytes(&bytes)?;
@@ -113,11 +113,11 @@ proptest! {
         height in 0.5f64..=6.0,
     ) {
         let (model, solid) = extruded(&profile, height);
-        let middle = model.solid(solid).measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").centroid();
+        let middle = model.solid(solid)?.measure(a_deflection(), &Policy::certified(), &mut ProvenanceLog::new()).expect("a solid this size measures").centroid();
 
         let mut log = ProvenanceLog::new();
         let sits = model
-            .solid(solid)
+            .solid(solid)?
             .classify_point(middle, &Policy::certified(), &mut log);
 
         match sits {
@@ -164,7 +164,7 @@ proptest! {
                 for fraction in [0.3, 0.7] {
                     let sample = Point::new(flat[0], flat[1], height * fraction);
                     let mut log = ProvenanceLog::new();
-                    let sits = model.solid(solid).classify_point(sample, &policy, &mut log);
+                    let sits = model.solid(solid)?.classify_point(sample, &policy, &mut log);
                     prop_assert!(log.is_empty(), "an exact question needed no approximation");
 
                     match (material, sits) {

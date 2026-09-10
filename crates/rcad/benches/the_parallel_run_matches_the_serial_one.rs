@@ -35,7 +35,7 @@ fn classifying_a_grid_of_points_across_threads_gives_the_same_bits_as_one_thread
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the plate is a valid solid");
 
-    let solid = model.solid(plate);
+    let solid = model.solid(plate).expect("this model made the key");
     let points = grid_over(solid, POINTS_PER_SIDE);
 
     let serial = classify_one_at_a_time(solid, &points);
@@ -60,7 +60,7 @@ fn classifying_a_grid_of_points_across_threads_gives_the_same_bits_as_one_thread
 #[test]
 fn the_grid_holds_points_inside_the_plate_outside_it_and_on_its_skin() {
     let (model, plate) = plate_with_holes();
-    let solid = model.solid(plate);
+    let solid = model.solid(plate).expect("this model made the key");
     let points = grid_over(solid, POINTS_PER_SIDE);
 
     let [inside, on_boundary, outside, undecided] = tally(&classify_one_at_a_time(solid, &points));

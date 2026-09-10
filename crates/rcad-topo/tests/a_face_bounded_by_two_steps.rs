@@ -85,6 +85,7 @@ fn the_plates_two_flat_faces_are_bounded_by_two_steps_each() {
 
     let mut lengths: Vec<usize> = model
         .solid(plate)
+        .expect("this model made the key")
         .shells()
         .flat_map(|shell| shell.faces())
         .map(|face| face.outer_wire().step_count())

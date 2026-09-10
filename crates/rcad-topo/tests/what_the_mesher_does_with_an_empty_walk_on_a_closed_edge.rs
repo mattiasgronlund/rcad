@@ -156,6 +156,7 @@ fn an_empty_walk_on_a_closed_edge_is_refused_and_no_mesh_is_handed_back() {
 
     let starved = model
         .solid(needle)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(A_MESH_THAT_STARVES_THE_NEEDLE).expect("a positive length"),
             &a_tolerant_caller(),
@@ -192,6 +193,7 @@ fn an_ordinary_bar_meshes_at_the_deflection_the_needle_is_refused_at() {
 
     let mesh = model
         .solid(bar)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(A_MESH_THAT_STARVES_THE_NEEDLE).expect("a positive length"),
             &a_tolerant_caller(),
@@ -201,6 +203,7 @@ fn an_ordinary_bar_meshes_at_the_deflection_the_needle_is_refused_at() {
 
     let along_a_cap_circle = model
         .solid(bar)
+        .expect("this model made the key")
         .faces()
         .flat_map(|face| face.wires())
         .flat_map(|wire| wire.coedges())
@@ -231,6 +234,7 @@ fn a_certified_caller_is_told_the_arithmetic_could_not_place_the_points() {
 
     let refused = model
         .solid(needle)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(A_MESH_THAT_STARVES_THE_NEEDLE).expect("a positive length"),
             &Policy::certified(),
@@ -364,6 +368,7 @@ fn the_lid(model: &Model, needle: SolidKey) -> FaceKey {
     };
     model
         .solid(needle)
+        .expect("this model made the key")
         .faces()
         .filter(|face| face.surface().as_plane().is_some())
         .max_by(|one, other| how_high(one).total_cmp(&how_high(other)))

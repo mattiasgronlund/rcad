@@ -194,11 +194,15 @@ fn what_the_gesture_did(stored_apex: Option<Point>) -> WhatTheGestureDid {
             None => a_pointed_cone(&mut model, SLOPE, HOW_FAR_UP_THE_BASE_SITS),
             Some(at) => a_pointed_cone_stored_at(&mut model, SLOPE, HOW_FAR_UP_THE_BASE_SITS, at),
         };
-        model.place_solid(solid, &placement);
+        model
+            .place_solid(solid, &placement)
+            .expect("this model made the key");
 
         let [x, y, z] = the_apex_a_consumer_reads(&model, solid).coordinates();
         let snap = Isometry::translation(Vector::new(-x, -y, -z)).expect("a shift back");
-        model.place_solid(solid, &snap);
+        model
+            .place_solid(solid, &snap)
+            .expect("this model made the key");
 
         let apex = the_apex_a_consumer_reads(&model, solid);
         did.rows += 1;
@@ -224,6 +228,7 @@ fn what_the_gesture_did(stored_apex: Option<Point>) -> WhatTheGestureDid {
 
         let mesh = model
             .solid(solid)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(0.01).expect("a positive length"),
                 &Policy::certified(),
@@ -250,6 +255,7 @@ fn what_the_gesture_did(stored_apex: Option<Point>) -> WhatTheGestureDid {
 fn the_apex_a_consumer_reads(model: &Model, solid: SolidKey) -> Point {
     let mut apexes = model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .filter_map(|face| match face.surface() {
             Surface::Cone(cone) => Some(cone.apex()),

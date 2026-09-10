@@ -305,6 +305,7 @@ fn a_block_that_misses_a_frustum_hands_both_of_them_back_untouched() {
             .map(|&piece| {
                 let it = model
                     .solid(piece)
+                    .expect("this model made the key")
                     .measure(how_fine, &policy, &mut ProvenanceLog::new())
                     .expect("every piece of these answers measures");
                 assert!(
@@ -342,7 +343,7 @@ fn a_block_that_misses_a_frustum_hands_both_of_them_back_untouched() {
     let corners_of = |model: &Model, pieces: &[SolidKey]| {
         let mut corners: Vec<[u64; 3]> = Vec::new();
         for &piece in pieces {
-            for face in model.solid(piece).faces() {
+            for face in model.solid(piece).expect("this model made the key").faces() {
                 for wire in face.wires() {
                     for at in wire.points() {
                         corners.push(at.coordinates().map(f64::to_bits));
@@ -367,11 +368,11 @@ fn a_block_that_misses_a_frustum_hands_both_of_them_back_untouched() {
                     );
                     let mut inside = false;
                     for &piece in pieces {
-                        inside |= model.solid(piece).classify_point(
-                            at,
-                            &policy,
-                            &mut ProvenanceLog::new(),
-                        ) == Containment::Inside;
+                        inside |= model
+                            .solid(piece)
+                            .expect("this model made the key")
+                            .classify_point(at, &policy, &mut ProvenanceLog::new())
+                            == Containment::Inside;
                     }
                     held.push(inside);
                 }

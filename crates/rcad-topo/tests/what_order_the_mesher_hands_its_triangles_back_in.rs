@@ -79,7 +79,12 @@ fn a_faces_triangles_arrive_in_one_block_and_that_face_never_comes_back() {
 fn a_bars_blocks_arrive_in_the_order_the_solid_stores_its_faces() {
     let (what, model, bar) = a_round_bar();
     let arrived = the_faces_in_the_order_their_triangles_arrive(&meshed(&model, bar));
-    let stored: Vec<FaceKey> = model.solid(bar).faces().map(|face| face.key()).collect();
+    let stored: Vec<FaceKey> = model
+        .solid(bar)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.key())
+        .collect();
 
     assert_eq!(stored.len(), 3, "{what} has two caps and a wall");
     assert_eq!(
@@ -102,7 +107,12 @@ fn a_bars_blocks_arrive_in_the_order_the_solid_stores_its_faces() {
 fn a_cubes_blocks_arrive_in_the_order_the_solid_stores_its_faces() {
     let (what, model, cube) = a_cube();
     let arrived = the_faces_in_the_order_their_triangles_arrive(&meshed(&model, cube));
-    let stored: Vec<FaceKey> = model.solid(cube).faces().map(|face| face.key()).collect();
+    let stored: Vec<FaceKey> = model
+        .solid(cube)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.key())
+        .collect();
 
     assert_eq!(stored.len(), 6, "{what} has six sides");
     assert_eq!(
@@ -147,6 +157,7 @@ fn a_model() -> Model {
 fn meshed(model: &Model, solid: SolidKey) -> Mesh {
     let mesh = model
         .solid(solid)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(0.1).expect("a positive length"),
             &Policy::certified(),
@@ -183,6 +194,7 @@ fn which_way_each_of_them_faces(model: &Model, faces: &[FaceKey]) -> Vec<Option<
         .map(|&face| {
             model
                 .face(face)
+                .expect("this model made the key")
                 .surface()
                 .as_plane()
                 .map(|plane| plane.normal().components())

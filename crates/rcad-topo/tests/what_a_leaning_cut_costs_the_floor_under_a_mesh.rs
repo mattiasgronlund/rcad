@@ -109,6 +109,7 @@ fn a_bar_leaning_too_far_to_mesh_finely_is_refused_by_the_deflection_and_not_by_
 
     let refusal = model
         .solid(bar)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(FINER_THAN_ANY_OF_THEM_CAN_BE_CUT).expect("a positive length"),
             &Policy::certified(),
@@ -131,6 +132,7 @@ fn a_bar_leaning_too_far_to_mesh_finely_is_refused_by_the_deflection_and_not_by_
 fn the_floor_under((model, bar): &(Model, SolidKey)) -> f64 {
     let refusal = model
         .solid(*bar)
+        .expect("this model made the key")
         .mesh(
             Deflection::of(FINER_THAN_ANY_OF_THEM_CAN_BE_CUT).expect("a positive length"),
             &Policy::certified(),

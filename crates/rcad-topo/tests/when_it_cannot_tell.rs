@@ -257,6 +257,7 @@ fn a_solid_too_tall_for_f64_to_multiply_can_still_place_a_point() {
         let mut log = ProvenanceLog::new();
         let answer = model
             .solid(tower)
+            .expect("this model made the key")
             .classify_point(point, &Policy::certified(), &mut log);
         assert_eq!(answer, expected, "{point:?}");
         assert!(

@@ -30,7 +30,7 @@ fn measure(text: &str) -> (f64, f64, [f64; 3]) {
     let [(_, key)] = import.solids() else {
         panic!("one MANIFOLD_SOLID_BREP is one solid");
     };
-    let solid = import.model().solid(*key);
+    let solid = import.model().solid(*key).expect("this model made the key");
     let measured = solid
         .measure(
             Deflection::of(0.01).expect("a tenth of the smallest side"),
@@ -72,7 +72,7 @@ fn a_file_written_in_inches_comes_back_in_inches() {
     let [(_, key)] = import.solids() else {
         panic!("one solid");
     };
-    let solid = import.model().solid(*key);
+    let solid = import.model().solid(*key).expect("this model made the key");
     let measured = solid
         .measure(
             Deflection::of(0.01).expect("a hundredth of the side"),
@@ -160,6 +160,7 @@ fn a_quarter_disc_plate_written_by_hand_measures_what_its_numbers_say() {
     let measured = import
         .model()
         .solid(*key)
+        .expect("this model made the key")
         .measure(
             Deflection::of(0.001).expect("a fine mesh"),
             &Policy::certified(),

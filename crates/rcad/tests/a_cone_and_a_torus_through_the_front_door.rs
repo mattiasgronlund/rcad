@@ -82,6 +82,7 @@ fn a_pointed_cone_is_described_measured_and_named_from_the_front_door() {
     let how_fine = Deflection::of(deflection).expect("a positive length");
     let measured = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a pointed cone measures");
     assert!(
@@ -141,6 +142,7 @@ fn a_quarter_bend_is_described_measured_and_named_from_the_front_door() {
     let how_fine = Deflection::of(0.002).expect("a positive length");
     let measured = model
         .solid(solid)
+        .expect("this model made the key")
         .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a quarter bend measures");
     let volume = 2.0 * core::f64::consts::PI * core::f64::consts::PI * RING * TUBE * TUBE / 4.0;
@@ -239,6 +241,7 @@ fn every_surface_can_name_the_bound_its_sign_was_certified_against() {
 fn the_only_curved_surface_of(model: &Model, solid: SolidKey) -> Surface {
     let mut curved = model
         .solid(solid)
+        .expect("this model made the key")
         .faces()
         .map(|face| face.surface())
         .filter(|surface| !matches!(surface, Surface::Plane(_)));
