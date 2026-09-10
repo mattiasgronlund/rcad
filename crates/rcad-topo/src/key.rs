@@ -29,10 +29,12 @@ slotmap::new_key_type! {
 /// and peak resident memory moved 0.1%.
 ///
 /// What the zero-sized version bought instead was a release build in which
-/// `slot_in` waved every foreign key through: `other.solid(mine)` returned the
-/// wrong solid and `other.fuse(&[mine], …)` returned `Ok` with the wrong
-/// answer, both silently, both against the doc comment below saying it panics
-/// (decisions.md §82.10).
+/// `slot_in` waved every foreign key through, silently and against the doc
+/// comment below saying it panics. Two models, each holding one block as its
+/// first solid: `theirs.solid(mine)` measured 1000 mm³ for a key naming a 1 mm³
+/// cube, and `theirs.fuse(&[mine], &[block], Union, …)` answered **`Ok`**
+/// naming no solids at all — the block fused against itself, the caller's cube
+/// never looked at (decisions.md §82.10).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct ModelId(u64);
 

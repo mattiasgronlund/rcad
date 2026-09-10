@@ -68,9 +68,9 @@ fn these_tests_are_built_with_the_debug_assertions_off() {
 /// Reading a solid out of a model with another model's key panics.
 ///
 /// Both keys name slot zero of their own model, so before `ModelId` became a
-/// real number in every build this call did not fail: it handed back the ten
-/// millimetre block, volume 1000, when the caller had asked about a one
-/// millimetre cube, volume 1. Nothing said so.
+/// real number in every build this call did not fail. It handed back the ten
+/// millimetre block: `SolidView::measure` on it answered 1000 mm³ where the
+/// caller's key named a one millimetre cube of 1 mm³. Nothing said so.
 #[test]
 #[should_panic(expected = "this solid key was made by a different model")]
 fn a_solid_key_from_another_model_names_a_stranger_and_must_not_be_taken() {
@@ -84,9 +84,10 @@ fn a_solid_key_from_another_model_names_a_stranger_and_must_not_be_taken() {
 ///
 /// This is the one that mattered. `fuse` takes its arguments by key, so the
 /// zero-sized id let a caller ask for the union of a stranger's cube with this
-/// model's block and get **`Ok`** back — the block unioned with itself, volume
-/// 1000 where the caller's question was about a cube of volume 1. A wrong
-/// answer wearing `Ok` is the shape `CLAUDE.md`'s "crash > corrupt" is about.
+/// model's block and get **`Ok`** back. What it had really done was fuse the
+/// block against itself and hand back a [`Fused`](rcad_topo::Fused) naming no
+/// solids at all; the cube was never looked at. A wrong answer wearing `Ok` is
+/// the shape `CLAUDE.md`'s "crash > corrupt" is about.
 #[test]
 #[should_panic(expected = "this solid key was made by a different model")]
 fn a_fuse_given_another_models_solid_must_not_answer_ok() {
