@@ -134,10 +134,10 @@ impl Model {
     ///
     /// # Panics
     ///
-    /// If the key came from another model. Debug builds say so by name; a
-    /// release build cannot, because the model id is a zero-sized type there
-    /// (decisions.md §1.3), so all the panic can report is that no solid of
-    /// that name is here.
+    /// If the key came from another model, in every build and by name. That
+    /// used to be a debug build's answer only — the model id was zero-sized in
+    /// release, so two ids compared equal whichever models they came from and
+    /// the key resolved to whatever sat in that slot. `docs/decisions.md` §84.
     ///
     /// **A key this model handed out always names something**, which is what
     /// makes that an internal invariant and not a bad-input case. Nothing in
