@@ -280,12 +280,19 @@ impl Assembly {
     /// same answer twice; `the_two_writes_agree` measures that rather than
     /// asserting it (§16.10).
     ///
-    /// **The throwaway model is swept whole, by [`Model::validate`].** It holds
+    /// **The throwaway model is swept by twelve of `Model::validate`'s thirteen
+    /// checks**, [`Model::check_everything_but_the_coordinate_range`]. It holds
     /// the answer and nothing else, so a whole-model sweep of it is already local
     /// to what this fuse wrote — which is what §66.3 wanted and had to hand-cut
-    /// eleven checks out of the sweep to get. Sweeping it whole gets the other
-    /// two back: the keys-resolve pass, and the model-wide coordinate range,
-    /// which over a model holding only the answer *is* the answer's own range.
+    /// eleven checks out of the sweep to get. Sweeping it here gets the
+    /// keys-resolve pass back.
+    ///
+    /// The thirteenth, the coordinate range, is the one this must not ask.
+    /// [`Assembly::check_dynamic_range`] asks it before either write and only
+    /// behind `the_inputs_fit_in_f64`, so that a caller whose own solids sit
+    /// further apart than `f64` can resolve still gets an answer the arithmetic
+    /// reached exactly. A fold over a model holding only the answer would put
+    /// that question straight back and refuse those answers again (§87.3).
     ///
     /// New corners are tagged with how wide their box is, as
     /// [`Cause::ConstructedPoint`] — representation wobble, which is reported and
@@ -299,14 +306,16 @@ impl Assembly {
     ///
     /// # Errors
     ///
-    /// [`Error::TheFuseWroteABrokenAnswer`] if the sweep refuses the answer,
-    /// which is a bug here and not bad input — but a bug that costs the caller
-    /// nothing, since nothing was written. [`Invalid::DynamicRangeTooWide`]
-    /// travels as itself instead: see [`whose_fault_a_swept_answer_is`].
+    /// Every [`Invalid`] the sweep finds, as
+    /// [`Error::TheFuseWroteABrokenAnswer`]: a shape this crate built and cannot
+    /// stand behind, which is a bug here and not bad input — but a bug that
+    /// costs the caller nothing, since nothing was written. The blame is blanket
+    /// because the sweep no longer asks the one question whose answer was the
+    /// caller's geometry rather than this crate's arithmetic.
     ///
     /// Whatever else the sweep says, unchanged — [`Error::Undecidable`] where a
-    /// predicate gave up on the answer, and [`Error::Geometry`] where its
-    /// coordinate range could not be measured at all.
+    /// predicate gave up on the answer, say. "The kernel wrote something broken"
+    /// is not what those say.
     ///
     /// # Panics
     ///
@@ -318,7 +327,6 @@ impl Assembly {
     /// them means the two writes disagreed, which is corruption in this crate
     /// rather than a broken answer (§4.1, §87).
     ///
-    /// [`whose_fault_a_swept_answer_is`]: Assembly::whose_fault_a_swept_answer_is
     /// [`Assembly::write_into`]: Assembly::write_into
     pub(crate) fn commit(
         &self,
@@ -331,9 +339,14 @@ impl Assembly {
         let rehearsal = self.write_into(&mut throwaway, &self.solids, &self.runs);
         self.tag_everything_it_built(&mut throwaway, &rehearsal, inherited);
         let mut mine = ProvenanceLog::new();
-        let swept = throwaway.validate(policy, &mut mine);
+        let swept = throwaway.check_everything_but_the_coordinate_range(policy, &mut mine);
         mine.drain_into(log);
-        swept.map_err(Self::whose_fault_a_swept_answer_is)?;
+        swept.map_err(|refused| {
+            let Error::Invalid(broken) = refused else {
+                return refused;
+            };
+            Error::TheFuseWroteABrokenAnswer { broken }
+        })?;
 
         let approximation_before = model.worst_approximation();
         let written = self.write_into(model, &self.solids, &self.runs);
@@ -343,34 +356,6 @@ impl Assembly {
             model.check_touched_solid(solid);
         }
         Ok(written)
-    }
-
-    /// Whether a sweep refusing the answer is this kernel's bug or the caller's
-    /// geometry.
-    ///
-    /// **[`Invalid::DynamicRangeTooWide`] is the caller's, and it is the only
-    /// one.** [`Assembly::check_dynamic_range`] asks the same question before
-    /// either write, but only behind [`the_inputs_fit_in_f64`] — so when the
-    /// inputs are *already* too wide to resolve, that check is skipped and this
-    /// sweep is the first thing to see the answer's range. An answer too wide
-    /// out of inputs too wide is where the caller's solids sit, not arithmetic
-    /// gone wrong here, and wrapping it as a kernel bug would blame the fuse for
-    /// a model it was handed.
-    ///
-    /// Everything else the sweep refuses is a shape this crate built and cannot
-    /// stand behind. Refusals that are not about the model at all — a predicate
-    /// giving up, a range that could not be measured — travel unchanged, because
-    /// "the kernel wrote something broken" is not what they say.
-    ///
-    /// [`the_inputs_fit_in_f64`]: super::the_inputs_fit_in_f64
-    fn whose_fault_a_swept_answer_is(refused: Error) -> Error {
-        let Error::Invalid(broken) = refused else {
-            return refused;
-        };
-        if matches!(broken, Invalid::DynamicRangeTooWide { .. }) {
-            return broken.into();
-        }
-        Error::TheFuseWroteABrokenAnswer { broken }
     }
 
     /// One face per kept piece, and the corners and edges they share.

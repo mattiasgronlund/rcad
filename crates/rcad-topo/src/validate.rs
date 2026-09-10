@@ -89,6 +89,39 @@ impl Model {
     /// why [`how_far_the_sweeps_mesh_may_stray`] asks for the coarsest mesh
     /// there is.
     pub fn validate(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+        self.check_everything_but_the_coordinate_range(policy, log)?;
+        self.check_dynamic_range(policy, log)
+    }
+
+    /// Twelve of the sweep's thirteen checks: every one that is about an entity,
+    /// or about two entities that touch, rather than about the model as a whole.
+    ///
+    /// **The one left out is the coordinate range**, which is the only check
+    /// here that folds over everything in the model at once and so is the only
+    /// one whose answer depends on what else is in the model.
+    ///
+    /// [`Assembly::commit`](crate::fuse::Assembly::commit) sweeps its throwaway
+    /// model with this rather than with [`Model::validate`]. The throwaway holds
+    /// the fuse's answer and nothing else, so a whole-model sweep of it is local
+    /// to what the fuse wrote — but for the range that cuts both ways: a
+    /// whole-model fold over a model holding only the answer *is* the answer's
+    /// own range, and asking it there asks a question the fuse has already
+    /// decided not to ask. `Assembly::check_dynamic_range` asks it behind a
+    /// guard, so that a caller whose own solids are further apart than `f64` can
+    /// resolve still gets the answer that arithmetic reached exactly
+    /// (`docs/decisions.md` §87.3).
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Model::validate`] does, less
+    /// [`Invalid::DynamicRangeTooWide`] and less the
+    /// [`Error::Geometry`](crate::Error::Geometry) of a range that could not be
+    /// measured.
+    pub(crate) fn check_everything_but_the_coordinate_range(
+        &self,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
         self.data().check_keys_resolve()?;
         self.check_vertices()?;
         self.check_edges()?;
@@ -100,8 +133,7 @@ impl Model {
         self.check_no_flat_face_is_used_reversed()?;
         self.check_no_face_use_carries_a_placement()?;
         self.check_shells_and_solids(policy, log)?;
-        self.check_approximation_ordering()?;
-        self.check_dynamic_range(policy, log)
+        self.check_approximation_ordering()
     }
 
     /// The shape checks a public method is allowed to take for granted, asked

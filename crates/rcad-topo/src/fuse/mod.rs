@@ -172,12 +172,16 @@ impl Model {
     /// panic — but the answer is now built in a throwaway model and swept there,
     /// so a caller who sees it has a model exactly as it was, and there is
     /// nothing corrupt for a crash to protect (`docs/decisions.md` §87, which
-    /// amends §4.1 and §66.4). **The answer is swept in every build**, by the
-    /// whole of [`Model::validate`]: the throwaway holds the answer and nothing
-    /// else, which is what makes a whole-model sweep of it local to what this
-    /// fuse wrote. Before §66.3 the check was `debug_assertions`-gated *and*
-    /// skipped whenever the model did not already validate, so a release fuse
-    /// looked at nothing; §66.3 made it run always, and §87 made it a refusal.
+    /// amends §4.1 and §66.4). **The answer is swept in every build**, by twelve
+    /// of [`Model::validate`]'s thirteen checks: the throwaway holds the answer
+    /// and nothing else, which is what makes a whole-model sweep of it local to
+    /// what this fuse wrote. The thirteenth, the model-wide coordinate range, is
+    /// left out — `Assembly::check_dynamic_range` below asks that one, behind a
+    /// guard, and asking it again over a model holding only the answer would
+    /// undo the guard (§87.3). Before §66.3 the check was
+    /// `debug_assertions`-gated *and* skipped whenever the model did not already
+    /// validate, so a release fuse looked at nothing; §66.3 made it run always,
+    /// and §87 made it a refusal.
     ///
     /// # Panics
     ///
@@ -239,15 +243,12 @@ impl Model {
         // The last question the answer itself can be asked, and the only one
         // neither input could have been asked instead: a fuse invents features
         // — the sliver where two nearly-flush faces meet — and a sliver has no
-        // lower size short of zero. `Assembly::commit`'s sweep of the throwaway
-        // model asks the same question, so this is not the only place it is
-        // asked; it is asked here as well for three reasons the sweep cannot
-        // give. It reads `policy`, so a lenient caller gets the record where a
-        // strict one gets the refusal. It refuses before *either* write, where
-        // the sweep costs a whole answer built first. And it blames the caller:
-        // a refusal from here is `Invalid::DynamicRangeTooWide` as itself, which
-        // is why `Assembly::whose_fault_a_swept_answer_is` has to let that one
-        // variant past unwrapped when the sweep is the first to see it.
+        // lower size short of zero. This is the **only** place it is asked;
+        // `Assembly::commit` deliberately sweeps the throwaway with the twelve
+        // checks that are not this one, so that the guard on this line is what
+        // decides whether it is asked at all. Two of the fuse's own tests are
+        // pairs whose inputs do not fit and whose answer this fuse reaches
+        // exactly, and a sweep asking the question again refuses both (§87.3).
         if the_inputs_fit_in_f64(self, arguments, tools)? {
             assembly.check_dynamic_range(policy, log)?;
         }
@@ -278,10 +279,9 @@ impl Model {
 /// out the same and this would report the inputs as not fitting, which only
 /// ever makes the check below stand down. Leaving the radii out is therefore
 /// the stricter of the two, not a hole. A model whose radius is what puts it
-/// out of range fails `Model::validate` going in, and the sweep of the
-/// throwaway answer says so again on the way out — as
-/// [`Invalid::DynamicRangeTooWide`] and not as this kernel's bug, which is the
-/// one refusal [`Assembly::whose_fault_a_swept_answer_is`] lets past unwrapped.
+/// out of range fails `Model::validate` going in, and its caller's next
+/// `Model::validate` says so again on the way out; the sweep of the throwaway
+/// answer does not, because that sweep leaves the range question to this one.
 ///
 /// # Errors
 ///
