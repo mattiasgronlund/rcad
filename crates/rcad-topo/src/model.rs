@@ -764,8 +764,10 @@ impl Clone for Model {
 ///
 /// This is **not** the per-key model id the crate stamps into every key so that
 /// one model's key cannot resolve against another's arena (decisions.md §1.3).
-/// That one is zero-sized in release builds and survives a clone; this one is
-/// present in every build and does not.
+/// That one survives a clone: a clone's keys still address the original's
+/// slots, so the copied id has to keep matching them. This one does not,
+/// because the clone is a second model that a cache built from the original
+/// was not built from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WhichModelThisIs(u64);
 
@@ -1556,7 +1558,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic(expected = "made by a different model")]
     fn a_key_from_one_model_may_not_be_used_on_another() {
         let (_first, cube) = a_cube();
