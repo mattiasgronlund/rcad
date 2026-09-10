@@ -98,3 +98,27 @@ define_key!(WireKey, WireSlot, "wire");
 define_key!(FaceKey, FaceSlot, "face");
 define_key!(ShellKey, ShellSlot, "shell");
 define_key!(SolidKey, SolidSlot, "solid");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A key carries its model's number, and carries it in this build too.
+    ///
+    /// The two tests that measure what a foreign key *does* live in
+    /// `tests/what_only_a_release_build_does.rs`, and only the release arm runs
+    /// them. This one runs everywhere, and it is here because the failure it
+    /// guards against is a build in which [`ModelId`] is zero-sized again: the
+    /// key loses eight bytes, `slot_in`'s comparison becomes true whichever
+    /// models the two ids came from, and nothing in the ordinary suite notices
+    /// (decisions.md §84).
+    #[test]
+    fn a_key_is_wide_enough_to_hold_a_model_number() {
+        assert_eq!(
+            size_of::<SolidKey>(),
+            size_of::<SolidSlot>() + size_of::<ModelId>(),
+            "a key is its slot and its model's number, and neither is free"
+        );
+        assert_ne!(size_of::<ModelId>(), 0, "a zero-sized id compares equal to every other id");
+    }
+}
