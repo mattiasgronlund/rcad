@@ -1,0 +1,14 @@
+[Unit]
+Description=rcad overnight fuzzing, 00:10 to 08:10
+
+[Timer]
+OnCalendar=*-*-* 00:10:00
+
+# A missed midnight must not fire at ten in the morning and fuzz until six. The
+# run is worth having tonight or not at all.
+Persistent=false
+
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
