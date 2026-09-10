@@ -20057,8 +20057,8 @@ why those rows say "until", not "never".
 > does `Assembly::commit` now. `Assembly::write_into` reads nothing out of the
 > model it writes into and names no entity that was already there, which is what
 > makes a second call available; §87.5's second test demonstrates that the two
-> writes agree rather than arguing it. Costed at 37.1 µs on a 12-face flat
-> answer and 58.0 µs on an 18-face one (§87.7), not at the 51 ms this paragraph
+> writes agree rather than arguing it. Costed at 34.2 µs on a 12-face flat
+> answer and 55.0 µs on an 18-face one (§87.7), not at the 51 ms this paragraph
 > budgeted against. The five `add_*` rows still say "until", and §87.8 now has a
 > measured number for what converting them would cost rather than a proxy.
 
@@ -20156,9 +20156,11 @@ never touched, and the check that actually went in is local for that reason
 
 > **Amended 2026-09-10, §87.** Built, and "nobody has measured the copy" is now
 > false twice over. There is no copy — the fuse calls `write_into` a second time
-> — and it is measured: 37.1 µs on a 12-face answer against a fuse of 1.45 ms,
-> 58.0 µs on an 18-face answer against 4.75 ms, about 3.2 µs a face on a flat
-> answer and four times that on a curved one (§87.7). A broken answer is
+> — and it is measured: 34.2 µs on a 12-face answer against a fuse of 1.42 ms,
+> 55.0 µs on an 18-face answer against 2.94 ms, about 3 µs a face on a flat
+> answer and four times that on a curved one (§87.7, whose shapes are named
+> there and whose first cut had the 18-face fuse at 4.75 ms without saying which
+> three cubes it meant). A broken answer is
 > `Error::TheFuseWroteABrokenAnswer` and the caller's model is untouched. Of the
 > three items below this one, the fourth-listed `add_extrusion` figure is now
 > measured rather than a proxy; the other two stand.
@@ -20183,13 +20185,19 @@ to exist rather than being guessed here.
 
 > **Amended 2026-09-10, §87.** The +7.9% was never a measurement of this shape
 > and is withdrawn. What a throwaway-and-write-twice `add_extrusion` would
-> actually cost is **+640%**: a 6-face box takes 2.2 µs to build and the
-> rehearsal — a fresh `Model`, the same build again, and the twelve-check sweep
-> — adds 14.1 µs (§87.7's second table). The proxy was out by a factor of
-> eighty. The rest of this item stands unchanged: there is still no consumer to
-> weigh it against, and §13 still says the importer decides. What has changed is
-> that the trade is now known to be a bad one rather than assumed to be a cheap
-> one.
+> actually cost is **about 14 µs added to a ~3 µs operation** — a 6-face box
+> takes 2.79–2.90 µs to build into a fresh `Model`, and the rehearsal (a fresh
+> `Model`, the same build again, the twelve-check sweep) adds 13.8–14.2 µs
+> (§87.7's second table). Call it roughly six times the present cost; the
+> denominator is the part that moves, so a two-figure percentage does not
+> survive re-measurement. **The +640% first published here is withdrawn too**:
+> it divided the rehearsal by 2.2 µs, which is `add_extrusion` into a model
+> whose arenas have already grown, and a rehearsal always starts from
+> `Model::new`. The proxy was still out by nearly two orders of magnitude, which
+> is the part that matters. The rest of this item stands unchanged: there is
+> still no consumer to weigh it against, and §13 still says the importer
+> decides. What has changed is that the trade is now known to be a bad one
+> rather than assumed to be a cheap one.
 
 ---
 
@@ -24797,9 +24805,25 @@ sweep folds.
 `Invalid::EdgeHasNoLength` is the one worth naming, because it is the closest
 thing to a caller's-geometry finding left — two corners of the answer with
 different names landing on one `f64` triple, which is what happens when the
-inputs are far enough apart. It is wrapped, and that is not a change: §82's
-hand-cut local check already ran `check_edges`, so this variant was already the
-fuse's to answer for.
+inputs are far enough apart. It is wrapped, and continuity is one argument for
+that — §82's hand-cut local check already ran `check_edges`, so this variant was
+already the fuse's to answer for — but continuity would say the same of a
+variant that ought to have moved, so it is not what decides.
+
+**What decides it is §16.10's limit/gap distinction, and it puts
+`EdgeHasNoLength` on the opposite side from `DynamicRangeTooWide`.** When two
+named corners of the answer land on one `f64` triple there is **no answer to
+hand back**: the edge between them is a feature of the answer that has no
+length, the two names are genuinely one point in the only arithmetic there is,
+and no rescaling of the inputs recovers the distinction because the corners are
+the fuse's own output and not the caller's coordinates. That is a limit, so
+refusing is right and the only arguable part is the label — whether "the fuse
+wrote something broken" is a fair name for arithmetic that ran out. It is,
+because the fuse is what named two corners it could not keep apart.
+`DynamicRangeTooWide` is the exact opposite case: the answer existed, exactly,
+and was being withheld over a statement about where the caller put their solids
+(§16.10 calls that a gap, and the two tests above are what it cost). A gap
+gets fixed; a limit gets refused and documented. This one is refused.
 
 Refusals that are not about the model at all travel unchanged: `Error::Undecidable`
 where a predicate gave up on the answer, because "the kernel wrote something
@@ -24898,12 +24922,11 @@ write instead, which is where it guards something.
 
 ### 87.7 What it costs, measured
 
-**Re-measured after the twelve-check correction; these numbers replace the
-first cut's.** Release, on this machine, best of 50 calls after 10 warmups, and
-reproduced over four runs — the percentages held to two figures every time. The
-harness was a temporary `#[ignore]`d unit test in `fuse/assemble.rs` that timed
-`Model::fuse` end to end on a freshly built model, and separately timed
-`Model::new` + `write_into` + `tag_everything_it_built` +
+**Re-measured twice: once after the twelve-check correction, and again after a
+gate audit could not reproduce two of the numbers.** Release, best of 50 calls
+after 10 warmups. The harness was a temporary `#[ignore]`d unit test in
+`fuse/assemble.rs` that timed `Model::fuse` end to end on a freshly built model,
+and separately timed `Model::new` + `write_into` + `tag_everything_it_built` +
 `check_everything_but_the_coordinate_range` over an `Assembly` built once —
 which is exactly the block `commit` added. It was deleted after the run. It was
 run as:
@@ -24913,13 +24936,51 @@ mise exec -- just t --no-capture --release --run-ignored all \
     temporary_measurement_of_what_the_throwaway_costs
 ```
 
+**What the shapes are, exactly, because the first cut did not say and a row did
+not survive that.** Every solid is `Scale::millimetres(100.0)`, every fuse is
+`Rule::Union` with one argument and the rest as tools:
+
+- **Two cubes.** Two `Model::add_cube(2.0, …)`, so each runs from the origin to
+  `(2, 2, 2)`; the second moved by `place_solid` with the translation
+  `(1, 1, 1)`. Argument: the unmoved one. 12 faces.
+- **Three cubes.** Three of those same cubes, the second moved by `(1, 1, 1)`
+  and the third by `(2, 2, 2)`. Argument: the unmoved one; tools: the other two.
+  18 faces.
+- **Cube and bar.** One such cube, and `add_round_bar(0.5, 4.0, …)` moved to
+  `(1, 1, -1)` so it stands right through the cube. Argument: the cube. 10
+  faces, two of them curved.
+
+Best of the four runs, all on one machine — an AMD Ryzen 9 3900X, the same one
+`just gate` runs on here:
+
 | Answer | Whole fuse | Throwaway build + tag + sweep | Per face |
 |---|---|---|---|
-| 12 flat faces (two cubes, one moved along the diagonal) | 1.45 ms | 37.1 µs, **+2.6%** | 3 093 ns |
-| 18 flat faces (three cubes, two moved) | 4.75 ms | 58.0 µs, **+1.2%** | 3 221 ns |
-| 10 faces, two of them curved (a cube and a round bar through it) | 0.873 ms | 128.8 µs, **+17.3%** | 12 876 ns |
+| 12 flat faces (two cubes) | 1.42 ms | 34.2 µs, **+2.4%** | 2 849 ns |
+| 18 flat faces (three cubes) | 2.94 ms | 55.0 µs, **+1.9%** | 3 055 ns |
+| 10 faces, two of them curved (cube and bar) | 0.861 ms | 125.7 µs, **+14.6%** | 12 572 ns |
 
-**The per-face constant is about 3.2 µs on a flat answer and four times that on
+**The percentages held to two figures over four runs; two of the millisecond
+figures they came from did not.** Across those four runs the 12-face share was
+2.4% every time and the 18-face share 1.9% every time; the curved row moved
+between 14.4% and 14.8%. The spread underneath: whole fuse 1.422–1.463 /
+2.940–3.030 / 0.861–0.882 ms, block 34.2–35.7 / 55.0–58.2 / 125.7–127.9 µs.
+
+**The 18-face row used to say 4.75 ms and a 1.2% share, and neither reproduces.**
+An independent gate audit re-measuring from the old description alone got the
+face count and the block right (56.4–61.0 µs) and the fuse at 2.84–3.01 ms — a
+share near 2.0%. Re-run here with the arrangement pinned above it is 2.94 ms and
+1.9%, which is the audit's answer and not the published one. The old row is
+withdrawn: the only thing that could have made it 4.75 ms is a different
+three-cube arrangement, and the section did not say which, so there is nothing
+to defend. §82.7 is the precedent — a ratio belongs to a machine *and* to a
+workload, and "three cubes, two moved" pins neither.
+
+**The curved row's 17.3% was not what its own two columns said either.** 128.8 µs
+over 0.873 ms is 14.8%, not 17.3%; the two timings reproduce here within 2% and
+the percentage between them was simply wrong. It is 14.6% now, from numbers that
+divide.
+
+**The per-face constant is about 3 µs on a flat answer and four times that on
 a curved one.** The first cut's table had only flat answers in it and read the
 agreement between two of them as the sweep being linear in faces full stop; the
 third row says it is not. A curved solid's volume check meshes it
@@ -24927,8 +24988,8 @@ third row says it is not. A curved solid's volume check meshes it
 time goes — 10 faces cost more than 18 flat ones. An answer's face count is not
 enough to price this: its curvature is the other half.
 
-Flat-answer numbers are otherwise a shade cheaper than the first cut's, and one
-check fewer is why: 37.1 µs against 45.1 µs on the same 12-face shape.
+Flat-answer numbers are a shade cheaper than the pre-correction table's, and one
+check fewer is why: 34.2 µs against 45.1 µs on the same 12-face shape.
 
 Two things this table does not say, and neither should be read into it. It is
 **pure addition** — it does not net off `check_what_was_just_written`, which
@@ -24936,7 +24997,7 @@ this unit deleted and which asked eleven of the same questions of the same
 entities. The real cost of §87 against the code it replaced is therefore smaller
 than these numbers, and by an amount nobody has measured. And the percentages are
 a share of *this* fuse, whose cost grows much faster than its answer does: the
-18-face row's fuse is 3.3× the 12-face row's while its answer is 1.5×. Quote the
+18-face row's fuse is 2.1× the 12-face row's while its answer is 1.5×. Quote the
 microseconds a face; the percentage is about which shape you picked.
 
 **And this is what the same shape would cost `add_extrusion`**, which §66.7's
@@ -24945,22 +25006,46 @@ the same way, from the same harness, with no change to `build.rs` at all: the
 rehearsal a throwaway `add_extrusion` would add is `Model::new` + the build +
 the twelve-check sweep, and all three are callable from outside.
 
-| Operation | As it is | What a rehearsal would add |
-|---|---|---|
-| `add_extrusion`, a 4 × 4 × 4 box, 6 faces | 2.2 µs | 14.1 µs, **+640%** |
+**Both halves against the same starting condition, which is a fresh `Model`.**
+That is the condition a rehearsal is stuck with — it makes its own throwaway
+every call — so it is the one the operation has to be timed under too. The
+profile is a 4 × 4 square from `ProfileBuilder`, extruded 4 with
+`Isometry::identity()`, six faces:
 
-**Six hundred and forty per cent, not eight.** The proxy was out by a factor of
-eighty, and in the direction that matters. The reason is the one the fuse rows
-already show from the other end: the sweep's cost is arithmetic over the answer,
-and it does not care how cheap the operation that produced the answer was. A
-fuse pays 37 µs against 1.45 ms; an extrusion pays 14 µs against 2.2 µs. §66.4's
-"Panic, until it gets a scratch" rows for the five `add_*` builders now have a
-number to weigh, and it is a much worse trade than the roadmap assumed.
+| `add_extrusion`, a 4 × 4 × 4 box, 6 faces | Time |
+|---|---|
+| Into a fresh `Model`, one call each | **2.79–2.90 µs** |
+| What a rehearsal adds — fresh `Model` + the same build + the twelve-check sweep | **13.8–14.2 µs** |
+| Repeated into one `Model` whose arenas have already grown | 1.57–1.60 µs |
+
+**About 14 µs added to a ~3 µs operation: the rehearsal costs roughly five times
+the build it rehearses, and would leave `add_extrusion` at about six times its
+present cost.** Read it that way and not as a percentage to two figures — the
+denominator is the part that moves.
+
+**The +640% this section used to publish came from the third row, and the third
+row is not like for like.** 14.1 µs over 2.2 µs is +640%, but 2.2 µs is
+`add_extrusion` into a model that has already grown, and a rehearsal never gets
+one: it always starts from `Model::new`. An independent gate audit reproduced the
+14 µs within 5% on five different harness designs and could not reproduce the
+2.2 µs on any of them, getting 3.21–3.40 µs from a fresh model and 1.6–3.2 µs,
+very noisy, from a grown one — four consecutive rounds inside one process gave
+it +143%, +270%, +255% and +400%. Against a fresh model here it is +490%, and
+the honest thing to say is the sentence above rather than any of those numbers.
+
+The direction the proxy got wrong is unchanged, and it is the point: §66.2's
++7.9% was out by nearly two orders of magnitude. The reason is the one the fuse
+rows already show from the other end — the sweep's cost is arithmetic over the
+answer, and it does not care how cheap the operation that produced the answer
+was. A fuse pays 34 µs against 1.42 ms; an extrusion pays 14 µs against 3 µs.
+§66.4's "Panic, until it gets a scratch" rows for the five `add_*` builders now
+have a number to weigh, and it is a much worse trade than the roadmap assumed.
 
 Subtraction on the whole fuse was tried by the first cut and abandoned: two runs
 of the same shipped code differed by 1.4 ms on a 23-face shape, which is fourteen
-times the effect being measured. Timing the block directly, as here, is why these
-rows reproduce to two figures.
+times the effect being measured. Timing the block directly, as here, is why the
+shares in the first table hold to two figures where the raw milliseconds move by
+a few per cent.
 
 ### 87.8 What this closes, and what it leaves
 
@@ -24970,12 +25055,13 @@ amended in place to say so.
 
 **Not closed: the five `add_*` builders in `build.rs`.** They are the same
 change and the same shape, and §66.4's rows still say "Panic, until it gets a
-scratch". The reason they wait is now a measured **+640%** on `add_extrusion`
-rather than §66.2's +7.9% proxy — §87.7's second table, which closes §66.7's
-fourth item. A fuse pays this cost against milliseconds and an extrusion pays it
-against microseconds, and the gap is two orders of magnitude wider than the
-proxy said. §13's rule stands: the consumer that would weigh that trade is the
-importer, and it does not exist yet.
+scratch". The reason they wait is now a measured **~14 µs added to a ~3 µs
+operation** on `add_extrusion` — about six times its present cost — rather than
+§66.2's +7.9% proxy; §87.7's second table, which closes §66.7's fourth item. A
+fuse pays this cost against milliseconds and an extrusion pays it against
+microseconds, and the gap is two orders of magnitude wider than the proxy said.
+§13's rule stands: the consumer that would weigh that trade is the importer, and
+it does not exist yet.
 
 **Not closed: `place_solid`.** It writes in place and has nothing to write into
 a throwaway, so §66.7's second item — whether it should roll back with the
