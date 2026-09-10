@@ -364,16 +364,13 @@ impl Assembly {
     ///
     /// [`the_inputs_fit_in_f64`]: super::the_inputs_fit_in_f64
     fn whose_fault_a_swept_answer_is(refused: Error) -> Error {
-        if matches!(
-            refused,
-            Error::Invalid(Invalid::DynamicRangeTooWide { .. })
-        ) {
+        let Error::Invalid(broken) = refused else {
             return refused;
+        };
+        if matches!(broken, Invalid::DynamicRangeTooWide { .. }) {
+            return broken.into();
         }
-        match refused {
-            Error::Invalid(broken) => Error::TheFuseWroteABrokenAnswer { broken },
-            other => other,
-        }
+        Error::TheFuseWroteABrokenAnswer { broken }
     }
 
     /// One face per kept piece, and the corners and edges they share.
@@ -3418,13 +3415,15 @@ mod tests {
 
         let mut busy = Model::new(scale);
         let one = busy.add_cube(2.0, &policy, &mut log).expect("a cube");
-        let other = busy.add_cube(2.0, &policy, &mut log).expect("a second cube");
+        let other = busy
+            .add_cube(2.0, &policy, &mut log)
+            .expect("a second cube");
         let along_the_diagonal = Isometry::translation(Vector::new(1.0, 1.0, 1.0))
             .expect("a whole-number step is a translation");
         busy.place_solid(other, &along_the_diagonal)
             .expect("this model made the key");
 
-        let scratch = Scratch::split_both_groups(&mut busy, &[one], &[other], &policy, &mut log)
+        let scratch = Scratch::split_both_groups(&busy, &[one], &[other], &policy, &mut log)
             .expect("two overlapping cubes split each other");
         let chosen =
             choose(&busy, &scratch, Rule::Union, &policy, &mut log).expect("a union of two cubes");
