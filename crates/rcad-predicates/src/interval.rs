@@ -56,6 +56,44 @@ impl Interval {
             .map_err(|_| Error::NotAnInterval { lo, hi })
     }
 
+    /// The range `centre` give or take `reach`, rounded **outward**.
+    ///
+    /// This and not [`Interval::new`] whenever the range is a box some point is
+    /// known to be inside. `centre - reach` and `centre + reach` round to
+    /// nearest, and nearest rounds *inward*: each end lands up to half an ulp
+    /// short of where it was asked for. Where `reach` is under half an ulp of
+    /// `centre` the two ends land back on `centre` and the box collapses to the
+    /// single point the caller was saying it did not have. A predicate handed
+    /// that box certifies a sign about somewhere the true point need not be.
+    ///
+    /// That is not hypothetical: a pipe of radius 1.98 sixteen million units
+    /// out is where the nightly fuzzer found it (`docs/decisions.md` §85).
+    ///
+    /// ```
+    /// # use rcad_predicates::Interval;
+    /// let far_out = 16252928.89923649;
+    /// let hair = 4.895112993500317e-10;
+    /// assert_eq!(far_out - hair, far_out, "a hair is under half an ulp out here");
+    /// assert!(Interval::around(far_out, hair).unwrap().width() > 0.0);
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotAnInterval`] when `reach` is below zero or is not a number,
+    /// and when `centre` is not finite. A box round a place that is not a place
+    /// is not a box, and the alternative — [`Interval::ENTIRE`], which
+    /// [`Interval::exactly`] hands back for the same input — would turn every
+    /// caller that refuses one today into one that carries on knowing nothing.
+    pub fn around(centre: f64, reach: f64) -> Result<Self, Error> {
+        if !centre.is_finite() {
+            return Err(Error::NotAnInterval {
+                lo: centre - reach,
+                hi: centre + reach,
+            });
+        }
+        Ok(Self::exactly(centre) + Self::new(-reach, reach)?)
+    }
+
     /// The lower bound.
     pub fn lo(self) -> f64 {
         self.0.inf()
@@ -184,6 +222,67 @@ mod tests {
             Interval::new(f64::NAN, 1.0),
             Err(Error::NotAnInterval { .. })
         ));
+    }
+
+    /// The pipe the nightly fuzzer found, in one line: sixteen million units
+    /// out, one ulp is 1.86e-9, and the walk knew its point to 4.9e-10. Asking
+    /// for that box with plain subtraction gives back no box at all.
+    #[test]
+    fn a_box_thinner_than_half_an_ulp_is_still_a_box() {
+        let centre = 16252928.89923649;
+        let reach = 4.895112993500317e-10;
+        assert_eq!(
+            (centre - reach, centre + reach),
+            (centre, centre),
+            "nearest rounding puts both ends back on the centre"
+        );
+
+        let around = Interval::around(centre, reach).unwrap();
+        assert!(
+            around.lo() < centre && centre < around.hi(),
+            "the centre has to be strictly inside, or the box says nothing"
+        );
+        assert!(
+            around.width() >= 2.0 * reach,
+            "a box that is not at least as wide as it was asked for is not an enclosure"
+        );
+    }
+
+    /// The three ways there is no box to hand back. The last one matters most:
+    /// every caller of this refused a centre that is not a place before it was
+    /// written, by way of [`Interval::new`], and none of them wants
+    /// [`Interval::ENTIRE`] in its stead.
+    #[test]
+    fn a_box_round_nowhere_is_refused() {
+        for (centre, reach) in [
+            (1.0, -1.0),
+            (1.0, f64::NAN),
+            (f64::INFINITY, 1.0),
+            (f64::NAN, 1.0),
+        ] {
+            assert!(
+                matches!(
+                    Interval::around(centre, reach),
+                    Err(Error::NotAnInterval { .. })
+                ),
+                "a box {reach} round {centre} is not a box"
+            );
+            assert!(
+                Interval::new(centre - reach, centre + reach).is_err(),
+                "and the two subtractions this replaced refused it too, which is what \
+                 makes swapping them in a safe change at every call site"
+            );
+        }
+    }
+
+    /// Nothing is widened that does not need to be: a reach that lands on the
+    /// grid gives back exactly the two ends asked for, and no reach at all
+    /// gives back the point.
+    #[test]
+    fn a_box_that_needs_no_rounding_is_not_widened() {
+        let exact = Interval::around(4.0, 0.25).unwrap();
+        assert_eq!((exact.lo(), exact.hi()), (3.75, 4.25));
+        assert_eq!(Interval::around(4.0, 0.0).unwrap().width(), 0.0);
     }
 
     #[test]

@@ -31,9 +31,9 @@
 //!
 //! **No byte string reaches a cone or a torus.** [`two_surfaces_from`] reads two
 //! bits per surface and asks `which % 3`, so a plane, a ball and a pipe are the
-//! whole of what it can name. Measured over the checked-in corpus: 743 of its
-//! 824 seeds decode to a pair, and those 1486 surfaces are 232 planes, 423 balls
-//! and 831 pipes. Bits 4 to 7 of the kinds byte are read by nothing at all.
+//! whole of what it can name. Measured over the checked-in corpus: 744 of its
+//! 825 seeds decode to a pair, and those 1488 surfaces are 232 planes, 423 balls
+//! and 833 pipes. Bits 4 to 7 of the kinds byte are read by nothing at all.
 //!
 //! **The three it does draw are not drawn evenly.** `which % 3` sends both 0 and
 //! 3 to a plane, so uniform bytes ask for a plane twice as often as for a ball
@@ -289,11 +289,17 @@ pub fn every_point_of_every_crossing_is_on_both_surfaces(pair: [Surface; 2]) -> 
 
 /// The box a computed point is really known to be inside, or `None` where the
 /// bound is not a length.
+///
+/// [`Interval::around`] and not [`Interval::new`], because `coordinate - bound`
+/// rounds to nearest and nearest rounds the box *inwards*. A point far from the
+/// origin walked along a small crossing is where that bites: the bound goes
+/// under half an ulp of the coordinate, the side collapses, and this hands back
+/// a box that does not hold the point it is a box around.
 fn somewhere_within(point: Point, bound: f64) -> Option<PredicatePoint> {
     let sides: Option<[Interval; 3]> = point
         .coordinates()
         .iter()
-        .map(|coordinate| Interval::new(coordinate - bound, coordinate + bound).ok())
+        .map(|coordinate| Interval::around(*coordinate, bound).ok())
         .collect::<Option<Vec<_>>>()
         .and_then(|sides| <[Interval; 3]>::try_from(sides).ok());
     sides.map(PredicatePoint::Constructed)

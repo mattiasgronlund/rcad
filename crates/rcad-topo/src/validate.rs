@@ -1953,7 +1953,7 @@ fn not_provably_off(
         return false;
     }
     let within = PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
-        Interval::new(coordinate - reach, coordinate + reach)
+        Interval::around(coordinate, reach)
             .expect("a positive finite reach makes a box round a finite corner")
     }));
     matches!(

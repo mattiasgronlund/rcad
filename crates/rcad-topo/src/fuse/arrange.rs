@@ -3179,7 +3179,7 @@ fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) 
     }
     let reach = POINT_ALONG_A_CROSSING_ROUNDOFF * from.largest_coordinate_magnitude().max(1.0);
     PredicatePoint::Constructed(from.coordinates().map(|coordinate| {
-        Interval::new(coordinate - reach, coordinate + reach)
+        Interval::around(coordinate, reach)
             .expect("a finite seed and a positive reach leave a low end below a high one")
     }))
 }

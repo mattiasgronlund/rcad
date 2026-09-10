@@ -40,18 +40,23 @@
 //! it.
 //!
 //! The byte layout is not widened to fix that, and **not because a repack would
-//! reinterpret the whole corpus — measured, it would not.** Over the 824
+//! reinterpret the whole corpus — measured, it would not.** Over the 825
 //! minimised seeds, promoting the two unread bits 4 and 5 to a third kind bit
 //! apiece and reading five kinds instead of three gives a different kind to at
-//! least one side of **92** seeds, 67 of them among the 743 that decode to a
+//! least one side of **92** seeds, 67 of them among the 744 that decode to a
 //! pair. Handing the already-redundant kind value 3 to `Cone` and leaving the
 //! layout alone moves **42**, 35 of them decoding. A seed whose two kind fields
 //! come out unchanged reads the same bytes into the same pair, so those counts
 //! are the whole of what either repack disturbs.
 //!
+//! The two counts are 2026-09-04's and did not move when §85's seed was added:
+//! its kinds byte is `0x0a`, so both sides read kind 2 today, both read kind 2
+//! under the wider layout — bits 4 and 5 are clear — and neither side is the
+//! value 3 that the other repack rewrites.
+//!
 //! Two things settle it instead. **A minimised seed is worth keeping only for
 //! the branch it reached**, so ninety-odd of them quietly meaning something else
-//! is a real cost against a corpus of 824. And **the repack does not buy the
+//! is a real cost against a corpus of 825. And **the repack does not buy the
 //! coverage it is for**: a torus reads eight numbers where a pipe reads seven,
 //! so a torus against a cone, a pipe or another torus needs 76 bytes, and the
 //! longest seed checked in is 71. Those pairs would decode to nothing whatever
@@ -75,9 +80,13 @@
 //!
 //! | row | pairs | points | orders | scalings |
 //! |---|---|---|---|---|
-//! | corpus | 743 of 824 seeds | 1983 | 542 | 1083 |
+//! | corpus | 744 of 825 seeds | 1993 | 543 | 1085 |
 //! | soak | 199 943 of 200 000 draws | 400 342 | 178 631 | 355 291 |
 //! | cones and tori | 136 | 696 | 39 | 78 |
+//!
+//! The corpus row is 2026-09-10's, one seed later than the other two: §85's
+//! crash was promoted into the corpus and it walks ten more points. The floors
+//! are left where they were, still roughly three quarters of the row.
 //!
 //! **Not one of them is `rcad-fuzz`'s number.** That branch published three
 //! floors measured before M4 and §33 moved the refusal rates under them, and

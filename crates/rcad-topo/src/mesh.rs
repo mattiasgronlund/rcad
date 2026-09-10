@@ -3458,8 +3458,7 @@ mod tests {
             };
             for &point in along_it.points() {
                 let at = PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
-                    Interval::new(coordinate - slack, coordinate + slack)
-                        .expect("a bound is a length")
+                    Interval::around(coordinate, slack).expect("a bound is a length")
                 }));
                 for surface in &has_to_be_on {
                     let decision = side_of_surface(surface, at);

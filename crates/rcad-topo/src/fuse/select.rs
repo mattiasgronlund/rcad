@@ -1045,7 +1045,7 @@ fn back_onto_the_surface(surface: &Surface, candidate: PredicatePoint) -> Option
     let reach = Surface::ROUND_TRIP_ROUNDOFF * there.largest_coordinate_magnitude().max(1.0);
     Some(PredicatePoint::Constructed(there.coordinates().map(
         |coordinate| {
-            Interval::new(coordinate - reach, coordinate + reach)
+            Interval::around(coordinate, reach)
                 .expect("the check just above sent every point that is not a place back as None")
         },
     )))
