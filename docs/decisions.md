@@ -23811,7 +23811,7 @@ part:
 - **"peak RSS up 0.1% … and about 2%" is an estimate that did not survive
   measuring.** Five release runs a side put the whole after-range for peak
   memory inside the before-range, and the control column that mints no key
-  moved further than the ones that do (§84.4).
+  moved as far as the furthest of the ones that do (§84.4).
 
 `large.solid(one)` returning the wrong solid is the line that was right, and it
 is the one that mattered.
@@ -23898,7 +23898,7 @@ having if this is ever reopened.
 
 ## 83. The gate builds the shipping code path now, recorded 2026-09-10
 
-`just test` runs 1820 tests and every one of them has `debug_assertions` on.
+`just test` runs 1821 tests and every one of them has `debug_assertions` on.
 `Cargo.toml` has no `[profile.release]` section at all, and `[profile.test]`
 sets only `opt-level = 2`, so nothing in the gate had ever built the profile a
 user gets — not `check`, which is `cargo check --workspace --all-targets` under
@@ -23908,7 +23908,7 @@ This is not a question about speed. §82.7 re-measured the two profiles against
 each other on the same sweep workload, five model sizes each, and they landed
 within 3% at every size. What differs is not how fast the two builds are but
 what is in them: every `debug_assert!` and every `cfg!(debug_assertions)`
-branch is present in all 1820 gated tests and gone from what ships.
+branch is present in all 1821 gated tests and gone from what ships.
 
 What went in is one filtered arm, `check-release-build` — one crate, one test
 binary, `--cargo-profile release` — placed in `gate` after `test`, so the
@@ -23916,13 +23916,17 @@ ordinary suite still reports first. The arm is small on purpose and the
 interesting part of it is not the arm but what stops it from lying about
 itself.
 
-### 83.1 `ModelId` is a different type in the two builds
+### 83.1 `ModelId` was a different type in the two builds
 
-`crates/rcad-topo/src/key.rs` defines `ModelId` twice. Under
-`#[cfg(debug_assertions)]` it is a `u64` handed out by an atomic counter, so
-two models never share one. Under `#[cfg(not(debug_assertions))]` it is
+**Everything in this subsection is the tree as it stood when the arm went in.
+§84 closed it on this same branch**, so `key.rs` defines one `ModelId` now and
+the paragraphs below describe what the arm was built to be able to see.
+
+`crates/rcad-topo/src/key.rs` defined `ModelId` twice. Under
+`#[cfg(debug_assertions)]` it was a `u64` handed out by an atomic counter, so
+two models never shared one. Under `#[cfg(not(debug_assertions))]` it was
 `pub(crate) struct ModelId;` — a zero-sized type with one inhabitant, so every
-model has the same one.
+model had the same one.
 
 Every key carries a `ModelId`, and `slot_in` opens with a plain `assert!`, not
 a `debug_assert!`. The assert is compiled into both builds. What changes is
@@ -23939,10 +23943,10 @@ remembers which model made it" — and nothing that gates had ever run the other
 half.
 
 **That is not fixed here, and this section does not claim it is.** The fix is a
-later unit. What this one does is make the place its test can live exist: a
-test for release-build `ModelId` written anywhere else in `rcad-topo` passes
-under `just gate` for the wrong reason, because the gate would run it in the
-build where the counter is real.
+later unit, and it is §84. What this one does is make the place its test can
+live exist: a test for release-build `ModelId` written anywhere else in
+`rcad-topo` passes under `just gate` for the wrong reason, because the gate
+would run it in the build where the counter is real.
 
 ### 83.2 One test binary in release, not a second gate
 
@@ -23973,14 +23977,15 @@ ever lost, or the filter stops matching what it names, nextest selects nothing
 — and a run of no tests otherwise reports itself as a pass. `--no-tests fail`
 turns it into a failure instead.
 
-Both directions were run here, on `2076a74`:
+Both directions were run here, on `2076a74`, when the file held one test, and
+again on `690c81f`, where §84's two joined it:
 
 | Command | Selected | Exit |
 |---|---|---|
-| `just check-release-build` | 1 test, passed | 0 |
-| the same filter, no `--cargo-profile release` | 0 tests | 4, `no tests to run` |
+| `just check-release-build` | 1 test on `2076a74`, 3 on `690c81f`, all passed | 0 |
+| the same filter, no `--cargo-profile release` | 0 tests, both times | 4, `no tests to run` |
 
-The one test in the file asserts `!cfg!(debug_assertions)`, which is redundant
+The file's own selftest asserts `!cfg!(debug_assertions)`, which is redundant
 with the file-level `cfg` on the day it was written. That is its job. The `cfg`
 is what keeps the file out of the dev suite, and deleting it is the change that
 would turn this arm into a second copy of the dev suite wearing a release
@@ -24060,7 +24065,8 @@ There is one type now, the `u64`, in both builds
 §83 built is what runs them.
 
 The reason it had been two types was cost, and most of this unit was pricing
-that. The price is zero.
+that. The price is one eight-byte field on each `Model`, nothing per entity,
+and nothing anybody could measure in time or in peak memory.
 
 ### 84.1 The check never disappeared. The question it asked did
 
@@ -24104,8 +24110,11 @@ hunting for a 1500 would have found nothing wrong and stopped.
 Nothing a `Model` stores holds a key. Every arena payload names its neighbours
 by `*Slot` — `VertexData` through `ShellUse`, `crates/rcad-topo/src/model.rs`
 `:1161` to `:1268` — and the derived `Index` at `:1075` is four `SecondaryMap`s
-off slots. So widening the id widens no stored field, and a `Model` of any size
-is exactly as big after this change as before it.
+off slots. So widening the id widens nothing the arena holds, and the whole
+change to a `Model` is the one `id: ModelId` field on the model itself
+(`model.rs:33`), which went from a zero-sized type to a `u64`. Once per model,
+nothing per entity: a model with a million faces grows by the same one field as
+an empty one.
 
 What widens is a key in flight: `{slot, model}` went from 8 bytes to 16. The
 widest transient population is the mesher's key-keyed maps —
@@ -24113,6 +24122,13 @@ widest transient population is the mesher's key-keyed maps —
 `crates/rcad-topo/src/mesh.rs:49`, `:50` and `:398`. On the largest model in
 the corpus that reads, that is 2 812 vertices plus 4 530 edges counted twice,
 11 872 keys, so about 95 kB more against a peak of 51 MB for the whole import.
+
+**That 95 kB is a floor, not the figure.** It counts the key bytes and nothing
+else, and a `std::collections::HashMap` stores `(K, V)` pairs: a
+`(VertexKey, u32)` entry goes from 12 bytes to 24, not from 8 to 16, because the
+key's alignment goes with its width. Two or three times 95 kB is still nothing
+against 51 MB, which is why the floor is enough to argue from and why §84.4
+measures rather than adds this up.
 
 ### 84.4 The measurement, and the control that makes it evidence
 
@@ -24123,7 +24139,7 @@ solid). Medians, and the full range where it matters:
 
 | | before (zero-sized) | after (`u64`) |
 |---|---|---|
-| parse ms | 55.6 | 56.6 |
+| parse ms | 55.5 | 56.6 |
 | import ms | 64.7 | 63.6 |
 | validate ms | 33.5 | 33.7 |
 | mesh ms | 24.1 | 23.5 |
@@ -24133,26 +24149,29 @@ Import and mesh came out nominally *faster* with the wider key, and the whole
 after-range for peak memory sits inside the before-range.
 
 **The parse column is the control and it is the argument.** Parsing a STEP file
-mints no key at all, so nothing this change touched can move it — and it moved
-by 1.0 ms, more than any of the three columns that do touch keys. That is what
-licenses reading the table as "the machine, not the change". Without that
-column these are four numbers that moved, with no way to tell which movements
-meant anything, which is noise presented as evidence.
+mints no key at all — `StepFile::read` goes through `graph.rs`, `read.rs`,
+`token.rs` and `text.rs`, none of which name `rcad_topo` — so nothing this
+change touched can move it. It moved by 1.1 ms anyway, which is exactly what
+the largest of the three key-touching columns moved (import, 1.1 ms the other
+way) and more than the other two. That is what licenses reading the table as
+"the machine, not the change". Without that column these are four numbers that
+moved, with no way to tell which movements meant anything, which is noise
+presented as evidence.
 
 ### 84.5 Why the biggest model that reads is a 2.9 MB pin header
 
-Four corpus files are bigger and all four are NIST parts, and not one of them
+Five corpus files are bigger and all five are NIST parts, and not one of them
 ever becomes a `Model`. `how_often_a_real_file_imports` on this base gives the
-reasons: `nist_ftc_09_asme1_ap242-e1.stp` and `nist_stc_10_asme1_ap242-e2.stp`
-on `B_SPLINE_CURVE_WITH_KNOTS`, `nist_stc_09_asme1_ap242-e3.stp` on a corner
-9 874 spacings off the curved face the file puts it on, and
-`nist_ftc_08_asme1_ap242-e2.stp` on a swept area that could not settle one
-decision it depends on.
+reasons: `nist_ftc_09_asme1_ap242-e1.stp`, `nist_stc_10_asme1_ap242-e2.stp` and
+`nist_ctc_02_asme1_ap203.stp` on `B_SPLINE_CURVE_WITH_KNOTS`,
+`nist_stc_09_asme1_ap242-e3.stp` on a corner 9 874 spacings off the curved face
+the file puts it on, and `nist_ftc_08_asme1_ap242-e2.stp` on a swept area that
+could not settle one decision it depends on.
 
 So the largest thing this kernel can hold out of 367 corpus files is a KiCad
 connector housing. That says more about what the reader can read than about
 this change, and it is written down because the next person looking for a big
-model to measure against will otherwise go hunting through those four.
+model to measure against will otherwise go hunting through those five.
 
 ### 84.6 A `u32` id was considered and lost
 
