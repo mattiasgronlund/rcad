@@ -1093,6 +1093,7 @@ mod tests {
         let measured = |model: &Model, solid: SolidKey, how_fine: f64| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .measure(
                     Deflection::of(how_fine).expect("a length"),
                     &policy,
@@ -1157,6 +1158,7 @@ mod tests {
         for how_fine in [0.1, 0.03, 0.01] {
             let measurement = model
                 .solid(block)
+                .expect("this model made the key")
                 .measure(
                     Deflection::of(how_fine).expect("a length"),
                     &policy,

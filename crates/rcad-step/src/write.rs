@@ -270,7 +270,9 @@ impl Writing {
         model: &Model,
         shell: rcad_topo::ShellKey,
     ) -> Result<(), CannotWrite> {
-        let shell = model.shell(shell);
+        let shell = model
+            .shell(shell)
+            .expect("every key here came off the model being written");
         let mut either_side: HashMap<EdgeKey, Vec<Surface>> = HashMap::new();
         for face in shell.faces() {
             let surface = face.surface();
@@ -368,6 +370,7 @@ impl Writing {
     ) -> Result<u64, CannotWrite> {
         let closed = model
             .edge(edge)
+            .expect("every key here came off the model being written")
             .is_closed()
             .map_err(|_| CannotWrite::ARunKindThisWriterHasNoCurveFor)?;
         let [first, second] = match either_side {

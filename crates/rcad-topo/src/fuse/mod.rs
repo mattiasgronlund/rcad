@@ -159,13 +159,18 @@ impl Model {
     /// a face left a piece bounded by two straight sides, which enclose no area
     /// and so describe no face — [`Invalid::WireTooShort`], and §67 for why that
     /// is the input's fault and not the splitter's.
+    /// [`Error::KeyFromAnotherModel`] when one of `arguments` or `tools` was
+    /// made by a different model — asked of every key in both lists **before
+    /// any other work**, so that the one case a fuse can rule out for nothing
+    /// is ruled out where the "Atomic" promise above is trivially kept (§86).
+    /// It answered `Ok` naming no solids at all until §84, and panicked between
+    /// §84 and §86.
     ///
     /// # Panics
     ///
-    /// If a key came from another model, or if the answer this wrote is not
-    /// itself valid. A fuse invents topology that was in no input, which puts it
-    /// nearer an import than a mutation, and a corrupt solid is worse than a
-    /// crash (§17.4, §4.3).
+    /// If the answer this wrote is not itself valid. A fuse invents topology
+    /// that was in no input, which puts it nearer an import than a mutation,
+    /// and a corrupt solid is worse than a crash (§17.4, §4.3).
     ///
     /// **The answer is checked in every build**, by
     /// [`Model::check_what_was_just_written`], which asks eleven of
@@ -190,6 +195,10 @@ impl Model {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Fused> {
+        for key in arguments.iter().chain(tools) {
+            key.try_slot_in(self.id())?;
+        }
+
         let mut mine = ProvenanceLog::new();
         let fused = self.fused_under(arguments, tools, rule, policy, &mut mine);
         mine.drain_into(log);
@@ -284,7 +293,7 @@ fn the_inputs_fit_in_f64(
     let mut largest = 0.0_f64;
     let mut shortest = f64::INFINITY;
     for &solid in arguments.iter().chain(tools) {
-        for face in model.solid(solid).faces() {
+        for face in model.solid_at(solid.slot_in(model.id())).faces() {
             for wire in face.wires() {
                 for corner in wire.points() {
                     largest = largest.max(corner.largest_coordinate_magnitude());
@@ -326,9 +335,9 @@ fn worst_tag_of_the_inputs(
         }
     };
     for &solid in arguments.iter().chain(tools) {
-        for face in model.solid(solid).faces() {
+        for face in model.solid_at(solid.slot_in(model.id())).faces() {
             take(face.approximation());
-            for wire in model.face(face.key()).wires() {
+            for wire in model.face_at(face.key().slot_in(model.id())).wires() {
                 for coedge in wire.coedges() {
                     take(coedge.edge().approximation());
                     take(coedge.start().approximation());
@@ -656,13 +665,19 @@ mod tests {
         let other = model
             .add_cube(2.0, &policy, &mut log)
             .expect("another cube");
-        model.place_solid(
-            other,
-            &Isometry::translation(shift).expect("a finite shift"),
-        );
+        model
+            .place_solid(
+                other,
+                &Isometry::translation(shift).expect("a finite shift"),
+            )
+            .expect("this model made the key");
         if let Some(turn) = turn {
-            model.place_solid(one, &turn);
-            model.place_solid(other, &turn);
+            model
+                .place_solid(one, &turn)
+                .expect("this model made the key");
+            model
+                .place_solid(other, &turn)
+                .expect("this model made the key");
         }
         (model, one, other)
     }
@@ -812,7 +827,9 @@ mod tests {
             .expect("another cube");
         let axis = Axis::new(Point::new(1.0, 1.0, 1.0), Vector::new(1.0, 2.0, 3.0))
             .expect("a direction with length");
-        model.place_solid(turned, &Isometry::rotation(&axis, 0.7).expect("a rotation"));
+        model
+            .place_solid(turned, &Isometry::rotation(&axis, 0.7).expect("a rotation"))
+            .expect("this model made the key");
 
         let scratch = Scratch::split_both_groups(&model, &[straight], &[turned], &policy, &mut log)
             .expect("a turned cube cutting a straight one is decided by proof alone");

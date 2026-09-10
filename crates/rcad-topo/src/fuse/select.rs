@@ -510,7 +510,7 @@ fn settle_against_each(
             }
             continue;
         }
-        let solid: SolidView<'_> = model.solid(solids[index].key);
+        let solid: SolidView<'_> = model.solid_at(solids[index].key.slot_in(model.id()));
         let mut ray = ProvenanceLog::new();
         let placed = solid.classify_uncertain_point(point, policy, &mut ray);
         // A classification nobody could make is not a decision anybody took, so
@@ -644,7 +644,7 @@ fn a_face_of_the_input_holds(
             .winding_around(&corners, point)
             .is_some_and(|winding| winding != 0));
     }
-    let view = model.solid(solid.key);
+    let view = model.solid_at(solid.key.slot_in(model.id()));
     Ok(view.face_holds_the_point(face.keys[0], point, policy, log)? != crate::OnAFace::NotHeld)
 }
 

@@ -1116,8 +1116,7 @@ impl Assembly {
 
         let mut volumes = Vec::new();
         for &solid in &written.solids {
-            let volume =
-                how_much_space_it_encloses(apart.solid(apart.key_for_solid(solid)), policy, log)?;
+            let volume = how_much_space_it_encloses(apart.solid_at(solid), policy, log)?;
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
             }
@@ -1178,7 +1177,7 @@ impl Assembly {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
-        let solid = apart.solid(apart.key_for_solid(written.solids[outer]));
+        let solid = apart.solid_at(written.solids[outer]);
         for &face in &self.shells[hollow] {
             for side in self.faces[face].wires.iter().flatten() {
                 let at = self.corners[self.edges[side.edge].ends[0]].point;

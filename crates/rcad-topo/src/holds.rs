@@ -866,6 +866,7 @@ mod tests {
     ) -> OnAFace {
         model
             .solid(solid)
+            .expect("this model made the key")
             .face_holds_the_point(face, point, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("a washer is a shape this can follow")
     }
@@ -880,6 +881,7 @@ mod tests {
         let (model, washer) = a_washer();
         let cap = model
             .solid(washer)
+            .expect("this model made the key")
             .faces()
             .find(|face| face.surface().as_plane().is_some())
             .expect("a washer has two caps")
@@ -916,6 +918,7 @@ mod tests {
         let (model, washer) = a_washer();
         let hole = model
             .solid(washer)
+            .expect("this model made the key")
             .faces()
             .find(|face| match face.surface() {
                 Surface::Cylinder(pipe) => pipe.radius() == INNER,
@@ -959,7 +962,13 @@ mod tests {
         let ball = model
             .add_ball(OUTER, &Isometry::identity())
             .expect("a ball");
-        let skin = model.solid(ball).faces().next().expect("one face").key();
+        let skin = model
+            .solid(ball)
+            .expect("this model made the key")
+            .faces()
+            .next()
+            .expect("one face")
+            .key();
 
         for point in [
             at(OUTER, 0.0, 0.0),
@@ -1021,6 +1030,7 @@ mod tests {
 
         let refusal = model
             .solid(key)
+            .expect("this model made the key")
             .face_holds_the_point(
                 crate::FaceKey::new(wall, model.id()),
                 at(0.0, OUTER, HEIGHT / 2.0),
@@ -1048,7 +1058,13 @@ mod tests {
         let ball = model
             .add_ball(OUTER, &Isometry::identity())
             .expect("a ball");
-        let skin = model.solid(ball).faces().next().expect("one face").key();
+        let skin = model
+            .solid(ball)
+            .expect("this model made the key")
+            .faces()
+            .next()
+            .expect("one face")
+            .key();
 
         // A pipe up the z axis crosses this ball in two circles, one either side
         // of the equator. One corner on the upper one, and one closed edge round
@@ -1079,6 +1095,7 @@ mod tests {
 
         let refusal = model
             .solid(ball)
+            .expect("this model made the key")
             .face_holds_the_point(
                 skin,
                 at(0.0, 0.0, -OUTER),

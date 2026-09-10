@@ -16,6 +16,27 @@ pub enum Error {
     #[error("geometry: {0}")]
     Geometry(rcad_geom::Error),
 
+    /// A key made by one model was handed to a different one.
+    ///
+    /// `slotmap`'s generation counter catches a key whose slot was freed and
+    /// refilled *in the same* model. It cannot see a key from another live
+    /// model reaching a live slot in this one, and slot zero of any model is a
+    /// slot every model has — so the wrong answer this stops is a plausible
+    /// one, not a crash: a one millimetre cube's key measured 1000 mm³ against
+    /// a model holding a ten millimetre block (decisions.md §82.10).
+    ///
+    /// It is bad caller input rather than a broken invariant, because which
+    /// model a key came from is not something this crate chose. It was a panic
+    /// until §86, on the grounds that the panic was the smaller fix; every one
+    /// of the calls that can raise it reads and writes nothing before it does,
+    /// which is the case §4.1's amendment under §66 wants an `Err` for.
+    #[error("this {entity} key was made by a different model")]
+    KeyFromAnotherModel {
+        /// Which kind of entity the key names: `"vertex"`, `"edge"`,
+        /// `"coedge"`, `"wire"`, `"face"`, `"shell"` or `"solid"`.
+        entity: &'static str,
+    },
+
     /// A profile loop has fewer than three points, so it encloses nothing.
     #[error("a profile loop needs at least three points, this one has {count}")]
     TooFewPoints {

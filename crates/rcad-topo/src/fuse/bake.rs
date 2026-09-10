@@ -255,7 +255,7 @@ fn bake_one_solid(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedSolid> {
-    let solid = model.solid(key);
+    let solid = model.solid_at(key.slot_in(model.id()));
     if solid.is_wholly_flat()
         && let Some(joined) = joined_faces_of_an_input(model, solid, log)?
     {
@@ -366,7 +366,7 @@ fn corner_of_every_vertex_left(
             let stored = where_the_model_puts_a_corner(
                 model,
                 slot,
-                &faces_around_a_vertex(model, vertex, &surfaces),
+                &faces_around_a_vertex(model, slot, &surfaces),
             )?;
             Ok((slot, derive_a_corner(vertex, stored, planes, policy, log)?))
         })
@@ -423,14 +423,14 @@ fn corner_of_every_vertex(
 ) -> Result<BTreeMap<VertexSlot, BakedCorner>> {
     let mut corners = BTreeMap::new();
     for face in solid.faces() {
-        for wire in model.face(face.key()).wires() {
+        for wire in model.face_at(face.key().slot_in(model.id())).wires() {
             for coedge in wire.coedges() {
                 for vertex in [coedge.start().key(), coedge.end().key()] {
                     let slot = vertex.slot_in(model.id());
                     if corners.contains_key(&slot) {
                         continue;
                     }
-                    let around = faces_around_a_vertex(model, vertex, surfaces);
+                    let around = faces_around_a_vertex(model, slot, surfaces);
                     corners.insert(
                         slot,
                         place_a_corner(model, vertex, slot, &around, policy, log)?,
@@ -450,12 +450,12 @@ fn corner_of_every_vertex(
 /// have it, so the model was already broken.
 fn faces_around_a_vertex(
     model: &Model,
-    vertex: VertexKey,
+    vertex: VertexSlot,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
 ) -> Vec<PlacedSurface> {
     let mut faces = BTreeSet::new();
-    for edge in model.vertex(vertex).edges().collect::<Vec<_>>() {
-        for face in model.edge(edge).neighbouring_faces() {
+    for edge in model.vertex_at(vertex).edges().collect::<Vec<_>>() {
+        for face in model.edge_at(edge.slot_in(model.id())).neighbouring_faces() {
             let slot = face.slot_in(model.id());
             if surfaces.contains_key(&slot) {
                 faces.insert(slot);
@@ -776,7 +776,7 @@ fn bake_one_face(
     let mine = key.slot_in(model.id());
 
     let wires = model
-        .face(key)
+        .face_at(mine)
         .wires()
         .map(|wire| {
             wire.coedges()
@@ -814,7 +814,7 @@ fn bake_one_face(
 /// already broken.
 fn face_across(model: &Model, mine: FaceSlot, edge: EdgeKey) -> Option<FaceSlot> {
     let across: Vec<FaceSlot> = model
-        .edge(edge)
+        .edge_at(edge.slot_in(model.id()))
         .neighbouring_faces()
         .map(|other| other.slot_in(model.id()))
         .filter(|&other| other != mine)
@@ -858,7 +858,11 @@ mod tests {
     /// — which is what the baked surfaces have been moved by too.
     fn corners_as_stored(model: &Model, solid: SolidKey) -> Vec<(VertexKey, [f64; 3])> {
         let mut corners = Vec::new();
-        for face in model.solid(solid).faces() {
+        for face in model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+        {
             for wire in face.wires() {
                 for coedge in wire.coedges() {
                     corners.push((coedge.start().key(), coedge.start().point().coordinates()));
@@ -883,6 +887,7 @@ mod tests {
     fn where_the_solid_puts(model: &Model, solid: SolidKey, vertex: VertexKey) -> [f64; 3] {
         model
             .solid(solid)
+            .expect("this model made the key")
             .faces()
             .flat_map(|face| face.wires().collect::<Vec<_>>())
             .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
@@ -959,7 +964,9 @@ mod tests {
     #[test]
     fn re_deriving_the_corners_of_a_turned_cube_gives_boxes_that_hold_them() {
         let (mut model, cube) = a_cube_of_side_two();
-        model.place_solid(cube, &a_turn());
+        model
+            .place_solid(cube, &a_turn())
+            .expect("this model made the key");
         let corners = corners_as_stored(&model, cube);
         let baked = baked(&model, &[cube]);
 
@@ -995,7 +1002,9 @@ mod tests {
     #[test]
     fn a_certified_policy_bakes_a_turned_cube_without_recording_anything() {
         let (mut model, cube) = a_cube_of_side_two();
-        model.place_solid(cube, &a_turn());
+        model
+            .place_solid(cube, &a_turn())
+            .expect("this model made the key");
         let log = ProvenanceLog::new();
 
         baked(&model, &[cube]);
@@ -1081,14 +1090,22 @@ mod tests {
             for side in face.wires.iter().flatten() {
                 assert_eq!(
                     side.start.point.exact_coordinates(),
-                    Some(model.vertex(side.start.vertex).point().coordinates()),
+                    Some(
+                        model
+                            .vertex(side.start.vertex)
+                            .expect("this model made the key")
+                            .point()
+                            .coordinates()
+                    ),
                     "a bar that has not been moved has corners that are f64 exactly"
                 );
                 assert_eq!(side.start.around.len(), 2);
             }
         }
 
-        model.place_solid(bar, &a_turn());
+        model
+            .place_solid(bar, &a_turn())
+            .expect("this model made the key");
         let turned = baked(&model, &[bar]);
         let mut anything_was_built = false;
         for face in &turned[0].faces {

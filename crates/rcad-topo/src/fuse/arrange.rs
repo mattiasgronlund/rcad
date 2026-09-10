@@ -6562,8 +6562,12 @@ mod how_often_cutting_a_curved_face_refuses {
         if let Family::Turned = family {
             let axis = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).ok()?;
             let turn = Isometry::rotation(&axis, 0.1 + draw.fraction()).ok()?;
-            model.place_solid(block, &turn);
-            model.place_solid(bar, &turn);
+            model
+                .place_solid(block, &turn)
+                .expect("this model made the key");
+            model
+                .place_solid(bar, &turn)
+                .expect("this model made the key");
         }
         Some((model, [block, bar]))
     }

@@ -132,38 +132,55 @@ impl Model {
 
     /// A view of one solid, in the model's own frame.
     ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model.
+    /// It reads nothing before it says so, so the caller's model is untouched
+    /// (`docs/decisions.md` §86). That answer used to be a panic, and before
+    /// §84 it was no answer at all in a release build — the model id was
+    /// zero-sized there, so two ids compared equal whichever models they came
+    /// from and the key resolved to whatever sat in that slot.
+    ///
     /// # Panics
     ///
-    /// If the key came from another model, in every build and by name. That
-    /// used to be a debug build's answer only — the model id was zero-sized in
-    /// release, so two ids compared equal whichever models they came from and
-    /// the key resolved to whatever sat in that slot. `docs/decisions.md` §84.
-    ///
-    /// **A key this model handed out always names something**, which is what
-    /// makes that an internal invariant and not a bad-input case. Nothing in
-    /// the crate removes an entity from an arena outside a test, and a file
-    /// whose stored slots resolve to nothing never becomes a `Model` at all —
-    /// `Deserialize` refuses it before the index is built, demonstrated by
+    /// If the key is this model's own and names nothing. **A key this model
+    /// handed out always names something**, which is what makes that an
+    /// internal invariant and not a bad-input case. Nothing in the crate
+    /// removes an entity from an arena outside a test, and a file whose stored
+    /// slots resolve to nothing never becomes a `Model` at all — `Deserialize`
+    /// refuses it before the index is built, demonstrated by
     /// `a_file_naming_a_corner_that_is_not_there_never_becomes_a_model` in
     /// [`serialize`](crate::serialize).
-    #[must_use]
-    pub fn solid(&self, key: SolidKey) -> SolidView<'_> {
-        let slot = key.slot_in(self.id);
+    pub fn solid(&self, key: SolidKey) -> Result<SolidView<'_>> {
+        let slot = key.try_slot_in(self.id)?;
         assert!(self.data.solids.contains_key(slot), "no such solid");
-        SolidView::new(self, slot, Isometry::identity(), Orientation::Forward)
+        Ok(SolidView::new(
+            self,
+            slot,
+            Isometry::identity(),
+            Orientation::Forward,
+        ))
     }
 
     /// A view of one shell, in the model's own frame.
     ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`], the same way as [`Model::solid`].
+    ///
     /// # Panics
     ///
-    /// If the key came from another model, the same way and with the same
-    /// demonstration as [`Model::solid`].
-    #[must_use]
-    pub fn shell(&self, key: ShellKey) -> ShellView<'_> {
-        let slot = key.slot_in(self.id);
+    /// If the key is this model's own and names nothing, the same way and with
+    /// the same demonstration as [`Model::solid`].
+    pub fn shell(&self, key: ShellKey) -> Result<ShellView<'_>> {
+        let slot = key.try_slot_in(self.id)?;
         assert!(self.data.shells.contains_key(slot), "no such shell");
-        ShellView::new(self, slot, Isometry::identity(), Orientation::Forward)
+        Ok(ShellView::new(
+            self,
+            slot,
+            Isometry::identity(),
+            Orientation::Forward,
+        ))
     }
 
     /// A view of one face, in the model's own frame.
@@ -172,67 +189,102 @@ impl Model {
     /// composed down from that solid instead. This one is the face as stored,
     /// which is what you want for tagging it or reading its own plane.
     ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`], the same way as [`Model::solid`].
+    ///
     /// # Panics
     ///
-    /// If the key came from another model, the same way and with the same
-    /// demonstration as [`Model::solid`].
-    #[must_use]
-    pub fn face(&self, key: FaceKey) -> FaceView<'_> {
-        let slot = key.slot_in(self.id);
+    /// If the key is this model's own and names nothing, the same way and with
+    /// the same demonstration as [`Model::solid`].
+    pub fn face(&self, key: FaceKey) -> Result<FaceView<'_>> {
+        let slot = key.try_slot_in(self.id)?;
         assert!(self.data.faces.contains_key(slot), "no such face");
-        FaceView::new(self, slot, Isometry::identity(), Orientation::Forward)
+        Ok(FaceView::new(
+            self,
+            slot,
+            Isometry::identity(),
+            Orientation::Forward,
+        ))
     }
 
     /// A view of one wire, in the model's own frame.
     ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`], the same way as [`Model::solid`].
+    ///
     /// # Panics
     ///
-    /// If the key came from another model, the same way and with the same
-    /// demonstration as [`Model::solid`].
-    #[must_use]
-    pub fn wire(&self, key: WireKey) -> WireView<'_> {
-        let slot = key.slot_in(self.id);
+    /// If the key is this model's own and names nothing, the same way and with
+    /// the same demonstration as [`Model::solid`].
+    pub fn wire(&self, key: WireKey) -> Result<WireView<'_>> {
+        let slot = key.try_slot_in(self.id)?;
         assert!(self.data.wires.contains_key(slot), "no such wire");
-        WireView::new(self, slot, Isometry::identity(), Orientation::Forward)
+        Ok(WireView::new(
+            self,
+            slot,
+            Isometry::identity(),
+            Orientation::Forward,
+        ))
     }
 
     /// A view of one coedge, in the model's own frame.
     ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`], the same way as [`Model::solid`].
+    ///
     /// # Panics
     ///
-    /// If the key came from another model, the same way and with the same
-    /// demonstration as [`Model::solid`].
-    #[must_use]
-    pub fn coedge(&self, key: CoedgeKey) -> CoedgeView<'_> {
-        let slot = key.slot_in(self.id);
+    /// If the key is this model's own and names nothing, the same way and with
+    /// the same demonstration as [`Model::solid`].
+    pub fn coedge(&self, key: CoedgeKey) -> Result<CoedgeView<'_>> {
+        let slot = key.try_slot_in(self.id)?;
         assert!(self.data.coedges.contains_key(slot), "no such coedge");
-        CoedgeView::new(self, slot, Isometry::identity(), Orientation::Forward)
+        Ok(CoedgeView::new(
+            self,
+            slot,
+            Isometry::identity(),
+            Orientation::Forward,
+        ))
     }
 
     /// A view of one edge, in the model's own frame.
     ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`], the same way as [`Model::solid`].
+    ///
     /// # Panics
     ///
-    /// If the key came from another model, the same way and with the same
-    /// demonstration as [`Model::solid`].
-    #[must_use]
-    pub fn edge(&self, key: EdgeKey) -> EdgeView<'_> {
-        let slot = key.slot_in(self.id);
+    /// If the key is this model's own and names nothing, the same way and with
+    /// the same demonstration as [`Model::solid`].
+    pub fn edge(&self, key: EdgeKey) -> Result<EdgeView<'_>> {
+        let slot = key.try_slot_in(self.id)?;
         assert!(self.data.edges.contains_key(slot), "no such edge");
-        EdgeView::new(self, slot, Isometry::identity(), Orientation::Forward)
+        Ok(EdgeView::new(
+            self,
+            slot,
+            Isometry::identity(),
+            Orientation::Forward,
+        ))
     }
 
     /// A view of one vertex, in the model's own frame.
     ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`], the same way as [`Model::solid`].
+    ///
     /// # Panics
     ///
-    /// If the key came from another model, the same way and with the same
-    /// demonstration as [`Model::solid`].
-    #[must_use]
-    pub fn vertex(&self, key: VertexKey) -> VertexView<'_> {
-        let slot = key.slot_in(self.id);
+    /// If the key is this model's own and names nothing, the same way and with
+    /// the same demonstration as [`Model::solid`].
+    pub fn vertex(&self, key: VertexKey) -> Result<VertexView<'_>> {
+        let slot = key.try_slot_in(self.id)?;
         assert!(self.data.vertices.contains_key(slot), "no such vertex");
-        VertexView::new(self, slot, Isometry::identity())
+        Ok(VertexView::new(self, slot, Isometry::identity()))
     }
 
     /// Every solid, in a fixed order that does not change between runs.
@@ -273,12 +325,19 @@ impl Model {
     /// already used at, so calling this twice is the same as calling it once
     /// with the two movements composed.
     ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model.
+    /// Nothing is moved before that is answered, so the model is left as it was
+    /// (`docs/decisions.md` §86).
+    ///
     /// # Panics
     ///
-    /// If the key came from another model, or if the mutation leaves the solid
-    /// broken.
-    pub fn place_solid(&mut self, key: SolidKey, movement: &Isometry) {
-        let slot = key.slot_in(self.id);
+    /// If the mutation leaves the solid broken. By then the movement is already
+    /// composed onto the shells and this call cannot take it back, which is the
+    /// case §4.1's amendment under §66 keeps as a panic.
+    pub fn place_solid(&mut self, key: SolidKey, movement: &Isometry) -> Result<()> {
+        let slot = key.try_slot_in(self.id)?;
         let approximation_before = self.worst_approximation;
 
         let solid = self
@@ -292,6 +351,7 @@ impl Model {
 
         self.check_touched_solid(slot);
         self.assert_approximation_did_not_grow(approximation_before);
+        Ok(())
     }
 
     /// Tag a vertex with the slop a decision put into it.
@@ -301,12 +361,9 @@ impl Model {
     /// [`Invalid::ApproximationOrdering`] if the tag would be smaller than one
     /// of the edges built on this vertex. A point cannot be known better than
     /// the edges through it (roadmap §5.4).
-    ///
-    /// # Panics
-    ///
-    /// If the key came from another model.
+    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model.
     pub fn set_vertex_approximation(&mut self, key: VertexKey, tag: Approximation) -> Result<()> {
-        let slot = key.slot_in(self.id);
+        let slot = key.try_slot_in(self.id)?;
         for &edge in self.index.edges_of_vertex(slot) {
             let on_edge = magnitude_of(self.data.edges[edge].approximation);
             if tag.magnitude() < on_edge {
@@ -330,12 +387,9 @@ impl Model {
     /// which `Model`'s `Deserialize` reads wholesale with no check that it
     /// resolves, and calling this does not require `Model::validate` (which
     /// does catch it) to have run first.
-    ///
-    /// # Panics
-    ///
-    /// If the key came from another model.
+    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model.
     pub fn set_edge_approximation(&mut self, key: EdgeKey, tag: Approximation) -> Result<()> {
-        let slot = key.slot_in(self.id);
+        let slot = key.try_slot_in(self.id)?;
         let edge = &self.data.edges[slot];
         for end in [edge.start, edge.end] {
             let on_vertex = magnitude_of(
@@ -374,12 +428,9 @@ impl Model {
     /// the face's own stored wires, coedges or edges does not resolve —
     /// caller-input, the same way and for the same reason as
     /// [`Model::set_edge_approximation`]'s own `DanglingKey` case.
-    ///
-    /// # Panics
-    ///
-    /// If the key came from another model.
+    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model.
     pub fn set_face_approximation(&mut self, key: FaceKey, tag: Approximation) -> Result<()> {
-        let slot = key.slot_in(self.id);
+        let slot = key.try_slot_in(self.id)?;
         for edge in self.edges_of_face(slot)? {
             let on_edge = magnitude_of(
                 self.data
@@ -520,6 +571,40 @@ impl Model {
 
     pub(crate) fn key_for_solid(&self, slot: SolidSlot) -> SolidKey {
         SolidKey::new(slot, self.id)
+    }
+
+    /// A view of one solid, for a slot this crate already holds.
+    ///
+    /// [`Model::solid`] answers `Err` for a key another model made, which is
+    /// the only thing it can say about data a caller chose. A slot is not that
+    /// data — a `*Slot` is `pub(crate)` and every one of them came out of this
+    /// model's own arena — so these four doors take the question away rather
+    /// than answering it, and the inside of the crate uses them
+    /// (decisions.md §86).
+    pub(crate) fn solid_at(&self, slot: SolidSlot) -> SolidView<'_> {
+        assert!(self.data.solids.contains_key(slot), "no such solid");
+        SolidView::new(self, slot, Isometry::identity(), Orientation::Forward)
+    }
+
+    /// A view of one face, in the model's own frame, for a slot this crate
+    /// already holds. The same door as [`Model::solid_at`].
+    pub(crate) fn face_at(&self, slot: FaceSlot) -> FaceView<'_> {
+        assert!(self.data.faces.contains_key(slot), "no such face");
+        FaceView::new(self, slot, Isometry::identity(), Orientation::Forward)
+    }
+
+    /// A view of one edge, in the model's own frame, for a slot this crate
+    /// already holds. The same door as [`Model::solid_at`].
+    pub(crate) fn edge_at(&self, slot: EdgeSlot) -> EdgeView<'_> {
+        assert!(self.data.edges.contains_key(slot), "no such edge");
+        EdgeView::new(self, slot, Isometry::identity(), Orientation::Forward)
+    }
+
+    /// A view of one vertex, in the model's own frame, for a slot this crate
+    /// already holds. The same door as [`Model::solid_at`].
+    pub(crate) fn vertex_at(&self, slot: VertexSlot) -> VertexView<'_> {
+        assert!(self.data.vertices.contains_key(slot), "no such vertex");
+        VertexView::new(self, slot, Isometry::identity())
     }
 
     /// The cheap checks that run after every mutation, on the entities that
@@ -1297,10 +1382,13 @@ mod tests {
         let stored: Vec<_> = model.faces().map(crate::FaceView::plane).collect();
 
         let movement = a_movement();
-        model.place_solid(cube, &movement);
+        model
+            .place_solid(cube, &movement)
+            .expect("this model made the key");
 
         let moved: Vec<_> = model
             .solid(cube)
+            .expect("this model made the key")
             .faces()
             .map(crate::FaceView::plane)
             .collect();
@@ -1384,10 +1472,14 @@ mod tests {
         let (mut model, cube) = a_cube();
         let outward: Vec<_> = model
             .solid(cube)
+            .expect("this model made the key")
             .faces()
             .map(crate::FaceView::outward_normal)
             .collect();
-        let volume = model.solid(cube).signed_volume();
+        let volume = model
+            .solid(cube)
+            .expect("this model made the key")
+            .signed_volume();
 
         for shell in model.data.shells.values_mut() {
             for used in &mut shell.faces {
@@ -1395,10 +1487,11 @@ mod tests {
             }
         }
 
-        for (before, face) in outward.iter().zip(model.solid(cube).faces()) {
+        let turned = model.solid(cube).expect("this model made the key");
+        for (before, face) in outward.iter().zip(turned.faces()) {
             assert_eq!(face.outward_normal(), -*before);
         }
-        assert_eq!(model.solid(cube).signed_volume(), -volume);
+        assert_eq!(turned.signed_volume(), -volume);
     }
 
     /// §20.1 settled that `measure` panics on a solid whose faces point
@@ -1511,6 +1604,7 @@ mod tests {
         let (mut model, cube) = a_cube();
         let one_way: Vec<Vec<Point>> = model
             .solid(cube)
+            .expect("this model made the key")
             .faces()
             .map(|face| face.outer_wire().points().collect())
             .collect();
@@ -1521,7 +1615,8 @@ mod tests {
             }
         }
 
-        for (forwards, face) in one_way.iter().zip(model.solid(cube).faces()) {
+        let turned = model.solid(cube).expect("this model made the key");
+        for (forwards, face) in one_way.iter().zip(turned.faces()) {
             let backwards: Vec<Point> = face.outer_wire().points().collect();
             let mut expected = vec![forwards[0]];
             expected.extend(forwards[1..].iter().rev().copied());
@@ -1533,9 +1628,12 @@ mod tests {
     fn a_vertex_of_a_placed_solid_comes_back_already_moved() {
         let (mut model, cube) = a_cube();
         let movement = a_movement();
-        model.place_solid(cube, &movement);
+        model
+            .place_solid(cube, &movement)
+            .expect("this model made the key");
 
-        let face = model.solid(cube).faces().next().expect("a cube has faces");
+        let placed = model.solid(cube).expect("this model made the key");
+        let face = placed.faces().next().expect("a cube has faces");
         for wire in face.wires() {
             for coedge in wire.coedges() {
                 let vertex = coedge.start();
@@ -1653,7 +1751,9 @@ mod tests {
         model
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
             .expect("the ordering holds");
-        model.place_solid(cube, &a_movement());
+        model
+            .place_solid(cube, &a_movement())
+            .expect("this model made the key");
     }
 
     /// In every build, because [`Model::check_touched_wire`] runs in every
@@ -1672,7 +1772,9 @@ mod tests {
             .steps
             .swap(0, 1);
 
-        model.place_solid(cube, &a_movement());
+        model
+            .place_solid(cube, &a_movement())
+            .expect("this model made the key");
     }
 
     /// Every build, for the reason
@@ -1684,7 +1786,9 @@ mod tests {
         let edge = model.data.edges.keys().next().expect("a cube has edges");
         model.add_coedge(edge, Orientation::Forward);
 
-        model.place_solid(cube, &a_movement());
+        model
+            .place_solid(cube, &a_movement())
+            .expect("this model made the key");
     }
 
     #[test]
@@ -1713,7 +1817,9 @@ mod tests {
             .expect("a cube has corners")
             .approximation = Some(Approximation::new(1e-6, Cause::ImportedUncertainty));
 
-        model.place_solid(cube, &a_movement());
+        model
+            .place_solid(cube, &a_movement())
+            .expect("this model made the key");
     }
 
     #[test]
@@ -1758,10 +1864,13 @@ mod tests {
         let other = model
             .add_cube(2.0, &policy, &mut log)
             .expect("a second cube");
-        model.place_solid(
-            other,
-            &rcad_geom::Isometry::translation(Vector::new(1.0, 1.0, 1.0)).expect("a finite shift"),
-        );
+        model
+            .place_solid(
+                other,
+                &rcad_geom::Isometry::translation(Vector::new(1.0, 1.0, 1.0))
+                    .expect("a finite shift"),
+            )
+            .expect("this model made the key");
         assert_eq!(
             model.which_model_this_is(),
             before,
@@ -1790,7 +1899,12 @@ mod tests {
         let copy = model.clone();
 
         assert_ne!(copy.which_model_this_is(), model.which_model_this_is());
-        assert_eq!(copy.solid(cube).signed_volume(), 8.0);
+        assert_eq!(
+            copy.solid(cube)
+                .expect("a clone's keys address the same slots")
+                .signed_volume(),
+            8.0
+        );
     }
 
     /// The fourth. Reading a file gives back a model that no cache was built

@@ -34,7 +34,7 @@ slotmap::new_key_type! {
 ///
 /// What the zero-sized version bought instead was a release build in which
 /// `slot_in` waved every foreign key through, silently and against the doc
-/// comment below saying it panics. Two models, each holding one block as its
+/// comment below, which said then that it panics. Two models, each holding one block as its
 /// first solid: `theirs.solid(mine)` measured 1000 mm³ for a key naming a 1 mm³
 /// cube, and `theirs.fuse(&[mine], &[block], Union, …)` answered **`Ok`**
 /// naming no solids at all — the block fused against itself, the caller's cube
@@ -60,8 +60,9 @@ macro_rules! define_key {
         /// silent lookup of the wrong thing.
         ///
         /// A key also remembers which model made it, in every build. Using it
-        /// against a different model panics instead of resolving to whatever
-        /// now sits in that slot.
+        /// against a different model is refused —
+        /// [`Error::KeyFromAnotherModel`](crate::Error::KeyFromAnotherModel) —
+        /// instead of resolving to whatever now sits in that slot.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub struct $key {
             slot: $slot,
@@ -73,13 +74,37 @@ macro_rules! define_key {
                 Self { slot, model }
             }
 
-            /// The slot this key names, having checked it came from `model`.
+            /// The slot this key names, for a key that came from a caller.
+            ///
+            /// # Errors
+            ///
+            /// [`Error::KeyFromAnotherModel`](crate::Error::KeyFromAnotherModel)
+            /// if the key was made by another model. Which model a caller's key
+            /// came from is data this crate did not choose, so it is bad caller
+            /// input and not a broken invariant (decisions.md §4.1, §86).
+            pub(crate) fn try_slot_in(self, model: ModelId) -> $crate::Result<$slot> {
+                if self.model == model {
+                    Ok(self.slot)
+                } else {
+                    Err($crate::Error::KeyFromAnotherModel { entity: $what })
+                }
+            }
+
+            /// The slot this key names, for a key this crate derived itself.
             ///
             /// # Panics
             ///
-            /// If the key was made by another model. That is a bug in the
-            /// caller and the alternative is silently reading the wrong
-            /// entity.
+            /// If the key was made by another model. Every caller of this got
+            /// its key from a view of `model` moments earlier, so a mismatch
+            /// here is a bug in this crate and not in anybody's input. A key a
+            /// caller handed over goes through
+            #[doc = concat!("[`", stringify!($key), "::try_slot_in`] instead.")]
+            ///
+            /// Allowed to be dead because this macro writes seven of these and
+            /// only some kinds of entity are ever reached by key from inside
+            /// the crate. A wire, a shell and a coedge are reached through the
+            /// face or solid that owns them, so nothing here resolves one.
+            #[allow(dead_code)]
             pub(crate) fn slot_in(self, model: ModelId) -> $slot {
                 assert!(
                     self.model == model,

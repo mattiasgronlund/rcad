@@ -287,10 +287,12 @@ mod tests {
         let other = model
             .add_cube(2.0, &policy, &mut log)
             .expect("another cube");
-        model.place_solid(
-            other,
-            &Isometry::translation(shift).expect("a finite shift"),
-        );
+        model
+            .place_solid(
+                other,
+                &Isometry::translation(shift).expect("a finite shift"),
+            )
+            .expect("this model made the key");
         bake(&model, &[one, other], &policy, &mut ProvenanceLog::new()).expect("two cubes bake")
     }
 
@@ -418,10 +420,12 @@ mod tests {
         let other = model
             .add_cube(2.0, &policy, &mut log)
             .expect("another cube");
-        model.place_solid(
-            other,
-            &Isometry::translation(Vector::new(1.0, 1.0, 1.0)).expect("a finite shift"),
-        );
+        model
+            .place_solid(
+                other,
+                &Isometry::translation(Vector::new(1.0, 1.0, 1.0)).expect("a finite shift"),
+            )
+            .expect("this model made the key");
         let crossed = both_solids_as_one(&mut model, one, other);
 
         let mut solids =

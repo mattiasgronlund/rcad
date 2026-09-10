@@ -2304,7 +2304,9 @@ fn the_two_surfaces_along_this_edge(
     let across = edge
         .neighbouring_faces()
         .find(|&other| other != face.key())
-        .map_or(mine, |other| model.face(other).surface());
+        .map_or(mine, |other| {
+            model.face_at(other.slot_in(model.id())).surface()
+        });
     [mine, across]
 }
 

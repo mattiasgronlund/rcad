@@ -3029,6 +3029,7 @@ mod tests {
 
         let refusal = model
             .solid(bar)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(1.0).expect("a length"),
                 &Policy::certified(),
@@ -3076,6 +3077,7 @@ mod tests {
 
         let refusal = model
             .solid(bar)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(1.0).expect("a length"),
                 &Policy::certified(),
@@ -3126,6 +3128,7 @@ mod tests {
 
         let refusal = model
             .solid(bar)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(1.0).expect("a length"),
                 &Policy::certified(),
@@ -3160,6 +3163,7 @@ mod tests {
 
         let refusal = model
             .solid(ball)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(1.0).expect("a length"),
                 &Policy::certified(),
@@ -3495,6 +3499,7 @@ mod tests {
         let solid = model.solids().next().expect("the ball").key();
         let mesh = model
             .solid(solid)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(0.1).expect("a length"),
                 &Policy::certified(),
@@ -3594,7 +3599,7 @@ mod tests {
             )
             .expect("a leaning plane cuts an ellipse right round a pipe");
 
-        let solid = model.solid(bar);
+        let solid = model.solid(bar).expect("this model made the key");
         let deflection = Deflection::of(5e-4).expect("a positive length");
         let mut building = BuildingAMesh::new(deflection, solid.surfaces_along_each_edge());
         for face in solid.faces() {
@@ -3668,6 +3673,7 @@ mod tests {
 
         let refusal = model
             .solid(bar)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(1.0).expect("a length"),
                 &Policy::certified(),
@@ -3762,14 +3768,19 @@ mod tests {
                     let ball = model.add_ball(2.0, &placement).expect("a ball");
                     let bar = model.add_round_bar(3.0, 7.0, &placement).expect("a bar");
                     assert_eq!(
-                        model.solid(ball).faces().count(),
+                        model
+                            .solid(ball)
+                            .expect("this model made the key")
+                            .faces()
+                            .count(),
                         1,
                         "a ball whose one face is its sphere is what makes the two-movement \
                          ceiling below the right one to charge it"
                     );
 
                     for (kind, solid) in [ball, bar].into_iter().enumerate() {
-                        for face in model.solid(solid).faces() {
+                        let placed = model.solid(solid).expect("this model made the key");
+                        for face in placed.faces() {
                             if face.surface().as_plane().is_some() {
                                 continue;
                             }
@@ -3792,7 +3803,7 @@ mod tests {
                             let reach = how_far_the_points_of_reach(
                                 face,
                                 &the_frame_this_face_is_meshed_in(face),
-                                &model.solid(solid).surfaces_along_each_edge(),
+                                &placed.surfaces_along_each_edge(),
                             );
                             let stray =
                                 how_far_apart(&face.stored_surface(), &round_tripped, reach);
@@ -3981,6 +3992,7 @@ mod tests {
         let ball = model.add_ball(1.0, &Isometry::identity()).expect("a ball");
         let mesh = model
             .solid(ball)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(0.05).expect("a length"),
                 &Policy::certified(),
@@ -3988,7 +4000,7 @@ mod tests {
             )
             .expect("a ball meshes");
 
-        let uses = every_use_of_an_edge_of(model.solid(ball));
+        let uses = every_use_of_an_edge_of(model.solid(ball).expect("this model made the key"));
         assert_eq!(
             uses.len(),
             2,
@@ -4082,6 +4094,7 @@ mod tests {
             .expect("a bar five across and ten tall");
         let mesh = model
             .solid(bar)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(0.5).expect("a length"),
                 &Policy::certified(),
@@ -4089,7 +4102,7 @@ mod tests {
             )
             .expect("a bar meshes");
 
-        let bottom: Vec<EdgeView<'_>> = every_use_of_an_edge_of(model.solid(bar))
+        let bottom: Vec<EdgeView<'_>> = every_use_of_an_edge_of(model.solid(bar).expect("this model made the key"))
             .into_iter()
             .filter(|edge| {
                 edge.is_closed().expect("a bar's edges are all readable")
@@ -4158,6 +4171,7 @@ mod tests {
             .expect("another cube");
         let mesh = model
             .solid(cube)
+            .expect("this model made the key")
             .mesh(
                 Deflection::of(0.5).expect("a length"),
                 &Policy::certified(),
@@ -4167,7 +4181,7 @@ mod tests {
 
         assert_eq!(mesh.points().len(), 8, "a cube is its own eight corners");
         let mut seen = HashSet::new();
-        for corner in every_corner_of(model.solid(cube)) {
+        for corner in every_corner_of(model.solid(cube).expect("this model made the key")) {
             let at = mesh
                 .point_at_vertex(corner.key())
                 .expect("every corner of the meshed solid has a point");
@@ -4183,21 +4197,21 @@ mod tests {
         }
         assert_eq!(seen.len(), 8);
 
-        for edge in every_use_of_an_edge_of(model.solid(cube)) {
+        for edge in every_use_of_an_edge_of(model.solid(cube).expect("this model made the key")) {
             assert!(
                 mesh.points_along_edge(edge.key()).is_empty(),
                 "a plane has nothing to say about a curve on it, and a straight edge \
                  needs nothing said"
             );
         }
-        for corner in every_corner_of(model.solid(another)) {
+        for corner in every_corner_of(model.solid(another).expect("this model made the key")) {
             assert_eq!(
                 mesh.point_at_vertex(corner.key()),
                 None,
                 "a corner of a solid this mesh was not cut from"
             );
         }
-        for edge in every_use_of_an_edge_of(model.solid(another)) {
+        for edge in every_use_of_an_edge_of(model.solid(another).expect("this model made the key")) {
             assert!(mesh.points_along_edge(edge.key()).is_empty());
         }
     }
@@ -4221,6 +4235,7 @@ mod tests {
         let cut = |solid| {
             model
                 .solid(solid)
+                .expect("this model made the key")
                 .mesh(
                     Deflection::of(0.5).expect("a length"),
                     &Policy::certified(),
@@ -4230,7 +4245,7 @@ mod tests {
         };
 
         let meshed_bar = cut(bar);
-        let seam: Vec<EdgeView<'_>> = every_use_of_an_edge_of(model.solid(bar))
+        let seam: Vec<EdgeView<'_>> = every_use_of_an_edge_of(model.solid(bar).expect("this model made the key"))
             .into_iter()
             .filter(|edge| !edge.is_closed().expect("a bar's edges are all readable"))
             .collect();
@@ -4245,7 +4260,7 @@ mod tests {
         );
 
         let meshed_cube = cut(cube);
-        for edge in every_use_of_an_edge_of(model.solid(cube)) {
+        for edge in every_use_of_an_edge_of(model.solid(cube).expect("this model made the key")) {
             assert!(
                 !meshed_cube.along_edge.contains_key(&edge.key()),
                 "an edge with a plane either side is never walked"
@@ -4281,6 +4296,7 @@ mod tests {
         for solid in solids {
             let mesh = model
                 .solid(solid)
+                .expect("this model made the key")
                 .mesh(
                     Deflection::of(0.1).expect("a length"),
                     &Policy::certified(),

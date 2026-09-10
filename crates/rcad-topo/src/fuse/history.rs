@@ -40,38 +40,46 @@ impl Fused {
     /// What became of an input face: the faces it turned into. Empty means it
     /// was deleted.
     ///
-    /// # Panics
+    /// **Empty and refused are different answers**, which is why this is a
+    /// `Result` and not an empty slice. A key from another model used to panic
+    /// here; before that it would have read a stranger's slot number out of
+    /// this map and answered "deleted" for a face nobody had touched.
     ///
-    /// If the key came from another model.
-    #[must_use]
-    pub fn images_of_face(&self, face: FaceKey) -> &[FaceKey] {
-        self.faces
-            .get(&face.slot_in(self.model))
-            .map_or(&[], Vec::as_slice)
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`](crate::Error::KeyFromAnotherModel) if the
+    /// key was made by a different model (decisions.md §86).
+    pub fn images_of_face(&self, face: FaceKey) -> crate::Result<&[FaceKey]> {
+        Ok(self
+            .faces
+            .get(&face.try_slot_in(self.model)?)
+            .map_or(&[], Vec::as_slice))
     }
 
     /// What became of an input edge. Empty means it was deleted.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If the key came from another model.
-    #[must_use]
-    pub fn images_of_edge(&self, edge: EdgeKey) -> &[EdgeKey] {
-        self.edges
-            .get(&edge.slot_in(self.model))
-            .map_or(&[], Vec::as_slice)
+    /// [`Error::KeyFromAnotherModel`](crate::Error::KeyFromAnotherModel), the
+    /// same way as [`Fused::images_of_face`].
+    pub fn images_of_edge(&self, edge: EdgeKey) -> crate::Result<&[EdgeKey]> {
+        Ok(self
+            .edges
+            .get(&edge.try_slot_in(self.model)?)
+            .map_or(&[], Vec::as_slice))
     }
 
     /// What became of an input vertex. Empty means it was deleted.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If the key came from another model.
-    #[must_use]
-    pub fn images_of_vertex(&self, vertex: VertexKey) -> &[VertexKey] {
-        self.vertices
-            .get(&vertex.slot_in(self.model))
-            .map_or(&[], Vec::as_slice)
+    /// [`Error::KeyFromAnotherModel`](crate::Error::KeyFromAnotherModel), the
+    /// same way as [`Fused::images_of_face`].
+    pub fn images_of_vertex(&self, vertex: VertexKey) -> crate::Result<&[VertexKey]> {
+        Ok(self
+            .vertices
+            .get(&vertex.try_slot_in(self.model)?)
+            .map_or(&[], Vec::as_slice))
     }
 
     /// Faces in the result with no input ancestor.
@@ -138,9 +146,9 @@ pub(crate) fn history_of(
     };
 
     for solid in scratch.arguments.iter().chain(&scratch.tools) {
-        for face in model.solid(solid.key).faces() {
+        for face in model.solid_at(solid.key.slot_in(id)).faces() {
             fused.faces.entry(face.key().slot_in(id)).or_default();
-            for wire in model.face(face.key()).wires() {
+            for wire in model.face_at(face.key().slot_in(id)).wires() {
                 for coedge in wire.coedges() {
                     fused
                         .edges

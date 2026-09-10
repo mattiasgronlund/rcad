@@ -130,7 +130,11 @@ mod tests {
     #[test]
     fn crossing_the_two_faces_along_a_cap_circle_names_the_circle_and_the_edge() {
         let (model, bar) = a_round_bar();
-        let faces: Vec<_> = model.solid(bar).faces().collect();
+        let faces: Vec<_> = model
+            .solid(bar)
+            .expect("this model made the key")
+            .faces()
+            .collect();
         let wall = faces
             .iter()
             .find(|face| matches!(face.surface(), Surface::Cylinder(_)))
@@ -161,7 +165,9 @@ mod tests {
             "the model already holds this circle as one edge: {:?}",
             crossed.along()
         );
-        let already = model.edge(crossed.along()[0]);
+        let already = model
+            .edge(crossed.along()[0])
+            .expect("this model made the key");
         assert_eq!(
             already.run(),
             EdgeRun::RightRoundWhereItsFacesCross,
@@ -176,6 +182,7 @@ mod tests {
         let (model, bar) = a_round_bar();
         let caps: Vec<_> = model
             .solid(bar)
+            .expect("this model made the key")
             .faces()
             .filter(|face| face.surface().as_plane().is_some())
             .collect();
@@ -199,6 +206,7 @@ mod tests {
             .expect("a ball of radius three");
         let skin = model
             .solid(ball)
+            .expect("this model made the key")
             .faces()
             .next()
             .expect("a ball has one face");
@@ -218,7 +226,10 @@ mod tests {
         // could ever name.
         let meridian = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
             .expect("the y axis is a unit normal");
-        let EdgeRun::PartOfWhereItCrosses { and, .. } = model.edge(crossed.along()[0]).stored_run()
+        let EdgeRun::PartOfWhereItCrosses { and, .. } = model
+            .edge(crossed.along()[0])
+            .expect("this model made the key")
+            .stored_run()
         else {
             panic!("a ball's seam is part of where its face crosses a meridian");
         };
