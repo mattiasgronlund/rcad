@@ -148,9 +148,14 @@ pub enum Error {
     /// case §66.4 asked to be carved out of that — nothing is corrupt, because
     /// nothing was written.
     ///
-    /// [`Invalid::DynamicRangeTooWide`] never arrives wrapped in here. An answer
-    /// too wide to resolve is the caller's geometry rather than this kernel's
-    /// arithmetic, so it travels as itself; §87 has the argument.
+    /// [`Invalid::DynamicRangeTooWide`] never arrives wrapped in here, because
+    /// the sweep of the throwaway model does not ask the coordinate range —
+    /// twelve of `Model::validate`'s thirteen checks, and that is the
+    /// thirteenth. A fuse asks it once, in `Assembly::check_dynamic_range` and
+    /// behind a guard, so that a caller whose own solids sit further apart than
+    /// `f64` can resolve still gets the answer the arithmetic reached; §87.3 has
+    /// the argument. Everything else the sweep refuses is wrapped in here, with
+    /// no list of exceptions to keep honest.
     #[error("this kernel built an answer that does not validate, and wrote nothing: {broken}")]
     TheFuseWroteABrokenAnswer {
         /// What the sweep of the throwaway model refused the answer for.

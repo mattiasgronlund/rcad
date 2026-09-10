@@ -20057,9 +20057,10 @@ why those rows say "until", not "never".
 > does `Assembly::commit` now. `Assembly::write_into` reads nothing out of the
 > model it writes into and names no entity that was already there, which is what
 > makes a second call available; §87.5's second test demonstrates that the two
-> writes agree rather than arguing it. Costed at 45.1 µs on a 12-face answer and
-> 84.6 µs on a 23-face one (§87.7), not at the 51 ms this paragraph budgeted
-> against. The five `add_*` rows still say "until" and §87.8 says why.
+> writes agree rather than arguing it. Costed at 37.1 µs on a 12-face flat
+> answer and 58.0 µs on an 18-face one (§87.7), not at the 51 ms this paragraph
+> budgeted against. The five `add_*` rows still say "until", and §87.8 now has a
+> measured number for what converting them would cost rather than a proxy.
 
 `place_solid` is the one row where the answer is a settled panic. It overwrites
 `used.loc` on every shell of an existing solid before checking anything
@@ -20155,10 +20156,12 @@ never touched, and the check that actually went in is local for that reason
 
 > **Amended 2026-09-10, §87.** Built, and "nobody has measured the copy" is now
 > false twice over. There is no copy — the fuse calls `write_into` a second time
-> — and it is measured: 45.1 µs on a 12-face answer against a fuse of 1.477 ms,
-> 84.6 µs on a 23-face answer against 31.52 ms, the sweep half of it linear at
-> 3.21 µs a face (§87.7). A broken answer is `Error::TheFuseWroteABrokenAnswer`
-> and the caller's model is untouched. The three items below this one all stand.
+> — and it is measured: 37.1 µs on a 12-face answer against a fuse of 1.45 ms,
+> 58.0 µs on an 18-face answer against 4.75 ms, about 3.2 µs a face on a flat
+> answer and four times that on a curved one (§87.7). A broken answer is
+> `Error::TheFuseWroteABrokenAnswer` and the caller's model is untouched. Of the
+> three items below this one, the fourth-listed `add_extrusion` figure is now
+> measured rather than a proxy; the other two stand.
 
 **Whether `place_solid` should roll back with the inverse isometry.** It can:
 `movement` is invertible. Whether an operation that discovers a broken solid
@@ -20177,6 +20180,16 @@ opinion about, and `Invalid::DynamicRangeTooWide` is where that opinion would go
 measured on a synthetic loop of 2 000 extrusions. Whether it matters is a
 question for the importer, and §13's rule says the answer waits for the importer
 to exist rather than being guessed here.
+
+> **Amended 2026-09-10, §87.** The +7.9% was never a measurement of this shape
+> and is withdrawn. What a throwaway-and-write-twice `add_extrusion` would
+> actually cost is **+640%**: a 6-face box takes 2.2 µs to build and the
+> rehearsal — a fresh `Model`, the same build again, and the twelve-check sweep
+> — adds 14.1 µs (§87.7's second table). The proxy was out by a factor of
+> eighty. The rest of this item stands unchanged: there is still no consumer to
+> weigh it against, and §13 still says the importer decides. What has changed is
+> that the trade is now known to be a bad one rather than assumed to be a cheap
+> one.
 
 ---
 
@@ -23444,17 +23457,23 @@ at by measurement rather than by merging §66's own words.
 
 > **Amended 2026-09-10, §87.** `Model::check_what_was_just_written` is deleted.
 > §87 has the fuse build its answer in a throwaway model and sweep *that* with
-> the whole of `Model::validate`, which left this function with one caller: its
-> own unit test.
+> twelve of `Model::validate`'s thirteen checks, which left this function with
+> one caller: its own unit test.
 >
 > **§82.4's argument is moot, not wrong.** It argued that eleven of the sweep's
 > thirteen checks asked of the written entities ask the same questions as
 > thirteen asked of the whole model, and that argument holds. A throwaway model
 > holding only the answer simply *is* the set of entities §82.4 argued about, so
-> the whole sweep of it asks those questions without anything being cut by hand
-> — and the two that were cut come back, each for its own reason (§87.6).
-> §82.5's objection to the coordinate range does not apply to a model that holds
-> nothing but the answer; §87.3 handles the one case where it still refuses.
+> a sweep of it asks those questions without anything being cut by hand — and
+> `check_keys_resolve`, one of the two §82 cut, comes back for free (§87.6).
+>
+> **§82.5's objection to the coordinate range survives, and §87 nearly lost
+> it.** §87's first cut swept the throwaway with the whole of `Model::validate`,
+> reasoning that a fold over a model holding only the answer is not a fold over
+> the caller's other solids. True, and beside the point: the fuse has already
+> decided, in `the_inputs_fit_in_f64`, not to ask the answer's range when the
+> caller's inputs were too wide to resolve, and the fold asks it anyway. Two
+> passing fuses started refusing. §87.3.
 >
 > §82.7's measurements stand and are what §87.7 is quoted against. What §82
 > chose and §87 changes is the *other* half — §82 put the check in and left the
@@ -24612,15 +24631,23 @@ finds all of them.
 ## 87. The fuse builds its answer twice, recorded 2026-09-10
 
 §66.7's first item, closed. `Assembly::commit` builds the whole answer in a
-throwaway `Model` of its own, sweeps that with the whole of `Model::validate`,
-and writes into the caller's model only if the sweep is clean. A broken answer
-is now `Error::TheFuseWroteABrokenAnswer` and the caller's model is
-byte-identical to what it was.
+throwaway `Model` of its own, sweeps that with **twelve of `Model::validate`'s
+thirteen checks**, and writes into the caller's model only if the sweep is
+clean. A broken answer is now `Error::TheFuseWroteABrokenAnswer` and the
+caller's model is byte-identical to what it was.
 
 The shape is `SolidBuilder::build`'s, which §66.4's table already named as the
 one row that was right. Nothing here is new engineering; what took the work was
 deciding which of the sweep's questions the throwaway should be allowed to ask,
 and who is to blame for each answer.
+
+**Twelve and not thirteen, and the first cut of this unit got that wrong.** It
+swept the throwaway with the whole of `Model::validate`, which ends in a fold of
+the coordinate range over everything in the model. Over a model holding only the
+answer that fold *is* the answer's own range — which is exactly the question
+`Assembly::check_dynamic_range` is kept behind a guard so as not to ask. §87.3
+is that correction; it used to say the sweep asked the question and let the
+answer through unwrapped, and it now says the sweep does not ask.
 
 **It also deletes `Model::check_what_was_just_written`**, which §82 had built
 five days earlier. That is not a reversal of §82 and §87.6 says why: §82 cut
@@ -24655,16 +24682,23 @@ away.
 ### 87.2 Thirteen decisions, in the order they bite
 
 1. `commit` builds into `Model::new(model.scale())`, tags that throwaway, sweeps
-   it with `Model::validate`, and only then calls `write_into` a second time
-   into the caller's model.
+   it with `Model::check_everything_but_the_coordinate_range`, and only then
+   calls `write_into` a second time into the caller's model.
 2. **Write twice.** Not a copy and not a graft. `Assembly::write_into` is a pure
    function of `&self`, the lumps and the runs: it reads nothing out of the model
    it writes into and names no entity that was already there. That is what makes
    a second call available, and it is the same reason `SolidBuilder::build`
    calls its own `write_into` twice rather than copying.
-3. The throwaway is checked with the **whole** `Model::validate`, not with a
-   local subset. It holds the answer and nothing else, so a whole-model sweep of
-   it is already local — and it gets back the two checks the local one left out.
+3. The throwaway is checked with **twelve of the sweep's thirteen** checks, not
+   with §82's hand-cut local subset. It holds the answer and nothing else, so a
+   whole-model sweep of it is already local — and it gets back the keys-resolve
+   pass, which is one of the two the local one left out. The other, the
+   coordinate range, is left out here too and for a different reason: §87.3.
+   The check is **skipped, not filtered**. `Model::validate` returns on its first
+   finding, so dropping a `DynamicRangeTooWide` out of what it returned would let
+   a range failure mask a real one — the answer would come back `Ok` with a
+   broken shape in it. `Model::check_everything_but_the_coordinate_range` is
+   twelve calls that never reach the thirteenth.
 4. `commit` returns `Result<Written>`. It no longer panics on a broken answer in
    **either** build. There is no `cfg!(debug_assertions)` split; §4.1's
    two-door wording was written when the check did not run in release at all.
@@ -24672,7 +24706,13 @@ away.
    `Invalid` the sweep produced. `Error::Invalid` already means "your description
    was bad" where `SolidBuilder::build` returns it, and overloading it would make
    "we have a bug" and "you gave us a bad shape" the same value.
-6. **The blame is not blanket** — §87.3.
+6. **The blame is blanket**: every `Invalid` the sweep finds is wrapped. It was
+   not, in the first cut — `Assembly::whose_fault_a_swept_answer_is` let
+   `Invalid::DynamicRangeTooWide` past as itself, because the sweep asking the
+   range question meant a caller's own too-wide geometry could come back that
+   way. With the question gone from the sweep there was nothing left to except,
+   and the function is deleted. §87.3 walks the other twenty-four `Invalid`
+   variants and says why none of them wants excepting.
 7. `commit` takes a `&mut ProvenanceLog` so the throwaway sweep's records reach
    the caller's log, drained through a local log the way `SolidBuilder::build`
    drains `mine` into `log`.
@@ -24693,38 +24733,79 @@ away.
 13. `build.rs`'s five `add_*` builders keep their post-write panic. They are the
     same change and §66.4's "until" still applies to them; §87.8.
 
-### 87.3 The one refusal that is not this kernel's fault
+### 87.3 The one question the throwaway sweep must not ask
 
-`Invalid::DynamicRangeTooWide` out of the throwaway sweep travels as itself and
-is **not** wrapped as a kernel bug.
+**The thirteenth check is the model-wide coordinate range, and the throwaway
+sweep leaves it out.** `Model::check_everything_but_the_coordinate_range` is
+`Model::validate`'s first twelve calls; `validate` is now that, and then
+`check_dynamic_range`.
 
 `Assembly::check_dynamic_range` asks the answer's own range before either write,
-but only behind `if the_inputs_fit_in_f64(self, arguments, tools)?`. When the
-inputs do not fit `f64` that check is skipped — so for exactly those inputs the
-throwaway sweep is the first thing to see a too-wide answer. A too-wide answer
-out of too-wide inputs is where the caller's solids sit, not arithmetic gone
-wrong here, and `Error::TheFuseWroteABrokenAnswer` would blame the fuse for a
-model it was handed. That is §66.3's rule, arriving at a new site.
+but only behind `if the_inputs_fit_in_f64(self, arguments, tools)?`
+(`crates/rcad-topo/src/fuse/mod.rs`). **That guard is the whole point**: a fuse
+is answerable for what it builds, not for what it was handed, so when the
+caller's own solids are already further apart than `f64` can resolve, the
+question is not asked at all and the fuse hands back the answer the arithmetic
+reached. A whole-model fold over a model holding only the answer *is* the
+answer's own range, so putting `Model::validate` on the throwaway put the
+question straight back and made the guard do nothing.
 
-Everything else the sweep refuses is a shape this crate built and cannot stand
-behind. Refusals that are not about the model at all — `Error::Undecidable`
-where a predicate gave up on the answer, `Error::Geometry` where the range could
-not be measured — travel unchanged, because "the kernel wrote something broken"
-is not what they say.
+**Two fuses stopped being answered, and this is how they read.** Both are tests
+that pass on `main`, both fuse inputs that already fail `the_inputs_fit_in_f64`,
+and the first cut of this unit refused both:
 
-**This changes what two existing tests measure, and both are outside the files
-this unit owns.** `a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses`
-fuses a frame at `2^40` and at `2^50` with a copy of itself, and
-`a_pair_of_towers_a_hundred_powers_of_ten_shorter_is_settled_and_measured`
-fuses towers a hundred powers of ten apart. Both have inputs that already fail
-`the_inputs_fit_in_f64`, both used to answer `Ok` because the local check left
-the range out, and both now refuse:
-`Invalid(DynamicRangeTooWide { ratio: 1.099511627779e12 })` and
-`Invalid(DynamicRangeTooWide { ratio: 2e200 })`. The first test's own doc
-already said "past about `2^37` the model is outside
-`DynamicRange::LARGEST_SUPPORTED_RATIO` and a validate boundary says so"; what
-changes is that the fuse now says so too, at the moment it builds the answer,
-instead of leaving it for the caller's next `Model::validate`.
+```
+a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses
+  the model is broken: coordinates span a range of 1.099511627779e12,
+  which is too wide to compute in
+a_pair_of_towers_a_hundred_powers_of_ten_shorter_is_settled_and_measured
+  two overlapping towers are a union f64 can prove:
+  Invalid(DynamicRangeTooWide { ratio: 2e200 })
+```
+
+**Those are gaps and not limits**, which is the §16.10 distinction and the
+reason this is a bug rather than a tightening. The answer exists in both cases
+and the arithmetic reached it exactly: the second test's own doc calls its pair
+one "which a certified fuse settles and used to refuse", and the first's says
+that being outside `DynamicRange::LARGEST_SUPPORTED_RATIO` "is a separate
+statement from the volume, which stays exact". A frame at `2^40` united with a
+copy of itself is its own volume to the last bit; the range says the *model* is
+uncomfortable to compute in, which is a true statement about where the caller
+put their solids and not a reason to withhold a proved answer. Deferring them
+would have undone deliberate earlier work — the guard was put there for exactly
+these two.
+
+Contrast the range question `Assembly::check_dynamic_range` *does* ask, which is
+a limit and is documented as one: the sliver where two nearly-flush faces meet
+is a feature neither input had, its ratio is a length over a length so no
+scaling helps, and there is no answer to hand back.
+
+**With the question gone, the blame is blanket.** Every `Invalid` the sweep
+returns becomes `Error::TheFuseWroteABrokenAnswer`, and
+`Assembly::whose_fault_a_swept_answer_is` is deleted. Walking the other
+twenty-four `Invalid` variants for one that is the caller's fault rather than
+this crate's finds none, and the reason is structural rather than a list: the
+throwaway is `Model::new` and then one `Assembly::write_into`, so every entity
+the twelve checks look at was put there by this crate on this call. A dangling
+key, a non-finite corner, a wire that does not close, a shell enclosing negative
+space, an approximation tag out of order — each names something `write_into` or
+`tag_everything_it_built` wrote. `DynamicRangeTooWide` was the exception only
+because it was never about an entity: it folded over the model as a whole, and
+"as a whole" is where the caller's placement leaks in. Nothing else in the
+sweep folds.
+
+`Invalid::EdgeHasNoLength` is the one worth naming, because it is the closest
+thing to a caller's-geometry finding left — two corners of the answer with
+different names landing on one `f64` triple, which is what happens when the
+inputs are far enough apart. It is wrapped, and that is not a change: §82's
+hand-cut local check already ran `check_edges`, so this variant was already the
+fuse's to answer for.
+
+Refusals that are not about the model at all travel unchanged: `Error::Undecidable`
+where a predicate gave up on the answer, because "the kernel wrote something
+broken" is not what that says. `Error::Geometry` from a range that could not be
+measured no longer comes out of the sweep at all — it was the range check's, and
+the range check is not run there.
 
 ### 87.4 What is still a panic, and why the operation is not wholly atomic
 
@@ -24743,7 +24824,7 @@ whole-operation atomicity would be the kind of sentence §16.10 exists to stop:
 the claim is *nearly* true, and the honest form names the two cases where it is
 not rather than rounding them off.
 
-### 87.5 The two tests, and what each demonstrates
+### 87.5 The tests, and what each demonstrates
 
 `an_answer_whose_wire_does_not_close_is_refused_and_nothing_is_written` builds
 an `Assembly` by hand — a triangle whose second face walks all three edges
@@ -24761,6 +24842,15 @@ reports the seven arena lengths as `[11, 15, 30, 8, 8, 2, 2]` against
 wires, two faces, shell and solid of the broken answer, left behind in a model
 that started as one plain cube.
 
+**Two more tests, neither of them new, are what the §87.3 correction is checked
+against**: `a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses`
+and `a_pair_of_towers_a_hundred_powers_of_ten_shorter_is_settled_and_measured`.
+Passing *untouched* is the whole of what they demonstrate — they measure fuses
+of inputs too wide for `f64`, they passed before §87, the first cut of §87
+refused both, and the fix is judged by their going green again with not a line
+edited. A test that has to be adjusted to accept a new refusal is not evidence
+that the refusal was right.
+
 `the_same_answer_is_written_into_an_empty_model_and_into_a_busy_one` is the
 demonstration decision 2's claim needs. CLAUDE.md's §16.10 rule says a claim
 that something cannot happen needs a demonstration and not a paragraph, and
@@ -24775,19 +24865,24 @@ compared by position within `Written`, since the slots cannot match.
 written entities asks the same questions as asking all thirteen of the whole
 model, and it was a good argument. §87 does not contradict it. It makes it
 **moot**: a throwaway model holding only the answer *is* the set of entities
-§82.4 argued about, so the whole sweep of it asks exactly the questions the
-hand-cut eleven asked, plus the two that were cut.
+§82.4 argued about, so a sweep of it asks exactly the questions the hand-cut
+eleven asked, with no hand-cutting.
 
-The two that were cut come back for free and for the right reason:
+One of the two that were cut comes back for free and for the right reason:
 
-- `check_dynamic_range` was cut because it folds over every solid in the model
-  and would blame a fuse for where somebody else's solid sits. Folded over a
-  model holding only the answer it *is* the answer's own range, so §82.5's
-  objection does not apply to it — and §87.3 handles the one case where it
-  refuses.
 - `check_keys_resolve` was cut because there was nothing in a just-written
   subgraph for it to find. That is still true, and running it costs a pass over
   arenas that hold only the answer.
+
+`check_dynamic_range` is the one that does **not** come back, and the first cut
+of this unit brought it back by mistake. §82.5 cut it because folding over every
+solid in the model blames a fuse for where somebody else's solid sits, and it is
+true that folded over a model holding only the answer it *is* the answer's own
+range — but the answer's own range is a question the fuse has already decided
+not to ask for these inputs. §87.3.
+
+So the count is twelve, not eleven and not thirteen: §82's eleven, plus
+`check_keys_resolve`.
 
 What §82 built therefore had one caller left after this change — its own unit
 test — which made it dead in everything that ships. `check_approximation_ordering_of`
@@ -24803,40 +24898,69 @@ write instead, which is where it guards something.
 
 ### 87.7 What it costs, measured
 
-Release, on this machine, best over every call in the run after warmups. The
-harness was a throwaway integration test that timed `Model::fuse` end to end,
-with a temporary probe inside `commit` timing the throwaway block and the sweep
-within it, run as:
+**Re-measured after the twelve-check correction; these numbers replace the
+first cut's.** Release, on this machine, best of 50 calls after 10 warmups, and
+reproduced over four runs — the percentages held to two figures every time. The
+harness was a temporary `#[ignore]`d unit test in `fuse/assemble.rs` that timed
+`Model::fuse` end to end on a freshly built model, and separately timed
+`Model::new` + `write_into` + `tag_everything_it_built` +
+`check_everything_but_the_coordinate_range` over an `Assembly` built once —
+which is exactly the block `commit` added. It was deleted after the run. It was
+run as:
 
 ```
-mise exec -- cargo nextest run --release -p rcad-topo \
-    -E 'test(measure_the_fuse)' --no-capture
+mise exec -- just t --no-capture --release --run-ignored all \
+    temporary_measurement_of_what_the_throwaway_costs
 ```
 
-| Answer | Whole fuse | Throwaway build + tag + sweep | Sweep alone |
+| Answer | Whole fuse | Throwaway build + tag + sweep | Per face |
 |---|---|---|---|
-| 12 faces (two cubes, one moved along the diagonal) | 1.477 ms | 45.1 µs, **+3.06%** | 38.5 µs |
-| 23 faces (two 10-step staircase prisms, one raised) | 31.52 ms | 84.6 µs, **+0.27%** | 73.9 µs |
+| 12 flat faces (two cubes, one moved along the diagonal) | 1.45 ms | 37.1 µs, **+2.6%** | 3 093 ns |
+| 18 flat faces (three cubes, two moved) | 4.75 ms | 58.0 µs, **+1.2%** | 3 221 ns |
+| 10 faces, two of them curved (a cube and a round bar through it) | 0.873 ms | 128.8 µs, **+17.3%** | 12 876 ns |
 
-**The sweep is linear in the answer and the constant is 3.21 µs a face**, which
-is what the two rows agree on to three figures: 38 544 ns over 12 faces and
-73 871 ns over 23 both come out at 3 212 ns. The build-and-tag half is the rest,
-about 0.5 µs a face.
+**The per-face constant is about 3.2 µs on a flat answer and four times that on
+a curved one.** The first cut's table had only flat answers in it and read the
+agreement between two of them as the sweep being linear in faces full stop; the
+third row says it is not. A curved solid's volume check meshes it
+(`SolidView::mesh`, §66.3's "coarsest mesh there is"), and meshing is where the
+time goes — 10 faces cost more than 18 flat ones. An answer's face count is not
+enough to price this: its curvature is the other half.
+
+Flat-answer numbers are otherwise a shade cheaper than the first cut's, and one
+check fewer is why: 37.1 µs against 45.1 µs on the same 12-face shape.
 
 Two things this table does not say, and neither should be read into it. It is
-**pure addition** — measured against a `commit` with the throwaway block taken
-out and nothing put back, so it does not net off `check_what_was_just_written`,
-which this unit deleted and which asked eleven of the same thirteen questions of
-the same entities. The real cost of §87 against the code it replaced is
-therefore smaller than these numbers, and by an amount nobody has measured. And
-the percentages are a share of *this* fuse, whose cost grows much faster than
-its answer does: the 23-face row's fuse is 21× the 12-face row's while its
-answer is 1.9×. Quote the microseconds a face; the percentage is about which
-shape you picked.
+**pure addition** — it does not net off `check_what_was_just_written`, which
+this unit deleted and which asked eleven of the same questions of the same
+entities. The real cost of §87 against the code it replaced is therefore smaller
+than these numbers, and by an amount nobody has measured. And the percentages are
+a share of *this* fuse, whose cost grows much faster than its answer does: the
+18-face row's fuse is 3.3× the 12-face row's while its answer is 1.5×. Quote the
+microseconds a face; the percentage is about which shape you picked.
 
-Subtraction on the whole fuse was tried first and abandoned: two runs of the
-same shipped code differed by 1.4 ms on the 23-face shape, which is fourteen
-times the effect being measured. That is why the probe went inside `commit`.
+**And this is what the same shape would cost `add_extrusion`**, which §66.7's
+fourth item wanted a real figure for instead of §66.2's +7.9% proxy. Measured
+the same way, from the same harness, with no change to `build.rs` at all: the
+rehearsal a throwaway `add_extrusion` would add is `Model::new` + the build +
+the twelve-check sweep, and all three are callable from outside.
+
+| Operation | As it is | What a rehearsal would add |
+|---|---|---|
+| `add_extrusion`, a 4 × 4 × 4 box, 6 faces | 2.2 µs | 14.1 µs, **+640%** |
+
+**Six hundred and forty per cent, not eight.** The proxy was out by a factor of
+eighty, and in the direction that matters. The reason is the one the fuse rows
+already show from the other end: the sweep's cost is arithmetic over the answer,
+and it does not care how cheap the operation that produced the answer was. A
+fuse pays 37 µs against 1.45 ms; an extrusion pays 14 µs against 2.2 µs. §66.4's
+"Panic, until it gets a scratch" rows for the five `add_*` builders now have a
+number to weigh, and it is a much worse trade than the roadmap assumed.
+
+Subtraction on the whole fuse was tried by the first cut and abandoned: two runs
+of the same shipped code differed by 1.4 ms on a 23-face shape, which is fourteen
+times the effect being measured. Timing the block directly, as here, is why these
+rows reproduce to two figures.
 
 ### 87.8 What this closes, and what it leaves
 
@@ -24846,16 +24970,18 @@ amended in place to say so.
 
 **Not closed: the five `add_*` builders in `build.rs`.** They are the same
 change and the same shape, and §66.4's rows still say "Panic, until it gets a
-scratch". The reason they wait is §66.2's +7.9% on `add_extrusion`, measured on
-a synthetic loop of 2 000 extrusions — a fuse pays this cost against
-milliseconds and an extrusion pays it against microseconds. §13's rule stands:
-the consumer that would weigh that trade is the importer, and it does not exist
-yet.
+scratch". The reason they wait is now a measured **+640%** on `add_extrusion`
+rather than §66.2's +7.9% proxy — §87.7's second table, which closes §66.7's
+fourth item. A fuse pays this cost against milliseconds and an extrusion pays it
+against microseconds, and the gap is two orders of magnitude wider than the
+proxy said. §13's rule stands: the consumer that would weigh that trade is the
+importer, and it does not exist yet.
 
 **Not closed: `place_solid`.** It writes in place and has nothing to write into
 a throwaway, so §66.7's second item — whether it should roll back with the
 inverse isometry — is untouched by this and stays open.
 
 **Not closed: whether "valid" should depend on a policy at all.** §66.7's third
-item. §87.3 makes it slightly sharper by putting `Invalid::DynamicRangeTooWide`
-on a new path, but it does not answer it.
+item. §87.3 makes it slightly sharper by settling that the fuse asks the range
+question in exactly one place, under the caller's policy, but it does not answer
+it.
