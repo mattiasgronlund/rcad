@@ -112,6 +112,11 @@ mod tests {
     /// key loses eight bytes, `slot_in`'s comparison becomes true whichever
     /// models the two ids came from, and nothing in the ordinary suite notices
     /// (decisions.md §84).
+    ///
+    /// **The second line is the guard; the first only draws the shape.** A
+    /// zero-sized field has alignment one, so it can never add padding — with
+    /// the id back to `struct ModelId;` the first line reads 8 == 8 + 0 and
+    /// passes just as happily as it reads 16 == 8 + 8 today.
     #[test]
     fn a_key_is_wide_enough_to_hold_a_model_number() {
         assert_eq!(
