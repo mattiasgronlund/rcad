@@ -9,10 +9,11 @@
 //!
 //! `ModelId` in `crates/rcad-topo/src/key.rs` is the case that asked for this
 //! file: a counter in a debug build and a zero-sized type in release, so the
-//! wrong-model comparison in `slot_in` is always true in release and a key from
-//! another live model resolves to whatever now sits in that slot. A test for
+//! wrong-model comparison in `slot_in` was always true in release and a key from
+//! another live model resolved to whatever now sat in that slot. A test for
 //! that written anywhere else in this crate would pass under `just gate` for
-//! the wrong reason.
+//! the wrong reason. The two tests below are that test, and the id is a real
+//! counter in every build now (`docs/decisions.md` §82.10).
 //!
 //! # Adding a test here
 //!
@@ -35,6 +36,19 @@
 //! pass.
 #![cfg(not(debug_assertions))]
 
+use rcad_geom::{Isometry, Scale, Vector};
+use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
+
+/// One millimetre cube, and a block a thousand times its size.
+///
+/// Both are the first solid their own model holds, so both keys name slot zero.
+/// That is what makes the wrong answer a *plausible* one rather than a crash:
+/// the small cube's key resolves, against the other model, to a solid that is
+/// really there.
+const SMALL: f64 = 1.0;
+const LARGE: f64 = 10.0;
+
 /// The arm's own selftest: this file must be built with the assertions off.
 ///
 /// Redundant with the file-level `cfg` on the day it is written, and that is
@@ -49,4 +63,57 @@ fn these_tests_are_built_with_the_debug_assertions_off() {
         "this file ran with debug_assertions on, so it proves nothing about a \
          release build — see the recipe check-release-build"
     );
+}
+
+/// Reading a solid out of a model with another model's key panics.
+///
+/// Both keys name slot zero of their own model, so before `ModelId` became a
+/// real number in every build this call did not fail: it handed back the ten
+/// millimetre block, volume 1000, when the caller had asked about a one
+/// millimetre cube, volume 1. Nothing said so.
+#[test]
+#[should_panic(expected = "this solid key was made by a different model")]
+fn a_solid_key_from_another_model_names_a_stranger_and_must_not_be_taken() {
+    let (_mine, cube) = a_model_holding_one_block(SMALL);
+    let (theirs, _block) = a_model_holding_one_block(LARGE);
+
+    let _ = theirs.solid(cube);
+}
+
+/// A fuse handed another model's solid panics, rather than answering `Ok`.
+///
+/// This is the one that mattered. `fuse` takes its arguments by key, so the
+/// zero-sized id let a caller ask for the union of a stranger's cube with this
+/// model's block and get **`Ok`** back — the block unioned with itself, volume
+/// 1000 where the caller's question was about a cube of volume 1. A wrong
+/// answer wearing `Ok` is the shape `CLAUDE.md`'s "crash > corrupt" is about.
+#[test]
+#[should_panic(expected = "this solid key was made by a different model")]
+fn a_fuse_given_another_models_solid_must_not_answer_ok() {
+    let (_mine, cube) = a_model_holding_one_block(SMALL);
+    let (mut theirs, block) = a_model_holding_one_block(LARGE);
+
+    let _ = theirs.fuse(
+        &[cube],
+        &[block],
+        Rule::Union,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+}
+
+/// A model of its own, holding one square block `side` millimetres on a side.
+fn a_model_holding_one_block(side: f64) -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let square = ProfileBuilder::new(vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+    let block = model
+        .add_extrusion(
+            &square,
+            side,
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a finite placement"),
+        )
+        .expect("building a box needs no decision");
+    (model, block)
 }

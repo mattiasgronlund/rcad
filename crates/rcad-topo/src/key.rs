@@ -15,32 +15,33 @@ slotmap::new_key_type! {
 /// reaching a live slot in this one, and that resolves to the wrong entity with
 /// no crash (decisions.md §1.3).
 ///
-/// In release builds this is a zero-sized type, so keys pay nothing for it and
-/// the comparison folds away.
-#[cfg(debug_assertions)]
+/// # It is a real number in every build, and it used to not be
+///
+/// This was `struct ModelId;` — a zero-sized type, one value, every comparison
+/// true — whenever `debug_assertions` were off, on the grounds that keys should
+/// pay nothing for a check nobody had priced. The price is now measured and it
+/// is not there: nothing a [`Model`](crate::Model) stores holds a key at all.
+/// Every arena payload points at its neighbours by `*Slot`, so growing the id
+/// grows the model by zero bytes; only keys in flight and the transient maps a
+/// mesh or a fuse builds get wider. On the biggest model in the STEP corpus
+/// that reads — 20 312 entities out of `PinHeader_2x39_P2.54mm_Horizontal.step`
+/// — parse, import, validate and mesh moved inside their own run-to-run spread
+/// and peak resident memory moved 0.1%.
+///
+/// What the zero-sized version bought instead was a release build in which
+/// `slot_in` waved every foreign key through: `other.solid(mine)` returned the
+/// wrong solid and `other.fuse(&[mine], …)` returned `Ok` with the wrong
+/// answer, both silently, both against the doc comment below saying it panics
+/// (decisions.md §82.10).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct ModelId(u64);
 
-#[cfg(debug_assertions)]
 impl ModelId {
     pub(crate) fn next() -> Self {
         use core::sync::atomic::{AtomicU64, Ordering};
 
         static NEXT: AtomicU64 = AtomicU64::new(1);
         Self(NEXT.fetch_add(1, Ordering::Relaxed))
-    }
-}
-
-/// The release-build stand-in for [`ModelId`]: every model has the same one, so
-/// the check costs nothing and proves nothing.
-#[cfg(not(debug_assertions))]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ModelId;
-
-#[cfg(not(debug_assertions))]
-impl ModelId {
-    pub(crate) fn next() -> Self {
-        Self
     }
 }
 
@@ -52,7 +53,7 @@ macro_rules! define_key {
         /// something that wants an edge is a compile error rather than a
         /// silent lookup of the wrong thing.
         ///
-        /// In debug builds a key also remembers which model made it. Using it
+        /// A key also remembers which model made it, in every build. Using it
         /// against a different model panics instead of resolving to whatever
         /// now sits in that slot.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
