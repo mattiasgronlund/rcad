@@ -2397,16 +2397,20 @@ fn sides_of(
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cone, Cylinder, EdgeRun, Orientation, Plane, Scale, Sphere, Surface, SurfaceMeet,
-        Torus,
+        Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Scale, Sphere, Surface,
+        SurfaceMeet, Torus,
     };
     use rcad_predicates::{Policy, ProvenanceLog};
 
-    use crate::{DraftStep, Rule, SolidBuilder};
+    use crate::{DraftStep, Invalid, Rule, SolidBuilder};
 
+    use super::super::Scratch;
+    use super::super::select::choose;
     use super::{
-        Corners, MeetPoint, Model, Point, PredicatePoint, Vector, names_of_the_three_surfaces,
-        the_crossing_of_these_runs_straight, the_half_space_both_ends_are_on,
+        Assembly, Corner, Corners, Edge, Error, Face, Lump, MeetPoint, Model, Point,
+        PredicatePoint, Side, Vector, WhichArc, WireStep, Written, assemble,
+        names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
+        the_half_space_both_ends_are_on,
     };
 
     /// A corner that settles on a lower rounding leaves the coordinate it came
@@ -3205,5 +3209,252 @@ mod tests {
             ])
             .expect("a closed skin");
         draft.build(model, policy, log).expect("a round bar")
+    }
+
+    /// A triangle walked forwards and then walked forwards again, which is one
+    /// wire that closes and one that does not.
+    ///
+    /// Every edge is used by two coedges running opposite ways, so the checks
+    /// before the wires have nothing to say; the second face's wire is the one
+    /// thing wrong with the answer.
+    fn a_triangle_whose_other_side_is_walked_the_wrong_way_round() -> Assembly {
+        let up = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal");
+        let corner = |x: f64, y: f64| Corner {
+            point: Point::new(x, y, 0.0),
+            wobble: 0.0,
+            from: None,
+        };
+        let edge = |ends: [usize; 2]| Edge {
+            ends,
+            carried_by: [Surface::Plane(up), Surface::Plane(up.reversed())],
+            arc: WhichArc::TheOnlyOne,
+            from: Vec::new(),
+        };
+        let face = |surface: Plane, forward: bool| Face {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(surface),
+            used: Orientation::Forward,
+            wires: vec![(0..3).map(|edge| Side { edge, forward }).collect()],
+            is_a_whole_closed_surface: false,
+        };
+
+        Assembly {
+            corners: vec![corner(0.0, 0.0), corner(1.0, 0.0), corner(0.0, 1.0)],
+            edges: vec![edge([0, 1]), edge([1, 2]), edge([2, 0])],
+            runs: vec![EdgeRun::Straight, EdgeRun::Straight, EdgeRun::Straight],
+            faces: vec![face(up, true), face(up.reversed(), false)],
+            shells: vec![vec![0, 1]],
+            solids: vec![Lump {
+                outer: 0,
+                voids: Vec::new(),
+            }],
+        }
+    }
+
+    /// How many of each kind of entity a model holds.
+    fn what_is_in_it(model: &Model) -> [usize; 7] {
+        [
+            model.data().vertices.len(),
+            model.data().edges.len(),
+            model.data().coedges.len(),
+            model.data().wires.len(),
+            model.data().faces.len(),
+            model.data().shells.len(),
+            model.data().solids.len(),
+        ]
+    }
+
+    /// A broken answer is refused, and the caller's model does not so much as
+    /// grow a slot.
+    ///
+    /// Before `docs/decisions.md` §87 the answer went straight into the
+    /// caller's arena and was judged afterwards, so this same assembly left
+    /// three corners, three edges, six coedges, two wires, two faces, a shell
+    /// and a solid behind and *then* crashed. Nothing in this crate rolls back,
+    /// so the crash was the only thing standing between the caller and a model
+    /// holding a face whose wire does not close.
+    #[test]
+    fn an_answer_whose_wire_does_not_close_is_refused_and_nothing_is_written() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube of side two");
+        let before = what_is_in_it(&model);
+
+        let refused = a_triangle_whose_other_side_is_walked_the_wrong_way_round().commit(
+            &mut model,
+            None,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        match refused {
+            Err(Error::TheFuseWroteABrokenAnswer { broken }) => assert_eq!(
+                broken,
+                Invalid::WireDoesNotClose { position: 1 },
+                "the second face's wire is what the sweep should have caught"
+            ),
+            Err(other) => panic!("a wire that does not close is a broken answer, and gave {other}"),
+            Ok(_) => panic!("a wire that does not close is not an answer to hand back"),
+        }
+        assert_eq!(
+            what_is_in_it(&model),
+            before,
+            "a refused answer leaves the model exactly as it was"
+        );
+    }
+
+    /// What one write of an answer made, in a form two models can be compared
+    /// by.
+    ///
+    /// Slots are not comparable across models — the second write lands in
+    /// whatever slots the first model had spare — so everything here is said in
+    /// positions within [`Written`], which is the order `write_into` built
+    /// things in.
+    #[derive(Debug, PartialEq)]
+    struct Shape {
+        corners: Vec<Point>,
+        edges: Vec<(usize, usize, EdgeRun)>,
+        coedges: Vec<(usize, Orientation)>,
+        wires: Vec<Vec<Result<usize, usize>>>,
+        faces: Vec<(Surface, Vec<usize>)>,
+        shells: Vec<Vec<(usize, Orientation)>>,
+        solids: Vec<Vec<usize>>,
+    }
+
+    fn shape_of(model: &Model, written: &Written) -> Shape {
+        Shape {
+            corners: written
+                .vertices
+                .iter()
+                .map(|&slot| model.data().vertices[slot].point)
+                .collect(),
+            edges: written
+                .edges
+                .iter()
+                .map(|&slot| {
+                    let edge = &model.data().edges[slot];
+                    (
+                        at(&written.vertices, edge.start),
+                        at(&written.vertices, edge.end),
+                        edge.run.clone(),
+                    )
+                })
+                .collect(),
+            coedges: written
+                .coedges
+                .iter()
+                .map(|&slot| {
+                    let coedge = &model.data().coedges[slot];
+                    (at(&written.edges, coedge.edge), coedge.orientation)
+                })
+                .collect(),
+            wires: written
+                .wires
+                .iter()
+                .map(|&slot| {
+                    model.data().wires[slot]
+                        .steps
+                        .iter()
+                        .map(|&step| match step {
+                            WireStep::Along(coedge) => Ok(at(&written.coedges, coedge)),
+                            WireStep::Pole(vertex) => Err(at(&written.vertices, vertex)),
+                        })
+                        .collect()
+                })
+                .collect(),
+            faces: written
+                .faces
+                .iter()
+                .map(|&slot| {
+                    let face = &model.data().faces[slot];
+                    (
+                        face.surface,
+                        face.wires
+                            .iter()
+                            .map(|&wire| at(&written.wires, wire))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            shells: written
+                .shells
+                .iter()
+                .map(|&slot| {
+                    model.data().shells[slot]
+                        .faces
+                        .iter()
+                        .map(|used| (at(&written.faces, used.face), used.orient))
+                        .collect()
+                })
+                .collect(),
+            solids: written
+                .solids
+                .iter()
+                .map(|&slot| {
+                    model.data().solids[slot]
+                        .shells
+                        .iter()
+                        .map(|used| at(&written.shells, used.shell))
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    /// Which position in the write this slot was, which is the one name for an
+    /// entity that two models can agree on.
+    fn at<K: Copy + PartialEq>(slots: &[K], wanted: K) -> usize {
+        slots
+            .iter()
+            .position(|&slot| slot == wanted)
+            .expect("an answer names only what it wrote")
+    }
+
+    /// The second write writes the same answer as the first.
+    ///
+    /// `Assembly::commit` builds its answer twice — once in a throwaway model
+    /// it sweeps, and once in the caller's — and everything §87 claims rests on
+    /// the two being the same answer. `Assembly::write_into` reads nothing out
+    /// of the model it writes into, which is the argument; this is the
+    /// demonstration CLAUDE.md's §16.10 rule asks for instead of the argument.
+    ///
+    /// The two models here are as unalike as the caller's and the throwaway
+    /// ever are: one is empty, the other already holds both input cubes, so
+    /// every slot the answer lands in differs between them.
+    #[test]
+    fn the_same_answer_is_written_into_an_empty_model_and_into_a_busy_one() {
+        let scale = Scale::millimetres(100.0).expect("100 mm is a working size");
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+
+        let mut busy = Model::new(scale);
+        let one = busy.add_cube(2.0, &policy, &mut log).expect("a cube");
+        let other = busy.add_cube(2.0, &policy, &mut log).expect("a second cube");
+        let along_the_diagonal = Isometry::translation(Vector::new(1.0, 1.0, 1.0))
+            .expect("a whole-number step is a translation");
+        busy.place_solid(other, &along_the_diagonal)
+            .expect("this model made the key");
+
+        let scratch = Scratch::split_both_groups(&mut busy, &[one], &[other], &policy, &mut log)
+            .expect("two overlapping cubes split each other");
+        let chosen =
+            choose(&busy, &scratch, Rule::Union, &policy, &mut log).expect("a union of two cubes");
+        let assembly =
+            assemble(&busy, &scratch, &chosen, &policy, &mut log).expect("an answer to write");
+
+        let mut empty = Model::new(scale);
+        let into_empty = assembly
+            .commit(&mut empty, None, &policy, &mut log)
+            .expect("the answer is sound");
+        let into_busy = assembly
+            .commit(&mut busy, None, &policy, &mut log)
+            .expect("the answer is sound in the model that holds the inputs too");
+
+        assert_eq!(
+            shape_of(&empty, &into_empty),
+            shape_of(&busy, &into_busy),
+            "the two writes wrote different answers"
+        );
     }
 }
