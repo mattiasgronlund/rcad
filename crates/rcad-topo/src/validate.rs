@@ -16,7 +16,6 @@ use rcad_predicates::{
 use slotmap::SecondaryMap;
 
 use crate::builder::the_ends_are_the_whole_of_it;
-use crate::fuse::assemble::Written;
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on, what_trims_this_face};
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot};
@@ -103,142 +102,6 @@ impl Model {
         self.check_shells_and_solids(policy, log)?;
         self.check_approximation_ordering()?;
         self.check_dynamic_range(policy, log)
-    }
-
-    /// The same sweep, asked of what one operation just wrote and of nothing
-    /// else.
-    ///
-    /// This is what [`Assembly::commit`](crate::fuse::assemble::Assembly::commit)
-    /// runs after every fuse, in every build. The full sweep costs a pass over
-    /// the whole model — 1.9 to 2.1 µs a face on three machines, twice over,
-    /// with no fixed cost worth naming. On a model of 5040 faces that is about
-    /// 20 ms against a fuse of two small blocks costing a millisecond or so,
-    /// and on a model the fuse built itself it is under a percent. Quote the
-    /// 20 ms and not a ratio: the same three machines put the fuse itself at
-    /// 0.82, 1.34 and 1.44 ms, which moves "how many times the fuse" from
-    /// fourteen to twenty-five. That is the same cost §66.2 measured at
-    /// 3.4–4.4 µs a face on its own shapes, on planar ones instead. Sweeping
-    /// what did not change is all of that difference.
-    ///
-    /// # Why asking only the new entities asks the same questions
-    ///
-    /// `Assembly::write_into` builds every entity fresh and links them by
-    /// indices into its own local vectors, so **nothing new points at anything
-    /// old and nothing old points at anything new**. The written entities are a
-    /// piece of the arena on their own, closed under "refers to".
-    ///
-    /// That is what makes the sweep's counting loops local despite looking
-    /// global. "Is this face used by exactly one shell" reads a count over every
-    /// shell in the model, but an untouched face's shells cannot have changed,
-    /// and a new face can only be named by a new shell. The same argument covers
-    /// orphans, wires, coedges and shells.
-    ///
-    /// # The two questions this does not ask
-    ///
-    /// [`Model::check_dynamic_range`] is genuinely global: it folds the largest
-    /// coordinate and the smallest feature over every solid in the model, so two
-    /// solids that are each fine can be too far apart to compute between. Asked
-    /// here it would fail a fuse for where somebody else's solid sits — a block
-    /// at `1024` and a step of `2^-30` cut near the origin cross
-    /// [`DynamicRange::LARGEST_SUPPORTED_RATIO`] together and neither does alone, which
-    /// is `a_fuse_is_not_blamed_for_a_solid_it_never_touched.rs`.
-    ///
-    /// The local form of that question is asked, and asked before the write:
-    /// `Assembly::check_dynamic_range` measures the answer's own coordinates
-    /// against the answer's own shortest edge, behind `the_inputs_fit_in_f64`.
-    ///
-    /// The second is [`ModelData::check_keys_resolve`], and it is left out
-    /// because there is nothing here for it to find: every key these checks
-    /// follow was minted by `write_into` microseconds earlier. Where this
-    /// function reaches into an arena it indexes it directly, so a key that did
-    /// not resolve would panic rather than come back as
-    /// [`Invalid::DanglingKey`] — which is the right answer under §4.1 for this
-    /// crate having broken its own arena, and not a question a caller's input
-    /// can raise.
-    ///
-    /// **The tolerances are still the model's.** [`Model::allowed_wobble`] and
-    /// [`Model::what_writing_a_point_down_costs`] both fold over every vertex in
-    /// the model, so a face is judged here by exactly the number the full sweep
-    /// would judge it by. An answer this accepts is one [`Model::validate`]
-    /// accepts, but for the coordinate range.
-    ///
-    /// # Errors
-    ///
-    /// Whatever [`Model::validate`] refuses, less the coordinate range and the
-    /// keys-resolve pass.
-    pub(crate) fn check_what_was_just_written(
-        &self,
-        written: &Written,
-        policy: &Policy,
-        log: &mut ProvenanceLog,
-    ) -> Result<()> {
-        for &slot in &written.vertices {
-            self.check_vertex(slot)?;
-        }
-
-        let largest_coordinate = self.largest_coordinate();
-        let rounding = self.what_writing_a_plane_down_costs(largest_coordinate);
-        let writing_a_point_down = self.what_writing_a_point_down_costs(largest_coordinate);
-        for &slot in &written.edges {
-            self.check_edge(slot, rounding, writing_a_point_down)?;
-        }
-
-        used_exactly_once(
-            "coedge",
-            written.coedges.iter().copied(),
-            written
-                .wires
-                .iter()
-                .flat_map(|&wire| self.data().wires[wire].coedges()),
-        )?;
-
-        for &slot in &written.wires {
-            self.check_wire_closes(&self.data().wires[slot])?;
-        }
-        used_exactly_once(
-            "wire",
-            written.wires.iter().copied(),
-            written
-                .faces
-                .iter()
-                .flat_map(|&face| self.data().faces[face].wires.iter().copied()),
-        )?;
-
-        let allowed_wobble = self.allowed_wobble(largest_coordinate);
-        for &slot in &written.faces {
-            self.check_face(slot, allowed_wobble, writing_a_point_down, policy, log)?;
-        }
-        used_exactly_once(
-            "face",
-            written.faces.iter().copied(),
-            written
-                .shells
-                .iter()
-                .flat_map(|&shell| self.data().shells[shell].faces.iter().map(|used| used.face)),
-        )?;
-
-        for &slot in &written.shells {
-            self.check_no_face_of_this_shell_carries_a_placement(slot)?;
-        }
-        used_exactly_once(
-            "shell",
-            written.shells.iter().copied(),
-            written.solids.iter().flat_map(|&solid| {
-                self.data().solids[solid]
-                    .shells
-                    .iter()
-                    .map(|used| used.shell)
-            }),
-        )?;
-
-        for &slot in &written.solids {
-            self.check_which_side_of_its_trimming_each_curved_face_of_this_solid_lies_on(slot)?;
-            self.check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(slot)?;
-            self.check_no_flat_face_of_this_solid_is_used_reversed(slot)?;
-            self.check_this_solid_encloses_space(slot, policy, log)?;
-        }
-
-        self.check_approximation_ordering_of(written)
     }
 
     /// The shape checks a public method is allowed to take for granted, asked
@@ -815,10 +678,11 @@ impl Model {
     /// down whenever the model did not already validate — which a model with a
     /// turned-round wall does not — so a release fuse of two boxes with one wall
     /// turned round answered and committed a model that did not validate. §66.3
-    /// took both gates away: the touched checks run in every build, and
-    /// [`Model::check_what_was_just_written`] asks this very question of what
-    /// the fuse wrote, in every build. A caller now sees a panic and not a wrong
-    /// answer.
+    /// took both gates away: the touched checks run in every build, and the
+    /// fuse asks this very question of what it wrote, in every build. A caller
+    /// now sees a refusal and not a wrong answer — §87 turned the fuse's own
+    /// panic into [`Error::TheFuseWroteABrokenAnswer`], because the answer is
+    /// built in a throwaway model and never reaches theirs.
     ///
     /// **Not reachable through the public API, and a file cannot carry it in
     /// either — every door this paragraph used to say was open is shut.**
@@ -842,9 +706,10 @@ impl Model {
     /// hardening exercise and not §16.11's kind: no caller reaches it any
     /// more. What still earns the check its place is the paragraph above — a
     /// bug in the fuse itself, not a caller, could still slip a turned-round
-    /// wall past all three doors, and
-    /// [`Model::check_what_was_just_written`] is what turns that into a panic
-    /// rather than a model that commits without validating.
+    /// wall past all three doors, and the sweep
+    /// [`Assembly::commit`](crate::fuse::assemble::Assembly::commit) runs over
+    /// its throwaway answer is what turns that into a refusal rather than a
+    /// model that commits without validating.
     ///
     /// # Why this and not a count over the skin
     ///
@@ -1028,26 +893,6 @@ impl Model {
             self.check_this_edge_claims_no_less_slop_than_its_corners(slot)?;
         }
         for slot in self.data().faces.keys() {
-            self.check_this_face_claims_no_less_slop_than_its_edges(slot)?;
-        }
-        Ok(())
-    }
-
-    /// The same three questions, asked of what one operation wrote.
-    fn check_approximation_ordering_of(&self, written: &Written) -> Result<()> {
-        for &slot in &written.vertices {
-            slop_is_a_length("vertex", self.data().vertices[slot].approximation)?;
-        }
-        for &slot in &written.edges {
-            slop_is_a_length("edge", self.data().edges[slot].approximation)?;
-        }
-        for &slot in &written.faces {
-            slop_is_a_length("face", self.data().faces[slot].approximation)?;
-        }
-        for &slot in &written.edges {
-            self.check_this_edge_claims_no_less_slop_than_its_corners(slot)?;
-        }
-        for &slot in &written.faces {
             self.check_this_face_claims_no_less_slop_than_its_edges(slot)?;
         }
         Ok(())
@@ -1290,8 +1135,7 @@ impl Model {
 ///
 /// The four arenas that sit under something else — coedges under wires, wires
 /// under faces, faces under shells, shells under solids — are all asked this,
-/// and the whole sweep and [`Model::check_what_was_just_written`] ask it with
-/// different pairs of lists rather than with different code.
+/// with a different pair of lists each time rather than with different code.
 fn used_exactly_once<K: slotmap::Key>(
     entity: &'static str,
     held: impl Iterator<Item = K>,
@@ -2565,7 +2409,6 @@ mod tests {
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
-    use super::Written;
     use super::{
         Decision, a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets,
         gradient_of, winding_of, winding_round,
@@ -2573,7 +2416,7 @@ mod tests {
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
     use crate::model::{FaceUse, ShellData, ShellUse, SolidData, VertexData, WireStep};
-    use crate::{Error, FaceView, Invalid, Model, Result, SolidView, WireView};
+    use crate::{Error, FaceView, Invalid, Model, SolidView, WireView};
 
     fn an_empty_model() -> Model {
         Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
@@ -2634,82 +2477,6 @@ mod tests {
             Err(Error::Invalid(broken)) => broken,
             other => panic!("the sweep should have refused this model, and gave {other:?}"),
         }
-    }
-
-    /// Everything in the model, named as though one operation had written it.
-    ///
-    /// The fuse hands [`Model::check_what_was_just_written`] the entities it
-    /// built; here the whole model is a stand-in for that, so what the check
-    /// asks and what the sweep asks can be compared on the same entities.
-    fn as_if_one_operation_wrote_it(model: &Model) -> Written {
-        Written {
-            vertices: model.data().vertices.keys().collect(),
-            edges: model.data().edges.keys().collect(),
-            coedges: model.data().coedges.keys().collect(),
-            wires: model.data().wires.keys().collect(),
-            faces: model.data().faces.keys().collect(),
-            shells: model.data().shells.keys().collect(),
-            solids: model.data().solids.keys().collect(),
-        }
-    }
-
-    fn what_the_commit_check_says(model: &Model, written: &Written) -> Result<()> {
-        model.check_what_was_just_written(written, &Policy::certified(), &mut ProvenanceLog::new())
-    }
-
-    /// The check has teeth: a wall turned round is caught by it and not only by
-    /// the sweep.
-    ///
-    /// This is `a_flat_face_used_reversed_is_caught`'s model asked the question
-    /// `Assembly::commit` asks. Without it nothing here would say the commit
-    /// check refuses anything at all — every other test of it asserts an absence
-    /// of a panic, which an empty check would also pass.
-    #[test]
-    fn the_check_a_commit_makes_catches_a_wall_turned_round() {
-        let mut model = a_cube();
-        let written = as_if_one_operation_wrote_it(&model);
-        what_the_commit_check_says(&model, &written).expect("a plain cube is sound");
-
-        let shell = model
-            .data_mut()
-            .shells
-            .values_mut()
-            .next()
-            .expect("a cube has a shell");
-        shell.faces[0].orient = Orientation::Reversed;
-
-        assert!(matches!(
-            what_the_commit_check_says(&model, &written),
-            Err(Error::Invalid(Invalid::AFlatFaceIsUsedReversed))
-        ));
-    }
-
-    /// And it is local: the same broken wall on a solid the operation did not
-    /// write goes unmentioned.
-    ///
-    /// Which is the whole point of the change — a fuse answers for what it
-    /// wrote, not for what it was handed (`docs/decisions.md` §66.3). The sweep
-    /// refuses this model; the commit check does not.
-    #[test]
-    fn the_check_a_commit_makes_says_nothing_about_a_solid_the_operation_did_not_write() {
-        let mut model = a_cube();
-        let written = as_if_one_operation_wrote_it(&model);
-        model
-            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a second cube, which nothing here claims to have written");
-
-        let broken = model
-            .data()
-            .solids
-            .keys()
-            .nth(1)
-            .expect("the second cube is there");
-        let shell = model.data().solids[broken].shells[0].shell;
-        model.data_mut().shells[shell].faces[0].orient = Orientation::Reversed;
-
-        assert_eq!(refusal(&model), Invalid::AFlatFaceIsUsedReversed);
-        what_the_commit_check_says(&model, &written)
-            .expect("but the first cube is what was written, and it is still sound");
     }
 
     #[test]

@@ -1,13 +1,21 @@
 //! A fuse near the origin, in a model that also holds a block a long way out.
 //!
 //! `Assembly::commit` checks what the fuse wrote, in every build, and it is the
-//! one place a check like that can be *asked the wrong question*: the sweep it
-//! replaced was [`Model::validate`] over the whole model, and one of the
-//! sweep's thirteen checks — the coordinate range — is a fold over every solid
-//! there is. Two solids that are each perfectly fine can be too far apart to
-//! compute between, so a whole-model range check after a write reports where
-//! **somebody else's** solid sits as this fuse's bug (`docs/decisions.md` §66.3,
-//! and `Model::check_what_was_just_written` for what is asked instead).
+//! one place a check like that can be *asked the wrong question*: one of
+//! [`Model::validate`]'s thirteen checks — the coordinate range — is a fold over
+//! every solid there is. Two solids that are each perfectly fine can be too far
+//! apart to compute between, so a whole-model range check after a write reports
+//! where **somebody else's** solid sits as this fuse's bug
+//! (`docs/decisions.md` §66.3).
+//!
+//! **The sweep is a whole `Model::validate` again, and the property still
+//! holds — structurally rather than by a list of exceptions.** §66.3 cut eleven
+//! of the thirteen checks out of the sweep by hand to get locality; §87 gets it
+//! back for free by building the answer in a throwaway model and sweeping
+//! *that*. The far block was never written into the throwaway, so no fold over
+//! it can reach the far block, and there is no list of left-out checks to keep
+//! honest. What this test measures is that structural fact: run it against a
+//! sweep of the caller's model and the fuse refuses.
 //!
 //! **The numbers, and why they are exactly these.**
 //! [`DynamicRange::LARGEST_SUPPORTED_RATIO`] is `1e11`.
@@ -22,7 +30,7 @@
 //!   answer's shortest edge, `2^-30` — the ratio is `1026 * 2^30`, exactly
 //!   `1_101_659_111_424`, about `1.1e12`, which is not.
 //!
-//! So before this change the fuse answered, wrote, and then panicked with
+//! So before §66.3 the fuse answered, wrote, and then panicked with
 //! `Invalid(DynamicRangeTooWide { ratio: 1101659111424.0 })` — for a step it cut
 //! near the origin and a block it never touched.
 //!
@@ -30,9 +38,8 @@
 //! step would pass this test by doing nothing interesting, so the test does not
 //! merely assert that the fuse returns `Ok`: it asserts that the model
 //! afterwards is one [`Model::validate`] *refuses*, by that very name. That is
-//! the whole-model check firing — which is what the commit check would have
-//! done if it still asked the whole-model question — with the fuse having
-//! committed its answer anyway.
+//! the whole-model check firing — which is what a sweep of the caller's model
+//! would have done — with the fuse having committed its answer anyway.
 //!
 //! **`2^-30` is exact**, so `Policy::certified()` decides everything here and a
 //! refusal from the fuse would be a bug rather than the arithmetic giving up.

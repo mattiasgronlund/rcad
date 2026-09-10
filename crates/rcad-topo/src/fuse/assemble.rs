@@ -60,7 +60,7 @@ use rcad_predicates::{
 };
 use smallvec::SmallVec;
 
-use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
+use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse, WireStep};
 use crate::validate::{
     a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
@@ -1317,8 +1317,6 @@ impl Assembly {
             })
             .collect();
 
-        let mut all_coedges: Vec<CoedgeSlot> = Vec::new();
-        let mut all_wires: Vec<WireSlot> = Vec::new();
         let mut faces: Vec<FaceSlot> = Vec::new();
         for face in &self.faces {
             let mut wires: SmallVec<[WireSlot; 1]> = SmallVec::new();
@@ -1330,9 +1328,7 @@ impl Assembly {
                     } else {
                         Orientation::Reversed
                     };
-                    let coedge = model.add_coedge(edges[side.edge], turn);
-                    all_coedges.push(coedge);
-                    steps.push(WireStep::Along(coedge));
+                    steps.push(WireStep::Along(model.add_coedge(edges[side.edge], turn)));
                     // A whole closed surface is cut open along a seam, and a
                     // seam ends where the surface pinches to a point. The
                     // boundary has to go somewhere between arriving at a pole
@@ -1342,9 +1338,7 @@ impl Assembly {
                         steps.push(WireStep::Pole(vertices[self.stops_at(side)]));
                     }
                 }
-                let wire = model.add_wire_of_steps(steps);
-                all_wires.push(wire);
-                wires.push(wire);
+                wires.push(model.add_wire_of_steps(steps));
             }
             faces.push(model.add_face(face.surface, wires));
         }
@@ -1381,10 +1375,7 @@ impl Assembly {
         Written {
             vertices,
             edges,
-            coedges: all_coedges,
-            wires: all_wires,
             faces,
-            shells,
             solids,
         }
     }
@@ -1446,13 +1437,15 @@ impl Assembly {
 const ONE_SHELL_INSIDE_ANOTHER: &str = "one shell inside another";
 
 /// What one call to [`Assembly::write_into`] made, in the order it made it.
+///
+/// The four arenas anybody asks about afterwards. A solid names its shells,
+/// which name their faces, which name their wires, which name their coedges, so
+/// the other three are reachable from `solids` and listing them as well would be
+/// a second copy of what the arena already says.
 pub(crate) struct Written {
     pub(crate) vertices: Vec<VertexSlot>,
     pub(crate) edges: Vec<EdgeSlot>,
-    pub(crate) coedges: Vec<CoedgeSlot>,
-    pub(crate) wires: Vec<WireSlot>,
     pub(crate) faces: Vec<FaceSlot>,
-    pub(crate) shells: Vec<ShellSlot>,
     pub(crate) solids: Vec<SolidSlot>,
 }
 
@@ -3310,16 +3303,22 @@ mod tests {
     /// Slots are not comparable across models — the second write lands in
     /// whatever slots the first model had spare — so everything here is said in
     /// positions within [`Written`], which is the order `write_into` built
-    /// things in.
+    /// things in. Wires and coedges have no list of their own there, so they are
+    /// walked to through the faces that name them.
     #[derive(Debug, PartialEq)]
     struct Shape {
         corners: Vec<Point>,
         edges: Vec<(usize, usize, EdgeRun)>,
-        coedges: Vec<(usize, Orientation)>,
-        wires: Vec<Vec<Result<usize, usize>>>,
-        faces: Vec<(Surface, Vec<usize>)>,
-        shells: Vec<Vec<(usize, Orientation)>>,
-        solids: Vec<Vec<usize>>,
+        faces: Vec<(Surface, Vec<Vec<Step>>)>,
+        solids: Vec<Vec<Vec<(usize, Orientation)>>>,
+    }
+
+    /// One step of one wire: along an edge one way or the other, or standing
+    /// still on a pole.
+    #[derive(Debug, PartialEq)]
+    enum Step {
+        Along(usize, Orientation),
+        Pole(usize),
     }
 
     fn shape_of(model: &Model, written: &Written) -> Shape {
@@ -3341,51 +3340,34 @@ mod tests {
                     )
                 })
                 .collect(),
-            coedges: written
-                .coedges
-                .iter()
-                .map(|&slot| {
-                    let coedge = &model.data().coedges[slot];
-                    (at(&written.edges, coedge.edge), coedge.orientation)
-                })
-                .collect(),
-            wires: written
-                .wires
-                .iter()
-                .map(|&slot| {
-                    model.data().wires[slot]
-                        .steps
-                        .iter()
-                        .map(|&step| match step {
-                            WireStep::Along(coedge) => Ok(at(&written.coedges, coedge)),
-                            WireStep::Pole(vertex) => Err(at(&written.vertices, vertex)),
-                        })
-                        .collect()
-                })
-                .collect(),
             faces: written
                 .faces
                 .iter()
                 .map(|&slot| {
                     let face = &model.data().faces[slot];
-                    (
-                        face.surface,
-                        face.wires
-                            .iter()
-                            .map(|&wire| at(&written.wires, wire))
-                            .collect(),
-                    )
-                })
-                .collect(),
-            shells: written
-                .shells
-                .iter()
-                .map(|&slot| {
-                    model.data().shells[slot]
-                        .faces
+                    let wires = face
+                        .wires
                         .iter()
-                        .map(|used| (at(&written.faces, used.face), used.orient))
-                        .collect()
+                        .map(|&wire| {
+                            model.data().wires[wire]
+                                .steps
+                                .iter()
+                                .map(|&step| match step {
+                                    WireStep::Along(coedge) => {
+                                        let coedge = &model.data().coedges[coedge];
+                                        Step::Along(
+                                            at(&written.edges, coedge.edge),
+                                            coedge.orientation,
+                                        )
+                                    }
+                                    WireStep::Pole(vertex) => {
+                                        Step::Pole(at(&written.vertices, vertex))
+                                    }
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    (face.surface, wires)
                 })
                 .collect(),
             solids: written
@@ -3395,7 +3377,13 @@ mod tests {
                     model.data().solids[slot]
                         .shells
                         .iter()
-                        .map(|used| at(&written.shells, used.shell))
+                        .map(|used| {
+                            model.data().shells[used.shell]
+                                .faces
+                                .iter()
+                                .map(|used| (at(&written.faces, used.face), used.orient))
+                                .collect()
+                        })
                         .collect()
                 })
                 .collect(),
