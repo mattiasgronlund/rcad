@@ -2336,9 +2336,16 @@ fn how_big_this_is(places: &[Point], lengths: &[f64]) -> f64 {
 /// assert, or an answer, and the first two are the same bet twice over — this
 /// runs on a stranger's bytes, and `walk` already hands its caller an `Err`.
 /// So the answer is `None` and the caller names the refusal.
+///
+/// **The ends are rounded outwards**, which plain subtraction does not do:
+/// nearest rounding pulls each end up to half an ulp inwards, and where the
+/// deviation is under half an ulp of the coordinate both ends land back on the
+/// coordinate and the side stops being a side. A crossing a metre across, walked
+/// sixteen million metres from the origin, is inside what this kernel is for
+/// (`docs/decisions.md` §85).
 fn somewhere_within(point: Point, deviation: f64) -> Option<PredicatePoint> {
     let [x, y, z] = point.coordinates();
-    let side = |coordinate: f64| Interval::new(coordinate - deviation, coordinate + deviation).ok();
+    let side = |coordinate: f64| Interval::around(coordinate, deviation).ok();
     Some(PredicatePoint::Constructed([side(x)?, side(y)?, side(z)?]))
 }
 

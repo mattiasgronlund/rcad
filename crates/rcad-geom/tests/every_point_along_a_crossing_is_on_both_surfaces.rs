@@ -945,10 +945,16 @@ fn side_of(surface: &Surface, point: PredicatePoint) -> Decision {
 }
 
 /// The box a computed point is really known to be inside.
+///
+/// [`Interval::around`] rounds the ends outwards. Plain subtraction rounds them
+/// in, and a point far from the origin on a small crossing is where that turns
+/// the box into no box at all.
 fn somewhere_within(point: Point, bound: f64) -> PredicatePoint {
-    PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
-        Interval::new(coordinate - bound, coordinate + bound).expect("a bound is a length")
-    }))
+    PredicatePoint::Constructed(
+        point
+            .coordinates()
+            .map(|coordinate| Interval::around(coordinate, bound).expect("a bound is a length")),
+    )
 }
 
 /// One run, walked as finely as [`HOW_FINE`] asks for a shape this big.

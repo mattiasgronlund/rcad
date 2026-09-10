@@ -245,8 +245,7 @@ fn every_point_of_a_picked_run_is_inside_every_half_space_that_picked_it() {
     let slack = walked.deviation().magnitude();
     for point in walked.points() {
         let at = rcad_predicates::Point::Constructed(point.coordinates().map(|coordinate| {
-            rcad_predicates::Interval::new(coordinate - slack, coordinate + slack)
-                .expect("a bound is a length")
+            rcad_predicates::Interval::around(coordinate, slack).expect("a bound is a length")
         }));
         for surface in [&ball, &meridian] {
             assert_ne!(side_of(surface, at), Decision::Pos, "off {surface:?}");
@@ -398,8 +397,7 @@ fn a_quartic_crossing_is_named_in_two_pieces_and_each_piece_is_walked_right_roun
         let slack = walked.deviation().magnitude();
         for point in walked.points() {
             let at = rcad_predicates::Point::Constructed(point.coordinates().map(|coordinate| {
-                rcad_predicates::Interval::new(coordinate - slack, coordinate + slack)
-                    .expect("a bound is a length")
+                rcad_predicates::Interval::around(coordinate, slack).expect("a bound is a length")
             }));
             for surface in [&ball, &pipe] {
                 assert_ne!(side_of(surface, at), Decision::Pos, "off {surface:?}");

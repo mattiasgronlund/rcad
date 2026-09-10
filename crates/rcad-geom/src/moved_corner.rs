@@ -167,7 +167,7 @@ pub fn where_a_corner_lands_after_moving(
     }
     Ok((
         PredicatePoint::Constructed(moved.coordinates().map(|coordinate| {
-            Interval::new(coordinate - reach, coordinate + reach)
+            Interval::around(coordinate, reach)
                 .expect("a reach is a positive length, so the low end is below the high one")
         })),
         Approximation::new(reach, Cause::ConstructedPoint),
