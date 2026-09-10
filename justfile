@@ -30,7 +30,7 @@ list:
 # one `test` — and this repo already says "gated green", "a gate agent", "the
 # gate worktree". `test-all` would have shipped a false sentence on day one.
 [doc("Everything, in the order CI runs it. ~9 minutes.")]
-gate: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest lint test check-t-selftest deny
+gate: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest lint test check-release-build check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -480,8 +480,8 @@ check-gate-runs-every-check:
     listed=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "21" ]; then \
-        echo "found $n check-* recipes, expected 21"; \
+    if [ "$n" != "22" ]; then \
+        echo "found $n check-* recipes, expected 22"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -1068,6 +1068,32 @@ check-src-selftest:
 test:
     cargo nextest run --workspace
     cargo test --workspace --doc
+
+# The tests that are about what a release build does, built the way it ships.
+#
+# `test` above runs every one of its 1820 tests with `debug_assertions` **on**:
+# `Cargo.toml` has no `[profile.release]` section and `[profile.test]` sets only
+# `opt-level`, so until this recipe nothing that gates had ever built the
+# shipping code path. That is not a speed question — the two profiles measured
+# within 3% of each other on the same workload — it is that every
+# `debug_assert!` and every `cfg!(debug_assertions)` branch is in all 1820 and
+# in none of what a user gets. `ModelId` in `crates/rcad-topo/src/key.rs` is a
+# counter with the assertions on and a zero-sized type without them, which
+# changes what the kernel *answers*, not how fast it answers.
+#
+# Filtered, rather than a release arm over the whole gate. The suite is the
+# slowest thing anybody here waits for and a second copy of it would buy the
+# handful of tests this is about at the price of every other test being run
+# twice. So one crate is built in release, and one test binary in it.
+#
+# `--no-tests fail` is what makes the arm worth trusting. Its tests sit behind
+# `#![cfg(not(debug_assertions))]`, so a run that quietly came up in the dev
+# profile — or a filter that stopped matching — selects nothing, and a run of no
+# tests otherwise reports itself as a pass. `check-ignored` above says the same
+# thing about itself for the same reason.
+[doc("The tests about what a release build does, with the assertions off.")]
+check-release-build:
+    cargo nextest run --cargo-profile release -p rcad-topo --test what_only_a_release_build_does --no-tests fail
 
 # Where the open questions live: one file per session, under the session's own
 # scratchpad and never in the tree. Overridable so the selftest can point at a
