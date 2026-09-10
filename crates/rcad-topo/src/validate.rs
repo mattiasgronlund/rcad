@@ -100,7 +100,7 @@ impl Model {
     /// here that folds over everything in the model at once and so is the only
     /// one whose answer depends on what else is in the model.
     ///
-    /// [`Assembly::commit`](crate::fuse::Assembly::commit) sweeps its throwaway
+    /// `Assembly::commit` sweeps its throwaway
     /// model with this rather than with [`Model::validate`]. The throwaway holds
     /// the fuse's answer and nothing else, so a whole-model sweep of it is local
     /// to what the fuse wrote — but for the range that cuts both ways: a
@@ -114,9 +114,8 @@ impl Model {
     /// # Errors
     ///
     /// Whatever [`Model::validate`] does, less
-    /// [`Invalid::DynamicRangeTooWide`] and less the
-    /// [`Error::Geometry`](crate::Error::Geometry) of a range that could not be
-    /// measured.
+    /// [`Invalid::DynamicRangeTooWide`] and less the [`Error::Geometry`] of a
+    /// range that could not be measured.
     pub(crate) fn check_everything_but_the_coordinate_range(
         &self,
         policy: &Policy,
