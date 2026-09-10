@@ -277,8 +277,8 @@ impl Assembly {
     ///
     /// [`Assembly::write_into`] reads nothing out of the model it writes into and
     /// names no entity that was already there, so writing it twice writes the
-    /// same answer twice; `the_two_writes_agree` measures that rather than
-    /// asserting it (§16.10).
+    /// same answer twice; `the_same_answer_is_written_into_an_empty_model_and_into_a_busy_one`
+    /// measures that rather than asserting it (§16.10).
     ///
     /// **The throwaway model is swept by twelve of `Model::validate`'s thirteen
     /// checks**, [`Model::check_everything_but_the_coordinate_range`]. It holds
