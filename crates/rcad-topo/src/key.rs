@@ -124,6 +124,10 @@ mod tests {
             size_of::<SolidSlot>() + size_of::<ModelId>(),
             "a key is its slot and its model's number, and neither is free"
         );
-        assert_ne!(size_of::<ModelId>(), 0, "a zero-sized id compares equal to every other id");
+        assert_ne!(
+            size_of::<ModelId>(),
+            0,
+            "a zero-sized id compares equal to every other id"
+        );
     }
 }
