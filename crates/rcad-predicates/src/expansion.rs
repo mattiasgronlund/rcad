@@ -143,6 +143,91 @@ pub fn scale_expansion(expansion: &[f64], factor: f64, out: &mut [f64]) -> usize
     used
 }
 
+/// One sweep down the expansion and back up, packing the value into fewer
+/// entries, written into `out`.
+///
+/// Returns how many entries of `out` were used, never more than the input had.
+///
+/// # Why an exact answer still needs this
+///
+/// [`expansion_sum`] and [`scale_expansion`] give back an expansion whose
+/// entries do not overlap, which is all a *sign* needs. It is not enough to make
+/// the expansion a function of the value it stands for: the same number reached
+/// by two routes comes back in two different lists of entries, both correct and
+/// one of them longer and reaching further down the range than the other.
+///
+/// That matters because [`product_is_exact`] is a question about *entries*.
+/// A multiplication refuses as soon as one entry-by-entry product would land in
+/// the subnormals, so a needlessly long expansion refuses multiplications that
+/// the same value written shortly would have taken — and which route produced it
+/// then decides whether an answer that exists can be reached. Asking one pair of
+/// cylinders which shape they cross in, both ways round, found exactly that:
+/// `W₁W₂` came back eight entries and 239 binary orders wide one way and nine
+/// entries and 284 wide the other, and only the shorter one could be multiplied
+/// by what came next (`docs/decisions.md` §88).
+///
+/// # One sweep is not always a fixed point
+///
+/// Shewchuk's `COMPRESS`, with `FAST-TWO-SUM` replaced by the unconditional
+/// [`two_sum`] as everywhere else here. **It does not always settle in one go**:
+/// the leaning-pipes question above comes out of a sweep ten entries reaching
+/// down to `2^-483`, and sweeping *that* gives ten entries reaching to `2^-504`,
+/// which is then stable. So this is a step and not a normal form, and a caller
+/// that needs the entries to depend on the value alone has to run it to a fixed
+/// point — which is what `Exact::canonical` does and what
+/// `sweeping_twice_can_differ_from_sweeping_once` pins here.
+///
+/// # Panics
+///
+/// If `out` is shorter than `expansion`.
+pub fn compress(expansion: &[f64], out: &mut [f64]) -> usize {
+    assert!(
+        out.len() >= expansion.len(),
+        "compressing an expansion cannot lengthen it"
+    );
+    let Some((&largest, rest)) = expansion.split_last() else {
+        return 0;
+    };
+
+    // Down from the largest entry, pushing what each addition rounds away into
+    // the entry below it. This leaves the entries stacked against the top of the
+    // range, written from `bottom` upwards.
+    let mut bottom = expansion.len();
+    let mut running = largest;
+    for &entry in rest.iter().rev() {
+        let (sum, roundoff) = two_sum(running, entry);
+        if roundoff == 0.0 {
+            running = sum;
+            continue;
+        }
+        bottom -= 1;
+        out[bottom] = sum;
+        running = roundoff;
+    }
+    bottom -= 1;
+    out[bottom] = running;
+
+    // And back up the same way, which is the pass that makes each entry the
+    // rounded total of itself and everything under it. `running` is still the
+    // entry just written, so the sweep carries straight on from it. Reads run
+    // ahead of writes — `used` is always below `index` — so one slice serves for
+    // both.
+    let mut used = 0;
+    for index in bottom + 1..expansion.len() {
+        let (sum, roundoff) = two_sum(out[index], running);
+        running = sum;
+        if roundoff != 0.0 {
+            out[used] = roundoff;
+            used += 1;
+        }
+    }
+    if running != 0.0 || used == 0 {
+        out[used] = running;
+        used += 1;
+    }
+    used
+}
+
 /// The sign of the value an expansion represents.
 ///
 /// The entries never overlap, so the last one — the one with the largest
@@ -267,8 +352,8 @@ pub fn product_is_exact(a: f64, b: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_diff, two_product,
-        two_sum,
+        compress, expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_diff,
+        two_product, two_sum,
     };
     use crate::Decision;
 
@@ -493,5 +578,215 @@ mod tests {
                 enclosure: f64::INFINITY
             }
         );
+    }
+
+    /// An expansion of `terms`, built by adding them up one at a time.
+    fn an_expansion_of(terms: &[f64]) -> Vec<f64> {
+        let mut total: Vec<f64> = Vec::new();
+        for &term in terms {
+            let mut merged = vec![0.0; total.len() + 1];
+            let len = expansion_sum(&total, &[term], &mut merged);
+            merged.truncate(len);
+            total = merged;
+        }
+        total
+    }
+
+    /// Whether `left` and `right` are the same number, through
+    /// [`expansion_sum`] alone — which knows nothing about [`compress`] and so
+    /// can be used to judge it.
+    fn the_same_number(left: &[f64], right: &[f64]) -> bool {
+        let negated: Vec<f64> = right.iter().map(|entry| -entry).collect();
+        let mut difference = vec![0.0; left.len() + negated.len()];
+        let len = expansion_sum(left, &negated, &mut difference);
+        expansion_sign(&difference[..len]) == Decision::Zero
+    }
+
+    /// The one thing compressing must never do.
+    ///
+    /// Judged by [`expansion_sum`], which is the arithmetic
+    /// [`compress`] is not built on, so a bug in one cannot hide in the other.
+    #[test]
+    fn compressing_does_not_change_the_number() {
+        for terms in [
+            vec![2f64.powi(-60), 1.0, 2f64.powi(60)],
+            vec![1.0, 2f64.powi(-53), 2f64.powi(-106)],
+            vec![0.1, 0.2, 0.3, 0.4, 0.5],
+            vec![1e-300, 1e300, -1e300, 7.5],
+            vec![1.0, -1.0, 2f64.powi(-70)],
+            vec![3.0],
+            vec![],
+        ] {
+            let expansion = an_expansion_of(&terms);
+            let mut out = vec![0.0; expansion.len()];
+            let len = compress(&expansion, &mut out);
+            assert!(
+                the_same_number(&expansion, &out[..len]),
+                "compressing {expansion:?} gave {:?}, which is a different number",
+                &out[..len]
+            );
+            assert!(len <= expansion.len().max(1));
+        }
+    }
+
+    /// The property the leaning-pipes fix rests on: the entries depend on the
+    /// number and not on the route that reached it.
+    ///
+    /// `W₁W₂` is the quantity that broke — reached one way it came back eight
+    /// entries wide and the other way nine, and only the shorter could be
+    /// multiplied by what came next. Here are the same two routes in miniature.
+    /// `left × right`, accumulated one entry of `right` at a time — the way
+    /// `Exact::times` does it, and so the place the operand order gets in.
+    fn the_product_of(left: &[f64], right: &[f64]) -> Vec<f64> {
+        let mut total: Vec<f64> = Vec::new();
+        for &factor in right {
+            let mut scaled = vec![0.0; 2 * left.len()];
+            let len = scale_expansion(left, factor, &mut scaled);
+            let mut merged = vec![0.0; total.len() + len];
+            let merged_len = expansion_sum(&total, &scaled[..len], &mut merged);
+            merged.truncate(merged_len);
+            total = merged;
+        }
+        total
+    }
+
+    /// On an ordinary expansion one sweep settles it.
+    #[test]
+    fn compressing_a_compressed_expansion_usually_changes_nothing() {
+        let expansion = an_expansion_of(&[0.1, 0.2, 0.3, 1e-200, 1e200, 2f64.powi(-1000)]);
+        let mut once = vec![0.0; expansion.len()];
+        let first = compress(&expansion, &mut once);
+        let mut twice = vec![0.0; first];
+        let second = compress(&once[..first], &mut twice);
+        assert_eq!(&once[..first], &twice[..second]);
+    }
+
+    /// But not always, which is why `Exact::canonical` sweeps to a fixed point
+    /// rather than sweeping once.
+    ///
+    /// This was found the expensive way. One sweep was taken for a normal form,
+    /// and the entries it gave for `M` — the leaning-pipes question — were not
+    /// the entries a second sweep gave. Ten entries either way, but reaching to
+    /// `2^-483` after one and `2^-504` after two, and only the second is stable.
+    /// A claim that a value has one written form is worth nothing if the
+    /// function making it is not run to where it stops moving.
+    /// These six numbers are the smallest instance a search turned up: one sweep
+    /// drops four entries to three and leaves the smallest of them wrong against
+    /// the settled answer, the second gets it, and the third changes nothing.
+    #[test]
+    fn sweeping_twice_can_differ_from_sweeping_once() {
+        let expansion = an_expansion_of(&[
+            0.000_485_599_498_242_050_23,
+            27_086.019_292_511_162,
+            -1.783_184_736_861_294_4e-13,
+            6.850_717_877_827_191,
+            -1.222_739_631_755_684e-12,
+            53_911.450_270_901_83,
+        ]);
+        let once = swept(&expansion);
+        let twice = swept(&once);
+
+        assert_ne!(
+            once, twice,
+            "this test is only worth running while one sweep really does leave work behind"
+        );
+        assert_eq!(twice, swept(&twice), "and the second sweep settles it");
+        assert!(
+            the_same_number(&expansion, &once) && the_same_number(&expansion, &twice),
+            "every sweep is exact, settled or not"
+        );
+    }
+
+    /// One sweep of `entries`, as a fresh list.
+    fn swept(entries: &[f64]) -> Vec<f64> {
+        let mut out = vec![0.0; entries.len()];
+        let len = compress(entries, &mut out);
+        out.truncate(len);
+        out
+    }
+
+    /// The property the whole of §88 rests on: once the sweeping has settled,
+    /// the entries are a function of the value and of nothing else.
+    ///
+    /// Two expansions are built for the same number by routes that give
+    /// different entries — `a×b` against `b×a`, which is exactly the pair that
+    /// made one crossing name two different shapes — and they have to settle on
+    /// the same list. Searched rather than argued, because sweeping to a fixed
+    /// point is a normal form here by demonstration and not by a proof anyone
+    /// has written down.
+    #[test]
+    fn two_routes_to_one_number_end_at_the_same_entries() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut a_number = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let exponent = ((state >> 52) % 120) as i32 - 60;
+            let mantissa = 1.0 + (state & 0xf_ffff_ffff_ffff) as f64 / 4.503_6e15;
+            mantissa * 2f64.powi(exponent) * if state & 1 == 0 { 1.0 } else { -1.0 }
+        };
+
+        let mut differed_before_settling = 0;
+        for _ in 0..20_000 {
+            let left = an_expansion_of(&[a_number(), a_number(), a_number()]);
+            let right = an_expansion_of(&[a_number(), a_number(), a_number()]);
+            let one_way = the_product_of(&left, &right);
+            let the_other_way = the_product_of(&right, &left);
+
+            assert!(
+                the_same_number(&one_way, &the_other_way),
+                "multiplying {left:?} by {right:?} gave two different numbers"
+            );
+            if one_way != the_other_way {
+                differed_before_settling += 1;
+            }
+            assert_eq!(
+                settled(&one_way),
+                settled(&the_other_way),
+                "the same number reached two ways has to settle on the same entries: \
+                 {left:?} times {right:?}"
+            );
+        }
+        assert!(
+            differed_before_settling > 0,
+            "this search proves nothing unless the two orders really do differ before settling"
+        );
+    }
+
+    /// Sweeping `entries` until it stops changing, as `Exact::canonical` does.
+    fn settled(entries: &[f64]) -> Vec<f64> {
+        let mut at = entries.to_vec();
+        for _ in 0..=entries.len() {
+            let next = swept(&at);
+            if next == at {
+                return at;
+            }
+            at = next;
+        }
+        panic!("sweeping {entries:?} never settled");
+    }
+
+    /// The ordering the rest of the module relies on survives compressing:
+    /// entries increase in magnitude, so the last one settles the sign.
+    #[test]
+    fn a_compressed_expansion_is_still_sorted_smallest_first() {
+        let expansion = an_expansion_of(&[2f64.powi(-90), 0.1, 3.7, 2f64.powi(80), 0.25]);
+        let mut out = vec![0.0; expansion.len()];
+        let len = compress(&expansion, &mut out);
+        for pair in out[..len].windows(2) {
+            assert!(
+                pair[0].abs() < pair[1].abs(),
+                "compressed entries run smallest first: {:?}",
+                &out[..len]
+            );
+        }
+        assert_eq!(expansion_sign(&out[..len]), Decision::Pos);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot lengthen")]
+    fn compressing_refuses_to_write_past_the_end() {
+        let mut out = [0.0; 1];
+        compress(&[2f64.powi(-60), 1.0, 2f64.powi(60)], &mut out);
     }
 }
