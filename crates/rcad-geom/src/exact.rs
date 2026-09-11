@@ -1,7 +1,8 @@
 //! Exact expansion arithmetic the quadric predicates share.
 
 use rcad_predicates::expansion::{
-    expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_diff, two_product,
+    compress, expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_diff,
+    two_product,
 };
 use rcad_predicates::{Decision, Interval};
 
@@ -85,6 +86,15 @@ pub(crate) fn square_of_expansion(value: &[f64], out: &mut [f64]) -> Option<usiz
 ///
 /// Every operation here is exact or refuses. There is no rounding anywhere in
 /// this type, which is what makes [`Exact::sign`] a proof rather than a guess.
+///
+/// The entries are **canonical**: each one is the correctly rounded total of
+/// itself and everything below it, so the list depends on the number and not on
+/// the route that reached it ([`Exact::canonical`]). Without that, `a·b` and
+/// `b·a` are the same number held in different entries, and since
+/// [`product_is_exact`] asks about entries, one of them can be multiplied by
+/// what comes next and the other cannot — which made one pair of cylinders name
+/// two different crossings depending on which was written first
+/// (`docs/decisions.md` §88).
 #[derive(Clone, Debug)]
 pub(crate) struct Exact(Vec<f64>);
 
@@ -131,8 +141,54 @@ impl Exact {
     pub(crate) fn plus(&self, other: &Exact) -> Exact {
         let mut out = vec![0.0; self.0.len() + other.0.len()];
         let len = expansion_sum(&self.0, &other.0, &mut out);
-        out.truncate(len);
-        Exact(out)
+        Self::canonical(&out[..len])
+    }
+
+    /// The same number with its entries in the one form the value decides, which
+    /// is what keeps `a·b` and `b·a` the same list of entries and not merely the
+    /// same number.
+    ///
+    /// [`compress`] is one sweep and one sweep does not always settle, so this
+    /// runs it until it stops changing. What comes back then satisfies
+    /// `compress(h) == h`, and `two_routes_to_one_number_end_at_the_same_entries`
+    /// is the search that says a value has only one such `h`.
+    ///
+    /// Every constructor above already hands back settled entries — a single
+    /// number is one entry, and [`two_product`]'s high half is the rounded total
+    /// of both — and [`Exact::slid_by`] only moves exponents. So going through
+    /// here in [`Exact::plus`], which [`Exact::times`] and [`Exact::minus`] both
+    /// build on, is enough to make it hold of every [`Exact`] there is.
+    ///
+    /// # Panics
+    ///
+    /// If the sweeps do not settle. Each one packs the value into no more
+    /// entries than it was given, so it cannot run for longer than there are
+    /// entries; running longer means [`compress`] is not shortening, and a level
+    /// that silently stopped being exact is worse than a crash.
+    fn canonical(entries: &[f64]) -> Exact {
+        // An overflow upstream leaves an infinity or a `NaN`, which has no
+        // settled form to reach — it is never equal to itself, so the sweeps
+        // below would run for ever. It is not this function's to report either:
+        // every operation here keeps a non-finite entry rather than dropping it,
+        // so that `expansion_sign` is the one place that refuses to name a sign
+        // for one. Hand it on untouched and let it get there.
+        if !entries.iter().all(|entry| entry.is_finite()) {
+            return Exact(entries.to_vec());
+        }
+
+        let mut settled = vec![0.0; entries.len()];
+        let mut len = compress(entries, &mut settled);
+        for _ in 0..=entries.len() {
+            let mut again = vec![0.0; len];
+            let next = compress(&settled[..len], &mut again);
+            if again[..next] == settled[..len] {
+                settled.truncate(len);
+                return Exact(settled);
+            }
+            settled = again;
+            len = next;
+        }
+        unreachable!("compressing {entries:?} never settled");
     }
 
     /// This minus `other`, exactly.
@@ -594,6 +650,25 @@ mod an_exact_number {
             other => panic!("an overflowed product has no sign: {other:?}"),
         }
     }
+
+    /// An overflowed sum reaches the sign rather than the settling loop.
+    ///
+    /// A `NaN` is never equal to itself, so an expansion holding one has no form
+    /// the sweeping can settle on, and [`Exact::canonical`] would have gone round
+    /// until its own assertion caught it. It did, on two balls a soak drew at
+    /// `2^510`. The rule this module already had is the answer: a non-finite
+    /// entry is carried rather than dropped, so that `expansion_sign` is the one
+    /// place that refuses to name a sign for it.
+    #[test]
+    fn an_overflowed_sum_is_carried_to_the_sign_and_not_settled() {
+        let overflowed = Exact::of(f64::MAX).minus(&Exact::of(-f64::MAX));
+        assert_eq!(
+            overflowed.sign(),
+            Decision::Undecidable {
+                enclosure: f64::INFINITY
+            },
+        );
+    }
 }
 
 /// Where exact arithmetic runs out, measured rather than argued.
@@ -681,7 +756,7 @@ mod how_far_exact_arithmetic_reaches {
     /// `ρ₁ ± ρ₂` against `δ`, and those are `rᵢ/√Wᵢ` and `|T|/√K` — three square
     /// roots in three different metrics. Clearing them takes squaring
     /// `r₁²W₂K + r₂²W₁K − T²W₁W₂`, and that expansion is already **five hundred
-    /// binary orders wide**: its smallest entry is `2^-500` of its largest, so
+    /// binary orders wide**: its smallest entry is `2^-504` of its largest, so
     /// the square of that entry lands a thousand orders down, past the bottom of
     /// `f64`.
     ///
@@ -700,26 +775,13 @@ mod how_far_exact_arithmetic_reaches {
     /// [`Exact::square_minus`], which does that slide for the caller.
     /// `a_comparison_too_wide_to_square_is_decided_after_it_is_slid_up_the_range`
     /// is the same numbers going through it.
+    ///
+    /// The width here is a property of the *value*, not of how it was reached:
+    /// §88 made [`Exact`] settle its entries, so this is the one expansion these
+    /// two pipes have rather than whichever one the argument order produced.
     #[test]
     fn the_question_two_leaning_pipes_ask_is_too_wide_to_square_where_it_stands() {
-        let (volume, squared_sideways, squared_direction) = a_leaning_pair();
-        let radii = |radius: f64| {
-            Exact::product_of(radius, radius)
-                .expect("a radius squared")
-                .times(&squared_direction)
-                .expect("both are of order one")
-                .times(&squared_sideways)
-                .expect("and so is this")
-        };
-        let against_the_gap = radii(1.0).plus(&radii(2.0)).minus(
-            &volume
-                .times(&volume)
-                .expect("an offset squared")
-                .times(&squared_direction)
-                .expect("times a unit direction squared")
-                .times(&squared_direction)
-                .expect("and the other one"),
-        );
+        let against_the_gap = the_leaning_pipes_question();
 
         assert!(
             against_the_gap.spread() > 400,
@@ -751,6 +813,29 @@ mod how_far_exact_arithmetic_reaches {
         );
     }
 
+    /// `M = r₁²W₂K + r₂²W₁K − T²W₁W₂` for the pipes [`a_leaning_pair`] draws,
+    /// with the radii one and two.
+    fn the_leaning_pipes_question() -> Exact {
+        let (volume, squared_sideways, squared_direction) = a_leaning_pair();
+        let radii = |radius: f64| {
+            Exact::product_of(radius, radius)
+                .expect("a radius squared")
+                .times(&squared_direction)
+                .expect("both are of order one")
+                .times(&squared_sideways)
+                .expect("and so is this")
+        };
+        radii(1.0).plus(&radii(2.0)).minus(
+            &volume
+                .times(&volume)
+                .expect("an offset squared")
+                .times(&squared_direction)
+                .expect("times a unit direction squared")
+                .times(&squared_direction)
+                .expect("and the other one"),
+        )
+    }
+
     /// The answer that was one scaling away, taken.
     ///
     /// `M² − N²` for the same two leaning pipes, where `M` is the expansion the
@@ -765,24 +850,8 @@ mod how_far_exact_arithmetic_reaches {
     /// rather than luck.
     #[test]
     fn a_comparison_too_wide_to_square_is_decided_after_it_is_slid_up_the_range() {
-        let (volume, squared_sideways, squared_direction) = a_leaning_pair();
-        let radii = |radius: f64| {
-            Exact::product_of(radius, radius)
-                .expect("a radius squared")
-                .times(&squared_direction)
-                .expect("both are of order one")
-                .times(&squared_sideways)
-                .expect("and so is this")
-        };
-        let room = radii(1.0).plus(&radii(2.0)).minus(
-            &volume
-                .times(&volume)
-                .expect("an offset squared")
-                .times(&squared_direction)
-                .expect("times a unit direction squared")
-                .times(&squared_direction)
-                .expect("and the other one"),
-        );
+        let (_, squared_sideways, squared_direction) = a_leaning_pair();
+        let room = the_leaning_pipes_question();
         // `N² = 4r₁²r₂²K²W₁W₂`, with the radii one and two.
         let together_squared = Exact::product_of(4.0, 4.0)
             .expect("four times a radius times a radius")

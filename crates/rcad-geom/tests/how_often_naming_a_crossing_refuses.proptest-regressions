@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc fd19173bb5382b1f967e3e36f019ab3016656eb5b22f011a0d646b399bfac200 # shrinks to Crossing { first: Pipe { along: [0, 0, 1], through: [0, 0, 0], radius: 1 }, second: Pipe { along: [0, 0, 1], through: [2, 0, 0], radius: 1 }, turn: Some(Turn { direction: [1, 2, -3], steps: 16 }), elsewhere: Elsewhere { scale: 0, shift: None }, hair: Some(AHair { ulps: 0, lean: Some(55) }) }
+cc 57040d04952ef8d31771f3aad49dd7dde3e4896d5606b4dd30a76b87675aab0b # shrinks to Crossing { first: Ball { centre: [0, 0, 2], radius: 3 }, second: Ball { centre: [0, 0, -2], radius: 1 }, turn: None, elsewhere: Elsewhere { scale: 510, shift: None }, hair: None }

@@ -3702,4 +3702,39 @@ mod tests {
         // that the two are the same number and answers exactly.
         assert_eq!(decide(&room(0.1, 0.1)), (Decision::Zero, Level::Exact));
     }
+
+    /// The pair the fuzzer found that named two different crossings depending on
+    /// which pipe was written first (`docs/decisions.md` §88).
+    ///
+    /// Two pipes of the same radius, each leaning a hair off square: one tilted
+    /// `2.3e-7` in z, the other `7.3e-12` in y. All three perturbations are
+    /// load-bearing — put any one of them back and the two orders agreed
+    /// already.
+    ///
+    /// Both orders reach the same third sign question, `ρ₂ − ρ₁ + δ`, whose
+    /// enclosure straddles zero, so both go to the exact level. There the answer
+    /// turned on `W₁W₂`, which came back as eight entries one way round and nine
+    /// the other — the same number, and only the shorter of the two could be
+    /// multiplied by what came next. `Exact` is canonical now, so there is one
+    /// list of entries and one answer.
+    fn a_pipe_leaning_a_hair(along: [f64; 3], through: [f64; 3]) -> Surface {
+        a_pipe(along, through, 1.999_999_999_068_677_4)
+    }
+
+    #[test]
+    fn two_pipes_leaning_a_hair_apart_name_one_crossing_whichever_is_written_first() {
+        let one = a_pipe_leaning_a_hair(
+            [0.999_999_999_999_972_5, 0.0, 2.347_497_192_393_293_4e-7],
+            [256.0, 0.0, 0.0],
+        );
+        let other = a_pipe_leaning_a_hair(
+            [0.0, -7.275_957_593_854_635e-12, -1.0],
+            [6.089_020_112_174_685e-30, 0.0, 0.0],
+        );
+
+        // `crossing` asks both ways round and fails if they disagree, which is
+        // the whole of this test. It also fails on a refusal, and one order used
+        // to refuse.
+        assert!(matches!(crossing(&one, &other), SurfaceMeet::Curves(_)));
+    }
 }
