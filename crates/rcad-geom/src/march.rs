@@ -65,20 +65,21 @@ const SAGITTA_MAY_TAKE: f64 = 0.75;
 /// than along it (`docs/decisions.md` §89).
 const SAGITTA_MAY_TAKE_OF_ITS_CHORD: f64 = 0.25;
 
-/// How many times a step may be halved before the marcher gives up on it.
+/// How many times a step may be shortened before the marcher gives up on it.
 ///
-/// Fifty, which is a thousandth of a millionth of a millionth of the step it
-/// started at — and the sagitta it is being judged on falls with the *square* of
-/// the step, so fifty halvings ask a piece to bend `1e-30` of what the first one
-/// did. Reaching the end of that means the curve is not being followed at all
-/// rather than that the budget was tight.
+/// Fifty. A try at worst halves the step and the chord branch below cuts it
+/// further, so fifty of them reach at least a thousandth of a millionth of a
+/// millionth of the step it started at — and the sagitta it is being judged on
+/// falls with the *square* of the step, so fifty tries ask a piece to bend at
+/// most `1e-30` of what the first one did. Reaching the end of that means the
+/// curve is not being followed at all rather than that the budget was tight.
 ///
 /// **Not "fifty halvings puts any step below the smallest normal number"**,
 /// which is what this used to say and is out by twenty binary orders of
 /// magnitude: `2^-50` of a step of one is `9e-16`, and the smallest normal number
 /// is `2e-308`. The claim audit caught it. Fifty is right for the reason above
 /// and the arithmetic in the old reason was wrong.
-const HALVINGS_BEFORE_GIVING_UP: usize = 50;
+const SHORTENINGS_BEFORE_GIVING_UP: usize = 50;
 
 /// How many multiples of the deflection budget one step may grow to.
 ///
@@ -132,8 +133,8 @@ pub(crate) struct Marched {
 /// # Why it terminates
 ///
 /// Every accepted step moves the point somewhere it was not, and a step is only
-/// halved [`HALVINGS_BEFORE_GIVING_UP`] times before the run is refused, so a
-/// curve of finite length is walked in finitely many steps. **How far a step
+/// shortened [`SHORTENINGS_BEFORE_GIVING_UP`] times before the run is refused,
+/// so a curve of finite length is walked in finitely many steps. **How far a step
 /// moves is measured and not decreed**: the trial point is settled onto both
 /// surfaces afterwards, so what the step actually covers is whatever the
 /// settling left, and all that is checked is that it is not nothing. That makes
@@ -314,9 +315,9 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 /// # Errors
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when shortening
-/// the step [`HALVINGS_BEFORE_GIVING_UP`] times still leaves a piece that strays
-/// too far, which means the curve is not being followed rather than that the
-/// budget was tight.
+/// the step [`SHORTENINGS_BEFORE_GIVING_UP`] times still leaves a piece that
+/// strays too far, which means the curve is not being followed rather than that
+/// the budget was tight.
 fn one_step(
     surfaces: [&Surface; 2],
     here: Point,
@@ -325,7 +326,7 @@ fn one_step(
     room: f64,
 ) -> Result<(Point, f64)> {
     let mut step = from;
-    for _ in 0..HALVINGS_BEFORE_GIVING_UP {
+    for _ in 0..SHORTENINGS_BEFORE_GIVING_UP {
         let next = settled(surfaces, here + tangent * step)?;
         let straight_on = next - here;
         let middle = here + straight_on * 0.5;
