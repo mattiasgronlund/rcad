@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 0469d0e43f9bd27b4ded6e3b59a492b0eaa9c7de593a887b1406f9d04f6a1820 # shrinks to (Crossing { first: Flat { normal: [1, 0, 0], at: 0 }, second: Pipe { along: [0, 1, 0], through: [-3, 0, 0], radius: 1 }, turn: None, elsewhere: Elsewhere { scale: 0, shift: None } }, Turn { direction: [-1, 1, 0], steps: 1 })
+cc e17554c3df54c84cd1924afe4b1d933bf4c0fd2c024cd3df79b191de9de3b79c # shrinks to (Crossing { first: Ball { centre: [-5, -3, -5], radius: 1 }, second: Pipe { along: [0, 1, 0], through: [-5, -3, -5], radius: 1 }, turn: None, elsewhere: Elsewhere { scale: 0, shift: None }, hair: None }, Turn { direction: [0, 1, 1], steps: 2 })
