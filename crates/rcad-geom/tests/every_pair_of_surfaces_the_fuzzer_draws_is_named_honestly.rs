@@ -81,16 +81,23 @@
 //!
 //! | row | pairs | points | orders | scalings |
 //! |---|---|---|---|---|
-//! | corpus | 745 of 826 seeds | 1993 | 544 | 1087 |
-//! | soak | 199 943 of 200 000 draws | 400 342 | 178 631 | 355 291 |
+//! | corpus | 745 of 826 seeds | 4207 | 544 | 1087 |
+//! | soak | 199 943 of 200 000 draws | 400 412 | 178 631 | 355 291 |
 //! | cones and tori | 136 | 696 | 39 | 78 |
 //!
-//! The corpus row is 2026-09-11's, two seeds later than the other two: §85's
-//! crash was promoted into the corpus, and then §88's — the pair of leaning
-//! pipes that named one crossing forwards and refused backwards. The second
-//! decodes to a pair and is decided both ways round now, which is the one order
-//! and two scalings the row gained. The floors are left where they were, still
-//! roughly three quarters of the row.
+//! The corpus row is 2026-09-11's, two seeds later than the cone-and-torus one:
+//! §85's crash was promoted into the corpus, and then §88's — the pair of
+//! leaning pipes that named one crossing forwards and refused backwards. The
+//! second decodes to a pair and is decided both ways round now, which is the one
+//! order and two scalings the row gained.
+//!
+//! **The points column then more than doubled, and that is §89.** The marcher
+//! used to jump clean across a crossing when the budget handed to it was larger
+//! than the crossing was — which is what the first of the two walks here does on
+//! purpose — and publish a bound so wide that the second walk was asked for
+//! something absurd and gave up. Corpus points went `1993` to `4207` and the
+//! soak's `400 342` to `400 412`; no row lost any. The floors are left where they
+//! were, which is now nearer a half of the corpus row than three quarters.
 //!
 //! **Not one of them is `rcad-fuzz`'s number.** That branch published three
 //! floors measured before M4 and §33 moved the refusal rates under them, and

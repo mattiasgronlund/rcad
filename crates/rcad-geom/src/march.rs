@@ -47,6 +47,24 @@ use crate::{Cone, Cylinder, Error, Plane, Point, Result, Sphere, Surface, Torus,
 /// at the middle rather than searched for along the whole piece.
 const SAGITTA_MAY_TAKE: f64 = 0.75;
 
+/// How much of a straight piece's *own length* its sagitta may take.
+///
+/// [`SAGITTA_MAY_TAKE`] asks whether a piece is inside the caller's budget, and
+/// a caller may hand over a budget larger than the whole crossing — the coarse
+/// walk in `crates/rcad-geom/tests/fuzzing/mod.rs` asks `f64::MAX / 4.0` on
+/// purpose, to find out how big a crossing is before asking for the real one.
+/// Against a budget like that the question decides nothing, and a step of
+/// `2.2e307` along the tangent is accepted wherever the settling happens to land
+/// it. This is the question that does not go away: **a straight piece is a piece
+/// of the curve only if it is straighter than it is long.**
+///
+/// A quarter. On a circular arc the sagitta is `tan(θ/4)/2` of the chord, so the
+/// quarter-turn rule below sits at `0.2071` and a quarter leaves a little room
+/// over it for curves that are not circles. What it rejects measured `0.44` to
+/// `0.59` — half a turn and worse, a chord drawn clean across the curve rather
+/// than along it (`docs/decisions.md` §89).
+const SAGITTA_MAY_TAKE_OF_ITS_CHORD: f64 = 0.25;
+
 /// How many times a step may be halved before the marcher gives up on it.
 ///
 /// Fifty, which is a thousandth of a millionth of a millionth of the step it
@@ -96,13 +114,17 @@ pub(crate) struct Marched {
 ///
 /// # The step rule
 ///
-/// Two questions, and the second is the one that makes this a *marcher* rather
-/// than a sampler. **How far it bends**: the middle of each straight piece is
-/// settled onto the curve and the distance it moved is that piece's sagitta,
-/// measured rather than derived, and a step whose sagitta takes more than
-/// [`SAGITTA_MAY_TAKE`] of `room` is halved and tried again. **How far it
-/// turns**: no step may turn the tangent by more than a quarter turn, because
-/// past a half turn a step cannot be told from one the other way.
+/// Three questions, and the last two are what make this a *marcher* rather than
+/// a sampler. **How far it bends**: the middle of each straight piece is settled
+/// onto the curve and the distance it moved is that piece's sagitta, measured
+/// rather than derived, and a step whose sagitta takes more than
+/// [`SAGITTA_MAY_TAKE`] of `room` is shortened and tried again. **How far it
+/// bends across itself**: the same sagitta against the piece's own length rather
+/// than against the budget, because a caller may hand over a budget larger than
+/// the whole crossing and then the first question decides nothing
+/// ([`SAGITTA_MAY_TAKE_OF_ITS_CHORD`]). **How far it turns**: no step may turn
+/// the tangent by more than a quarter turn, because past a half turn a step
+/// cannot be told from one the other way.
 ///
 /// A step whose sagitta is comfortably inside the budget grows for the next one,
 /// so a large gentle loop does not get walked at the step a tight corner needed.
@@ -264,17 +286,37 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
         .map_err(|_| Error::CannotFollowACrossingWhereItsSurfacesAreTangent)
 }
 
-/// One step along the crossing, halved until the straight piece it leaves behind
-/// stays inside `room`, and turning no more than a quarter turn.
+/// One step along the crossing, shortened until the straight piece it leaves
+/// behind stays inside `room`, stays straighter than it is long, and turns no
+/// more than a quarter turn.
 ///
 /// Returns where the step landed and how long it turned out to be.
 ///
+/// # What a rejected trial is retried at
+///
+/// Half of what was asked, **unless the trial covered less than half of it**.
+/// A trial that came back short never stepped along the curve at all: the
+/// settling pulled it back, and it will land in the same place however far the
+/// ask is halved. Measured, a chord of `1.1003e39` sat still over twenty-one
+/// halvings, and the trial that finally passed did so because the quarter-turn
+/// test drifted into accepting it, not because anything had converged. There the
+/// chord is the one thing the trial did measure about the curve, so the next ask
+/// comes from that instead.
+///
+/// **The two cases are kept apart rather than merged into `min`** because the
+/// merged form also shortens steps in the ordinary fine walk, where the trial
+/// came back a little short for honest reasons, and that moved the marcher's
+/// published bound from `0.577` of its own enclosure to `0.871` — still a bound,
+/// but past the three quarters `how_far_the_marcher_strays_from_a_crossing_that_is_a_circle`
+/// publishes. Splitting on whether the trial overshot leaves the fine walk at
+/// `0.577` exactly (`docs/decisions.md` §89).
+///
 /// # Errors
 ///
-/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when halving the
-/// step [`HALVINGS_BEFORE_GIVING_UP`] times still leaves a piece that strays too
-/// far, which means the curve is not being followed rather than that the budget
-/// was tight.
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when shortening
+/// the step [`HALVINGS_BEFORE_GIVING_UP`] times still leaves a piece that strays
+/// too far, which means the curve is not being followed rather than that the
+/// budget was tight.
 fn one_step(
     surfaces: [&Surface; 2],
     here: Point,
@@ -289,10 +331,27 @@ fn one_step(
         let middle = here + straight_on * 0.5;
         let sagitta = (settled(surfaces, middle)? - middle).length();
         let turned = which_way_the_crossing_runs(surfaces, next)?.dot(tangent);
-        if sagitta <= room * SAGITTA_MAY_TAKE && turned >= 0.0 && straight_on.length() > 0.0 {
-            return Ok((next, straight_on.length()));
+        let chord = straight_on.length();
+        if sagitta <= room * SAGITTA_MAY_TAKE
+            && sagitta <= chord * SAGITTA_MAY_TAKE_OF_ITS_CHORD
+            && turned >= 0.0
+            && chord > 0.0
+        {
+            return Ok((next, chord));
         }
-        step *= 0.5;
+
+        // A trial that covered less than half of what it asked for never stepped
+        // along the curve: the settling pulled it back, and it will land in the
+        // same place however far the ask is halved, so the halvings run out with
+        // the chord where it started. There the chord is the one thing the trial
+        // did measure about the curve, so the next ask comes from that. A trial
+        // that did step along the curve and only bent too far is halved as
+        // before, which is what the published bound was measured under.
+        step = if chord > 0.0 && chord * 2.0 < step {
+            chord * 0.5
+        } else {
+            step * 0.5
+        };
     }
     Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent)
 }
