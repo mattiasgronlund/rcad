@@ -24955,15 +24955,28 @@ Best of the four runs, all on one machine — an AMD Ryzen 9 3900X, the same one
 
 | Answer | Whole fuse | Throwaway build + tag + sweep | Per face |
 |---|---|---|---|
-| 12 flat faces (two cubes) | 1.42 ms | 34.2 µs, **+2.4%** | 2 849 ns |
+| 12 flat faces (two cubes) | 1.42 ms | 34.2 µs, **+2.5%** | 2 849 ns |
 | 18 flat faces (three cubes) | 2.94 ms | 55.0 µs, **+1.9%** | 3 055 ns |
-| 10 faces, two of them curved (cube and bar) | 0.861 ms | 125.7 µs, **+14.6%** | 12 572 ns |
+| 10 faces, two of them curved (cube and bar) | 0.861 ms | 125.7 µs, **+17.1%** | 12 572 ns |
 
-**The percentages held to two figures over four runs; two of the millisecond
-figures they came from did not.** Across those four runs the 12-face share was
-2.4% every time and the 18-face share 1.9% every time; the curved row moved
-between 14.4% and 14.8%. The spread underneath: whole fuse 1.422–1.463 /
+**The percentage is the block over the fuse *without* it — what this change
+added — and not the block's share of the new total.** The "whole fuse" column
+times the shipped code, so the block is inside it: `125.7 / (861 − 125.7)` is
+17.1% where `125.7 / 861` is 14.6%. Both are arithmetic on the same two
+timings and they answer different questions; a reader asking what §87 cost is
+asking the first. The two flat rows cannot tell the conventions apart — 2.5%
+against 2.4%, and 1.9% either way — so the curved row is the only place in this
+table where the choice is visible, which is why it is easy to get wrong here and
+why this paragraph exists. The `add_extrusion` figure below uses the same
+convention: "six times its present cost" is measured against the cost before it,
+and two conventions in one section would be worse than either.
+
+**The block held to three figures over four runs; two of the millisecond figures
+it is divided by did not.** The spread underneath: whole fuse 1.422–1.463 /
 2.940–3.030 / 0.861–0.882 ms, block 34.2–35.7 / 55.0–58.2 / 125.7–127.9 µs.
+Those spreads bound the three shares at 2.4–2.6%, 1.8–2.0% and 16.6–17.5% —
+a bound over the worst pairing of the two columns, not four recomputed runs,
+which is what figures reported as ranges will honestly carry.
 
 **The 18-face row used to say 4.75 ms and a 1.2% share, and neither reproduces.**
 An independent gate audit re-measuring from the old description alone got the
@@ -24975,10 +24988,15 @@ three-cube arrangement, and the section did not say which, so there is nothing
 to defend. §82.7 is the precedent — a ratio belongs to a machine *and* to a
 workload, and "three cubes, two moved" pins neither.
 
-**The curved row's 17.3% was not what its own two columns said either.** 128.8 µs
-over 0.873 ms is 14.8%, not 17.3%; the two timings reproduce here within 2% and
-the percentage between them was simply wrong. It is 14.6% now, from numbers that
-divide.
+**The curved row's original 17.3% was right, and was briefly withdrawn as an
+arithmetic slip.** `128.8 / 873` is 14.8%, which is not 17.3%, and on that
+reading the row was corrected to a share of the new total. But
+`128.8 / (873 − 128.8)` is 17.31%, so the old figure was never a slip: it was
+this section's convention, stated nowhere, visible on no other row. It is
+restored, with the paragraph above it saying which denominator it is. The
+lesson is the one §82.7 keeps learning: a ratio needs its workload *and* its
+two ends written down, and the row where a convention is invisible is the row
+that will be corrected in the wrong direction.
 
 **The per-face constant is about 3 µs on a flat answer and four times that on
 a curved one.** The first cut's table had only flat answers in it and read the
