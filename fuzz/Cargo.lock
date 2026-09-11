@@ -317,11 +317,16 @@ version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
  "postcard",
+ "rcad-fuzz-timing",
  "rcad-geom",
  "rcad-predicates",
  "rcad-step",
  "rcad-topo",
 ]
+
+[[package]]
+name = "rcad-fuzz-timing"
+version = "0.0.0"
 
 [[package]]
 name = "rcad-geom"

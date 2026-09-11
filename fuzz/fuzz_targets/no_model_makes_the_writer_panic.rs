@@ -29,15 +29,23 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+use rcad_fuzz_timing::timed;
 use rcad_topo::Model;
 
 fuzz_target!(|bytes: &[u8]| {
+    timed(env!("CARGO_BIN_NAME"), bytes, || {
+        one_model_decoded_and_written(bytes);
+    });
+});
+
+/// One draw of bytes, decoded the way a stranger's saved file is and written out.
+fn one_model_decoded_and_written(bytes: &[u8]) {
     let Ok(model) = postcard::from_bytes::<Model>(bytes) else {
         return;
     };
     every_number_the_door_promised_is_real(&model);
     let _ = rcad_step::write(&model, "fuzz");
-});
+}
 
 /// What `Deserialize for Model` promised about the numbers in it.
 ///

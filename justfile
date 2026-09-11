@@ -1764,6 +1764,17 @@ fuzz-overnight window="28800":
     night="{{fuzz_log_root}}/$(date +%Y-%m-%d)"
     mkdir -p "$night"
 
+    # Per-run timings, which libFuzzer keeps none of. Its `Slowest unit:` line
+    # ratchets and is whole seconds, so a night that ran a thousand slow inputs
+    # leaves one behind and says nothing about how the rest were spread. Each
+    # target writes a percentile table and its slowest inputs under here, named
+    # so they can be handed straight back to `cargo fuzz run`.
+    #
+    # Exported rather than passed, because it has to reach past `just`, `cargo`
+    # and `cargo-fuzz` to the target's own process, and every one of those
+    # passes the environment through untouched.
+    export RCAD_FUZZ_TIMINGS="$night/timings"
+
     # What was fuzzed, in the summary line, because nothing here advances the
     # worktree to `main` and nothing should: an unattended `git checkout` racing
     # the lanes that merge into `main` is a write nobody reviewed. The cost of
@@ -1941,7 +1952,7 @@ check-fuzz-overnight-selftest:
     cat >"$dir/bin/cargo" <<'STUB'
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '%s\n' "$*" >>"$STUB_LOG"
+    printf '%s [timings=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" >>"$STUB_LOG"
     case " $* " in
         *" build "*) exit 0 ;;
     esac
@@ -1995,6 +2006,14 @@ check-fuzz-overnight-selftest:
     [ "$elapsed" -le 16 ] || fail "a twelve-second window took $elapsed s, so the window is a budget and not a deadline"
     grep -q 'TO LOOK AT.*fuzz-reader' "$dir/logs/latest" \
         || fail "the summary line does not name the target that died"
+
+    # Every target is told where to write its per-run timings, and the place is
+    # this night's own directory. A target that was not told keeps nothing, and
+    # the morning has libFuzzer's one ratcheted `Slowest unit:` line and no
+    # spread — which is the state this replaced.
+    timed=$(grep -c "fuzz run.*\[timings=$dir/logs/$(date +%Y-%m-%d)/timings\]" "$dir/log" || true)
+    [ "$timed" -eq 4 ] \
+        || fail "$timed of 4 targets were told where to write their timings"
 
     # Two: the tracked corpus is a read-only seed and never the directory
     # libFuzzer writes to, which is the whole of §81. Order is the only thing

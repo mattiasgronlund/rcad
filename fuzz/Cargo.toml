@@ -15,6 +15,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 postcard = { version = "1", default-features = false, features = ["use-std"] }
+rcad-fuzz-timing = { path = "../crates/rcad-fuzz-timing" }
 rcad-geom = { path = "../crates/rcad-geom" }
 rcad-predicates = { path = "../crates/rcad-predicates" }
 rcad-step = { path = "../crates/rcad-step" }

@@ -21,10 +21,18 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+use rcad_fuzz_timing::timed;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 
 fuzz_target!(|bytes: &[u8]| {
+    timed(env!("CARGO_BIN_NAME"), bytes, || {
+        everything_one_file_is_put_through(bytes);
+    });
+});
+
+/// One draw of bytes, read and then walked everywhere a caller could walk it.
+fn everything_one_file_is_put_through(bytes: &[u8]) {
     let Ok(file) = StepFile::read(bytes) else {
         return;
     };
@@ -66,6 +74,10 @@ fuzz_target!(|bytes: &[u8]| {
     let _ = import.asks_for_more_precision_than_its_numbers_carry();
     let _ = import.shapes_this_reader_did_not_take();
     for (_, solid) in import.solids() {
-        let _ = import.model().solid(*solid).box_around_it();
+        let _ = import
+            .model()
+            .solid(*solid)
+            .expect("a key this import handed out is this import's model's own")
+            .box_around_it();
     }
-});
+}

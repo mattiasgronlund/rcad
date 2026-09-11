@@ -58,10 +58,18 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+use rcad_fuzz_timing::timed;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, Rule};
 
 fuzz_target!(|data: &[u8]| {
+    timed(env!("CARGO_BIN_NAME"), data, || {
+        two_models_split_and_fused(data);
+    });
+});
+
+/// One draw of bytes, cut into a header and two `Model`s.
+fn two_models_split_and_fused(data: &[u8]) {
     let Some((&header, rest)) = data.split_first() else {
         return;
     };
@@ -70,7 +78,7 @@ fuzz_target!(|data: &[u8]| {
 
     fuse_a_split_of_its_own_solids(first_half, header);
     fuse_a_split_of_its_own_solids(second_half, header.rotate_left(4));
-});
+}
 
 /// Decode one `Model`, and — if it passes `validate` — fuse a `header`-chosen
 /// split of its own solids against each other under a `header`-chosen rule

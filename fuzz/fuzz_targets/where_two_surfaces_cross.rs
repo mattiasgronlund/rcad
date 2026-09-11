@@ -17,9 +17,12 @@ use libfuzzer_sys::fuzz_target;
 mod fuzzing;
 
 use fuzzing::{every_oracle_holds_of, two_surfaces_from};
+use rcad_fuzz_timing::timed;
 
 fuzz_target!(|bytes: &[u8]| {
-    if let Some(pair) = two_surfaces_from(bytes) {
-        let _ = every_oracle_holds_of(pair);
-    }
+    timed(env!("CARGO_BIN_NAME"), bytes, || {
+        if let Some(pair) = two_surfaces_from(bytes) {
+            let _ = every_oracle_holds_of(pair);
+        }
+    });
 });
