@@ -24461,11 +24461,19 @@ fuzz target and would have failed the same way given the same pair.
 
 ### 85.5 What is checked, and what is not
 
-The crashing seed is promoted into `fuzz/corpus/where_two_surfaces_cross/`, so
-`every_seed_in_the_checked_in_corpus_names_its_crossing_honestly` replays it on
-every `just gate` — the corpus goes from 824 seeds to 825, and from 743 that
-decode to a pair to 744. That is the end-to-end regression and it fails without
-this change.
+The crashing seed is promoted into `fuzz/corpus/where_two_surfaces_cross/` as
+`crash-a2acceace…`, so `every_seed_in_the_checked_in_corpus_names_its_crossing_honestly`
+replays it on every `just gate` — the corpus goes from 824 seeds to 825, and from
+743 that decode to a pair to 744. That is the end-to-end regression and it fails
+without this change.
+
+The file is named here because the name is the only thing that ties it back to
+this section. A seed is named for its contents, the night that found it leaves a
+copy in `fuzz/artifacts/` that `.gitignore` hides, and §85 and §88 landed a seed
+each against the same target a day apart — so a reader holding a `crash-…` file
+has no way to tell which finding it belongs to except `git log --diff-filter=A`.
+On 2026-09-11 two sessions in one evening reconstructed it that way, and one of
+them first read this seed as an untriaged crash.
 
 `Interval::around`'s own unit tests carry the arithmetic: the collapse at
 16 252 928.899, the three ways there is no box to hand back, and the two cases
@@ -25187,8 +25195,15 @@ writing it rather than assuming convergence.
 ### 88.5 What moved, and what did not
 
 The refusal rate moved **down**, which §16.10 asks be reported rather than passed
-over in silence: the crashing corpus seed is decided now, in both orders, and no
-test anywhere refuses something it used to decide.
+over in silence: the crashing corpus seed — `crash-3f9c76a3…`, in
+`fuzz/corpus/where_two_surfaces_cross/` and landed by the fix rather than ahead
+of it — is decided now, in both orders, and no test anywhere refuses something it
+used to decide.
+
+§85.5 says why the file is named here rather than left to
+`git log --diff-filter=A`: that section landed a seed against this same target a
+day earlier, and on 2026-09-11 a session reading the two files side by side
+attributed this one to §89 on the strength of its mtime.
 
 Two unit tests in `exact.rs` changed and then changed back, and the round trip is
 the interesting part. With one sweep, `M` settled shortly enough to square where
