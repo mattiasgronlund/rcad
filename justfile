@@ -30,7 +30,7 @@ list:
 # one `test` — and this repo already says "gated green", "a gate agent", "the
 # gate worktree". `test-all` would have shipped a false sentence on day one.
 [doc("Everything, in the order CI runs it. ~9 minutes.")]
-gate: check-plugins check check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest lint test check-release-build check-t-selftest deny
+gate: check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest lint test check-release-build check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -54,6 +54,26 @@ export RCAD_STEP_CORPUS := env_var_or_default("RCAD_STEP_CORPUS", parent_directo
 [doc("Type-check the whole workspace, tests and benches included.")]
 check:
     cargo check --workspace --all-targets
+
+# The fuzz targets compile, which `check` above cannot tell you.
+#
+# `fuzz/Cargo.toml` declares its own empty `[workspace]`, deliberately: building
+# a target needs a nightly compiler and a sanitizer, and `rust-toolchain.toml`
+# pins stable. The cost of that was silence. `no_step_file_makes_the_reader_panic.rs`
+# stopped compiling when §86 made `Model::solid` return a `Result`, and nothing
+# said so until a night of fuzzing had already been spent — the §77.6 shape, a
+# check passing for a property of the environment it ran in.
+#
+# **Type-checking needs none of that.** The nightly compiler and the sanitizer
+# are for *linking* an instrumented binary; `cargo check` on stable reads the
+# same four targets and finds the same break, in six seconds. So the gap was
+# never that this could not be checked, only that nothing checked it.
+#
+# Run from `fuzz/` because it is its own workspace; `--all-targets` to reach the
+# `fuzz_targets/` binaries rather than just the empty lib.
+[doc("The four fuzz targets still compile, which the workspace check cannot see.")]
+check-fuzz-builds:
+    cd fuzz && cargo check --all-targets
 
 # Every public enum either grows or says why it does not (docs/decisions.md §40).
 #
@@ -480,8 +500,8 @@ check-gate-runs-every-check:
     listed=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "22" ]; then \
-        echo "found $n check-* recipes, expected 22"; \
+    if [ "$n" != "23" ]; then \
+        echo "found $n check-* recipes, expected 23"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
