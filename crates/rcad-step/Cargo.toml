@@ -16,6 +16,7 @@ smallvec.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+postcard.workspace = true
 step-io = "0.2.4"
 
 [lints]

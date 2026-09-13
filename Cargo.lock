@@ -824,6 +824,7 @@ dependencies = [
 name = "rcad-step"
 version = "0.0.0"
 dependencies = [
+ "postcard",
  "rcad-geom",
  "rcad-predicates",
  "rcad-topo",
