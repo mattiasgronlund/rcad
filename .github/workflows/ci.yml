@@ -163,52 +163,43 @@ jobs:
       # value that comes out empty; it makes the whole workflow file invalid, and
       # the run then fails in 0 s having never started a job.
       - run: echo "RCAD_STEP_CORPUS=$RUNNER_TEMP/rcad-step-corpus" >> "$GITHUB_ENV"
-      # `just gate` begins with `check-plugins` — pinned there by
-      # `check-gate-runs-every-check` since 2026-09-08, because it ran first
-      # only by where it sat and this step's diagnosis depends on it — and three
-      # of its recipes run scripts that live in the shared marketplace now
-      # rather than in `.claude/`.
-      # A runner has no Claude Code to install a plugin into, so it clones the
-      # marketplace and points `CLAUDE_PLUGINS_ROOT` at it — the same escape
-      # hatch `check-plugins` offers a human whose clone is somewhere else.
+      # There is no plugin clone here any more, and the absence is the change.
+      # Until 2026-09-13 this job cloned the shared marketplace at a pinned sha
+      # and pointed `CLAUDE_PLUGINS_ROOT` at it, because `just gate` begins with
+      # `check-plugins` and two later recipes ran scripts out of it. Asked what
+      # the clone bought, each of its three users turned out to be checking
+      # something this job does not have:
       #
-      # Outside the checkout for the reason the corpus is: not this repo's to
-      # carry, and inside the working tree it would read as untracked.
+      #   `check-plugins` asks whether Claude Code has been *told about* three
+      #   plugins, and a runner has no Claude Code. The clone was creating the
+      #   very directories the check then found — the job satisfying its own
+      #   precondition — and the seam test after it drives `just question`
+      #   against a parser no session here would load.
       #
-      # Pinned by commit, like the KiCad half of the corpus. Unpinned, a push to
-      # that repo could turn this one red with no commit here, and a green would
-      # stop meaning "this tree passes". Bump it deliberately.
+      #   `check-hooks` tests a **PreToolUse** hook, which fires in a session.
+      #   There is none in a job, so the cases ran against a hook that could not
+      #   have fired either way. Its other two arms are rcad's own hooks and
+      #   still run.
       #
-      # Bumped from `952672e` to `f5f2f48` on 2026-09-08, and that bump is load
-      # bearing rather than housekeeping: `f5f2f48` is where `check-declared.sh`
-      # learned to skip on a machine with no Claude Code, which is what this
-      # runner is. Pinned back below it, `just gate` goes red at
-      # `check-plugins`. `docs/decisions.md` §77.
+      #   `check-questions-selftest` ran the marketplace repo's own 20 cases out
+      #   of a clone made here, which tests that repo's tree rather than this
+      #   one's. That repo runs them itself on every push now.
       #
-      # What this does **not** check is that a human's installed plugins match
-      # the pin: `check-plugins` tests that three directories exist, not which
-      # version they hold, so local and CI can disagree about the plugin half of
-      # a gate. That is a limit and not a gap — an installed plugin need not be a
-      # git checkout, so there is no version on the local side to compare.
-      # No credentials here, deliberately: the marketplace is a **public** repo,
-      # which Mattias settled on 2026-09-08 knowing it is the one public thing
-      # among `rcad` and `rscene`. The alternative was a fine-grained token in an
-      # Actions secret — the automatic `GITHUB_TOKEN` cannot read another repo —
-      # and a secret to rotate was judged the worse trade.
+      # So those recipes skip where there is no config directory and say
+      # "skipped, not passed" — the predicate is that directory and never `CI`,
+      # `docs/decisions.md` §77. `check-plugins` keeps its place at the head of
+      # `gate` and `check-gate-runs-every-check` still pins it there, because a
+      # skip is not a reason to stop asking first.
       #
-      # The failure arm is here because of the order these two things happened
-      # in: the repo was created private, and a clone with no credentials against
-      # a private repo fails with `fatal: could not read Username for
-      # 'https://github.com'`, which names neither the repo nor the fix.
-      - run: |
-          if ! git clone --quiet https://github.com/mattiasgronlund/claude-questions.git "$RUNNER_TEMP/claude-plugins"; then
-            echo "Could not clone the plugin marketplace, and this clone carries"
-            echo "no credentials by design. If the repo is still private:"
-            echo "  gh repo edit mattiasgronlund/claude-questions --visibility public"
-            exit 1
-          fi
-          git -C "$RUNNER_TEMP/claude-plugins" checkout --quiet f5f2f483deb966263b6201dc4b9a6905ca3fb6dc
-          echo "CLAUDE_PLUGINS_ROOT=$RUNNER_TEMP/claude-plugins/plugins" >> "$GITHUB_ENV"
+      # What is genuinely lost is this repo's three overlay patching cases in
+      # `.claude/patching-cases.local.json`, which now run when a human runs the
+      # gate and nowhere else. Named rather than replaced: no runner-side
+      # substitute was worth a clone whose other two users checked nothing.
+      #
+      # The version this repo asks for lives in `.claude/settings.json` —
+      # `mattiasgronlund/claude-questions@v0.2.0` — and `check-declared.sh`
+      # fails a machine registered at a different ref. That is a statement about
+      # the sessions a human opens here, not about this job.
       # mise installs the `cargo:` tools in parallel, and each one triggers
       # rustup to materialise the toolchain pinned in `rust-toolchain.toml`.
       # They race over the same `.partial` file in ~/.rustup/downloads and all

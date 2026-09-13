@@ -13,11 +13,16 @@
 # formatting, nothing that could disagree with the other repo's copy.
 #
 # `$HOME`-relative and overridable, never absolute: a tracked file naming
-# `/home/mattias` breaks for anyone who clones this. The same two variables the
-# justfile reads, so there is one place to move.
+# `/home/mattias` breaks for anyone who clones this. The same variables the
+# justfile reads, resolved in the same order, so there is one place to move:
+# the override first, then the marketplace clone — the tree the `ref` in
+# `.claude/settings.json` pins — then a plain checkout.
 set -uo pipefail
 
-root=${CLAUDE_PLUGINS_ROOT:-$HOME/git/mattiasgronlund/claude-questions/plugins}
+config=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+clone=$config/plugins/marketplaces/mattiasgronlund-local/plugins
+[ -d "$clone" ] || clone=$HOME/git/mattiasgronlund/claude-questions/plugins
+root=${CLAUDE_PLUGINS_ROOT:-$clone}
 plugin=${CLAUDE_QUESTIONS_PLUGIN:-$root/questions}
 line="$plugin/bin/statusline.sh"
 
@@ -26,7 +31,7 @@ line="$plugin/bin/statusline.sh"
 # blank line reads as "under budget" rather than as "not installed".
 if [ ! -x "$line" ]; then
 	cat >/dev/null
-	printf '%s\n' "questions plugin not found at $plugin — /plugin install questions@mattiasgronlund-local"
+	printf '%s\n' "questions plugin not found at $plugin — claude plugin install -y questions@mattiasgronlund-local"
 	exit 0
 fi
 

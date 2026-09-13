@@ -2,6 +2,20 @@
   "env": {
     "CLAUDE_CODE_THRIFTY_SONIC": "false"
   },
+  "extraKnownMarketplaces": {
+    "mattiasgronlund-local": {
+      "source": {
+        "source": "github",
+        "repo": "mattiasgronlund/claude-questions",
+        "ref": "v0.2.0"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "questions@mattiasgronlund-local": true,
+    "guardrails@mattiasgronlund-local": true,
+    "practices@mattiasgronlund-local": true
+  },
   "statusLine": {
     "type": "command",
     "command": "\"$CLAUDE_PROJECT_DIR/.claude/statusline.sh\"",
