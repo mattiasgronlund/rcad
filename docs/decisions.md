@@ -25948,9 +25948,30 @@ than it was, which is the state §92.3 is about.
 
 Replayed against `main` at `dba39bd`, all 88 pass: `cargo +nightly fuzz run
 two_solids_fused_by_a_stranger <the 88> -- -runs=0`, 89 runs, no crash. They are
-witnesses to bugs the six days since have fixed. What to do with them is open;
-the tree is **locked with that as its reason**, which is the record §55 already
-provides for "this tree is not free" and costs no second place to look.
+witnesses to bugs the six days since have fixed.
+
+**Seven of the 88 earned a place in the corpus, and the measurement is not the
+one §85, §88 and `b7bda36` used.** Those three justify a seed by subtraction
+against the corpus row — *"746 of 827 seeds, 4217 points, 545 orders, 1089
+scalings; remove it and it is exactly the 745 of 826 that was published
+before"*. That row is the `where_two_surfaces_cross` test walking its corpus.
+**`two_solids_fused_by_a_stranger` has no such row**: nothing in
+`crates/` reads that corpus directory, so there is no published number to
+subtract a seed from. Its inputs reach the code only through `cargo fuzz`.
+
+So the subtraction that exists for a fuzz corpus is coverage, and libFuzzer
+already does it: `-merge=1` copies an input into the destination only when it
+adds a feature the destination does not have. Against the tracked 1740, the 88
+take it to **1747 — seven added, 81 already covered**. Those seven are committed
+under their content hashes, which is what the merge names them and what the rest
+of that directory is named.
+
+**The other 81 are not deleted, they are filed.** All 88 originals went to
+`~/rcad-fuzz-logs/artifacts-rescued-2026-09-13/`, matching the
+`artifacts-rescued-2026-09-11/` beside it. An input that buys no coverage today
+is still the thing that reproduced a bug on 2026-09-07, and the archive is where
+that belongs when the corpus will not have it. With the bytes in two places
+neither of which is a lock, the tree stops being anything's only copy.
 
 ## 93. A pipe on a fat pipe's skin, named one way round only, fixed 2026-09-13
 
