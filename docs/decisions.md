@@ -26397,7 +26397,7 @@ rule) pairs only three can be drawn:
 | 2 | `tools` empty | `Difference` |
 
 A two-sided union and a two-sided difference cannot be drawn at all. Counted
-over the corpus: **564 of 673 fuses have nothing on one of their two sides**.
+over the corpus: **569 of 678 fuses have nothing on one of their two sides**.
 
 **It is not fixed here, and the reason is §29's own.** Changing the layout
 reinterprets 1740 checked-in seeds, and the thing to have before making that
@@ -26415,9 +26415,15 @@ With the six seeds in, measured by the three replay tests:
 |---|---|---|
 | reader | 909 | 137 parse, 547 instances, 1 imports, 136 refuse |
 | writer | 1182 | 18 decode, 13 faces, 1 writes, 17 refuse |
-| fuse | 1742 | 3484 halves, 914 decode, 673 validate, 673 fuse, 257 ok, 416 refuse |
+| fuse | 1749 | 3498 halves, 922 decode, 678 validate, 678 fuse, 260 ok, 418 refuse |
 
-22 ms, 19 ms and 0.74 s run on their own. Every floor is set at roughly three
+**The fuse row includes the seven crash seeds §92 rescued**, which landed on
+`main` while this was being written. Replaying them moves halves 3484 → 3498,
+fuses 673 → 678, `ok` 257 → 260 and refusals 416 → 418, for no measurable time.
+That is the arrangement paying for itself on its first day: seven seeds a night
+found are now five more fuses a commit can break.
+
+22 ms, 19 ms and 0.75 s run on their own. Every floor is set at roughly three
 quarters of what was measured, which is §29.9's rule and catches a stage falling
 silent without failing on ordinary drift. The exceptions are the two counts that
 come from one seed each — the reader's `imported` and the writer's `written` —

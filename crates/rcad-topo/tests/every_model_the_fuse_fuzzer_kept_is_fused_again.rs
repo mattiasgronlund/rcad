@@ -27,7 +27,7 @@
 //! `header % (solids.len() + 1)` and `header % 3` are the same expression, so
 //! only three of the nine (split, rule) pairs can be drawn and two of the three
 //! have an empty side. `Reached::one_sided` counts what that costs rather than
-//! describing it — **564 of 673 fuses, measured below** — and
+//! describing it — **569 of 678 fuses, measured below** — and
 //! `docs/decisions.md` §95 records why the layout is left alone for now: a
 //! change to it reinterprets 1740 checked-in seeds, and the measurement of what
 //! that disturbs is the thing to have before making it — the same argument
@@ -57,11 +57,19 @@
 //! which reported, with the two control seeds in:
 //!
 //! ```text
-//! Reached { halves: 3484, decoded: 914, validated: 673, fused: 673,
-//!           one_sided: 564, ok: 257, refused: 416 }
+//! Reached { halves: 3498, decoded: 922, validated: 678, fused: 678,
+//!           one_sided: 569, ok: 260, refused: 418 }
 //! ```
 //!
-//! in 0.74 s, and each floor is set at roughly three quarters of that. The
+//! in 0.75 s, and each floor is set at roughly three quarters of that.
+//!
+//! **The seven crash seeds §92 rescued are in that number and cost nothing.**
+//! They landed on `main` while this file was being written, and replaying them
+//! here moves halves 3484 → 3498, fuses 673 → 678, `ok` 257 → 260 and refusals
+//! 416 → 418, for no measurable time at all. Seven seeds a night found, five
+//! more fuses a commit can break.
+//!
+//! The
 //! `one_sided` assertion is not a floor and is written the other way round: it
 //! fails when the number *drops*, because a drop means the shared modulus has
 //! been changed and §95 is out of date.
