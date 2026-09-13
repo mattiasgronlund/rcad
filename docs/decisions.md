@@ -26575,3 +26575,92 @@ cost of adding a test to a suite that runs in parallel; read the critical path.
 All four targets build on nightly after the move, and all three corpora replay
 clean through the real `cargo fuzz` binaries with `-runs=0`: 910, 1183 and 1743
 runs, no crash.
+
+### 95.6 The fuse target asks the answer three questions, not none
+
+§95 stopped at "does it crash", which is what a corpus nobody had counted could
+be asked for. With the counting done, the fuse target is where three promises
+already written down can be asked continuously, and `let _ =` on the answer was
+throwing all three away.
+
+| checked | promised by | tested before this |
+|---|---|---|
+| a refusal leaves the model byte-identical | §17.4's atomicity row, and `Model::fuse`'s "Atomic" heading | **nothing** |
+| every solid handed back resolves in the model that minted it | §17.4's history-map row — "deleted" is an input with no image, not a key that stopped resolving | nothing directly |
+| an `Ok` answer passes the sweep under its own policy | `Model::fuse`, "What `Ok` promises, and under which policy" | §66.1, once, by a harness built for the day |
+
+**The atomicity row is the one that had nothing.** Grepping the tree for it
+finds `fusing_two_bars_side_by_side.rs`, which calls `Model::validate` after a
+refusal — so it would pass a model that had been half written and was still
+sound, which is exactly the half-applied boolean §4.1 would rather crash than
+emit. The bytes are compared through `postcard`, the same door the seeds came
+in through, so what is compared is what a saved file would hold rather than the
+arena's own bookkeeping.
+
+**The third is §66.1 stopping being a one-off.** That harness was the fuzz
+target's own decode and split with the answer kept instead of dropped, run three
+times by hand against `a6f03b8`; it is now the target itself, on every commit.
+It carries none of §66.1's sixteen forward: those failed a *certified* sweep
+after a *tolerant* fuse, which §68 and `Model::fuse` both say is correct, and
+the sweep here is under the policy the fuse ran under — the 0 of §66.1's middle
+row, made permanent.
+
+#### The `Ok` sweep leans on the certified sweep above it, and that is not obvious
+
+`Model::fuse` answering `Ok` does **not** mean the caller's model validates.
+§87.3 leaves that open deliberately: inputs that fail `the_inputs_fit_in_f64`
+stand `Assembly::check_dynamic_range` down, and `Model::validate`'s thirteenth
+check — the coordinate range, the only one that folds over the whole model —
+then refuses an answer the arithmetic reached exactly.
+`a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses` is such a
+fuse and it passes on `main`. So the assertion added here is **false of
+`Model::fuse` in general** and true of every fuse this harness can draw.
+
+What makes it true here is the `Policy::certified()` sweep the harness runs
+before fusing. `the_inputs_fit_in_f64` folds over the input solids alone and
+takes chords alone, so its ratio is bounded by the whole-model ratio that sweep
+has already accepted: no coordinate it sees is larger, no edge it sees is
+shorter. A model that reaches the fuse fits, the range check runs, and a fuse
+that would have needed the carve-out refuses instead of answering.
+
+That sweep was put there to keep the target off `Model::fuse`'s documented panic
+on unsound input. It is now load-bearing twice, and moving it to the fuse's own
+policy — which reads like a tightening — would make the assertion fire on good
+answers. The harness says so where the sweep is.
+
+#### A check nothing reaches passes for free, so two counters say what was reached
+
+`solids_made: 266` across 265 answers is how many keys the resolve check looked
+at; 265 empty answers would have left it at zero and the check asserting
+nothing. `ok_that_wrote_something: 249` is how many `Ok` fuses moved the bytes
+— the control on the refusal side's comparison, because serialization blind to
+what a fuse writes would let that comparison pass on a half-written model. The
+16 that did not move them are the empty answers, which §17.4 says are real ones.
+
+**The byte check was shown to catch the thing it is for, not argued to.** A
+refusal made to leave one cube behind in `Model::fuse` takes the replay red on
+the first refusal it reaches, in 8 ms:
+
+```text
+a refused fuse left the model changed: 3556 bytes where it had 2381
+```
+
+#### What it costs, and why the writer target did not get the same
+
+0.82 s against 0.81 s over 682 fuses — one extra `postcard` round each, and the
+gate's critical path is a 30.7 s test §95.5 already measured.
+
+**The writer target was asked the same question and the answer was no.** A round
+trip through `StepFile` and `Import` is feasible — both are public, and
+`a_solid_written_out_and_read_back_is_the_same_solid.rs` already does exactly
+it. But §95.5's writer row is `written: 1`: one model in a 1182-seed corpus
+writes at all, and it is the hand-made control seed `two_cubes_that_write`. The
+check would run once per gate, against a deterministic test that already
+compares volume, area and centroid **bit for bit** and then fuses the result
+against a third solid. That is the stronger oracle and it already runs.
+
+So the writer target's problem is not missing checks, it is the 18-of-1182
+decode rate that starves everything downstream of one. The fuse target takes 926
+of 3502 off the same `postcard` door by splitting its input in two. Why that is
+worth 926 against 18 is still not measured, and is its own piece of work rather
+than a guess made here.

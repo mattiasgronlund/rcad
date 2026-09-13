@@ -59,6 +59,51 @@
 //! **A one-sided draw is still two thirds of what a two-solid model can draw,
 //! and that is the split's own modulus rather than this.** `Reached::one_sided`
 //! counts it and §95.4 says why it is left alone.
+//!
+//! # What the answer is asked, beyond whether it crashed
+//!
+//! Three checks, and each one is a promise made somewhere else in the tree
+//! (§95.6):
+//!
+//! - **A refusal leaves the model byte-identical.** §17.4's atomicity row, and
+//!   `Model::fuse`'s own "Atomic" heading. Nothing else in the tree asked it:
+//!   the nearest thing is `fusing_two_bars_side_by_side.rs`, which re-validates
+//!   after a refusal and so would pass a model that had been half written and
+//!   was still sound.
+//! - **Every solid handed back resolves**, through `Model::solid`, in the model
+//!   that minted it.
+//! - **An `Ok` answer passes the sweep under the policy the fuse ran under** —
+//!   `Model::fuse`'s "What `Ok` promises, and under which policy". §66.1
+//!   measured this once over 1060 answers with a harness built for the day;
+//!   here it stops being a one-off.
+//!
+//! What the bytes are compared with is `postcard`, which is the same door the
+//! input came through, so this compares what a saved file would hold and not
+//! the arena's own bookkeeping. `Reached::ok_that_wrote_something` is what says
+//! that comparison can see a fuse's writes at all.
+//!
+//! # The `Ok` sweep is sound here because of the sweep above it
+//!
+//! **`Model::fuse` answering `Ok` does not mean the caller's model validates,
+//! in general.** §87.3 leaves that case open on purpose: when the inputs fail
+//! `the_inputs_fit_in_f64` the fuse skips `Assembly::check_dynamic_range` and
+//! hands back the answer the arithmetic reached exactly, and `Model::validate`'s
+//! thirteenth check — the coordinate range, the one check that folds over the
+//! whole model — then refuses it.
+//! `a_frame_a_long_way_from_the_origin_encloses_what_a_frame_encloses` is such a
+//! fuse and it passes on `main`.
+//!
+//! It cannot arise here, because the model was swept under `Policy::certified()`
+//! before it was fused. `the_inputs_fit_in_f64` folds over the input solids
+//! alone and takes chords alone, so its ratio is bounded by the whole-model
+//! ratio that sweep has already accepted: no coordinate it sees is larger and no
+//! edge it sees is shorter. So a model that reaches the fuse here fits, the
+//! range check runs, and a fuse that would have needed the carve-out refuses
+//! rather than answering.
+//!
+//! **Which makes that sweep load-bearing twice over.** Moving it to the fuse's
+//! own policy, or taking it out, does not merely change what reaches the fuse —
+//! it makes the assertion below start firing on good answers.
 
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
@@ -106,6 +151,18 @@ pub struct Reached {
     pub ok: usize,
     /// Fuses that refused by name.
     pub refused: usize,
+    /// Solids handed back across every `Ok`, each one a key checked to resolve.
+    ///
+    /// An empty answer is a real answer (§17.4), so this is not `ok` again: it
+    /// is how many keys the resolve check actually had to look at.
+    pub solids_made: usize,
+    /// `Ok` fuses after which the model's bytes are different.
+    ///
+    /// **The control on the byte comparison the refusal arm makes.** Were
+    /// serializing a `Model` blind to what a fuse writes into it, that
+    /// comparison would pass on a half-written model and nothing would say so —
+    /// and this number would be zero.
+    pub ok_that_wrote_something: usize,
 }
 
 impl Reached {
@@ -122,6 +179,8 @@ impl Reached {
             two_sided_differences: self.two_sided_differences + other.two_sided_differences,
             ok: self.ok + other.ok,
             refused: self.refused + other.refused,
+            solids_made: self.solids_made + other.solids_made,
+            ok_that_wrote_something: self.ok_that_wrote_something + other.ok_that_wrote_something,
         }
     }
 }
@@ -200,9 +259,35 @@ pub fn how_one_model_is_fused(bytes: &[u8], header: u8) -> Reached {
     };
 
     reached.fused = 1;
-    match model.fuse(arguments, tools, rule, &policy, &mut ProvenanceLog::new()) {
-        Ok(_) => reached.ok = 1,
-        Err(_) => reached.refused = 1,
+    let before = postcard::to_allocvec(&model).expect("a model that decoded serializes again");
+    let answer = model.fuse(arguments, tools, rule, &policy, &mut ProvenanceLog::new());
+    let after = postcard::to_allocvec(&model).expect("a fused model serializes");
+
+    match answer {
+        Ok(fused) => {
+            reached.ok = 1;
+            reached.solids_made = fused.solids().len();
+            if before != after {
+                reached.ok_that_wrote_something = 1;
+            }
+            for &solid in fused.solids() {
+                model
+                    .solid(solid)
+                    .expect("a solid the fuse handed back resolves in the model that made it");
+            }
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .expect("an answer the fuse called Ok passes the sweep under its own policy");
+        }
+        Err(_) => {
+            reached.refused = 1;
+            assert!(
+                before == after,
+                "a refused fuse left the model changed: {} bytes where it had {}",
+                after.len(),
+                before.len()
+            );
+        }
     }
     reached
 }

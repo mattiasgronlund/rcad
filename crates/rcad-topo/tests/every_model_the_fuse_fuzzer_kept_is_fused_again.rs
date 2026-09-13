@@ -83,10 +83,25 @@
 //! ```text
 //! Reached { halves: 3502, decoded: 926, validated: 682, fused: 682,
 //!           one_sided: 569, two_sided_unions: 69, two_sided_differences: 7,
-//!           ok: 265, refused: 417 }
+//!           ok: 265, refused: 417, solids_made: 266,
+//!           ok_that_wrote_something: 249 }
 //! ```
 //!
-//! in 0.81 s, and each floor is set at roughly three quarters of that.
+//! in 0.82 s, and each floor is set at roughly three quarters of that.
+//!
+//! # The last two counters are the ones that keep the checks honest
+//!
+//! §95.6 added three correctness checks to the harness — a refusal leaves the
+//! model byte-identical, an `Ok` answer passes the sweep under its own policy,
+//! and every solid handed back resolves — and a check nothing reaches passes for
+//! free. `solids_made: 266` is how many keys the resolve check looked at across
+//! 265 answers, so it is not 265 empty ones; `ok_that_wrote_something: 249` is
+//! how many `Ok` fuses moved the bytes, which is what says the byte comparison
+//! on the refusal side can see a fuse's writes at all. The 16 that did not move
+//! them are the empty answers.
+//!
+//! The three cost 0.01 s over 682 fuses — the extra `postcard` round per fuse,
+//! which is the same door the seeds came through.
 //!
 //! Before the rule moved off the split the same run read `halves: 3498,
 //! decoded: 922, validated: 678, fused: 678, one_sided: 569, ok: 260,
@@ -172,6 +187,19 @@ fn every_seed_in_the_checked_in_corpus_is_fused_without_panicking() {
         reached.refused
     );
     assert!(
+        reached.solids_made >= 190,
+        "only {} solids came back across every answer, so the check that every \
+         key handed back resolves is looking at almost nothing (§95.6)",
+        reached.solids_made
+    );
+    assert!(
+        reached.ok_that_wrote_something >= 180,
+        "only {} answered fuses changed the model's bytes, so `postcard` has \
+         stopped seeing what a fuse writes — and the byte comparison on every \
+         refusal is passing for free (§95.6)",
+        reached.ok_that_wrote_something
+    );
+    assert!(
         reached.two_sided_unions >= 50,
         "only {} fuses were a union with something on both sides, and there \
          were none at all until the rule moved off `header % 3` — so the split \
@@ -209,6 +237,15 @@ fn the_named_control_seeds_still_land_either_side_of_the_fuse() {
     assert_eq!(reached.halves, 2, "{reached:?}");
     assert_eq!(reached.fused, 2, "{reached:?}");
     assert_eq!(reached.ok, 2, "both halves are the same model: {reached:?}");
+    assert_eq!(
+        reached.solids_made, 2,
+        "a union of two overlapping cubes is one solid and so is their \
+         intersection, and both keys were resolved: {reached:?}"
+    );
+    assert_eq!(
+        reached.ok_that_wrote_something, 2,
+        "neither answer is empty, so both wrote into the model: {reached:?}"
+    );
     assert_eq!(
         reached.one_sided, 0,
         "header 0x01 cuts between the two cubes on both halves: {reached:?}"
