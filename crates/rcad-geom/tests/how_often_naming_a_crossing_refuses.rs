@@ -123,6 +123,13 @@ const A_CROSSING_SOMEWHERE_ELSE_MAY_REFUSE: f64 = 0.25;
 /// left is the *bounded* half of the same question — where the two lines sit
 /// relative to the flat surface that separates them — on a plane so close to a
 /// pipe's wall that the two lines nearly meet.
+///
+/// **That remainder is unclassified, not a limit**, and this sentence says so
+/// because this is where its rate is published and a rate with no verdict beside
+/// it reads as settled. §93 fixed the same shape of arithmetic one row over and
+/// §29.8 records what is untried here; what refuses is the *rotated* pairs, where
+/// the separation is worked out from two numbers a division already rounded. On
+/// the lattice it refuses nothing, down to one half-ulp of the wall.
 const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.005;
 
 /// How much of a quartic family may refuse for want of a half-space.

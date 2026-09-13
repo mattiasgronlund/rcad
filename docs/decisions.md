@@ -6153,6 +6153,28 @@ it is a change to a type every predicate in the kernel is certified about, so it
 is M4's. Measured cost of leaving it: 0.44% of turned planar pairs, 10.9% of
 turned quartic ones.
 
+**The bounded half above is written as closed, and it is not classified.** Added
+by §93, which found the same shape of arithmetic one row over and fixed it there.
+`two_lines_along_a_pipe` works out the separation as `√(skin² − in_front²)` from
+`ρ/√W` and `(n·o − d)/√N` — two numbers that have **already been rounded by a
+division**, so the loss is in the operands before the subtraction happens and no
+regrouping of the subtraction recovers it. On the lattice this costs nothing: a
+plane walked in to one half-ulp of a pipe's wall, at radius 1 and at radius 1024
+with a coordinate normal, names two lines every time. What refuses is the rotated
+pairs, where `√N` rounds and `in_front` stops being exact — the band family's
+3.12% and the turned quartic family's 2.24%.
+
+The untried technique is §93's: stop working from normalised lengths and go back
+to the stored numbers, where the same quantity is an exact polynomial,
+`out² = (ρ²N − W(n·o−d)²)/(WN)`. Whether that is enough is a separate question,
+because what refuses is `on_each_line` projected on the picking normal and the
+other enclosures in that point may dominate — which is something to measure and
+not to argue. So this is recorded as **unclassified**, not as a limit: §16.10's
+rule is that the sentence "the answer is not reachable" needs a demonstration,
+and nobody has written one for this half. Mattias took (a) over a lane on
+2026-09-13; the lane is worth having after §91.3, whose slow seed costs the gate
+63 of its 65 seconds.
+
 ### 29.9 Criterion 10: what runs in CI and what does not, said plainly
 
 `cargo-fuzz` builds with a sanitizer that needs a nightly compiler and
