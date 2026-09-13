@@ -25760,12 +25760,37 @@ So a sweep needs a check no ancestry test provides: **for every gitignored
 artifact in a tree about to go, refuse unless `main` already carries those exact
 bytes.** Bytes, not filenames — a corpus file is named after its own content
 hash, so a name match is nearly a content match and "nearly" is how the wrong
-file gets kept while the right one goes. The check is proven in three directions
-rather than one, because a guard that only ever says yes is §77.6's shape: it
-accepts the seed `34ba0ad` committed, refuses
-`crash-cba396f88aa1063b9d879100bded7b9fcd0d5f95` (which cannot go in the corpus
-while the bug is live, since a crashing input there kills every night at corpus
-load), and refuses a file carrying a committed seed's name over different bytes.
+file gets kept while the right one goes.
+
+**Key it on the bytes and nothing else.** The first version of this check looked
+the artifact up by *filename* under `fuzz/corpus/` and compared bytes only once
+it found a hit. That is broken, and it was broken against the very next seed to
+land: `crash-cba396f8…` went into the corpus as
+`crash-a-thin-pipe-on-a-fat-ones-skin-cba396f8…`, same blob
+`3a1ced3a04e4ee856ae41cb47332e41ae7ad47af`, because the raw hash is unreadable
+and naming a seed is what anyone would do. So the key was the one thing expected
+to change, and a committed seed would have been reported as an orphan for ever.
+`git hash-object` against the blob ids in `main`'s corpus tree is the key that
+holds: it asks "does `main` have these bytes", which is the actual question, and
+it cannot be confused by either a rename or a collision of names.
+
+**Prove it refusing, not just accepting** — a guard that only ever says yes is
+§77.6's shape, and this one is checked in four directions: it accepts a seed
+under its own name, accepts one under a new name, refuses a file wearing a
+committed seed's name over different bytes, and refuses bytes in no corpus.
+
+**"In no corpus on `main`" is not a proxy for "worthless". It marks the window in
+which a file is most dangerous to lose.** A crash seed is deliberately absent
+from the corpus for exactly as long as the bug is live, because a crashing input
+there kills every later night at corpus load. So the sweep refuses hardest
+precisely where the loss would be worst, which is the property to keep rather
+than a coincidence to note.
+
+That window has an end, and it is the fix commit — §93 closed this one about four
+hours after §92 was written. **So an orphan artifact never needs a human to
+adjudicate it and the answer is never "delete it now": refuse, and re-check
+later.** Either it has become a committed seed by then, or the bug is still live
+and the file is still the only copy.
 
 ### 92.4 "Copied out" and "in the object store" are different claims
 
