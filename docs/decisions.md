@@ -26240,3 +26240,176 @@ the refusal is cheap and named: the new test fails without this change, with
 The new refusal is reachable from the public API and not only from a fuzzer — two
 pipes and a radius ratio is all it takes — so it is a published limit like any
 other, with the sweep in 94.2 behind it.
+
+## 95. Three fuzz corpora nobody had counted, replayed 2026-09-13
+
+*§29.9 gave `where_two_surfaces_cross` a suite that replays its corpus on every
+commit, and the other three targets never got one. Two of the three turn out to
+have been nearly inert for months, and it took counting to see it.*
+
+### 95.1 What the three corpora actually reach
+
+Measured on this tree before anything was changed, by replaying each corpus
+through its own target's harness and counting how far each seed got:
+
+| corpus | seeds | decoded | operation reached | ok | refused | time |
+|---|---|---|---|---|---|---|
+| `no_step_file_makes_the_reader_panic` | 907 | 135 parse | **0 imports** | — | 135 | 15 ms |
+| `no_model_makes_the_writer_panic` | 1180 | **16** models | 16 writes | — | — | 13 ms |
+| `two_solids_fused_by_a_stranger` | 1740 | 910 of 3480 halves | 669 fuses | 255 | 414 | 0.79 s |
+
+**The reader corpus never reached the importer.** All 135 seeds that parse fail
+at the *first* line of `Import::read` — `what_the_file_declared`
+(`crates/rcad-step/src/import.rs:73`) → `Refusal::TheFileDeclaresNoLengthUnit`.
+Not one of 907 reaches
+`nothing_is_placed_somewhere_this_reader_cannot_move_it`, the
+`MANIFOLD_SOLID_BREP` walk, `solid_from`, or the `Model::validate` sweep the
+harness ends with. The target's own doc comment said "**And the mapping is
+fuzzed and not only the parse**", in the present tense, and over the checked-in
+corpus that sentence was false.
+
+It was false for a reason nothing was going to fix on its own. Byte mutation
+was never going to build a `GEOMETRIC_REPRESENTATION_CONTEXT` with a
+`LENGTH_UNIT` hanging off it out of nothing, and the corpus had no seed to
+mutate *from*: the hand-written `a_small_whole_file` declares its `LENGTH_UNIT`
+as a free-standing complex instance that no context references, so it refuses
+too. A coverage-guided run keeps what reaches somewhere new, and there was
+nowhere new to reach.
+
+**The writer corpus decoded 16 models out of 1180, and all 16 were empty** — at
+most one solid, no faces, no edges, no vertices. So `rcad_step::write` was
+reached 16 times in 1180 and turned away every time at `TheModelHasNoSolid` or
+`ASolidWithNoShell`, the two shallowest refusals it has, and
+`every_number_the_door_promised_is_real` walked three empty iterators 1180
+times over.
+
+**The fuse corpus was the healthy one.** The one difference that is measured is
+that the target splits its input in two and decodes a `Model` from each half, so
+it gets two draws per seed — off the *same* `postcard` door that leaves the
+writer's corpus at 16, so the door is not what separates them. Why two draws per
+seed is worth 910 against 16 is not measured, and no paragraph here guesses at
+it. Its models are real — 7 and 12 faces are the common shapes — and its
+refusals are `ResultIsNotManifold` and `Undecidable` raised by *where three
+surfaces meet*, *a point inside a piece of a face* and *where two planes cross*.
+
+### 95.2 Feasibility was the question asked, and the answer was the whole of it
+
+The proposal was to replay all three corpora, benchmark first, and split off
+measured slow cases if the gate cost proved material. It does not: 0.8 s for
+all three, against a suite where the `where_two_surfaces_cross` replay *alone*
+was 63 s until §94. **The second half of the proposal is answered by the first
+half's measurement**, and nothing is split.
+
+The shape is §29.9's, copied exactly. Each target's pure harness moves to a
+`tests/fuzzing/` module in the crate that owns the thing being fuzzed — reader
+and writer in `rcad-step`, fuse in `rcad-topo` — the target reaches across with
+`#[path]`, and the replay is an ordinary integration test beside it. A property
+added to one of those files is explored by `cargo fuzz` and replayed on every
+commit without either side being edited.
+
+**One thing went the other way and shrank.** Both the writer's harness and the
+fuse's carried their own copy of `every_number_the_door_promised_is_real`, the
+§44.5 check on what `Deserialize for Model` promised. There is now one copy, in
+`crates/rcad-topo/tests/fuzzing/the_door.rs` — `rcad-topo` owns the door — and
+both harnesses reach it by `#[path]`. Two places to update when the door grows
+a fourth promise is one place to forget, which is the argument CLAUDE.md makes
+about the plugins and it applies inside a repo too.
+
+**Each stage gets its own count, not one total.** A byte string that does not
+parse, a model that does not validate and a fuse that refuses fail for entirely
+different reasons, and a single number lets the deep stages fall to nothing
+behind the shallow ones. That is §29.9's argument for three oracle counts
+rather than one, and the reader corpus is the case that proves it: 135 of 907
+parsed, which looks like a working corpus, and **none at all** imported.
+
+### 95.3 Six control seeds, one either side of each operation
+
+A floor of 0 asserts nothing, and a floor met by 16 empty models asserts almost
+nothing. So the two inert corpora are repaired in the same change, and each of
+the three gets a named seed either side of its operation:
+
+| corpus | reaches it | is refused by it |
+|---|---|---|
+| reader | `a_block_that_imports` | `a_block_with_no_solid_in_it` |
+| writer | `two_cubes_that_write` | `a_ball_whose_pole_the_writer_refuses` |
+| fuse | `two_cubes_that_fuse` | `two_cubes_touching_along_one_edge` |
+
+`a_block_that_imports` is `written_by_hand::a_block([2.0, 4.0, 8.0], ".MILLI.")`,
+the same block three other test files measure, and it is the corpus's only seed
+that reaches `solid_from` and the sweep. `a_block_with_no_solid_in_it` is that
+file with its one `MANIFOLD_SOLID_BREP` line deleted, so it gets past the unit
+and the placements and is then refused `TheFileHoldsNoSolid` — a refusal
+*inside* the mapping, where the 135 that were already there all stop at the
+door.
+
+`two_cubes_that_write` is two cubes of side 2, at the origin and at `(1, 1, 1)`,
+which writes 10 435 bytes of Part 21. `a_ball_whose_pole_the_writer_refuses` is
+one ball of radius 2, refused `AWireThatStandsStillAtAPole` — a named gap deep
+inside `solid_from_shell`, past where that corpus had ever been.
+
+The two fuse seeds are `[header] ++ bytes ++ bytes`, so both halves decode to
+the same model and the second header is the first rotated by four. Header `0x01`
+intersects the overlapping pair and comes back with a model; header `0x02` on
+two cubes meeting along one edge is refused `ResultIsNotManifold { count: 4 }`.
+
+**Four of the six are `postcard` bytes and stop decoding if `Model`'s
+serialized shape changes.** That is the alarm working rather than a fragility: a
+change to the door that silently reinterprets a stranger's saved file is
+precisely what §44.5 is about, and the floors go red for it.
+
+**The seeds are worth more to the fuzzer than to the replay.** An overnight run
+now has something to mutate from on the reader and the writer, which is the half
+of the problem no test could fix.
+
+### 95.4 The split and the rule are the same number
+
+Found while building the fuse control seeds, and it is a defect in the target
+rather than in the kernel. `how_one_model_is_fused` reads
+`header % (solids.len() + 1)` for the split and `header % 3` for the rule. For a
+model with **two** solids those are the same expression, so of the nine (split,
+rule) pairs only three can be drawn:
+
+| header % 3 | split | rule |
+|---|---|---|
+| 0 | `arguments` empty | `Union` |
+| 1 | one against one | `Intersection` |
+| 2 | `tools` empty | `Difference` |
+
+A two-sided union and a two-sided difference cannot be drawn at all. Counted
+over the corpus: **564 of 673 fuses have nothing on one of their two sides**.
+
+**It is not fixed here, and the reason is §29's own.** Changing the layout
+reinterprets 1740 checked-in seeds, and the thing to have before making that
+change is a measurement of what it disturbs — which is what the rest of this
+section is for and what did not exist a day ago.
+`every_model_the_fuse_fuzzer_kept_is_fused_again.rs` asserts the 564 *does not
+drop*, written that way round on purpose: a drop means somebody changed the
+modulus and this section is out of date.
+
+### 95.5 The numbers
+
+With the six seeds in, measured by the three replay tests:
+
+| corpus | seeds | reached |
+|---|---|---|
+| reader | 909 | 137 parse, 547 instances, 1 imports, 136 refuse |
+| writer | 1182 | 18 decode, 13 faces, 1 writes, 17 refuse |
+| fuse | 1742 | 3484 halves, 914 decode, 673 validate, 673 fuse, 257 ok, 416 refuse |
+
+22 ms, 19 ms and 0.74 s run on their own. Every floor is set at roughly three
+quarters of what was measured, which is §29.9's rule and catches a stage falling
+silent without failing on ordinary drift. The exceptions are the two counts that
+come from one seed each — the reader's `imported` and the writer's `written` —
+whose floor is 1, and the control seed is what holds it up.
+
+**What they cost the gate is nothing measurable, and that is a stronger claim
+than the sum.** `just gate` is green at **1863 tests**, six of them these, and
+the six take 1.65 s of the run between them under full parallel load — the fuse
+one 1.5 s of that, against 0.74 s alone, which is contention and not the test.
+The gate's wall time is set by its slowest single test at **30.7 s**, so none of
+the six is anywhere near the critical path. Do not read a wall-time total as the
+cost of adding a test to a suite that runs in parallel; read the critical path.
+
+All four targets build on nightly after the move, and all three corpora replay
+clean through the real `cargo fuzz` binaries with `-runs=0`: 910, 1183 and 1743
+runs, no crash.
