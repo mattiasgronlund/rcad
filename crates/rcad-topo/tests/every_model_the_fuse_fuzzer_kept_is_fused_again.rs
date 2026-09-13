@@ -21,29 +21,53 @@
 //! same `postcard` door that leaves the writer's corpus at 16 models out of
 //! 1180.
 //!
-//! # The split and the rule are the same number
+//! # The split and the rule used to be the same number
 //!
-//! `fuse.rs`'s header comment has it: for a model with two solids,
-//! `header % (solids.len() + 1)` and `header % 3` are the same expression, so
-//! only three of the nine (split, rule) pairs can be drawn and two of the three
-//! have an empty side. `Reached::one_sided` counts what that costs rather than
-//! describing it — **569 of 678 fuses, measured below** — and
-//! `docs/decisions.md` §95 records why the layout is left alone for now: a
-//! change to it reinterprets 1740 checked-in seeds, and the measurement of what
-//! that disturbs is the thing to have before making it — the same argument
-//! `every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs` makes about
-//! its own byte layout.
+//! For a model with two solids `header % (solids.len() + 1)` and `header % 3`
+//! are the same expression, so only three of the nine (split, rule) pairs could
+//! be drawn and **a two-sided union or difference could not be drawn at all**.
+//! §95.4 measured that rather than arguing it: over the corpus as it stood, the
+//! 678 fuses landed on 23 distinct `(sidedness, rule, outcome)` triples and not
+//! one of them was a two-sided union or a two-sided difference.
 //!
-//! # The two control seeds
+//! Taking the rule off the high nibble instead — `(header >> 4) % 3` — costs no
+//! seed its model, because the byte the input is cut at does not move. It is 28
+//! triples now, 9 gained and 4 lost, and `two_sided_unions` and
+//! `two_sided_differences` below are the two counters that were flatly zero
+//! before it. §95.4 has the whole table, including why a second header byte was
+//! declined: it moves the payload, and 678 fuses become 336 or 80.
 //!
-//! Both are `[header] ++ bytes ++ bytes`, so both halves decode to the same
+//! **It buys coverage and that is measured, not argued.** The same 1751 files
+//! through the `cargo-fuzz` binary reach 14 788 to 14 793 edges under the new
+//! layout against 14 765 to 14 766 under the old — three runs and two, because
+//! the count is not deterministic, and the ranges do not overlap.
+//!
+//! **`one_sided` did not move, and that is the point of keeping it.** One-sided
+//! draws come from the split's own modulus having two degenerate outcomes of
+//! three, which is a separate matter from the rule and is left alone; §95.4 says
+//! why.
+//!
+//! # The four control seeds
+//!
+//! Every one is `[header] ++ bytes ++ bytes`, so both halves decode to the same
 //! model and the second header is the first one rotated by four.
-//! `two_cubes_that_fuse` is two cubes of side 2 overlapping at `(1, 1, 1)` under
-//! header `0x01`, which intersects them and comes back with a model.
-//! `two_cubes_touching_along_one_edge` is two cubes meeting along one edge at
-//! `(2, 2, 0)` under header `0x02`, refused `ResultIsNotManifold { count: 4 }`.
-//! One either side, named, so the floors below cannot be met by a corpus that
-//! has quietly stopped doing one of the two.
+//!
+//! | seed | header | what it draws |
+//! |---|---|---|
+//! | `two_cubes_that_fuse` | `0x01` | two cubes of side 2 overlapping at `(1, 1, 1)`, unioned then intersected, both `Ok` |
+//! | `two_cubes_touching_along_one_edge` | `0x02` | two cubes meeting along one edge at `(2, 2, 0)`, refused `ResultIsNotManifold { count: 4 }` |
+//! | `two_cubes_one_taken_out_of_the_other` | `0x22` | the overlapping cubes again, a **two-sided difference** both halves, both `Ok` |
+//! | `a_curved_face_with_a_hole_that_goes_too_far_round` | `0xa0` | a **two-sided intersection** refused `CurvedFaceWithAHoleGoesTooFarRound` |
+//!
+//! One either side of the fuse, named, so the floors below cannot be met by a
+//! corpus that has quietly stopped doing one of them. The last two are the
+//! rule's move: the difference seed holds up the thinnest floor here, and the
+//! curved-face seed is the **one branch the move would otherwise have dropped**
+//! — exactly one half in the corpus reached
+//! `CurvedFaceWithAHoleGoesTooFarRound`, at header `0xf4`, and under the new
+//! layout that half draws a union instead. `0xa0` draws the same tolerant
+//! two-sided intersection on the same model, so the branch is kept by name
+//! rather than by luck.
 //!
 //! # Where the floors below come from
 //!
@@ -54,14 +78,20 @@
 //!     --test every_model_the_fuse_fuzzer_kept_is_fused_again --no-capture
 //! ```
 //!
-//! which reported, with the two control seeds in:
+//! which reported, with all four control seeds in:
 //!
 //! ```text
-//! Reached { halves: 3498, decoded: 922, validated: 678, fused: 678,
-//!           one_sided: 569, ok: 260, refused: 418 }
+//! Reached { halves: 3502, decoded: 926, validated: 682, fused: 682,
+//!           one_sided: 569, two_sided_unions: 69, two_sided_differences: 7,
+//!           ok: 265, refused: 417 }
 //! ```
 //!
-//! in 0.75 s, and each floor is set at roughly three quarters of that.
+//! in 0.81 s, and each floor is set at roughly three quarters of that.
+//!
+//! Before the rule moved off the split the same run read `halves: 3498,
+//! decoded: 922, validated: 678, fused: 678, one_sided: 569, ok: 260,
+//! refused: 418` — so the move itself cost no half its model, and the four extra
+//! halves are the two seeds added with it.
 //!
 //! **The seven crash seeds §92 rescued are in that number and cost nothing.**
 //! They landed on `main` while this file was being written, and replaying them
@@ -69,10 +99,10 @@
 //! 416 → 418, for no measurable time at all. Seven seeds a night found, five
 //! more fuses a commit can break.
 //!
-//! The
-//! `one_sided` assertion is not a floor and is written the other way round: it
-//! fails when the number *drops*, because a drop means the shared modulus has
-//! been changed and §95 is out of date.
+//! The `one_sided` assertion is not a floor and is written the other way round:
+//! it fails when the number *drops*, because a drop means the split's modulus
+//! has been changed and §95.4 is out of date. It survived the rule moving off
+//! the split untouched, which is the evidence that the two are separate defects.
 
 #![forbid(unsafe_code)]
 
@@ -142,31 +172,80 @@ fn every_seed_in_the_checked_in_corpus_is_fused_without_panicking() {
         reached.refused
     );
     assert!(
+        reached.two_sided_unions >= 50,
+        "only {} fuses were a union with something on both sides, and there \
+         were none at all until the rule moved off `header % 3` — so the split \
+         and the rule are the same number again (§95.4)",
+        reached.two_sided_unions
+    );
+    assert!(
+        reached.two_sided_differences >= 5,
+        "only {} fuses were a difference with something on both sides, and \
+         there were none at all until the rule moved off `header % 3` — so the \
+         split and the rule are the same number again (§95.4). Two of them are \
+         `two_cubes_one_taken_out_of_the_other`, so reaching zero here means \
+         that seed stopped decoding too",
+        reached.two_sided_differences
+    );
+    assert!(
         reached.one_sided * 2 > reached.fused,
         "fewer than half of {} fuses had a side with nothing in it, which \
-         would mean the shared modulus `fuse.rs` names has been fixed — move \
-         this assertion and §95 rather than deleting them",
+         would mean the split's own modulus has been changed — move this \
+         assertion and §95.4 rather than deleting them",
         reached.fused
     );
 }
 
-/// The two named seeds, each asserted to be the thing it was checked in as.
+/// One named seed, replayed.
+fn control_seed(name: &str) -> Reached {
+    let bytes = std::fs::read(corpus().join(name)).expect("the control seed is checked in");
+    two_models_split_and_fused(&bytes)
+}
+
+/// The four named seeds, each asserted to be the thing it was checked in as.
 #[test]
-fn the_two_named_control_seeds_still_land_either_side_of_the_fuse() {
-    let fuses = std::fs::read(corpus().join("two_cubes_that_fuse"))
-        .expect("the control seed is checked in");
-    let reached = two_models_split_and_fused(&fuses);
+fn the_named_control_seeds_still_land_either_side_of_the_fuse() {
+    let reached = control_seed("two_cubes_that_fuse");
     assert_eq!(reached.halves, 2, "{reached:?}");
     assert_eq!(reached.fused, 2, "{reached:?}");
     assert_eq!(reached.ok, 2, "both halves are the same model: {reached:?}");
+    assert_eq!(
+        reached.one_sided, 0,
+        "header 0x01 cuts between the two cubes on both halves: {reached:?}"
+    );
+    assert_eq!(
+        reached.two_sided_unions, 1,
+        "the first half unions the two cubes, which nothing could draw before \
+         the rule moved off the split: {reached:?}"
+    );
 
-    let refuses = std::fs::read(corpus().join("two_cubes_touching_along_one_edge"))
-        .expect("the control seed is checked in");
-    let reached = two_models_split_and_fused(&refuses);
+    let reached = control_seed("two_cubes_touching_along_one_edge");
     assert_eq!(reached.fused, 2, "{reached:?}");
     assert_eq!(
         reached.refused, 2,
         "two cubes meeting along one edge leave a result that is not a \
          manifold: {reached:?}"
+    );
+
+    let reached = control_seed("two_cubes_one_taken_out_of_the_other");
+    assert_eq!(reached.fused, 2, "{reached:?}");
+    assert_eq!(
+        reached.two_sided_differences, 2,
+        "header 0x22 is its own nibble swap, so both halves take one cube out \
+         of the other: {reached:?}"
+    );
+    assert_eq!(reached.ok, 2, "{reached:?}");
+
+    let reached = control_seed("a_curved_face_with_a_hole_that_goes_too_far_round");
+    assert_eq!(reached.fused, 2, "{reached:?}");
+    assert_eq!(
+        reached.one_sided, 0,
+        "both halves cut between the solids: {reached:?}"
+    );
+    assert_eq!(
+        reached.refused, 1,
+        "the first half is the tolerant two-sided intersection that refuses \
+         `CurvedFaceWithAHoleGoesTooFarRound`, the only branch moving the rule \
+         off the split would otherwise have dropped: {reached:?}"
     );
 }

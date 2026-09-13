@@ -26373,6 +26373,11 @@ the same model and the second header is the first rotated by four. Header `0x01`
 intersects the overlapping pair and comes back with a model; header `0x02` on
 two cubes meeting along one edge is refused `ResultIsNotManifold { count: 4 }`.
 
+**Six became eight the same day**, when §95.4 moved the rule off the split and
+added two more fuse seeds: one to hold up the thinnest floor that move creates,
+and one to keep the single branch it would otherwise have dropped. Header `0x01`
+draws a union on its first half now rather than an intersection on both.
+
 **Four of the six are `postcard` bytes and stop decoding if `Model`'s
 serialized shape changes.** That is the alarm working rather than a fragility: a
 change to the door that silently reinterprets a stranger's saved file is
@@ -26382,13 +26387,13 @@ precisely what §44.5 is about, and the floors go red for it.
 now has something to mutate from on the reader and the writer, which is the half
 of the problem no test could fix.
 
-### 95.4 The split and the rule are the same number
+### 95.4 The split and the rule were the same number
 
-Found while building the fuse control seeds, and it is a defect in the target
-rather than in the kernel. `how_one_model_is_fused` reads
+Found while building the fuse control seeds, and it was a defect in the target
+rather than in the kernel. `how_one_model_is_fused` read
 `header % (solids.len() + 1)` for the split and `header % 3` for the rule. For a
 model with **two** solids those are the same expression, so of the nine (split,
-rule) pairs only three can be drawn:
+rule) pairs only three could be drawn:
 
 | header % 3 | split | rule |
 |---|---|---|
@@ -26396,16 +26401,140 @@ rule) pairs only three can be drawn:
 | 1 | one against one | `Intersection` |
 | 2 | `tools` empty | `Difference` |
 
-A two-sided union and a two-sided difference cannot be drawn at all. Counted
-over the corpus: **569 of 678 fuses have nothing on one of their two sides**.
+**That a two-sided union and a two-sided difference could not be drawn at all is
+a demonstration and not a paragraph** (§16.10). Every fused half of the corpus
+was labelled with the `(sidedness, rule, outcome)` triple it landed on, `outcome`
+being `Ok` or the name of the refusal variant. The corpus reached **23 distinct
+triples, and not one of them was a two-sided union or a two-sided difference.**
 
-**It is not fixed here, and the reason is §29's own.** Changing the layout
-reinterprets 1740 checked-in seeds, and the thing to have before making that
-change is a measurement of what it disturbs — which is what the rest of this
-section is for and what did not exist a day ago.
-`every_model_the_fuse_fuzzer_kept_is_fused_again.rs` asserts the 564 *does not
-drop*, written that way round on purpose: a drop means somebody changed the
-modulus and this section is out of date.
+It is fixed now: the rule comes off `(header >> 4) % 3`. The rest of this section
+is the measurement that chose that over the obvious fix, because the obvious fix
+is the wrong one.
+
+#### A second header byte loses most of the corpus
+
+Measured over all 1749 seeds, replaying each under each candidate:
+
+| layout | halves | decoded | validated | fused | one-sided | ok | refused |
+|---|---|---|---|---|---|---|---|
+| `header % 3`, as it stood | 3498 | 922 | 678 | 678 | 569 | 260 | 418 |
+| a rule byte in front of the halves | 3496 | 392 | 336 | 336 | 303 | 149 | 187 |
+| a rule byte off the end of the input | 3496 | 211 | 80 | 80 | 70 | 26 | 54 |
+| `(header >> 4) % 3`, same byte | 3498 | 922 | 678 | 678 | 569 | 262 | 416 |
+
+**Both byte layouts lose most of the corpus, and taking the byte off the end —
+which looked like the cheap option — is the worse of the two**: 678 fuses down to
+80. A minimised seed is byte-tight, because the fuzzer shrank it until every byte
+mattered, so shifting a half along by one byte or truncating it by one stops it
+decoding. And the end is not a free place to take a byte from: the input is cut
+at `rest.len() / 2`, so dropping the last byte moves that cut on every seed of
+odd length as well as truncating the second half of every seed.
+
+This is §29's answer reached from the other side. There the repack was declined
+because 92 of 830 seeds would have decoded to a different *pair*; here the draw
+survives and the *model* does not.
+
+#### Which bits the rule comes off
+
+Every payload-preserving choice leaves `fused` at 678 — the split is untouched,
+so no seed loses its model whichever bits the rule reads. What separates them is
+where the nine (split, rule) cells land, over the 612 halves holding two solids:
+
+| rule read from | two-sided union / intersection / difference | smallest of the nine | triples gained | lost |
+|---|---|---|---|---|
+| `header % 3` | 0 / 109 / 0 | 0 | — | — |
+| `(header >> 2) % 3` | 37 / 66 / 6 | 1 | 8 | 3 |
+| `(header >> 3) % 3` | 92 / 10 / 7 | 1 | 11 | 6 |
+| `(header >> 4) % 3` | 68 / 36 / 5 | 2 | 9 | 4 |
+| `(header >> 5) % 3` | 14 / 67 / 28 | 0 | 11 | 6 |
+| `(header >> 6) % 3` | 13 / 30 / 66 | 1 | 8 | 3 |
+
+`(header >> 6) % 3` is disqualified outright, and not on a count: bit 7 is the
+policy bit, so rule and policy would share two bits and **a tolerant
+intersection could never be drawn**. That trades one coupling for another.
+
+That leaves `>> 2` and `>> 4`, which net the same five triples. `>> 4` is taken
+for three reasons. It gains **eight** two-sided triples where `>> 2` gains four,
+and a two-sided draw is the scarce kind — 109 of 678. The smallest of its nine
+cells is 2 rather than 1, so a floor can rest on it. And it is the nibble
+`rotate_left(4)` already swaps, so the two halves read each other's nibble for
+the rule and the layout takes one sentence to explain.
+
+#### What it costs, and the seed that pays it back
+
+Nine triples gained, four lost. The gains are the whole point: two-sided
+difference reaching `Ok`, `Invalid`, `ResultIsNotManifold` and `Undecidable`, and
+two-sided union reaching those three plus
+`CannotTellTheCellsOfAFaceApart` — cases nothing in the corpus could draw before.
+
+Three of the four losses are a pairing rather than a branch: the refusal variant
+is still reached, under a different sidedness or rule. **One is a real loss.**
+`CurvedFaceWithAHoleGoesTooFarRound` was reached by exactly one half in the
+corpus — seed `4217bc51fd9dd4955482c024121a1b0b54b50762`, half 1, header `0xf4`,
+a tolerant two-sided intersection — and `0xf4`'s high nibble draws a union
+instead. Header `0xa0` draws the same tolerant two-sided intersection on the same
+model and reaches the same refusal, so the branch is kept by name:
+`a_curved_face_with_a_hole_that_goes_too_far_round`. Losing a branch a night's
+fuzzing found, to a layout change, is the cost §29 declined its repack over; here
+it is one seed to avoid.
+
+`two_cubes_one_taken_out_of_the_other`, header `0x22` — its own nibble swap, so
+both halves draw the same — is the second seed added, and it holds up the
+thinnest floor in the replay: two-sided differences number 7, and 5 of those are
+incidental.
+
+That makes **eight** control seeds where §95.3 had six.
+
+#### The edges the kernel actually runs, counted
+
+§29 declined its repack partly because **it did not buy the coverage it was for**,
+and that is a claim this one has to answer in the same currency. Replaying the
+same 1751 files through the real `cargo-fuzz` binary with `-runs=0`:
+
+| layout | edges (`cov`) | features (`ft`) |
+|---|---|---|
+| `header % 3` | 14 765, 14 766 | 69 734, 69 750 |
+| `(header >> 4) % 3` | 14 788, 14 789, 14 793 | 69 253, 69 273, 69 277 |
+
+Repeated because the numbers are not deterministic — the ranges are two and three
+runs of the same binary. They do not overlap: **the same seeds reach about 25 more
+edges of the kernel** under the new layout.
+
+**The feature count falls by about 480, and that is not a contradiction.**
+libFuzzer's features include hit-count buckets as well as edges, so a corpus that
+stops running the same one-sided difference 282 times loses buckets while reaching
+more code. `cov` is the number that answers "what did the kernel run", and it went
+up.
+
+#### `one_sided` did not move, and it is a different defect
+
+The 569 is not the coupling, and the assertion that named it was wrong about what
+it measured. It is `header % (solids.len() + 1)` having two degenerate outcomes
+of three for a two-solid model, plus 66 one-solid halves that have no two-sided
+draw at all. Moving the rule left it at exactly 569.
+
+Biasing the split toward the interior was measured as well, off the low nibble so
+as not to touch the bits the rule now reads:
+
+| split | one-sided | two-sided | distinct triples | gained | lost | halves whose operation moves |
+|---|---|---|---|---|---|---|
+| `header % (n + 1)`, as it stands | 569 | 109 | 28 | 9 | 4 | 269 |
+| never one-sided when `n >= 2` | 66 | 612 | 23 | 16 | 16 | 599 |
+| interior half the time | 456 | 222 | 28 | 9 | 4 | 378 |
+
+**Neither buys a branch.** Always-interior trades the entire one-sided union
+family for the two-sided one and lands back on 23 triples — sixteen gained
+against sixteen lost, for 599 halves reinterpreted. Interior-half-the-time
+reaches exactly the same 28 triples as leaving the split alone, for 109 more
+halves reinterpreted than the rule move alone costs. So the split is left alone,
+on the measurement rather than on an argument.
+
+`every_model_the_fuse_fuzzer_kept_is_fused_again.rs` still asserts the 569 *does
+not drop*, written that way round on purpose, but it now says the split's modulus
+rather than "the shared modulus": a drop means somebody changed the split and
+this section is out of date. `two_sided_unions >= 50` and
+`two_sided_differences >= 5` are the two assertions that hold the fix down, and
+both were flatly zero before it.
 
 ### 95.5 The numbers
 
@@ -26415,13 +26544,19 @@ With the six seeds in, measured by the three replay tests:
 |---|---|---|
 | reader | 909 | 137 parse, 547 instances, 1 imports, 136 refuse |
 | writer | 1182 | 18 decode, 13 faces, 1 writes, 17 refuse |
-| fuse | 1749 | 3498 halves, 922 decode, 678 validate, 678 fuse, 260 ok, 418 refuse |
+| fuse | 1751 | 3502 halves, 926 decode, 682 validate, 682 fuse, 265 ok, 417 refuse |
 
 **The fuse row includes the seven crash seeds §92 rescued**, which landed on
 `main` while this was being written. Replaying them moves halves 3484 → 3498,
 fuses 673 → 678, `ok` 257 → 260 and refusals 416 → 418, for no measurable time.
 That is the arrangement paying for itself on its first day: seven seeds a night
 found are now five more fuses a commit can break.
+
+**The fuse row is §95.4's too**, which is why it reads 1751 and not 1749: the two
+seeds it added bring four halves, and the rule coming off the high nibble moves
+`ok` and refusals without moving a single decode. It also carries
+`two_sided_unions: 69` and `two_sided_differences: 7`, the two counters that were
+zero for every seed until that move.
 
 22 ms, 19 ms and 0.75 s run on their own. Every floor is set at roughly three
 quarters of what was measured, which is §29.9's rule and catches a stage falling

@@ -37,16 +37,28 @@
 //! numeric parameter there is an already-known, already-reported panic and
 //! drawing it from the model sidesteps rediscovering that one on every run.
 //!
-//! # The split and the rule are the same number, and that is a defect
+//! # The rule comes off the high nibble, and the split off the whole byte
 //!
 //! [`how_one_model_is_fused`] reads `header % (solids.len() + 1)` for the split
-//! and `header % 3` for the rule. For a model with **two** solids those are the
-//! same expression, so of the nine (split, rule) pairs only three are
-//! reachable: an empty `arguments` under `Union`, one against one under
-//! `Intersection`, and an empty `tools` under `Difference`. A two-sided union
-//! and a two-sided difference cannot be drawn at all. `docs/decisions.md` §95
-//! records what that costs over the checked-in corpus and why the layout is
-//! left alone for now rather than reinterpreting 1740 seeds in passing.
+//! and `(header >> 4) % 3` for the rule. Until 2026-09-13 the rule read
+//! `header % 3`, which for a model with **two** solids is the same expression as
+//! the split: only three of the nine (split, rule) pairs could be drawn, and a
+//! two-sided union or a two-sided difference could not be drawn at all.
+//!
+//! **The high nibble is the version of that fix which moves no model payload.**
+//! Every seed still cuts at the same byte and decodes to the model it always
+//! did. Giving the rule a second header byte instead — in front of the halves or
+//! taken off the end — shifts or truncates them, and a minimised seed is
+//! byte-tight: `docs/decisions.md` §95.4 measured 678 fuses falling to 336 and
+//! to 80. Only the operation a seed draws moves, on 269 of 3498 halves.
+//!
+//! Because a half's header is the other half's nibble swap, the two halves read
+//! each other's nibble for the rule, which is what [`two_models_split_and_fused`]
+//! already used `rotate_left(4)` for.
+//!
+//! **A one-sided draw is still two thirds of what a two-solid model can draw,
+//! and that is the split's own modulus rather than this.** `Reached::one_sided`
+//! counts it and §95.4 says why it is left alone.
 
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
@@ -77,12 +89,19 @@ pub struct Reached {
     pub fused: usize,
     /// Fuses run with nothing on one of the two sides.
     ///
-    /// **A measurement of the defect the file header names**, not a stage. For
-    /// a two-solid model the header cannot draw a two-sided union or a
-    /// two-sided difference at all, and this is what that costs. A change to
-    /// the byte layout that claims to fix it has to move this number to prove
-    /// it.
+    /// Not a stage, and **not a measurement of the rule-and-split defect** —
+    /// taking the rule off the high nibble left this number exactly where it
+    /// was, because one-sidedness comes from `header % (solids.len() + 1)`
+    /// having two degenerate outcomes of three. A one-solid model has no
+    /// two-sided draw at all.
     pub one_sided: usize,
+    /// Two-sided fuses under `Union`, which could not be drawn before.
+    ///
+    /// Zero for every seed checked in until the rule moved off the split, and
+    /// that is what the replay asserts against.
+    pub two_sided_unions: usize,
+    /// Two-sided fuses under `Difference`, which could not be drawn before.
+    pub two_sided_differences: usize,
     /// Fuses that came back with a model.
     pub ok: usize,
     /// Fuses that refused by name.
@@ -99,6 +118,8 @@ impl Reached {
             validated: self.validated + other.validated,
             fused: self.fused + other.fused,
             one_sided: self.one_sided + other.one_sided,
+            two_sided_unions: self.two_sided_unions + other.two_sided_unions,
+            two_sided_differences: self.two_sided_differences + other.two_sided_differences,
             ok: self.ok + other.ok,
             refused: self.refused + other.refused,
         }
@@ -153,15 +174,25 @@ pub fn how_one_model_is_fused(bytes: &[u8], header: u8) -> Reached {
     }
     let split = usize::from(header) % (solids.len() + 1);
     let (arguments, tools) = solids.split_at(split);
-    if arguments.is_empty() || tools.is_empty() {
+    let one_sided = arguments.is_empty() || tools.is_empty();
+    if one_sided {
         reached.one_sided = 1;
     }
 
-    let rule = match header % 3 {
+    let rule = match (header >> 4) % 3 {
         0 => Rule::Union,
         1 => Rule::Intersection,
         _ => Rule::Difference,
     };
+    if !one_sided {
+        match rule {
+            Rule::Union => reached.two_sided_unions = 1,
+            Rule::Difference => reached.two_sided_differences = 1,
+            Rule::Intersection => {}
+            // Imprint and symmetric difference, when they arrive, are neither.
+            _ => {}
+        }
+    }
     let policy = if header & 0x80 == 0 {
         Policy::certified()
     } else {
