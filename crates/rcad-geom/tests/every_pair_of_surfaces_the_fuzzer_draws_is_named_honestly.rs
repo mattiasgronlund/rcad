@@ -40,10 +40,10 @@
 //! it.
 //!
 //! The byte layout is not widened to fix that, and **not because a repack would
-//! reinterpret the whole corpus — measured, it would not.** Over the 829
+//! reinterpret the whole corpus — measured, it would not.** Over the 830
 //! minimised seeds, promoting the two unread bits 4 and 5 to a third kind bit
 //! apiece and reading five kinds instead of three gives a different kind to at
-//! least one side of **92** seeds, 67 of them among the 748 that decode to a
+//! least one side of **92** seeds, 67 of them among the 749 that decode to a
 //! pair. Handing the already-redundant kind value 3 to `Cone` and leaving the
 //! layout alone moves **42**, 35 of them decoding. A seed whose two kind fields
 //! come out unchanged reads the same bytes into the same pair, so those counts
@@ -54,13 +54,13 @@
 //! under the wider layout — bits 4 and 5 are clear — and neither side is the
 //! value 3 that the other repack rewrites. §88's seed is `0x0a` too, so the same
 //! three sentences carry it, and the counts are unmoved again. So is §89's slow
-//! unit, promoted 2026-09-13, and so are both of §91's, promoted the same day —
-//! which makes five seeds the paragraph covers and none that it has had to be
-//! rewritten for.
+//! unit, promoted 2026-09-13, and so are both of §91's, promoted the same day,
+//! and so is §93's crash, promoted with the fix for it — which makes six seeds
+//! the paragraph covers and none that it has had to be rewritten for.
 //!
 //! Two things settle it instead. **A minimised seed is worth keeping only for
 //! the branch it reached**, so ninety-odd of them quietly meaning something else
-//! is a real cost against a corpus of 829. And **the repack does not buy the
+//! is a real cost against a corpus of 830. And **the repack does not buy the
 //! coverage it is for**: a torus reads eight numbers where a pipe reads seven,
 //! so a torus against a cone, a pipe or another torus needs 76 bytes, and the
 //! longest seed checked in is 71. Those pairs would decode to nothing whatever
@@ -84,16 +84,28 @@
 //!
 //! | row | pairs | points | orders | scalings |
 //! |---|---|---|---|---|
-//! | corpus | 748 of 829 seeds | 4235 | 547 | 1093 |
+//! | corpus | 749 of 830 seeds | 4235 | 549 | 1097 |
 //! | soak | 199 943 of 200 000 draws | 400 412 | 178 631 | 355 291 |
 //! | cones and tori | 136 | 696 | 39 | 78 |
 //!
-//! The corpus row is 2026-09-13's, five seeds later than the cone-and-torus
+//! The corpus row is 2026-09-13's, six seeds later than the cone-and-torus
 //! one: §85's crash was promoted into the corpus, then §88's — the pair of
 //! leaning pipes that named one crossing forwards and refused backwards — then
-//! §89's slow unit, and last the two §91 rescued. §88's decodes to a pair and is
-//! decided both ways round now, which is one order and two scalings of what the
-//! row gained.
+//! §89's slow unit, then the two §91 rescued, and last §93's crash. §88's decodes
+//! to a pair and is decided both ways round now, which is one order and two
+//! scalings of what the row gained.
+//!
+//! **§93 moved this row twice over, and only one of the two is its seed.** The
+//! fix took orders from 547 to 548 and scalings from 1093 to 1095 with no seed
+//! added at all: one pair already in the corpus was a side-by-side pipe pair at a
+//! radius ratio that used to be named one way round and refused the other, and
+//! closing that reaches it. Then §93's own seed — the crash the night of
+//! 2026-09-12 found and the night after reported as nothing found — takes them to
+//! 549 and 1097. Measured the way the others were, by adding it and taking it
+//! away again, it brings one seed, one pair, one order, two scalings and **no
+//! points**, because two endless straight lines are named rather than walked. It
+//! costs no measurable time: 63.15 s against 63.61 s, which is the slow seed two
+//! paragraphs down and not this one.
 //!
 //! **The second of §91's two is the cheap one, and it is why the points column
 //! moved.** It is a slow unit written 2026-09-09 that was still sitting as its
@@ -110,12 +122,17 @@
 //! against radius `4.3601508761683463e-106` — a ratio near 5e114 — and after 63
 //! seconds it produces **no points at all**, so it brought one order and two
 //! scalings and not a single point. That is §89's shape a second time and at ten
-//! times the cost. When §91's gap is closed this row goes back under a tenth of a
-//! second and the seed starts earning its place; until then the 63 seconds is the
-//! price of not losing the input again, and `docs/decisions.md` §91 is where that
-//! trade is argued rather than here.
+//! times the cost. When **§91.3's** gap is closed this row goes back under a
+//! tenth of a second and the seed starts earning its place; until then the 63
+//! seconds is the price of not losing the input again, and `docs/decisions.md`
+//! §91 is where that trade is argued rather than here.
 //!
-//! **Three of the five were promoted for their time rather than their answer**,
+//! That sentence said "§91's gap" until §93, which closed §91.2's and moved the
+//! timing by 0.46 s — inside the noise. §91 recorded two gaps and this seed
+//! witnesses the leaning row's, so naming the subsection is the difference
+//! between a prediction and a guess.
+//!
+//! **Three of the six were promoted for their time rather than their answer**,
 //! and §89's is the one that shows what a closed gap looks like afterwards: two
 //! crossed pipes, radius 2048 against radius `0.0152740478515625`, which before
 //! §89 took 5.93 s to produce no points at all and now takes 227 µs to produce

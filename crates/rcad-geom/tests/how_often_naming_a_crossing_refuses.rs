@@ -91,8 +91,11 @@ const A_LEANING_CROSSING_MAY_REFUSE: f64 = 0.0;
 /// what this number measures is how much of that range is past the edge — and it
 /// moves if the range does.
 ///
-/// Measured on the shipped corpus: 10.5%, and every one of those 215 refusals is
-/// named once the same two surfaces are written back on the lattice. Twenty-five
+/// Measured on the shipped corpus: 10.58%, and every one of those 217 refusals is
+/// named once the same two surfaces are written back on the lattice. The count
+/// read 215 and 10.5% from 2026-09-01 until §93 re-measured it; ninety-one commits
+/// to `rcad-geom/src/` landed in between, and §93 is not one of the two, which
+/// adds and removes no sign question at all. Twenty-five
 /// percent is well above it and well below "most of them", which is what a
 /// filter refusing things it could decide would look like.
 const A_CROSSING_SOMEWHERE_ELSE_MAY_REFUSE: f64 = 0.25;

@@ -929,27 +929,8 @@ fn where_two_pipes_side_by_side_cross(
         Decision::Pos => {
             let edge = Question {
                 named: WHERE_TWO_PIPES_CROSS,
-                enclosing: || {
-                    let room = how_much_room_two_side_by_side_pipes_leave_enclosing(one, other);
-                    room * room
-                        - Interval::exactly(4.0)
-                            * squared_enclosing(mine)
-                            * squared_enclosing(theirs)
-                            * squared_length_enclosing(exactly(my_way))
-                            * squared_length_enclosing(exactly(their_way))
-                },
-                exactly: || {
-                    let room = how_much_room_two_side_by_side_pipes_leave_exactly(one, other)?;
-                    Some(
-                        room.times(&room)?.minus(
-                            &Exact::product_of(2.0, 2.0)?
-                                .times(&Exact::product_of(mine, mine)?)?
-                                .times(&Exact::product_of(theirs, theirs)?)?
-                                .times(&Exact::dot_of(my_way, my_way)?)?
-                                .times(&Exact::dot_of(their_way, their_way)?)?,
-                        ),
-                    )
-                },
+                enclosing: || how_deeply_two_side_by_side_pipes_overlap_enclosing(one, other),
+                exactly: || how_deeply_two_side_by_side_pipes_overlap_exactly(one, other),
             };
             match ask(&edge, four_lengths, &at, policy, log)? {
                 Decision::Neg => two_lines_between_two_pipes(one, other),
@@ -967,12 +948,46 @@ fn where_two_pipes_side_by_side_cross(
 /// The two endless lines two side-by-side pipes cut out of each other.
 ///
 /// They sit either side of the plane that holds both axes, so that plane is what
-/// tells them apart. Each line's own distance from it is `X = √(ρ₁² − y₀²)`,
-/// where `y₀` is how far along the line between the axes the two cross.
+/// tells them apart, and each line's own distance `X` from it is the only thing
+/// that has to be worked out well: `across` places both lines along the line
+/// between the axes, which the picking plane reads as nothing.
+///
+/// # Why `X` is not `√(ρ₁² − across²)`
+///
+/// It is, as arithmetic, and that subtraction is where the row used to give up on
+/// a pair it had already decided. The two pipes' crossing has been settled by
+/// this point — the caller reached here because the discriminant came out below
+/// zero — and then naming the two halves of it could fail, which is §16.10's gap
+/// and not a limit.
+///
+/// Write `δ` for the distance between the axes and `ρᵢ` for the certified radii.
+/// A thin pipe whose axis lies on a fat one's skin has `δ = ρ₁` and `across =
+/// ρ₁ − ρ₂²/(2ρ₁)`, so `ρ₁² − across²` is `ρ₂²` arrived at by subtracting two
+/// numbers that agree to `ρ₂²/ρ₁²` of themselves. Past `ρ₁ ≈ 2²⁶·ρ₂` — a 67 m
+/// pipe against a 1 m one — `f64` has no bits left to hold the answer in, the
+/// enclosure straddles zero, and the two lines cannot be shown to be either side
+/// of anything. The same pair asked the other way round has `across ≈ 0` and
+/// decides, which is what made it an order-dependent answer.
+///
+/// So `X` is taken from the discriminant instead, which the caller has already
+/// found the sign of. Heron's factorisation of `4δ²X² = 4δ²ρ₁² −
+/// (δ²+ρ₁²−ρ₂²)²` is `−(δ²−(ρ₁+ρ₂)²)(δ²−(ρ₁−ρ₂)²)`, and that product is the
+/// discriminant divided by `(W₁W₂)²`. With `δ² = A/W₁` that comes out as
+///
+/// ```text
+/// X²  =  −(E² − 4r₁²r₂²W₁W₂)  /  (4·A·W₁·W₂²)
+/// ```
+///
+/// in the stored numbers alone, with no subtraction of two nearly equal large
+/// numbers anywhere in it. The numerator is the same expression the shape
+/// question asked, so a pair decided to cross in two lines is a pair whose two
+/// lines can be told apart, and the two steps cannot disagree.
 fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<SurfaceMeet> {
     let here = one.axis().origin();
     let along = one.axis().direction();
     let squared_direction = squared_length_enclosing(exactly(along.components()));
+    let squared_theirs_direction =
+        squared_length_enclosing(exactly(other.axis().direction().components()));
     let between = other.axis().origin() - here;
     let towards = between - along * (between.dot(along) / along.length_squared());
 
@@ -995,7 +1010,27 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
         apart * apart + mine * mine - theirs * theirs,
         Interval::exactly(2.0) * apart,
     );
-    let out = root_enclosing(mine * mine - across * across);
+    let there = other.axis().origin().coordinates();
+    let overlap = how_deeply_two_side_by_side_pipes_overlap_exactly(one, other)
+        .as_ref()
+        .map_or_else(
+            || how_deeply_two_side_by_side_pipes_overlap_enclosing(one, other),
+            Exact::enclosure,
+        );
+    let squared_gap = how_far_off_an_axis_exactly(there, here.coordinates(), along.components())
+        .as_ref()
+        .map_or_else(
+            || how_far_off_an_axis_enclosing(there, here.coordinates(), along.components()),
+            Exact::enclosure,
+        );
+    let out = root_enclosing(quotient_or_everything(
+        -overlap,
+        Interval::exactly(4.0)
+            * squared_gap
+            * squared_direction
+            * squared_theirs_direction
+            * squared_theirs_direction,
+    ));
 
     let on_each_line = [1.0, -1.0].map(|side| {
         core::array::from_fn(|axis| {
@@ -1516,6 +1551,42 @@ fn how_two_squares_compare_exactly(
     )
 }
 
+/// `E² − 4r₁²r₂²W₁W₂` as an enclosure.
+///
+/// Below zero the two cross in two lines, and then this same reading says how far
+/// apart those lines are — see [`two_lines_between_two_pipes`].
+fn how_deeply_two_side_by_side_pipes_overlap_enclosing(
+    one: &Cylinder,
+    other: &Cylinder,
+) -> Interval {
+    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let room = how_much_room_two_side_by_side_pipes_leave_enclosing(one, other);
+    room * room
+        - Interval::exactly(4.0)
+            * squared_enclosing(one.radius())
+            * squared_enclosing(other.radius())
+            * squared_length_enclosing(exactly(my_way))
+            * squared_length_enclosing(exactly(their_way))
+}
+
+/// `E² − 4r₁²r₂²W₁W₂`, exactly.
+fn how_deeply_two_side_by_side_pipes_overlap_exactly(
+    one: &Cylinder,
+    other: &Cylinder,
+) -> Option<Exact> {
+    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let room = how_much_room_two_side_by_side_pipes_leave_exactly(one, other)?;
+    Some(
+        room.times(&room)?.minus(
+            &Exact::product_of(2.0, 2.0)?
+                .times(&Exact::product_of(one.radius(), one.radius())?)?
+                .times(&Exact::product_of(other.radius(), other.radius())?)?
+                .times(&Exact::dot_of(my_way, my_way)?)?
+                .times(&Exact::dot_of(their_way, their_way)?)?,
+        ),
+    )
+}
+
 /// `E = A·W₂ − r₁²W₂ − r₂²W₁` as an enclosure.
 fn how_much_room_two_side_by_side_pipes_leave_enclosing(
     one: &Cylinder,
@@ -1579,8 +1650,17 @@ fn how_far_a_picking_half_space_sits_off_a_point(picker: &HalfSpace, through: Po
 ///
 /// The first was the whole of §29.8's remaining gap while the picker was a
 /// [`Plane`], which rounds a squareness away on the way in. A [`HalfSpace`]
-/// keeps it, so this now only refuses where a product of two of the direction's
-/// own components lands among the subnormals and the exact level cannot run.
+/// keeps it, so **the squareness check** only refuses where a product of two of
+/// the direction's own components lands among the subnormals and the exact level
+/// cannot run.
+///
+/// That sentence said "this now only refuses", of the whole function, until §93.
+/// It was wrong, and a doc comment is where it was cheapest to be wrong: the
+/// either-side check below was refusing a pair of parallel pipes whose directions
+/// are `[1, 0, 0]`, with nothing subnormal anywhere and the exact level available,
+/// because the caller handed it two line positions worked out by subtracting two
+/// nearly equal large numbers. The caller stopped doing that; what is left here
+/// refuses where the two lines really are within a rounding of each other.
 fn two_lines_told_apart(
     picker: HalfSpace,
     along: [f64; 3],
@@ -3295,6 +3375,60 @@ mod tests {
             })
             .collect();
         assert_eq!(sides, [Decision::Pos, Decision::Neg]);
+    }
+
+    /// A thin pipe whose axis lies on a much fatter pipe's skin, which is the
+    /// pair the overnight fuzzer turned up (`docs/decisions.md` §93).
+    ///
+    /// The answer is two lines at every ratio. It used to be two lines asked
+    /// thin-first and a refusal asked fat-first, from `2²⁷` thin radii up — a 67 m
+    /// pipe against a 1 m one, so the ratios here are ordinary engineering and
+    /// not a fuzzer's reach. `crossing` asks both ways round and insists the log
+    /// is empty, so nothing here is allowed to be approximated into agreeing.
+    #[test]
+    fn two_pipes_side_by_side_at_an_extreme_radius_ratio_still_cut_two_lines() {
+        for thin_radius in [1.0, 1.984375, 1000.0] {
+            for power in [26, 27, 40, 60, 100] {
+                let fat_radius = thin_radius * f64::powi(2.0, power);
+                let met = crossing(
+                    &a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], fat_radius),
+                    &a_pipe([1.0, 0.0, 0.0], [0.0, fat_radius, 0.0], thin_radius),
+                );
+                assert_eq!(
+                    same_shape(&met),
+                    ("curves", 2),
+                    "a {thin_radius} radius pipe on the skin of one 2^{power} times fatter"
+                );
+            }
+        }
+    }
+
+    /// The rest of that row, so the test above cannot pass by answering "two
+    /// lines" to everything at an extreme ratio.
+    ///
+    /// Every distance is a whole number of the thin radius against a fat radius
+    /// that is a power of two, so all six pairs are exactly representable and
+    /// `Policy::certified()` has to decide every one of them.
+    #[test]
+    fn an_extreme_radius_ratio_still_tells_the_side_by_side_shapes_apart() {
+        let fat_radius = f64::powi(2.0, 40);
+        let fat = a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], fat_radius);
+        for (apart, expected) in [
+            (0.0, ("nothing", 0)),
+            (fat_radius - 2.0, ("nothing", 0)),
+            (fat_radius - 1.0, ("curves", 1)),
+            (fat_radius, ("curves", 2)),
+            (fat_radius + 1.0, ("curves", 1)),
+            (fat_radius + 2.0, ("nothing", 0)),
+        ] {
+            let thin = a_pipe([1.0, 0.0, 0.0], [0.0, apart, 0.0], 1.0);
+            assert_eq!(
+                same_shape(&crossing(&fat, &thin)),
+                expected,
+                "axes {} thin radii off the fat skin",
+                apart - fat_radius
+            );
+        }
     }
 
     /// Criterion 4's tangent pipe-and-pipe rows, side by side: two pipes resting
