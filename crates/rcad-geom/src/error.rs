@@ -506,6 +506,24 @@ pub enum Error {
     #[error("this crossing runs where its two surfaces are too nearly parallel to follow it")]
     CannotFollowACrossingWhereItsSurfacesAreTangent,
 
+    /// A crossing too small, where it sits, for any `f64` point to be on both
+    /// the surfaces that make it.
+    ///
+    /// Two pipes leaning across each other cross in a loop as wide as the
+    /// thinner one. Put that loop far enough from the origin and the numbers
+    /// there are spaced further apart than the loop is wide, so the nearest
+    /// point that can be written down is off one of the two surfaces by a great
+    /// deal more than the loop's own size. There is nothing to walk.
+    ///
+    /// A **limit** and not a gap: the curve is real, but no arithmetic of this
+    /// width can name a point on it, and the same pair with a thicker pipe or
+    /// nearer the origin walks without complaint.
+    /// `how_small_a_crossing_can_be_before_no_point_sits_on_it.rs` is the
+    /// demonstration rather than this paragraph, and `docs/decisions.md` §94 has
+    /// the measurement.
+    #[error("this crossing is smaller than the gap between the numbers where it sits")]
+    ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces,
+
     /// A crossing was asked to be walked into more points than one is allowed to
     /// hold.
     #[error("walking this crossing that finely would take more than {most} points")]

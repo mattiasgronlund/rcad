@@ -90,6 +90,22 @@ const SHORTENINGS_BEFORE_GIVING_UP: usize = 50;
 /// gone anywhere.
 const MOST_A_STEP_MAY_GROW_TO: f64 = 1e6;
 
+/// How many enclosure widths a settled seed may sit off either of its surfaces.
+///
+/// A million. Over the 991 marches the test suite runs, every walk that closed
+/// its loop had a seed within **12.8** widths, and the four that crawled to the
+/// point cap had one at **1.7e15**. A million sits eighty thousand times above
+/// what a working walk has ever needed and a billion times below the failure,
+/// which is as far from both as the measurement allows.
+///
+/// **An enclosure of no width is let through, and that is not a hole.** No width
+/// says every operation along the way was exact, so a residual beside it would
+/// be a real distance and this question would have no scale to ask it against.
+/// Measured: of 3 333 seed checks the suite makes, 580 come back with no width,
+/// and every one of those has a residual of exactly zero with it. A settling
+/// that lands exactly is what an exact enclosure is reporting.
+const WIDTHS_A_SETTLED_SEED_MAY_SIT_OFF: f64 = 1e6;
+
 /// How many rounds of settling a point onto both surfaces.
 ///
 /// Eight. Newton doubles its digits each round from anywhere near the answer, so
@@ -142,7 +158,18 @@ pub(crate) struct Marched {
 /// not left to stand on its own: `most` caps the count outright, and reaching
 /// that cap is a refusal rather than a truncated answer.
 ///
+/// **The hole in that argument is steps that shrink**, because their lengths can
+/// sum to something finite and the walk then converges on a point instead of
+/// traversing a curve. That is what a crossing smaller than the numbers where it
+/// sits does to this loop, and [`the_settling_did_not_land_on_both`] turns the
+/// seed away before the first step rather than leaving `most` to notice a
+/// million points later (`docs/decisions.md` §94).
+///
 /// # Errors
+///
+/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when the seed,
+/// settled, is still far enough off one of the surfaces that nothing near it can
+/// be on both.
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when the two
 /// surfaces are too nearly parallel at some point along the run for a tangent
@@ -158,6 +185,9 @@ pub(crate) fn march(
     most: usize,
 ) -> Result<Marched> {
     let start = settled(surfaces, seed)?;
+    if the_settling_did_not_land_on_both(surfaces, start) {
+        return Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces);
+    }
     let mut deviation = how_far_off_the_crossing(surfaces, start)?;
     let mut points = Vec::new();
     let mut here = start;
@@ -201,6 +231,32 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
     let settled = settled(surfaces, seed)?;
     let off = how_far_off_the_crossing(surfaces, settled)?;
     Ok((settled, off))
+}
+
+/// Whether the settled seed is still so far off one of the two surfaces that no
+/// point near it can be on both.
+///
+/// The settling moves a point onto both surfaces as far as `f64` lets it, and
+/// how far that is is [`how_far_off_enclosing`]'s own width: an enclosure of the
+/// distance is as narrow as the arithmetic at that point can make it, so a
+/// residual of a few of those widths is what a settled point looks like. A
+/// residual of a great many of them is a point the settling could not move,
+/// which happens when the crossing is so much smaller than the place it sits
+/// that no `f64` point lands within reach of both surfaces at once
+/// (`docs/decisions.md` §94).
+///
+/// **Asked of the seed and of nothing else.** Measured over the whole suite,
+/// the first *marched* point of a walk that goes on to close its loop sits up to
+/// `4.8e10` widths off, so the same question asked of every point would refuse
+/// walks that work. The seed is what the rest is built on, and it is the one
+/// point whose residual the marcher has spent eight Newton rounds on before
+/// anything else has happened.
+fn the_settling_did_not_land_on_both(surfaces: [&Surface; 2], at: Point) -> bool {
+    surfaces.iter().any(|surface| {
+        let (off, _) = how_far_off_enclosing(surface, at);
+        let width = off.hi() - off.lo();
+        width > 0.0 && furthest_from_zero(off).hi() > width * WIDTHS_A_SETTLED_SEED_MAY_SIT_OFF
+    })
 }
 
 /// `from` settled onto both surfaces, by Newton in the plane the two normals
@@ -258,7 +314,10 @@ fn settled(surfaces: [&Surface; 2], from: Point) -> Result<Point> {
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when the sine
 /// cannot be told from zero, so no bound can be put on the distance at all.
 fn how_far_off_the_crossing(surfaces: [&Surface; 2], at: Point) -> Result<f64> {
-    let [first, second] = surfaces.map(|surface| how_far_off_enclosing(surface, at));
+    let [first, second] = surfaces.map(|surface| {
+        let (off, way) = how_far_off_enclosing(surface, at);
+        (furthest_from_zero(off), way)
+    });
     let sideways = cross_enclosing(first.1, second.1);
     let leaning = root_enclosing(squared_length_enclosing(sideways));
     if leaning.lo() <= 0.0 {
@@ -431,8 +490,14 @@ fn how_far_off_and_which_way(surface: &Surface, at: Point) -> (f64, Vector) {
     }
 }
 
-/// An upper bound on how far `at` sits off `surface`, and an enclosure of the
-/// unit normal there.
+/// An enclosure of how far `at` sits off `surface`, **signed**, and an enclosure
+/// of the unit normal there.
+///
+/// Signed, and the width is kept, because two callers want two different things
+/// out of it. [`how_far_off_the_crossing`] wants the magnitude and takes it with
+/// [`furthest_from_zero`]. [`the_settling_did_not_land_on_both`] wants the width,
+/// which is how close to the surface the arithmetic at this point can place
+/// anything at all.
 fn how_far_off_enclosing(surface: &Surface, at: Point) -> (Interval, [Interval; 3]) {
     match surface {
         Surface::Plane(flat) => how_far_off_a_plane_enclosing(flat, at),
@@ -443,7 +508,7 @@ fn how_far_off_enclosing(surface: &Surface, at: Point) -> (Interval, [Interval; 
     }
 }
 
-/// `|n·p − d| / √(n·n)`, and `n / √(n·n)`.
+/// `(n·p − d) / √(n·n)`, and `n / √(n·n)`.
 fn how_far_off_a_plane_enclosing(flat: &Plane, at: Point) -> (Interval, [Interval; 3]) {
     let normal = exactly(flat.normal().components());
     let length = root_enclosing(squared_length_enclosing(normal));
@@ -451,23 +516,20 @@ fn how_far_off_a_plane_enclosing(flat: &Plane, at: Point) -> (Interval, [Interva
         dot_enclosing(normal, exactly(at.coordinates())) - Interval::exactly(flat.offset()),
         length,
     );
-    (
-        furthest_from_zero(off),
-        normal.map(|part| quotient_or_everything(part, length)),
-    )
+    (off, normal.map(|part| quotient_or_everything(part, length)))
 }
 
-/// `| ‖p − c‖ − R |`, and `(p − c) / ‖p − c‖`.
+/// `‖p − c‖ − R`, and `(p − c) / ‖p − c‖`.
 fn how_far_off_a_ball_enclosing(ball: &Sphere, at: Point) -> (Interval, [Interval; 3]) {
     let out = gap_enclosing(ball.centre().coordinates(), at.coordinates());
     let reach = root_enclosing(squared_length_enclosing(out));
     (
-        furthest_from_zero(reach - Interval::exactly(ball.radius())),
+        reach - Interval::exactly(ball.radius()),
         out.map(|part| quotient_or_everything(part, reach)),
     )
 }
 
-/// `| ‖(p − o) × w‖ − r | / √(w·w)`, and the unit direction out from the axis.
+/// `(‖(p − o) × w‖ − r) / √(w·w)`, and the unit direction out from the axis.
 fn how_far_off_a_pipe_enclosing(pipe: &Cylinder, at: Point) -> (Interval, [Interval; 3]) {
     let along = exactly(pipe.axis().direction().components());
     let squared_direction = squared_length_enclosing(along);
@@ -482,12 +544,12 @@ fn how_far_off_a_pipe_enclosing(pipe: &Cylinder, at: Point) -> (Interval, [Inter
         root_enclosing(squared_direction),
     );
     (
-        furthest_from_zero(off),
+        off,
         sideways.map(|part| quotient_or_everything(part, reach)),
     )
 }
 
-/// `| ‖(p − apex)_perp‖ − slope·|(p − apex)_along| | / √(1 + slope²)`, and the
+/// `(‖(p − apex)_perp‖ − slope·|(p − apex)_along|) / √(1 + slope²)`, and the
 /// unit normal there.
 ///
 /// Unreachable from anything this crate marches, for the reason
@@ -516,10 +578,10 @@ fn how_far_off_a_cone_enclosing(cone: &Cone, at: Point) -> (Interval, [Interval;
         );
         quotient_or_everything(across - down, steepness)
     });
-    (furthest_from_zero(off), outwards)
+    (off, outwards)
 }
 
-/// `| ‖(‖(p − c)_perp‖ − R, (p − c)·ŵ)‖ − r |`, and the unit normal there.
+/// `‖(‖(p − c)_perp‖ − R, (p − c)·ŵ)‖ − r`, and the unit normal there.
 ///
 /// Unreachable from anything this crate marches, for the reason
 /// [`how_far_off_and_which_way`]'s torus arm gives; written out rather than
@@ -540,7 +602,7 @@ fn how_far_off_a_torus_enclosing(ring: &Torus, at: Point) -> (Interval, [Interva
         quotient_or_everything(out_of_the_tube, off_the_circle)
     });
     (
-        furthest_from_zero(off_the_circle - Interval::exactly(ring.tube_radius())),
+        off_the_circle - Interval::exactly(ring.tube_radius()),
         outwards,
     )
 }
