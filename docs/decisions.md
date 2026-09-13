@@ -25367,6 +25367,30 @@ went from 1993 points to 4207 and the soak's from 400 342 to 400 412, with order
 and scalings unmoved in both — which is what a fix to the walk and to nothing
 else should look like.
 
+**The seed, promoted 2026-09-13.**
+`fuzz/corpus/where_two_surfaces_cross/slow-unit-6a164a91…` is the input behind
+the p100 above, and it is checked in because until then this section published a
+26 000× number with nothing anybody could re-run. Two crossed pipes, radius 2048
+along x against radius `0.0152740478515625` along `[-1.07e-300, 0, 1]`: at
+`27b3125`, the commit before this section landed, **5.930367367 s** producing
+`Asked { points: 0 }`; at `71c7474`, **226.882 µs** producing ten points. Six
+seconds to yield nothing, against a fifth of a millisecond to answer.
+
+It was written on 2026-09-10 by the soak that found it, into a `fuzz/artifacts/`
+directory `.gitignore` hides, and it sat there for three days as the only copy of
+the one input that witnesses this fix — in a worktree that was unlocked and due
+to be reclaimed. §85 and §88 each landed their seed with their fix and did not
+name it, which cost two sessions an evening (§85.5). This section landed no seed
+at all, which is the same gap one step earlier: a regression test checks that the
+behaviour holds, and only the input says what the behaviour was.
+
+Adding it moves the corpus row of
+`every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly` from 745 of 826 seeds
+to 746 of 827, and its points from 4207 to 4217 with one more order and two more
+scalings. Measured by removing the seed and re-running, so the delta is this file
+and not drift: without it the row is exactly the 4207 · 544 · 1087 published
+before.
+
 ### 89.7 The backstop that lost its consumer
 
 The fix was agreed as two parts: this one, and a cheap detector for a walk

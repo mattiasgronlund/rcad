@@ -40,10 +40,10 @@
 //! it.
 //!
 //! The byte layout is not widened to fix that, and **not because a repack would
-//! reinterpret the whole corpus — measured, it would not.** Over the 826
+//! reinterpret the whole corpus — measured, it would not.** Over the 827
 //! minimised seeds, promoting the two unread bits 4 and 5 to a third kind bit
 //! apiece and reading five kinds instead of three gives a different kind to at
-//! least one side of **92** seeds, 67 of them among the 745 that decode to a
+//! least one side of **92** seeds, 67 of them among the 746 that decode to a
 //! pair. Handing the already-redundant kind value 3 to `Cone` and leaving the
 //! layout alone moves **42**, 35 of them decoding. A seed whose two kind fields
 //! come out unchanged reads the same bytes into the same pair, so those counts
@@ -53,11 +53,13 @@
 //! its kinds byte is `0x0a`, so both sides read kind 2 today, both read kind 2
 //! under the wider layout — bits 4 and 5 are clear — and neither side is the
 //! value 3 that the other repack rewrites. §88's seed is `0x0a` too, so the same
-//! three sentences carry it, and the counts are unmoved again.
+//! three sentences carry it, and the counts are unmoved again. So is §89's slow
+//! unit, promoted 2026-09-13, which makes three seeds the paragraph covers and
+//! none that it has had to be rewritten for.
 //!
 //! Two things settle it instead. **A minimised seed is worth keeping only for
 //! the branch it reached**, so ninety-odd of them quietly meaning something else
-//! is a real cost against a corpus of 826. And **the repack does not buy the
+//! is a real cost against a corpus of 827. And **the repack does not buy the
 //! coverage it is for**: a torus reads eight numbers where a pipe reads seven,
 //! so a torus against a cone, a pipe or another torus needs 76 bytes, and the
 //! longest seed checked in is 71. Those pairs would decode to nothing whatever
@@ -81,15 +83,24 @@
 //!
 //! | row | pairs | points | orders | scalings |
 //! |---|---|---|---|---|
-//! | corpus | 745 of 826 seeds | 4207 | 544 | 1087 |
+//! | corpus | 746 of 827 seeds | 4217 | 545 | 1089 |
 //! | soak | 199 943 of 200 000 draws | 400 412 | 178 631 | 355 291 |
 //! | cones and tori | 136 | 696 | 39 | 78 |
 //!
-//! The corpus row is 2026-09-11's, two seeds later than the cone-and-torus one:
-//! §85's crash was promoted into the corpus, and then §88's — the pair of
-//! leaning pipes that named one crossing forwards and refused backwards. The
-//! second decodes to a pair and is decided both ways round now, which is the one
-//! order and two scalings the row gained.
+//! The corpus row is 2026-09-13's, three seeds later than the cone-and-torus
+//! one: §85's crash was promoted into the corpus, then §88's — the pair of
+//! leaning pipes that named one crossing forwards and refused backwards — and
+//! then §89's slow unit. §88's decodes to a pair and is decided both ways round
+//! now, which is one order and two scalings of what the row gained.
+//!
+//! **§89's seed is the only one here promoted for its time rather than its
+//! answer**, and the row is where that shows: two crossed pipes, radius 2048
+//! against radius `0.0152740478515625`, which before §89 took 5.93 s to produce
+//! no points at all and now takes 227 µs to produce ten. Those are the ten
+//! points, one order and two scalings between the 2026-09-11 row and this one.
+//! A seed that costs a fifth of a millisecond is worth keeping for the six
+//! seconds it used to cost, and §89's own regression test is a claim with no
+//! input behind it until this file is checked in beside it.
 //!
 //! **The points column then more than doubled, and that is §89.** The marcher
 //! used to jump clean across a crossing when the budget handed to it was larger
