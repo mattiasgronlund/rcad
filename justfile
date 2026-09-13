@@ -1872,18 +1872,52 @@ fuzz-overnight window="28800":
                 echo "$recipe: exited $status — see $night/$recipe.log"
                 to_look_at+=("$recipe:crash") ;;
         esac
+
+        # The input a target found is kept beside the log that describes it,
+        # because `fuzz/artifacts/` is the wrong place to leave the only copy of
+        # anything (§91). Two reasons, and each one lost a finding.
+        #
+        # **libFuzzer never reads that directory back as a seed.** So the next
+        # night starts from a corpus without the crash in it, rolls a fresh seed,
+        # and does not re-find it: on 2026-09-13 a night reported "nothing found"
+        # on the very commit the night before had crashed on, and nothing had
+        # been fixed in between.
+        #
+        # **It lives in this worktree, and `.gitignore` hides it.** §89's slow
+        # unit sat there as its only copy for three days in a tree that had been
+        # unlocked and was due to be reclaimed.
+        #
+        # Copied after each target rather than once at the end, so a night killed
+        # from outside still keeps what the targets that did run found. `-n`
+        # makes the repeat cheap and keeps the first copy of a name that libFuzzer
+        # rewrites.
+        if [ -d fuzz/artifacts ]; then
+            mkdir -p "$night/artifacts"
+            cp -Rn fuzz/artifacts/. "$night/artifacts/"
+        fi
     done
 
+    # Counted after the loop and named in the summary, because a copy nobody is
+    # told about is very nearly as lost as the original was. A clean night writes
+    # slow units too — the night of 2026-09-13 wrote three and said "nothing
+    # found" — so this is reported whether or not anything failed.
+    kept=0
+    if [ -d "$night/artifacts" ]; then
+        kept=$(find "$night/artifacts" -type f | wc -l)
+    fi
+    artifacts=""
+    [ "$kept" -eq 0 ] || artifacts="  $kept artifacts in $night/artifacts"
+
     if [ "${#to_look_at[@]}" -eq 0 ]; then
-        printf '%s  %s (%d days old, %s behind main)  %d targets, nothing found  %s\n' \
+        printf '%s  %s (%d days old, %s behind main)  %d targets, nothing found%s  %s\n' \
             "$(date '+%Y-%m-%d %H:%M')" "$commit" "$age" "$behind" "${#recipes[@]}" \
-            "$night" >"{{fuzz_log_root}}/latest"
-        echo "nothing found"
+            "$artifacts" "$night" >"{{fuzz_log_root}}/latest"
+        cat "{{fuzz_log_root}}/latest"
         exit 0
     fi
-    printf '%s  %s (%d days old, %s behind main)  %d targets, %d TO LOOK AT (%s)  %s\n' \
+    printf '%s  %s (%d days old, %s behind main)  %d targets, %d TO LOOK AT (%s)%s  %s\n' \
         "$(date '+%Y-%m-%d %H:%M')" "$commit" "$age" "$behind" "${#recipes[@]}" \
-        "${#to_look_at[@]}" "${to_look_at[*]}" "$night" >"{{fuzz_log_root}}/latest"
+        "${#to_look_at[@]}" "${to_look_at[*]}" "$artifacts" "$night" >"{{fuzz_log_root}}/latest"
     cat "{{fuzz_log_root}}/latest"
     exit 1
 
@@ -2028,7 +2062,14 @@ check-fuzz-overnight-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
     dir=$(mktemp -d)
-    trap 'rm -rf "$dir"' EXIT
+
+    # The stub writes its artifacts into the real `fuzz/artifacts/`, because that
+    # is the one path the recipe under test is not free to choose — `cargo-fuzz`
+    # fixes `-artifact_prefix` and nothing in the environment moves it. So the tag
+    # is unique per run, two lanes can gate at once, and the trap takes away
+    # exactly what this run put there and nothing a real night left.
+    tag="overnight-selftest-$$-${RANDOM}"
+    trap 'rm -rf "$dir"; rm -f fuzz/artifacts/*/crash-"$tag"' EXIT
     mkdir -p "$dir/bin"
 
     # Logs its whole command line, then sleeps **half** the slice it was given.
@@ -2053,6 +2094,26 @@ check-fuzz-overnight-selftest:
     case " $* " in
         *" build "*) exit 0 ;;
     esac
+
+    # Writes what libFuzzer would write, where libFuzzer would write it: the real
+    # `cargo fuzz run` is handed `-artifact_prefix=<worktree>/fuzz/artifacts/<target>/`
+    # and this stub's cwd is that `fuzz/` directory, because `fuzz-target` cd's
+    # into it. Named with a tag the arm picks, so the assertion is about this run's
+    # own file and not about whatever a real session left lying there.
+    target=""
+    prev=""
+    for arg in "$@"; do
+        if [ "$prev" = "run" ]; then
+            target="$arg"
+            break
+        fi
+        prev="$arg"
+    done
+    if [ -n "$target" ] && [ -n "${STUB_ARTIFACT_TAG:-}" ]; then
+        mkdir -p "artifacts/$target"
+        echo "what a target found" >"artifacts/$target/crash-$STUB_ARTIFACT_TAG"
+    fi
+
     for arg in "$@"; do
         case "$arg" in
             -max_total_time=*)
@@ -2087,7 +2148,7 @@ check-fuzz-overnight-selftest:
     }
 
     run() {
-        STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+        STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" STUB_ARTIFACT_TAG="$tag" \
             RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
             {{just_executable()}} fuzz-overnight "$1" >"$dir/out" 2>&1
     }
@@ -2122,6 +2183,34 @@ check-fuzz-overnight-selftest:
     timed=$(grep -c "fuzz run.*\[timings=$dir/logs/$(date +%Y-%m-%d)/timings\]" "$dir/log" || true)
     [ "$timed" -eq 4 ] \
         || fail "$timed of 4 targets were told where to write their timings"
+
+    # What each target found is carried out of the worktree and into the night's
+    # own directory (§91). `fuzz/artifacts/` is gitignored, lives in a tree that
+    # gets unlocked and reclaimed, and is never read back as a seed — so an input
+    # left only there is an input the next night cannot re-find and a sweep can
+    # delete. A night on 2026-09-13 reported "nothing found" over a crash sitting
+    # in it.
+    night="$dir/logs/$(date +%Y-%m-%d)"
+    for target in where_two_surfaces_cross no_step_file_makes_the_reader_panic \
+            no_model_makes_the_writer_panic two_solids_fused_by_a_stranger; do
+        [ -f "$night/artifacts/$target/crash-$tag" ] \
+            || fail "$target's artifact was left in the worktree instead of kept in $night/artifacts"
+    done
+
+    # And the morning is told, because a copy nobody is told about is very nearly
+    # as lost as the original. This arm's night also failed, so it proves the
+    # count rides along with `TO LOOK AT` rather than replacing it.
+    #
+    # **At least four, and not exactly four.** The stub writes into the real
+    # `fuzz/artifacts/`, so a tree where somebody has actually fuzzed has more in
+    # it than this arm put there. Pinning the number would make the arm pass or
+    # fail on a property of the machine rather than of the recipe, which is §77.6's
+    # mistake made a third time.
+    kept=$(sed -n 's/.*  \([0-9]*\) artifacts in .*/\1/p' "$dir/logs/latest")
+    [ -n "$kept" ] \
+        || fail "the summary line does not say how many artifacts were kept: $(cat "$dir/logs/latest")"
+    [ "$kept" -ge 4 ] \
+        || fail "four targets each left an artifact and the summary counted $kept"
 
     # Two: the tracked corpus is a read-only seed and never the directory
     # libFuzzer writes to, which is the whole of §81. Order is the only thing
