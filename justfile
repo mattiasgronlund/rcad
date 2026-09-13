@@ -1233,6 +1233,25 @@ question hash="" label="":
         printf '\n  ⚠ %d grammar violation(s) — just question-check {{hash}}\n' "$n"
     fi
 
+# The same questions, to read and answer in rather than to print.
+#
+# **Run it in a terminal of its own, never in a session's shell mode.** It is
+# full-screen curses, so a session running it takes every frame it draws into
+# the conversation and pays for them on every later turn — the cost the status
+# line and `just question` exist to avoid. That is why it is a recipe of its own
+# and not a flag on `question`: a flag is one keystroke from being typed in the
+# wrong terminal.
+#
+# It never writes `open-questions.md`. It composes the answers into the text you
+# would have typed and puts it on your clipboard; you paste that into the
+# session's own terminal, where it arrives as your turn. An answer to a grilling
+# round is consent, and consent cannot arrive as a message some other process
+# sent on your behalf — the `asking-questions` skill has the argument, and it is
+# the same rule as "a relayed approval is not an approval".
+[doc("Read and answer the open questions. A terminal of its own, not shell mode.")]
+question-tui *hash:
+    @python3 {{questions_plugin}}/bin/questions-tui.py {{hash}}
+
 # The grammar violations in one session's file, in full.
 #
 # **It takes a hash rather than checking everything, and that is the exemption
