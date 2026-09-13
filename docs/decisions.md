@@ -25689,3 +25689,110 @@ into the real artifacts directory, so a tree where somebody has actually fuzzed
 has more in it than the fixture put there, and pinning the number would make the
 arm pass or fail on a property of the machine rather than of the recipe. That is
 §77.6's mistake, and this is the third time it has been available to make.
+
+## 92. What 352 branches and 45 worktrees were actually holding, recorded 2026-09-13
+
+*An audit of everything uncommitted or unmerged in this repo, run because the
+question "is there anything outstanding" had no cheap answer. The answer is in
+§92.2; §92.1 is why the obvious commands give the wrong one.*
+
+### 92.1 `git branch --no-merged` answers a different question than the one asked
+
+On 2026-09-13 the repo had **352 local branches and 45 worktrees**, and 14 of
+those branches were unmerged. Thirteen of the fourteen held nothing that was not
+already in `main`.
+
+This is §50.2's finding, which said it about two branches and predicted nothing
+about the rate: *"An unmerged branch is not evidence of unlanded work; it is
+evidence of an unrecorded merge, and the two look identical from `git branch
+--no-merged`."* At 13 of 14 it is not an occasional accident, it is what the
+command means here. A lane that is reworked before landing — renamed commits,
+squashed, re-derived on a newer base — lands its *content* and never its
+*commits*, and `merge-base --is-ancestor` only ever sees the commits.
+
+**So judge a branch by its items, not by its ancestry.** The cheap version: take
+the names the commit adds (`git show --format= <sha> | grep '^+.*fn '`) and ask
+whether `main` has them. That separated the fourteen in one pass where reading
+diffs would not have — `git diff main..<branch>` on these branches reports
+thousands of changed files, because the branch is old and the diff is mostly
+`main`'s own later work flowing backwards.
+
+`git cherry` is the sharper tool and still not sufficient: it matches patch-ids,
+so it catches a verbatim cherry-pick (it cleared `m5-predicates-scaling` and two
+of three commits on a mesh branch) and misses every rework. One branch had its
+doc-fix commit marked as landed and the two commits *underneath* it marked as
+not, which is impossible as stated and exactly what a rework looks like.
+
+### 92.2 The one real find, and the shape that distinguished it
+
+`arms-spike` at `b6de278` adds `where_a_plane_cuts_a_cone_in_a_parabola` and
+`follow_the_parabola` to `crates/rcad-geom/src/walk.rs`. Neither name exists
+anywhere in `main`'s `src/`, both sit **above** that file's `#[cfg(test)]`, and
+both are called from the live dispatch. It is titled `spike:` like a dozen
+throwaway probes and is the only one of them carrying production code.
+
+**The test that separated it from the probes: where the added functions sit
+relative to `#[cfg(test)]`.** Two other `spike:` branches add a dozen-odd
+functions each with names that read like real geometry —
+`the_two_flat_surfaces_a_coaxial_cone_and_pipe_cross_in`,
+`building_the_cross_product_in_f` — and every one of them is below the marker, in
+a probe module. Commit titles, branch names and function names all failed to
+tell these apart; the marker did not.
+
+### 92.3 A worktree that reads "clean" can be the only copy of something
+
+`prune-worktrees` keeps a tree that is locked, dirty, holds `main`, is detached,
+or is unmerged (§76). The detached arm is **unconditional** — kept even when the
+tree's commit is provably an ancestor of `main` and it therefore holds nothing
+unique. Lanes here mostly end detached, which is why 45 trees accumulated: 20 of
+them were clean, unlocked, detached, and at commits already in `main`, and the
+recipe will never touch one of those.
+
+That is a defensible default and it is not the dangerous part. **The dangerous
+part is that `git status --porcelain` does not see gitignored files, and
+`fuzz/artifacts/` is gitignored.** Two trees in that "pure clutter" set held the
+only copy of live fuzz evidence. `rcad-worktrees/fuzz-overnight` held
+`slow-unit-5a19686d…`, in no corpus, on no branch, no second copy anywhere on
+disk; it passed every test a sweep applies and came one command from being
+reclaimed. §91 is the same story for `rcad-nightly-fuzz` and cost three days.
+
+So a sweep needs a check no ancestry test provides: **for every gitignored
+artifact in a tree about to go, refuse unless `main` already carries those exact
+bytes.** Bytes, not filenames — a corpus file is named after its own content
+hash, so a name match is nearly a content match and "nearly" is how the wrong
+file gets kept while the right one goes. The check is proven in three directions
+rather than one, because a guard that only ever says yes is §77.6's shape: it
+accepts the seed `34ba0ad` committed, refuses
+`crash-cba396f88aa1063b9d879100bded7b9fcd0d5f95` (which cannot go in the corpus
+while the bug is live, since a crashing input there kills every night at corpus
+load), and refuses a file carrying a committed seed's name over different bytes.
+
+### 92.4 "Copied out" and "in the object store" are different claims
+
+The session that landed `34ba0ad` first reported the seed copied out and its
+worktree free to reclaim. It was not: the file was `??` in that worktree, under
+`fuzz/corpus/` — **tracked territory, not a gitignored path, so `git clean -fd`
+takes it and nothing reads as unusual first.** Untracked under a tracked
+directory is a worse hiding place than gitignored, because the gitignored case at
+least announces itself to `status --ignored`.
+
+Three checks settle it and none of them is a peer's word: the commit is an
+ancestor of `main`, `git cat-file -e main:<path>` answers for each file, and the
+blob is `cmp`-identical to the original on disk. Run those before reclaiming a
+tree, including when the session that owns the file says it is safe — that report
+was made in good faith and was wrong about the one thing that mattered.
+
+### 92.5 What the audit actually removed
+
+334 branches, every one verified an ancestor of `main` first. The rest —
+12 valueless branches, 38 worktrees, four untracked probe tests, and three
+debug-only uncommitted edits (an `eprintln!("TRACE …")` block, a
+`MEASURING_SLACK` loosened from 16 to 32 against the doc comment directly above
+it, and a 141-line draft of a §41 that `main` already records) — needs
+`git branch -D` and `git worktree remove`, which Claude Code's auto permission
+mode refuses. That half is scripted and unrun; it is not evidence of anything
+except a permission boundary.
+
+Three branches are deliberately kept: `arms-spike` (§92.2), `ci-kache-bootstrap`
+(PR #1, which `.github/workflows/ci.yml` already records as superseded in its own
+comment), and the live session's own.
