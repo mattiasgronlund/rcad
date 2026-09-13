@@ -426,11 +426,27 @@ test-ignored:
 # recipe of ours. The plugin's runner appends it and fails loudly if the file is
 # named and missing, because a repo's own cases quietly not running is exactly
 # the drift the plugin was made to end.
+#
+# The plugin's half is skipped where there is no Claude Code, which since
+# 2026-09-13 includes CI: the runner used to clone the marketplace to get that
+# script, and the hook it tests is a **PreToolUse** hook, which cannot fire in a
+# job with no session. What is lost is this repo's three overlay cases, and it
+# is named here rather than hidden. The shared 24 have a runner of their own in
+# the marketplace repo now.
+#
+# The two hooks below it are rcad's own, need no plugin, and run either way —
+# which is why the skip wraps one line and not the recipe.
 [doc("The hooks against their own cases: shell patching, context budget, worktrees.")]
 check-hooks:
-    @{{guardrails_plugin}}/bin/selftest.sh .claude/patching-cases.local.json
-    @.claude/hooks/check-worktree-create.sh
-    @.claude/hooks/check-session-start-hub.sh
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -d "{{claude_config}}" ]; then
+        {{guardrails_plugin}}/bin/selftest.sh .claude/patching-cases.local.json
+    else
+        echo "no {{claude_config}}, so no Claude Code and no plugin here: the patching cases are skipped, not passed"
+    fi
+    .claude/hooks/check-worktree-create.sh
+    .claude/hooks/check-session-start-hub.sh
 
 # kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
 #
@@ -1125,13 +1141,44 @@ questions_root := env_var_or_default("CLAUDE_QUESTIONS_ROOT", env_var_or_default
 # a parser that still dropped the second label of a paired entry months after
 # the fix landed here.
 #
+# The name Claude Code knows them by, which is not derivable from the paths
+# below and is not this repo's to pick: it comes from the marketplace's own
+# `marketplace.json`, and an `extraKnownMarketplaces` key that disagrees with it
+# registers nothing, silently.
+marketplace := env_var_or_default("CLAUDE_MARKETPLACE", "mattiasgronlund-local")
+
+# The config directory is the installation — settings, `known_marketplaces.json`,
+# `installed_plugins.json` — so its absence is what "there is no Claude Code
+# here" means. The recipes that need a plugin skip on it, and on `CI` never: a
+# human who exports `CI` would lose the check silently, and a runner that does
+# not set it would go red with nothing to act on. `docs/decisions.md` §77.
+claude_config := env_var_or_default("CLAUDE_CONFIG_DIR", home_directory() / ".claude")
+
+# Three places can hold the plugins, in this order:
+#
+#   `CLAUDE_PLUGINS_ROOT` — the escape hatch. A checkout elsewhere, or the
+#   working tree when the point is to change a plugin and see the change. It is
+#   also how one repo tries a version the shared pin has not taken: the
+#   marketplace name is fixed, so one name carries one ref and this is what
+#   independence looks like instead.
+#
+#   The marketplace clone, which is the **pinned** tree. `claude plugin
+#   marketplace add mattiasgronlund/claude-questions@v0.2.0` clones the tag here
+#   and leaves it, so a recipe reading it runs the version the session loaded.
+#
+#   `$HOME/git/…` — a machine with the repo checked out that never added the
+#   marketplace.
+#
+# Not the install path. A github source installs under
+# `<config>/plugins/cache/<marketplace>/<plugin>/<version>` — measured, and
+# version-stamped — so a recipe naming it breaks at the next bump in the
+# direction of "no questions found", which is the failure this whole apparatus
+# exists to prevent. The clone above does not move.
+#
 # `$HOME`-relative and overridable rather than absolute, so a clone somewhere
-# else still resolves. A **directory**-source marketplace is what makes this
-# path stable at all — a github source installs under
-# `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`, and a recipe
-# naming that breaks on the next version bump in the direction of "no questions
-# found", which is the failure this whole apparatus exists to prevent.
-plugins_root := env_var_or_default("CLAUDE_PLUGINS_ROOT", home_directory() / "git/mattiasgronlund/claude-questions/plugins")
+# else still resolves.
+marketplace_clone := claude_config / "plugins/marketplaces" / marketplace / "plugins"
+plugins_root := env_var_or_default("CLAUDE_PLUGINS_ROOT", if path_exists(marketplace_clone) == "true" { marketplace_clone } else { home_directory() / "git/mattiasgronlund/claude-questions/plugins" })
 questions_plugin := env_var_or_default("CLAUDE_QUESTIONS_PLUGIN", plugins_root / "questions")
 guardrails_plugin := env_var_or_default("CLAUDE_GUARDRAILS_PLUGIN", plugins_root / "guardrails")
 
@@ -1211,9 +1258,21 @@ question-check hash:
 # Keeping the recipe's name is deliberate: `check-gate-runs-every-check`
 # counts `check-*` recipes and this one moving out of that set would be a
 # silent change to a number that exists to be loud.
+#
+# Skipped where there is no Claude Code. These are the plugin's own 20 cases and
+# the marketplace repo's CI runs them on every push there; running them again
+# out of a clone this job made was checking that repo's tree rather than this
+# one's. The seam this file does own is in `check-plugins`, which exercises
+# `just question` end to end.
 [private]
 check-questions-selftest:
-    @{{questions_plugin}}/bin/selftest.sh
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d "{{claude_config}}" ]; then
+        echo "no {{claude_config}}, so no Claude Code and no plugin here: the questions cases are skipped, not passed"
+        exit 0
+    fi
+    exec {{questions_plugin}}/bin/selftest.sh
 
 # The three plugins this repo's `.claude/` was emptied into, checked for being
 # where the recipes above think they are.
@@ -1242,6 +1301,13 @@ check-questions-selftest:
 check-plugins:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Both questions below presuppose a Claude Code, and so does the seam test
+    # at the end, which runs `just question` against the plugin's parser. Where
+    # there is none, all three are skipped and this says which.
+    if [ ! -d "{{claude_config}}" ]; then
+        echo "no {{claude_config}}, so no Claude Code to have been told anything: the plugin checks are skipped, not passed"
+        exit 0
+    fi
     missing=0
     for p in "{{questions_plugin}}" "{{guardrails_plugin}}" "{{plugins_root}}/practices"; do
         [ -d "$p" ] && continue
@@ -1249,12 +1315,17 @@ check-plugins:
         missing=1
     done
     if [ "$missing" -eq 1 ]; then
+        # The ref comes out of the committed settings file rather than being
+        # written here, so this cannot name a version the repo is not asking
+        # for.
+        pin=$(jq -r '.extraKnownMarketplaces["{{marketplace}}"].source.ref // "main"' \
+            .claude/settings.json 2>/dev/null || echo main)
         echo
         echo "install them with:"
-        echo "  /plugin marketplace add ~/git/mattiasgronlund/claude-questions"
-        echo "  /plugin install questions@mattiasgronlund-local"
-        echo "  /plugin install guardrails@mattiasgronlund-local"
-        echo "  /plugin install practices@mattiasgronlund-local"
+        echo "  claude plugin marketplace add mattiasgronlund/claude-questions@$pin"
+        echo "  claude plugin install -y questions@{{marketplace}}"
+        echo "  claude plugin install -y guardrails@{{marketplace}}"
+        echo "  claude plugin install -y practices@{{marketplace}}"
         echo "or point CLAUDE_PLUGINS_ROOT at your checkout's plugins directory"
         exit 1
     fi
@@ -1269,7 +1340,7 @@ check-plugins:
     # in the script now, with a selftest, because it is the same guard `rscene`
     # needs and a copy per repo is a copy that goes stale. `docs/decisions.md`
     # §77.
-    "{{guardrails_plugin}}/bin/check-declared.sh" mattiasgronlund-local questions guardrails practices
+    "{{guardrails_plugin}}/bin/check-declared.sh" {{marketplace}} questions guardrails practices
 
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT

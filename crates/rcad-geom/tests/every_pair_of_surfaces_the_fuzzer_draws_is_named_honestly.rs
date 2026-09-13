@@ -104,8 +104,10 @@
 //! 549 and 1097. Measured the way the others were, by adding it and taking it
 //! away again, it brings one seed, one pair, one order, two scalings and **no
 //! points**, because two endless straight lines are named rather than walked. It
-//! costs no measurable time: 63.15 s against 63.61 s, which is the slow seed two
-//! paragraphs down and not this one.
+//! costs no measurable time: 63.15 s against 63.61 s. Both of those numbers are
+//! the slow seed two paragraphs down rather than this one, and §94 has since
+//! taken them off the row — they are left as measured because what they were
+//! measuring is the *difference* between them.
 //!
 //! **The second of §91's two is the cheap one, and it is why the points column
 //! moved.** It is a slow unit written 2026-09-09 that was still sitting as its
@@ -114,23 +116,29 @@
 //! one order and two scalings. A seed that buys coverage for a tenth of a second
 //! needs no argument beyond that it was one sweep from being deleted.
 //!
-//! **The first of §91's two is the one that costs something, and it is in here on
-//! purpose.** It is the only seed promoted while the thing it witnesses is still
-//! broken, so unlike §89's it is not paying for itself yet: it takes this row from
-//! 0.072 s to 63.2 s, measured by adding it and taking it away again, and it is
-//! the whole of the difference. Two near-perpendicular pipes, radius 2147482112
-//! against radius `4.3601508761683463e-106` — a ratio near 5e114 — and after 63
-//! seconds it produces **no points at all**, so it brought one order and two
-//! scalings and not a single point. That is §89's shape a second time and at ten
-//! times the cost. When **§91.3's** gap is closed this row goes back under a
-//! tenth of a second and the seed starts earning its place; until then the 63
-//! seconds is the price of not losing the input again, and `docs/decisions.md`
-//! §91 is where that trade is argued rather than here.
+//! **The first of §91's two cost 63 of this row's 65 seconds, and §94 took them
+//! back.** Two near-perpendicular pipes, radius 2147482112 against radius
+//! `4.3601508761683463e-106` — a ratio near 5e114 — crossing in two loops each as
+//! wide as the thin pipe, sitting where the numbers are `2.38e-7` apart. The
+//! marcher used to take the seed anyway and crawl to its million-point cap, which
+//! took this row from 0.072 s to 63.2 s and brought one order, two scalings and
+//! **no points at all**. It now turns the seed away in twenty microseconds and
+//! the row reads 0.069 s.
 //!
-//! That sentence said "§91's gap" until §93, which closed §91.2's and moved the
+//! **The seed still brings no points, and it was never going to.** §91.3 called
+//! this a gap and said the row would drop "when §91.3's gap is closed"; §94
+//! measured it a **limit** instead — each loop is narrower than one step of the
+//! grid it sits on by ninety-nine orders of magnitude, so no point that can be
+//! written down is on both pipes, and there is no answer to reach. What the seed
+//! earns its place with is the refusal being cheap and named:
+//! `how_small_a_crossing_can_be_before_no_point_sits_on_it.rs` fails without §94
+//! with `TooManyPointsAlongOneCrossing` after 35 seconds.
+//!
+//! That prediction said "§91's gap" until §93, which closed §91.2's and moved the
 //! timing by 0.46 s — inside the noise. §91 recorded two gaps and this seed
-//! witnesses the leaning row's, so naming the subsection is the difference
-//! between a prediction and a guess.
+//! witnesses the leaning row's, so naming the subsection was the difference
+//! between a prediction and a guess — and the named prediction then turned out
+//! right about the timing and wrong about the classification.
 //!
 //! **Three of the six were promoted for their time rather than their answer**,
 //! and §89's is the one that shows what a closed gap looks like afterwards: two
