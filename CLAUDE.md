@@ -193,8 +193,8 @@ run it on.** There is no list of grandfathered sessions: `/tmp` is swept at 30
 days, so a list of session ids would dangle within a month, and it would be a
 second record beside the thing itself (§60). A dead session's file cannot be
 fixed, so nothing judges it; yours can, so run this in the turn you write a
-question. `just question <hash>` announces a count of violations under the
-listing without spelling them out.
+question. `just question <hash>` names every violation it finds under the
+questions themselves, so the check and the read are one call.
 
 Nothing is ever dropped: an entry whose label does not parse is listed as `??`
 with its line number, and shows in the status line as `??×1`. The `asking-questions`
@@ -205,11 +205,18 @@ plugin, because a copy in each repo is a copy that goes stale — `rscene` carri
 one that still dropped the second label of a paired entry months after the fix
 landed here. So do the hooks and the shared skills; see "Three plugins" below.
 
-**Read one back with `just question`, never with `!cat`.** The status line shows
+**Read them back with `just question`, never with `!cat`.** The status line shows
 the open labels collapsed, after the session's hash — `❓ 766405 K1-K4, Q2,
-Q4-Q6` — and that hash is the address: `just question 766405` lists the headings,
-`just question 766405 Q11` prints that one entry in full. `!cat` puts all of them
-in the conversation instead, and charges for every line on every later turn.
+Q4-Q6` — and that hash is the address. `just question 766405` prints **every open
+question in full**; `just question 766405 Q11 Q19` prints those two, answered or
+not; `--labels` is one line per entry, `--all` includes the answered, `--json` is
+for a program. `!cat` puts the whole file in the conversation and charges for
+every line of it on every later turn.
+
+**`just question` is written for you; `just question-tui` is the one Mattias
+types.** That split is why the default is whole bodies rather than a listing to
+drill into: a person has a finite screen and cheap keystrokes, and you have the
+reverse. §100.
 
 **A label is a letter and a number, and the letter carries meaning.** `Q` for a
 grilling round or any plain decision — that is what the `grilling` skill's format

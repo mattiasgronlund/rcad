@@ -1182,35 +1182,51 @@ plugins_root := env_var_or_default("CLAUDE_PLUGINS_ROOT", if path_exists(marketp
 questions_plugin := env_var_or_default("CLAUDE_QUESTIONS_PLUGIN", plugins_root / "questions")
 guardrails_plugin := env_var_or_default("CLAUDE_GUARDRAILS_PLUGIN", plugins_root / "guardrails")
 
-# One open question, in full, by the hash the status line prints beside it.
+# The open questions, in full, by the hash the status line prints beside them.
 #
 #     just question                 the sessions that have open questions
-#     just question 766405          that session's labels and headings
-#     just question 766405 Q19      that one question, body and all
+#     just question 766405          every open question in that session, in full
+#     just question 766405 Q19 Q21  those two, answered or not
+#     just question 766405 --labels one line per entry, the old default
+#     just question 766405 --all    the answered ones too
+#     just question 766405 --json   the whole file, for a program
+#
+# **This recipe is for an agent. `just question-tui` is the one a person types.**
+# That split is what sets the default. Terseness here used to be justified by
+# what "you came for" and by a finite screen — true of a human at a terminal,
+# and false of the caller this actually has. A call is billed the context it is
+# made at, not the bytes it returns: across the five longest transcripts in this
+# repo the mean turn bills 144 k-182 k input against 850-1 300 output, 97 % of it
+# cache reads. One avoidable follow-up costs about what carrying 2 200 extra
+# resident tokens for 73 further turns costs, and the largest question file in
+# the tree is 2 200 tokens whole. Drilling down is a human affordance and an
+# agent tax. `docs/decisions.md` §100.
+#
+# **The stronger reason is that a malformed entry is only readable here.** It has
+# no label to print, so `--labels` can say no more than `??` with a line number
+# and the status line no more than `??×1`; the TUI drops it outright. Printing
+# bodies by default is what puts a broken entry in front of someone able to fix
+# it. That would be worth doing at zero token cost.
 #
 # **The hash exists because nothing else knows the address.** The file is named
 # by the session id, which only the harness has, so reading one question meant
-# `!cat` on the whole file — fifteen entries put in front of you to read one,
-# and shell mode then charges the model for every line of it on every later
-# turn. That is the same arithmetic that put the status line here to begin with.
+# `!cat` on the whole file, and shell mode then charges the model for every line
+# of it on every later turn.
 #
-# **The middle form is also the format check.** It and `statusline.sh` are the
-# same parser — `.claude/questions.py` — so an entry one of them would drop
-# cannot be one the other shows. They used to be two implementations of one
+# **This and `statusline.sh` are the same parser**, so an entry one of them would
+# drop cannot be one the other shows. They used to be two implementations of one
 # grammar held in step by a comment, and they disagreed: an entry carrying two
 # labels, `**Q7 / Q11**`, counted as one, and Q11 and Q27 stayed open and
-# invisible through 2026-09-06.
-#
-# Nothing is ever dropped. An entry whose label does not parse is listed as `??`
-# with its line number rather than skipped, because a question that vanishes is
-# the one failure this cannot have.
+# invisible through 2026-09-06. That entry is also why naming two labels prints
+# one body: what is deduped is the entry, not the label.
 #
 # There is deliberately no recipe that *writes* a question. A body is paragraphs
 # of prose with backticks and `§` refs in it, so passing one as a shell argument
 # costs what `Edit` costs and echoes the whole thing back on top; and marking one
 # answered is a substitution, which is the quiet-failure shape §50.8 is about.
-[doc("One open question in full, by the hash the status line prints.")]
-question hash="" label="":
+# For the caller this recipe is written for, `Write` already is that API.
+[doc("The open questions in full, for an agent. `question-tui` is the human one.")]
+question hash="" *args:
     #!/usr/bin/env bash
     set -euo pipefail
     q="{{questions_plugin}}/bin/questions.py"
@@ -1220,17 +1236,43 @@ question hash="" label="":
     fi
     file=$(python3 "$q" find "{{questions_root}}" "{{hash}}")
 
-    if [ -n "{{label}}" ]; then
-        exec python3 "$q" entry "$file" "{{label}}"
+    mode=open
+    labels=()
+    given=({{args}})
+    for arg in ${given[@]+"${given[@]}"}; do
+        case "$arg" in
+        --labels) mode=labels ;;
+        --all) mode=all ;;
+        --json) mode=json ;;
+        --*) printf 'unknown flag %s — try --labels, --all or --json\n' "$arg" >&2; exit 2 ;;
+        *) labels+=("$arg") ;;
+        esac
+    done
+
+    # Before anything is printed: a program asked for the file, so it gets the
+    # file and nothing appended to it.
+    [ "$mode" = json ] && exec python3 "$q" json "$file"
+
+    # A named label bypasses the open filter. Asking for Q2 and being told there
+    # is no such question, because Q2 was answered an hour ago, is a worse
+    # failure than the one the filter saves.
+    if [ ${#labels[@]} -gt 0 ]; then
+        python3 "$q" entry "$file" "${labels[@]}"
+    elif [ "$mode" = labels ]; then
+        python3 "$q" labels "$file"
+    elif [ "$mode" = all ]; then
+        python3 "$q" entries "$file" --all
+    else
+        python3 "$q" entries "$file"
     fi
 
-    python3 "$q" labels "$file"
-
-    # A violation is announced but not spelled out here, because the listing is
-    # what you came for and a wall of grammar notes underneath it is not.
-    n=$(python3 "$q" check "$file" | grep -c . || true)
-    if [ "$n" -gt 0 ]; then
-        printf '\n  ⚠ %d grammar violation(s) — just question-check {{hash}}\n' "$n"
+    # The violations are named, not counted. A count is not actionable, and the
+    # second call that makes it actionable pays for the whole conversation again
+    # to learn three lines — 150 k tokens of context for a few hundred bytes.
+    problems=$(python3 "$q" check "$file" || true)
+    if [ -n "$problems" ]; then
+        printf '\n'
+        sed 's/^/  ⚠ /' <<<"$problems"
     fi
 
 # The same questions, to read and answer in rather than to print.
@@ -1380,16 +1422,40 @@ check-plugins:
         echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
 
     # Captured before it is matched: `grep -q` closes the pipe on its first
-    # hit, and under `pipefail` that SIGPIPE reads exactly like the listing
+    # hit, and under `pipefail` that SIGPIPE reads exactly like the output
     # having failed.
-    listing=$($j question 766405)
+    open=$($j question 766405)
+    grep -q 'indented body' <<<"$open" \
+        || { echo "the default did not print bodies, only headings"; exit 1; }
+
+    # Named, not counted. The count used to be the whole footer and cost a
+    # second call at full context to find out what it meant.
+    grep -q 'stated in prose but not marked' <<<"$open" \
+        || { echo "the footer did not name the violation it found"; exit 1; }
+    if grep -q 'grammar violation' <<<"$open"; then
+        echo "the footer counted violations instead of naming them"; exit 1
+    fi
+
+    listing=$($j question 766405 --labels)
     grep -q 'Q7, Q11' <<<"$listing" \
-        || { echo "the listing did not reach the plugin's parser"; exit 1; }
-    grep -q '⚠ 1 grammar violation' <<<"$listing" \
-        || { echo "the listing did not announce the violation it found"; exit 1; }
+        || { echo "--labels did not reach the plugin's parser"; exit 1; }
+    grep -q 'indented body' <<<"$listing" \
+        && { echo "--labels printed bodies"; exit 1; }
+
+    # One entry, two labels. Deduping by label rather than by entry prints the
+    # body twice and reads as two questions that happen to be identical.
+    both=$($j question 766405 Q7 Q11)
+    [ "$(grep -c 'indented body' <<<"$both")" = 1 ] \
+        || { echo "an entry with two labels printed more than once"; exit 1; }
+
     entry=$($j question 766405 Q11)
     grep -q 'indented body' <<<"$entry" \
         || { echo "an entry did not come back in full"; exit 1; }
+    python3 -c 'import json,sys; json.load(sys.stdin)' <<<"$($j question 766405 --json)" \
+        || { echo "--json did not come back as json"; exit 1; }
+    if $j question 766405 --nonsense >/dev/null 2>&1; then
+        echo "an unknown flag was accepted"; exit 1
+    fi
     if $j question zzzz >/dev/null 2>&1; then
         echo "a hash matching no session was accepted"; exit 1
     fi
