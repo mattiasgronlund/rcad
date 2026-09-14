@@ -780,6 +780,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcad-fuzz-explain"
+version = "0.0.0"
+dependencies = [
+ "postcard",
+ "rcad-geom",
+ "rcad-predicates",
+ "rcad-step",
+ "rcad-topo",
+]
+
+[[package]]
 name = "rcad-fuzz-timing"
 version = "0.0.0"
 
