@@ -2475,8 +2475,14 @@ check-fuzz-overnight-selftest:
         || fail "a night told it had already advanced exited non-zero: $(cat "$dir/out")"
     [ "$(git -C "$night_repo" rev-parse HEAD)" = "$woke_on" ] \
         || fail "a night told it had already advanced moved the tree a second time"
-    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 4 ] \
-        || fail "the night that took over did not go on to fuzz: $(cat "$dir/out")"
+    # Counted off `fuzz_all` rather than written down. What this arm is about is
+    # the hand-over, not the roster — arm one owns the roster and says the
+    # number out loud there — and a literal here is a second place to remember
+    # when a target is added. One was, between this arm being written and the
+    # branch it was written on reaching `main`.
+    targets=$(wc -w <<<"{{ fuzz_all }}")
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq "$targets" ] \
+        || fail "the night that took over did not go on to fuzz all $targets targets: $(cat "$dir/out")"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed,
