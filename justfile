@@ -2989,13 +2989,21 @@ fuzz-triage night="" against="main":
 # Turns one artifact `fuzz-triage` found into a seed, which today is a `cp`
 # somebody has to remember — and §98.5 is what happens when nobody does.
 #
+# **The kind comes off the source file's own name, not a hardcoded `crash`.**
+# libFuzzer writes `crash-<sha1>`, `slow-unit-<sha1>`, `oom-<sha1>` and
+# `timeout-<sha1>` — a slow-unit promoted under the crash kind would be a lie
+# in the one place a later reader trusts, the file name. So the kind is read
+# off, not invented: everything before the trailing sha1 and its separating
+# dash. A name with nothing readable there — no dash before the sha1 at all —
+# is refused rather than promoted under a guess.
+#
 # `name` is the human-readable slug, `crash-a-thin-pipe-on-a-fat-ones-skin` is
 # the shape already in the corpus, but the sha1 on the end is what makes the
 # name unique and it is never typed by hand: it is read off the file's own
 # name and checked against the file's own bytes before anything is written, so
 # a renamed or truncated artifact is refused rather than seeded under a false
-# name. Leave `name` out and the promoted file is just `crash-<sha1>`.
-[doc("Promote a fuzz artifact into fuzz/corpus/<target>/, sha1-checked, under a name.")]
+# name. Leave `name` out and the promoted file is just `<kind>-<sha1>`.
+[doc("Promote a fuzz artifact into fuzz/corpus/<target>/, sha1-checked, under its own kind.")]
 fuzz-promote target file name="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -3023,12 +3031,17 @@ fuzz-promote target file name="":
         echo "refused: $base names sha1 $embedded but the file hashes to $actual"
         exit 1
     fi
+    kind="${base%-$embedded}"
+    if [ "$kind" = "$base" ] || [ -z "$kind" ]; then
+        echo "refused: $base has no <kind>-<sha1> shape, so no kind could be read from it"
+        exit 1
+    fi
     dest_dir="fuzz/corpus/{{target}}"
     name="{{name}}"
     if [ -n "$name" ]; then
-        dest="$dest_dir/crash-$name-$embedded"
+        dest="$dest_dir/$kind-$name-$embedded"
     else
-        dest="$dest_dir/crash-$embedded"
+        dest="$dest_dir/$kind-$embedded"
     fi
     if [ -e "$dest" ]; then
         if cmp -s "$file" "$dest"; then
@@ -3185,6 +3198,33 @@ check-fuzz-triage-selftest:
     grep -q 'hashes to' <<<"$got" || fail "the refusal did not say the hash mismatched"
     [ ! -e "$promote_repo/fuzz/corpus/where_two_surfaces_cross/crash-$zeros" ] \
         || fail "a hash-mismatched file was written into the corpus anyway"
+
+    # Nine: a slow-unit is not a crash, and does not get promoted as one — the
+    # kind comes off the source name, not a hardcoded "crash".
+    slow_content="$dir/slow-content"
+    printf 'this one just took too long, it never crashed' >"$slow_content"
+    slow_sha1=$(sha1sum "$slow_content" | awk '{print $1}')
+    slow="$dir/slow-unit-$slow_sha1"
+    mv "$slow_content" "$slow"
+    got=$(promote where_two_surfaces_cross "$slow") || fail "promoting a slow-unit artifact failed"
+    slow_dest="$promote_repo/fuzz/corpus/where_two_surfaces_cross/slow-unit-$slow_sha1"
+    [ -f "$slow_dest" ] || fail "a slow-unit was not promoted under its own kind"
+    cmp -s "$slow" "$slow_dest" || fail "the promoted slow-unit's contents do not match the source"
+    [ ! -e "$promote_repo/fuzz/corpus/where_two_surfaces_cross/crash-$slow_sha1" ] \
+        || fail "a slow-unit was promoted under the crash kind"
+
+    # Ten: a source name with nothing readable before its sha1 — no dash, no
+    # kind — is refused rather than promoted under an invented kind.
+    noprefix_content="$dir/noprefix-content"
+    printf 'the whole name is the sha1, nothing before it' >"$noprefix_content"
+    noprefix_sha1=$(sha1sum "$noprefix_content" | awk '{print $1}')
+    noprefix="$dir/$noprefix_sha1"
+    mv "$noprefix_content" "$noprefix"
+    if got=$(promote where_two_surfaces_cross "$noprefix" 2>&1); then
+        fail "promoting a file with no kind before its sha1 was not refused"
+    fi
+    grep -q 'no kind could be read' <<<"$got" \
+        || fail "the refusal did not say it could not read a kind"
 
 [doc("The benchmarks.")]
 bench:
