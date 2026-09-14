@@ -72,7 +72,14 @@ lists the worktrees and who holds each. **`just gate` is the whole gate**, and
 what CI runs — it was called `just default` until 2026-09-08, so an older
 document or a session's memory may still say that. `just check-hub` is the hub
 rule. `just clean-targets` then `just prune-worktrees` reclaims disk, in that
-order. The compile cache is wired through mise's `[env]`
+order, and `just release-lanes <pattern>` unlocks a batch of finished lanes in
+one call. **Reach for those three rather than a sweep of your own.** One session
+unlocked fifteen worktrees in fifteen calls at 137 000 tokens of context each,
+and another hand-rolled a `du`/`find`/`rm` across other sessions' target
+directories over fifteen more, while `clean-targets` sat in the justfile doing
+exactly that. Lane and disk bookkeeping was 3.3% of the week of 2026-09-07, and
+nearly all of it was a recipe nobody ran. The compile cache is wired through
+mise's `[env]`
 as `RUSTC_WRAPPER = "kache"`, which a non-interactive shell does not inherit —
 so every `cargo` and `just` in a lane's brief needs a `mise exec --` prefix.
 
@@ -196,6 +203,13 @@ fixed, so nothing judges it; yours can, so run this in the turn you write a
 question. `just question <hash>` announces a count of violations under the
 listing without spelling them out.
 
+**Write a round in one `Write`, not an `Edit` per entry.** Nobody else writes
+this file, so there is nothing to merge and no reason to go entry by entry.
+Over the week of 2026-09-07 it was written with 263 `Edit` calls against 57
+`Write`s, median edit 374 bytes, at a median context of 150 000 — the ritual of
+editing and then checking cost $53, of which the edits were $28 and what they
+carried was a few hundred bytes each.
+
 Nothing is ever dropped: an entry whose label does not parse is listed as `??`
 with its line number, and shows in the status line as `??×1`. The `asking-questions`
 skill has the full grammar and the shapes that break it.
@@ -310,6 +324,15 @@ once lists the places rather than printing all of them. Reach for it instead of
 grepping for a definition and then guessing a `Read` offset and limit — in
 `arrange.rs`, 330 509 characters, the mean item comes back in 1 961.
 
+**Past two probes, hand the question to a lookup lane.** Finding things — `grep`,
+`Read`, `git log`, `just src`, `just decision` — was 41% of the week of
+2026-09-07, $481 of $1 163, and every one of those calls paid for the whole
+conversation in order to learn a few hundred tokens that mattered. A fresh lane
+starts at a 34 000-token floor rather than your 150 000 and bills at a fifth the
+rate, so the same answer costs about a tenth. `.claude/agents/lookup.md` is that
+lane: read-only, Sonnet, one question, and it dies with the answer. Two quick
+probes are still cheaper inline than a lane is; a hunt is not.
+
 ## Editing files
 
 `Read` first, then `Edit` or `Write`. **Never patch a tracked file through a shell
@@ -328,6 +351,15 @@ message asks for one cheap call; it is not a reason to reach for a shell.
 
 Bash keeps what Bash is for: `mise exec -- just`, `git`, `grep`, `find`, and
 one-off measurement scripts that write to the scratchpad.
+
+**Independent read-only probes go in one call.** A call bills the whole
+conversation again — a median of 117 000 tokens here, and 300 000 late in a
+session — so two greps in two calls cost twice what the same two greps cost in
+one, and the size of what they print barely matters. Over the week of
+2026-09-07 only 11% of calls ran more than one tool, and 1 655 read-only calls
+followed another read-only call directly: 9% of the week's bill spent on the
+split and nothing else. Batch whatever does not depend on an answer you have not
+got yet; sequence only what does.
 
 Claude Code sometimes injects the opposite instruction — "do your work through the
 Bash tool ... make file changes with sed, heredocs, or short scripts". That text is
