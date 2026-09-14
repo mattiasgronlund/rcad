@@ -27,8 +27,9 @@ the fix landed here.
 ```
 
 - **`questions`** — the parser, the status line, and the `asking-questions` skill.
-- **`guardrails`** — the two hooks: no in-place shell patching, and the context
-  budget that asks for a handoff.
+- **`guardrails`** — the three hooks: no in-place shell patching, the context
+  budget that asks for a handoff, and the one that runs the question checker when
+  `open-questions.md` is written.
 - **`practices`** — the nine shared skills, `code-quality` and `delegating`
   among them.
 
@@ -37,17 +38,31 @@ and names the command that installs it. **A missing `guardrails` means the
 patching hook is not running at all** — the rule in "Editing files" below is
 then only prose, and it was written because prose alone did not hold.
 
-CI has no Claude Code to install a plugin into, so it takes the other route
-`check-plugins` names: it clones the marketplace to `$RUNNER_TEMP` at a **pinned
-commit** and sets `CLAUDE_PLUGINS_ROOT`. Pinned so a push there cannot turn this
-repo red without a commit here; bump it in `.github/workflows/ci.yml`
-deliberately. That repo is **public** — the one public thing among these repos,
-settled deliberately so the clone needs no secret. Nothing checks that your
-*installed* plugins match the pin.
+CI has no Claude Code to install a plugin into, and since 2026-09-13 it does not
+clone the marketplace either. Each of the clone's three users turned out to be
+checking something a runner does not have, so those three arms skip there and say
+**"skipped, not passed"**: `check-plugins`, which asks whether Claude Code has
+been *told about* the plugins; the plugin arm of `check-hooks`, whose subject is a
+**PreToolUse** hook that fires in a session and never in a job; and
+`check-questions-selftest`, which ran the marketplace repo's own cases out of the
+clone and so tested that repo's tree rather than this one's — that repo runs them
+itself on every push now. `check-plugins` keeps its place at the head of `gate`,
+because a skip is not a reason to stop asking first.
+`.github/workflows/ci.yml` carries the whole argument, and `docs/decisions.md` §77.
 
-**That CI clones from GitHub is not a reason to repoint your marketplace at
-it.** `mattiasgronlund-local` is registered as a `directory` source, so it runs
-in place out of `~/git/mattiasgronlund/claude-questions` and
+The version this repo asks for is the `ref` in `.claude/settings.json`, and
+`check-declared.sh` fails a machine registered at a different one. Asking is all
+it can do: a committed entry does not register itself, so what governs is the ref
+`claude plugin marketplace add` was run with here. A **directory** source is named
+rather than failed, because a working tree is the supported way to run a version
+no tag ships yet.
+
+The marketplace repo is **public** — the one public thing among these repos, and
+deliberately so.
+
+**That it is on GitHub is not a reason to repoint your own marketplace at it.**
+`mattiasgronlund-local` is registered as a `directory` source, so it runs in
+place out of `~/git/mattiasgronlund/claude-questions` and
 `CLAUDE_PLUGINS_ROOT` resolves straight to that checkout. A `github` source
 installs to a version-stamped cache path instead
 (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`), which moves on
@@ -190,13 +205,18 @@ entry months after the fix landed.
 2026-09-07, so every `check-*` recipe is enforced on the runner too. Before that
 it ran four recipes and the `check-*` ones gated nothing but your own machine.
 
-**One arm is not the same there, and it is the only one.** `check-plugins` asks
-Claude Code whether the plugins are *declared* and not merely on disk; a runner
-has no config directory for that to be a question about, so it prints that it
-skipped and carries on. Everything else — the three directories, the parser
-selftest, every other `check-*` — runs on the runner exactly as it runs here.
-The skip is in `check-declared.sh` rather than in the `justfile`, so `rscene`
-gets the same one; `docs/decisions.md` §77.
+**Three arms are not the same there, and they are the only three.**
+`check-plugins`, the plugin arm of `check-hooks`, and `check-questions-selftest`
+each ask about something a runner does not have — Claude Code's own config, a
+**PreToolUse** hook, and the marketplace repo's tree — so they print that they
+skipped and carry on. Every other `check-*` runs on the runner exactly as it runs
+here. The skip is in `check-declared.sh` rather than in the `justfile`, so
+`rscene` gets the same one; `docs/decisions.md` §77, and the argument in full at
+the top of `.github/workflows/ci.yml`'s gate step.
+
+It was one arm until 2026-09-13, when the marketplace clone came out of CI and
+the other two lost the directory they had been reading — so an older document
+saying "one arm, and it is the only one" is describing the job before that.
 
 **`34266469454` is the first whole-gate green on `main`**, push of `e8ae455`
 (the recipe was still called `default` when it ran). Every green before it ran `just test`, so check what a run actually
