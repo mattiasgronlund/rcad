@@ -25,12 +25,181 @@ set positional-arguments
 list:
     @{{ just_executable() }} --list --unsorted
 
+# Every step of the gate, in the order CI runs them, and the one place that
+# order is written down. `check-gate-runs-every-check` reads this line to prove
+# no `check-*` recipe was written and then never run.
+#
+# **A list rather than `gate`'s dependencies, which is what it used to be.** A
+# dependency that fails takes `just` down with it, so a gate that failed printed
+# whatever the failing step said and stopped — and the summary block below, the
+# thing a reader actually wants, could only ever have been printed on a pass.
+# Driving the steps from a loop is what lets the same block describe both.
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest lint test check-release-build check-t-selftest deny"
+
+# Where the whole run is kept, so the block at the end can be read back in full
+# without running it again. A variable so `check-gate-summary-selftest` can
+# point a nested run somewhere else: the selftest runs inside the gate, and a
+# fixed path would have it truncate the log its own parent was still writing.
+gate_log := "target/last-gate.log"
+
 # The whole gate, and the same command CI runs. Named `gate` rather than
-# `test-all` because it is 20 checks, a lint and a `cargo-deny` around exactly
-# one `test` — and this repo already says "gated green", "a gate agent", "the
-# gate worktree". `test-all` would have shipped a false sentence on day one.
-[doc("Everything, in the order CI runs it. ~9 minutes.")]
-gate: check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest lint test check-release-build check-t-selftest deny
+# `test-all` because it is two dozen checks, a lint and a `cargo-deny` around
+# exactly one `test` — and this repo already says "gated green", "a gate agent",
+# "the gate worktree". `test-all` would have shipped a false sentence on day one.
+#
+# **It ends with a summary block, and that is what the nine minutes are for.**
+# In one week 145 of 415 gate runs were followed by a second call that grepped
+# the redirected log for `Summary|FAIL|tests run` — a mean of 159k tokens of
+# context to read back three numbers this recipe already had in hand. So it says
+# them itself, last, on stdout: pass or fail, the counts, and the name of the
+# first thing that broke.
+#
+# The exit code is untouched — CI reads it and nothing else.
+#
+# Each step's stderr is folded into stdout so that `tee` keeps one stream in the
+# order it happened. That is the shape a redirected run already had, and the
+# block is parsed back out of it.
+[doc("Everything, in the order CI runs it. ~9 minutes. Ends with a summary block.")]
+gate:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    log='{{ gate_log }}'
+    mkdir -p "$(dirname "$log")"
+    : >"$log"
+    failed=""
+    status=0
+    for step in {{ gate_steps }}; do
+        {{ just_executable() }} "$step" 2>&1 | tee -a "$log"
+        # Read before anything else runs. `[` is a command, so it rewrites
+        # `PIPESTATUS` with its own 0 — which read as a clean gate over a step
+        # that had just failed, the first time this loop was run.
+        step_status=${PIPESTATUS[0]}
+        if [ "$step_status" -ne 0 ]; then
+            failed="$step"
+            status=$step_status
+            break
+        fi
+    done
+    {{ just_executable() }} _gate-summary "$log" "$status" "$failed" | tee -a "$log"
+    exit $status
+
+# The block itself, kept apart from the run so `check-gate-summary-selftest` can
+# hold it against logs whose answer is already known — the same split `t` and
+# `_test-digest` have, and for the same reason.
+#
+# **The escape codes come off before anything is grepped.** `ci.yml` sets
+# `CARGO_TERM_COLOR: always`, so on a runner nextest's summary line arrives as
+# `\e[1m     Summary\e[0m ...` and an anchored pattern sees a colour code where
+# it wanted a space. That is not a guess: it is what turned two CI runs red in
+# `check-wildcards`, which anchored its grep the same way (docs/decisions.md
+# §77.6).
+#
+# **A missing count reads as `not reached`, never as zero.** A gate that died in
+# `check-enums` never got to `test`, and a block that printed `0 tests run`
+# there would be describing the gate's own failure as a clean empty suite.
+#
+# **Every count line is reported, never the last one.** The gate has two nextest
+# runs — `test` and `check-release-build` — and eight `test result:` lines, one
+# per crate, out of `cargo test --doc`. Reading the last of each got `3 tests
+# run` over a suite of 1869 and `2 passed` over 24 doc tests, on a real green
+# gate. A number that small and that wrong is worse than none, because it reads
+# as a real total. So the `Summary` lines are all printed, each under its own
+# `tests:` label, and the doc tests are added up.
+[private]
+_gate-summary log status failed="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    plain=$(sed 's/\x1b\[[0-9;]*m//g' '{{ log }}' 2>/dev/null)
+    tests=$(grep -E '^ *Summary ' <<<"$plain")
+    doctests=$(awk '/^test result: /{passed += $4; failed += $6; crates += 1} \
+                    END {if (crates) printf "%d passed, %d failed, across %d crate(s)", passed, failed, crates}' \
+                    <<<"$plain")
+    echo
+    echo "=== gate summary ==="
+    if [ '{{ status }}' = "0" ]; then
+        echo "gate: PASS"
+    else
+        echo "gate: FAIL  first failure: {{ failed }} (exit {{ status }})"
+        first=$(grep -m1 -E '^ *FAIL \[' <<<"$plain" | sed 's/^ *//')
+        [ -z "$first" ] || echo "first failing test: $first"
+    fi
+    if [ -z "$tests" ]; then
+        echo "tests: not reached"
+    else
+        sed 's/^ *//; s/^/tests: /' <<<"$tests"
+    fi
+    echo "doc tests: ${doctests:-not reached}"
+    echo "full log: {{ log }}"
+
+# Holds the block and the loop that drives it against fixtures whose right
+# answer is known, rather than against whatever the gate happens to do today.
+#
+# **The loop is exercised by moving `gate_steps`, not by running the real gate.**
+# This selftest is itself a step of the gate, so a nested real run would not
+# terminate. `--set` hands the driver a step list one of whose words is not a
+# recipe at all, which is the cheapest failing step there is and needs no
+# fixture recipe of its own.
+#
+# The five ways this can be wrong each get a fixture: a pass that does not print
+# the block, a failure that prints no block at all (which is the whole defect
+# this recipe exists to remove), a failure that does not name the step that
+# broke, a log whose counts are behind colour codes, and a doc-test total read
+# off one crate's line rather than added up.
+[private]
+check-gate-summary-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    j='{{ just_executable() }}'
+
+    fail() {
+        echo "the gate summary drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+
+    # A pass. `list` is a real recipe that costs nothing, so the driver runs
+    # something real without the gate running itself.
+    got=$($j --set gate_steps list --set gate_log "$dir/pass.log" gate 2>&1) \
+        || fail "a gate whose every step passed exited non-zero"
+    [ "$(tail -6 <<<"$got" | grep -c '=== gate summary ===')" -eq 1 ] \
+        || fail "the block is not at the tail, which is the one place a redirected run is read"
+    grep -q '^gate: PASS$' <<<"$got" || fail "a passing gate did not say so"
+    grep -q '^tests: not reached$' <<<"$got" \
+        || fail "a run that never reached the suite reported a count anyway"
+
+    # A failure. The step list names something that is not a recipe, so `just`
+    # exits non-zero on it, and the two steps after it must not run.
+    got=$($j --set gate_steps 'list no-such-step list' --set gate_log "$dir/fail.log" gate 2>&1) \
+        && fail "a gate with a failing step exited 0"
+    grep -q '=== gate summary ===' <<<"$got" \
+        || fail "a failing gate printed no block, which is the defect this exists to remove"
+    grep -q '^gate: FAIL  first failure: no-such-step' <<<"$got" \
+        || fail "the block does not name the step that broke"
+    [ "$(grep -c 'Everything this repo can do' "$dir/fail.log")" -eq 1 ] \
+        || fail "the gate carried on past a failing step"
+
+    # The counts, read back out of a log written the way a runner writes one:
+    # `CARGO_TERM_COLOR: always`, so every line arrives wrapped in escape codes.
+    printf '\033[1m     Summary\033[0m [  12.345s] 1811 tests run: 1811 passed, 0 skipped\n' >"$dir/counts.log"
+    printf 'test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n' >>"$dir/counts.log"
+    printf 'test result: ok. 9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n' >>"$dir/counts.log"
+    printf '     Summary [   0.007s] 3 tests run: 3 passed, 0 skipped\n' >>"$dir/counts.log"
+    got=$($j _gate-summary "$dir/counts.log" 0)
+    grep -q '^tests: Summary \[  12.345s\] 1811 tests run: 1811 passed, 0 skipped$' <<<"$got" \
+        || fail "the test counts did not survive the colour codes a runner writes"
+    grep -q '^tests: Summary \[   0.007s\] 3 tests run: 3 passed, 0 skipped$' <<<"$got" \
+        || fail "only one of the gate's two nextest runs was reported"
+    grep -q '^doc tests: 24 passed, 1 failed, across 2 crate(s)$' <<<"$got" \
+        || fail "the doc tests were read off one crate's line instead of added up over all of them"
+
+    # A failing suite names the first failing test as well as the step, because
+    # `test` is one step and the answer wanted under it is which test.
+    printf '        FAIL [   0.011s] rcad-geom a_plane_and_a_sphere\n' >>"$dir/counts.log"
+    got=$($j _gate-summary "$dir/counts.log" 1 test)
+    grep -q '^first failing test: FAIL \[   0.011s\] rcad-geom a_plane_and_a_sphere$' <<<"$got" \
+        || fail "a failing suite did not name the first test that failed"
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -495,6 +664,9 @@ check-kache-off-on-ci:
 # renaming `default` to `gate` broke the anchor on the second line below, the
 # pinned count is what turned that into a failure rather than a silent pass, and
 # both arms were re-checked by mutation afterwards rather than by running green.
+# The anchor moved a second time when `gate` stopped being a dependency list and
+# its steps became `gate_steps`, so that a failing gate could still print a
+# summary; the count caught that move too.
 #
 # So bumping the number is how a new `check-*` recipe gets added, deliberately,
 # in the commit that adds it.
@@ -512,12 +684,13 @@ check-kache-off-on-ci:
 # who also noticed that nothing held the ordering it depends on.
 [doc("Every check-* recipe is in `gate`, and check-plugins is first.")]
 check-gate-runs-every-check:
-    @defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
-    listed=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
-    others=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
+    @steps=$(grep -m1 '^gate_steps := ' justfile | sed 's/^gate_steps := "//; s/"$//'); \
+    defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
+    listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
+    others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "24" ]; then \
-        echo "found $n check-* recipes, expected 24"; \
+    if [ "$n" != "27" ]; then \
+        echo "found $n check-* recipes, expected 27"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -536,7 +709,7 @@ check-gate-runs-every-check:
         echo "change that sentence in the same commit, or this is now false"; \
         exit 1; \
     fi; \
-    first=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -m1 .); \
+    first=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -m1 .); \
     if [ "$first" != "check-plugins" ]; then \
         echo "gate runs '$first' first, expected 'check-plugins'"; \
         echo "CLAUDE.md says check-plugins runs first thing in just gate, and"; \
@@ -2592,6 +2765,219 @@ check-fuzz-watermark-selftest:
     grep -q 'uncommitted changes' "$dir/why" \
         || fail "uncommitted work was passed over without saying why"
 
+# The morning after a night's fuzzing, in one call.
+#
+# What this replaces is four or five calls that each had to read a directory
+# somebody else wrote: the `latest` line, then the night's directory, then the
+# artifacts under it, then the decoder on each one, then whether any of it still
+# matters. Every one of those costs a fresh session the whole context of the
+# ones before it.
+#
+# `night` defaults to whatever `latest` names, which is what the timer wrote
+# when it finished. Giving one by hand reads an older night, and then the commit
+# is only known if `latest` still describes it — a night's directory does not
+# record its own commit, and this says "unknown" rather than reporting the wrong
+# one.
+#
+# **Both places an input can be.** `fuzz-overnight` copies what a target found
+# into `<night>/artifacts/` (§91), but the nights before that landed have their
+# inputs in `<root>/artifacts-rescued-<date>/` beside the night instead, put
+# there by hand — and the night of 2026-09-14 is one of them, because the body
+# that ran had been read from a commit older than the copy-out. Both layouts are
+# `<target-name>/<file>`, which is where the target name for the decoder comes
+# from: it is the artifact's own parent directory, not a guess off the `TO LOOK
+# AT` list, which names recipes rather than targets.
+#
+# **`against` is the tree the decoder runs in, and `main` is the point.** The
+# night stands on an older commit by design (§90), so "it crashed" is yesterday's
+# news and "it still crashes on `main`" is the question. When `main` is not what
+# this worktree is standing on, a detached worktree of it is made and taken away
+# again, so nobody's tree moves.
+#
+# A decode that fails is reported and not fatal: the exit code here says whether
+# the triage ran, because a morning that stops on the first undecodable input
+# tells you nothing about the other five.
+[doc("The morning after: what the night found, decoded, and whether main still fails.")]
+fuzz-triage night="" against="main":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    root='{{ fuzz_log_root }}'
+    latest="$root/latest"
+    night='{{ night }}'
+    if [ -z "$night" ]; then
+        if [ ! -f "$latest" ]; then
+            echo "nothing to triage: $latest does not exist, so no run has reported a night"
+            exit 1
+        fi
+        night=$(awk 'END{print $NF}' "$latest")
+    fi
+    if [ ! -d "$night" ]; then
+        echo "nothing to triage: $night is not a directory"
+        exit 1
+    fi
+
+    line=""
+    if [ -f "$latest" ] && [ "$(awk 'END{print $NF}' "$latest")" = "$night" ]; then
+        line=$(tail -1 "$latest")
+    fi
+    echo "night:    $night"
+    if [ -z "$line" ]; then
+        echo "commit:   unknown — $latest describes another night, and a night's directory does not record its own"
+        echo "targets:  unknown for the same reason; each artifact below names its own"
+    elif [ "$(awk '{print $3}' <<<"$line")" = "BUILD" ]; then
+        echo "commit:   none — the targets did not build that night: $night/build.log"
+        echo "targets:  none ran"
+    else
+        echo "commit:   $(awk '{print $3}' <<<"$line")"
+        flagged=$(sed -n 's/.*TO LOOK AT (\([^)]*\)).*/\1/p' <<<"$line")
+        echo "targets:  ${flagged:-nothing flagged}"
+    fi
+    echo "summary:  ${line:-(this night is not the one $latest describes)}"
+
+    artifacts="$night/artifacts"
+    rescued="$root/artifacts-rescued-$(basename "$night")"
+    if [ -d "$artifacts" ]; then
+        echo "inputs:   $artifacts"
+    elif [ -d "$rescued" ]; then
+        echo "inputs:   $rescued (rescued beside the night; $artifacts is not there)"
+        artifacts="$rescued"
+    else
+        echo "inputs:   none — neither $artifacts nor $rescued exists"
+        exit 0
+    fi
+    files=$(find "$artifacts" -type f | sort)
+    if [ -z "$files" ]; then
+        echo "no files under $artifacts, so there is nothing to decode"
+        exit 0
+    fi
+
+    at=$(git rev-parse --verify --quiet '{{ against }}^{commit}')
+    if [ -z "$at" ]; then
+        echo "there is no commit named '{{ against }}' here, so nothing can be replayed against it"
+        exit 1
+    fi
+    work="."
+    if [ "$at" != "$(git rev-parse HEAD)" ]; then
+        borrowed=$(mktemp -d)
+        # Detached, so it never asks for a branch that is checked out elsewhere,
+        # and taken away on the way out however this ends — a worktree left
+        # behind would show up in `just lanes` as a lane nobody dispatched.
+        trap 'git worktree remove --force "$borrowed/tree" >/dev/null 2>&1 || true; rm -rf "$borrowed"' EXIT
+        if ! git worktree add --quiet --detach "$borrowed/tree" "$at"; then
+            echo "could not borrow a worktree at {{ against }}, so nothing was replayed against it"
+            exit 1
+        fi
+        work="$borrowed/tree"
+    fi
+    echo "replayed: {{ against }} ($(git rev-parse --short "$at")) in $work"
+
+    still=0
+    while IFS= read -r file; do
+        target=$(basename "$(dirname "$file")")
+        echo
+        echo "--- $target / $(basename "$file") ---"
+        echo "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- $target $file"
+        reason=$(mktemp)
+        (cd "$work" && mise exec -- cargo run -q -p rcad-fuzz-explain -- "$target" "$file") 2>"$reason"
+        decoded=$?
+        if [ "$decoded" -eq 0 ]; then
+            echo "still fails on {{ against }}: no — it decoded and replayed clean"
+        else
+            still=$((still + 1))
+            echo "still fails on {{ against }}: exit $decoded, it did not come back clean — whether that is a failed decode or a failed replay is on stderr:"
+            sed 's/^/    /' "$reason"
+        fi
+        rm -f "$reason"
+    done <<<"$files"
+
+    echo
+    echo "$still of $(grep -c . <<<"$files") input(s) did not come back clean on {{ against }}"
+
+# Pins `fuzz-triage` against nights this builds itself: a `latest` line in the
+# shape `fuzz-overnight` writes, artifacts in both of the two places they land,
+# and a night nothing has reported.
+#
+# **The decoder is asserted by name, first, and that is not decoration.** It is
+# another lane's crate, and without it every arm below would still pass: a
+# decoder that cannot run reports as an input that did not come back clean,
+# which is the right thing for the recipe to do and says nothing at all about
+# whether the decoder was ever there. So this arm fails loudly until
+# `rcad-fuzz-explain` exists, rather than going quietly green over a contract
+# nothing implements.
+#
+# `HEAD` rather than `main` for `against`, because the arms are about the
+# recipe's parse and not about which tree it borrows: pointing it at `main` from
+# a lane would have every gate build a second worktree of the workspace to
+# decode a fixture of twenty junk bytes.
+[private]
+check-fuzz-triage-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo metadata --no-deps --format-version 1 2>/dev/null \
+        | grep -q '"name":"rcad-fuzz-explain"' \
+        || { echo "fuzz-triage decodes an artifact with rcad-fuzz-explain, and this workspace has no such crate"; \
+             echo "it is lane-fuzz-explain's deliverable; this stays red until that branch is merged"; \
+             exit 1; }
+
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    logs="$dir/logs"
+    night="$logs/2026-09-14"
+    crash="$night/artifacts/where_two_surfaces_cross/crash-deadbeef"
+    mkdir -p "$(dirname "$crash")"
+    printf 'not a real crash input' >"$crash"
+    printf '%s  %s  %s  %s  %s\n' \
+        "2026-09-14 08:10" "9b82e9e (0 days old, 0 behind main)" \
+        "4 targets, 1 TO LOOK AT (fuzz:crash)" "1 artifacts in $night/artifacts" \
+        "$night" >"$logs/latest"
+
+    fail() {
+        echo "fuzz-triage drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    triage() { RCAD_FUZZ_LOGS="$logs" just fuzz-triage "$1" HEAD 2>&1; }
+
+    # One: no night given, so it reads the one `latest` names, and everything
+    # the morning asks for comes out of that one line.
+    got=$(triage "") || fail "a night with one artifact made the triage itself fail"
+    grep -qF "night:    $night" <<<"$got" || fail "it did not say which night it read"
+    grep -q '^commit:   9b82e9e$' <<<"$got" \
+        || fail "it did not name the commit that was fuzzed, which is the whole of §90"
+    grep -q '^targets:  fuzz:crash$' <<<"$got" || fail "it did not name the target that was flagged"
+    grep -qF "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- where_two_surfaces_cross $crash" <<<"$got" \
+        || fail "it did not run the decoder on the artifact, naming the target off the artifact's own directory"
+    grep -q 'still fails on HEAD' <<<"$got" \
+        || fail "it decoded the input without saying whether it still fails"
+
+    # Two: the nights before §91's copy-out landed keep their inputs in a
+    # rescued directory beside the night, and 2026-09-14 is one of them.
+    rm -rf "$night/artifacts"
+    rescued="$logs/artifacts-rescued-2026-09-14/two_solids_fused_by_a_stranger"
+    mkdir -p "$rescued"
+    printf 'nor is this one' >"$rescued/crash-c0ffee"
+    got=$(triage "") || fail "a night whose inputs were rescued beside it made the triage fail"
+    grep -qF "inputs:   $logs/artifacts-rescued-2026-09-14" <<<"$got" \
+        || fail "it did not look beside the night for the rescued inputs"
+    grep -qF "rcad-fuzz-explain -- two_solids_fused_by_a_stranger $rescued/crash-c0ffee" <<<"$got" \
+        || fail "it did not decode the rescued input"
+
+    # Three: a night nothing reported still says what it can, and says the
+    # commit is unknown rather than borrowing the one `latest` happens to name.
+    other="$logs/2026-09-09"
+    mkdir -p "$other"
+    got=$(triage "$other") || fail "a night with no artifacts at all made the triage fail"
+    grep -q '^commit:   unknown' <<<"$got" \
+        || fail "it read another night's commit off the latest line and reported it as this one's"
+    grep -qF "inputs:   none" <<<"$got" \
+        || fail "a night that kept nothing did not say so"
+
+    # Four: a directory that is not there is a failure and not an empty report.
+    if triage "$logs/2026-01-01" >/dev/null 2>&1; then
+        got=$(triage "$logs/2026-01-01")
+        fail "a night that does not exist was triaged anyway"
+    fi
+
 [doc("The benchmarks.")]
 bench:
     cargo bench --workspace
@@ -2947,6 +3333,175 @@ check-lanes-selftest:
         || fail "the count line is wrong, so an empty parse could pass as a quiet tree"
     grep -qF "somebody is working in the hub" <<<"$got" \
         || fail "a hub sitting on a branch drew no warning"
+
+# Hand back every lane matching a pattern, in one call.
+#
+# `git worktree unlock` takes one tree, so releasing a batch of lanes was one
+# call per lane: fifteen of them in a row on 2026-09-12, at about 137k of
+# context each, which is two million tokens to clear fifteen locks. The locks
+# are what `lanes` reads as ownership (§55), so a batch of lanes finishing
+# together is the ordinary case and not an unusual one.
+#
+# **The pattern is a glob, and it is matched against the branch name and against
+# the worktree's own directory name.** Both, because a lane is addressed by
+# either depending on who is asking — `release-lanes 'lane-fuzz-*'` after a
+# batch of briefs, `release-lanes 'agent-*'` after a batch of sessions. It is
+# required and has no default: a recipe that released everything when told
+# nothing is a recipe that unlocks a tree somebody is still working in.
+#
+# **The hub is never touched**, and it is left out by position rather than by
+# name. Git documents the main working tree as the first entry of
+# `--porcelain`, which is the same parse `lanes` and `check-hub` use, and it
+# answers *"fatal: The main working tree cannot be locked or unlocked"* — so a
+# pattern matching the hub has to be reported rather than attempted.
+[doc("Unlock every lane matching a pattern: `just release-lanes 'lane-fuzz-*'`.")]
+release-lanes pattern dir=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo=$(git -C "{{dir}}" rev-parse --show-toplevel)
+    listing=$(git -C "$repo" worktree list --porcelain)
+    if [ -z "$listing" ]; then
+        echo "git worktree list --porcelain printed nothing, so this released nothing"
+        exit 1
+    fi
+    pattern='{{ pattern }}'
+    released=0
+    left=0
+    seen=0
+    tree=""
+    branch=""
+    locked=""
+    consider() {
+        [ -n "$tree" ] || return 0
+        seen=$((seen + 1))
+        if [ "$seen" -eq 1 ]; then
+            printf 'hub      left alone, git cannot lock it and nobody works there: %s\n' "$tree"
+            return 0
+        fi
+        if ! matches "$branch" && ! matches "$(basename "$tree")"; then
+            left=$((left + 1))
+            printf 'skipped  no match for %s: %s [%s]\n' "'$pattern'" "$tree" "$branch"
+            return 0
+        fi
+        if [ -z "$locked" ]; then
+            left=$((left + 1))
+            printf 'skipped  already free: %s [%s]\n' "$tree" "$branch"
+            return 0
+        fi
+        was="$(why_it_is_held)"
+        git -C "$repo" worktree unlock "$tree"
+        released=$((released + 1))
+        printf 'RELEASED %s [%s]\n' "$tree" "$branch"
+        printf '         was held by: %s\n' "$was"
+    }
+    matches() {
+        case "$1" in
+            $pattern) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+    # The same reason `lanes` prints, read from the lock file rather than from
+    # the porcelain listing, which C-quotes any non-ASCII byte in it. Read before
+    # the unlock, because the unlock is what deletes it.
+    why_it_is_held() {
+        [ -d "$tree" ] || { echo "(locked; its directory is gone, so the reason cannot be read)"; return 0; }
+        note="$(git -C "$tree" rev-parse --git-dir)/locked"
+        if [ -s "$note" ]; then
+            tr '\n' ' ' <"$note" | sed 's/ *$//'
+        else
+            echo "(locked, no reason given)"
+        fi
+    }
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "worktree "*)
+                consider
+                tree=${line#worktree }
+                branch="(detached)"
+                locked=""
+                ;;
+            "branch "*) branch=${line#branch refs/heads/} ;;
+            "locked"*) locked="yes" ;;
+        esac
+    done <<<"$listing"
+    consider
+    if [ "$seen" -eq 0 ]; then
+        echo "no worktree was parsed out of a non-empty listing, so the parse is broken"
+        exit 1
+    fi
+    echo "$released lane(s) released, $left left as they were; the hub is never either"
+
+# Pins `release-lanes` against a repository it builds itself: what matches, what
+# does not, and the hub.
+#
+# The case that costs the most to get wrong is the third one. A pattern that
+# names the hub cannot be answered by unlocking it — git refuses, and `set -e`
+# would take the whole batch down with the fatal — so the hub has to be
+# recognised by position and reported. That arm passes only if the recipe never
+# reached for `git worktree unlock` on it.
+[private]
+check-release-lanes-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'for t in alpha beta unrelated agent-xyz; do git -C "$dir/main" worktree unlock "$dir/$t" 2>/dev/null || true; done; rm -rf "$dir"' EXIT
+    git init -q -b main "$dir/main"
+    git -C "$dir/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m root
+    git -C "$dir/main" worktree add -q "$dir/alpha" -b lane-alpha
+    git -C "$dir/main" worktree add -q "$dir/beta" -b lane-beta
+    git -C "$dir/main" worktree add -q "$dir/quiet" -b lane-quiet
+    git -C "$dir/main" worktree add -q "$dir/unrelated" -b keep-me
+    git -C "$dir/main" worktree add -q "$dir/agent-xyz" -b nothing-like-a-lane
+    for t in alpha beta unrelated agent-xyz; do
+        git -C "$dir/main" worktree lock --reason "agent-$t · deliverable · 2026-09-12T00:00:00Z" "$dir/$t"
+    done
+
+    fail() {
+        echo "release-lanes drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    still_locked() {
+        git -C "$dir/main" worktree list --porcelain \
+            | awk -v want="worktree $1" '/^worktree /{found = ($0 == want)} \
+                                          found && /^locked/ {print "yes"; exit}'
+    }
+
+    # One: the pattern matches two branches out of five.
+    got=$(just release-lanes 'lane-*' "$dir/main")
+    [ -z "$(still_locked "$dir/alpha")" ] || fail "a lane matching the pattern was left locked"
+    [ -z "$(still_locked "$dir/beta")" ] || fail "only the first matching lane was released"
+    [ -n "$(still_locked "$dir/unrelated")" ] \
+        || fail "a tree that does not match the pattern was unlocked anyway"
+    [ -n "$(still_locked "$dir/agent-xyz")" ] \
+        || fail "a tree that does not match the pattern was unlocked anyway"
+    grep -qF "RELEASED $dir/alpha [lane-alpha]" <<<"$got" \
+        || fail "a released lane was not reported"
+    grep -qF "was held by: agent-alpha · deliverable · 2026-09-12T00:00:00Z" <<<"$got" \
+        || fail "the lock reason was thrown away rather than reported before the unlock"
+    grep -qF "skipped  no match for 'lane-*': $dir/unrelated [keep-me]" <<<"$got" \
+        || fail "a skipped tree was not said to be skipped, so silence reads as success"
+    grep -qF "skipped  already free: $dir/quiet [lane-quiet]" <<<"$got" \
+        || fail "a matching tree that was not locked was not reported as already free"
+    grep -qx "2 lane(s) released, 3 left as they were; the hub is never either" <<<"$got" \
+        || fail "the count line is wrong, so a parse that saw nothing could pass as a quiet batch"
+
+    # Two: the directory name is an address too, because a batch of sessions is
+    # named that way and a batch of briefs is named the other way.
+    got=$(just release-lanes 'agent-*' "$dir/main")
+    [ -z "$(still_locked "$dir/agent-xyz")" ] \
+        || fail "a pattern matching the worktree's directory released nothing"
+    [ -n "$(still_locked "$dir/unrelated")" ] \
+        || fail "matching on the directory name released a tree that matched neither"
+
+    # Three: a pattern naming the hub leaves it alone and says so, rather than
+    # dying on git's refusal to unlock the main working tree.
+    got=$(just release-lanes 'main' "$dir/main") \
+        || fail "a pattern matching the hub took the whole batch down with it"
+    grep -qF "hub      left alone, git cannot lock it and nobody works there: $dir/main" <<<"$got" \
+        || fail "the hub was not reported as left alone"
+    grep -qx "0 lane(s) released, 5 left as they were; the hub is never either" <<<"$got" \
+        || fail "the hub was counted as a lane"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #
