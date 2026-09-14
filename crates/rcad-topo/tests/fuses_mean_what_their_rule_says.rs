@@ -161,6 +161,13 @@ fn decisively_in(model: &Model, keys: &[SolidKey], point: Point) -> Option<bool>
         match solid.classify_point(point, &Policy::certified(), &mut ProvenanceLog::new()) {
             Containment::Inside => any_inside = true,
             Containment::Outside => {}
+            Containment::OnBoundary
+            | Containment::Undecidable { .. }
+            | Containment::CannotFollowAFacesTrimming { .. }
+            | Containment::CannotFireARayAtAFacesSurface { .. } => return None,
+            // `Containment` is `#[non_exhaustive]`; every variant that exists
+            // today is named above, and this is only here for one that does not
+            // exist yet.
             _ => return None,
         }
     }
