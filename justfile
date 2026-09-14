@@ -2863,6 +2863,14 @@ check-fuzz-watermark-selftest:
 # A decode that fails is reported and not fatal: the exit code here says whether
 # the triage ran, because a morning that stops on the first undecodable input
 # tells you nothing about the other five.
+#
+# **The target comes from the artifact's own parent directory, and that name is
+# checked against `fuzz/fuzz_targets/*.rs` before anything is decoded.** A flat
+# directory of rescued artifacts — no target subdirectory at all — hands the
+# decoder a name that is not a target, and every one of those used to come back
+# as "did not come back clean", which reads exactly like a live crash and is
+# none. That input gets a third outcome instead, counted apart from the ones
+# that were actually decoded and actually failed.
 [doc("The morning after: what the night found, decoded, and whether main still fails.")]
 fuzz-triage night="" against="main":
     #!/usr/bin/env bash
@@ -2937,11 +2945,26 @@ fuzz-triage night="" against="main":
     fi
     echo "replayed: {{ against }} ($(git rev-parse --short "$at")) in $work"
 
+    valid_targets=""
+    for target_rs in "$work"/fuzz/fuzz_targets/*.rs; do
+        [ -e "$target_rs" ] || continue
+        valid_targets="$valid_targets $(basename "$target_rs" .rs)"
+    done
+
     still=0
+    untellable=0
     while IFS= read -r file; do
         target=$(basename "$(dirname "$file")")
         echo
         echo "--- $target / $(basename "$file") ---"
+        case " $valid_targets " in
+            *" $target "*) ;;
+            *)
+                untellable=$((untellable + 1))
+                echo "target:   unknown — $target names no fuzz_targets/*.rs on {{ against }}, so this could not be placed and was not decoded"
+                continue
+                ;;
+        esac
         echo "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- $target $file"
         reason=$(mktemp)
         (cd "$work" && mise exec -- cargo run -q -p rcad-fuzz-explain -- "$target" "$file") 2>"$reason"
@@ -2957,7 +2980,80 @@ fuzz-triage night="" against="main":
     done <<<"$files"
 
     echo
-    echo "$still of $(grep -c . <<<"$files") input(s) did not come back clean on {{ against }}"
+    total=$(grep -c . <<<"$files")
+    echo "$still of $total input(s) did not come back clean on {{ against }}"
+    if [ "$untellable" -gt 0 ]; then
+        echo "$untellable of $total input(s) could not be told which target they came from, and are not counted as failures above"
+    fi
+
+# Turns one artifact `fuzz-triage` found into a seed, which today is a `cp`
+# somebody has to remember — and §98.5 is what happens when nobody does.
+#
+# **The kind comes off the source file's own name, not a hardcoded `crash`.**
+# libFuzzer writes `crash-<sha1>`, `slow-unit-<sha1>`, `oom-<sha1>` and
+# `timeout-<sha1>` — a slow-unit promoted under the crash kind would be a lie
+# in the one place a later reader trusts, the file name. So the kind is read
+# off, not invented: everything before the trailing sha1 and its separating
+# dash. A name with nothing readable there — no dash before the sha1 at all —
+# is refused rather than promoted under a guess.
+#
+# `name` is the human-readable slug, `crash-a-thin-pipe-on-a-fat-ones-skin` is
+# the shape already in the corpus, but the sha1 on the end is what makes the
+# name unique and it is never typed by hand: it is read off the file's own
+# name and checked against the file's own bytes before anything is written, so
+# a renamed or truncated artifact is refused rather than seeded under a false
+# name. Leave `name` out and the promoted file is just `<kind>-<sha1>`.
+[doc("Promote a fuzz artifact into fuzz/corpus/<target>/, sha1-checked, under its own kind.")]
+fuzz-promote target file name="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target_rs="fuzz/fuzz_targets/{{target}}.rs"
+    if [ ! -f "$target_rs" ]; then
+        echo "no such target: $target_rs does not exist"
+        exit 1
+    fi
+    file="{{file}}"
+    if [ ! -f "$file" ]; then
+        echo "no such file: $file"
+        exit 1
+    fi
+    base=$(basename "$file")
+    embedded=""
+    if [ "${#base}" -ge 40 ]; then
+        embedded="${base: -40}"
+    fi
+    if ! [[ "$embedded" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "refused: $base does not end in a 40-character sha1, so nothing was promoted"
+        exit 1
+    fi
+    actual=$(sha1sum "$file" | awk '{print $1}')
+    if [ "$actual" != "$embedded" ]; then
+        echo "refused: $base names sha1 $embedded but the file hashes to $actual"
+        exit 1
+    fi
+    kind="${base%-$embedded}"
+    if [ "$kind" = "$base" ] || [ -z "$kind" ]; then
+        echo "refused: $base has no <kind>-<sha1> shape, so no kind could be read from it"
+        exit 1
+    fi
+    dest_dir="fuzz/corpus/{{target}}"
+    name="{{name}}"
+    if [ -n "$name" ]; then
+        dest="$dest_dir/$kind-$name-$embedded"
+    else
+        dest="$dest_dir/$kind-$embedded"
+    fi
+    if [ -e "$dest" ]; then
+        if cmp -s "$file" "$dest"; then
+            echo "already there: $dest"
+            exit 0
+        fi
+        echo "refused: $dest already exists with different contents"
+        exit 1
+    fi
+    mkdir -p "$dest_dir"
+    cp "$file" "$dest"
+    echo "promoted: $dest"
 
 # Pins `fuzz-triage` against nights this builds itself: a `latest` line in the
 # shape `fuzz-overnight` writes, artifacts in both of the two places they land,
@@ -3043,6 +3139,92 @@ check-fuzz-triage-selftest:
         got=$(triage "$logs/2026-01-01")
         fail "a night that does not exist was triaged anyway"
     fi
+
+    # Five: a flat directory of artifacts, no target subdirectory at all — the
+    # shape `~/rcad-fuzz-logs/artifacts-rescued-2026-09-13/` was in, 88 files
+    # whose parent directory names no target. Every one of those used to read
+    # as "did not come back clean", indistinguishable from a live crash.
+    flat_night="$logs/2026-09-13"
+    mkdir -p "$flat_night"
+    flat_rescued="$logs/artifacts-rescued-2026-09-13"
+    mkdir -p "$flat_rescued"
+    printf 'flat, no target subdirectory' >"$flat_rescued/crash-baadf00d"
+    got=$(triage "$flat_night") || fail "a flat directory of artifacts made the triage itself fail"
+    grep -q '^target:   unknown' <<<"$got" \
+        || fail "an artifact whose parent directory names no real target was decoded anyway"
+    grep -qF "1 of 1 input(s) could not be told which target they came from" <<<"$got" \
+        || fail "the untellable count did not reach the tail line"
+    grep -q '^0 of 1 input(s) did not come back clean on HEAD$' <<<"$got" \
+        || fail "an untellable input was folded into the count of inputs that did not come back clean"
+
+    # Six: promoting a good artifact keeps the trailing sha1 and lands it under
+    # a name — `crash-<name>-<sha1>` is the shape already in the corpus.
+    promote_repo="$dir/promote-repo"
+    mkdir -p "$promote_repo/fuzz/fuzz_targets" "$promote_repo/fuzz/corpus"
+    touch "$promote_repo/fuzz/fuzz_targets/where_two_surfaces_cross.rs"
+    git -C "$promote_repo" init -q
+    promote() {
+        {{just_executable()}} --justfile "{{justfile()}}" \
+            --working-directory "$promote_repo" fuzz-promote "$@" 2>&1
+    }
+    src="$dir/crash-tmp"
+    printf 'a thin pipe on a fat ones skin' >"$src"
+    sha1=$(sha1sum "$src" | awk '{print $1}')
+    mv "$src" "$dir/crash-$sha1"
+    src="$dir/crash-$sha1"
+    got=$(promote where_two_surfaces_cross "$src" a-thin-pipe-on-a-fat-ones-skin) \
+        || fail "promoting a good artifact failed"
+    dest="$promote_repo/fuzz/corpus/where_two_surfaces_cross/crash-a-thin-pipe-on-a-fat-ones-skin-$sha1"
+    [ -f "$dest" ] || fail "promote did not land the file at $dest"
+    cmp -s "$src" "$dest" || fail "the promoted file's contents do not match the source"
+
+    # Seven: a target that does not exist is refused, and gets no corpus
+    # directory of its own.
+    if got=$(promote no_such_target "$src" 2>&1); then
+        fail "promoting into a target that does not exist was not refused"
+    fi
+    grep -q 'no such target' <<<"$got" || fail "the refusal did not say the target does not exist"
+    [ ! -d "$promote_repo/fuzz/corpus/no_such_target" ] \
+        || fail "a target that does not exist got a corpus directory anyway"
+
+    # Eight: a file whose contents do not hash to the sha1 in its own name is
+    # refused, and nothing is written into the corpus for it.
+    zeros=$(printf '%040d' 0)
+    bad="$dir/crash-$zeros"
+    printf 'these bytes do not hash to forty zeros' >"$bad"
+    if got=$(promote where_two_surfaces_cross "$bad" 2>&1); then
+        fail "promoting a file whose contents do not match its own sha1 was not refused"
+    fi
+    grep -q 'hashes to' <<<"$got" || fail "the refusal did not say the hash mismatched"
+    [ ! -e "$promote_repo/fuzz/corpus/where_two_surfaces_cross/crash-$zeros" ] \
+        || fail "a hash-mismatched file was written into the corpus anyway"
+
+    # Nine: a slow-unit is not a crash, and does not get promoted as one — the
+    # kind comes off the source name, not a hardcoded "crash".
+    slow_content="$dir/slow-content"
+    printf 'this one just took too long, it never crashed' >"$slow_content"
+    slow_sha1=$(sha1sum "$slow_content" | awk '{print $1}')
+    slow="$dir/slow-unit-$slow_sha1"
+    mv "$slow_content" "$slow"
+    got=$(promote where_two_surfaces_cross "$slow") || fail "promoting a slow-unit artifact failed"
+    slow_dest="$promote_repo/fuzz/corpus/where_two_surfaces_cross/slow-unit-$slow_sha1"
+    [ -f "$slow_dest" ] || fail "a slow-unit was not promoted under its own kind"
+    cmp -s "$slow" "$slow_dest" || fail "the promoted slow-unit's contents do not match the source"
+    [ ! -e "$promote_repo/fuzz/corpus/where_two_surfaces_cross/crash-$slow_sha1" ] \
+        || fail "a slow-unit was promoted under the crash kind"
+
+    # Ten: a source name with nothing readable before its sha1 — no dash, no
+    # kind — is refused rather than promoted under an invented kind.
+    noprefix_content="$dir/noprefix-content"
+    printf 'the whole name is the sha1, nothing before it' >"$noprefix_content"
+    noprefix_sha1=$(sha1sum "$noprefix_content" | awk '{print $1}')
+    noprefix="$dir/$noprefix_sha1"
+    mv "$noprefix_content" "$noprefix"
+    if got=$(promote where_two_surfaces_cross "$noprefix" 2>&1); then
+        fail "promoting a file with no kind before its sha1 was not refused"
+    fi
+    grep -q 'no kind could be read' <<<"$got" \
+        || fail "the refusal did not say it could not read a kind"
 
 [doc("The benchmarks.")]
 bench:
