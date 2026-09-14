@@ -648,14 +648,14 @@ fn exactly_scaled(value: f64, factor: f64) -> Option<f64> {
 
 /// The bytes a pair of surfaces would be decoded from, for writing a corpus out.
 ///
-/// The exponent is the smallest step of five that keeps the whole number inside
-/// thirty-one bits, so a number that is a whole one times a power of two — which
-/// every seed in the corpus is — comes back bit for bit.
+/// [`written_as_numbers`] picks the exponents, and **every number
+/// [`two_surfaces_from`] can hand back comes back out of here bit for bit** —
+/// which is what lets the explainer print a line that rebuilds the seed it read.
 ///
 /// # Panics
 ///
-/// If a number cannot be written down that way, which means a seed was asked for
-/// that the decoder could never have produced.
+/// If a number is outside what five bytes reach at all, which means a seed was
+/// asked for that the decoder could never have produced.
 #[must_use]
 pub fn bytes_for(kinds: [u8; 2], numbers: &[f64]) -> Vec<u8> {
     let mut out = vec![kinds[0] | (kinds[1] << 2)];
