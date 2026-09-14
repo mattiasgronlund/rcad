@@ -177,7 +177,9 @@ fn every_seed_in_the_checked_in_corpus_names_its_crossing_honestly() {
             path.display()
         );
         *kind_pairs.entry(what_pair_this_is(&pair)).or_default() += 1;
-        *bands.entry(what_band_this_is_written_at(&pair)).or_default() += 1;
+        *bands
+            .entry(what_band_this_is_written_at(&pair))
+            .or_default() += 1;
         sharing_an_axis += usize::from(the_two_share_one_axis_line(&pair));
         asked = asked.and(every_oracle_holds_of(pair));
     }
@@ -238,6 +240,12 @@ fn a_soak_over_pseudo_random_bytes_names_every_crossing_honestly() {
         drawn += 1;
         if let Some(pair) = two_surfaces_with_a_cone_or_a_torus_from(&bytes) {
             named += 1;
+            assert!(
+                pair.iter()
+                    .any(|surface| matches!(surface, Surface::Cone(_) | Surface::Torus(_))),
+                "these bytes decoded to a pair with neither a cone nor a torus in it.\n  \
+                 bytes {bytes:?}\n  pair {pair:?}"
+            );
             for surface in &pair {
                 *kinds.entry(what_kind_this_is(surface)).or_default() += 1;
             }
