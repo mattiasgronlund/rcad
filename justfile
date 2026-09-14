@@ -30,7 +30,7 @@ list:
 # one `test` — and this repo already says "gated green", "a gate agent", "the
 # gate worktree". `test-all` would have shipped a false sentence on day one.
 [doc("Everything, in the order CI runs it. ~9 minutes.")]
-gate: check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest lint test check-release-build check-t-selftest deny
+gate: check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest lint test check-release-build check-t-selftest deny
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -516,8 +516,8 @@ check-gate-runs-every-check:
     listed=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "24" ]; then \
-        echo "found $n check-* recipes, expected 24"; \
+    if [ "$n" != "25" ]; then \
+        echo "found $n check-* recipes, expected 25"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -2486,6 +2486,303 @@ check-fuzz-watermark-selftest:
 [doc("The benchmarks.")]
 bench:
     cargo bench --workspace
+
+# Which regions of `crates/*/src` the suite never runs.
+#
+# **Not in `gate`, and named `coverage` rather than `check-coverage` for that
+# reason**: `check-gate-runs-every-check` says a check nobody runs is not a
+# check, so a `check-` name would have to be paid on every commit. One run is
+# about ten minutes and a `target/llvm-cov-target` of its own that shares
+# nothing with the ordinary build, which is a thing to ask for. `bench` is out
+# of the gate on the same argument and sits above.
+#
+# **It prints places and not a percentage.** The first run answered 94.0% and
+# nobody could act on that; what the missing 6% *is* turned out to be the
+# refusal half of this kernel — invariant panics, named `Error`s, and
+# `Decision::Undecidable` arms at call sites nothing has ever reached. Every
+# other check in this file pins a count of things rather than a ratio, and a
+# ratio is the one number that moves for reasons nobody reads.
+#
+# The two costs worth knowing before you start it. Instrumentation is paid by
+# the *suite*, not the build: 347 s against the 30.7 s critical path §95.5
+# measures, one `rcad-step` test going from seconds to 342. And `llvm-tools` is
+# in `rust-toolchain.toml` for this and nothing else.
+[doc("Which regions of crates/*/src the suite never runs. Not in gate; ~10 minutes.")]
+coverage:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p target
+    cargo llvm-cov nextest --workspace --json --output-path target/coverage.json
+    {{ just_executable() }} coverage-report target/coverage.json
+
+# Read a coverage run back. `coverage` above calls this; it is separate so that
+# the reading can be tested without a ten-minute run behind it, which is what
+# `check-coverage-selftest` does.
+#
+# **Three things about llvm-cov's export make the naive read wrong, and two of
+# them are silent.**
+#
+# A generic is exported once per instantiation and its regions are counted again
+# each time, so the records have to be collapsed onto their spans: 199 081
+# records over 35 368 real spans on this tree. Nothing about the un-collapsed
+# number looks wrong.
+#
+# An inline `#[cfg(test)] mod tests` is ordinary lines of the file it sits in,
+# and it is covered by construction — 42% of the region count here. The obvious
+# filter is the function's name, and **that one fails silently**: names in the
+# export are v0-mangled, so a test for `::tests::` matches nothing and keeps
+# every one of them while looking like it worked. The first draft of this did
+# exactly that and printed a confident "0 dropped". So the cut is geometric
+# instead — the region's own file and start line against that file's first
+# `#[cfg(test)]`.
+#
+# And `crates/*/tests/` needs no filter, because llvm-cov maps only `src` into
+# its file summary. Measured, not assumed: the printed and src-only totals agree
+# to the digit in all seven crates.
+#
+# **So it checks itself against the summary before it says anything.** The
+# collapsed span count has to equal what llvm-cov's own per-file summary says,
+# and a parse that drifts from that fails here rather than printing a plausible
+# number. That identity is what catches the next version of the mangling bug.
+[doc("Read a coverage run back: which regions of crates/*/src were never run.")]
+coverage-report report:
+    #!/usr/bin/env python3
+    import json
+    import re
+    import sys
+    from collections import defaultdict
+
+    WHICH_CRATE = re.compile(r"/crates/([a-z0-9-]+)/")
+
+
+    def main():
+        with open("{{report}}") as handle:
+            export = json.load(handle)["data"][0]
+
+        widest = the_widest_count_for_each_span(export)
+        say_so_if_the_summary_disagrees(export, widest)
+
+        per_crate = defaultdict(lambda: [0, 0])
+        per_file = defaultdict(lambda: [0, 0, []])
+        cut_away = 0
+        for (path, line, _, _, _), count in widest.items():
+            starts_the_tests = where_the_tests_start(path)
+            if starts_the_tests is not None and line >= starts_the_tests:
+                cut_away += 1
+                continue
+            crate = per_crate[WHICH_CRATE.search(path).group(1)]
+            here = per_file[path]
+            crate[0] += 1
+            here[0] += 1
+            if count == 0:
+                crate[1] += 1
+                here[1] += 1
+                here[2].append(line)
+
+        print("never run, by crate")
+        for crate in sorted(per_crate):
+            total, missing = per_crate[crate]
+            print(f"  {crate:<20} {missing:6d} of {total:6d}")
+
+        print()
+        print("never run, by file")
+        worst = sorted(per_file.items(), key=lambda pair: -pair[1][1])
+        for path, (total, missing, lines) in worst:
+            if missing == 0:
+                continue
+            print(f"  {short(path):<44} {missing:5d} of {total:5d}  "
+                  f"lines {as_runs(sorted(set(lines)))}")
+
+        kept = sum(total for total, _ in per_crate.values())
+        print()
+        print(f"{kept} regions in crates/*/src, and {cut_away} more inside an inline")
+        print("#[cfg(test)] module, which are covered by construction and were cut")
+        print(f"{sum(1 for _ in every_record(export))} region records collapsed onto "
+              f"{kept + cut_away} spans")
+
+
+    def the_widest_count_for_each_span(export):
+        """The same span is exported once per instantiation of a generic. Keep the
+        highest count any of them reached: one instantiation running a branch is
+        that branch having run."""
+        widest = {}
+        for span, count in every_record(export):
+            if count > widest.get(span, -1):
+                widest[span] = count
+        return widest
+
+
+    def every_record(export):
+        for function in export["functions"]:
+            paths = function["filenames"]
+            for region in function["regions"]:
+                line, column, last_line, last_column, count, which_file = region[:6]
+                if region[7] != 0 or which_file >= len(paths):
+                    continue
+                path = paths[which_file]
+                if WHICH_CRATE.search(path) is None or "/src/" not in path:
+                    continue
+                yield (path, line, column, last_line, last_column), count
+
+
+    def say_so_if_the_summary_disagrees(export, widest):
+        summed = 0
+        for entry in export["files"]:
+            path = entry["filename"]
+            if WHICH_CRATE.search(path) is None or "/src/" not in path:
+                continue
+            summed += entry["summary"]["regions"]["count"]
+        if summed != len(widest):
+            sys.exit(
+                f"llvm-cov's own summary counts {summed} regions in crates/*/src "
+                f"and collapsing the records gave {len(widest)}.\n"
+                "One of the two reads is wrong, and a number printed from here "
+                "would look plausible either way.")
+
+
+    read_so_far = {}
+
+
+    def where_the_tests_start(path):
+        """The line of the file's first `#[cfg(test)]`, or None if it has none."""
+        if path not in read_so_far:
+            found = None
+            try:
+                with open(path) as handle:
+                    for number, text in enumerate(handle, 1):
+                        if "#[cfg(test)]" in text:
+                            found = number
+                            break
+            except OSError:
+                found = None
+            read_so_far[path] = found
+        return read_so_far[path]
+
+
+    def as_runs(lines):
+        runs = []
+        for line in lines:
+            if runs and line - runs[-1][1] <= 3:
+                runs[-1][1] = line
+            else:
+                runs.append([line, line])
+        return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in runs)
+
+
+    def short(path):
+        return path.split("/crates/")[-1]
+
+
+    main()
+
+# `coverage-report` against a synthetic export, for each way the read can be
+# wrong. It builds its own two-file tree under `mktemp` and writes its own JSON,
+# so it needs no coverage run and sits in `gate` beside `check-corpus-selftest`.
+#
+# Verified by mutating the recipe above, one at a time, reverting between
+# (docs/decisions.md §79's rule, applied to this):
+#
+# | Mutation | What failed |
+# |---|---|
+# | the collapse keeps the *last* count rather than the widest | the generic case, on a span that ran reading as never run |
+# | `where_the_tests_start` always returns `None` | the cut case, on a line below the attribute being listed |
+# | the `"/src/"` test dropped from `every_record` | the summary cross-check, before any output |
+# | the cross-check's `sys.exit` deleted | the disagreement case, which then printed a plausible table |
+#
+# The third is why the cross-check is not merely a nicety: dropping the `src`
+# filter is the shape of the mangling bug that already happened once, and the
+# only thing that notices is the identity against llvm-cov's own summary.
+[doc("coverage-report against a synthetic export, for each way the read can be wrong.")]
+check-coverage-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    work=$(mktemp -d -- "${TMPDIR:-/tmp}/rcad-coverage-selftest.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+
+    mkdir -p "$work/crates/thing/src"
+    # Twelve lines of kernel, then the inline tests. Written with printf because
+    # it is a throwaway fixture under mktemp and not a tracked file.
+    for line in $(seq 1 11); do printf 'fn kernel_%s() {}\n' "$line" >>"$work/crates/thing/src/thing.rs"; done
+    printf '#[cfg(test)]\nmod tests {\n    fn a_test() {}\n}\n' >>"$work/crates/thing/src/thing.rs"
+
+    thing="$work/crates/thing/src/thing.rs"
+
+    # A region is [line, col, last_line, last_col, count, file, expanded, kind].
+    # kind 0 is a code region; the summary count must match the collapsed spans.
+    export_of() {
+        printf '{"data":[{"files":[{"filename":"%s","summary":{"regions":{"count":%s,"covered":0},"lines":{"count":1,"covered":1},"functions":{"count":1,"covered":1}}}],"functions":[%s],"totals":{}}]}' \
+            "$thing" "$2" "$3" >"$work/$1.json"
+    }
+
+    failed=0
+    check() {
+        local name=$1 want_rc=$2
+        shift 2
+        local out rc needle
+        set +e
+        out=$({{ just_executable() }} coverage-report "$work/$name.json" 2>&1)
+        rc=$?
+        set -e
+        if [ "$rc" != "$want_rc" ]; then
+            echo "FAIL $name: exit $rc, expected $want_rc"
+            echo "$out" | sed 's/^/    /'
+            failed=1
+            return
+        fi
+        for needle in "$@"; do
+            case "$needle" in
+            !*)
+                if grep -qF -- "${needle#!}" <<<"$out"; then
+                    echo "FAIL $name: output says '${needle#!}' and must not"
+                    echo "$out" | sed 's/^/    /'
+                    failed=1
+                fi
+                ;;
+            *)
+                if ! grep -qF -- "$needle" <<<"$out"; then
+                    echo "FAIL $name: output does not say '$needle'"
+                    echo "$out" | sed 's/^/    /'
+                    failed=1
+                fi
+                ;;
+            esac
+        done
+    }
+
+    # One: the geometric cut. Line 3 is kernel and never run, line 14 is inside
+    # `mod tests` and never run. Only the first is anybody's business.
+    export_of cut 2 '{"name":"_RNvCs0_5thing6kernel","count":0,"filenames":["'"$thing"'"],"regions":[[3,1,3,9,0,0,0,0],[14,1,14,9,0,0,0,0]]}'
+    check cut 0 "lines 3" '!lines 3, 14' "and 1 more inside an inline"
+
+    # Two: a generic exported twice, never run first and run second. Collapsing
+    # on the widest count is what makes this a reached region; keeping the last
+    # or the first record read would answer differently, and one of those two
+    # orders would look right.
+    export_of generic 1 '{"name":"_RNvCs0_5thing1a","count":0,"filenames":["'"$thing"'"],"regions":[[5,1,5,9,0,0,0,0]]},{"name":"_RNvCs0_5thing1b","count":7,"filenames":["'"$thing"'"],"regions":[[5,1,5,9,7,0,0,0]]}'
+    check generic 0 "never run, by file" '!thing.rs' "1 regions in crates/*/src"
+
+    # Three: the same two records the other way about. §79.2's lesson — a
+    # mutation that leaves one order right can leave the other wrong.
+    export_of generic-reversed 1 '{"name":"_RNvCs0_5thing1b","count":7,"filenames":["'"$thing"'"],"regions":[[5,1,5,9,7,0,0,0]]},{"name":"_RNvCs0_5thing1a","count":0,"filenames":["'"$thing"'"],"regions":[[5,1,5,9,0,0,0,0]]}'
+    check generic-reversed 0 '!thing.rs' "1 regions in crates/*/src"
+
+    # Four: a region of a kind other than code, and a region in a file the
+    # summary does not describe. Both are dropped, so the summary still agrees.
+    export_of kinds 1 '{"name":"_RNvCs0_5thing1a","count":0,"filenames":["'"$thing"'"],"regions":[[6,1,6,9,0,0,0,0],[7,1,7,9,0,0,0,2]]},{"name":"_RNvCs0_5thing1c","count":0,"filenames":["'"$work"'/crates/thing/tests/a.rs"],"regions":[[1,1,1,9,0,0,0,0]]}'
+    check kinds 0 "lines 6" '!lines 6, 7' '!tests/a.rs'
+
+    # Five: the cross-check itself. The summary says three regions and the
+    # records collapse to one, which is the shape every parse bug here takes,
+    # and it must refuse rather than print a table nobody can tell is wrong.
+    export_of disagreement 3 '{"name":"_RNvCs0_5thing1a","count":0,"filenames":["'"$thing"'"],"regions":[[8,1,8,9,0,0,0,0]]}'
+    check disagreement 1 "llvm-cov's own summary counts 3 regions" '!never run, by crate'
+
+    if [ "$failed" != "0" ]; then
+        echo "^ coverage-report read a synthetic export wrongly"
+        exit 1
+    fi
+    echo "coverage-report: five synthetic exports read as they should be"
 
 [doc("Format the Rust and the TOML in place.")]
 fmt:
