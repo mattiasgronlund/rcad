@@ -161,103 +161,24 @@ These are the ones that are expensive to notice late.
 
 ## Asking the user a decision
 
-Ask in prose, numbered, batched — `Q11`, `Q12` — with the recommendation and the
-narrowing spelled out. That works: 51 user messages on 2026-09-05, one of which
-was a correction. Do not reach for `AskUserQuestion` for a design batch; it caps
-at four questions of four options and would split one message into seven.
+**Every question goes in `open-questions.md` in this session's scratchpad, the
+same turn you ask it in the terminal.** A question asked only in the terminal
+scrolls away, and recovering it costs a full-context turn — which happened, and
+is why the file exists.
 
-**Every question also goes in `open-questions.md` in this session's scratchpad,
-the same turn you ask it.** A question asked only in the terminal scrolls away,
-and recovering it costs a full-context turn — which happened, and is why the file
-exists. Write each one the way the `grilling` skill formats a round — a heading
-line, the body under it, the recommendation last:
-
-```
-- [ ] **Q11** — Short heading, in one line?
-
-  The body, as many paragraphs as it takes. Backticks, `§` refs and file:line
-  belong here; this is the argument, not a summary of it.
-
-  - **(a)** the first option, on a line of its own
-  - **(b)** the second
-
-  ➡️ *Recommend (a), because …*
-```
-
-The checkbox line carries the label and the heading, and everything indented
-under it belongs to that question. `- [x]` and `→ answered: …` when the answer
-comes.
-
-**Options go on their own lines, lettered from `(a)` with no gaps.** Nothing can
-lift out of prose an option that was never marked, and until 2026-09-07 nothing
-was: 17 of 227 entries offered options and not one of them wrote the options as
-lines, which is why finding what `(a)` meant took reading the paragraph it was
-buried in. The heading, the option lines and the `➡️` line are the grammar; the
-body between them is free prose that no tool interprets.
-
-**`just question-check <hash>` names every violation, and it is your own file you
-run it on.** There is no list of grandfathered sessions: `/tmp` is swept at 30
-days, so a list of session ids would dangle within a month, and it would be a
-second record beside the thing itself (§60). A dead session's file cannot be
-fixed, so nothing judges it; yours can, so run this in the turn you write a
-question. `just question <hash>` names every violation it finds under the
-questions themselves, so the check and the read are one call.
-
-**Write a round in one `Write`, not an `Edit` per entry.** Nobody else writes
-this file, so there is nothing to merge and no reason to go entry by entry.
-Over the week of 2026-09-07 it was written with 263 `Edit` calls against 57
-`Write`s, median edit 374 bytes, at a median context of 150 000 — the ritual of
-editing and then checking cost $53, of which the edits were $28 and what they
-carried was a few hundred bytes each.
-
-Nothing is ever dropped: an entry whose label does not parse is listed as `??`
-with its line number, and shows in the status line as `??×1`. The `asking-questions`
-skill has the full grammar and the shapes that break it.
-
-**The parser and that skill are not in this repo.** They live in the `questions`
-plugin, because a copy in each repo is a copy that goes stale — `rscene` carried
-one that still dropped the second label of a paired entry months after the fix
-landed here. So do the hooks and the shared skills; see "Three plugins" below.
-
-**Read them back with `just question`, never with `!cat`.** The status line shows
-the open labels collapsed, after the session's hash — `❓ 766405 K1-K4, Q2,
-Q4-Q6` — and that hash is the address. `just question 766405` prints **every open
-question in full**; `just question 766405 Q11 Q19` prints those two, answered or
-not; `--labels` is one line per entry, `--all` includes the answered, `--json` is
-for a program. `!cat` puts the whole file in the conversation and charges for
-every line of it on every later turn.
-
-**`just question` is written for you; `just question-tui` is the one Mattias
-types.** That split is why the default is whole bodies rather than a listing to
-drill into: a person has a finite screen and cheap keystrokes, and you have the
-reverse. §100.
-
-**A label is a letter and a number, and the letter carries meaning.** `Q` for a
-grilling round or any plain decision — that is what the `grilling` skill's format
-already uses. A lane's findings take **the lane's own letter**, which is where
-`K1`-`K4` came from: they were Lane K's. Keep it, because "which lane is this
-from" is the first thing asked about a finding. The label goes straight after the
-checkbox; the status line reads it there and nowhere else, so a body is free to
-mention `M5` or `§52.11` without becoming a question.
-
-**One entry may carry two labels when one answer settles both** — `**Q7 / Q11**
-— …`, addressable as either. Both are counted and both are shown. Reading only
-the first is a bug that has been fixed once already: on 2026-09-06 the line
-showed fourteen of sixteen open questions and looked complete (`docs/decisions.md`
-§59.2).
-
-**Never in the tree.** Four sessions were live across these two repos on
-2026-09-05; a tracked file would have had all four writing to it. Per session
-also means the numbering is the session's own, so `Q3` means what it says in the
-conversation the user is looking at.
-
-The cost of that is the file dies with the session, so **carry every unanswered
-question into the handoff document.** Long argument still belongs in
-`docs/decisions.md` under the section it will become; the scratchpad file is what
-is outstanding, not why.
+**Read it back with `just question <hash>`, never with `!cat`.** The status line
+carries the hash and the open labels — `❓ 766405 K1-K4, Q2, Q4-Q6`. `just
+question` prints whole bodies because it is written for you; `just question-tui`
+is the one Mattias types. `docs/decisions.md` §100.
 
 End any turn that asks for a decision with a `## Waiting on you` block, last,
 after the prose.
+
+The grammar, how a round is written, what breaks the parser and how to read a
+file back cheaply are the **`asking-questions` skill's**, in the `questions`
+plugin. They are not repeated here: a copy in each repo is a copy that goes
+stale, and `rscene` carried one that still dropped the second label of a paired
+entry months after the fix landed.
 
 ## Tooling
 
@@ -339,6 +260,13 @@ starts at a 34 000-token floor rather than your 150 000 and bills at a fifth the
 rate, so the same answer costs about a tenth. `.claude/agents/lookup.md` is that
 lane: read-only, Sonnet, one question, and it dies with the answer. Two quick
 probes are still cheaper inline than a lane is; a hunt is not.
+
+**A call is billed the context it is made at, not what it prints.** That is the
+one rule the lookup lane, the batching rule under "Editing files" and `just
+question`'s whole-file default all come out of, and `docs/decisions.md` §100 has
+the arithmetic: a round trip you did not have to take costs about what carrying
+2 200 extra resident tokens for 73 more turns costs. So print the whole thing
+and read it once.
 
 ## Editing files
 
