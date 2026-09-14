@@ -27002,7 +27002,69 @@ before a merge, and one deliberate full sweep on a day somebody can triage it.
 §13 is why the sweep is not scheduled here — it has no named consumer until
 that day exists.
 
-### 97.7 What this does not close
+### 97.7 The first scope: ten survivors, and only two of them mean anything
+
+Q4's first deliberate scope, run at `190d672`: `interval.rs`, `cascade.rs`,
+`policy.rs`, `decision.rs` — the 117 mutants where "replaced a `Decision`
+variant" would live. **117 mutants in 59 s**, 10 missed, 78 caught, 29
+unviable, `--output` into the scratchpad so nothing lands in the tree.
+
+Triaged, because a survivor is a question and not a finding:
+
+**Two are provably equivalent mutants.** `Policy::symbolic_perturbation`
+replaced with `false` is identical to the real function — its doc comment says
+"Always `false`" and §1.5 says why there is deliberately no way to turn it on.
+And `+` to `-` at `interval.rs:94` computes the same interval: the operand is
+`[-reach, reach]`, so `[c,c] - [-r,r]` and `[c,c] + [-r,r]` are both
+`[c-r, c+r]`. Neither is a test to write.
+
+**Five are the error payload of a branch that cannot observe them.** Four
+mutants across `interval.rs:90` and `:91` change `lo` and `hi` inside
+`Error::NotAnInterval`, on the path taken only when `centre` is not finite —
+where `inf - r`, `inf + r`, `inf / r` and `inf * r` agree for every positive
+`r`. They are distinguishable only for a *negative* `reach` with a non-finite
+`centre`, which nothing asks for. The fifth is the `Debug` impl. Diagnostics,
+not arithmetic.
+
+**Two are a real gap, and it is the one worth having.** `cascade.rs:119` and
+`:122` are `value > error_bound` and `-value > error_bound`, the float filter's
+own certification test, and `>` to `>=` survives both. At exact equality the
+true value can be zero, so the mutant certifies a sign the bound has not
+earned — and no input in the suite lands on `value == error_bound`. That is the
+boundary the whole level-1 argument rests on, untested, which is §15.6's rule
+about a published bound wanting a test applied to the comparison that enforces
+it.
+
+**One is unsettled and is not being guessed at.** `delete -` in `impl Neg for
+Interval` survives, and the two instruments disagree about it in a way that is
+worth writing down: **coverage says line 197 runs, and mutation says nothing
+depends on what it computes.** Breaking the impl on purpose and reading the
+compiler's errors — rather than grepping for a unary minus, which finds nothing
+— names eight call sites. Four are inside code §97.2 already showed is dead
+(`march.rs:568` in `how_far_off_a_cone_enclosing`, and
+`three_surfaces.rs:1264`, `:1603`, `:1648`). **Four run**: `intersect.rs:1027`
+and `three_surfaces.rs:1688`, `:1694`, `:1706`, the last three all inside
+`the_two_places_along_it`, which is `(-b ± √D) / 2a` in interval arithmetic
+with `the_tighter` picking the narrower of two enclosures of the same root.
+
+Making `neg` the identity makes both of those enclosures wrong, and the suite
+still passes. Either the wrong enclosures reliably straddle zero and the
+cascade falls through to level 3 and answers correctly anyway, or a wrong
+level-2 answer is being certified and nothing notices. **Reading cannot settle
+which, and this section is not going to assert one** — §97.8 carries it as
+open. What is already certain is narrower and still useful: nothing pins the
+*numbers* `the_two_places_along_it` returns, only the decisions downstream of
+them.
+
+**So the survivor rate is 10 in 88 viable, and the useful rate is 2 or 3.**
+§97.6's triage argument was built on 1 in 8 and holds at that ratio; what it
+did not predict is how much of the 1 in 8 is equivalent mutants and
+diagnostics. A whole sweep at this rate would be roughly 900 survivors and
+perhaps 200 worth reading, which sharpens the argument rather than softening
+it: the cost is not the compute, it is that somebody has to do what this
+subsection did, nine hundred times.
+
+### 97.8 What this does not close
 
 **`march.rs`'s plane arm still says nothing.** §97.2 demonstrates it is
 unreachable and leaves the code untouched. Either it gets the paragraph its two
@@ -27019,10 +27081,22 @@ pins it, no `check-` recipe runs `coverage`, and the number in §97.1 is true of
 this tree on this date. The list is the product, and it is re-read by running
 the recipe rather than by trusting this section.
 
-**The full sweep is unrun**, so the 1-in-8 survivor rate that §97.6's triage
-argument leans on is eleven mutants of one file. If the sweep comes in far
-under that rate, the argument against a periodic whole sweep weakens and
-should be re-made rather than cited.
+**Two of §97.7's ten survivors are unanswered, and they are the two that
+matter.** Nothing lands on `value == error_bound`, so `cascade.rs:119` and
+`:122` have no test at the boundary the float filter's certification rests on;
+constructing an input where a predicate's value equals its own forward error
+bound exactly is the work, and it is constructible because both are `f64` and
+the bound is a deterministic function of the inputs. And whether `neg` becoming
+the identity is an equivalent mutation or a wrong level-2 answer nothing
+notices is **unsettled** — the experiment is to apply it and check what
+`the_two_places_along_it` hands back at the four reached call sites against a
+closed-form root, not to read the function again.
+
+**The full sweep is unrun**, and the survivor rate now has two points that do
+not agree: 1 in 8 viable on `fuse/select.rs`, 10 in 88 on this scope, of which
+2 or 3 were worth reading. §97.6's triage argument survives both, but if a
+whole sweep comes in far under them the argument against a periodic sweep
+weakens and should be re-made rather than cited.
 
 **"Semantic STEP goldens next" was the third item of the proposal, and it is
 mostly already built.** Asked in a session of its own while this was being
