@@ -43,9 +43,9 @@ gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards
 gate_log := "target/last-gate.log"
 
 # The whole gate, and the same command CI runs. Named `gate` rather than
-# `test-all` because it is 20 checks, a lint and a `cargo-deny` around exactly
-# one `test` — and this repo already says "gated green", "a gate agent", "the
-# gate worktree". `test-all` would have shipped a false sentence on day one.
+# `test-all` because it is two dozen checks, a lint and a `cargo-deny` around
+# exactly one `test` — and this repo already says "gated green", "a gate agent",
+# "the gate worktree". `test-all` would have shipped a false sentence on day one.
 #
 # **It ends with a summary block, and that is what the nine minutes are for.**
 # In one week 145 of 415 gate runs were followed by a second call that grepped
@@ -97,13 +97,21 @@ gate:
 # **A missing count reads as `not reached`, never as zero.** A gate that died in
 # `check-enums` never got to `test`, and a block that printed `0 tests run`
 # there would be describing the gate's own failure as a clean empty suite.
+#
+# **The doc tests are added up, not read off the last line.** `cargo test --doc`
+# prints one `test result:` per crate — eight of them here — so the last one is
+# whichever crate ran last, and it said `2 passed` over a run of 24. A number
+# that small and that wrong is worse than no number, because it reads as a real
+# total.
 [private]
 _gate-summary log status failed="":
     #!/usr/bin/env bash
     set -uo pipefail
     plain=$(sed 's/\x1b\[[0-9;]*m//g' '{{ log }}' 2>/dev/null)
     tests=$(grep -E '^ *Summary ' <<<"$plain" | tail -1 | sed 's/^ *//')
-    doctests=$(grep -E '^test result: ' <<<"$plain" | tail -1)
+    doctests=$(awk '/^test result: /{passed += $4; failed += $6; crates += 1} \
+                    END {if (crates) printf "%d passed, %d failed, across %d crate(s)", passed, failed, crates}' \
+                    <<<"$plain")
     echo
     echo "=== gate summary ==="
     if [ '{{ status }}' = "0" ]; then
@@ -122,14 +130,15 @@ _gate-summary log status failed="":
 #
 # **The loop is exercised by moving `gate_steps`, not by running the real gate.**
 # This selftest is itself a step of the gate, so a nested real run would not
-# terminate. `--set` hands the driver a step list of two words, one of which is
-# not a recipe at all, which is the cheapest failing step there is and needs no
+# terminate. `--set` hands the driver a step list one of whose words is not a
+# recipe at all, which is the cheapest failing step there is and needs no
 # fixture recipe of its own.
 #
-# The four ways this can be wrong each get a fixture: a pass that does not print
+# The five ways this can be wrong each get a fixture: a pass that does not print
 # the block, a failure that prints no block at all (which is the whole defect
 # this recipe exists to remove), a failure that does not name the step that
-# broke, and a log whose counts are behind colour codes.
+# broke, a log whose counts are behind colour codes, and a doc-test total read
+# off one crate's line rather than added up.
 [private]
 check-gate-summary-selftest:
     #!/usr/bin/env bash
@@ -168,12 +177,13 @@ check-gate-summary-selftest:
     # The counts, read back out of a log written the way a runner writes one:
     # `CARGO_TERM_COLOR: always`, so every line arrives wrapped in escape codes.
     printf '\033[1m     Summary\033[0m [  12.345s] 1811 tests run: 1811 passed, 0 skipped\n' >"$dir/counts.log"
-    printf 'test result: ok. 214 passed; 0 failed; 0 ignored\n' >>"$dir/counts.log"
+    printf 'test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n' >>"$dir/counts.log"
+    printf 'test result: ok. 9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n' >>"$dir/counts.log"
     got=$($j _gate-summary "$dir/counts.log" 0)
     grep -q '^tests: Summary \[  12.345s\] 1811 tests run: 1811 passed, 0 skipped$' <<<"$got" \
         || fail "the test counts did not survive the colour codes a runner writes"
-    grep -q '^doc tests: test result: ok. 214 passed; 0 failed; 0 ignored$' <<<"$got" \
-        || fail "the doc test counts were not read back"
+    grep -q '^doc tests: 24 passed, 1 failed, across 2 crate(s)$' <<<"$got" \
+        || fail "the doc tests were read off one crate's line instead of added up over all of them"
 
     # A failing suite names the first failing test as well as the step, because
     # `test` is one step and the answer wanted under it is which test.
