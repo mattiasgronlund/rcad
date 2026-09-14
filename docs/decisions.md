@@ -27084,13 +27084,6 @@ all, or replays into an outcome shape this rescue itself repeats several times
 and `docs/decisions.md` §95 already names as common. `fuzz/corpus/` is
 unchanged by this section.
 
-  101.1   What was where, and the one night that needed attributing first   28 lines
-  101.2   `two_solids_fused_by_a_stranger`: 247 of 253 do not even decode   30 lines
-  101.3   The 94 that do decode, and why they are duplicates in kind       34 lines
-  101.4   `where_two_surfaces_cross`: five of nine were already checked in   26 lines
-  101.5   A panic that belongs to the explain tool, not the kernel         24 lines
-  101.6   Why zero, and not "the two that looked most interesting"        20 lines
-
 ### 101.1 What was where, and the one night that needed attributing first
 
 `2026-09-11` and `2026-09-14` keep each artifact under its target's own
@@ -27119,6 +27112,14 @@ replay. The 88 were copied into a per-target layout under this session's
 scratchpad (`night13/artifacts/two_solids_fused_by_a_stranger/`) and triaged
 from there — the recipe itself was not touched.
 
+A stronger form of the same evidence sat in the tree already and did not need
+running anything: 7 of the 88 — `158d358d..`, `5b8430a6..`, `66172e27..`,
+`66d6743f..`, `8cc43081..`, `b0794805..`, `c29fad84..` — are byte-identical
+(full trailing sha1) to files already checked into
+`fuzz/corpus/two_solids_fused_by_a_stranger/`. A file the corpus regression
+test replays as that target *is* that target; the dictionary match and the
+decode were both corroborating what the corpus itself already said.
+
 ### 101.2 `two_solids_fused_by_a_stranger`: 247 of 253 do not even decode
 
 ```text
@@ -27133,13 +27134,43 @@ every one carries the identical message: `neither half of N bytes is a saved
 Model`. That is `rcad-fuzz-explain`'s own decode step
 (`crates/rcad-fuzz-explain/src/lib.rs:364`, `two_models_for_the_fuse`) failing
 before it ever calls the fuse — both halves fail `postcard::from_bytes::<Model>`
-and the function returns `Err` without attempting a replay. The crate's own doc
-comment is explicit about what that means: *"`Err` is only ever 'these bytes
-are not a case of this target at all'"* (`lib.rs:78`). These 247 bytes are not
-readable as a `two_solids_fused_by_a_stranger` case under the current encoding
-at all — not a crash reproduced, not a crash fixed, nothing decoded for the
-corpus regression test to gain either (`every_model_the_fuse_fuzzer_kept_is_fused_again.rs`
-only counts what decodes). They earn nothing.
+and the function returns `Err` without attempting a replay.
+
+**That is not a stale format.** `two_solids_fused_by_a_stranger` bytes carry
+`FORMAT_VERSION` (`crates/rcad-topo/src/serialize.rs:133`) as the first thing
+written, and a mismatch is refused with a named error
+(`Error::WrongFormatVersion`, guarded by its own test,
+`a_model_written_by_a_different_version_of_the_format_is_refused`). It last
+moved 2 → 3 at `3f384cf`, 2026-09-01 — ten days before this rescue's earliest
+night and untouched since (`git log -p --follow -- crates/rcad-topo/src/serialize.rs`,
+current value confirmed `3` at `crates/rcad-topo/src/serialize.rs:133`). A
+throwaway probe crate under this session's scratchpad, path-depending on this
+tree's `rcad-topo` for `Model` and on the workspace's own `postcard`, decoded
+both halves of every one of the 253 fuse artifacts and peeked the leading
+varint with `postcard::take_from_bytes::<u32>` before attempting the full
+decode. Of the 500 halves that fail, 453 fail with `postcard::Error::SerdeDeCustom`
+— the wrapper `Model`'s `Deserialize` uses for its *own* checks
+(`check_keys_resolve`, `check_nothing_is_used_more_than_once`,
+`check_everything_has_an_owner`, `check_shape_is_possible`, all in
+`serialize.rs`) — and of those, 342 carry a leading varint that reads exactly
+`3`, the current version, not a stale one. The other 47 fail with a raw
+`postcard` structural error (`DeserializeBadOption` 38, `DeserializeBadVarint`
+7, `DeserializeUnexpectedEnd` 2) — bytes that are not shaped like postcard's
+wire format at all, version aside — and 34 of those 47 *also* carry a leading
+`3`: the corruption a mutation left behind reaches past the version byte
+either way. 376 of the 500, across both groups, read a leading `3`.
+
+So the 247 are fuzzer mutations of real, current-format seeds, most of them
+landing on a leading version byte a mutation left untouched while corrupting
+the arena underneath it — exactly the failure mode `Model`'s own consistency
+checks exist to refuse, and 90% of the time do. `Err` here is `rcad-fuzz-explain`'s
+crate doc comment working as documented (*"`Err` is only ever 'these bytes are
+not a case of this target at all'"*, `lib.rs:78`) for the right reason: not
+because the format moved out from under them, but because most of what a
+byte-level mutation produces is not a self-consistent `Model`, then or now.
+Nothing decoded for the corpus regression test to gain either
+(`every_model_the_fuse_fuzzer_kept_is_fused_again.rs` only counts what
+decodes). They earn nothing.
 
 The remaining 6 of 253 decode and replay clean — 0 of them panic. §101.3 covers
 what they, and the 88 from `2026-09-13`, actually reached.
@@ -27175,7 +27206,7 @@ Nothing here is a shape the corpus does not already reach, and the two
 refusal kinds are shown recurring inside a rescue of only 94 decoding
 artifacts — not evidence of rarity.
 
-### 101.4 `where_two_surfaces_cross`: five of nine were already checked in
+### 101.4 `where_two_surfaces_cross`: six of nine were already checked in
 
 ```text
 mise exec -- just fuzz-triage ~/rcad-fuzz-logs/2026-09-14 04f6085
@@ -27185,18 +27216,32 @@ mise exec -- just fuzz-triage ~/rcad-fuzz-logs/2026-09-14 04f6085
 
 9 artifacts total (3 from `2026-09-11`, 6 from `2026-09-14`). Comparing every
 rescued file's trailing sha1 against every `fuzz/corpus/*/` file's trailing
-sha1 (`comm -12` on the two sorted lists) finds 5 exact matches, and all 5 are
-in this target: `crash-3f9c76a3..`, `slow-unit-6a164a91..` and
-`crash-a2acceace0..` from `2026-09-11` (all 3 of that night's artifacts), plus
-`crash-cba396f8..` and `slow-unit-b9068e9e..` from `2026-09-14`. The 4
-remaining `2026-09-14` files all decode and replay clean —
-`outcome: succeeded — SurfaceMeet::Curves, N of them` in every case, the
-dominant shape already in an 831-file corpus.
+sha1 — `find ~/rcad-fuzz-logs -type f \( -name 'crash-*' -o -name
+'slow-unit-*' \) -printf '%f\n' | sed 's/^.*-//' | sort -u` against `find
+fuzz/corpus -type f -printf '%f\n' | sed 's/^.*-//' | sort -u`, then `comm
+-12` — finds 6 exact matches in this target: `crash-3f9c76a3..`,
+`slow-unit-6a164a91..` and `crash-a2acceace0..` from `2026-09-11` (all 3 of
+that night's artifacts), plus `crash-cba396f8..`, `crash-d04e0041..` and
+`slow-unit-b9068e9e..` from `2026-09-14` (3 of that night's 6, not the 2 an
+earlier pass here reported — `d04e0041..` is a bare-hash corpus filename
+under the same underscored directory name that hid the 7 fuse matches; see
+below for why). The 3 remaining `2026-09-14` files all decode and
+replay clean — `outcome: succeeded — SurfaceMeet::Curves, N of them` in every
+case, the dominant shape already in an 831-file corpus.
 
-Across all 350 rescued files, `comm -23` finds 345 whose trailing sha1 matches
-no corpus file and `comm -12` finds the other 5 — so "337 sha1s appear in no
-file under `fuzz/corpus/`" in this lane's brief undercounts by 8; the true
-count, re-derived here, is 345.
+Across all 350 rescued files that same `comm` finds 13 exact matches — the 6
+here plus the 7 fuse matches of §101.1 — and 337 whose trailing sha1 matches
+no corpus file. **This lane's own brief had it right at "337 sha1s appear in
+no file under `fuzz/corpus/`"**; an earlier pass here reported 345 and 5
+because its corpus side was built with `find fuzz/corpus -type f | sed
+'s/^.*-//'` — `sed` operating on the full path rather than the basename. A
+corpus filename that is a bare sha1 under an underscored directory name (no
+dash anywhere, e.g. `fuzz/corpus/two_solids_fused_by_a_stranger/158d358d..`)
+has nothing for `s/^.*-//` to cut, so the whole path passed through unchanged
+and never matched a bare 40-character hash from the rescued side; only the
+`crash-`/`slow-unit-`-prefixed corpus files (which do carry a dash) were ever
+being compared. `-printf '%f\n'` before the `sed`, taking the basename first,
+is the fix, and it is what the two `find` commands above do.
 
 ### 101.5 A panic that belongs to the explain tool, not the kernel
 
@@ -27232,16 +27277,19 @@ replays it in under a second, `outcome: succeeded`, exit 0.)
 Every artifact in this rescue lands in one of three buckets, and none of the
 three earns a seed:
 
-- **Does not decode** (247) — `Err`, by the tool's own contract not a case of
-  this target at all. Nothing for the corpus regression test to gain, since it
-  only counts what decodes.
-- **Decodes, replays clean, new (not already in the corpus)** (98: the 94
-  `two_solids_fused_by_a_stranger` artifacts of §101.3, plus 4
+- **Does not decode** (247) — fuzzer mutations of real, current-format seeds
+  that a mutation broke, refused by `Model`'s own consistency checks or by
+  `postcard`'s wire format itself (§101.2's evidence). Nothing for the corpus
+  regression test to gain, since it only counts what decodes.
+- **Decodes, replays clean, new (not already in the corpus)** (90: 87 of the
+  94 `two_solids_fused_by_a_stranger` artifacts of §101.3, plus 3
   `where_two_surfaces_cross` from `2026-09-14`) — every outcome shape recurs
   inside this rescue batch alone, or is named in §95 as already the corpus's
   common case.
-- **Already checked in** (5: 3 from `2026-09-11`, 2 from `2026-09-14`,
-  §101.4) — byte-identical to a file under `fuzz/corpus/` already.
+- **Already checked in** (13: 7 `two_solids_fused_by_a_stranger`, all from
+  `2026-09-13`, §101.1; 6 `where_two_surfaces_cross` — 3 from `2026-09-11`,
+  3 from `2026-09-14`, §101.4) — byte-identical to a file under
+  `fuzz/corpus/` already.
 
 `fuzz/corpus/` §95.1 measured 1751 fuse seeds and this file's own corpus
 regression test reports `ok: 265, refused: 417` over `682` fuses already —
