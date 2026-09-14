@@ -1902,11 +1902,34 @@ fuzz-overnight window="28800":
     # Deciding is separate from doing, in `fuzz-watermark` below, because this
     # recipe's selftest runs it in a real worktree and a checkout here would move
     # whichever tree the gate was run from.
-    target=$({{just_executable()}} fuzz-watermark 2>"$night/watermark.log") || true
-    cat "$night/watermark.log"
-    if [ -n "$target" ]; then
-        echo "advancing to $target, the last commit CI went green on"
-        git checkout --quiet --detach "$target"
+    if [ -n "${RCAD_FUZZ_ALREADY_ADVANCED:-}" ]; then
+        echo "standing where the night that started this one put us"
+    else
+        target=$({{just_executable()}} fuzz-watermark 2>"$night/watermark.log") || true
+        cat "$night/watermark.log"
+        if [ -n "$target" ]; then
+            echo "advancing to $target, the last commit CI went green on"
+            git checkout --quiet --detach "$target"
+
+            # **Start again, from the justfile that was just checked out.** `just`
+            # hands bash the whole recipe body before the first line of it runs,
+            # so without this a change to this recipe takes effect the night
+            # *after* it lands. That is not a hypothetical: the night of
+            # 2026-09-14 kept none of the six artifacts it found, because the
+            # body it was running had been read from a commit of 2026-09-11 and
+            # §91's copy-out landed on 2026-09-13.
+            #
+            # **A night advances once.** The commit just checked out is the
+            # newest green there was a moment ago, so the recipe taking over
+            # would almost always find nothing to move to and stop of its own
+            # accord — but "almost always" is a bound on CI's timing and not on
+            # this loop, and a night that spent itself chasing a branch that
+            # kept going green would say nothing about why. Once is also the
+            # honest reading of §90: the night follows the last green commit as
+            # of when it started.
+            export RCAD_FUZZ_ALREADY_ADVANCED=1
+            exec {{just_executable()}} fuzz-overnight "$(( deadline - $(date +%s) ))"
+        fi
     fi
 
     # How far behind `main` the night is, which is the indicator §81.4 asked for
@@ -2221,12 +2244,15 @@ check-fuzz-overnight-selftest:
     chmod +x "$dir/bin/cargo"
 
     # The night asks `fuzz-watermark` where to stand, and this arm runs it for
-    # real in whatever worktree the gate was run from. A stub that can answer
-    # nothing keeps that hermetic — no network, no account — and the HEAD
-    # assertion at the end is what says a gate cannot move somebody's tree.
+    # real in whatever worktree the gate was run from. Answering nothing unless
+    # an arm asks for an answer keeps that hermetic — no network, no account —
+    # and the HEAD assertion at the end is what says a gate cannot move
+    # somebody's tree. The arm that does want the night to move sets `GH_GREEN`,
+    # and does it in a fixture repository of its own.
     cat >"$dir/bin/gh" <<'STUB'
     #!/usr/bin/env bash
-    exit 1
+    [ -n "${GH_GREEN:-}" ] || exit 1
+    cat "$GH_GREEN"
     STUB
     chmod +x "$dir/bin/gh"
     head_before=$(git rev-parse HEAD)
@@ -2364,6 +2390,83 @@ check-fuzz-overnight-selftest:
         || fail "the hub was refused without saying why: $(cat "$dir/out")"
     [ ! -s "$dir/log" ] \
         || fail "the hub was refused only after cargo had been run"
+
+    # Six: a night runs the justfile it checked out, and not the one it woke up
+    # on. `just` reads the whole recipe body before the first line of it runs, so
+    # a recipe that advanced the tree and carried on would be fuzzing one commit
+    # with another commit's instructions — and every fix to this file would take
+    # effect the night after it landed. That is what happened on 2026-09-14: six
+    # artifacts kept nowhere, by a body read from a commit two days older than
+    # §91's copy-out.
+    #
+    # The fixture says which body ran by making the two commits disagree: the
+    # night starts on the real recipe and the commit it advances to carries a
+    # `fuzz-overnight` that does nothing but name itself.
+    night_repo="$dir/night"
+    git init -q -b main "$night_repo"
+    mkdir -p "$night_repo/fuzz"
+    touch "$night_repo/fuzz/.keep"
+    cp justfile "$night_repo/justfile"
+    git -C "$night_repo" add justfile fuzz/.keep
+    git -C "$night_repo" -c user.email=t@t -c user.name=t commit -q -m "the real recipe"
+    woke_on=$(git -C "$night_repo" rev-parse HEAD)
+    cat >"$night_repo/justfile" <<'STUB'
+    fuzz-overnight window="28800":
+        @echo "the checked-out justfile ran, with {{{{ window }} s left"
+    STUB
+    git -C "$night_repo" add justfile
+    git -C "$night_repo" -c user.email=t@t -c user.name=t commit -q -m "a recipe that names itself"
+    green=$(git -C "$night_repo" rev-parse HEAD)
+    git init -q --bare "$dir/night-origin.git"
+    git -C "$night_repo" remote add origin "$dir/night-origin.git"
+    git -C "$night_repo" push -q origin main
+    git -C "$night_repo" checkout -q --detach "$woke_on"
+    echo "$green" >"$dir/night-green"
+
+    # The status is read last, and not with `||`. A night that carried on with
+    # the wrong body goes on to build and fuzz, and then fails or passes for
+    # reasons of its own — so asserting on it first answers "did the fixture's
+    # stubs behave" where the arm means to ask "whose recipe ran".
+    : >"$dir/log"
+    status=0
+    (cd "$night_repo" && STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+        GH_GREEN="$dir/night-green" \
+        RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 20) >"$dir/out" 2>&1 || status=$?
+    grep -q "advancing to $green" "$dir/out" \
+        || fail "the night did not advance onto the green commit: $(cat "$dir/out")"
+    grep -q 'the checked-out justfile ran' "$dir/out" \
+        || fail "the night carried on with the recipe it woke up on: $(cat "$dir/out")"
+    [ ! -s "$dir/log" ] \
+        || fail "the recipe that woke up on the old commit built and fuzzed before handing over"
+    [ "$(git -C "$night_repo" rev-parse HEAD)" = "$green" ] \
+        || fail "the night ended on $(git -C "$night_repo" rev-parse HEAD) rather than the commit it advanced to"
+    [ "$status" -eq 0 ] || fail "a night that advanced exited $status: $(cat "$dir/out")"
+
+    # What is left of the window is handed on, rather than a fresh one. A night
+    # that started the clock again would run until morning past its deadline,
+    # which is arm one's mistake made where nothing else would catch it.
+    left=$(sed -n 's/.*ran, with \([0-9-]*\) s left.*/\1/p' "$dir/out")
+    [ -n "$left" ] || fail "the recipe taking over was told no window at all"
+    [ "$left" -le 20 ] \
+        || fail "the recipe taking over was given $left s of a twenty-second window"
+
+    # Seven: a night advances once. The commit it lands on is the newest green
+    # there was a moment ago, so the recipe taking over almost always finds
+    # nothing to move to — but "almost always" is a bound on CI's timing and not
+    # on this loop, and a night that spent itself chasing a branch that kept
+    # going green would say nothing about why.
+    git -C "$night_repo" checkout -q --detach "$woke_on"
+    : >"$dir/log"
+    (cd "$night_repo" && STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+        GH_GREEN="$dir/night-green" RCAD_FUZZ_ALREADY_ADVANCED=1 \
+        RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 8) >"$dir/out" 2>&1 \
+        || fail "a night told it had already advanced exited non-zero: $(cat "$dir/out")"
+    [ "$(git -C "$night_repo" rev-parse HEAD)" = "$woke_on" ] \
+        || fail "a night told it had already advanced moved the tree a second time"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 4 ] \
+        || fail "the night that took over did not go on to fuzz: $(cat "$dir/out")"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed,

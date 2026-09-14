@@ -592,6 +592,35 @@ impl Axis {
         )
     }
 
+    /// The same line through another point, pointing along the same bits.
+    ///
+    /// **Scaling is what this is for.** Multiplying a model by `2^k` moves an
+    /// origin and leaves a direction alone, because a direction is not a length
+    /// — so there is nothing left to work out and nothing that should round.
+    /// Going back through [`Axis::new`] instead scales an already-scaled
+    /// direction, and that is not the direction that went in: **24 750 of
+    /// 100 000** random directions come back with other bits when an axis is
+    /// rebuilt from its own. [`Axis::transformed`] refuses the same second
+    /// scaling and says more about what it costs.
+    ///
+    /// That is a footgun and not a broken promise. [`Axis::new`] keeps what it
+    /// claims — two vectors *exactly* along one line give the same axis bit for
+    /// bit — and a stored direction is the rounded normalizing of whatever
+    /// built it, so it lies exactly along nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if `origin` has a coordinate that is not a finite
+    /// number.
+    pub fn moved_to(&self, origin: Point) -> Result<Self> {
+        if !origin.is_finite() {
+            return Err(Error::NotFinite {
+                what: "axis origin",
+            });
+        }
+        Ok(Self::holding(origin, self.direction))
+    }
+
     /// The only place an `Axis` is built, so that no axis anywhere stores
     /// `-0.0`.
     ///
@@ -934,6 +963,69 @@ mod tests {
             reducing_first_differed, 0,
             "reducing by the largest component makes the answer a function of the ratios, and a \
              ratio does not care how long the vector was"
+        );
+    }
+
+    /// **Rebuilding an axis from its own direction moves it, and
+    /// [`Axis::moved_to`] is how a scaling avoids that.**
+    ///
+    /// The test above is about two vectors that lie *exactly* along one line,
+    /// and that promise holds. A stored direction is not such a vector: it is
+    /// the rounded normalizing of whatever built the axis, so dividing it by
+    /// its own largest component and normalizing again rounds a second time and
+    /// lands somewhere else. The pair of pipes the night of 2026-09-14 crashed
+    /// on turned on exactly one such bit — one spelling crossed in a closed loop
+    /// and the other in nothing, and both were right about the pipes they were
+    /// given.
+    #[test]
+    fn rebuilding_an_axis_from_its_own_direction_moves_it_and_moving_its_origin_does_not() {
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            f64::from(u32::try_from(seed & 0xffff_ffff).expect("thirty-two bits"))
+                / f64::from(u32::MAX)
+                - 0.5
+        };
+
+        let mut drawn = 0usize;
+        let mut rebuilding_moved_it = 0usize;
+        let mut moving_the_origin_moved_it = 0usize;
+        for _ in 0..100_000 {
+            let Ok(axis) = Axis::new(Point::origin(), Vector::new(next(), next(), next())) else {
+                continue;
+            };
+            drawn += 1;
+            let rebuilt = Axis::new(Point::origin(), axis.direction()).expect("a direction");
+            if rebuilt.direction() != axis.direction() {
+                rebuilding_moved_it += 1;
+            }
+            let moved = axis
+                .moved_to(Point::new(2.0, -3.0, 5.0))
+                .expect("a finite origin");
+            if moved.direction() != axis.direction() {
+                moving_the_origin_moved_it += 1;
+            }
+        }
+
+        println!(
+            "{drawn} directions: rebuilding the axis from its own direction stored other bits for \
+             {rebuilding_moved_it} of them, moving the origin for {moving_the_origin_moved_it}"
+        );
+        assert!(
+            drawn >= 99_000,
+            "only {drawn} of 100 000 draws named a direction, so this is measuring the generator"
+        );
+        assert!(
+            rebuilding_moved_it * 100 > drawn,
+            "going back through Axis::new is meant to move a stored direction often enough to be \
+             worth a method of its own, and here it moved {rebuilding_moved_it} of {drawn}"
+        );
+        assert_eq!(
+            moving_the_origin_moved_it, 0,
+            "a scaling moves an origin and leaves a direction alone, so moved_to has nothing to \
+             work out and must round nothing"
         );
     }
 

@@ -490,8 +490,21 @@ fn scaled(surface: &Surface, by: i32) -> Option<Surface> {
 }
 
 /// The same axis moved to where scaling puts it, pointing the same way.
+///
+/// **[`Axis::moved_to`] and not [`Axis::new`], which would tilt it.** Handing a
+/// stored direction back to `Axis::new` scales an already-scaled vector and
+/// lands a bit away for a quarter of all directions, so the pair that came out
+/// of here was not the pair that went in written larger — it was that pair with
+/// one axis leaning very slightly differently. The oracle above then reports a
+/// scaling that changed the answer when what changed the answer was the tilt.
+///
+/// The night of 2026-09-14 crashed on that: two leaning pipes whose first sign
+/// question is `1/√(a²+c²) − 1` for the axis direction's `a` and `c`, which the
+/// rebuild carried from `−1.87e-17` to `+1.31e-16`. One spelling crossed in a
+/// closed loop and the other in nothing, and the kernel was right about both.
+/// `scaled(pair, 2⁰)` — a factor of one, no scaling at all — already flipped it.
 fn scaled_axis(axis: Axis, factor: f64) -> Option<Axis> {
-    Axis::new(scaled_place(axis.origin(), factor)?, axis.direction()).ok()
+    axis.moved_to(scaled_place(axis.origin(), factor)?).ok()
 }
 
 fn scaled_place(point: Point, factor: f64) -> Option<Point> {
