@@ -29,6 +29,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "where_a_cone_or_a_torus_crosses"
+path = "fuzz_targets/where_a_cone_or_a_torus_crosses.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "no_step_file_makes_the_reader_panic"
 path = "fuzz_targets/no_step_file_makes_the_reader_panic.rs"
 test = false

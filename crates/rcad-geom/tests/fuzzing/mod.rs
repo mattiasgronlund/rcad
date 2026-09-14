@@ -29,7 +29,8 @@
 //! rather than copying it, so the property `cargo fuzz` explores and the
 //! property the suite replays are the same lines of code.
 //!
-//! **No byte string reaches a cone or a torus.** [`two_surfaces_from`] reads two
+//! **No byte string reaches a cone or a torus through
+//! [`two_surfaces_from`].** It reads two
 //! bits per surface and asks `which % 3`, so a plane, a ball and a pipe are the
 //! whole of what it can name. Measured over the checked-in corpus: 744 of its
 //! 825 seeds decode to a pair, and those 1488 surfaces are 232 planes, 423 balls
@@ -40,9 +41,23 @@
 //! or a pipe. Measured over the soak's 200 000 draws, of which 199 943 decode:
 //! 200 003 planes, 99 925 balls, 99 958 pipes.
 //!
-//! Cones and tori are covered by a hand-written family in
-//! `every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs` instead, and
-//! that file holds the measurements behind leaving this layout alone.
+//! # A second decoder, whose bytes cannot avoid a cone or a torus
+//!
+//! [`two_surfaces_with_a_cone_or_a_torus_from`] is the other half, and it is a
+//! second byte format rather than a widening of the first. The 830 seeds behind
+//! the paragraph above keep meaning exactly what they meant, because nothing
+//! reads them differently — the new format has a corpus of its own and a fuzz
+//! target of its own, `fuzz/fuzz_targets/where_a_cone_or_a_torus_crosses.rs`.
+//!
+//! One slot of its pair is *forced* to be a cone or a torus by the decoder and
+//! not by a filter over what it drew, so there is no byte string it turns into a
+//! pair without one. The other slot is free across all five kinds.
+//!
+//! The hand-written family in
+//! `every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs` stays where it
+//! is and keeps its own row, and holds the measurements behind leaving the first
+//! layout alone. It is a table of fixed `Surface` values that no fuzzer can
+//! mutate; this is a byte format that a fuzzer can.
 
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
@@ -62,6 +77,13 @@ const BYTES_PER_NUMBER: usize = 5;
 ///
 /// One for the kinds, then seven numbers apiece, which is what a pipe takes.
 pub const MOST_BYTES_A_PAIR_READS: usize = 1 + 2 * 7 * BYTES_PER_NUMBER;
+
+/// The most bytes a pair with a cone or a torus in it reads.
+///
+/// One for the kinds, then eight numbers apiece, which is what a ring takes —
+/// a torus on both sides being the longest thing
+/// [`two_surfaces_with_a_cone_or_a_torus_from`] can be asked for.
+pub const MOST_BYTES_A_CONE_OR_TORUS_PAIR_READS: usize = 1 + 2 * 8 * BYTES_PER_NUMBER;
 
 /// How far a walk in here may stray, as a share of how big the **crossing** is.
 ///
@@ -94,6 +116,105 @@ pub fn two_surfaces_from(bytes: &[u8]) -> Option<[Surface; 2]> {
     let first = one_surface_from(kinds & 0b11, &mut reading)?;
     let second = one_surface_from((kinds >> 2) & 0b11, &mut reading)?;
     Some([first, second])
+}
+
+/// Two surfaces decoded from `bytes`, **one of which is always a cone or a
+/// torus**, or `None` where they name no pair.
+///
+/// # What the kinds byte says
+///
+/// | bits | what they pick |
+/// |---|---|
+/// | 0 | which slot is the forced one: 0 the first, 1 the second |
+/// | 1 | what the forced slot is: 0 a cone, 1 a torus |
+/// | 2 to 7 | the free slot's kind, as `(kinds >> 2) % 5` |
+///
+/// `0` is a plane, `1` a ball, `2` a pipe, `3` a cone, `4` a ring. The numbers
+/// follow in slot order — the first slot's, then the second's — so which slot is
+/// forced changes how many bytes each side eats: 4 for a plane, 4 for a ball, 7
+/// for a pipe, 7 for a cone and 8 for a ring.
+///
+/// **Every bit of the kinds byte is read**, which is the one thing the first
+/// format does not do — bits 4 to 7 of its kinds byte are read by nothing.
+///
+/// # The free slot is nearly, and not exactly, even
+///
+/// `kinds >> 2` runs over 0 to 63 and 64 is not a multiple of 5, so a uniform
+/// byte asks for a plane, a ball, a pipe or a cone 13 times in 64 and for a ring
+/// 12. That is an 8 % lean against the ring and it is left alone: a
+/// coverage-guided fuzzer finds its way by feedback rather than by the byte
+/// distribution, and squaring the residue up would cost a rejected value — a
+/// byte string that decodes to nothing at all — for the whole of the gain.
+/// §51.3's own note on `which % 3` is the same sentence about a 2:1 lean.
+///
+/// # What is refused, and why that is not a repair
+///
+/// The same rule the first decoder keeps: nothing here nudges a number to make
+/// it acceptable. A cone's slope is taken through `.abs()` the way a ball's and
+/// a pipe's radii are, because a sign there is a spelling of the same shape and
+/// not a shape — but a ring's two radii are handed over as they were drawn, so
+/// [`Torus::new`] refuses a tube that is as wide as its ring rather than this
+/// swapping them behind the fuzzer's back.
+///
+/// **There is no byte string this hands back a pair without a cone or a torus
+/// in it.** The forced slot is built by the cone arm or the ring arm and by
+/// nothing else, so the invariant is the decoder's shape rather than a filter
+/// over what it drew.
+#[must_use]
+pub fn two_surfaces_with_a_cone_or_a_torus_from(bytes: &[u8]) -> Option<[Surface; 2]> {
+    let mut reading = bytes.iter().copied();
+    let kinds = reading.next()?;
+    let forced = if kinds & 0b10 == 0 { CONE } else { TORUS };
+    let free = (kinds >> 2) % 5;
+    let [first, second] = if kinds & 0b1 == 0 {
+        [forced, free]
+    } else {
+        [free, forced]
+    };
+    Some([
+        one_of_five_surfaces_from(first, &mut reading)?,
+        one_of_five_surfaces_from(second, &mut reading)?,
+    ])
+}
+
+/// What the second decoder's forced slot may be.
+const CONE: u8 = 3;
+const TORUS: u8 = 4;
+
+/// One surface of the kind `which` names, across all five kinds.
+///
+/// The first three are exactly the first decoder's, asked for by the same
+/// number, so the two formats read a plane, a ball and a pipe out of identical
+/// bytes and only the kinds byte in front of them differs.
+///
+/// # Panics
+///
+/// If `which` is above 4. Every caller reduces modulo 5 first, so reaching that
+/// is a broken invariant in here and not bad input from outside.
+fn one_of_five_surfaces_from(which: u8, reading: &mut impl Iterator<Item = u8>) -> Option<Surface> {
+    match which {
+        0..=2 => one_surface_from(which, reading),
+        CONE => {
+            let axis = an_axis(reading)?;
+            Cone::new(axis, a_number(reading)?.abs())
+                .ok()
+                .map(Surface::Cone)
+        }
+        TORUS => {
+            let axis = an_axis(reading)?;
+            Torus::new(axis, a_number(reading)?, a_number(reading)?)
+                .ok()
+                .map(Surface::Torus)
+        }
+        other => unreachable!("{other} is not one of the five kinds"),
+    }
+}
+
+/// A place and a direction, six numbers, or `None` where that is no axis.
+fn an_axis(reading: &mut impl Iterator<Item = u8>) -> Option<Axis> {
+    let origin = a_place(reading)?;
+    let direction = Vector::from([a_number(reading)?, a_number(reading)?, a_number(reading)?]);
+    Axis::new(origin, direction).ok()
 }
 
 /// One surface of the kind `which % 3` names: a plane for 0 and for 3, a ball
@@ -525,12 +646,70 @@ fn exactly_scaled(value: f64, factor: f64) -> Option<f64> {
 #[must_use]
 pub fn bytes_for(kinds: [u8; 2], numbers: &[f64]) -> Vec<u8> {
     let mut out = vec![kinds[0] | (kinds[1] << 2)];
+    written_as_numbers(&mut out, numbers);
+    out
+}
+
+/// The bytes a pair with a cone or a torus in it would be decoded from.
+///
+/// `kinds` is what each slot is — 0 a plane, 1 a ball, 2 a pipe, 3 a cone, 4 a
+/// ring — and the numbers follow in slot order. The forced slot is the first one
+/// of the two that is a cone or a ring, which is a free choice only when both
+/// are, and then the two spellings decode to the same pair anyway.
+///
+/// # Panics
+///
+/// If neither slot is a cone or a ring, which is a pair
+/// [`two_surfaces_with_a_cone_or_a_torus_from`] could never hand back, or if a
+/// number cannot be written down in five bytes.
+#[must_use]
+pub fn bytes_for_a_cone_or_torus_pair(kinds: [u8; 2], numbers: &[f64]) -> Vec<u8> {
+    assert!(
+        kinds.iter().all(|kind| *kind <= TORUS),
+        "{kinds:?} names a kind that does not exist"
+    );
+    let forced_slot = kinds
+        .iter()
+        .position(|kind| *kind >= CONE)
+        .expect("a pair with a cone or a torus in it");
+    let free = kinds[1 - forced_slot];
+    let mut out = vec![
+        u8::try_from(forced_slot).expect("a slot is 0 or 1")
+            | u8::from(kinds[forced_slot] == TORUS) << 1
+            | free << 2,
+    ];
+    written_as_numbers(&mut out, numbers);
+    out
+}
+
+/// Every number appended as the five bytes [`a_number`] reads back.
+///
+/// The exponent is the smallest step of five that keeps the whole number inside
+/// thirty-one bits.
+///
+/// **`ceil` alone gets that wrong by one for every number whose `log2` is
+/// `31 + 5k`**, and `2.0` is one of them. The division then lands on exactly
+/// `2^31`, which is one past the top of an `i32`, and `as i32` saturates
+/// silently to `2147483647` — so a radius asked for as `2.0` used to be written
+/// out as `1.9999999990686774`, against a doc comment promising it came back bit
+/// for bit. Nothing had ever called this with such a number, which is why the
+/// promise stood. Measuring the whole number and stepping once more is the whole
+/// of the fix, and it fires only where the old arithmetic had already overflowed.
+///
+/// # Panics
+///
+/// If a number cannot be written down that way, which means a seed was asked for
+/// that no decoder could have produced.
+fn written_as_numbers(out: &mut Vec<u8>, numbers: &[f64]) {
     for number in numbers {
-        let steps = if *number == 0.0 {
+        let mut steps = if *number == 0.0 {
             0
         } else {
             ((number.abs().log2() - 31.0) / f64::from(FIVES_PER_STEP)).ceil() as i32
         };
+        if (number / 2f64.powi(steps * FIVES_PER_STEP)).abs() >= 2f64.powi(31) {
+            steps += 1;
+        }
         assert!(
             (-128..=127).contains(&steps),
             "{number:e} is past what one byte of exponent reaches"
@@ -539,5 +718,4 @@ pub fn bytes_for(kinds: [u8; 2], numbers: &[f64]) -> Vec<u8> {
         out.extend_from_slice(&whole.to_le_bytes());
         out.push(steps as u8);
     }
-    out
 }
