@@ -1814,11 +1814,11 @@ lint:
 deny:
     cargo deny check
 
-# The four fuzz recipes the overnight run takes, in the order it takes them.
+# The five fuzz recipes the overnight run takes, in the order it takes them.
 #
 # Recipe names rather than fuzz-target names, because what each target wants on
 # its command line is the recipe's business and not this list's.
-fuzz_all := "fuzz fuzz-reader fuzz-writer fuzz-fuse"
+fuzz_all := "fuzz fuzz-reader fuzz-writer fuzz-fuse fuzz-cones-and-tori"
 
 # Where a night's logs go. One directory per date, plus a one-line `latest`.
 fuzz_log_root := env_var_or_default("RCAD_FUZZ_LOGS", env_var("HOME") / "rcad-fuzz-logs")
@@ -1849,7 +1849,7 @@ fuzz_corpus_root := env_var_or_default("RCAD_FUZZ_CORPUS", env_var("HOME") / "rc
 # the end if anything failed.
 #
 # Same nightly-compiler caveat as `fuzz` below.
-[doc("Fuzz all four targets in turn, inside a window in seconds. What the timer runs.")]
+[doc("Fuzz all five targets in turn, inside a window in seconds. What the timer runs.")]
 fuzz-overnight window="28800":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2129,8 +2129,17 @@ fuzz-writer duration="60" corpus_root="": (fuzz-target "no_model_makes_the_write
 [doc("Fuzz the fuse over two arbitrary Models.")]
 fuzz-fuse duration="60" corpus_root="": (fuzz-target "two_solids_fused_by_a_stranger" duration corpus_root)
 
-# The one place that knows how to start a fuzz target. The four recipes above
-# are its four call sites and differ only in the name and `-max_len`.
+# A cone or a torus crossing another surface, over its own byte decoder.
+#
+# Same nightly-compiler caveat as `fuzz` above. Needs its own `-max_len`,
+# like `fuzz` above and unlike the reader/writer/fuse targets: a torus-vs-torus
+# pair is this decoder's worst case, at 1 byte of choice plus two 8-byte
+# doubles for each of a torus's five numbers, so 81 and not `fuzz`'s 71.
+[doc("Fuzz the predicates over a cone or a torus and another surface.")]
+fuzz-cones-and-tori duration="60" corpus_root="": (fuzz-target "where_a_cone_or_a_torus_crosses" duration corpus_root "81")
+
+# The one place that knows how to start a fuzz target. The five recipes above
+# are its five call sites and differ only in the name and `-max_len`.
 #
 # RUSTFLAGS has to be repeated: cargo-fuzz sets it as an environment variable,
 # and that shadows the `.cargo/config.toml` entry `inari` needs to build at all.
@@ -2188,9 +2197,9 @@ check-fuzz-overnight-selftest:
     # Logs its whole command line, then sleeps **half** the slice it was given.
     #
     # Half, and not all of it, is what keeps this arm from being a race. Sleeping
-    # the whole slice makes the four sleeps add up to the window by
+    # the whole slice makes the five sleeps add up to the window by
     # construction, which leaves nothing for the arm's own overhead — `timeout`
-    # around a nested `just`, four times over, about 1.2 s under load. `date +%s`
+    # around a nested `just`, five times over, about 1.2 s under load. `date +%s`
     # truncates to whole seconds and hides that until it crosses a second
     # boundary; then `(deadline - now) / left` truncates to 0 for the last
     # target, it is skipped, and the night correctly exits 1 for a reason the
@@ -2269,9 +2278,9 @@ check-fuzz-overnight-selftest:
             {{just_executable()}} fuzz-overnight "$1" >"$dir/out" 2>&1
     }
 
-    # One: four targets inside a twelve-second window, with the second of them
+    # One: five targets inside a twelve-second window, with the second of them
     # dying. Every one still runs, the run ends inside the window rather than
-    # four times past it, and it reports the failure rather than swallowing it.
+    # five times past it, and it reports the failure rather than swallowing it.
     #
     # A correct recipe spends about 9 s here and the budget mutation about 24 s,
     # so 16 separates them with room on both sides. There is deliberately no
@@ -2286,7 +2295,7 @@ check-fuzz-overnight-selftest:
     elapsed=$(( $(date +%s) - started ))
     [ "$status" -ne 0 ] || fail "a target exited 1 and the night reported success"
     ran=$(grep -c 'fuzz run' "$dir/log" || true)
-    [ "$ran" -eq 4 ] || fail "a crash in the second target left $ran of 4 targets run"
+    [ "$ran" -eq 5 ] || fail "a crash in the second target left $ran of 5 targets run"
     [ "$elapsed" -ge 4 ] || fail "a twelve-second window was over in $elapsed s, so nothing was fuzzed"
     [ "$elapsed" -le 16 ] || fail "a twelve-second window took $elapsed s, so the window is a budget and not a deadline"
     grep -q 'TO LOOK AT.*fuzz-reader' "$dir/logs/latest" \
@@ -2297,8 +2306,8 @@ check-fuzz-overnight-selftest:
     # the morning has libFuzzer's one ratcheted `Slowest unit:` line and no
     # spread — which is the state this replaced.
     timed=$(grep -c "fuzz run.*\[timings=$dir/logs/$(date +%Y-%m-%d)/timings\]" "$dir/log" || true)
-    [ "$timed" -eq 4 ] \
-        || fail "$timed of 4 targets were told where to write their timings"
+    [ "$timed" -eq 5 ] \
+        || fail "$timed of 5 targets were told where to write their timings"
 
     # What each target found is carried out of the worktree and into the night's
     # own directory (§91). `fuzz/artifacts/` is gitignored, lives in a tree that
@@ -2308,7 +2317,8 @@ check-fuzz-overnight-selftest:
     # in it.
     night="$dir/logs/$(date +%Y-%m-%d)"
     for target in where_two_surfaces_cross no_step_file_makes_the_reader_panic \
-            no_model_makes_the_writer_panic two_solids_fused_by_a_stranger; do
+            no_model_makes_the_writer_panic two_solids_fused_by_a_stranger \
+            where_a_cone_or_a_torus_crosses; do
         [ -f "$night/artifacts/$target/crash-$tag" ] \
             || fail "$target's artifact was left in the worktree instead of kept in $night/artifacts"
     done
@@ -2317,7 +2327,7 @@ check-fuzz-overnight-selftest:
     # as lost as the original. This arm's night also failed, so it proves the
     # count rides along with `TO LOOK AT` rather than replacing it.
     #
-    # **At least four, and not exactly four.** The stub writes into the real
+    # **At least five, and not exactly five.** The stub writes into the real
     # `fuzz/artifacts/`, so a tree where somebody has actually fuzzed has more in
     # it than this arm put there. Pinning the number would make the arm pass or
     # fail on a property of the machine rather than of the recipe, which is §77.6's
@@ -2325,8 +2335,8 @@ check-fuzz-overnight-selftest:
     kept=$(sed -n 's/.*  \([0-9]*\) artifacts in .*/\1/p' "$dir/logs/latest")
     [ -n "$kept" ] \
         || fail "the summary line does not say how many artifacts were kept: $(cat "$dir/logs/latest")"
-    [ "$kept" -ge 4 ] \
-        || fail "four targets each left an artifact and the summary counted $kept"
+    [ "$kept" -ge 5 ] \
+        || fail "five targets each left an artifact and the summary counted $kept"
 
     # Two: the tracked corpus is a read-only seed and never the directory
     # libFuzzer writes to, which is the whole of §81. Order is the only thing
