@@ -98,6 +98,22 @@ mise's `[env]`
 as `RUSTC_WRAPPER = "kache"`, which a non-interactive shell does not inherit —
 so every `cargo` and `just` in a lane's brief needs a `mise exec --` prefix.
 
+**`just status` answers "where does this repo stand" in one call**, and it is
+where to start rather than where to end up: what unit the work is in, who holds
+which lane, which **branches** carry work `main` does not have, how far the tip
+is past the last green, and how far `decisions.md` has got. Assembling that by
+hand took twelve tool calls and a lookup lane on 2026-09-14, and every
+ingredient was already in the justfile. The first row is the one a recipe
+cannot compute, so it is written down in `docs/decisions.md` **§0** — `just
+decision 0` — and **that section is edited by hand when the work moves**;
+`check-where-the-work-is` holds it to its shape but cannot tell you it is
+stale, so `status` prints its age instead. `docs/decisions.md` §102.
+
+Do not read the branch row off `just lanes`: `lanes` lists worktrees, and a
+worktree is not a branch. Do not derive it from ahead-of-main either — of the
+five branches that count called unmerged on 2026-09-14, three carried nothing,
+their commits having reached `main` by a cherry-pick or a split (§102.4).
+
 ## Nobody works in the hub
 
 `/home/mattias/git/mattiasgronlund/rcad` is the **hub**. It owns `.git` and
@@ -123,7 +139,7 @@ worktree like any lane.
 and it is in `just gate`. A repository with one worktree is exempt, because a
 lone checkout is not a hub. `docs/decisions.md` §60.
 
-`docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
+`docs/decisions.md` is 27 000 lines: `just decisions-toc` for the map, then
 `just decision 49` or `just decision 49.6`. Never guess a line range.
 
 **Search it with `just decisions-find 'refusal rate'`, not with `grep`.** Grep

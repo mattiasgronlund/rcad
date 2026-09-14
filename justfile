@@ -34,7 +34,7 @@ list:
 # whatever the failing step said and stopped — and the summary block below, the
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest lint test check-release-build check-t-selftest deny"
 
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
@@ -689,8 +689,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "27" ]; then \
-        echo "found $n check-* recipes, expected 27"; \
+    if [ "$n" != "29" ]; then \
+        echo "found $n check-* recipes, expected 29"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -737,7 +737,7 @@ decisions_file := "docs/decisions.md"
 # The map of docs/decisions.md: every top-level section, and what it costs to
 # read.
 #
-# 17 000 lines under 487 headings, so the file is not a thing anyone holds at
+# 27 000 lines under 843 headings, so the file is not a thing anyone holds at
 # once, and the way it was being read was `sed -n '15690,15900p'` — a guessed
 # line range, ~5 000 tokens a guess, landing beside the section about as often
 # as on it. On 2026-09-05 that cost 123 calls and ~180 000 tokens in one day,
@@ -3438,6 +3438,323 @@ check-prune-worktrees-selftest:
         || fail "the detached worktree was not reported as kept"
     grep -qF "removed: $dir/merged" <<<"$got" \
         || fail "a merged lane branch was not reported as removed"
+
+# Where this repo stands, in one call.
+#
+# Collecting that from cold took twelve tool calls and a lookup lane on
+# 2026-09-14, and every ingredient was already here and simply never assembled:
+# `lanes` has who holds what, `gh` has the last green, `decisions-toc` has how
+# far the record has got. The one fact nothing printed is the one that took
+# longest — which *branches* carry something `main` does not — because `lanes`
+# lists worktrees, and a worktree is not a branch.
+#
+# **Five rows, and the first of them is the one a recipe cannot compute.** What
+# unit the work is in is a judgement, so it is written down in
+# `docs/decisions.md` §0 and this prints it; §102 argues why there and not in a
+# file of its own. The other four are facts, and they are read fresh every time.
+#
+# **It never fails.** A row that cannot be answered says so in place of its
+# answer — the shape `fuzz-watermark` already has, and for the same reason: a
+# survey that exits non-zero because `gh` was not on PATH is a survey nobody
+# runs before deciding what to do next.
+[doc("Where the work is, who holds what, and what is not landed on main yet.")]
+status dir=".":
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    echo "=== where the work is (docs/decisions.md §0) ==="
+    block=$({{ just_executable() }} decision 0 2>&1) || block="docs/decisions.md has no §0; \`just check-where-the-work-is\` says what it should hold"
+    echo "$block"
+    reviewed=$(sed -n 's/^reviewed: *//p' <<<"$block" | head -1)
+    if [ -n "$reviewed" ] && stamp=$(date -d "$reviewed" +%s 2>/dev/null); then
+        echo "(last reviewed $(( ( $(date +%s) - stamp ) / 86400 )) days ago)"
+    fi
+
+    echo
+    echo "=== lanes ==="
+    {{ just_executable() }} lanes '{{dir}}'
+
+    echo
+    echo "=== branches carrying work main does not have ==="
+    {{ just_executable() }} _status-branches '{{dir}}' main
+
+    echo
+    echo "=== main against the last green ==="
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "unknown: gh is not on PATH, so no run's conclusion can be read"
+    else
+        green=$(gh run list --workflow ci.yml --branch main --status success \
+            --limit 1 --json headSha --jq '.[0].headSha' 2>/dev/null)
+        if [ -z "$green" ]; then
+            echo "unknown: gh lists no green run on main"
+        elif ! git -C '{{dir}}' cat-file -e "${green}^{commit}" 2>/dev/null; then
+            echo "last green $(cut -c1-7 <<<"$green") is not in this checkout; fetch to weigh main against it"
+        else
+            ahead=$(git -C '{{dir}}' rev-list --count "$green"..main 2>/dev/null)
+            printf 'main tip %s, last green %s, %s commit(s) on main not yet green\n' \
+                "$(git -C '{{dir}}' rev-parse --short main)" "$(cut -c1-7 <<<"$green")" "${ahead:-?}"
+        fi
+    fi
+
+    echo
+    echo "=== docs/decisions.md ==="
+    {{ just_executable() }} decisions-toc | awk '
+        { n = $1 + 0; if (n > top) top = n; seen[n] = 1; count += 1 }
+        END {
+            if (!count) { print "the toc printed nothing, so this counted no sections"; exit }
+            gaps = ""
+            for (i = 1; i < top; i++) if (!(i in seen)) gaps = gaps (gaps ? ", " : "") i
+            printf "%d sections, highest is %d%s\n", count, top, \
+                (gaps ? "; no section " gaps " — a gap is normal, a number is picked against every branch" : "")
+        }'
+
+# The branch half of `status`, kept apart so `check-status-selftest` can hold it
+# against a repository whose right answer is known.
+#
+# **`git cherry` and not `rev-list main..<branch>`.** Ahead-of-main counts what
+# is reachable; what a reader wants is what is *unlanded*, and the two disagree
+# on every branch whose commits reached `main` by a cherry-pick, a rebase or a
+# split into two commits. On 2026-09-14 that was three of the five branches the
+# count called unmerged — one of them `merge/justfile`, whose recipe had been on
+# `main` for days. `cherry` compares patch ids and marks those `-`, so counting
+# only its `+` lines turns a five-branch answer into a two-branch one without a
+# human reading five diffs. It skips merge commits, which is the same thing
+# wanted here: a lane merging `main` into itself has landed nothing.
+#
+# **A branch with nothing new is counted, not listed.** The count is what says
+# the sweep ran; listing twenty-three names nobody has to act on is how a survey
+# stops being read.
+[private]
+_status-branches dir base:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    repo=$(git -C '{{dir}}' rev-parse --show-toplevel) || exit 1
+    if ! git -C "$repo" rev-parse --verify --quiet '{{base}}^{commit}' >/dev/null; then
+        echo "there is no branch named {{base}} here, so nothing could be weighed against it"
+        exit 1
+    fi
+
+    trees=$(git -C "$repo" worktree list --porcelain \
+        | awk '/^worktree /{t=substr($0,10)} /^branch /{print substr($0,19) "\t" t}')
+
+    branches=$(git -C "$repo" for-each-ref --format='%(refname:short)' refs/heads/)
+    if [ -z "$branches" ]; then
+        echo "for-each-ref printed no branches, so this counted nothing"
+        exit 1
+    fi
+
+    carrying=0
+    quiet=0
+    while IFS= read -r branch; do
+        [ "$branch" != '{{base}}' ] || continue
+        new=$(git -C "$repo" cherry '{{base}}' "$branch" 2>/dev/null | grep -c '^+')
+        if [ "$new" -eq 0 ]; then
+            quiet=$((quiet + 1))
+            continue
+        fi
+        carrying=$((carrying + 1))
+        where=$(awk -F'\t' -v b="$branch" '$1 == b { print $2 }' <<<"$trees")
+        printf '%-46s %2d commit(s)  %s\n' "$branch" "$new" "${where:-no worktree}"
+    done <<<"$branches"
+
+    if [ "$carrying" -eq 0 ]; then
+        echo "nothing: every branch here is already on {{base}}"
+    fi
+    echo "$quiet branch(es) carry nothing {{base}} does not already have"
+
+# §0 is the one row of `status` that a recipe cannot compute, so this is what
+# stands behind it. It cannot check the judgement — whether the unit named there
+# is still the unit — and it does not pretend to. It checks the three ways the
+# block goes wrong without anyone noticing.
+#
+# **A cited section that does not exist.** §0 points at the sections that defer
+# the work it lists, and those numbers get renumbered (§71 is four such moves in
+# one session). A block pointing at a §43.8 that has become §44.8 is worse than
+# no block, because it reads as current.
+#
+# **A `reviewed:` date that does not parse.** `status` prints how old the block
+# is, and a date `date -d` cannot read makes that line silently vanish — which
+# looks exactly like a block reviewed today.
+#
+# **A block that has grown into an essay.** The cap is the whole reason this
+# stays true: `decisions.md` is 27 000 lines because nothing ever capped it, and
+# that is correct for a record and fatal for a summary. Fifty lines is about a
+# screen, which is the length something gets re-read at.
+[doc("docs/decisions.md §0 exists, parses, and points only at sections that do.")]
+check-where-the-work-is:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    {{ just_executable() }} _where-the-work-is-check '{{ decisions_file }}'
+
+# Held apart from the recipe above so the selftest can run it over fixtures
+# whose answer is known, rather than over whatever §0 happens to say today.
+[private]
+_where-the-work-is-check file:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    file='{{file}}'
+
+    block=$(awk '/^## 0\. /{on=1} on && /^## [1-9]/{exit} on{print}' "$file")
+    if [ -z "$block" ]; then
+        echo "$file has no '## 0.' section, so nothing says where the work is"
+        exit 1
+    fi
+    if ! head -1 <<<"$block" | grep -qx '## 0\. Where the work is'; then
+        echo "$(head -1 <<<"$block")"
+        echo "^ §0 is reserved for 'Where the work is'; \`just status\` prints it by that name"
+        exit 1
+    fi
+
+    lines=$(grep -c . <<<"$block")
+    if [ "$lines" -gt 50 ]; then
+        echo "§0 is $lines non-blank lines; the cap is 50, because a summary nobody re-reads is not one"
+        exit 1
+    fi
+
+    reviewed=$(sed -n 's/^reviewed: *//p' <<<"$block" | head -1)
+    if [ -z "$reviewed" ]; then
+        echo "§0 has no 'reviewed: <date>' line, so \`just status\` cannot say how stale it is"
+        exit 1
+    fi
+    if ! date -d "$reviewed" +%s >/dev/null 2>&1; then
+        echo "§0's reviewed date '$reviewed' is not one \`date -d\` can read, so its age would print as nothing"
+        exit 1
+    fi
+
+    missing=""
+    for id in $(grep -oE '§[0-9]+(\.[0-9]+)?' <<<"$block" | sed 's/^§//' | sort -u); do
+        case "$id" in
+        *.*) pattern="^### ${id//./\\.} " ;;
+        *)   pattern="^## ${id}\. " ;;
+        esac
+        grep -qE "$pattern" "$file" || missing="$missing $id"
+    done
+    if [ -n "$missing" ]; then
+        echo "§0 cites sections that do not exist:$missing"
+        echo "^ a renumbering moved them; §0 reads as current whether or not it is (docs/decisions.md §71)"
+        exit 1
+    fi
+
+# Pins both halves of `status` against fixtures, because the live repository
+# cannot exercise either of them. Its §0 is right today by construction, and its
+# branches are whatever happens to be lying around — a `_status-branches` that
+# had lost the ability to tell a cherry-picked branch from an unlanded one would
+# pass on most mornings and fail on the one that mattered.
+#
+# The branch fixture is the 2026-09-14 tree in miniature: a branch whose commit
+# was cherry-picked onto main (ahead by the count, carrying nothing), a branch
+# with real unlanded work, a branch fully merged, and a branch checked out in a
+# worktree, which must be reported with the tree that holds it.
+#
+# The §0 fixtures are the three failures the check exists for, plus a good one,
+# because a check that rejects everything passes every negative case.
+[private]
+check-status-selftest:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    fail() {
+        echo "status drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+
+    git init -q -b main "$dir/repo"
+    git -C "$dir/repo" config user.email t@t
+    git -C "$dir/repo" config user.name t
+    echo root > "$dir/repo/f"; git -C "$dir/repo" add f
+    git -C "$dir/repo" commit -q -m root
+
+    git -C "$dir/repo" checkout -q -b picked
+    echo picked > "$dir/repo/p"; git -C "$dir/repo" add p
+    git -C "$dir/repo" commit -q -m "a patch that reaches main another way"
+    picked=$(git -C "$dir/repo" rev-parse HEAD)
+
+    git -C "$dir/repo" checkout -q -b unlanded main
+    echo unlanded > "$dir/repo/u"; git -C "$dir/repo" add u
+    git -C "$dir/repo" commit -q -m "work that is genuinely not on main"
+
+    git -C "$dir/repo" checkout -q main
+    # Without an unrelated commit here first, cherry-picking onto the same
+    # parent reproduces the byte-identical sha, `main..picked` is empty, and the
+    # fixture quietly stops testing the thing it exists for: the broken
+    # ahead-of-main implementation passed it.
+    echo other > "$dir/repo/x"; git -C "$dir/repo" add x
+    git -C "$dir/repo" commit -q -m "an unrelated commit, so the pick is not the same sha"
+    git -C "$dir/repo" cherry-pick "$picked" >/dev/null 2>&1 \
+        || { echo "the fixture's cherry-pick did not apply, so nothing here was tested"; exit 1; }
+    [ "$(git -C "$dir/repo" rev-list --count main..picked)" -eq 1 ] \
+        || { echo "the fixture's picked branch is reachable from main, so it cannot tell the two counts apart"; exit 1; }
+    git -C "$dir/repo" branch -q merged main
+    git -C "$dir/repo" worktree add -q "$dir/held" unlanded
+
+    got=$(just _status-branches "$dir/repo" main)
+    grep -q "^unlanded  *1 commit(s)  *$dir/held$" <<<"$got" \
+        || fail "the branch with real work is not listed with the worktree holding it"
+    grep -q '^picked' <<<"$got" \
+        && fail "a branch whose patch is already on main was listed as carrying work"
+    grep -q '^merged' <<<"$got" \
+        && fail "a fully merged branch was listed as carrying work"
+    grep -qx "2 branch(es) carry nothing main does not already have" <<<"$got" \
+        || fail "the quiet count is wrong, so a broken sweep could pass as a clean tree"
+
+    got=$(just _status-branches "$dir/repo" no-such-branch 2>&1) \
+        && fail "weighing against a branch that does not exist did not fail"
+    grep -qF "no branch named no-such-branch" <<<"$got" \
+        || fail "a missing base branch did not say so"
+
+    good='## 0. Where the work is
+
+    reviewed: 2026-09-14
+
+    **unit:** the thing, opened in §3.1 and still open.
+
+    ## 1. Something else
+    ### 3.1 Not really under 1, but this fixture is not check-decisions
+    '
+    printf '%s\n' "$good" | sed 's/^    //' > "$dir/good.md"
+    got=$(just _where-the-work-is-check "$dir/good.md" 2>&1) \
+        || fail "a well-formed §0 was rejected"
+
+    sed 's/§3\.1/§9.9/' "$dir/good.md" > "$dir/dangling.md"
+    got=$(just _where-the-work-is-check "$dir/dangling.md" 2>&1) \
+        && fail "§0 citing a section that does not exist was accepted"
+    grep -qF "cites sections that do not exist: 9.9" <<<"$got" \
+        || fail "a dangling citation was not named"
+
+    sed 's/^reviewed: .*/reviewed: whenever/' "$dir/good.md" > "$dir/undated.md"
+    got=$(just _where-the-work-is-check "$dir/undated.md" 2>&1) \
+        && fail "§0 with an unparsable reviewed date was accepted"
+
+    sed '/^## 1\./i\
+    filler' "$dir/good.md" > "$dir/long.md"
+    for _ in $(seq 6); do
+        sed '/^filler$/a\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler' "$dir/long.md" > "$dir/long.next.md"
+        mv "$dir/long.next.md" "$dir/long.md"
+    done
+    got=$(just _where-the-work-is-check "$dir/long.md" 2>&1) \
+        && fail "a §0 grown past the cap was accepted"
+    grep -qF "the cap is 50" <<<"$got" \
+        || fail "an over-long §0 did not say what the cap is"
+
+    printf '## 1. No zero here\n' > "$dir/none.md"
+    got=$(just _where-the-work-is-check "$dir/none.md" 2>&1) \
+        && fail "a file with no §0 at all was accepted"
+
+    # Every assertion above is `command && fail`, so the last one leaves its own
+    # non-zero status behind when it passes. Without this the whole selftest
+    # failed silently on a green run, printing nothing at all.
+    exit 0
 
 # Who is working where, right now. Run this before you touch a shared tree.
 #
