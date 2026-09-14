@@ -129,7 +129,9 @@
 # Pointing `CLAUDE_PLUGINS_ROOT` at an empty directory is what found it — exit 1
 # and two 127s. A green sweep is not evidence when the thing you are asking
 # about is what the environment supplies. Do not count the recipes here again;
-# `grep '^gate:' justfile | tr ' ' '\n' | grep -c '^check-'` is the number.
+# `sed -n 's/^gate_steps := "//p' justfile | tr ' ' '\n' | grep -c '^check-'` is
+# the number. The `sed` strips the opening quote; grepping the line whole counts
+# 26, because the first step is `"check-plugins` and does not match `^check-`.
 #
 # One step rather than four, and `check-corpus` deliberately twice. The single
 # step is what lets `check-gate-runs-every-check` reach this file: a new
