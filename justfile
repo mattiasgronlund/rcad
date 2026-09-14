@@ -2854,7 +2854,10 @@ fuzz-triage night="" against="main":
         # and taken away on the way out however this ends — a worktree left
         # behind would show up in `just lanes` as a lane nobody dispatched.
         trap 'git worktree remove --force "$borrowed/tree" >/dev/null 2>&1 || true; rm -rf "$borrowed"' EXIT
-        git worktree add --quiet --detach "$borrowed/tree" "$at"
+        if ! git worktree add --quiet --detach "$borrowed/tree" "$at"; then
+            echo "could not borrow a worktree at {{ against }}, so nothing was replayed against it"
+            exit 1
+        fi
         work="$borrowed/tree"
     fi
     echo "replayed: {{ against }} ($(git rev-parse --short "$at")) in $work"
