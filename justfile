@@ -98,17 +98,19 @@ gate:
 # `check-enums` never got to `test`, and a block that printed `0 tests run`
 # there would be describing the gate's own failure as a clean empty suite.
 #
-# **The doc tests are added up, not read off the last line.** `cargo test --doc`
-# prints one `test result:` per crate — eight of them here — so the last one is
-# whichever crate ran last, and it said `2 passed` over a run of 24. A number
-# that small and that wrong is worse than no number, because it reads as a real
-# total.
+# **Every count line is reported, never the last one.** The gate has two nextest
+# runs — `test` and `check-release-build` — and eight `test result:` lines, one
+# per crate, out of `cargo test --doc`. Reading the last of each got `3 tests
+# run` over a suite of 1869 and `2 passed` over 24 doc tests, on a real green
+# gate. A number that small and that wrong is worse than none, because it reads
+# as a real total. So the `Summary` lines are all printed, each under its own
+# `tests:` label, and the doc tests are added up.
 [private]
 _gate-summary log status failed="":
     #!/usr/bin/env bash
     set -uo pipefail
     plain=$(sed 's/\x1b\[[0-9;]*m//g' '{{ log }}' 2>/dev/null)
-    tests=$(grep -E '^ *Summary ' <<<"$plain" | tail -1 | sed 's/^ *//')
+    tests=$(grep -E '^ *Summary ' <<<"$plain")
     doctests=$(awk '/^test result: /{passed += $4; failed += $6; crates += 1} \
                     END {if (crates) printf "%d passed, %d failed, across %d crate(s)", passed, failed, crates}' \
                     <<<"$plain")
@@ -121,7 +123,11 @@ _gate-summary log status failed="":
         first=$(grep -m1 -E '^ *FAIL \[' <<<"$plain" | sed 's/^ *//')
         [ -z "$first" ] || echo "first failing test: $first"
     fi
-    echo "tests: ${tests:-not reached}"
+    if [ -z "$tests" ]; then
+        echo "tests: not reached"
+    else
+        sed 's/^ *//; s/^/tests: /' <<<"$tests"
+    fi
     echo "doc tests: ${doctests:-not reached}"
     echo "full log: {{ log }}"
 
@@ -179,9 +185,12 @@ check-gate-summary-selftest:
     printf '\033[1m     Summary\033[0m [  12.345s] 1811 tests run: 1811 passed, 0 skipped\n' >"$dir/counts.log"
     printf 'test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n' >>"$dir/counts.log"
     printf 'test result: ok. 9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n' >>"$dir/counts.log"
+    printf '     Summary [   0.007s] 3 tests run: 3 passed, 0 skipped\n' >>"$dir/counts.log"
     got=$($j _gate-summary "$dir/counts.log" 0)
     grep -q '^tests: Summary \[  12.345s\] 1811 tests run: 1811 passed, 0 skipped$' <<<"$got" \
         || fail "the test counts did not survive the colour codes a runner writes"
+    grep -q '^tests: Summary \[   0.007s\] 3 tests run: 3 passed, 0 skipped$' <<<"$got" \
+        || fail "only one of the gate's two nextest runs was reported"
     grep -q '^doc tests: 24 passed, 1 failed, across 2 crate(s)$' <<<"$got" \
         || fail "the doc tests were read off one crate's line instead of added up over all of them"
 
