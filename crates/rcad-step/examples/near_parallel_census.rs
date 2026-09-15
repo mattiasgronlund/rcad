@@ -502,7 +502,14 @@ fn number_of(value: &Value) -> Option<f64> {
     match value {
         Value::Real(number) => Some(*number),
         Value::Integer(number) => Some(*number as f64),
-        _ => None,
+        Value::Text(_)
+        | Value::Enumeration(_)
+        | Value::Reference(_)
+        | Value::List(_)
+        | Value::Typed { .. }
+        | Value::Nothing
+        | Value::Derived
+        | _ => None,
     }
 }
 
