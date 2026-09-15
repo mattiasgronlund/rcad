@@ -19,7 +19,7 @@ The states are **done**, **partly**, **todo**, **unaudited** and **n/a**.
 that is really in the tree. It cannot check that the evidence *proves* the item,
 which is why each line names a module or a test rather than an opinion.
 
-Audited 2026-09-15 against `main` at `6939147`. `docs/decisions.md` §105.
+Audited 2026-09-15 against `main` at `6939147`. `docs/decisions.md` §106.
 
 3        partly     crates/rcad-predicates/src/cascade.rs crates/rcad-topo/src/key.rs crates/rcad-topo/src/serialize.rs — cascade, intervals, arena, generational ids and serialization all stand; no autodiff or spatial-index crate, Newton and quadrature are hand-rolled
 4.1      done       crates/rcad-geom/src/cone.rs crates/rcad-geom/src/bspline_curve.rs — analytic primitives stay exact and distinct, NURBS underneath

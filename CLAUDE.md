@@ -121,7 +121,7 @@ line per item — the roadmap number, a state, the evidence — and the titles a
 rendered from the roadmap, so there is one copy of them. `check-plan` derives
 the item list from the roadmap on both sides and fails when they differ, and
 holds every path a `done` names against the disk. Edit `docs/plan.md` when a
-state moves; never add a checkbox to the roadmap. `docs/decisions.md` §105.
+state moves; never add a checkbox to the roadmap. `docs/decisions.md` §106.
 
 ## Nobody works in the hub
 

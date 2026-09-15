@@ -648,14 +648,14 @@ fn exactly_scaled(value: f64, factor: f64) -> Option<f64> {
 
 /// The bytes a pair of surfaces would be decoded from, for writing a corpus out.
 ///
-/// The exponent is the smallest step of five that keeps the whole number inside
-/// thirty-one bits, so a number that is a whole one times a power of two — which
-/// every seed in the corpus is — comes back bit for bit.
+/// [`written_as_numbers`] picks the exponents, and **every number
+/// [`two_surfaces_from`] can hand back comes back out of here bit for bit** —
+/// which is what lets the explainer print a line that rebuilds the seed it read.
 ///
 /// # Panics
 ///
-/// If a number cannot be written down that way, which means a seed was asked for
-/// that the decoder could never have produced.
+/// If a number is outside what five bytes reach at all, which means a seed was
+/// asked for that the decoder could never have produced.
 #[must_use]
 pub fn bytes_for(kinds: [u8; 2], numbers: &[f64]) -> Vec<u8> {
     let mut out = vec![kinds[0] | (kinds[1] << 2)];
@@ -698,7 +698,8 @@ pub fn bytes_for_a_cone_or_torus_pair(kinds: [u8; 2], numbers: &[f64]) -> Vec<u8
 /// Every number appended as the five bytes [`a_number`] reads back.
 ///
 /// The exponent is the smallest step of five that keeps the whole number inside
-/// thirty-one bits.
+/// thirty-one bits, or the smallest step one byte can spell, whichever is the
+/// larger.
 ///
 /// **`ceil` alone gets that wrong by one for every number whose `log2` is
 /// `31 + 5k`**, and `2.0` is one of them. The division then lands on exactly
@@ -709,10 +710,37 @@ pub fn bytes_for_a_cone_or_torus_pair(kinds: [u8; 2], numbers: &[f64]) -> Vec<u8
 /// promise stood. Measuring the whole number and stepping once more is the whole
 /// of the fix, and it fires only where the old arithmetic had already overflowed.
 ///
+/// # Wanting the largest whole number runs off both ends of the byte
+///
+/// That want is a preference and never a requirement: dropping a step divides
+/// the whole number by thirty-two and names the very same number, so wherever
+/// the largest spelling is past the end of the byte a smaller one is not. The
+/// clamp is what picks it up, and refusing was a gap and not a limit (§16.10).
+///
+/// It fired on a seed already in the corpus. `9.332114885078756e-187`, out of
+/// `fuzz/corpus/where_two_surfaces_cross/slow-unit-b9068e9ed0f147c54aec5b6b35af2f152303b761`,
+/// wants a step of `-129` for a whole number of `136247104`; at `-128`, the
+/// smallest step there is, it is `4257722` and reads back bit for bit. So `just
+/// fuzz-triage` died every morning on the one case it was pointed at. The far
+/// end does the same: `i32::MIN` with an exponent byte of `127` is
+/// `-3.061802069160839e+200`, which wants a step of `128` and is spelled at
+/// `127` as exactly `i32::MIN`.
+///
+/// **Every number [`a_number`] can hand back survives the clamp exactly**, and
+/// not by luck. Such a number is `whole · 2^(5s)` for some `s` the byte already
+/// holds, so scaling it to any other step in range multiplies it by a power of
+/// two and lands on a whole number again — `2^-640` is the smallest of them and
+/// nothing goes subnormal on the way. The test at the foot of this file walks
+/// all two hundred and fifty-six exponent bytes.
+///
 /// # Panics
 ///
-/// If a number cannot be written down that way, which means a seed was asked for
-/// that no decoder could have produced.
+/// If a number is outside what five bytes reach at all — wider than `2^666`,
+/// smaller than half of `2^-640`, or not a number — which means a seed was asked
+/// for that no decoder could have produced. The check is on the whole number the
+/// clamped step leaves, at both ends: too big and it will not fit in thirty-one
+/// bits, too small and it rounds to nothing. So the clamp can never turn a
+/// number this cannot spell into a quietly wrong one.
 fn written_as_numbers(out: &mut Vec<u8>, numbers: &[f64]) {
     for number in numbers {
         let mut steps = if *number == 0.0 {
@@ -723,12 +751,90 @@ fn written_as_numbers(out: &mut Vec<u8>, numbers: &[f64]) {
         if (number / 2f64.powi(steps * FIVES_PER_STEP)).abs() >= 2f64.powi(31) {
             steps += 1;
         }
-        assert!(
-            (-128..=127).contains(&steps),
-            "{number:e} is past what one byte of exponent reaches"
-        );
-        let whole = (number / 2f64.powi(steps * FIVES_PER_STEP)).round() as i32;
-        out.extend_from_slice(&whole.to_le_bytes());
+        let steps = steps.clamp(i32::from(i8::MIN), i32::from(i8::MAX));
+        let whole = (number / 2f64.powi(steps * FIVES_PER_STEP)).round();
+        let spellable =
+            (-2f64.powi(31)..2f64.powi(31)).contains(&whole) && (whole != 0.0) == (*number != 0.0);
+        assert!(spellable, "{number:e} is past what five bytes reach");
+        out.extend_from_slice(&(whole as i32).to_le_bytes());
         out.push(steps as u8);
+    }
+}
+
+/// What [`written_as_numbers`] can spell, and what it is right to refuse.
+///
+/// Nothing else in the suite reaches this writer with a number the decoder made
+/// — the corpus replays go the other way, bytes first — which is how a seed that
+/// stopped `just fuzz-triage` dead sat in `fuzz/corpus` without a red test.
+#[cfg(test)]
+mod what_the_writer_can_spell {
+    use super::{FIVES_PER_STEP, a_number, written_as_numbers};
+
+    /// The number [`a_number`] reads out of the bytes [`written_as_numbers`] writes.
+    fn written_and_read_back(number: f64) -> f64 {
+        let mut bytes = Vec::new();
+        written_as_numbers(&mut bytes, &[number]);
+        a_number(&mut bytes.into_iter()).expect("five bytes back out")
+    }
+
+    #[test]
+    fn every_number_the_decoder_can_hand_back_comes_back_bit_for_bit() {
+        for whole in [0, 1, -1, 3, 12_345, i32::MAX, i32::MIN] {
+            for byte in i8::MIN..=i8::MAX {
+                let number = f64::from(whole) * 2f64.powi(i32::from(byte) * FIVES_PER_STEP);
+                assert_eq!(
+                    written_and_read_back(number).to_bits(),
+                    number.to_bits(),
+                    "{whole} times two to the five times {byte}, which is {number:e}"
+                );
+            }
+        }
+    }
+
+    /// **One of a class of 21, not a one-off.** Running the explainer over all
+    /// 4709 seeds in `fuzz/corpus` on `b013ac4` killed 65 of them, every one in
+    /// `where_two_surfaces_cross` and every one on this assert, over 21 distinct
+    /// numbers between `-2.191809349008403e-193` and `-1.4708981359843996e-185`
+    /// — signed, so the rounding is walked on both sides here. The first of the
+    /// two below is the seed `just fuzz-triage` opens every morning,
+    /// `slow-unit-b9068e9e…`; it wants a step of `-129` and one byte stops at
+    /// `-128`, where the same number is a whole `4257722` and not `136247104`.
+    #[test]
+    fn a_number_too_small_to_want_a_step_the_byte_holds_still_writes_down() {
+        for number in [
+            9.332114885078756e-187,
+            -2.191809349008403e-193,
+            -1.4708981359843996e-185,
+            1.3914044109375144e-188,
+            1.6514376035707827e-186,
+            5.611031933461512e-191,
+            3.5584042315626215e-186,
+        ] {
+            assert_eq!(
+                written_and_read_back(number).to_bits(),
+                number.to_bits(),
+                "{number:e}"
+            );
+        }
+    }
+
+    /// The other end of the same want: `i32::MIN` at the largest exponent byte
+    /// asks for a step of `128`, and is spelled at `127` exactly as it went in.
+    #[test]
+    fn the_widest_number_the_decoder_can_hand_back_still_writes_down() {
+        let number = f64::from(i32::MIN) * 2f64.powi(127 * FIVES_PER_STEP);
+        assert_eq!(written_and_read_back(number).to_bits(), number.to_bits());
+    }
+
+    #[test]
+    #[should_panic(expected = "is past what five bytes reach")]
+    fn a_number_wider_than_five_bytes_reach_is_still_a_broken_invariant() {
+        written_as_numbers(&mut Vec::new(), &[1e300]);
+    }
+
+    #[test]
+    #[should_panic(expected = "is past what five bytes reach")]
+    fn a_number_finer_than_five_bytes_reach_is_still_a_broken_invariant() {
+        written_as_numbers(&mut Vec::new(), &[2f64.powi(-700)]);
     }
 }
