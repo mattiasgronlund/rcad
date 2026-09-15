@@ -17,11 +17,31 @@ Each decision cites the roadmap section it comes from or contradicts.
 
 reviewed: 2026-09-15
 
-**unit:** *the hollow*, §104, opened 2026-09-15. Shelling: a solid whose faces
+**unit:** none open. What runs is a **measurement** of what opens the STEP
+corpus, decided by Mattias on 2026-09-15 and not yet a unit: three lanes off
+`0cd0643`, each reporting numbers and none of them touching `main`. Lane A
+censuses the two faces either side of every edge the reader refuses for its
+curve's name; lane B lifts that refusal in its own tree to see what the files
+hit next; lane C asks how many `SURFACE_OF_REVOLUTION`s are a cylinder, cone,
+sphere or torus in disguise. The unit is cut once they report, or the idea dies
+and something else is.
+
+The question they answer is whether roadmap §4.2 is the lever, and the reason
+it is not: §4.2's two unbuilt items are degree elevation and Oslo multiple
+insertion, and no corpus file is refused for want of either. The refusals fire
+on the keyword the file wrote — `geometry.rs:115`, `brep.rs:487` — before a
+basis function is evaluated, and §50.6 already records `BSplineSurface` as
+built, tested and reachable from nothing. §45.2 governs every count these lanes
+produce: a file count a blocker stops *first* is an upper bound, never a
+projection.
+
+**parked:** *the hollow*, §104, opened 2026-09-15. Shelling: a solid whose faces
 are planes, hollowed to a wall of one thickness. It is the first of roadmap
 §8's local operations, which the roadmap calls M6; §44.1 is why it has a name
-instead. **No lane runs yet** — §104.2 has the reason: §13 wants a named
-consumer and `docs/consumers.md` records none for any local operation.
+instead. **No lane runs, and none will yet** — §104.2 has the reason: §13 wants
+a named consumer and `docs/consumers.md` records none for any local operation.
+Mattias left it parked on 2026-09-15 rather than argue §13 down, because the
+corpus has a consumer today and shelling does not.
 
 The unit before it, §53 `a plane, a cone and a coaxial pipe`, is closed by §103
 having earned nothing. It was planned on 2026-09-05 and no lane ever ran; §55
