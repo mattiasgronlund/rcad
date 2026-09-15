@@ -837,4 +837,31 @@ mod what_the_writer_can_spell {
     fn a_number_finer_than_five_bytes_reach_is_still_a_broken_invariant() {
         written_as_numbers(&mut Vec::new(), &[2f64.powi(-700)]);
     }
+
+    /// The one number that went from written down wrong to refused. `NaN as
+    /// i32` is `0` in Rust, so the old writer measured no steps, compared
+    /// nothing against the top of an `i32` — every comparison with a `NaN` is
+    /// false — and put a plain zero in the repro line. The seed the explainer
+    /// printed was then a different seed from the one it had read.
+    #[test]
+    #[should_panic(expected = "NaN is past what five bytes reach")]
+    fn something_that_is_not_a_number_is_refused_instead_of_written_down_as_zero() {
+        written_as_numbers(&mut Vec::new(), &[f64::NAN]);
+    }
+
+    /// **The message is deliberately not asserted: there are two of them, and
+    /// which one comes out is the build's choice.** `inf.log2()` is `inf`, so
+    /// the saturating cast leaves `steps` at `i32::MAX`, and the bump check
+    /// multiplies that by five *before* the clamp brings it inside a byte. With
+    /// overflow checks on the multiply panics "attempt to multiply with
+    /// overflow"; with them off it wraps to a step whose power of two is still
+    /// `inf`, `inf / inf` is `NaN`, and the assert below says "inf is past what
+    /// five bytes reach". `[profile.test]` leaves the checks on, so the gate
+    /// only ever sees the overflow; an `expected` naming either message would
+    /// be pinning the profile and not the writer.
+    #[test]
+    #[should_panic]
+    fn an_infinite_number_is_refused_however_the_build_checks_its_arithmetic() {
+        written_as_numbers(&mut Vec::new(), &[f64::INFINITY]);
+    }
 }
