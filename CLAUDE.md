@@ -114,6 +114,15 @@ worktree is not a branch. Do not derive it from ahead-of-main either — of the
 five branches that count called unmerged on 2026-09-14, three carried nothing,
 their commits having reached `main` by a cherry-pick or a split (§102.4).
 
+**`just plan` is the roadmap with a box beside every item, and `just plan open`
+is what is left** — the list a unit's lanes are cut from. `docs/roadmap.md`
+still may not carry state and still has one commit; `docs/plan.md` holds a
+line per item — the roadmap number, a state, the evidence — and the titles are
+rendered from the roadmap, so there is one copy of them. `check-plan` derives
+the item list from the roadmap on both sides and fails when they differ, and
+holds every path a `done` names against the disk. Edit `docs/plan.md` when a
+state moves; never add a checkbox to the roadmap. `docs/decisions.md` §105.
+
 ## Nobody works in the hub
 
 `/home/mattias/git/mattiasgronlund/rcad` is the **hub**. It owns `.git` and

@@ -34,7 +34,7 @@ list:
 # whatever the failing step said and stopped — and the summary block below, the
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest lint test check-release-build check-t-selftest deny"
 
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
@@ -689,8 +689,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "29" ]; then \
-        echo "found $n check-* recipes, expected 29"; \
+    if [ "$n" != "31" ]; then \
+        echo "found $n check-* recipes, expected 31"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -3471,6 +3471,11 @@ status dir=".":
     fi
 
     echo
+    echo "=== the board ==="
+    {{ just_executable() }} _plan-summary
+    echo "(\`just plan\` for the roadmap with a box beside every item, \`just plan open\` for what is left)"
+
+    echo
     echo "=== lanes ==="
     {{ just_executable() }} lanes '{{dir}}'
 
@@ -3507,6 +3512,252 @@ status dir=".":
             printf "%d sections, highest is %d%s\n", count, top, \
                 (gaps ? "; no section " gaps " — a gap is normal, a number is picked against every branch" : "")
         }'
+
+plan_file := "docs/plan.md"
+roadmap_file := "docs/roadmap.md"
+
+# The roadmap with a box beside every item, and what fills each box.
+#
+# **`docs/roadmap.md` may not carry this and never will.** §1 of
+# `docs/decisions.md` says it is the north star and not a description of this
+# codebase — that is why it has one commit in the repository's whole history,
+# and why a later reader is told not to "fix" the code back to match it. So the
+# state goes beside it rather than in it, and this recipe renders the two
+# together. `docs/decisions.md` §105.
+#
+# **`docs/plan.md` holds no titles.** It is a line per item: the roadmap number,
+# a state, and the evidence. The titles come from the roadmap at render time, so
+# there is exactly one copy of them and `plan.md` cannot drift into describing a
+# roadmap that has been rewritten. The item list is not stored either — it is
+# derived, and `check-plan` fails when the two disagree.
+#
+# `just plan open` leaves out what is finished, which is the list lanes are cut
+# from.
+[doc("The roadmap with a box beside every item: `just plan`, or `just plan open`.")]
+plan filter="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    {{ just_executable() }} _plan-items '{{ roadmap_file }}' | awk -F'\t' -v filter='{{filter}}' '
+        FILENAME == "-" || started { }
+        { items[$1] = $2; section[$1] = $3; order[++n] = $1 }
+        END {
+            while ((getline line < "{{ plan_file }}") > 0) {
+                if (line !~ /^[0-9]/) continue
+                split(line, f, /[ \t]+/)
+                id = f[1]; state[id] = f[2]
+                sub(/^[^ \t]+[ \t]+[^ \t]+[ \t]*/, "", line); why[id] = line
+            }
+            for (i = 1; i <= n; i++) {
+                id = order[i]
+                s = (id in state) ? state[id] : "unaudited"
+                if (filter == "open" && (s == "done" || s == "n/a")) continue
+                if (section[id] != lastsection) {
+                    printf "\n%s\n", section[id]
+                    lastsection = section[id]
+                }
+                printf "  [%s] %-5s %-10s %s\n", (s == "done" || s == "n/a") ? "x" : " ", id, s, items[id]
+                if (why[id] != "") printf "              %s\n", why[id]
+            }
+        }'
+    echo
+    {{ just_executable() }} _plan-summary
+
+# The counts, on one line, so `status` can carry the plan without printing it.
+[private]
+_plan-summary:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    {{ just_executable() }} _plan-items '{{ roadmap_file }}' | awk -F'\t' '
+        { order[++n] = $1 }
+        END {
+            while ((getline line < "{{ plan_file }}") > 0) {
+                if (line !~ /^[0-9]/) continue
+                split(line, f, /[ \t]+/); state[f[1]] = f[2]
+            }
+            for (i = 1; i <= n; i++) {
+                id = order[i]
+                count[(id in state) ? state[id] : "unaudited"] += 1
+            }
+            printf "plan: %d items — %d done, %d partly, %d todo, %d unaudited, %d n/a\n", \
+                n, count["done"], count["partly"], count["todo"], \
+                count["unaudited"], count["n/a"]
+        }'
+
+# The roadmap's build items, derived rather than listed anywhere.
+#
+# An item is a **deepest heading under §3 to §11** — the layers and the testing
+# apparatus. §1 and §2 are scope and foundational argument, §12 to §15 are the
+# milestone list, the risk register and the reading, and none of those is a
+# thing that gets built. A `## N.` with `### N.M` children contributes the
+# children; one without contributes itself, which is how §3 and §8 get a line.
+#
+# Deriving it is the point. A stored list is a second copy of the roadmap's
+# shape, and §60's argument applies to a shape exactly as it applies to a
+# record: the copy is what goes stale when a section is added.
+[private]
+_plan-items file:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    awk -F'\n' '
+        /^## [0-9]+\./ {
+            flush()
+            rest = substr($0, 4); p = index(rest, " ")
+            top = substr(rest, 1, p - 1); sub(/\.$/, "", top)
+            title = substr(rest, p + 1)
+            want = (top + 0 >= 3 && top + 0 <= 11)
+            heading = "roadmap §" top "  " title
+            kids = 0
+            next
+        }
+        /^### [0-9]+\.[0-9]+ / {
+            if (!want) next
+            kids = 1
+            rest = substr($0, 5); p = index(rest, " ")
+            printf "%s\t%s\t%s\n", substr(rest, 1, p - 1), substr(rest, p + 1), heading
+        }
+        END { flush() }
+        function flush() {
+            if (want && !kids && top != "") printf "%s\t%s\t%s\n", top, title, heading
+        }' '{{file}}'
+
+# `docs/plan.md` still describes `docs/roadmap.md`, and says nothing it cannot
+# show you.
+#
+# **The item lists must agree exactly.** A roadmap gaining a subsection that
+# `plan.md` never hears about is the whole failure this file could otherwise
+# have: it would go on reading complete while covering a roadmap that has moved.
+# So the list is derived on both sides of the comparison and a difference in
+# either direction fails, naming the numbers.
+#
+# **A box is ticked only against evidence that exists.** `done` and `n/a` are
+# the two states that tick, and a `done` whose evidence names a path under
+# `crates/` or `docs/` is checked against the disk. That is §15.6's rule — a
+# published bound needs a test — applied to a published checkbox. It cannot
+# check that the evidence *proves* the item, which is why the audit that fills
+# this file names a module or a test rather than an opinion.
+[doc("docs/plan.md still covers docs/roadmap.md, and every ticked box names something real.")]
+check-plan:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    {{ just_executable() }} _plan-check '{{ roadmap_file }}' '{{ plan_file }}'
+
+# Held apart from the recipe above so the selftest can run it over fixtures
+# whose answer is known.
+[private]
+_plan-check roadmap plan:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    roadmap='{{roadmap}}'
+    plan='{{plan}}'
+    [ -f "$plan" ] || { echo "$plan does not exist, so nothing records how far the roadmap has got"; exit 1; }
+
+    wanted=$({{ just_executable() }} _plan-items "$roadmap" | cut -f1 | sort -u)
+    [ -n "$wanted" ] || { echo "no build items were parsed out of $roadmap, so this compared nothing"; exit 1; }
+    got=$(grep -E '^[0-9]' "$plan" | awk '{ print $1 }' | sort -u)
+
+    missing=$(comm -23 <(echo "$wanted") <(echo "$got") | tr '\n' ' ')
+    extra=$(comm -13 <(echo "$wanted") <(echo "$got") | tr '\n' ' ')
+    if [ -n "${missing// }" ] || [ -n "${extra// }" ]; then
+        [ -z "${missing// }" ] || echo "in $roadmap but not in $plan: $missing"
+        [ -z "${extra// }" ] || echo "in $plan but not in $roadmap: $extra"
+        echo "^ the plan no longer covers the roadmap, so its completeness means nothing"
+        exit 1
+    fi
+
+    dupes=$(grep -E '^[0-9]' "$plan" | awk '{ print $1 }' | sort | uniq -d | tr '\n' ' ')
+    if [ -n "${dupes// }" ]; then
+        echo "$plan lists these items twice, and the second wins silently: $dupes"
+        exit 1
+    fi
+
+    bad=0
+    while read -r id state rest; do
+        case "$state" in
+        done|partly|todo|unaudited|n/a) ;;
+        *) echo "$id: '$state' is not a state; they are done, partly, todo, unaudited, n/a"; bad=1; continue ;;
+        esac
+        if [ -z "$rest" ]; then
+            echo "$id: state '$state' with no evidence after it"
+            bad=1
+            continue
+        fi
+        [ "$state" = "done" ] || continue
+        for token in $(tr ',;' '  ' <<<"$rest"); do
+            case "$token" in
+            crates/*|docs/*|fuzz/*) [ -e "${token%%,}" ] || { echo "$id is done on '$token', which is not in the tree"; bad=1; } ;;
+            esac
+        done
+    done < <(grep -E '^[0-9]' "$plan")
+    [ "$bad" -eq 0 ] || { echo "^ a ticked box naming something that is not there is worse than an empty one"; exit 1; }
+
+# Pins the derivation and the comparison against fixtures, because the live
+# files cannot exercise either: they agree today by construction, so a
+# `_plan-check` that had stopped comparing would pass every run.
+#
+# The fixtures are the four ways this goes wrong — a roadmap that grew an item,
+# a plan that invented one, a box ticked against a path that is not there, and a
+# state nobody defined — plus a good pair, because a check that rejects
+# everything passes every negative case.
+[private]
+check-plan-selftest:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    fail() {
+        echo "plan drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+
+    cat > "$dir/roadmap.md" <<'MD'
+    # A roadmap
+    ## 1. Scope
+    ### 1.1 Not a build item
+    ## 3. Layer 0
+    ## 4. Layer 1
+    ### 4.1 First
+    ### 4.2 Second — with an em-dash in the title
+    ## 12. Milestones
+    ### 12.1 Also not a build item
+    MD
+    sed -i 's/^    //' "$dir/roadmap.md"
+
+    got=$(just _plan-items "$dir/roadmap.md" | cut -f1 | tr '\n' ' ')
+    [ "$got" = "3 4.1 4.2 " ] \
+        || fail "the item list is '$got', expected '3 4.1 4.2 ' — §1 and §12 are not build items, and §3 has no children"
+
+    printf '3 done crates\n4.1 todo nothing yet\n4.2 n/a prose only\n' > "$dir/plan.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/plan.md" 2>&1) \
+        || fail "a plan that covers the roadmap was rejected"
+
+    printf '3 done crates\n4.1 todo nothing yet\n' > "$dir/short.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/short.md" 2>&1) \
+        && fail "a plan missing an item the roadmap has was accepted"
+    grep -qF "but not in $dir/short.md: 4.2" <<<"$got" \
+        || fail "the missing item was not named"
+
+    printf '3 done crates\n4.1 todo x\n4.2 todo x\n9.9 todo invented\n' > "$dir/extra.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/extra.md" 2>&1) \
+        && fail "a plan naming an item the roadmap does not have was accepted"
+    grep -qF "9.9" <<<"$got" || fail "the invented item was not named"
+
+    printf '3 done crates/there-is-no-such-directory\n4.1 todo x\n4.2 todo x\n' > "$dir/liar.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/liar.md" 2>&1) \
+        && fail "a ticked box naming a path that is not in the tree was accepted"
+    grep -qF "is not in the tree" <<<"$got" || fail "the absent path was not named"
+
+    printf '3 finished crates\n4.1 todo x\n4.2 todo x\n' > "$dir/state.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/state.md" 2>&1) \
+        && fail "an undefined state was accepted"
+
+    printf '3 done\n4.1 todo x\n4.2 todo x\n' > "$dir/bare.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/bare.md" 2>&1) \
+        && fail "an item with a state and no evidence was accepted"
+
+    # As in check-status-selftest: every assertion above is `command && fail`,
+    # so the last one leaves its own non-zero status behind when it passes.
+    exit 0
 
 # The branch half of `status`, kept apart so `check-status-selftest` can hold it
 # against a repository whose right answer is known.
