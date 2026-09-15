@@ -27446,9 +27446,14 @@ NaN moved the same way, and it moved from silence to a crash. The old writer
 cast NaN through `as i32`, which saturates to `0`, so a NaN went into the repro
 line as the number zero and nothing said a word; the new check fails the range
 test and panics. Infinity panicked under both writers — the fix lane's note
-said it was new, and it was not — but under the old one it panicked on the step
-being `i32::MAX` rather than on anything about the number. Crash over corrupt,
-in the one place that had been quietly corrupting.
+said it was new, and it was not — but under the old one it panicked on
+`i32::MAX · 5` overflowing before the clamp ever ran, which is the arithmetic
+and not the number, and a build with the overflow checks off wrapped instead and
+blamed a `NaN`. Clamping the wanted step before the bump check multiplies it
+sends infinity through the very check above: the step is `127`, `inf / 2^635` is
+still `inf`, and that is not inside thirty-one bits — so every build now refuses
+infinity for being too wide to spell, and says so naming the number. Crash over
+corrupt, in the one place that had been quietly corrupting.
 
 ### 105.6 This does not overturn §101
 
