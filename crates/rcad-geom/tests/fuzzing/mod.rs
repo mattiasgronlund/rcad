@@ -736,18 +736,27 @@ pub fn bytes_for_a_cone_or_torus_pair(kinds: [u8; 2], numbers: &[f64]) -> Vec<u8
 /// # Panics
 ///
 /// If a number is outside what five bytes reach at all — wider than `2^666`,
-/// smaller than half of `2^-640`, or not a number — which means a seed was asked
-/// for that no decoder could have produced. The check is on the whole number the
-/// clamped step leaves, at both ends: too big and it will not fit in thirty-one
-/// bits, too small and it rounds to nothing. So the clamp can never turn a
-/// number this cannot spell into a quietly wrong one.
+/// smaller than half of `2^-640`, infinite, or not a number — which means a seed
+/// was asked for that no decoder could have produced. The check is on the whole
+/// number the clamped step leaves, at both ends: too big and it will not fit in
+/// thirty-one bits, too small and it rounds to nothing. So the clamp can never
+/// turn a number this cannot spell into a quietly wrong one.
+///
+/// **Infinity gets to that check only because the step is clamped before
+/// anything multiplies it by five.** `inf.log2()` is `inf`, so the cast
+/// saturates the wanted step to `i32::MAX`, and `i32::MAX · 5` overflows — which
+/// used to panic naming the arithmetic rather than the number, and only in a
+/// build that checks its arithmetic at all. Clamped first, the step is `127`,
+/// `inf / 2^635` is still `inf`, and infinity is refused for being too wide to
+/// spell like any other number that is.
 fn written_as_numbers(out: &mut Vec<u8>, numbers: &[f64]) {
     for number in numbers {
-        let mut steps = if *number == 0.0 {
+        let wanted = if *number == 0.0 {
             0
         } else {
             ((number.abs().log2() - 31.0) / f64::from(FIVES_PER_STEP)).ceil() as i32
         };
+        let mut steps = wanted.clamp(i32::from(i8::MIN), i32::from(i8::MAX));
         if (number / 2f64.powi(steps * FIVES_PER_STEP)).abs() >= 2f64.powi(31) {
             steps += 1;
         }
@@ -849,19 +858,154 @@ mod what_the_writer_can_spell {
         written_as_numbers(&mut Vec::new(), &[f64::NAN]);
     }
 
-    /// **The message is deliberately not asserted: there are two of them, and
-    /// which one comes out is the build's choice.** `inf.log2()` is `inf`, so
-    /// the saturating cast leaves `steps` at `i32::MAX`, and the bump check
-    /// multiplies that by five *before* the clamp brings it inside a byte. With
-    /// overflow checks on the multiply panics "attempt to multiply with
-    /// overflow"; with them off it wraps to a step whose power of two is still
-    /// `inf`, `inf / inf` is `NaN`, and the assert below says "inf is past what
-    /// five bytes reach". `[profile.test]` leaves the checks on, so the gate
-    /// only ever sees the overflow; an `expected` naming either message would
-    /// be pinning the profile and not the writer.
+    /// `inf.log2()` is `inf`, so the saturating cast leaves the wanted step at
+    /// `i32::MAX`. The clamp brings it inside a byte before anything multiplies
+    /// it by five, so infinity reaches the same check every other number does
+    /// and is refused for the same reason: `inf / 2^635` is still `inf`, which
+    /// does not fit in thirty-one bits.
     #[test]
-    #[should_panic]
-    fn an_infinite_number_is_refused_however_the_build_checks_its_arithmetic() {
+    #[should_panic(expected = "inf is past what five bytes reach")]
+    fn an_infinite_number_is_refused_by_the_check_on_the_whole_number() {
         written_as_numbers(&mut Vec::new(), &[f64::INFINITY]);
+    }
+
+    #[test]
+    #[should_panic(expected = "-inf is past what five bytes reach")]
+    fn an_infinite_number_the_other_way_is_refused_the_same_way() {
+        written_as_numbers(&mut Vec::new(), &[f64::NEG_INFINITY]);
+    }
+
+    /// **The one thing moving the clamp had to not do.** The bump exists to
+    /// undo a `ceil` that is one short for every number whose `log2` is
+    /// `31 + 5k`, and bumping a step that has *already* been clamped could walk
+    /// back out of the byte — so this holds the writer to producing the very
+    /// same five bytes the old one did, for every number the old one spelled,
+    /// and to refusing exactly the numbers it refused.
+    ///
+    /// It passes for a reason and not by luck. Wherever the wanted step is
+    /// inside the byte the two are the same code. Above the top the old one
+    /// clamped to `127` whatever the bump did, and the new one bumps `127` to
+    /// `128` and clamps back to `127`. Below the bottom the new bump cannot
+    /// fire at all: a wanted step of `-129` or less means `log2` at most
+    /// `-614`, and such a number divided by `2^-640` is at most `2^26`, which
+    /// is nowhere near the `2^31` the bump asks about.
+    #[test]
+    fn no_number_changed_its_spelling_when_the_clamp_moved_ahead_of_the_bump() {
+        let (mut spelled, mut refused) = (0, 0);
+        for number in every_number_worth_trying() {
+            let now = spelled_now(number);
+            assert_eq!(now, spelled_before_the_clamp_moved(number), "{number:e}");
+            if now.is_some() {
+                spelled += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        assert!(
+            spelled > 20_000 && refused > 20_000,
+            "agreeing on {spelled} spelled and {refused} refused is not enough of either"
+        );
+    }
+
+    /// The numbers to hold the two writers against each other on.
+    ///
+    /// Deliberate first: the seeds that made the clamp necessary, both ends of
+    /// the exponent byte, every one of the 256 bytes crossed with whole numbers
+    /// that reach both ends of an `i32`, the powers of two where `ceil` is one
+    /// short, and the magnitudes either side of what five bytes reach. Then a
+    /// fixed-seed walk over raw bit patterns, which is what gets the subnormals
+    /// and the far exponents nothing was chosen for.
+    fn every_number_worth_trying() -> Vec<f64> {
+        let mut numbers = vec![
+            0.0,
+            -0.0,
+            2.0,
+            9.332114885078756e-187,
+            -2.191809349008403e-193,
+            -1.4708981359843996e-185,
+            1.3914044109375144e-188,
+            1.6514376035707827e-186,
+            5.611031933461512e-191,
+            3.5584042315626215e-186,
+            1e300,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+        ];
+        for whole in [
+            0,
+            1,
+            -1,
+            3,
+            -7,
+            12_345,
+            -12_345,
+            1 << 30,
+            i32::MAX,
+            i32::MAX - 1,
+            i32::MIN,
+            i32::MIN + 1,
+        ] {
+            for byte in i8::MIN..=i8::MAX {
+                numbers.push(f64::from(whole) * 2f64.powi(i32::from(byte) * FIVES_PER_STEP));
+            }
+        }
+        for power in -1070..=1023 {
+            let number = 2f64.powi(power);
+            numbers.extend_from_slice(&[number, -number, number * 1.5, number * 0.75]);
+        }
+
+        let mut bits = 0x2545_f491_4f6c_dd1d_u64;
+        for _ in 0..100_000 {
+            bits ^= bits << 13;
+            bits ^= bits >> 7;
+            bits ^= bits << 17;
+            numbers.push(f64::from_bits(bits));
+        }
+        numbers.retain(|number| number.is_finite());
+        numbers
+    }
+
+    /// The five bytes the writer spells a number as, or `None` where it refuses.
+    fn spelled_now(number: f64) -> Option<[u8; 5]> {
+        let loud = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let written = std::panic::catch_unwind(|| {
+            let mut bytes = Vec::new();
+            written_as_numbers(&mut bytes, &[number]);
+            bytes
+        });
+        std::panic::set_hook(loud);
+        written
+            .ok()
+            .map(|bytes| bytes.try_into().expect("five bytes"))
+    }
+
+    /// The same, spelled the way it was before the clamp moved ahead of the bump.
+    ///
+    /// A copy of the old arithmetic rather than a reconstruction of it, with the
+    /// assert turned into the `None`. It is safe to run here on anything finite:
+    /// the widest finite `f64` wants a step near 199 and the smallest subnormal
+    /// one near `-221`, so the multiply the old code did before its clamp only
+    /// overflows on infinity, which [`every_number_worth_trying`] leaves out.
+    fn spelled_before_the_clamp_moved(number: f64) -> Option<[u8; 5]> {
+        let mut steps = if number == 0.0 {
+            0
+        } else {
+            ((number.abs().log2() - 31.0) / f64::from(FIVES_PER_STEP)).ceil() as i32
+        };
+        if (number / 2f64.powi(steps * FIVES_PER_STEP)).abs() >= 2f64.powi(31) {
+            steps += 1;
+        }
+        let steps = steps.clamp(i32::from(i8::MIN), i32::from(i8::MAX));
+        let whole = (number / 2f64.powi(steps * FIVES_PER_STEP)).round();
+        let spellable =
+            (-2f64.powi(31)..2f64.powi(31)).contains(&whole) && (whole != 0.0) == (number != 0.0);
+        spellable.then(|| {
+            let mut bytes = [0; 5];
+            bytes[..4].copy_from_slice(&(whole as i32).to_le_bytes());
+            bytes[4] = steps as u8;
+            bytes
+        })
     }
 }
