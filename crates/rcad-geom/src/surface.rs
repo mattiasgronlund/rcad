@@ -321,14 +321,14 @@ impl Surface {
     /// three for what a single one costs.
     ///
     /// Planes sort before balls and balls before pipes, which is what puts the
-    /// two flat ones of a triple at the front. **That is why this is public and
-    /// not `pub(crate)`**: it is how a reader is to pick which of the two
-    /// surfaces either side of a closed edge names the way that edge runs, and
-    /// `rcad-topo`'s `the_curved_one_of` already asks its own copy of the same
-    /// bits. The two have to land on the same surface or a file gets imported
-    /// walked against a rule it was read by. Nothing in `rcad-step` asks yet —
-    /// the reader that will is the rest of this work, and until it exists the
-    /// wider spelling carries no caller of its own.
+    /// two flat ones of a triple at the front. That ordering is how a reader is
+    /// to pick which of the two surfaces either side of a closed edge names the
+    /// way that edge runs, and `rcad-topo`'s `the_curved_one_of` already asks its
+    /// own copy of the same bits. The two have to land on the same surface or a
+    /// file gets imported walked against a rule it was read by. **Nothing outside
+    /// this crate asks yet**, so this stays `pub(crate)`: the `rcad-step` reader
+    /// that will ask is the rest of this work, and the widening belongs in the
+    /// commit that brings the caller with it.
     ///
     /// **A pipe, a cone and a bend written with the axis pointing the other way
     /// sort apart here, on purpose.** The two spellings are one surface, and
@@ -342,7 +342,7 @@ impl Surface {
     /// round and gets the same corners in the same order, bit for bit, so the
     /// row they sort into never mattered.
     #[must_use]
-    pub fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
+    pub(crate) fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
         let (mine, my_numbers) = self.the_numbers_it_is_written_with();
         let (theirs, their_numbers) = other.the_numbers_it_is_written_with();
         mine.cmp(&theirs).then_with(|| {
