@@ -23,13 +23,37 @@
 //! close that pair sits to the configuration where the two surfaces touch
 //! along their whole shared line rather than crossing it.
 //!
-//! **A confirmed tangency always wins the pair this census reports on**, even
-//! over an unconfirmed pair sitting at a smaller angle. An axis-aligned
-//! footprint has many pairs sitting at exactly zero degrees of deviation for
-//! reasons that have nothing to do with the one pair that refused — a
-//! cylindrical lead parallel to the board plane is ordinary, not degenerate.
-//! Whether the file's own radius and offset numbers also confirm a full-line
-//! touch, not just the angle, is what tells the two apart.
+//! # What this can and cannot conclude
+//!
+//! **`probe` cannot say which pair refused, so finding a tangent pair in a file
+//! does not make that file's refusal a limit.** `ProbeReport::reasons` is a
+//! `BTreeSet<String>` filled by `report.reasons.insert(kind_of(&why))`, and
+//! `kind_of` groups by the kind of thing that refused and drops the `#id`
+//! entirely. One entry therefore covers any number of distinct edges, and the
+//! six raise sites of this one error (`march.rs:286`, `:324`, `:328`, `:346`,
+//! `:416` and `along_a_crossing.rs:326`) all collapse to the same text. A
+//! genuinely tangent pair and a transverse pair the marcher gave up on early
+//! are indistinguishable from this output.
+//!
+//! So there is exactly one way this census can earn LIMIT without naming the
+//! pair: when **every** computable adjacent pair in the file is tangent,
+//! whichever one refused was tangent. Anything less is
+//! [`VerdictKind::TangencyNotAttributed`] — a tangency is present, and nothing
+//! says it is the one that refused.
+//!
+//! The reverse direction is stronger. A file where **no** computable adjacent
+//! pair is anywhere near a full-line tangency, and where every pair was
+//! computable, holds no geometry that explains its refusal as a genuine
+//! tangency at all, which leans gap.
+//!
+//! The control at the end of the run is what prices the whole criterion: it
+//! counts how many corpus files that *don't* have this refusal also hold a
+//! confirmed tangency. A criterion that fires on those just as readily
+//! separates nothing.
+//!
+//! Two cylinders that are coaxial with the same radius are **one cylinder split
+//! at a seam**, not two tangent surfaces, so they are counted separately and
+//! never confirm a tangency.
 //!
 //! **Every number computed here is read straight out of the file's own
 //! `DIRECTION`, `CARTESIAN_POINT` and real-valued attributes — no unit
@@ -78,16 +102,31 @@ const RADIUS_RELATIVE_TOL: f64 = 1.0e-9;
 
 fn main() {
     let root = corpus();
-    let mut qualifying: Vec<(&'static str, String, StepFile)> = Vec::new();
+    let mut qualifying: Vec<(&'static str, String, FileCensus)> = Vec::new();
+    let mut other_files = 0usize;
+    let mut other_files_holding_a_tangency = 0usize;
     for family in ["nist", "kicad"] {
         let mut files = files_under(&root.join(family));
         files.sort();
         for path in files {
-            if let Some(file) = qualifies(&path) {
-                qualifying.push((family, name_of(&path), file));
+            let (file, only_this_reason) = read_and_probe(&path);
+            let census = census_one_file(&file);
+            if only_this_reason {
+                qualifying.push((family, name_of(&path), census));
+            } else {
+                other_files += 1;
+                if census.confirmed_tangent_pairs > 0 {
+                    other_files_holding_a_tangency += 1;
+                }
             }
         }
     }
+
+    assert!(
+        !qualifying.is_empty(),
+        "no corpus file matched TARGET_REASON, so the string this census filters on has drifted \
+         from what `kind_of` writes — every number below would be a count of nothing"
+    );
 
     println!("=== files whose only probe reason is the near-parallel crossing ===");
     println!(
@@ -96,24 +135,26 @@ fn main() {
         qualifying.len()
     );
 
-    let mut limit = 0usize;
-    let mut gap = 0usize;
+    let mut earned_limit = 0usize;
+    let mut not_attributed = 0usize;
+    let mut leans_gap = 0usize;
     let mut uncertain = 0usize;
-    for (family, name, file) in &qualifying {
-        let verdict = census_one_file(file);
+    let mut holding_a_tangency = 0usize;
+    for (family, name, census) in &qualifying {
         println!("\n  {family}/{name}");
         println!(
             "    faces read: {}   adjacent pairs found: {}   of those, computable: {}   \
-             confirmed full-line tangencies: {}",
-            verdict.faces_read,
-            verdict.pairs_found,
-            verdict.pairs_computable,
-            verdict.confirmed_limit_pairs
+             tangencies confirmed: {}   pairs that are one surface split at a seam: {}",
+            census.faces_read,
+            census.pairs_found,
+            census.pairs_computable,
+            census.confirmed_tangent_pairs,
+            census.same_surface_pairs
         );
-        match &verdict.closest {
+        match &census.closest {
             Some(evidence) => {
-                let label = if evidence.confirmed_limit {
-                    "closest confirmed pair"
+                let label = if evidence.confirmed_tangency {
+                    "a confirmed tangent pair (not necessarily the pair that refused)"
                 } else {
                     "closest pair"
                 };
@@ -122,18 +163,52 @@ fn main() {
             }
             None => println!("    no computable pair found in this file"),
         }
-        println!("    verdict: {}", verdict.kind.label());
-        match verdict.kind {
-            VerdictKind::Limit => limit += 1,
-            VerdictKind::Gap => gap += 1,
+        println!("    verdict: {}", census.kind.label());
+        if census.confirmed_tangent_pairs > 0 {
+            holding_a_tangency += 1;
+        }
+        match census.kind {
+            VerdictKind::EveryPairTangent => earned_limit += 1,
+            VerdictKind::TangencyNotAttributed => not_attributed += 1,
+            VerdictKind::NoTangencyAnywhere => leans_gap += 1,
             VerdictKind::Uncertain => uncertain += 1,
         }
     }
 
     println!("\n=== summary over the {} files ===", qualifying.len());
-    println!("  limit (surfaces genuinely tangent — no arithmetic fixes this):    {limit}");
-    println!("  gap (a real crossing curve the arithmetic could not follow):      {gap}");
-    println!("  uncertain (this file's own numbers did not settle it):           {uncertain}");
+    println!(
+        "  LIMIT earned without naming the pair (every computable pair tangent): {earned_limit}"
+    );
+    println!(
+        "  a tangency is present but nothing says it is the pair that refused:   {not_attributed}"
+    );
+    println!("  no computable pair is near a tangency, and coverage was complete:     {leans_gap}");
+    println!("  uncertain (this file's own numbers did not settle it):                {uncertain}");
+
+    println!("\n=== control: does \"this file holds a tangency\" pick the 44 out at all? ===");
+    let of_the_44 = percent(holding_a_tangency, qualifying.len());
+    let of_the_rest = percent(other_files_holding_a_tangency, other_files);
+    println!(
+        "  of the {} qualifying files, {holding_a_tangency} hold a confirmed tangency ({of_the_44:.1}%)",
+        qualifying.len()
+    );
+    println!(
+        "  of the {other_files} corpus files that refuse for something else or not at all, \
+         {other_files_holding_a_tangency} hold one too ({of_the_rest:.1}%)"
+    );
+    if of_the_rest > 20.0 {
+        println!(
+            "  so holding a tangency is ordinary in this corpus and separates nothing: it cannot \
+             carry a LIMIT verdict on its own"
+        );
+    }
+}
+
+fn percent(part: usize, whole: usize) -> f64 {
+    if whole == 0 {
+        return 0.0;
+    }
+    100.0 * part as f64 / whole as f64
 }
 
 fn corpus() -> PathBuf {
@@ -180,9 +255,9 @@ fn name_of(path: &Path) -> String {
         .into_owned()
 }
 
-/// The file, parsed, if `probe` finds it refuses for exactly the one reason
-/// this census is about and nothing else.
-fn qualifies(path: &Path) -> Option<StepFile> {
+/// The file, parsed, and whether `probe` finds it refuses for exactly the one
+/// reason this census is about and nothing else.
+fn read_and_probe(path: &Path) -> (StepFile, bool) {
     let bytes = fs::read(path).unwrap_or_else(|why| panic!("reading {}: {why}", path.display()));
     let file = StepFile::read(&bytes)
         .unwrap_or_else(|why| panic!("{}: every file in the corpus parses: {why}", path.display()));
@@ -190,34 +265,51 @@ fn qualifies(path: &Path) -> Option<StepFile> {
     let found = probe(&file, &Policy::certified(), &mut log);
     let only_this =
         found.fatal.is_empty() && found.reasons.len() == 1 && found.reasons.contains(TARGET_REASON);
-    only_this.then_some(file)
+    (file, only_this)
 }
 
-/// What this file's own text says about the pair that most likely refused.
+/// What this file's own text says about how its adjacent face pairs sit —
+/// never about which of them refused, which `probe` does not report.
 struct FileCensus {
     faces_read: usize,
     pairs_found: usize,
     pairs_computable: usize,
-    confirmed_limit_pairs: usize,
+    confirmed_tangent_pairs: usize,
+    /// Pairs that are one cylinder split at a seam: coaxial, same radius,
+    /// touching everywhere because they are the same surface. Not a tangency.
+    same_surface_pairs: usize,
     closest: Option<PairEvidence>,
     kind: VerdictKind,
 }
 
 #[derive(Clone, Copy)]
 enum VerdictKind {
-    Limit,
-    Gap,
+    /// Every computable pair in the file is tangent, so whichever one refused
+    /// was tangent — the one verdict this census can earn without naming the
+    /// pair that refused.
+    EveryPairTangent,
+    /// A tangency is present, and nothing in `probe`'s output says it is the
+    /// pair that refused.
+    TangencyNotAttributed,
+    /// Every pair was computable and none is near a tangency.
+    NoTangencyAnywhere,
     Uncertain,
 }
 
 impl VerdictKind {
     fn label(self) -> &'static str {
         match self {
-            VerdictKind::Limit => {
-                "LIMIT — the two surfaces are genuinely tangent along the shared line"
+            VerdictKind::EveryPairTangent => {
+                "LIMIT — every computable pair in this file is tangent, so whichever one refused \
+                 was tangent"
             }
-            VerdictKind::Gap => {
-                "GAP — a real crossing curve, and no candidate pair sits near tangency"
+            VerdictKind::TangencyNotAttributed => {
+                "NOT ATTRIBUTED — a tangency is present, but probe's deduplicated reason cannot \
+                 say it is the pair that refused"
+            }
+            VerdictKind::NoTangencyAnywhere => {
+                "LEANS GAP — every pair was computable and none is near a tangency, so this \
+                 file's own geometry does not explain the refusal as one"
             }
             VerdictKind::Uncertain => "UNCERTAIN — this file's own numbers did not settle it",
         }
@@ -237,18 +329,16 @@ fn census_one_file(file: &StepFile) -> FileCensus {
         evaluated.push(evaluate_pair(surface_a, surface_b));
     }
     let pairs_computable = evaluated.iter().filter(|e| e.closeness.is_some()).count();
-    let confirmed_limit_pairs = evaluated.iter().filter(|e| e.confirmed_limit).count();
+    let confirmed_tangent_pairs = evaluated.iter().filter(|e| e.confirmed_tangency).count();
+    let same_surface_pairs = evaluated.iter().filter(|e| e.same_surface).count();
 
-    // A file with an axis-aligned footprint has many pairs sitting at exactly
-    // zero degrees of deviation for reasons that have nothing to do with the
-    // one pair that refused — a cylindrical lead parallel to the board plane
-    // is ordinary, not degenerate. **Whether the file confirms a full-line
-    // tangency anywhere** (matching radius, not just matching angle) is what
-    // separates that from a real limit, so a confirmed pair always wins the
-    // selection over an unconfirmed one at the same or even a smaller angle.
+    // The pair shown is the tangent one, when there is one, because that is the
+    // evidence a reader wants to check. It is **not** a claim that this is the
+    // pair that refused: `probe` groups its reasons by kind and drops the
+    // `#id`, so nothing here can name the pair.
     let closest = evaluated
         .iter()
-        .filter(|e| e.confirmed_limit)
+        .filter(|e| e.confirmed_tangency)
         .min_by(|a, b| a.closeness.unwrap().total_cmp(&b.closeness.unwrap()))
         .or_else(|| {
             evaluated
@@ -258,19 +348,29 @@ fn census_one_file(file: &StepFile) -> FileCensus {
         })
         .cloned();
 
-    let kind = match &closest {
-        Some(evidence) if evidence.confirmed_limit => VerdictKind::Limit,
-        Some(evidence) if evidence.closeness.unwrap() < DEGENERATE_DEG => VerdictKind::Uncertain,
-        Some(evidence) if evidence.closeness.unwrap() > GENERIC_DEG => VerdictKind::Gap,
-        Some(_) => VerdictKind::Uncertain,
-        None => VerdictKind::Uncertain,
+    let every_pair_tangent = pairs_computable > 0
+        && pairs_computable == pairs.len()
+        && confirmed_tangent_pairs == pairs_computable;
+    let nothing_near_a_tangency = pairs_computable == pairs.len()
+        && evaluated
+            .iter()
+            .all(|e| e.closeness.is_some_and(|degrees| degrees > GENERIC_DEG));
+    let kind = if every_pair_tangent {
+        VerdictKind::EveryPairTangent
+    } else if confirmed_tangent_pairs > 0 {
+        VerdictKind::TangencyNotAttributed
+    } else if nothing_near_a_tangency {
+        VerdictKind::NoTangencyAnywhere
+    } else {
+        VerdictKind::Uncertain
     };
 
     FileCensus {
         faces_read: faces.len(),
         pairs_found: pairs.len(),
         pairs_computable,
-        confirmed_limit_pairs,
+        confirmed_tangent_pairs,
+        same_surface_pairs,
         closest,
         kind,
     }
@@ -526,8 +626,12 @@ struct PairEvidence {
     closeness: Option<f64>,
     /// Whether the file's own radius and distance numbers also match a
     /// full-line tangency, not just the angle — the strongest evidence this
-    /// census can produce for `LIMIT`.
-    confirmed_limit: bool,
+    /// census can produce about a pair, which is still not evidence about
+    /// *which* pair refused.
+    confirmed_tangency: bool,
+    /// Whether the two faces carry the same surface — a cylinder split at a
+    /// seam. They touch everywhere, which is not a tangency of two surfaces.
+    same_surface: bool,
 }
 
 impl PairEvidence {
@@ -536,7 +640,8 @@ impl PairEvidence {
             kinds,
             detail: why.to_owned(),
             closeness: None,
-            confirmed_limit: false,
+            confirmed_tangency: false,
+            same_surface: false,
         }
     }
 }
@@ -608,7 +713,8 @@ fn plane_plane(kinds: (String, String), n1: [f64; 3], n2: [f64; 3]) -> PairEvide
         kinds,
         detail: format!("normals {folded:.6} deg from parallel"),
         closeness: Some(folded),
-        confirmed_limit: false,
+        confirmed_tangency: false,
+        same_surface: false,
     }
 }
 
@@ -636,7 +742,8 @@ fn plane_cylinder(
              {distance:.12} vs radius {radius:.12}"
         ),
         closeness: Some(deviation),
-        confirmed_limit: deviation < DEGENERATE_DEG && matches_radius,
+        confirmed_tangency: deviation < DEGENERATE_DEG && matches_radius,
+        same_surface: false,
     }
 }
 
@@ -664,16 +771,24 @@ fn plane_cone(
             "axis/normal angle {angle:.6} deg; cone semi-angle {semi_angle_deg:.6} deg \
              (assumed radians in the file, not confirmed); {deviation:.6} deg short of the \
              generator-tangent orientation (apex offset not checked, so this never confirms a \
-             limit by itself)"
+             tangency by itself)"
         ),
         closeness: Some(deviation),
-        confirmed_limit: false,
+        confirmed_tangency: false,
+        same_surface: false,
     }
 }
 
 /// Two cylinders touch along a full line exactly when their axes are parallel
 /// and the distance between the two axis lines equals `r1 + r2` (external
 /// tangency) or `|r1 − r2|` (one inside the other).
+///
+/// The `|r1 − r2|` test has a degenerate case that is not a tangency at all:
+/// coaxial cylinders of the *same* radius, where the distance and `|r1 − r2|`
+/// are both zero. Those two faces carry one surface, split at a seam — the
+/// usual way a whole cylinder is written as two `ADVANCED_FACE`s — and they
+/// touch everywhere for that reason and no other. Counted as
+/// [`PairEvidence::same_surface`], never as a tangency.
 fn cylinder_cylinder(
     kinds: (String, String),
     o1: [f64; 3],
@@ -690,16 +805,26 @@ fn cylinder_cylinder(
     let distance = length(cross(unit_a1, sub(o2, o1)));
     let matches_external = close(distance, r1 + r2);
     let matches_internal = close(distance, (r1 - r2).abs());
+    let coaxial = folded < DEGENERATE_DEG && close(distance, 0.0);
+    let same_surface = coaxial && close(r1, r2);
+    let same_surface_note = if same_surface {
+        " — one cylinder split at a seam, not two tangent surfaces"
+    } else {
+        ""
+    };
     PairEvidence {
         kinds,
         detail: format!(
             "axes {folded:.6} deg from parallel; axis-to-axis distance {distance:.12} vs \
-             r1+r2={:.12} / |r1-r2|={:.12}",
+             r1+r2={:.12} / |r1-r2|={:.12}{same_surface_note}",
             r1 + r2,
             (r1 - r2).abs()
         ),
         closeness: Some(folded),
-        confirmed_limit: folded < DEGENERATE_DEG && (matches_external || matches_internal),
+        confirmed_tangency: !same_surface
+            && folded < DEGENERATE_DEG
+            && (matches_external || matches_internal),
+        same_surface,
     }
 }
 
