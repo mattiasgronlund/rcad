@@ -34,7 +34,7 @@ list:
 # whatever the failing step said and stopped — and the summary block below, the
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest lint test check-release-build check-t-selftest deny"
 
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
@@ -689,8 +689,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "31" ]; then \
-        echo "found $n check-* recipes, expected 31"; \
+    if [ "$n" != "33" ]; then \
+        echo "found $n check-* recipes, expected 33"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -2062,6 +2062,10 @@ fuzz_all := "fuzz fuzz-reader fuzz-writer fuzz-fuse fuzz-cones-and-tori"
 # Where a night's logs go. One directory per date, plus a one-line `latest`.
 fuzz_log_root := env_var_or_default("RCAD_FUZZ_LOGS", env_var("HOME") / "rcad-fuzz-logs")
 
+# Where systemd looks for the timer. An argument only so `check-fuzz-unit`'s
+# selftest can point it somewhere hermetic; nothing else sets it.
+systemd_user_dir := env_var_or_default("RCAD_SYSTEMD_USER", env_var("HOME") / ".config/systemd/user")
+
 # Where the overnight run accumulates what it finds worth keeping.
 #
 # **Outside the tree, and that is the whole of decision §81.** The corpus under
@@ -2187,7 +2191,18 @@ fuzz-overnight window="28800":
             cargo +nightly fuzz build) >"$night/build.log" 2>&1; then
         tail -n 20 "$night/build.log"
         echo "the fuzz targets did not build, so nothing was fuzzed: $night/build.log"
-        echo "nightly is not pinned by this repo (docs/decisions.md §29.9); \`rustup toolchain install nightly\` is the usual answer"
+        # Which advice is the right advice depends on whether there is a `cargo`
+        # here at all. On 2026-09-15 there was not, and the night printed the
+        # nightly sentence over a `build.log` reading `cargo: command not found`
+        # — the one operator-facing line it wrote, naming the one thing that was
+        # never the question (§108.2).
+        if command -v cargo >/dev/null 2>&1; then
+            echo "nightly is not pinned by this repo (docs/decisions.md §29.9); \`rustup toolchain install nightly\` is the usual answer"
+        else
+            echo "there is no \`cargo\` on this PATH at all, so the toolchain is not the question:"
+            echo "  PATH=$PATH"
+            echo "a systemd run gets no profile. rcad-fuzz.service sets PATH itself for this reason, and \`just check-fuzz-unit\` says whether the copy systemd runs is the one in the tree"
+        fi
         printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
         exit 1
     fi
@@ -2723,6 +2738,56 @@ check-fuzz-overnight-selftest:
     [ "$(grep -c 'fuzz run' "$dir/log")" -eq "$targets" ] \
         || fail "the night that took over did not go on to fuzz all $targets targets: $(cat "$dir/out")"
 
+    # Eight: with no `cargo` on the PATH at all, the night says that and does not
+    # offer to install a nightly toolchain. This is 2026-09-15 exactly (§108.2):
+    # the real reason was in `build.log` and the only sentence addressed to a
+    # person named the toolchain, which was never the question.
+    #
+    # **The PATH is built here rather than borrowed, and asserted empty of
+    # `cargo` before it is used.** Borrowing `/usr/bin:/bin` passes on this
+    # machine, where cargo lives under `~/.cargo`, and silently tests nothing
+    # wherever cargo comes from a package — an arm passing for a property of the
+    # environment it ran in, which is §77.6's mistake and which this repo has
+    # now made three times.
+    # Built by dropping every PATH entry that holds a `cargo` and keeping the
+    # rest, rather than by listing the tools the night needs into a fresh
+    # directory. That list was tried and it is not a list anybody can finish:
+    # the first attempt died on `id`, which this justfile runs in a top-level
+    # backtick before any recipe body starts.
+    bare=""
+    IFS=: read -ra path_parts <<<"$PATH"
+    for part in "${path_parts[@]}"; do
+        [ -n "$part" ] || continue
+        if [ -x "$part/cargo" ]; then continue; fi
+        bare="${bare:+$bare:}$part"
+    done
+    if PATH="$bare" command -v cargo >/dev/null 2>&1; then
+        fail "the no-cargo fixture still has a cargo in it, so the arm below would prove nothing"
+    fi
+    # And the drop has to have taken cargo and nothing else. Where cargo ships in
+    # the same directory as the coreutils — a distribution package rather than
+    # rustup — this arm cannot run, and it says so instead of failing further
+    # down for a reason that reads like the night's fault.
+    for needed in bash git id date find sed awk grep tail wc timeout mktemp; do
+        if ! PATH="$bare" command -v "$needed" >/dev/null 2>&1; then
+            fail "dropping cargo from the PATH also dropped $needed, so this arm cannot run on this machine"
+        fi
+    done
+
+    : >"$dir/log"
+    status=0
+    PATH="$bare" STUB_LOG="$dir/log" RCAD_FUZZ_ALREADY_ADVANCED=1 \
+        RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 8 >"$dir/out" 2>&1 || status=$?
+    [ "$status" -ne 0 ] || fail "a night with no cargo at all reported success"
+    grep -q 'no `cargo` on this PATH at all' "$dir/out" \
+        || fail "a night with no cargo did not say so: $(cat "$dir/out")"
+    if grep -q 'rustup toolchain install nightly' "$dir/out"; then
+        fail "a night with no cargo offered to install a nightly, which is the sentence that misled on 2026-09-15"
+    fi
+    grep -q 'BUILD FAILED' "$dir/logs/latest" \
+        || fail "a night that could not build did not say BUILD FAILED in the summary line"
+
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed,
 # too far forward and it fuzzes what nothing has read.
@@ -3225,6 +3290,135 @@ check-fuzz-triage-selftest:
     fi
     grep -q 'no kind could be read' <<<"$got" \
         || fail "the refusal did not say it could not read a kind"
+
+# The timer's two unit files are tracked here and **copied** into
+# `~/.config/systemd/user/`. That is two records of one thing, which §60 says is
+# the shape to delete, and on 2026-09-15 it had a price: the night lost eight
+# hours to a `cargo` that was not on its PATH, and the fix for that lands in
+# `tooling/systemd/` where systemd will never read it. Nothing made the two
+# agree and neither file said whether anyone had.
+#
+# **An installed copy must match the tracked one; a machine with no installed
+# copy is not checked.** Almost nowhere runs the night — a runner has no
+# `~/.config/systemd/user` at all — so absence is the ordinary case and not a
+# finding.
+#
+# The gap that leaves is named rather than claimed away: this cannot tell a
+# machine that never installed the timer from one where the installed file was
+# removed, because both look the same from here and only the second is a
+# problem. What it does catch is the case that cost the night — installed, and
+# behind the tree.
+#
+# **Half an install is a failure, not an absence.** The pair goes in together;
+# one of the two on disk means somebody copied by hand and stopped, which is the
+# same mistake this recipe exists for, one file earlier.
+[doc("The installed rcad-fuzz timer is the one tracked in tooling/systemd.")]
+check-fuzz-unit tracked="tooling/systemd":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    units="rcad-fuzz.service rcad-fuzz.timer"
+    present=""
+    missing=""
+    for unit in $units; do
+        [ -f "{{tracked}}/$unit" ] \
+            || { echo "there is no {{tracked}}/$unit here to compare anything against"; exit 1; }
+        if [ -f "{{systemd_user_dir}}/$unit" ]; then
+            present="$present $unit"
+        else
+            missing="$missing $unit"
+        fi
+    done
+
+    if [ -z "$present" ]; then
+        echo "no rcad-fuzz timer installed under {{systemd_user_dir}}, so there is nothing to drift"
+        exit 0
+    fi
+    if [ -n "$missing" ]; then
+        echo "half of the timer is installed under {{systemd_user_dir}}:"
+        echo "  there:$present"
+        echo "  not there:$missing"
+        echo "the pair goes in together; copy both and reload:"
+        echo "    cp {{tracked}}/rcad-fuzz.service {{tracked}}/rcad-fuzz.timer {{systemd_user_dir}}/ && systemctl --user daemon-reload"
+        exit 1
+    fi
+
+    drifted=""
+    for unit in $units; do
+        cmp -s "{{tracked}}/$unit" "{{systemd_user_dir}}/$unit" || drifted="$drifted $unit"
+    done
+    if [ -n "$drifted" ]; then
+        for unit in $drifted; do
+            echo "installed $unit is not {{tracked}}/$unit:"
+            diff -u "{{systemd_user_dir}}/$unit" "{{tracked}}/$unit" | sed 's/^/    /' || true
+        done
+        echo "systemd runs the installed copy, so the tree is not what fires tonight:"
+        echo "    cp {{tracked}}/rcad-fuzz.service {{tracked}}/rcad-fuzz.timer {{systemd_user_dir}}/ && systemctl --user daemon-reload"
+        exit 1
+    fi
+    echo "the installed rcad-fuzz timer matches {{tracked}}"
+
+# Pins `check-fuzz-unit` against installs this builds itself, because the one
+# case that matters cannot be arranged on the machine running the gate without
+# breaking that machine's timer.
+#
+# **Each arm asserts the sentence its case produces, not the exit code.** A
+# recipe that always failed would satisfy the two failing arms and nothing else;
+# a recipe that always passed would satisfy the two passing ones. The pair of
+# them together is what says it is reading the files.
+[private]
+check-fuzz-unit-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    work=$(mktemp -d -- "${TMPDIR:-/tmp}/rcad-fuzz-unit-selftest.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+
+    tracked="$work/tracked"
+    installed="$work/installed"
+    mkdir -p "$tracked" "$installed"
+    printf '[Service]\nEnvironment=PATH=%%h/.cargo/bin:/usr/bin\n' >"$tracked/rcad-fuzz.service"
+    printf '[Timer]\nOnCalendar=*-*-* 00:10:00\n' >"$tracked/rcad-fuzz.timer"
+
+    failed=0
+    check() {
+        local name=$1 want_rc=$2 needle=$3
+        local out rc=0
+        out=$(RCAD_SYSTEMD_USER="$installed" \
+            {{ just_executable() }} check-fuzz-unit "$tracked" 2>&1) || rc=$?
+        if [ "$rc" -ne "$want_rc" ]; then
+            echo "check-fuzz-unit drifted from its own fixtures: $name wanted exit $want_rc, got $rc"
+            sed 's/^/    /' <<<"$out"
+            failed=1
+            return
+        fi
+        if ! grep -qF -- "$needle" <<<"$out"; then
+            echo "check-fuzz-unit drifted from its own fixtures: $name did not say \"$needle\""
+            sed 's/^/    /' <<<"$out"
+            failed=1
+        fi
+    }
+
+    # One: nothing installed. The ordinary case on every machine but this one,
+    # and on every runner, so it has to pass and say why rather than pass in
+    # silence that would look the same as a match.
+    check "nothing installed" 0 "so there is nothing to drift"
+
+    # Two: half of it. The pair goes in together.
+    cp "$tracked/rcad-fuzz.service" "$installed/"
+    check "half installed" 1 "not there: rcad-fuzz.timer"
+
+    # Three: both, byte for byte. The passing case.
+    cp "$tracked/rcad-fuzz.timer" "$installed/"
+    check "installed and equal" 0 "matches"
+
+    # Four: installed, and behind the tree. This is the night of 2026-09-15 —
+    # the fix sitting in `tooling/systemd/` while systemd runs the old copy — so
+    # the arm asserts the unit's name and the line that differs, not just a
+    # non-zero exit.
+    printf '[Service]\n' >"$installed/rcad-fuzz.service"
+    check "installed and stale" 1 "installed rcad-fuzz.service is not"
+    check "installed and stale names the missing line" 1 "Environment=PATH="
+
+    [ "$failed" -eq 0 ]
 
 [doc("The benchmarks.")]
 bench:

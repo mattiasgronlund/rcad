@@ -11,9 +11,24 @@ Type=oneshot
 # lock sweep can see it belongs to a machine (§81.4).
 WorkingDirectory=%h/git/mattiasgronlund/rcad-nightly-fuzz
 
-# mise by absolute path. systemd starts without a profile, so `just`,
-# `cargo-fuzz` and the RUSTC_WRAPPER=kache that mise.toml sets are all absent
-# from the environment, and cargo fails outright on a wrapper it cannot find.
+# The night calls `cargo` by name, and systemd has no profile to find one in.
+# `cargo` here is rustup's shim in `~/.cargo/bin`; the only files on this machine
+# that add that directory are `~/.bashrc` and `~/.profile`, and systemd --user
+# reads neither. mise supplies `just`, `cargo-fuzz` and `kache` — it pins no
+# rust, so it does not supply `cargo`.
+#
+# Five nights ran anyway, on a PATH the user manager had inherited from a login
+# session. The reboot of 2026-09-15 took that away, and the night wrote one line
+# — `cargo: command not found` — and fuzzed nothing for eight hours. Inherited is
+# not set, and this line is the difference.
+#
+# The ordinary entries are spelled out because `Environment=PATH=` replaces the
+# whole variable rather than adding to the front of it.
+Environment=PATH=%h/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+
+# mise by absolute path, for the same reason one line up: `just`, `cargo-fuzz`
+# and the RUSTC_WRAPPER=kache that mise.toml sets are all absent from a systemd
+# environment, and cargo fails outright on a wrapper it cannot find.
 ExecStart=%h/.local/bin/mise exec -- just fuzz-overnight 28800
 
 # The outer backstop. `fuzz-overnight` divides its own window against the clock
