@@ -321,11 +321,14 @@ impl Surface {
     /// three for what a single one costs.
     ///
     /// Planes sort before balls and balls before pipes, which is what puts the
-    /// two flat ones of a triple at the front, and it is how a reader picks
-    /// which of the two surfaces either side of a closed edge names the way that
-    /// edge runs: `rcad-step` asks this and `rcad-topo`'s `the_curved_one_of`
-    /// asks its own copy of the same bits, and they have to land on the same one
-    /// or a file imports walked against a rule it was read by.
+    /// two flat ones of a triple at the front. **That is why this is public and
+    /// not `pub(crate)`**: it is how a reader is to pick which of the two
+    /// surfaces either side of a closed edge names the way that edge runs, and
+    /// `rcad-topo`'s `the_curved_one_of` already asks its own copy of the same
+    /// bits. The two have to land on the same surface or a file gets imported
+    /// walked against a rule it was read by. Nothing in `rcad-step` asks yet —
+    /// the reader that will is the rest of this work, and until it exists the
+    /// wider spelling carries no caller of its own.
     ///
     /// **A pipe, a cone and a bend written with the axis pointing the other way
     /// sort apart here, on purpose.** The two spellings are one surface, and
@@ -451,6 +454,85 @@ mod tests {
 
         let pipe = Cylinder::new(Axis::z(), 1.0).unwrap();
         assert_eq!(Surface::from(pipe).as_plane(), None);
+    }
+
+    /// Stepping the first coordinate up moves the point the way
+    /// [`Surface::the_way_its_first_coordinate_runs_at`] said it would, on all
+    /// five kinds.
+    ///
+    /// The check is on the *direction* and nothing else, because that is all the
+    /// answer claims to be: a small step forwards in the first coordinate,
+    /// minus the point itself, has to point the same way — a positive dot — and
+    /// a step backwards the other. A dot rather than an angle, so no tolerance
+    /// is chosen anywhere and nothing is scaled.
+    ///
+    /// Comparing against a *step* rather than against a hand-written formula is
+    /// the point: a formula copied out of `point_at` would pass whatever
+    /// `point_at` did, and what is being checked is that the two agree.
+    #[test]
+    fn stepping_the_first_coordinate_up_moves_the_way_this_says_it_will() {
+        let step = 1.0e-6;
+        let mut checked = 0;
+        for (surface, places) in every_surface_with_places_on_it() {
+            for (first, second) in places {
+                let here = surface.point_at(first, second);
+                let running = surface
+                    .the_way_its_first_coordinate_runs_at(here)
+                    .unwrap_or_else(|| {
+                        panic!("{surface:?} has no first coordinate at ({first}, {second})")
+                    });
+                let forwards = surface.point_at(first + step, second) - here;
+                let backwards = surface.point_at(first - step, second) - here;
+                assert!(
+                    forwards.dot(running) > 0.0,
+                    "{surface:?} at ({first}, {second}): a step up the first coordinate goes \
+                     {forwards:?}, which is not the way {running:?} points"
+                );
+                assert!(
+                    backwards.dot(running) < 0.0,
+                    "{surface:?} at ({first}, {second}): a step down the first coordinate goes \
+                     {backwards:?}, which is not against {running:?}"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 100, "a sweep this small proves little: {checked}");
+    }
+
+    /// A ball's poles and a cone's apex have no first coordinate, and say so.
+    ///
+    /// These are the two places on a surface where it pinches — every longitude
+    /// of a ball runs through its pole, and a cone's angle means nothing at its
+    /// apex — and both are written out exactly here rather than stepped towards,
+    /// because `Sphere::point_at` lands a hair off a pole (`cos(π/2)` is
+    /// `6.1e-17`) and a hair off is a place that *does* have a first coordinate.
+    #[test]
+    fn a_balls_pole_and_a_cones_apex_have_no_first_coordinate() {
+        let ball = Sphere::new(Point::new(1.0, 2.0, 3.0), 5.0).unwrap();
+        for pole in [Point::new(1.0, 2.0, 8.0), Point::new(1.0, 2.0, -2.0)] {
+            assert_eq!(
+                Surface::from(ball).the_way_its_first_coordinate_runs_at(pole),
+                None,
+                "a pole of {ball:?}"
+            );
+        }
+
+        let cone = Cone::new(
+            Axis::new(Point::new(1.0, 2.0, 3.0), Vector::new(0.0, 0.0, 1.0)).unwrap(),
+            0.5,
+        )
+        .unwrap();
+        assert_eq!(
+            Surface::from(cone).the_way_its_first_coordinate_runs_at(cone.apex()),
+            None
+        );
+
+        let pipe = Cylinder::new(Axis::z(), 2.0).unwrap();
+        assert_eq!(
+            Surface::from(pipe).the_way_its_first_coordinate_runs_at(Point::new(0.0, 0.0, 7.0)),
+            None,
+            "a point on a pipe's axis has no nearest point on its skin"
+        );
     }
 
     #[test]
@@ -651,6 +733,60 @@ mod tests {
             }
         }
         pairs
+    }
+
+    /// Every kind of surface, with places on it to ask about, in that surface's
+    /// own two coordinates.
+    ///
+    /// A cone's and a ball's lists keep away from the apex and the poles, which
+    /// have no answer and are checked on their own.
+    fn every_surface_with_places_on_it() -> Vec<(Surface, Vec<(f64, f64)>)> {
+        let angles = [-3.0, -1.5, -0.4, 0.0, 0.7, 2.2, 3.1];
+        let mut all = Vec::new();
+        for axis in every_axis() {
+            let mut round_and_along = Vec::new();
+            for round in angles {
+                for along in [-2.0, 1.0, 4.0] {
+                    round_and_along.push((round, along));
+                }
+            }
+            all.push((
+                Surface::Cylinder(Cylinder::new(axis, 2.0).expect("a radius")),
+                round_and_along.clone(),
+            ));
+            all.push((
+                Surface::Cone(Cone::new(axis, 0.5).expect("a slope")),
+                round_and_along,
+            ));
+            let mut over_and_round = Vec::new();
+            for over in angles {
+                for round in [-2.0, 0.3, 2.5] {
+                    over_and_round.push((over, round));
+                }
+            }
+            all.push((
+                Surface::Torus(Torus::new(axis, 3.0, 1.0).expect("two radii")),
+                over_and_round,
+            ));
+        }
+        let mut round_and_up = Vec::new();
+        for round in angles {
+            for up in [-1.2, -0.3, 0.0, 0.9] {
+                round_and_up.push((round, up));
+            }
+        }
+        all.push((
+            Surface::Sphere(Sphere::new(Point::new(1.0, -2.0, 0.5), 3.0).expect("a radius")),
+            round_and_up,
+        ));
+        all.push((
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(0.0, 1.0, 2.0), Vector::new(1.0, 2.0, 3.0))
+                    .expect("a normal with length"),
+            ),
+            vec![(0.0, 0.0), (1.5, -2.0), (-3.0, 4.0)],
+        ));
+        all
     }
 
     fn every_axis() -> Vec<Axis> {
