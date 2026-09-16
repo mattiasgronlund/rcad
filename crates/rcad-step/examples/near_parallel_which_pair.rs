@@ -14,21 +14,6 @@
 //! of the one entity the builder was working on when it gave up — read that,
 //! find which two faces it sits between, and check tangency on *that* pair.
 //!
-//! # What it actually found
-//!
-//! `Refusal::ThisEntityOfTheSolidWasRefused` names an entity only when
-//! `SolidBuilder::which_entity_the_builder_meant` recognizes the
-//! `rcad_topo::Error` variant — and the near-parallel crossing
-//! (`rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent`) is a
-//! unit variant with no fields at all, raised from deep inside
-//! `Model::validate` (`SolidBuilder::build` → `scratch.validate` →
-//! `Error::Geometry`), which is not one of the variants that function
-//! matches. So for every one of the 44, `Import::read` hands back
-//! `Refusal::TheSolidTheFileDescribesIsNotOne { solid, .. }` — the whole-solid
-//! form, naming the `MANIFOLD_SOLID_BREP` and nothing narrower. There is no
-//! `#id` to read a pair out of; see the module's closing summary for the
-//! count this run actually got, straight from its own output.
-//!
 //! Run with `RCAD_STEP_CORPUS` pointing at a directory holding `nist/` and
 //! `kicad/`:
 //!
@@ -36,6 +21,49 @@
 //! RCAD_STEP_CORPUS=<path> mise exec -- cargo run -p rcad-step --release \
 //!   --example near_parallel_which_pair
 //! ```
+//!
+//! # What that run printed, on 2026-09-16
+//!
+//! ```text
+//! === summary over the 44 files ===
+//!   ThisEntityOfTheSolidWasRefused (an #id to read a pair from): 0
+//!   TheSolidTheFileDescribesIsNotOne (no entity, whole-solid form):     44
+//!   anything else (succeeded, or a different refusal):                   0
+//! ```
+//!
+//! All 44 of them, and every single one the same line:
+//!
+//! ```text
+//!   TheSolidTheFileDescribesIsNotOne: solid #15, why: geometry: this crossing
+//!   runs where its two surfaces are too nearly parallel to follow it
+//! ```
+//!
+//! So **this plan does not work, and the reason is a design one and not a
+//! bug.** `Refusal::ThisEntityOfTheSolidWasRefused` names an entity only when
+//! `SolidBuilder::which_entity_the_builder_meant` (`brep.rs:902`) recognizes
+//! the `rcad_topo::Error` it was handed, and that function names six
+//! `ADraft…` variants and answers `None` to everything else. The near-parallel
+//! crossing is none of the six: it is
+//! `rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent`, a unit
+//! variant carrying no fields, and it arrives wrapped as
+//! `rcad_topo::Error::Geometry` — which is what the `geometry:` in every line
+//! above is. Inside `SolidBuilder::build` the one step that can produce an
+//! `Error::Geometry` at all is `scratch.validate`, so the refusal is the
+//! sweep's and the sweep does not say which pair of surfaces it was looking
+//! at. `what_stopped_the_build` (`brep.rs:727`) therefore takes the `None`
+//! branch and publishes the whole-solid form, naming the `MANIFOLD_SOLID_BREP`
+//! — `#15` in all 44, which are all KiCad files from one writer — and nothing
+//! narrower.
+//!
+//! **The census's hole is therefore still open, and this example cannot close
+//! it.** `pair_for_entity` and `evaluate_surfaces` below are never reached: 0
+//! files took the `ThisEntityOfTheSolidWasRefused` arm, so the tangency test
+//! was applied to no pair at all. They are kept, rather than deleted, because
+//! they are the half that runs the moment an `#id` does come back. Closing the
+//! hole needs the refusal to carry the two surfaces the marcher gave up
+//! between — a kernel change in `rcad-geom`/`rcad-topo`, not a reading of the
+//! STEP text — and until then "the tangent pair the census found is the pair
+//! that refused" is unchecked, so all 44 LIMIT verdicts rest on it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -115,9 +143,7 @@ fn main() {
             }
             Err(Refusal::TheSolidTheFileDescribesIsNotOne { solid, why }) => {
                 whole_solid += 1;
-                println!(
-                    "    TheSolidTheFileDescribesIsNotOne: solid {solid}, why: {why}"
-                );
+                println!("    TheSolidTheFileDescribesIsNotOne: solid {solid}, why: {why}");
             }
             Err(other_refusal) => {
                 other += 1;
@@ -127,12 +153,8 @@ fn main() {
     }
 
     println!("\n=== summary over the {} files ===", qualifying.len());
-    println!(
-        "  ThisEntityOfTheSolidWasRefused (an #id to read a pair from): {named_entity}"
-    );
-    println!(
-        "  TheSolidTheFileDescribesIsNotOne (no entity, whole-solid form):     {whole_solid}"
-    );
+    println!("  ThisEntityOfTheSolidWasRefused (an #id to read a pair from): {named_entity}");
+    println!("  TheSolidTheFileDescribesIsNotOne (no entity, whole-solid form):     {whole_solid}");
     println!("  anything else (succeeded, or a different refusal):                   {other}");
     if named_entity > 0 {
         println!(
@@ -223,7 +245,12 @@ fn pair_for_entity(
         let mut both = two.iter().copied();
         let a = both.next()?;
         let b = both.next()?;
-        return Some((a, b, kind_name(&faces[&a]).to_owned(), kind_name(&faces[&b]).to_owned()));
+        return Some((
+            a,
+            b,
+            kind_name(&faces[&a]).to_owned(),
+            kind_name(&faces[&b]).to_owned(),
+        ));
     }
     None
 }
@@ -409,7 +436,14 @@ fn number_of(value: &Value) -> Option<f64> {
     match value {
         Value::Real(number) => Some(*number),
         Value::Integer(number) => Some(*number as f64),
-        _ => None,
+        Value::Text(_)
+        | Value::Enumeration(_)
+        | Value::Reference(_)
+        | Value::List(_)
+        | Value::Typed { .. }
+        | Value::Nothing
+        | Value::Derived
+        | _ => None,
     }
 }
 
@@ -499,7 +533,9 @@ fn evaluate_surfaces(a: &SurfaceGeom, b: &SurfaceGeom) -> PairEvidence {
                 confirmed_limit: folded < DEGENERATE_DEG && (matches_external || matches_internal),
             }
         }
-        _ => PairEvidence::uncomputable("not one of plane/plane, plane/cylinder or cylinder/cylinder"),
+        _ => PairEvidence::uncomputable(
+            "not one of plane/plane, plane/cylinder or cylinder/cylinder",
+        ),
     }
 }
 
