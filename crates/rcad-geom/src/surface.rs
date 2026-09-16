@@ -5,7 +5,7 @@ use core::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 use crate::isometry::Isometry;
-use crate::point::Point;
+use crate::point::{Point, Vector};
 use crate::{Cone, Cylinder, Plane, Sphere, Torus};
 
 /// The surface a face sits on.
@@ -159,6 +159,92 @@ impl Surface {
         }
     }
 
+    /// Which way a point moves when this surface's **first** coordinate goes up,
+    /// at `at`.
+    ///
+    /// [`Surface::point_at`] turns a pair of coordinates into a point,
+    /// [`Surface::coordinates_of`] comes back, and this is the third of the set:
+    /// it says which way the first of the two runs. `rcad-topo` calls it the
+    /// surface's *longitude*, and it is the direction a closed edge is stored
+    /// running along (`docs/decisions.md` §36.18) — the round-the-pipe angle on
+    /// a pipe or a cone, the longitude on a ball, the angle round the **tube**
+    /// on a bend of pipe, and the first of [`Plane::basis`]'s two directions on
+    /// a flat one.
+    ///
+    /// **A direction and not a rate.** Nothing here is scaled to length one, so
+    /// only the answer's direction means anything and its length does not. That
+    /// is what keeps every arm a polynomial in the numbers the surface stores,
+    /// with no square root anywhere in it (`docs/decisions.md` §31.2), which is
+    /// what a caller reading the sign of a dot product needs. A caller that
+    /// wants a *rate* wants [`Surface::furthest_a_unit_step_goes`].
+    ///
+    /// **This is meant to be the one spelling of it.** `rcad-topo` works the
+    /// same direction out for itself in `validate.rs`, as
+    /// `the_way_it_is_parametrised_about` crossed into `gradient_of`, and keeps
+    /// a second `gradient_of` in `mesh.rs` besides. Two spellings of one
+    /// question is how two answers come to disagree (`docs/decisions.md`
+    /// §23.8), so those are to call this. Rewiring them is not this method's
+    /// own change.
+    ///
+    /// # Where there is no answer
+    ///
+    /// `None`, in exactly the places each surface's own `coordinates_of` says
+    /// its first coordinate is not determined by the geometry:
+    ///
+    /// - a ball's two **poles**, where every longitude runs through the one
+    ///   point — which is [`Surface::ROUND_TRIP_ROUNDOFF`]'s own reason, that a
+    ///   step in longitude carries nothing at all there;
+    /// - a cone's **apex**, where the second coordinate pinches the first away
+    ///   to nothing;
+    /// - a point on the **axis** of a pipe, a cone or a bend, which has no
+    ///   nearest point on the surface to answer about.
+    ///
+    /// A pipe and a bend pinch nowhere, so a point on either always has one, and
+    /// a plane always has one.
+    ///
+    /// The question is about a point **on** the surface. A point off it gets its
+    /// nearest point's answer wherever the arithmetic has one, the same way
+    /// [`Surface::coordinates_of`] does.
+    #[must_use]
+    pub fn the_way_its_first_coordinate_runs_at(&self, at: Point) -> Option<Vector> {
+        let running = match self {
+            Surface::Plane(flat) => flat.basis().0,
+            // A ball has no axis of its own to be wound about, so the frame is
+            // the world's — [`Sphere::point_at`] says so in its arithmetic.
+            Surface::Sphere(ball) => Vector::new(0.0, 0.0, 1.0).cross(at - ball.centre()),
+            // `w × (at − origin)` is `w` crossed into the way the surface faces,
+            // with the part of it along `w` dropped for costing nothing: `w`
+            // crossed into itself is zero.
+            Surface::Cylinder(pipe) => pipe.axis().direction().cross(at - pipe.axis().origin()),
+            Surface::Cone(cone) => cone.axis().direction().cross(at - cone.apex()),
+            Surface::Torus(ring) => Surface::the_way_a_bend_winds_round_its_tube_at(ring, at),
+        };
+        (running != Vector::zero()).then_some(running)
+    }
+
+    /// Which way a bend of pipe's first coordinate runs, which is round its
+    /// **tube** and not round its ring.
+    ///
+    /// The other four wind about one fixed direction, so crossing that into the
+    /// way the surface faces is the whole of it. A bend does not: the direction
+    /// its tube winds about is the tangent to the centre circle, and that turns
+    /// as you go round the ring. So this is the general form written out — the
+    /// tangent `x × w`, crossed into the way the surface faces.
+    ///
+    /// Handed the bend's own axis instead of that tangent, the answer at a
+    /// corner on a meridian circle would be square to the circle and the sign a
+    /// caller reads off it would be exactly zero.
+    fn the_way_a_bend_winds_round_its_tube_at(ring: &Torus, at: Point) -> Vector {
+        let (centre, along) = (ring.centre(), ring.axis().direction());
+        let out = at - centre;
+        let (big, small) = (ring.ring_radius(), ring.tube_radius());
+        // The gradient of `(w·w)(x·x + R² − r²)² − 4R²‖x × w‖²` at
+        // `x = at − centre`, divided by four.
+        let bulge = out.dot(out) - big * big - small * small;
+        let facing = out * (along.dot(along) * bulge) + along * (2.0 * big * big * along.dot(out));
+        out.cross(along).cross(facing)
+    }
+
     /// How far in space one unit of `u`, and one of `v`, can carry you.
     ///
     /// An **upper bound**, not a rate, and the difference is why it is named
@@ -235,7 +321,11 @@ impl Surface {
     /// three for what a single one costs.
     ///
     /// Planes sort before balls and balls before pipes, which is what puts the
-    /// two flat ones of a triple at the front.
+    /// two flat ones of a triple at the front, and it is how a reader picks
+    /// which of the two surfaces either side of a closed edge names the way that
+    /// edge runs: `rcad-step` asks this and `rcad-topo`'s `the_curved_one_of`
+    /// asks its own copy of the same bits, and they have to land on the same one
+    /// or a file imports walked against a rule it was read by.
     ///
     /// **A pipe, a cone and a bend written with the axis pointing the other way
     /// sort apart here, on purpose.** The two spellings are one surface, and
@@ -248,7 +338,8 @@ impl Surface {
     /// 12 960 triples of pipes, cones and bends with every stored axis turned
     /// round and gets the same corners in the same order, bit for bit, so the
     /// row they sort into never mattered.
-    pub(crate) fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
+    #[must_use]
+    pub fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
         let (mine, my_numbers) = self.the_numbers_it_is_written_with();
         let (theirs, their_numbers) = other.the_numbers_it_is_written_with();
         mine.cmp(&theirs).then_with(|| {
