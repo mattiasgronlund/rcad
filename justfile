@@ -25,12 +25,181 @@ set positional-arguments
 list:
     @{{ just_executable() }} --list --unsorted
 
+# Every step of the gate, in the order CI runs them, and the one place that
+# order is written down. `check-gate-runs-every-check` reads this line to prove
+# no `check-*` recipe was written and then never run.
+#
+# **A list rather than `gate`'s dependencies, which is what it used to be.** A
+# dependency that fails takes `just` down with it, so a gate that failed printed
+# whatever the failing step said and stopped — and the summary block below, the
+# thing a reader actually wants, could only ever have been printed on a pass.
+# Driving the steps from a loop is what lets the same block describe both.
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest lint test check-release-build check-t-selftest deny"
+
+# Where the whole run is kept, so the block at the end can be read back in full
+# without running it again. A variable so `check-gate-summary-selftest` can
+# point a nested run somewhere else: the selftest runs inside the gate, and a
+# fixed path would have it truncate the log its own parent was still writing.
+gate_log := "target/last-gate.log"
+
 # The whole gate, and the same command CI runs. Named `gate` rather than
-# `test-all` because it is 20 checks, a lint and a `cargo-deny` around exactly
-# one `test` — and this repo already says "gated green", "a gate agent", "the
-# gate worktree". `test-all` would have shipped a false sentence on day one.
-[doc("Everything, in the order CI runs it. ~9 minutes.")]
-gate: check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-lanes-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest lint test check-release-build check-t-selftest deny
+# `test-all` because it is two dozen checks, a lint and a `cargo-deny` around
+# exactly one `test` — and this repo already says "gated green", "a gate agent",
+# "the gate worktree". `test-all` would have shipped a false sentence on day one.
+#
+# **It ends with a summary block, and that is what the nine minutes are for.**
+# In one week 145 of 415 gate runs were followed by a second call that grepped
+# the redirected log for `Summary|FAIL|tests run` — a mean of 159k tokens of
+# context to read back three numbers this recipe already had in hand. So it says
+# them itself, last, on stdout: pass or fail, the counts, and the name of the
+# first thing that broke.
+#
+# The exit code is untouched — CI reads it and nothing else.
+#
+# Each step's stderr is folded into stdout so that `tee` keeps one stream in the
+# order it happened. That is the shape a redirected run already had, and the
+# block is parsed back out of it.
+[doc("Everything, in the order CI runs it. ~9 minutes. Ends with a summary block.")]
+gate:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    log='{{ gate_log }}'
+    mkdir -p "$(dirname "$log")"
+    : >"$log"
+    failed=""
+    status=0
+    for step in {{ gate_steps }}; do
+        {{ just_executable() }} "$step" 2>&1 | tee -a "$log"
+        # Read before anything else runs. `[` is a command, so it rewrites
+        # `PIPESTATUS` with its own 0 — which read as a clean gate over a step
+        # that had just failed, the first time this loop was run.
+        step_status=${PIPESTATUS[0]}
+        if [ "$step_status" -ne 0 ]; then
+            failed="$step"
+            status=$step_status
+            break
+        fi
+    done
+    {{ just_executable() }} _gate-summary "$log" "$status" "$failed" | tee -a "$log"
+    exit $status
+
+# The block itself, kept apart from the run so `check-gate-summary-selftest` can
+# hold it against logs whose answer is already known — the same split `t` and
+# `_test-digest` have, and for the same reason.
+#
+# **The escape codes come off before anything is grepped.** `ci.yml` sets
+# `CARGO_TERM_COLOR: always`, so on a runner nextest's summary line arrives as
+# `\e[1m     Summary\e[0m ...` and an anchored pattern sees a colour code where
+# it wanted a space. That is not a guess: it is what turned two CI runs red in
+# `check-wildcards`, which anchored its grep the same way (docs/decisions.md
+# §77.6).
+#
+# **A missing count reads as `not reached`, never as zero.** A gate that died in
+# `check-enums` never got to `test`, and a block that printed `0 tests run`
+# there would be describing the gate's own failure as a clean empty suite.
+#
+# **Every count line is reported, never the last one.** The gate has two nextest
+# runs — `test` and `check-release-build` — and eight `test result:` lines, one
+# per crate, out of `cargo test --doc`. Reading the last of each got `3 tests
+# run` over a suite of 1869 and `2 passed` over 24 doc tests, on a real green
+# gate. A number that small and that wrong is worse than none, because it reads
+# as a real total. So the `Summary` lines are all printed, each under its own
+# `tests:` label, and the doc tests are added up.
+[private]
+_gate-summary log status failed="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    plain=$(sed 's/\x1b\[[0-9;]*m//g' '{{ log }}' 2>/dev/null)
+    tests=$(grep -E '^ *Summary ' <<<"$plain")
+    doctests=$(awk '/^test result: /{passed += $4; failed += $6; crates += 1} \
+                    END {if (crates) printf "%d passed, %d failed, across %d crate(s)", passed, failed, crates}' \
+                    <<<"$plain")
+    echo
+    echo "=== gate summary ==="
+    if [ '{{ status }}' = "0" ]; then
+        echo "gate: PASS"
+    else
+        echo "gate: FAIL  first failure: {{ failed }} (exit {{ status }})"
+        first=$(grep -m1 -E '^ *FAIL \[' <<<"$plain" | sed 's/^ *//')
+        [ -z "$first" ] || echo "first failing test: $first"
+    fi
+    if [ -z "$tests" ]; then
+        echo "tests: not reached"
+    else
+        sed 's/^ *//; s/^/tests: /' <<<"$tests"
+    fi
+    echo "doc tests: ${doctests:-not reached}"
+    echo "full log: {{ log }}"
+
+# Holds the block and the loop that drives it against fixtures whose right
+# answer is known, rather than against whatever the gate happens to do today.
+#
+# **The loop is exercised by moving `gate_steps`, not by running the real gate.**
+# This selftest is itself a step of the gate, so a nested real run would not
+# terminate. `--set` hands the driver a step list one of whose words is not a
+# recipe at all, which is the cheapest failing step there is and needs no
+# fixture recipe of its own.
+#
+# The five ways this can be wrong each get a fixture: a pass that does not print
+# the block, a failure that prints no block at all (which is the whole defect
+# this recipe exists to remove), a failure that does not name the step that
+# broke, a log whose counts are behind colour codes, and a doc-test total read
+# off one crate's line rather than added up.
+[private]
+check-gate-summary-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    j='{{ just_executable() }}'
+
+    fail() {
+        echo "the gate summary drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+
+    # A pass. `list` is a real recipe that costs nothing, so the driver runs
+    # something real without the gate running itself.
+    got=$($j --set gate_steps list --set gate_log "$dir/pass.log" gate 2>&1) \
+        || fail "a gate whose every step passed exited non-zero"
+    [ "$(tail -6 <<<"$got" | grep -c '=== gate summary ===')" -eq 1 ] \
+        || fail "the block is not at the tail, which is the one place a redirected run is read"
+    grep -q '^gate: PASS$' <<<"$got" || fail "a passing gate did not say so"
+    grep -q '^tests: not reached$' <<<"$got" \
+        || fail "a run that never reached the suite reported a count anyway"
+
+    # A failure. The step list names something that is not a recipe, so `just`
+    # exits non-zero on it, and the two steps after it must not run.
+    got=$($j --set gate_steps 'list no-such-step list' --set gate_log "$dir/fail.log" gate 2>&1) \
+        && fail "a gate with a failing step exited 0"
+    grep -q '=== gate summary ===' <<<"$got" \
+        || fail "a failing gate printed no block, which is the defect this exists to remove"
+    grep -q '^gate: FAIL  first failure: no-such-step' <<<"$got" \
+        || fail "the block does not name the step that broke"
+    [ "$(grep -c 'Everything this repo can do' "$dir/fail.log")" -eq 1 ] \
+        || fail "the gate carried on past a failing step"
+
+    # The counts, read back out of a log written the way a runner writes one:
+    # `CARGO_TERM_COLOR: always`, so every line arrives wrapped in escape codes.
+    printf '\033[1m     Summary\033[0m [  12.345s] 1811 tests run: 1811 passed, 0 skipped\n' >"$dir/counts.log"
+    printf 'test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n' >>"$dir/counts.log"
+    printf 'test result: ok. 9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n' >>"$dir/counts.log"
+    printf '     Summary [   0.007s] 3 tests run: 3 passed, 0 skipped\n' >>"$dir/counts.log"
+    got=$($j _gate-summary "$dir/counts.log" 0)
+    grep -q '^tests: Summary \[  12.345s\] 1811 tests run: 1811 passed, 0 skipped$' <<<"$got" \
+        || fail "the test counts did not survive the colour codes a runner writes"
+    grep -q '^tests: Summary \[   0.007s\] 3 tests run: 3 passed, 0 skipped$' <<<"$got" \
+        || fail "only one of the gate's two nextest runs was reported"
+    grep -q '^doc tests: 24 passed, 1 failed, across 2 crate(s)$' <<<"$got" \
+        || fail "the doc tests were read off one crate's line instead of added up over all of them"
+
+    # A failing suite names the first failing test as well as the step, because
+    # `test` is one step and the answer wanted under it is which test.
+    printf '        FAIL [   0.011s] rcad-geom a_plane_and_a_sphere\n' >>"$dir/counts.log"
+    got=$($j _gate-summary "$dir/counts.log" 1 test)
+    grep -q '^first failing test: FAIL \[   0.011s\] rcad-geom a_plane_and_a_sphere$' <<<"$got" \
+        || fail "a failing suite did not name the first test that failed"
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -495,6 +664,9 @@ check-kache-off-on-ci:
 # renaming `default` to `gate` broke the anchor on the second line below, the
 # pinned count is what turned that into a failure rather than a silent pass, and
 # both arms were re-checked by mutation afterwards rather than by running green.
+# The anchor moved a second time when `gate` stopped being a dependency list and
+# its steps became `gate_steps`, so that a failing gate could still print a
+# summary; the count caught that move too.
 #
 # So bumping the number is how a new `check-*` recipe gets added, deliberately,
 # in the commit that adds it.
@@ -512,12 +684,13 @@ check-kache-off-on-ci:
 # who also noticed that nothing held the ordering it depends on.
 [doc("Every check-* recipe is in `gate`, and check-plugins is first.")]
 check-gate-runs-every-check:
-    @defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
-    listed=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep '^check-' | sort -u); \
-    others=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
+    @steps=$(grep -m1 '^gate_steps := ' justfile | sed 's/^gate_steps := "//; s/"$//'); \
+    defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
+    listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
+    others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "25" ]; then \
-        echo "found $n check-* recipes, expected 25"; \
+    if [ "$n" != "34" ]; then \
+        echo "found $n check-* recipes, expected 34"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -536,7 +709,7 @@ check-gate-runs-every-check:
         echo "change that sentence in the same commit, or this is now false"; \
         exit 1; \
     fi; \
-    first=$(grep -m1 '^gate:' justfile | sed 's/^gate: *//' | tr ' ' '\n' | grep -m1 .); \
+    first=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -m1 .); \
     if [ "$first" != "check-plugins" ]; then \
         echo "gate runs '$first' first, expected 'check-plugins'"; \
         echo "CLAUDE.md says check-plugins runs first thing in just gate, and"; \
@@ -564,7 +737,7 @@ decisions_file := "docs/decisions.md"
 # The map of docs/decisions.md: every top-level section, and what it costs to
 # read.
 #
-# 17 000 lines under 487 headings, so the file is not a thing anyone holds at
+# 27 000 lines under 843 headings, so the file is not a thing anyone holds at
 # once, and the way it was being read was `sed -n '15690,15900p'` — a guessed
 # line range, ~5 000 tokens a guess, landing beside the section about as often
 # as on it. On 2026-09-05 that cost 123 calls and ~180 000 tokens in one day,
@@ -1182,35 +1355,51 @@ plugins_root := env_var_or_default("CLAUDE_PLUGINS_ROOT", if path_exists(marketp
 questions_plugin := env_var_or_default("CLAUDE_QUESTIONS_PLUGIN", plugins_root / "questions")
 guardrails_plugin := env_var_or_default("CLAUDE_GUARDRAILS_PLUGIN", plugins_root / "guardrails")
 
-# One open question, in full, by the hash the status line prints beside it.
+# The open questions, in full, by the hash the status line prints beside them.
 #
 #     just question                 the sessions that have open questions
-#     just question 766405          that session's labels and headings
-#     just question 766405 Q19      that one question, body and all
+#     just question 766405          every open question in that session, in full
+#     just question 766405 Q19 Q21  those two, answered or not
+#     just question 766405 --labels one line per entry, the old default
+#     just question 766405 --all    the answered ones too
+#     just question 766405 --json   the whole file, for a program
+#
+# **This recipe is for an agent. `just question-tui` is the one a person types.**
+# That split is what sets the default. Terseness here used to be justified by
+# what "you came for" and by a finite screen — true of a human at a terminal,
+# and false of the caller this actually has. A call is billed the context it is
+# made at, not the bytes it returns: across the five longest transcripts in this
+# repo the mean turn bills 144 k-182 k input against 850-1 300 output, 97 % of it
+# cache reads. One avoidable follow-up costs about what carrying 2 200 extra
+# resident tokens for 73 further turns costs, and the largest question file in
+# the tree is 2 200 tokens whole. Drilling down is a human affordance and an
+# agent tax. `docs/decisions.md` §100.
+#
+# **The stronger reason is that a malformed entry is only readable here.** It has
+# no label to print, so `--labels` can say no more than `??` with a line number
+# and the status line no more than `??×1`; the TUI drops it outright. Printing
+# bodies by default is what puts a broken entry in front of someone able to fix
+# it. That would be worth doing at zero token cost.
 #
 # **The hash exists because nothing else knows the address.** The file is named
 # by the session id, which only the harness has, so reading one question meant
-# `!cat` on the whole file — fifteen entries put in front of you to read one,
-# and shell mode then charges the model for every line of it on every later
-# turn. That is the same arithmetic that put the status line here to begin with.
+# `!cat` on the whole file, and shell mode then charges the model for every line
+# of it on every later turn.
 #
-# **The middle form is also the format check.** It and `statusline.sh` are the
-# same parser — `.claude/questions.py` — so an entry one of them would drop
-# cannot be one the other shows. They used to be two implementations of one
+# **This and `statusline.sh` are the same parser**, so an entry one of them would
+# drop cannot be one the other shows. They used to be two implementations of one
 # grammar held in step by a comment, and they disagreed: an entry carrying two
 # labels, `**Q7 / Q11**`, counted as one, and Q11 and Q27 stayed open and
-# invisible through 2026-09-06.
-#
-# Nothing is ever dropped. An entry whose label does not parse is listed as `??`
-# with its line number rather than skipped, because a question that vanishes is
-# the one failure this cannot have.
+# invisible through 2026-09-06. That entry is also why naming two labels prints
+# one body: what is deduped is the entry, not the label.
 #
 # There is deliberately no recipe that *writes* a question. A body is paragraphs
 # of prose with backticks and `§` refs in it, so passing one as a shell argument
 # costs what `Edit` costs and echoes the whole thing back on top; and marking one
 # answered is a substitution, which is the quiet-failure shape §50.8 is about.
-[doc("One open question in full, by the hash the status line prints.")]
-question hash="" label="":
+# For the caller this recipe is written for, `Write` already is that API.
+[doc("The open questions in full, for an agent. `question-tui` is the human one.")]
+question hash="" *args:
     #!/usr/bin/env bash
     set -euo pipefail
     q="{{questions_plugin}}/bin/questions.py"
@@ -1220,17 +1409,43 @@ question hash="" label="":
     fi
     file=$(python3 "$q" find "{{questions_root}}" "{{hash}}")
 
-    if [ -n "{{label}}" ]; then
-        exec python3 "$q" entry "$file" "{{label}}"
+    mode=open
+    labels=()
+    given=({{args}})
+    for arg in ${given[@]+"${given[@]}"}; do
+        case "$arg" in
+        --labels) mode=labels ;;
+        --all) mode=all ;;
+        --json) mode=json ;;
+        --*) printf 'unknown flag %s — try --labels, --all or --json\n' "$arg" >&2; exit 2 ;;
+        *) labels+=("$arg") ;;
+        esac
+    done
+
+    # Before anything is printed: a program asked for the file, so it gets the
+    # file and nothing appended to it.
+    [ "$mode" = json ] && exec python3 "$q" json "$file"
+
+    # A named label bypasses the open filter. Asking for Q2 and being told there
+    # is no such question, because Q2 was answered an hour ago, is a worse
+    # failure than the one the filter saves.
+    if [ ${#labels[@]} -gt 0 ]; then
+        python3 "$q" entry "$file" "${labels[@]}"
+    elif [ "$mode" = labels ]; then
+        python3 "$q" labels "$file"
+    elif [ "$mode" = all ]; then
+        python3 "$q" entries "$file" --all
+    else
+        python3 "$q" entries "$file"
     fi
 
-    python3 "$q" labels "$file"
-
-    # A violation is announced but not spelled out here, because the listing is
-    # what you came for and a wall of grammar notes underneath it is not.
-    n=$(python3 "$q" check "$file" | grep -c . || true)
-    if [ "$n" -gt 0 ]; then
-        printf '\n  ⚠ %d grammar violation(s) — just question-check {{hash}}\n' "$n"
+    # The violations are named, not counted. A count is not actionable, and the
+    # second call that makes it actionable pays for the whole conversation again
+    # to learn three lines — 150 k tokens of context for a few hundred bytes.
+    problems=$(python3 "$q" check "$file" || true)
+    if [ -n "$problems" ]; then
+        printf '\n'
+        sed 's/^/  ⚠ /' <<<"$problems"
     fi
 
 # The same questions, to read and answer in rather than to print.
@@ -1380,16 +1595,40 @@ check-plugins:
         echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
 
     # Captured before it is matched: `grep -q` closes the pipe on its first
-    # hit, and under `pipefail` that SIGPIPE reads exactly like the listing
+    # hit, and under `pipefail` that SIGPIPE reads exactly like the output
     # having failed.
-    listing=$($j question 766405)
+    open=$($j question 766405)
+    grep -q 'indented body' <<<"$open" \
+        || { echo "the default did not print bodies, only headings"; exit 1; }
+
+    # Named, not counted. The count used to be the whole footer and cost a
+    # second call at full context to find out what it meant.
+    grep -q 'stated in prose but not marked' <<<"$open" \
+        || { echo "the footer did not name the violation it found"; exit 1; }
+    if grep -q 'grammar violation' <<<"$open"; then
+        echo "the footer counted violations instead of naming them"; exit 1
+    fi
+
+    listing=$($j question 766405 --labels)
     grep -q 'Q7, Q11' <<<"$listing" \
-        || { echo "the listing did not reach the plugin's parser"; exit 1; }
-    grep -q '⚠ 1 grammar violation' <<<"$listing" \
-        || { echo "the listing did not announce the violation it found"; exit 1; }
+        || { echo "--labels did not reach the plugin's parser"; exit 1; }
+    grep -q 'indented body' <<<"$listing" \
+        && { echo "--labels printed bodies"; exit 1; }
+
+    # One entry, two labels. Deduping by label rather than by entry prints the
+    # body twice and reads as two questions that happen to be identical.
+    both=$($j question 766405 Q7 Q11)
+    [ "$(grep -c 'indented body' <<<"$both")" = 1 ] \
+        || { echo "an entry with two labels printed more than once"; exit 1; }
+
     entry=$($j question 766405 Q11)
     grep -q 'indented body' <<<"$entry" \
         || { echo "an entry did not come back in full"; exit 1; }
+    python3 -c 'import json,sys; json.load(sys.stdin)' <<<"$($j question 766405 --json)" \
+        || { echo "--json did not come back as json"; exit 1; }
+    if $j question 766405 --nonsense >/dev/null 2>&1; then
+        echo "an unknown flag was accepted"; exit 1
+    fi
     if $j question zzzz >/dev/null 2>&1; then
         echo "a hash matching no session was accepted"; exit 1
     fi
@@ -1823,6 +2062,10 @@ fuzz_all := "fuzz fuzz-reader fuzz-writer fuzz-fuse fuzz-cones-and-tori"
 # Where a night's logs go. One directory per date, plus a one-line `latest`.
 fuzz_log_root := env_var_or_default("RCAD_FUZZ_LOGS", env_var("HOME") / "rcad-fuzz-logs")
 
+# Where systemd looks for the timer. An argument only so `check-fuzz-unit`'s
+# selftest can point it somewhere hermetic; nothing else sets it.
+systemd_user_dir := env_var_or_default("RCAD_SYSTEMD_USER", env_var("HOME") / ".config/systemd/user")
+
 # Where the overnight run accumulates what it finds worth keeping.
 #
 # **Outside the tree, and that is the whole of decision §81.** The corpus under
@@ -1902,11 +2145,34 @@ fuzz-overnight window="28800":
     # Deciding is separate from doing, in `fuzz-watermark` below, because this
     # recipe's selftest runs it in a real worktree and a checkout here would move
     # whichever tree the gate was run from.
-    target=$({{just_executable()}} fuzz-watermark 2>"$night/watermark.log") || true
-    cat "$night/watermark.log"
-    if [ -n "$target" ]; then
-        echo "advancing to $target, the last commit CI went green on"
-        git checkout --quiet --detach "$target"
+    if [ -n "${RCAD_FUZZ_ALREADY_ADVANCED:-}" ]; then
+        echo "standing where the night that started this one put us"
+    else
+        target=$({{just_executable()}} fuzz-watermark 2>"$night/watermark.log") || true
+        cat "$night/watermark.log"
+        if [ -n "$target" ]; then
+            echo "advancing to $target, the last commit CI went green on"
+            git checkout --quiet --detach "$target"
+
+            # **Start again, from the justfile that was just checked out.** `just`
+            # hands bash the whole recipe body before the first line of it runs,
+            # so without this a change to this recipe takes effect the night
+            # *after* it lands. That is not a hypothetical: the night of
+            # 2026-09-14 kept none of the six artifacts it found, because the
+            # body it was running had been read from a commit of 2026-09-11 and
+            # §91's copy-out landed on 2026-09-13.
+            #
+            # **A night advances once.** The commit just checked out is the
+            # newest green there was a moment ago, so the recipe taking over
+            # would almost always find nothing to move to and stop of its own
+            # accord — but "almost always" is a bound on CI's timing and not on
+            # this loop, and a night that spent itself chasing a branch that
+            # kept going green would say nothing about why. Once is also the
+            # honest reading of §90: the night follows the last green commit as
+            # of when it started.
+            export RCAD_FUZZ_ALREADY_ADVANCED=1
+            exec {{just_executable()}} fuzz-overnight "$(( deadline - $(date +%s) ))"
+        fi
     fi
 
     # How far behind `main` the night is, which is the indicator §81.4 asked for
@@ -1925,7 +2191,18 @@ fuzz-overnight window="28800":
             cargo +nightly fuzz build) >"$night/build.log" 2>&1; then
         tail -n 20 "$night/build.log"
         echo "the fuzz targets did not build, so nothing was fuzzed: $night/build.log"
-        echo "nightly is not pinned by this repo (docs/decisions.md §29.9); \`rustup toolchain install nightly\` is the usual answer"
+        # Which advice is the right advice depends on whether there is a `cargo`
+        # here at all. On 2026-09-15 there was not, and the night printed the
+        # nightly sentence over a `build.log` reading `cargo: command not found`
+        # — the one operator-facing line it wrote, naming the one thing that was
+        # never the question (§108.2).
+        if command -v cargo >/dev/null 2>&1; then
+            echo "nightly is not pinned by this repo (docs/decisions.md §29.9); \`rustup toolchain install nightly\` is the usual answer"
+        else
+            echo "there is no \`cargo\` on this PATH at all, so the toolchain is not the question:"
+            echo "  PATH=$PATH"
+            echo "a systemd run gets no profile. rcad-fuzz.service sets PATH itself for this reason, and \`just check-fuzz-unit\` says whether the copy systemd runs is the one in the tree"
+        fi
         printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
         exit 1
     fi
@@ -2230,12 +2507,15 @@ check-fuzz-overnight-selftest:
     chmod +x "$dir/bin/cargo"
 
     # The night asks `fuzz-watermark` where to stand, and this arm runs it for
-    # real in whatever worktree the gate was run from. A stub that can answer
-    # nothing keeps that hermetic — no network, no account — and the HEAD
-    # assertion at the end is what says a gate cannot move somebody's tree.
+    # real in whatever worktree the gate was run from. Answering nothing unless
+    # an arm asks for an answer keeps that hermetic — no network, no account —
+    # and the HEAD assertion at the end is what says a gate cannot move
+    # somebody's tree. The arm that does want the night to move sets `GH_GREEN`,
+    # and does it in a fixture repository of its own.
     cat >"$dir/bin/gh" <<'STUB'
     #!/usr/bin/env bash
-    exit 1
+    [ -n "${GH_GREEN:-}" ] || exit 1
+    cat "$GH_GREEN"
     STUB
     chmod +x "$dir/bin/gh"
     head_before=$(git rev-parse HEAD)
@@ -2375,6 +2655,139 @@ check-fuzz-overnight-selftest:
     [ ! -s "$dir/log" ] \
         || fail "the hub was refused only after cargo had been run"
 
+    # Six: a night runs the justfile it checked out, and not the one it woke up
+    # on. `just` reads the whole recipe body before the first line of it runs, so
+    # a recipe that advanced the tree and carried on would be fuzzing one commit
+    # with another commit's instructions — and every fix to this file would take
+    # effect the night after it landed. That is what happened on 2026-09-14: six
+    # artifacts kept nowhere, by a body read from a commit two days older than
+    # §91's copy-out.
+    #
+    # The fixture says which body ran by making the two commits disagree: the
+    # night starts on the real recipe and the commit it advances to carries a
+    # `fuzz-overnight` that does nothing but name itself.
+    night_repo="$dir/night"
+    git init -q -b main "$night_repo"
+    mkdir -p "$night_repo/fuzz"
+    touch "$night_repo/fuzz/.keep"
+    cp justfile "$night_repo/justfile"
+    git -C "$night_repo" add justfile fuzz/.keep
+    git -C "$night_repo" -c user.email=t@t -c user.name=t commit -q -m "the real recipe"
+    woke_on=$(git -C "$night_repo" rev-parse HEAD)
+    cat >"$night_repo/justfile" <<'STUB'
+    fuzz-overnight window="28800":
+        @echo "the checked-out justfile ran, with {{{{ window }} s left"
+    STUB
+    git -C "$night_repo" add justfile
+    git -C "$night_repo" -c user.email=t@t -c user.name=t commit -q -m "a recipe that names itself"
+    green=$(git -C "$night_repo" rev-parse HEAD)
+    git init -q --bare "$dir/night-origin.git"
+    git -C "$night_repo" remote add origin "$dir/night-origin.git"
+    git -C "$night_repo" push -q origin main
+    git -C "$night_repo" checkout -q --detach "$woke_on"
+    echo "$green" >"$dir/night-green"
+
+    # The status is read last, and not with `||`. A night that carried on with
+    # the wrong body goes on to build and fuzz, and then fails or passes for
+    # reasons of its own — so asserting on it first answers "did the fixture's
+    # stubs behave" where the arm means to ask "whose recipe ran".
+    : >"$dir/log"
+    status=0
+    (cd "$night_repo" && STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+        GH_GREEN="$dir/night-green" \
+        RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 20) >"$dir/out" 2>&1 || status=$?
+    grep -q "advancing to $green" "$dir/out" \
+        || fail "the night did not advance onto the green commit: $(cat "$dir/out")"
+    grep -q 'the checked-out justfile ran' "$dir/out" \
+        || fail "the night carried on with the recipe it woke up on: $(cat "$dir/out")"
+    [ ! -s "$dir/log" ] \
+        || fail "the recipe that woke up on the old commit built and fuzzed before handing over"
+    [ "$(git -C "$night_repo" rev-parse HEAD)" = "$green" ] \
+        || fail "the night ended on $(git -C "$night_repo" rev-parse HEAD) rather than the commit it advanced to"
+    [ "$status" -eq 0 ] || fail "a night that advanced exited $status: $(cat "$dir/out")"
+
+    # What is left of the window is handed on, rather than a fresh one. A night
+    # that started the clock again would run until morning past its deadline,
+    # which is arm one's mistake made where nothing else would catch it.
+    left=$(sed -n 's/.*ran, with \([0-9-]*\) s left.*/\1/p' "$dir/out")
+    [ -n "$left" ] || fail "the recipe taking over was told no window at all"
+    [ "$left" -le 20 ] \
+        || fail "the recipe taking over was given $left s of a twenty-second window"
+
+    # Seven: a night advances once. The commit it lands on is the newest green
+    # there was a moment ago, so the recipe taking over almost always finds
+    # nothing to move to — but "almost always" is a bound on CI's timing and not
+    # on this loop, and a night that spent itself chasing a branch that kept
+    # going green would say nothing about why.
+    git -C "$night_repo" checkout -q --detach "$woke_on"
+    : >"$dir/log"
+    (cd "$night_repo" && STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+        GH_GREEN="$dir/night-green" RCAD_FUZZ_ALREADY_ADVANCED=1 \
+        RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 8) >"$dir/out" 2>&1 \
+        || fail "a night told it had already advanced exited non-zero: $(cat "$dir/out")"
+    [ "$(git -C "$night_repo" rev-parse HEAD)" = "$woke_on" ] \
+        || fail "a night told it had already advanced moved the tree a second time"
+    # Counted off `fuzz_all` rather than written down. What this arm is about is
+    # the hand-over, not the roster — arm one owns the roster and says the
+    # number out loud there — and a literal here is a second place to remember
+    # when a target is added. One was, between this arm being written and the
+    # branch it was written on reaching `main`.
+    targets=$(wc -w <<<"{{ fuzz_all }}")
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq "$targets" ] \
+        || fail "the night that took over did not go on to fuzz all $targets targets: $(cat "$dir/out")"
+
+    # Eight: with no `cargo` on the PATH at all, the night says that and does not
+    # offer to install a nightly toolchain. This is 2026-09-15 exactly (§108.2):
+    # the real reason was in `build.log` and the only sentence addressed to a
+    # person named the toolchain, which was never the question.
+    #
+    # **The PATH is built here rather than borrowed, and asserted empty of
+    # `cargo` before it is used.** Borrowing `/usr/bin:/bin` passes on this
+    # machine, where cargo lives under `~/.cargo`, and silently tests nothing
+    # wherever cargo comes from a package — an arm passing for a property of the
+    # environment it ran in, which is §77.6's mistake and which this repo has
+    # now made three times.
+    # Built by dropping every PATH entry that holds a `cargo` and keeping the
+    # rest, rather than by listing the tools the night needs into a fresh
+    # directory. That list was tried and it is not a list anybody can finish:
+    # the first attempt died on `id`, which this justfile runs in a top-level
+    # backtick before any recipe body starts.
+    bare=""
+    IFS=: read -ra path_parts <<<"$PATH"
+    for part in "${path_parts[@]}"; do
+        [ -n "$part" ] || continue
+        if [ -x "$part/cargo" ]; then continue; fi
+        bare="${bare:+$bare:}$part"
+    done
+    if PATH="$bare" command -v cargo >/dev/null 2>&1; then
+        fail "the no-cargo fixture still has a cargo in it, so the arm below would prove nothing"
+    fi
+    # And the drop has to have taken cargo and nothing else. Where cargo ships in
+    # the same directory as the coreutils — a distribution package rather than
+    # rustup — this arm cannot run, and it says so instead of failing further
+    # down for a reason that reads like the night's fault.
+    for needed in bash git id date find sed awk grep tail wc timeout mktemp; do
+        if ! PATH="$bare" command -v "$needed" >/dev/null 2>&1; then
+            fail "dropping cargo from the PATH also dropped $needed, so this arm cannot run on this machine"
+        fi
+    done
+
+    : >"$dir/log"
+    status=0
+    PATH="$bare" STUB_LOG="$dir/log" RCAD_FUZZ_ALREADY_ADVANCED=1 \
+        RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 8 >"$dir/out" 2>&1 || status=$?
+    [ "$status" -ne 0 ] || fail "a night with no cargo at all reported success"
+    grep -q 'no `cargo` on this PATH at all' "$dir/out" \
+        || fail "a night with no cargo did not say so: $(cat "$dir/out")"
+    if grep -q 'rustup toolchain install nightly' "$dir/out"; then
+        fail "a night with no cargo offered to install a nightly, which is the sentence that misled on 2026-09-15"
+    fi
+    grep -q 'BUILD FAILED' "$dir/logs/latest" \
+        || fail "a night that could not build did not say BUILD FAILED in the summary line"
+
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed,
 # too far forward and it fuzzes what nothing has read.
@@ -2482,6 +2895,530 @@ check-fuzz-watermark-selftest:
     [ -z "$got" ] || fail "it offered to check out $got over uncommitted work"
     grep -q 'uncommitted changes' "$dir/why" \
         || fail "uncommitted work was passed over without saying why"
+
+# The morning after a night's fuzzing, in one call.
+#
+# What this replaces is four or five calls that each had to read a directory
+# somebody else wrote: the `latest` line, then the night's directory, then the
+# artifacts under it, then the decoder on each one, then whether any of it still
+# matters. Every one of those costs a fresh session the whole context of the
+# ones before it.
+#
+# `night` defaults to whatever `latest` names, which is what the timer wrote
+# when it finished. Giving one by hand reads an older night, and then the commit
+# is only known if `latest` still describes it — a night's directory does not
+# record its own commit, and this says "unknown" rather than reporting the wrong
+# one.
+#
+# **Both places an input can be.** `fuzz-overnight` copies what a target found
+# into `<night>/artifacts/` (§91), but the nights before that landed have their
+# inputs in `<root>/artifacts-rescued-<date>/` beside the night instead, put
+# there by hand — and the night of 2026-09-14 is one of them, because the body
+# that ran had been read from a commit older than the copy-out. Both layouts are
+# `<target-name>/<file>`, which is where the target name for the decoder comes
+# from: it is the artifact's own parent directory, not a guess off the `TO LOOK
+# AT` list, which names recipes rather than targets.
+#
+# **`against` is the tree the decoder runs in, and `main` is the point.** The
+# night stands on an older commit by design (§90), so "it crashed" is yesterday's
+# news and "it still crashes on `main`" is the question. When `main` is not what
+# this worktree is standing on, a detached worktree of it is made and taken away
+# again, so nobody's tree moves.
+#
+# A decode that fails is reported and not fatal: the exit code here says whether
+# the triage ran, because a morning that stops on the first undecodable input
+# tells you nothing about the other five.
+#
+# **The target comes from the artifact's own parent directory, and that name is
+# checked against `fuzz/fuzz_targets/*.rs` before anything is decoded.** A flat
+# directory of rescued artifacts — no target subdirectory at all — hands the
+# decoder a name that is not a target, and every one of those used to come back
+# as "did not come back clean", which reads exactly like a live crash and is
+# none. That input gets a third outcome instead, counted apart from the ones
+# that were actually decoded and actually failed.
+[doc("The morning after: what the night found, decoded, and whether main still fails.")]
+fuzz-triage night="" against="main":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    root='{{ fuzz_log_root }}'
+    latest="$root/latest"
+    night='{{ night }}'
+    if [ -z "$night" ]; then
+        if [ ! -f "$latest" ]; then
+            echo "nothing to triage: $latest does not exist, so no run has reported a night"
+            exit 1
+        fi
+        night=$(awk 'END{print $NF}' "$latest")
+    fi
+    if [ ! -d "$night" ]; then
+        echo "nothing to triage: $night is not a directory"
+        exit 1
+    fi
+
+    line=""
+    if [ -f "$latest" ] && [ "$(awk 'END{print $NF}' "$latest")" = "$night" ]; then
+        line=$(tail -1 "$latest")
+    fi
+    echo "night:    $night"
+    if [ -z "$line" ]; then
+        echo "commit:   unknown — $latest describes another night, and a night's directory does not record its own"
+        echo "targets:  unknown for the same reason; each artifact below names its own"
+    elif [ "$(awk '{print $3}' <<<"$line")" = "BUILD" ]; then
+        echo "commit:   none — the targets did not build that night: $night/build.log"
+        echo "targets:  none ran"
+    else
+        echo "commit:   $(awk '{print $3}' <<<"$line")"
+        flagged=$(sed -n 's/.*TO LOOK AT (\([^)]*\)).*/\1/p' <<<"$line")
+        echo "targets:  ${flagged:-nothing flagged}"
+    fi
+    echo "summary:  ${line:-(this night is not the one $latest describes)}"
+
+    artifacts="$night/artifacts"
+    rescued="$root/artifacts-rescued-$(basename "$night")"
+    if [ -d "$artifacts" ]; then
+        echo "inputs:   $artifacts"
+    elif [ -d "$rescued" ]; then
+        echo "inputs:   $rescued (rescued beside the night; $artifacts is not there)"
+        artifacts="$rescued"
+    else
+        echo "inputs:   none — neither $artifacts nor $rescued exists"
+        exit 0
+    fi
+    files=$(find "$artifacts" -type f | sort)
+    if [ -z "$files" ]; then
+        echo "no files under $artifacts, so there is nothing to decode"
+        exit 0
+    fi
+
+    at=$(git rev-parse --verify --quiet '{{ against }}^{commit}')
+    if [ -z "$at" ]; then
+        echo "there is no commit named '{{ against }}' here, so nothing can be replayed against it"
+        exit 1
+    fi
+    work="."
+    if [ "$at" != "$(git rev-parse HEAD)" ]; then
+        borrowed=$(mktemp -d)
+        # Detached, so it never asks for a branch that is checked out elsewhere,
+        # and taken away on the way out however this ends — a worktree left
+        # behind would show up in `just lanes` as a lane nobody dispatched.
+        trap 'git worktree remove --force "$borrowed/tree" >/dev/null 2>&1 || true; rm -rf "$borrowed"' EXIT
+        if ! git worktree add --quiet --detach "$borrowed/tree" "$at"; then
+            echo "could not borrow a worktree at {{ against }}, so nothing was replayed against it"
+            exit 1
+        fi
+        work="$borrowed/tree"
+    fi
+    echo "replayed: {{ against }} ($(git rev-parse --short "$at")) in $work"
+
+    valid_targets=""
+    for target_rs in "$work"/fuzz/fuzz_targets/*.rs; do
+        [ -e "$target_rs" ] || continue
+        valid_targets="$valid_targets $(basename "$target_rs" .rs)"
+    done
+
+    still=0
+    untellable=0
+    while IFS= read -r file; do
+        target=$(basename "$(dirname "$file")")
+        echo
+        echo "--- $target / $(basename "$file") ---"
+        case " $valid_targets " in
+            *" $target "*) ;;
+            *)
+                untellable=$((untellable + 1))
+                echo "target:   unknown — $target names no fuzz_targets/*.rs on {{ against }}, so this could not be placed and was not decoded"
+                continue
+                ;;
+        esac
+        echo "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- $target $file"
+        reason=$(mktemp)
+        (cd "$work" && mise exec -- cargo run -q -p rcad-fuzz-explain -- "$target" "$file") 2>"$reason"
+        decoded=$?
+        if [ "$decoded" -eq 0 ]; then
+            echo "still fails on {{ against }}: no — it decoded and replayed clean"
+        else
+            still=$((still + 1))
+            echo "still fails on {{ against }}: exit $decoded, it did not come back clean — whether that is a failed decode or a failed replay is on stderr:"
+            sed 's/^/    /' "$reason"
+        fi
+        rm -f "$reason"
+    done <<<"$files"
+
+    echo
+    total=$(grep -c . <<<"$files")
+    echo "$still of $total input(s) did not come back clean on {{ against }}"
+    if [ "$untellable" -gt 0 ]; then
+        echo "$untellable of $total input(s) could not be told which target they came from, and are not counted as failures above"
+    fi
+
+# Turns one artifact `fuzz-triage` found into a seed, which today is a `cp`
+# somebody has to remember — and §98.5 is what happens when nobody does.
+#
+# **The kind comes off the source file's own name, not a hardcoded `crash`.**
+# libFuzzer writes `crash-<sha1>`, `slow-unit-<sha1>`, `oom-<sha1>` and
+# `timeout-<sha1>` — a slow-unit promoted under the crash kind would be a lie
+# in the one place a later reader trusts, the file name. So the kind is read
+# off, not invented: everything before the trailing sha1 and its separating
+# dash. A name with nothing readable there — no dash before the sha1 at all —
+# is refused rather than promoted under a guess.
+#
+# `name` is the human-readable slug, `crash-a-thin-pipe-on-a-fat-ones-skin` is
+# the shape already in the corpus, but the sha1 on the end is what makes the
+# name unique and it is never typed by hand: it is read off the file's own
+# name and checked against the file's own bytes before anything is written, so
+# a renamed or truncated artifact is refused rather than seeded under a false
+# name. Leave `name` out and the promoted file is just `<kind>-<sha1>`.
+[doc("Promote a fuzz artifact into fuzz/corpus/<target>/, sha1-checked, under its own kind.")]
+fuzz-promote target file name="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target_rs="fuzz/fuzz_targets/{{target}}.rs"
+    if [ ! -f "$target_rs" ]; then
+        echo "no such target: $target_rs does not exist"
+        exit 1
+    fi
+    file="{{file}}"
+    if [ ! -f "$file" ]; then
+        echo "no such file: $file"
+        exit 1
+    fi
+    base=$(basename "$file")
+    embedded=""
+    if [ "${#base}" -ge 40 ]; then
+        embedded="${base: -40}"
+    fi
+    if ! [[ "$embedded" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "refused: $base does not end in a 40-character sha1, so nothing was promoted"
+        exit 1
+    fi
+    actual=$(sha1sum "$file" | awk '{print $1}')
+    if [ "$actual" != "$embedded" ]; then
+        echo "refused: $base names sha1 $embedded but the file hashes to $actual"
+        exit 1
+    fi
+    kind="${base%-$embedded}"
+    if [ "$kind" = "$base" ] || [ -z "$kind" ]; then
+        echo "refused: $base has no <kind>-<sha1> shape, so no kind could be read from it"
+        exit 1
+    fi
+    dest_dir="fuzz/corpus/{{target}}"
+    name="{{name}}"
+    if [ -n "$name" ]; then
+        dest="$dest_dir/$kind-$name-$embedded"
+    else
+        dest="$dest_dir/$kind-$embedded"
+    fi
+    if [ -e "$dest" ]; then
+        if cmp -s "$file" "$dest"; then
+            echo "already there: $dest"
+            exit 0
+        fi
+        echo "refused: $dest already exists with different contents"
+        exit 1
+    fi
+    mkdir -p "$dest_dir"
+    cp "$file" "$dest"
+    echo "promoted: $dest"
+
+# Pins `fuzz-triage` against nights this builds itself: a `latest` line in the
+# shape `fuzz-overnight` writes, artifacts in both of the two places they land,
+# and a night nothing has reported.
+#
+# **The decoder is asserted by name, first, and that is not decoration.** It is
+# another lane's crate, and without it every arm below would still pass: a
+# decoder that cannot run reports as an input that did not come back clean,
+# which is the right thing for the recipe to do and says nothing at all about
+# whether the decoder was ever there. So this arm fails loudly until
+# `rcad-fuzz-explain` exists, rather than going quietly green over a contract
+# nothing implements.
+#
+# `HEAD` rather than `main` for `against`, because the arms are about the
+# recipe's parse and not about which tree it borrows: pointing it at `main` from
+# a lane would have every gate build a second worktree of the workspace to
+# decode a fixture of twenty junk bytes.
+[private]
+check-fuzz-triage-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo metadata --no-deps --format-version 1 2>/dev/null \
+        | grep -q '"name":"rcad-fuzz-explain"' \
+        || { echo "fuzz-triage decodes an artifact with rcad-fuzz-explain, and this workspace has no such crate"; \
+             echo "it is lane-fuzz-explain's deliverable; this stays red until that branch is merged"; \
+             exit 1; }
+
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    logs="$dir/logs"
+    night="$logs/2026-09-14"
+    crash="$night/artifacts/where_two_surfaces_cross/crash-deadbeef"
+    mkdir -p "$(dirname "$crash")"
+    printf 'not a real crash input' >"$crash"
+    printf '%s  %s  %s  %s  %s\n' \
+        "2026-09-14 08:10" "9b82e9e (0 days old, 0 behind main)" \
+        "4 targets, 1 TO LOOK AT (fuzz:crash)" "1 artifacts in $night/artifacts" \
+        "$night" >"$logs/latest"
+
+    fail() {
+        echo "fuzz-triage drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    triage() { RCAD_FUZZ_LOGS="$logs" just fuzz-triage "$1" HEAD 2>&1; }
+
+    # One: no night given, so it reads the one `latest` names, and everything
+    # the morning asks for comes out of that one line.
+    got=$(triage "") || fail "a night with one artifact made the triage itself fail"
+    grep -qF "night:    $night" <<<"$got" || fail "it did not say which night it read"
+    grep -q '^commit:   9b82e9e$' <<<"$got" \
+        || fail "it did not name the commit that was fuzzed, which is the whole of §90"
+    grep -q '^targets:  fuzz:crash$' <<<"$got" || fail "it did not name the target that was flagged"
+    grep -qF "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- where_two_surfaces_cross $crash" <<<"$got" \
+        || fail "it did not run the decoder on the artifact, naming the target off the artifact's own directory"
+    grep -q 'still fails on HEAD' <<<"$got" \
+        || fail "it decoded the input without saying whether it still fails"
+
+    # Two: the nights before §91's copy-out landed keep their inputs in a
+    # rescued directory beside the night, and 2026-09-14 is one of them.
+    rm -rf "$night/artifacts"
+    rescued="$logs/artifacts-rescued-2026-09-14/two_solids_fused_by_a_stranger"
+    mkdir -p "$rescued"
+    printf 'nor is this one' >"$rescued/crash-c0ffee"
+    got=$(triage "") || fail "a night whose inputs were rescued beside it made the triage fail"
+    grep -qF "inputs:   $logs/artifacts-rescued-2026-09-14" <<<"$got" \
+        || fail "it did not look beside the night for the rescued inputs"
+    grep -qF "rcad-fuzz-explain -- two_solids_fused_by_a_stranger $rescued/crash-c0ffee" <<<"$got" \
+        || fail "it did not decode the rescued input"
+
+    # Three: a night nothing reported still says what it can, and says the
+    # commit is unknown rather than borrowing the one `latest` happens to name.
+    other="$logs/2026-09-09"
+    mkdir -p "$other"
+    got=$(triage "$other") || fail "a night with no artifacts at all made the triage fail"
+    grep -q '^commit:   unknown' <<<"$got" \
+        || fail "it read another night's commit off the latest line and reported it as this one's"
+    grep -qF "inputs:   none" <<<"$got" \
+        || fail "a night that kept nothing did not say so"
+
+    # Four: a directory that is not there is a failure and not an empty report.
+    if triage "$logs/2026-01-01" >/dev/null 2>&1; then
+        got=$(triage "$logs/2026-01-01")
+        fail "a night that does not exist was triaged anyway"
+    fi
+
+    # Five: a flat directory of artifacts, no target subdirectory at all — the
+    # shape `~/rcad-fuzz-logs/artifacts-rescued-2026-09-13/` was in, 88 files
+    # whose parent directory names no target. Every one of those used to read
+    # as "did not come back clean", indistinguishable from a live crash.
+    flat_night="$logs/2026-09-13"
+    mkdir -p "$flat_night"
+    flat_rescued="$logs/artifacts-rescued-2026-09-13"
+    mkdir -p "$flat_rescued"
+    printf 'flat, no target subdirectory' >"$flat_rescued/crash-baadf00d"
+    got=$(triage "$flat_night") || fail "a flat directory of artifacts made the triage itself fail"
+    grep -q '^target:   unknown' <<<"$got" \
+        || fail "an artifact whose parent directory names no real target was decoded anyway"
+    grep -qF "1 of 1 input(s) could not be told which target they came from" <<<"$got" \
+        || fail "the untellable count did not reach the tail line"
+    grep -q '^0 of 1 input(s) did not come back clean on HEAD$' <<<"$got" \
+        || fail "an untellable input was folded into the count of inputs that did not come back clean"
+
+    # Six: promoting a good artifact keeps the trailing sha1 and lands it under
+    # a name — `crash-<name>-<sha1>` is the shape already in the corpus.
+    promote_repo="$dir/promote-repo"
+    mkdir -p "$promote_repo/fuzz/fuzz_targets" "$promote_repo/fuzz/corpus"
+    touch "$promote_repo/fuzz/fuzz_targets/where_two_surfaces_cross.rs"
+    git -C "$promote_repo" init -q
+    promote() {
+        {{just_executable()}} --justfile "{{justfile()}}" \
+            --working-directory "$promote_repo" fuzz-promote "$@" 2>&1
+    }
+    src="$dir/crash-tmp"
+    printf 'a thin pipe on a fat ones skin' >"$src"
+    sha1=$(sha1sum "$src" | awk '{print $1}')
+    mv "$src" "$dir/crash-$sha1"
+    src="$dir/crash-$sha1"
+    got=$(promote where_two_surfaces_cross "$src" a-thin-pipe-on-a-fat-ones-skin) \
+        || fail "promoting a good artifact failed"
+    dest="$promote_repo/fuzz/corpus/where_two_surfaces_cross/crash-a-thin-pipe-on-a-fat-ones-skin-$sha1"
+    [ -f "$dest" ] || fail "promote did not land the file at $dest"
+    cmp -s "$src" "$dest" || fail "the promoted file's contents do not match the source"
+
+    # Seven: a target that does not exist is refused, and gets no corpus
+    # directory of its own.
+    if got=$(promote no_such_target "$src" 2>&1); then
+        fail "promoting into a target that does not exist was not refused"
+    fi
+    grep -q 'no such target' <<<"$got" || fail "the refusal did not say the target does not exist"
+    [ ! -d "$promote_repo/fuzz/corpus/no_such_target" ] \
+        || fail "a target that does not exist got a corpus directory anyway"
+
+    # Eight: a file whose contents do not hash to the sha1 in its own name is
+    # refused, and nothing is written into the corpus for it.
+    zeros=$(printf '%040d' 0)
+    bad="$dir/crash-$zeros"
+    printf 'these bytes do not hash to forty zeros' >"$bad"
+    if got=$(promote where_two_surfaces_cross "$bad" 2>&1); then
+        fail "promoting a file whose contents do not match its own sha1 was not refused"
+    fi
+    grep -q 'hashes to' <<<"$got" || fail "the refusal did not say the hash mismatched"
+    [ ! -e "$promote_repo/fuzz/corpus/where_two_surfaces_cross/crash-$zeros" ] \
+        || fail "a hash-mismatched file was written into the corpus anyway"
+
+    # Nine: a slow-unit is not a crash, and does not get promoted as one — the
+    # kind comes off the source name, not a hardcoded "crash".
+    slow_content="$dir/slow-content"
+    printf 'this one just took too long, it never crashed' >"$slow_content"
+    slow_sha1=$(sha1sum "$slow_content" | awk '{print $1}')
+    slow="$dir/slow-unit-$slow_sha1"
+    mv "$slow_content" "$slow"
+    got=$(promote where_two_surfaces_cross "$slow") || fail "promoting a slow-unit artifact failed"
+    slow_dest="$promote_repo/fuzz/corpus/where_two_surfaces_cross/slow-unit-$slow_sha1"
+    [ -f "$slow_dest" ] || fail "a slow-unit was not promoted under its own kind"
+    cmp -s "$slow" "$slow_dest" || fail "the promoted slow-unit's contents do not match the source"
+    [ ! -e "$promote_repo/fuzz/corpus/where_two_surfaces_cross/crash-$slow_sha1" ] \
+        || fail "a slow-unit was promoted under the crash kind"
+
+    # Ten: a source name with nothing readable before its sha1 — no dash, no
+    # kind — is refused rather than promoted under an invented kind.
+    noprefix_content="$dir/noprefix-content"
+    printf 'the whole name is the sha1, nothing before it' >"$noprefix_content"
+    noprefix_sha1=$(sha1sum "$noprefix_content" | awk '{print $1}')
+    noprefix="$dir/$noprefix_sha1"
+    mv "$noprefix_content" "$noprefix"
+    if got=$(promote where_two_surfaces_cross "$noprefix" 2>&1); then
+        fail "promoting a file with no kind before its sha1 was not refused"
+    fi
+    grep -q 'no kind could be read' <<<"$got" \
+        || fail "the refusal did not say it could not read a kind"
+
+# The timer's two unit files are tracked here and **copied** into
+# `~/.config/systemd/user/`. That is two records of one thing, which §60 says is
+# the shape to delete, and on 2026-09-15 it had a price: the night lost eight
+# hours to a `cargo` that was not on its PATH, and the fix for that lands in
+# `tooling/systemd/` where systemd will never read it. Nothing made the two
+# agree and neither file said whether anyone had.
+#
+# **An installed copy must match the tracked one; a machine with no installed
+# copy is not checked.** Almost nowhere runs the night — a runner has no
+# `~/.config/systemd/user` at all — so absence is the ordinary case and not a
+# finding.
+#
+# The gap that leaves is named rather than claimed away: this cannot tell a
+# machine that never installed the timer from one where the installed file was
+# removed, because both look the same from here and only the second is a
+# problem. What it does catch is the case that cost the night — installed, and
+# behind the tree.
+#
+# **Half an install is a failure, not an absence.** The pair goes in together;
+# one of the two on disk means somebody copied by hand and stopped, which is the
+# same mistake this recipe exists for, one file earlier.
+[doc("The installed rcad-fuzz timer is the one tracked in tooling/systemd.")]
+check-fuzz-unit tracked="tooling/systemd":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    units="rcad-fuzz.service rcad-fuzz.timer"
+    present=""
+    missing=""
+    for unit in $units; do
+        [ -f "{{tracked}}/$unit" ] \
+            || { echo "there is no {{tracked}}/$unit here to compare anything against"; exit 1; }
+        if [ -f "{{systemd_user_dir}}/$unit" ]; then
+            present="$present $unit"
+        else
+            missing="$missing $unit"
+        fi
+    done
+
+    if [ -z "$present" ]; then
+        echo "no rcad-fuzz timer installed under {{systemd_user_dir}}, so there is nothing to drift"
+        exit 0
+    fi
+    if [ -n "$missing" ]; then
+        echo "half of the timer is installed under {{systemd_user_dir}}:"
+        echo "  there:$present"
+        echo "  not there:$missing"
+        echo "the pair goes in together; copy both and reload:"
+        echo "    cp {{tracked}}/rcad-fuzz.service {{tracked}}/rcad-fuzz.timer {{systemd_user_dir}}/ && systemctl --user daemon-reload"
+        exit 1
+    fi
+
+    drifted=""
+    for unit in $units; do
+        cmp -s "{{tracked}}/$unit" "{{systemd_user_dir}}/$unit" || drifted="$drifted $unit"
+    done
+    if [ -n "$drifted" ]; then
+        for unit in $drifted; do
+            echo "installed $unit is not {{tracked}}/$unit:"
+            diff -u "{{systemd_user_dir}}/$unit" "{{tracked}}/$unit" | sed 's/^/    /' || true
+        done
+        echo "systemd runs the installed copy, so the tree is not what fires tonight:"
+        echo "    cp {{tracked}}/rcad-fuzz.service {{tracked}}/rcad-fuzz.timer {{systemd_user_dir}}/ && systemctl --user daemon-reload"
+        exit 1
+    fi
+    echo "the installed rcad-fuzz timer matches {{tracked}}"
+
+# Pins `check-fuzz-unit` against installs this builds itself, because the one
+# case that matters cannot be arranged on the machine running the gate without
+# breaking that machine's timer.
+#
+# **Each arm asserts the sentence its case produces, not the exit code.** A
+# recipe that always failed would satisfy the two failing arms and nothing else;
+# a recipe that always passed would satisfy the two passing ones. The pair of
+# them together is what says it is reading the files.
+[private]
+check-fuzz-unit-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    work=$(mktemp -d -- "${TMPDIR:-/tmp}/rcad-fuzz-unit-selftest.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+
+    tracked="$work/tracked"
+    installed="$work/installed"
+    mkdir -p "$tracked" "$installed"
+    printf '[Service]\nEnvironment=PATH=%%h/.cargo/bin:/usr/bin\n' >"$tracked/rcad-fuzz.service"
+    printf '[Timer]\nOnCalendar=*-*-* 00:10:00\n' >"$tracked/rcad-fuzz.timer"
+
+    failed=0
+    check() {
+        local name=$1 want_rc=$2 needle=$3
+        local out rc=0
+        out=$(RCAD_SYSTEMD_USER="$installed" \
+            {{ just_executable() }} check-fuzz-unit "$tracked" 2>&1) || rc=$?
+        if [ "$rc" -ne "$want_rc" ]; then
+            echo "check-fuzz-unit drifted from its own fixtures: $name wanted exit $want_rc, got $rc"
+            sed 's/^/    /' <<<"$out"
+            failed=1
+            return
+        fi
+        if ! grep -qF -- "$needle" <<<"$out"; then
+            echo "check-fuzz-unit drifted from its own fixtures: $name did not say \"$needle\""
+            sed 's/^/    /' <<<"$out"
+            failed=1
+        fi
+    }
+
+    # One: nothing installed. The ordinary case on every machine but this one,
+    # and on every runner, so it has to pass and say why rather than pass in
+    # silence that would look the same as a match.
+    check "nothing installed" 0 "so there is nothing to drift"
+
+    # Two: half of it. The pair goes in together.
+    cp "$tracked/rcad-fuzz.service" "$installed/"
+    check "half installed" 1 "not there: rcad-fuzz.timer"
+
+    # Three: both, byte for byte. The passing case.
+    cp "$tracked/rcad-fuzz.timer" "$installed/"
+    check "installed and equal" 0 "matches"
+
+    # Four: installed, and behind the tree. This is the night of 2026-09-15 —
+    # the fix sitting in `tooling/systemd/` while systemd runs the old copy — so
+    # the arm asserts the unit's name and the line that differs, not just a
+    # non-zero exit.
+    printf '[Service]\n' >"$installed/rcad-fuzz.service"
+    check "installed and stale" 1 "installed rcad-fuzz.service is not"
+    check "installed and stale names the missing line" 1 "Environment=PATH="
+
+    [ "$failed" -eq 0 ]
 
 [doc("The benchmarks.")]
 bench:
@@ -2993,6 +3930,574 @@ check-prune-worktrees-selftest:
     grep -qF "removed: $dir/merged" <<<"$got" \
         || fail "a merged lane branch was not reported as removed"
 
+# Where this repo stands, in one call.
+#
+# Collecting that from cold took twelve tool calls and a lookup lane on
+# 2026-09-14, and every ingredient was already here and simply never assembled:
+# `lanes` has who holds what, `gh` has the last green, `decisions-toc` has how
+# far the record has got. The one fact nothing printed is the one that took
+# longest — which *branches* carry something `main` does not — because `lanes`
+# lists worktrees, and a worktree is not a branch.
+#
+# **Five rows, and the first of them is the one a recipe cannot compute.** What
+# unit the work is in is a judgement, so it is written down in
+# `docs/decisions.md` §0 and this prints it; §102 argues why there and not in a
+# file of its own. The other four are facts, and they are read fresh every time.
+#
+# **It never fails.** A row that cannot be answered says so in place of its
+# answer — the shape `fuzz-watermark` already has, and for the same reason: a
+# survey that exits non-zero because `gh` was not on PATH is a survey nobody
+# runs before deciding what to do next.
+[doc("Where the work is, who holds what, and what is not landed on main yet.")]
+status dir=".":
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    echo "=== where the work is (docs/decisions.md §0) ==="
+    block=$({{ just_executable() }} decision 0 2>&1) || block="docs/decisions.md has no §0; \`just check-where-the-work-is\` says what it should hold"
+    echo "$block"
+    reviewed=$(sed -n 's/^reviewed: *//p' <<<"$block" | head -1)
+    if [ -n "$reviewed" ] && stamp=$(date -d "$reviewed" +%s 2>/dev/null); then
+        echo "(last reviewed $(( ( $(date +%s) - stamp ) / 86400 )) days ago)"
+    fi
+
+    echo
+    echo "=== the board ==="
+    {{ just_executable() }} _plan-summary
+    echo "(\`just plan\` for the roadmap with a box beside every item, \`just plan open\` for what is left)"
+
+    echo
+    echo "=== lanes ==="
+    {{ just_executable() }} lanes '{{dir}}'
+
+    echo
+    echo "=== branches carrying work main does not have ==="
+    {{ just_executable() }} _status-branches '{{dir}}' main
+
+    echo
+    echo "=== main against the last green ==="
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "unknown: gh is not on PATH, so no run's conclusion can be read"
+    else
+        green=$(gh run list --workflow ci.yml --branch main --status success \
+            --limit 1 --json headSha --jq '.[0].headSha' 2>/dev/null)
+        if [ -z "$green" ]; then
+            echo "unknown: gh lists no green run on main"
+        elif ! git -C '{{dir}}' cat-file -e "${green}^{commit}" 2>/dev/null; then
+            echo "last green $(cut -c1-7 <<<"$green") is not in this checkout; fetch to weigh main against it"
+        else
+            ahead=$(git -C '{{dir}}' rev-list --count "$green"..main 2>/dev/null)
+            printf 'main tip %s, last green %s, %s commit(s) on main not yet green\n' \
+                "$(git -C '{{dir}}' rev-parse --short main)" "$(cut -c1-7 <<<"$green")" "${ahead:-?}"
+        fi
+    fi
+
+    echo
+    echo "=== docs/decisions.md ==="
+    {{ just_executable() }} decisions-toc | awk '
+        { n = $1 + 0; if (n > top) top = n; seen[n] = 1; count += 1 }
+        END {
+            if (!count) { print "the toc printed nothing, so this counted no sections"; exit }
+            gaps = ""
+            for (i = 1; i < top; i++) if (!(i in seen)) gaps = gaps (gaps ? ", " : "") i
+            printf "%d sections, highest is %d%s\n", count, top, \
+                (gaps ? "; no section " gaps " — a gap is normal, a number is picked against every branch" : "")
+        }'
+
+plan_file := "docs/plan.md"
+roadmap_file := "docs/roadmap.md"
+
+# The roadmap with a box beside every item, and what fills each box.
+#
+# **`docs/roadmap.md` may not carry this and never will.** §1 of
+# `docs/decisions.md` says it is the north star and not a description of this
+# codebase — that is why it has one commit in the repository's whole history,
+# and why a later reader is told not to "fix" the code back to match it. So the
+# state goes beside it rather than in it, and this recipe renders the two
+# together. `docs/decisions.md` §105.
+#
+# **`docs/plan.md` holds no titles.** It is a line per item: the roadmap number,
+# a state, and the evidence. The titles come from the roadmap at render time, so
+# there is exactly one copy of them and `plan.md` cannot drift into describing a
+# roadmap that has been rewritten. The item list is not stored either — it is
+# derived, and `check-plan` fails when the two disagree.
+#
+# `just plan open` leaves out what is finished, which is the list lanes are cut
+# from.
+[doc("The roadmap with a box beside every item: `just plan`, or `just plan open`.")]
+plan filter="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    {{ just_executable() }} _plan-items '{{ roadmap_file }}' | awk -F'\t' -v filter='{{filter}}' '
+        FILENAME == "-" || started { }
+        { items[$1] = $2; section[$1] = $3; order[++n] = $1 }
+        END {
+            while ((getline line < "{{ plan_file }}") > 0) {
+                if (line !~ /^[0-9]/) continue
+                split(line, f, /[ \t]+/)
+                id = f[1]; state[id] = f[2]
+                sub(/^[^ \t]+[ \t]+[^ \t]+[ \t]*/, "", line); why[id] = line
+            }
+            for (i = 1; i <= n; i++) {
+                id = order[i]
+                s = (id in state) ? state[id] : "unaudited"
+                if (filter == "open" && (s == "done" || s == "n/a")) continue
+                if (section[id] != lastsection) {
+                    printf "\n%s\n", section[id]
+                    lastsection = section[id]
+                }
+                printf "  [%s] %-5s %-10s %s\n", (s == "done" || s == "n/a") ? "x" : " ", id, s, items[id]
+                if (why[id] != "") printf "              %s\n", why[id]
+            }
+        }'
+    echo
+    {{ just_executable() }} _plan-summary
+
+# The counts, on one line, so `status` can carry the plan without printing it.
+[private]
+_plan-summary:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    {{ just_executable() }} _plan-items '{{ roadmap_file }}' | awk -F'\t' '
+        { order[++n] = $1 }
+        END {
+            while ((getline line < "{{ plan_file }}") > 0) {
+                if (line !~ /^[0-9]/) continue
+                split(line, f, /[ \t]+/); state[f[1]] = f[2]
+            }
+            for (i = 1; i <= n; i++) {
+                id = order[i]
+                count[(id in state) ? state[id] : "unaudited"] += 1
+            }
+            printf "plan: %d items — %d done, %d partly, %d todo, %d unaudited, %d n/a\n", \
+                n, count["done"], count["partly"], count["todo"], \
+                count["unaudited"], count["n/a"]
+        }'
+
+# The roadmap's build items, derived rather than listed anywhere.
+#
+# An item is a **deepest heading under §3 to §11** — the layers and the testing
+# apparatus. §1 and §2 are scope and foundational argument, §12 to §15 are the
+# milestone list, the risk register and the reading, and none of those is a
+# thing that gets built. A `## N.` with `### N.M` children contributes the
+# children; one without contributes itself, which is how §3 and §8 get a line.
+#
+# Deriving it is the point. A stored list is a second copy of the roadmap's
+# shape, and §60's argument applies to a shape exactly as it applies to a
+# record: the copy is what goes stale when a section is added.
+[private]
+_plan-items file:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    awk -F'\n' '
+        /^## [0-9]+\./ {
+            flush()
+            rest = substr($0, 4); p = index(rest, " ")
+            top = substr(rest, 1, p - 1); sub(/\.$/, "", top)
+            title = substr(rest, p + 1)
+            want = (top + 0 >= 3 && top + 0 <= 11)
+            heading = "roadmap §" top "  " title
+            kids = 0
+            next
+        }
+        /^### [0-9]+\.[0-9]+ / {
+            if (!want) next
+            kids = 1
+            rest = substr($0, 5); p = index(rest, " ")
+            printf "%s\t%s\t%s\n", substr(rest, 1, p - 1), substr(rest, p + 1), heading
+        }
+        END { flush() }
+        function flush() {
+            if (want && !kids && top != "") printf "%s\t%s\t%s\n", top, title, heading
+        }' '{{file}}'
+
+# `docs/plan.md` still describes `docs/roadmap.md`, and says nothing it cannot
+# show you.
+#
+# **The item lists must agree exactly.** A roadmap gaining a subsection that
+# `plan.md` never hears about is the whole failure this file could otherwise
+# have: it would go on reading complete while covering a roadmap that has moved.
+# So the list is derived on both sides of the comparison and a difference in
+# either direction fails, naming the numbers.
+#
+# **A box is ticked only against evidence that exists.** `done` and `n/a` are
+# the two states that tick, and a `done` whose evidence names a path under
+# `crates/` or `docs/` is checked against the disk. That is §15.6's rule — a
+# published bound needs a test — applied to a published checkbox. It cannot
+# check that the evidence *proves* the item, which is why the audit that fills
+# this file names a module or a test rather than an opinion.
+[doc("docs/plan.md still covers docs/roadmap.md, and every ticked box names something real.")]
+check-plan:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    {{ just_executable() }} _plan-check '{{ roadmap_file }}' '{{ plan_file }}'
+
+# Held apart from the recipe above so the selftest can run it over fixtures
+# whose answer is known.
+[private]
+_plan-check roadmap plan:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    roadmap='{{roadmap}}'
+    plan='{{plan}}'
+    [ -f "$plan" ] || { echo "$plan does not exist, so nothing records how far the roadmap has got"; exit 1; }
+
+    wanted=$({{ just_executable() }} _plan-items "$roadmap" | cut -f1 | sort -u)
+    [ -n "$wanted" ] || { echo "no build items were parsed out of $roadmap, so this compared nothing"; exit 1; }
+    got=$(grep -E '^[0-9]' "$plan" | awk '{ print $1 }' | sort -u)
+
+    missing=$(comm -23 <(echo "$wanted") <(echo "$got") | tr '\n' ' ')
+    extra=$(comm -13 <(echo "$wanted") <(echo "$got") | tr '\n' ' ')
+    if [ -n "${missing// }" ] || [ -n "${extra// }" ]; then
+        [ -z "${missing// }" ] || echo "in $roadmap but not in $plan: $missing"
+        [ -z "${extra// }" ] || echo "in $plan but not in $roadmap: $extra"
+        echo "^ the plan no longer covers the roadmap, so its completeness means nothing"
+        exit 1
+    fi
+
+    dupes=$(grep -E '^[0-9]' "$plan" | awk '{ print $1 }' | sort | uniq -d | tr '\n' ' ')
+    if [ -n "${dupes// }" ]; then
+        echo "$plan lists these items twice, and the second wins silently: $dupes"
+        exit 1
+    fi
+
+    bad=0
+    while read -r id state rest; do
+        case "$state" in
+        done|partly|todo|unaudited|n/a) ;;
+        *) echo "$id: '$state' is not a state; they are done, partly, todo, unaudited, n/a"; bad=1; continue ;;
+        esac
+        if [ -z "$rest" ]; then
+            echo "$id: state '$state' with no evidence after it"
+            bad=1
+            continue
+        fi
+        [ "$state" = "done" ] || continue
+        for token in $(tr ',;' '  ' <<<"$rest"); do
+            case "$token" in
+            crates/*|docs/*|fuzz/*) [ -e "${token%%,}" ] || { echo "$id is done on '$token', which is not in the tree"; bad=1; } ;;
+            esac
+        done
+    done < <(grep -E '^[0-9]' "$plan")
+    [ "$bad" -eq 0 ] || { echo "^ a ticked box naming something that is not there is worse than an empty one"; exit 1; }
+
+# Pins the derivation and the comparison against fixtures, because the live
+# files cannot exercise either: they agree today by construction, so a
+# `_plan-check` that had stopped comparing would pass every run.
+#
+# The fixtures are the four ways this goes wrong — a roadmap that grew an item,
+# a plan that invented one, a box ticked against a path that is not there, and a
+# state nobody defined — plus a good pair, because a check that rejects
+# everything passes every negative case.
+[private]
+check-plan-selftest:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    fail() {
+        echo "plan drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+
+    cat > "$dir/roadmap.md" <<'MD'
+    # A roadmap
+    ## 1. Scope
+    ### 1.1 Not a build item
+    ## 3. Layer 0
+    ## 4. Layer 1
+    ### 4.1 First
+    ### 4.2 Second — with an em-dash in the title
+    ## 12. Milestones
+    ### 12.1 Also not a build item
+    MD
+    sed -i 's/^    //' "$dir/roadmap.md"
+
+    got=$(just _plan-items "$dir/roadmap.md" | cut -f1 | tr '\n' ' ')
+    [ "$got" = "3 4.1 4.2 " ] \
+        || fail "the item list is '$got', expected '3 4.1 4.2 ' — §1 and §12 are not build items, and §3 has no children"
+
+    printf '3 done crates\n4.1 todo nothing yet\n4.2 n/a prose only\n' > "$dir/plan.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/plan.md" 2>&1) \
+        || fail "a plan that covers the roadmap was rejected"
+
+    printf '3 done crates\n4.1 todo nothing yet\n' > "$dir/short.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/short.md" 2>&1) \
+        && fail "a plan missing an item the roadmap has was accepted"
+    grep -qF "but not in $dir/short.md: 4.2" <<<"$got" \
+        || fail "the missing item was not named"
+
+    printf '3 done crates\n4.1 todo x\n4.2 todo x\n9.9 todo invented\n' > "$dir/extra.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/extra.md" 2>&1) \
+        && fail "a plan naming an item the roadmap does not have was accepted"
+    grep -qF "9.9" <<<"$got" || fail "the invented item was not named"
+
+    printf '3 done crates/there-is-no-such-directory\n4.1 todo x\n4.2 todo x\n' > "$dir/liar.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/liar.md" 2>&1) \
+        && fail "a ticked box naming a path that is not in the tree was accepted"
+    grep -qF "is not in the tree" <<<"$got" || fail "the absent path was not named"
+
+    printf '3 finished crates\n4.1 todo x\n4.2 todo x\n' > "$dir/state.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/state.md" 2>&1) \
+        && fail "an undefined state was accepted"
+
+    printf '3 done\n4.1 todo x\n4.2 todo x\n' > "$dir/bare.md"
+    got=$(just _plan-check "$dir/roadmap.md" "$dir/bare.md" 2>&1) \
+        && fail "an item with a state and no evidence was accepted"
+
+    # As in check-status-selftest: every assertion above is `command && fail`,
+    # so the last one leaves its own non-zero status behind when it passes.
+    exit 0
+
+# The branch half of `status`, kept apart so `check-status-selftest` can hold it
+# against a repository whose right answer is known.
+#
+# **`git cherry` and not `rev-list main..<branch>`.** Ahead-of-main counts what
+# is reachable; what a reader wants is what is *unlanded*, and the two disagree
+# on every branch whose commits reached `main` by a cherry-pick, a rebase or a
+# split into two commits. On 2026-09-14 that was three of the five branches the
+# count called unmerged — one of them `merge/justfile`, whose recipe had been on
+# `main` for days. `cherry` compares patch ids and marks those `-`, so counting
+# only its `+` lines turns a five-branch answer into a two-branch one without a
+# human reading five diffs. It skips merge commits, which is the same thing
+# wanted here: a lane merging `main` into itself has landed nothing.
+#
+# **A branch with nothing new is counted, not listed.** The count is what says
+# the sweep ran; listing twenty-three names nobody has to act on is how a survey
+# stops being read.
+[private]
+_status-branches dir base:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    repo=$(git -C '{{dir}}' rev-parse --show-toplevel) || exit 1
+    if ! git -C "$repo" rev-parse --verify --quiet '{{base}}^{commit}' >/dev/null; then
+        echo "there is no branch named {{base}} here, so nothing could be weighed against it"
+        exit 1
+    fi
+
+    trees=$(git -C "$repo" worktree list --porcelain \
+        | awk '/^worktree /{t=substr($0,10)} /^branch /{print substr($0,19) "\t" t}')
+
+    branches=$(git -C "$repo" for-each-ref --format='%(refname:short)' refs/heads/)
+    if [ -z "$branches" ]; then
+        echo "for-each-ref printed no branches, so this counted nothing"
+        exit 1
+    fi
+
+    carrying=0
+    quiet=0
+    while IFS= read -r branch; do
+        [ "$branch" != '{{base}}' ] || continue
+        new=$(git -C "$repo" cherry '{{base}}' "$branch" 2>/dev/null | grep -c '^+')
+        if [ "$new" -eq 0 ]; then
+            quiet=$((quiet + 1))
+            continue
+        fi
+        carrying=$((carrying + 1))
+        where=$(awk -F'\t' -v b="$branch" '$1 == b { print $2 }' <<<"$trees")
+        printf '%-46s %2d commit(s)  %s\n' "$branch" "$new" "${where:-no worktree}"
+    done <<<"$branches"
+
+    if [ "$carrying" -eq 0 ]; then
+        echo "nothing: every branch here is already on {{base}}"
+    fi
+    echo "$quiet branch(es) carry nothing {{base}} does not already have"
+
+# §0 is the one row of `status` that a recipe cannot compute, so this is what
+# stands behind it. It cannot check the judgement — whether the unit named there
+# is still the unit — and it does not pretend to. It checks the three ways the
+# block goes wrong without anyone noticing.
+#
+# **A cited section that does not exist.** §0 points at the sections that defer
+# the work it lists, and those numbers get renumbered (§71 is four such moves in
+# one session). A block pointing at a §43.8 that has become §44.8 is worse than
+# no block, because it reads as current.
+#
+# **A `reviewed:` date that does not parse.** `status` prints how old the block
+# is, and a date `date -d` cannot read makes that line silently vanish — which
+# looks exactly like a block reviewed today.
+#
+# **A block that has grown into an essay.** The cap is the whole reason this
+# stays true: `decisions.md` is 27 000 lines because nothing ever capped it, and
+# that is correct for a record and fatal for a summary. Fifty lines is about a
+# screen, which is the length something gets re-read at.
+[doc("docs/decisions.md §0 exists, parses, and points only at sections that do.")]
+check-where-the-work-is:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    {{ just_executable() }} _where-the-work-is-check '{{ decisions_file }}'
+
+# Held apart from the recipe above so the selftest can run it over fixtures
+# whose answer is known, rather than over whatever §0 happens to say today.
+[private]
+_where-the-work-is-check file:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    file='{{file}}'
+
+    block=$(awk '/^## 0\. /{on=1} on && /^## [1-9]/{exit} on{print}' "$file")
+    if [ -z "$block" ]; then
+        echo "$file has no '## 0.' section, so nothing says where the work is"
+        exit 1
+    fi
+    if ! head -1 <<<"$block" | grep -qx '## 0\. Where the work is'; then
+        echo "$(head -1 <<<"$block")"
+        echo "^ §0 is reserved for 'Where the work is'; \`just status\` prints it by that name"
+        exit 1
+    fi
+
+    lines=$(grep -c . <<<"$block")
+    if [ "$lines" -gt 50 ]; then
+        echo "§0 is $lines non-blank lines; the cap is 50, because a summary nobody re-reads is not one"
+        exit 1
+    fi
+
+    reviewed=$(sed -n 's/^reviewed: *//p' <<<"$block" | head -1)
+    if [ -z "$reviewed" ]; then
+        echo "§0 has no 'reviewed: <date>' line, so \`just status\` cannot say how stale it is"
+        exit 1
+    fi
+    if ! date -d "$reviewed" +%s >/dev/null 2>&1; then
+        echo "§0's reviewed date '$reviewed' is not one \`date -d\` can read, so its age would print as nothing"
+        exit 1
+    fi
+
+    missing=""
+    for id in $(grep -oE '§[0-9]+(\.[0-9]+)?' <<<"$block" | sed 's/^§//' | sort -u); do
+        case "$id" in
+        *.*) pattern="^### ${id//./\\.} " ;;
+        *)   pattern="^## ${id}\. " ;;
+        esac
+        grep -qE "$pattern" "$file" || missing="$missing $id"
+    done
+    if [ -n "$missing" ]; then
+        echo "§0 cites sections that do not exist:$missing"
+        echo "^ a renumbering moved them; §0 reads as current whether or not it is (docs/decisions.md §71)"
+        exit 1
+    fi
+
+# Pins both halves of `status` against fixtures, because the live repository
+# cannot exercise either of them. Its §0 is right today by construction, and its
+# branches are whatever happens to be lying around — a `_status-branches` that
+# had lost the ability to tell a cherry-picked branch from an unlanded one would
+# pass on most mornings and fail on the one that mattered.
+#
+# The branch fixture is the 2026-09-14 tree in miniature: a branch whose commit
+# was cherry-picked onto main (ahead by the count, carrying nothing), a branch
+# with real unlanded work, a branch fully merged, and a branch checked out in a
+# worktree, which must be reported with the tree that holds it.
+#
+# The §0 fixtures are the three failures the check exists for, plus a good one,
+# because a check that rejects everything passes every negative case.
+[private]
+check-status-selftest:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    fail() {
+        echo "status drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+
+    git init -q -b main "$dir/repo"
+    git -C "$dir/repo" config user.email t@t
+    git -C "$dir/repo" config user.name t
+    echo root > "$dir/repo/f"; git -C "$dir/repo" add f
+    git -C "$dir/repo" commit -q -m root
+
+    git -C "$dir/repo" checkout -q -b picked
+    echo picked > "$dir/repo/p"; git -C "$dir/repo" add p
+    git -C "$dir/repo" commit -q -m "a patch that reaches main another way"
+    picked=$(git -C "$dir/repo" rev-parse HEAD)
+
+    git -C "$dir/repo" checkout -q -b unlanded main
+    echo unlanded > "$dir/repo/u"; git -C "$dir/repo" add u
+    git -C "$dir/repo" commit -q -m "work that is genuinely not on main"
+
+    git -C "$dir/repo" checkout -q main
+    # Without an unrelated commit here first, cherry-picking onto the same
+    # parent reproduces the byte-identical sha, `main..picked` is empty, and the
+    # fixture quietly stops testing the thing it exists for: the broken
+    # ahead-of-main implementation passed it.
+    echo other > "$dir/repo/x"; git -C "$dir/repo" add x
+    git -C "$dir/repo" commit -q -m "an unrelated commit, so the pick is not the same sha"
+    git -C "$dir/repo" cherry-pick "$picked" >/dev/null 2>&1 \
+        || { echo "the fixture's cherry-pick did not apply, so nothing here was tested"; exit 1; }
+    [ "$(git -C "$dir/repo" rev-list --count main..picked)" -eq 1 ] \
+        || { echo "the fixture's picked branch is reachable from main, so it cannot tell the two counts apart"; exit 1; }
+    git -C "$dir/repo" branch -q merged main
+    git -C "$dir/repo" worktree add -q "$dir/held" unlanded
+
+    got=$(just _status-branches "$dir/repo" main)
+    grep -q "^unlanded  *1 commit(s)  *$dir/held$" <<<"$got" \
+        || fail "the branch with real work is not listed with the worktree holding it"
+    grep -q '^picked' <<<"$got" \
+        && fail "a branch whose patch is already on main was listed as carrying work"
+    grep -q '^merged' <<<"$got" \
+        && fail "a fully merged branch was listed as carrying work"
+    grep -qx "2 branch(es) carry nothing main does not already have" <<<"$got" \
+        || fail "the quiet count is wrong, so a broken sweep could pass as a clean tree"
+
+    got=$(just _status-branches "$dir/repo" no-such-branch 2>&1) \
+        && fail "weighing against a branch that does not exist did not fail"
+    grep -qF "no branch named no-such-branch" <<<"$got" \
+        || fail "a missing base branch did not say so"
+
+    good='## 0. Where the work is
+
+    reviewed: 2026-09-14
+
+    **unit:** the thing, opened in §3.1 and still open.
+
+    ## 1. Something else
+    ### 3.1 Not really under 1, but this fixture is not check-decisions
+    '
+    printf '%s\n' "$good" | sed 's/^    //' > "$dir/good.md"
+    got=$(just _where-the-work-is-check "$dir/good.md" 2>&1) \
+        || fail "a well-formed §0 was rejected"
+
+    sed 's/§3\.1/§9.9/' "$dir/good.md" > "$dir/dangling.md"
+    got=$(just _where-the-work-is-check "$dir/dangling.md" 2>&1) \
+        && fail "§0 citing a section that does not exist was accepted"
+    grep -qF "cites sections that do not exist: 9.9" <<<"$got" \
+        || fail "a dangling citation was not named"
+
+    sed 's/^reviewed: .*/reviewed: whenever/' "$dir/good.md" > "$dir/undated.md"
+    got=$(just _where-the-work-is-check "$dir/undated.md" 2>&1) \
+        && fail "§0 with an unparsable reviewed date was accepted"
+
+    sed '/^## 1\./i\
+    filler' "$dir/good.md" > "$dir/long.md"
+    for _ in $(seq 6); do
+        sed '/^filler$/a\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler\
+    filler' "$dir/long.md" > "$dir/long.next.md"
+        mv "$dir/long.next.md" "$dir/long.md"
+    done
+    got=$(just _where-the-work-is-check "$dir/long.md" 2>&1) \
+        && fail "a §0 grown past the cap was accepted"
+    grep -qF "the cap is 50" <<<"$got" \
+        || fail "an over-long §0 did not say what the cap is"
+
+    printf '## 1. No zero here\n' > "$dir/none.md"
+    got=$(just _where-the-work-is-check "$dir/none.md" 2>&1) \
+        && fail "a file with no §0 at all was accepted"
+
+    # Every assertion above is `command && fail`, so the last one leaves its own
+    # non-zero status behind when it passes. Without this the whole selftest
+    # failed silently on a green run, printing nothing at all.
+    exit 0
+
 # Who is working where, right now. Run this before you touch a shared tree.
 #
 # **A worktree's lock is this repo's record of who owns it**, and it is the only
@@ -3135,6 +4640,175 @@ check-lanes-selftest:
         || fail "the count line is wrong, so an empty parse could pass as a quiet tree"
     grep -qF "somebody is working in the hub" <<<"$got" \
         || fail "a hub sitting on a branch drew no warning"
+
+# Hand back every lane matching a pattern, in one call.
+#
+# `git worktree unlock` takes one tree, so releasing a batch of lanes was one
+# call per lane: fifteen of them in a row on 2026-09-12, at about 137k of
+# context each, which is two million tokens to clear fifteen locks. The locks
+# are what `lanes` reads as ownership (§55), so a batch of lanes finishing
+# together is the ordinary case and not an unusual one.
+#
+# **The pattern is a glob, and it is matched against the branch name and against
+# the worktree's own directory name.** Both, because a lane is addressed by
+# either depending on who is asking — `release-lanes 'lane-fuzz-*'` after a
+# batch of briefs, `release-lanes 'agent-*'` after a batch of sessions. It is
+# required and has no default: a recipe that released everything when told
+# nothing is a recipe that unlocks a tree somebody is still working in.
+#
+# **The hub is never touched**, and it is left out by position rather than by
+# name. Git documents the main working tree as the first entry of
+# `--porcelain`, which is the same parse `lanes` and `check-hub` use, and it
+# answers *"fatal: The main working tree cannot be locked or unlocked"* — so a
+# pattern matching the hub has to be reported rather than attempted.
+[doc("Unlock every lane matching a pattern: `just release-lanes 'lane-fuzz-*'`.")]
+release-lanes pattern dir=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo=$(git -C "{{dir}}" rev-parse --show-toplevel)
+    listing=$(git -C "$repo" worktree list --porcelain)
+    if [ -z "$listing" ]; then
+        echo "git worktree list --porcelain printed nothing, so this released nothing"
+        exit 1
+    fi
+    pattern='{{ pattern }}'
+    released=0
+    left=0
+    seen=0
+    tree=""
+    branch=""
+    locked=""
+    consider() {
+        [ -n "$tree" ] || return 0
+        seen=$((seen + 1))
+        if [ "$seen" -eq 1 ]; then
+            printf 'hub      left alone, git cannot lock it and nobody works there: %s\n' "$tree"
+            return 0
+        fi
+        if ! matches "$branch" && ! matches "$(basename "$tree")"; then
+            left=$((left + 1))
+            printf 'skipped  no match for %s: %s [%s]\n' "'$pattern'" "$tree" "$branch"
+            return 0
+        fi
+        if [ -z "$locked" ]; then
+            left=$((left + 1))
+            printf 'skipped  already free: %s [%s]\n' "$tree" "$branch"
+            return 0
+        fi
+        was="$(why_it_is_held)"
+        git -C "$repo" worktree unlock "$tree"
+        released=$((released + 1))
+        printf 'RELEASED %s [%s]\n' "$tree" "$branch"
+        printf '         was held by: %s\n' "$was"
+    }
+    matches() {
+        case "$1" in
+            $pattern) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+    # The same reason `lanes` prints, read from the lock file rather than from
+    # the porcelain listing, which C-quotes any non-ASCII byte in it. Read before
+    # the unlock, because the unlock is what deletes it.
+    why_it_is_held() {
+        [ -d "$tree" ] || { echo "(locked; its directory is gone, so the reason cannot be read)"; return 0; }
+        note="$(git -C "$tree" rev-parse --git-dir)/locked"
+        if [ -s "$note" ]; then
+            tr '\n' ' ' <"$note" | sed 's/ *$//'
+        else
+            echo "(locked, no reason given)"
+        fi
+    }
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "worktree "*)
+                consider
+                tree=${line#worktree }
+                branch="(detached)"
+                locked=""
+                ;;
+            "branch "*) branch=${line#branch refs/heads/} ;;
+            "locked"*) locked="yes" ;;
+        esac
+    done <<<"$listing"
+    consider
+    if [ "$seen" -eq 0 ]; then
+        echo "no worktree was parsed out of a non-empty listing, so the parse is broken"
+        exit 1
+    fi
+    echo "$released lane(s) released, $left left as they were; the hub is never either"
+
+# Pins `release-lanes` against a repository it builds itself: what matches, what
+# does not, and the hub.
+#
+# The case that costs the most to get wrong is the third one. A pattern that
+# names the hub cannot be answered by unlocking it — git refuses, and `set -e`
+# would take the whole batch down with the fatal — so the hub has to be
+# recognised by position and reported. That arm passes only if the recipe never
+# reached for `git worktree unlock` on it.
+[private]
+check-release-lanes-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'for t in alpha beta unrelated agent-xyz; do git -C "$dir/main" worktree unlock "$dir/$t" 2>/dev/null || true; done; rm -rf "$dir"' EXIT
+    git init -q -b main "$dir/main"
+    git -C "$dir/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m root
+    git -C "$dir/main" worktree add -q "$dir/alpha" -b lane-alpha
+    git -C "$dir/main" worktree add -q "$dir/beta" -b lane-beta
+    git -C "$dir/main" worktree add -q "$dir/quiet" -b lane-quiet
+    git -C "$dir/main" worktree add -q "$dir/unrelated" -b keep-me
+    git -C "$dir/main" worktree add -q "$dir/agent-xyz" -b nothing-like-a-lane
+    for t in alpha beta unrelated agent-xyz; do
+        git -C "$dir/main" worktree lock --reason "agent-$t · deliverable · 2026-09-12T00:00:00Z" "$dir/$t"
+    done
+
+    fail() {
+        echo "release-lanes drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    still_locked() {
+        git -C "$dir/main" worktree list --porcelain \
+            | awk -v want="worktree $1" '/^worktree /{found = ($0 == want)} \
+                                          found && /^locked/ {print "yes"; exit}'
+    }
+
+    # One: the pattern matches two branches out of five.
+    got=$(just release-lanes 'lane-*' "$dir/main")
+    [ -z "$(still_locked "$dir/alpha")" ] || fail "a lane matching the pattern was left locked"
+    [ -z "$(still_locked "$dir/beta")" ] || fail "only the first matching lane was released"
+    [ -n "$(still_locked "$dir/unrelated")" ] \
+        || fail "a tree that does not match the pattern was unlocked anyway"
+    [ -n "$(still_locked "$dir/agent-xyz")" ] \
+        || fail "a tree that does not match the pattern was unlocked anyway"
+    grep -qF "RELEASED $dir/alpha [lane-alpha]" <<<"$got" \
+        || fail "a released lane was not reported"
+    grep -qF "was held by: agent-alpha · deliverable · 2026-09-12T00:00:00Z" <<<"$got" \
+        || fail "the lock reason was thrown away rather than reported before the unlock"
+    grep -qF "skipped  no match for 'lane-*': $dir/unrelated [keep-me]" <<<"$got" \
+        || fail "a skipped tree was not said to be skipped, so silence reads as success"
+    grep -qF "skipped  already free: $dir/quiet [lane-quiet]" <<<"$got" \
+        || fail "a matching tree that was not locked was not reported as already free"
+    grep -qx "2 lane(s) released, 3 left as they were; the hub is never either" <<<"$got" \
+        || fail "the count line is wrong, so a parse that saw nothing could pass as a quiet batch"
+
+    # Two: the directory name is an address too, because a batch of sessions is
+    # named that way and a batch of briefs is named the other way.
+    got=$(just release-lanes 'agent-*' "$dir/main")
+    [ -z "$(still_locked "$dir/agent-xyz")" ] \
+        || fail "a pattern matching the worktree's directory released nothing"
+    [ -n "$(still_locked "$dir/unrelated")" ] \
+        || fail "matching on the directory name released a tree that matched neither"
+
+    # Three: a pattern naming the hub leaves it alone and says so, rather than
+    # dying on git's refusal to unlock the main working tree.
+    got=$(just release-lanes 'main' "$dir/main") \
+        || fail "a pattern matching the hub took the whole batch down with it"
+    grep -qF "hub      left alone, git cannot lock it and nobody works there: $dir/main" <<<"$got" \
+        || fail "the hub was not reported as left alone"
+    grep -qx "0 lane(s) released, 5 left as they were; the hub is never either" <<<"$got" \
+        || fail "the hub was counted as a lane"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #

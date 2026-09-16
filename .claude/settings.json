@@ -7,7 +7,7 @@
       "source": {
         "source": "github",
         "repo": "mattiasgronlund/claude-questions",
-        "ref": "v0.2.0"
+        "ref": "v0.2.3"
       }
     }
   },
@@ -32,6 +32,11 @@
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-hub.sh\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-guardrails.sh\"",
+            "timeout": 15
           }
         ]
       }

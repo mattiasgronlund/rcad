@@ -1,0 +1,19 @@
+[package]
+name = "rcad-fuzz-explain"
+description = "Takes one fuzz artifact and says what it means, on stable Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+postcard.workspace = true
+rcad-geom.workspace = true
+rcad-predicates.workspace = true
+rcad-step.workspace = true
+rcad-topo.workspace = true
+
+[lints]
+workspace = true

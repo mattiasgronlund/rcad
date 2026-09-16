@@ -1,12 +1,12 @@
 //! A file's solids become a [`Model`], or the file is refused by name.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{Point, Scale, Unit, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, SolidKey};
 
-use crate::brep::solid_from;
+use crate::brep::{probe_solid, solid_from};
 use crate::geometry::Reading;
 use crate::graph::{EntityId, StepFile, Value};
 use crate::refusal::Refusal;
@@ -200,6 +200,206 @@ impl Import {
     pub fn shapes_this_reader_did_not_take(&self) -> &BTreeMap<&'static str, usize> {
         &self.walked_past
     }
+}
+
+/// What [`probe`] found in one file: every distinct reason a face, a bound or
+/// an edge was skipped, kept apart from a reason that stopped the walk before
+/// it had anything left to skip.
+///
+/// **Reasons, not occurrences.** Two faces refused for the same reason count
+/// once here — this is a file's *vocabulary* of refusals and not a tally of how
+/// many times it speaks each word, because what prices a fix is which reasons a
+/// file has and not how many entities earn each one.
+#[derive(Debug, Default)]
+pub struct ProbeReport {
+    /// Every distinct refusal reason this file gives once the walk keeps going
+    /// past the first one — one entry per kind, named by the kind of thing that
+    /// refused and never by the `#id` or the number a particular occurrence
+    /// carries.
+    pub reasons: BTreeSet<String>,
+    /// A refusal that stopped the walk from starting at all, or stopped one
+    /// solid before it had a face list to skip through — kept apart from
+    /// `reasons` because nothing was skipped past to reach it.
+    pub fatal: BTreeSet<String>,
+}
+
+/// Every refusal `file` would produce, rather than the first one
+/// [`Import::read`] stops at.
+///
+/// **This imports nothing and heals nothing.** Every `Model` it writes into is
+/// a scratch one, thrown away after the one solid it was built for; a file this
+/// reports no reasons for is exactly a file [`Import::read`] imports, and a
+/// file it reports reasons for is never a claim about what imports, only about
+/// what refuses. What it is for is the one number a walk that stops cannot
+/// take: how many files have **only** a given reason, which is what fixing
+/// that reason is worth (§45.2).
+///
+/// The four gates before any solid is walked — the length unit, a placement
+/// this reader cannot apply, a `BREP_WITH_VOIDS`, no `MANIFOLD_SOLID_BREP` at
+/// all — are read in the same order [`Import::read`] reads them, because a file
+/// that trips two of them is one whose *first* gate is what [`Import::read`]
+/// would report, and this has to agree. Past that gate, every
+/// `MANIFOLD_SOLID_BREP` in the file is probed, not just the first:
+/// [`Import::read`] stops at the first solid's own refusal and this does not.
+#[must_use]
+pub fn probe(file: &StepFile, policy: &Policy, log: &mut ProvenanceLog) -> ProbeReport {
+    let mut report = ProbeReport::default();
+    let reading = Reading::of(file);
+    let declared = match what_the_file_declared(&reading) {
+        Ok(declared) => declared,
+        Err(why) => {
+            report.fatal.insert(kind_of(&why));
+            return report;
+        }
+    };
+    reading.angles_are_measured_in(declared.radians_per_angle_unit);
+    if let Err(why) = nothing_is_placed_somewhere_this_reader_cannot_move_it(&reading) {
+        report.fatal.insert(kind_of(&why));
+        return report;
+    }
+
+    let biggest_coordinate = biggest_coordinate_in(file);
+    let Ok(scale) = Scale::new(declared.unit, biggest_coordinate) else {
+        report.fatal.insert(kind_of(&Refusal::TheFileHasNoSize));
+        return report;
+    };
+
+    if let Some(voided) = file.instances_named("BREP_WITH_VOIDS").next() {
+        report
+            .fatal
+            .insert(kind_of(&Refusal::ASolidWithAVoidInIt { id: voided.id() }));
+        return report;
+    }
+
+    let breps: Vec<EntityId> = file
+        .instances()
+        .filter(|held| held.part("MANIFOLD_SOLID_BREP").is_some())
+        .map(crate::Instance::id)
+        .collect();
+    if breps.is_empty() {
+        report.fatal.insert(kind_of(&Refusal::TheFileHoldsNoSolid));
+        return report;
+    }
+
+    for brep in breps {
+        let mut model = Model::new(scale);
+        let outcome = probe_solid(&reading, brep, &mut model, policy, log);
+        for why in outcome.skipped {
+            report.reasons.insert(kind_of(&why));
+        }
+        for why in outcome.fatal {
+            report.fatal.insert(kind_of(&why));
+        }
+    }
+    report
+}
+
+/// The name one [`Refusal`] is grouped under for [`ProbeReport`] — the kind of
+/// thing that stopped an entity, never the `#id` it names or a number beside
+/// it. Two edges refused for the same reason group under exactly the same name,
+/// or a file's reason count would be counting entities rather than reasons.
+/// This is the grouping `how_often_a_real_file_imports.rs`'s own `grouped`
+/// makes of the single first refusal [`Import::read`] stops at, so a count here
+/// reads against that test's baseline rather than inventing a second
+/// vocabulary.
+///
+/// `Refusal` is `#[non_exhaustive]` for callers outside this crate; inside it,
+/// every variant is named below and the match is **exhaustive on purpose** — a
+/// variant added and left unnamed here would be a silent gap in what this
+/// counts.
+fn kind_of(why: &Refusal) -> String {
+    match why {
+        Refusal::TheFileHoldsNoSolid => "the file holds no solid".to_owned(),
+        Refusal::ASolidWithAVoidInIt { .. } => "a solid with a void in it".to_owned(),
+        Refusal::ASurfaceThisKernelDoesNotHold { keyword, .. } => {
+            format!("a surface this kernel does not hold: {keyword}")
+        }
+        Refusal::ACurveThisKernelDoesNotHold { keyword, .. } => {
+            format!("a curve this kernel does not hold: {keyword}")
+        }
+        Refusal::ALoopThisReaderDoesNotWalk { keyword, .. } => {
+            format!("a loop this reader does not walk: {keyword}")
+        }
+        Refusal::AFaceThatDoesNotSayWhichBoundIsTheOuterOne { .. } => {
+            "a face that does not say which bound is the outer one".to_owned()
+        }
+        Refusal::AnArcThatStartsAndEndsInTheSamePlace { .. } => {
+            "an arc that starts and ends in the same place".to_owned()
+        }
+        Refusal::AnArcThisReaderCouldNotName { .. } => {
+            "an arc this reader could not name".to_owned()
+        }
+        Refusal::ALengthUnitThisKernelDoesNotHave { described, .. } => {
+            format!("a length unit this kernel does not have: {described}")
+        }
+        Refusal::TheFileDeclaresNoLengthUnit => "the file declares no length unit".to_owned(),
+        Refusal::TheFileDeclaresTwoDifferentLengthUnits { .. } => {
+            "the file declares two different length units".to_owned()
+        }
+        Refusal::APlacementThisReaderCannotApply { keyword, .. } => {
+            format!("a placement this reader cannot apply: {keyword}")
+        }
+        Refusal::AnEntityIsNotTheKindTheSchemaWants { wanted, found, .. } => {
+            format!("a {found} where the schema wants a {wanted}")
+        }
+        Refusal::AnAttributeIsNotWhatTheSchemaWants {
+            keyword, wanted, ..
+        } => format!("{keyword}'s attribute is not the {wanted} the schema wants"),
+        Refusal::AnIntegerTooBigToBeTheRealItStandsFor { .. } => {
+            "an integer too big to be the real it stands for".to_owned()
+        }
+        Refusal::AReferencePointsNowhere { .. } => "a reference points nowhere".to_owned(),
+        Refusal::TheGeometryIsNotAWorkingShape { why, .. } => {
+            format!("the geometry is not a working shape: {why}")
+        }
+        Refusal::ThisEntityOfTheSolidWasRefused { why, .. }
+        | Refusal::TheSolidTheFileDescribesIsNotOne { why, .. } => {
+            format!(
+                "the builder or the sweep: {}",
+                without_numbers(first_line(&why.to_string()))
+            )
+        }
+        Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn { .. } => {
+            "a corner is not on the curved face the file says it is on".to_owned()
+        }
+        Refusal::ACornerIsNotOnThePlaneOfTheArcItEndsOn { .. } => {
+            "a corner is not on the plane of the arc it ends on".to_owned()
+        }
+        Refusal::TheFileHasNoSize => "the file has no size".to_owned(),
+    }
+}
+
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or(text)
+}
+
+/// `text` with every run of digits (and a decimal point stuck to one) replaced
+/// by a single `<N>`.
+///
+/// `SolidBuilder`'s own errors name **which** step, coedge or vertex by a
+/// position in its draft arrays — "step 2 does not start where the one before
+/// it ended", "the coedge described at position 4 is not used by anything" —
+/// and that position is an index into *this one wire's* draft, not a fact about
+/// the file. Two edges that fail the same way at different positions are the
+/// same reason wearing two different numbers, and grouping them apart would
+/// count entities where the question asks for kinds.
+fn without_numbers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if !ch.is_ascii_digit() {
+            out.push(ch);
+            continue;
+        }
+        out.push_str("<N>");
+        while chars
+            .peek()
+            .is_some_and(|next| next.is_ascii_digit() || *next == '.')
+        {
+            chars.next();
+        }
+    }
+    out
 }
 
 /// The largest coordinate magnitude of any corner the file's solids actually

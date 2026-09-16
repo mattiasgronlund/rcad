@@ -129,7 +129,9 @@
 # Pointing `CLAUDE_PLUGINS_ROOT` at an empty directory is what found it — exit 1
 # and two 127s. A green sweep is not evidence when the thing you are asking
 # about is what the environment supplies. Do not count the recipes here again;
-# `grep '^gate:' justfile | tr ' ' '\n' | grep -c '^check-'` is the number.
+# `sed -n 's/^gate_steps := "//p' justfile | tr ' ' '\n' | grep -c '^check-'` is
+# the number. The `sed` strips the opening quote; grepping the line whole counts
+# 26, because the first step is `"check-plugins` and does not match `^check-`.
 #
 # One step rather than four, and `check-corpus` deliberately twice. The single
 # step is what lets `check-gate-runs-every-check` reach this file: a new
@@ -196,10 +198,12 @@ jobs:
       # gate and nowhere else. Named rather than replaced: no runner-side
       # substitute was worth a clone whose other two users checked nothing.
       #
-      # The version this repo asks for lives in `.claude/settings.json` —
-      # `mattiasgronlund/claude-questions@v0.2.0` — and `check-declared.sh`
-      # fails a machine registered at a different ref. That is a statement about
-      # the sessions a human opens here, not about this job.
+      # The version this repo asks for lives in `.claude/settings.json`, and
+      # `check-declared.sh` fails a machine registered at a different ref. That
+      # is a statement about the sessions a human opens here, not about this
+      # job. The version is deliberately not repeated here: this comment named
+      # `v0.2.0` while the file said `v0.2.1`, and prose asserting a pin reads
+      # as agreement with it right up until someone checks.
       # mise installs the `cargo:` tools in parallel, and each one triggers
       # rustup to materialise the toolchain pinned in `rust-toolchain.toml`.
       # They race over the same `.partial` file in ~/.rustup/downloads and all

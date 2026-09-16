@@ -35,6 +35,82 @@ pub(crate) fn solid_from(
     walk.build(reading, model, policy, log)
 }
 
+/// Every refusal one `MANIFOLD_SOLID_BREP` would earn, rather than the first
+/// one [`solid_from`] stops at: a face, a bound or an edge that is refused is
+/// dropped and the walk carries on past whatever is left of the solid.
+///
+/// **This exists because a first refusal is an upper bound and nothing else**
+/// (§45.2). A file freed of its first blocker usually meets a second one right
+/// behind it, so the count of files one reason stops *first* says nothing about
+/// what fixing that reason is worth. What prices a fix is the count of files
+/// that have **only** that reason, and no walk that stops at the first one can
+/// take it.
+///
+/// Two buckets, never mixed. [`ProbeOutcome::skipped`] is every refusal that
+/// cost the walk one entity — the walk went on to whatever was left.
+/// [`ProbeOutcome::fatal`] is a refusal that stopped this solid before it had a
+/// face list to skip through at all: its `MANIFOLD_SOLID_BREP` does not name a
+/// `CLOSED_SHELL` that resolves, or that shell's own face list does not.
+///
+/// **Nothing that skipped an entity is ever asked to assemble what is left of
+/// it, at any of the three levels below.** A dropped edge leaves a wire that
+/// cannot close; a dropped bound leaves a face with a hole in it; a dropped
+/// face leaves a shell that is not closed — and `add_wire`, `add_face`,
+/// `add_shell` and the final `build` all refuse exactly that, by name, every
+/// time. That was measured rather than assumed: before
+/// [`ProbeWalk::probe_the_bound`] and [`ProbeWalk::probe_the_face`] stopped
+/// asking `add_wire`/`add_face` to assemble a known-incomplete wire or face,
+/// this reported `an arc this reader could not name` as never once a file's
+/// *only* reason — every file that had it also seemed to have a wire that would
+/// not close, when what it actually had was the one open wire that arc itself
+/// belongs to. `build` (and `add_wire`, `add_face`, `add_shell`) is asked only
+/// of a wire, a face, a shell or a solid that lost nothing — which is exactly
+/// when its refusal is the real one [`solid_from`] would give for it too, and
+/// not an echo of a hole this walk itself put there.
+pub(crate) fn probe_solid(
+    reading: &Reading<'_>,
+    brep: EntityId,
+    model: &mut Model,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> ProbeOutcome {
+    let shell = match reading.reference_at(brep, "MANIFOLD_SOLID_BREP", 1) {
+        Ok(shell) => shell,
+        Err(why) => {
+            return ProbeOutcome {
+                skipped: Vec::new(),
+                fatal: vec![why],
+            };
+        }
+    };
+    let mut probe = ProbeWalk::new(brep);
+    if let Err(why) = probe.probe_the_shell(reading, shell) {
+        return ProbeOutcome {
+            skipped: probe.refusals,
+            fatal: vec![why],
+        };
+    }
+    if probe.refusals.is_empty()
+        && let Err(why) = probe.walk.build(reading, model, policy, log)
+    {
+        probe.refusals.push(why);
+    }
+    ProbeOutcome {
+        skipped: probe.refusals,
+        fatal: Vec::new(),
+    }
+}
+
+/// What [`probe_solid`] found, in the two buckets its own doc comment names.
+pub(crate) struct ProbeOutcome {
+    /// A refusal that cost the walk one face, bound or edge — never the whole
+    /// solid.
+    pub(crate) skipped: Vec<Refusal>,
+    /// A refusal that stopped the walk before it had anything left to skip
+    /// through.
+    pub(crate) fatal: Vec<Refusal>,
+}
+
 /// One solid being described, and what every draft entity in it was called in
 /// the file.
 ///
@@ -598,8 +674,13 @@ impl Walk {
     }
 
     /// Check the whole description and write it into `model`.
+    ///
+    /// `&self` rather than `self`: [`ProbeWalk`] asks this of a walk it does
+    /// not own, having already spent `self` on probing every face.
+    /// `self.builder.clone()` was already how the one call this had was
+    /// answered, so taking `self` by value never bought anything here.
     fn build(
-        self,
+        &self,
         reading: &Reading<'_>,
         model: &mut Model,
         policy: &Policy,
@@ -643,7 +724,7 @@ impl Walk {
     /// Closing that properly wants the sweep's own two allowances, and neither
     /// `Model::what_writing_a_plane_down_costs` nor
     /// `Model::what_writing_a_point_down_costs` is reachable from this crate.
-    fn what_stopped_the_build(self, reading: &Reading<'_>, why: rcad_topo::Error) -> Refusal {
+    fn what_stopped_the_build(&self, reading: &Reading<'_>, why: rcad_topo::Error) -> Refusal {
         if matches!(
             why,
             rcad_topo::Error::Invalid(Invalid::VertexOffItsFaceSurface)
@@ -851,6 +932,192 @@ impl Walk {
             solid: self.brep,
             entity,
             why: Box::new(why),
+        }
+    }
+}
+
+/// Wraps a [`Walk`] and drives it fault-tolerantly for [`probe_solid`].
+///
+/// `Walk`'s own `describe_the_shell`/`describe_the_face`/`describe_the_bound`
+/// all use `?` to stop at the first entity that refuses, which is exactly right
+/// for [`solid_from`] and exactly wrong for counting how many reasons a file
+/// gives. These three methods are the ones this rewrites; everything below them
+/// — `describe_the_coedge`, `describe_the_edge`, `run_along`,
+/// `describe_the_vertex` — is called through `self.walk` unchanged, because
+/// nothing past one edge or one vertex has a sibling to carry on to.
+struct ProbeWalk {
+    walk: Walk,
+    /// Every refusal found so far, in the order the walk met them.
+    refusals: Vec<Refusal>,
+}
+
+impl ProbeWalk {
+    fn new(brep: EntityId) -> Self {
+        Self {
+            walk: Walk::new(brep),
+            refusals: Vec::new(),
+        }
+    }
+
+    /// Every face of the shell that could be described, skipping and recording
+    /// any that could not — the fault-tolerant twin of
+    /// [`Walk::describe_the_shell`].
+    ///
+    /// Only the face list itself not resolving is handed back as an `Err`: with
+    /// no list, there is nothing to skip through, which is
+    /// [`ProbeOutcome::fatal`]'s case and not this one's.
+    ///
+    /// `SolidBuilder::add_shell` is asked only when every face came back — the
+    /// same rule [`Self::probe_the_face`] and [`Self::probe_the_bound`] apply
+    /// one level down, for the same reason: a shell missing a face is open, and
+    /// a refusal for that is the shape of the missing face, not a second reason
+    /// next to it. [`probe_solid`] makes the same call about the final `build`,
+    /// one level up from here.
+    ///
+    /// **Unlike the two levels below, this one is not known to cost anything.**
+    /// `add_shell` took a block's five remaining faces without complaint when
+    /// the sixth was dropped, so the artefactual reason it guards against is
+    /// one no test here reaches; what actually catches an open skin is
+    /// `build`, which [`probe_solid`] already withholds from a solid that lost
+    /// something. The rule is kept at all three levels because a walk that
+    /// applies it at two is a walk whose numbers depend on which level a future
+    /// check lands at.
+    fn probe_the_shell(&mut self, reading: &Reading<'_>, shell: EntityId) -> Result<(), Refusal> {
+        let faces = reading.references_at(shell, "CLOSED_SHELL", 1)?;
+        let face_count = faces.len();
+        let mut skin: Vec<(DraftFace, Orientation)> = Vec::with_capacity(face_count);
+        for face in faces {
+            if let Some(described) = self.probe_the_face(reading, face) {
+                skin.push(described);
+            }
+        }
+        if skin.len() == face_count
+            && let Err(why) = self.walk.builder.add_shell(&skin)
+        {
+            self.refusals.push(self.walk.refused(shell, why));
+        }
+        Ok(())
+    }
+
+    /// One `ADVANCED_FACE`, or `None` with the reason recorded — the
+    /// fault-tolerant twin of [`Walk::describe_the_face`]. A face whose surface
+    /// or bound list will not even resolve is dropped whole.
+    ///
+    /// **`SolidBuilder::add_face` is asked only when every one of the face's
+    /// bounds came back whole.** A face missing a bound is a face with a hole
+    /// where a wire should be, and `add_face` then reports *that hole* —
+    /// `crossing`, `winding` and the rest of its refusals are about a bound
+    /// that is there, so a missing one is not a second reason the file has, it
+    /// is the shape of the first one. Recording it as one cost
+    /// `B_SPLINE_SURFACE_WITH_KNOTS` and `SURFACE_OF_REVOLUTION` every file
+    /// where either is the *only* reason: each always left a face-shaped hole,
+    /// and `add_face` on the hole always refused for a second, artefactual
+    /// reason before this asked the real question.
+    fn probe_the_face(
+        &mut self,
+        reading: &Reading<'_>,
+        face: EntityId,
+    ) -> Option<(DraftFace, Orientation)> {
+        let keyword = self.record(reading.keyword_of(
+            self.walk.brep,
+            face,
+            &["ADVANCED_FACE", "FACE_SURFACE"],
+        ))?;
+        let sits_on = self.record(reading.reference_at(face, keyword, 2))?;
+        let written = self.record(reading.surface_at(face, sits_on))?;
+        let same_sense = self.record(reading.flag_at(face, keyword, 3))?;
+        let (surface, used) = match (written.as_plane(), same_sense) {
+            (_, true) => (written, Orientation::Forward),
+            (Some(flat), false) => (Surface::Plane(flat.reversed()), Orientation::Forward),
+            (None, false) => (written, Orientation::Reversed),
+        };
+
+        let bounds = self.record(reading.references_at(face, keyword, 1))?;
+        let outer_first = self.record(
+            self.walk
+                .outer_bound_first(reading, face, &bounds, &surface),
+        )?;
+        let bound_count = outer_first.len();
+        let mut wires = Vec::with_capacity(bound_count);
+        for bound in outer_first {
+            if let Some(wire) = self.probe_the_bound(reading, face, bound) {
+                wires.push(wire);
+            }
+        }
+        if wires.len() < bound_count {
+            return None;
+        }
+        match self.walk.builder.add_face(surface, &wires) {
+            Ok(drafted) => {
+                self.walk.face_names.push(face);
+                self.walk.face_surfaces.push(surface);
+                Some((drafted, used))
+            }
+            Err(why) => {
+                self.refusals.push(self.walk.refused(face, why));
+                None
+            }
+        }
+    }
+
+    /// One `FACE_BOUND` or `FACE_OUTER_BOUND`, or `None` with the reason
+    /// recorded — the fault-tolerant twin of [`Walk::describe_the_bound`]. A
+    /// bound whose own loop will not resolve is dropped whole.
+    ///
+    /// **`SolidBuilder::add_wire` is asked only when every one of the loop's
+    /// steps read cleanly**, for the same reason [`Self::probe_the_face`] asks
+    /// `add_face` only of a face with every bound: a wire missing a step is
+    /// open where a closed loop is asked for, and "does not close" is the shape
+    /// of the step that is missing, not a second thing wrong with the edge that
+    /// could not be named.
+    fn probe_the_bound(
+        &mut self,
+        reading: &Reading<'_>,
+        face: EntityId,
+        bound: EntityId,
+    ) -> Option<rcad_topo::DraftWire> {
+        let (loop_id, walk_it_backwards) =
+            self.record(self.walk.loop_of_bound(reading, face, bound))?;
+        let mut oriented = self.record(reading.references_at(loop_id, "EDGE_LOOP", 1))?;
+        if walk_it_backwards {
+            oriented.reverse();
+        }
+        let edge_count = oriented.len();
+        let mut steps = Vec::with_capacity(edge_count);
+        for use_of_an_edge in oriented {
+            match self
+                .walk
+                .describe_the_coedge(reading, use_of_an_edge, walk_it_backwards)
+            {
+                Ok(coedge) => steps.push(DraftStep::Along(coedge)),
+                Err(why) => self.refusals.push(why),
+            }
+        }
+        if steps.len() < edge_count {
+            return None;
+        }
+        match self.walk.builder.add_wire(&steps) {
+            Ok(wire) => {
+                self.walk.wire_names.push(loop_id);
+                Some(wire)
+            }
+            Err(why) => {
+                self.refusals.push(self.walk.refused(loop_id, why));
+                None
+            }
+        }
+    }
+
+    /// Record `result`'s `Err` and turn it into `None`, or hand back its `Ok`.
+    /// Every one of the three methods above is this pattern repeated on a
+    /// different reading call, so it earns the name.
+    fn record<T>(&mut self, result: Result<T, Refusal>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(why) => {
+                self.refusals.push(why);
+                None
+            }
         }
     }
 }

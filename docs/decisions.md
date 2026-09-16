@@ -13,6 +13,59 @@ Each decision cites the roadmap section it comes from or contradicts.
 
 ---
 
+## 0. Where the work is
+
+reviewed: 2026-09-15
+
+**unit:** *a crossing too nearly parallel to follow* — the 44 corpus files that
+hang on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off
+§107's table, with the 18 closed edges walked against their surface's winding
+to follow it. No lane runs yet. §16.10 governs it: "too nearly parallel to
+follow" is a claim that something cannot be done, so the unit owes a
+demonstration either way — a gap if a scaling or a reformulation reaches the
+sign, a limit if none does.
+
+The measurement that chose it is closed, and §107 is what it found. Five lanes
+reported: roadmap §4.2 is not the lever, the B-spline edge is worth 17 files
+alone against 68 tangled, and the biggest bucket of all — 97 files with a corner
+off a curved face — is healing, which §42.9 refuses by name and whose own
+trigger in §44.6 scores 37% against a 50% bar. §45.2 still governs every count:
+a file count a blocker stops *first* is an upper bound, never a projection.
+
+**parked:** *the hollow*, §104, opened 2026-09-15. Shelling: a solid whose faces
+are planes, hollowed to a wall of one thickness. It is the first of roadmap
+§8's local operations, which the roadmap calls M6; §44.1 is why it has a name
+instead. **No lane runs, and none will yet** — §104.2 has the reason: §13 wants
+a named consumer and `docs/consumers.md` records none for any local operation.
+Mattias left it parked on 2026-09-15 rather than argue §13 down, because the
+corpus has a consumer today and shelling does not.
+
+The unit before it, §53 `a plane, a cone and a coaxial pipe`, is closed by §103
+having earned nothing. It was planned on 2026-09-05 and no lane ever ran; §55
+through §102 are defect fixes, fuzz work and tooling instead.
+
+**the board is not here.** `docs/plan.md` has one line per roadmap item with
+its state and the evidence; `just plan` renders it, `just plan open` lists what
+is left, and `just status` prints the counts. Audited 2026-09-15: 13 done,
+7 partly, 5 todo. §106.
+
+**deferred, with the section that defers it:**
+
+- §43.8 item 8 — `composite_wildcards.awk` counts sites, not uncovered
+  variants. The section says so itself: the hole all seven drifts fell through.
+- §43.8 item 12 — healing option C, imported-corner slop, not built. Nothing
+  closes it.
+- §89.7 — the cheap detector for a walk that does not close, deferred under
+  §13's no-named-consumer rule. Fine deflection still costs ~2.9s with no
+  cheap refusal ahead of it.
+- §52.13 — unscored. The gate that was to score it, §53.7 charge 3, never ran;
+  §104.6 carries it.
+
+This section is §0 so that it sorts above §1 and `just decision 0` reaches it;
+`just status` prints it, and `check-where-the-work-is` holds it to its shape.
+§102 argues why it is here rather than in `docs/roadmap.md` or a file of its
+own.
+
 ## 1. Departures from the roadmap
 
 Read this section first. Everything else is elaboration.
@@ -27131,3 +27184,1415 @@ unreached lines overwhelmingly named refusals for entity kinds the corpus never
 reaches, which is §43.10's 85.8% seen from the other side. That is context and
 not an answer: the gap found above is about which corpus has an independent
 fact to check against, which no line count can see.
+
+## 98. A night that crashed on its own oracle, fixed 2026-09-14
+
+`~/rcad-fuzz-logs/latest` read
+
+```text
+2026-09-14 08:10  9b82e9e (0 days old, 0 behind main)  4 targets, 1 TO LOOK AT (fuzz:crash)
+```
+
+and the crash was real, reproducible on `main`, and **in the test harness**.
+The other three targets ran clean: 112 097 627 runs of the reader, 293 178 960
+of the writer, 4 292 040 of the fuse.
+
+§91 is the night before this one, and it is the opposite shape. There the night
+lost a finding it had. Here the night had a finding that was not one — and the
+way to tell those apart is the same either way, which is to reproduce the thing
+before believing the label on it.
+
+### 98.1 The pair, and why both answers were right
+
+`writing_a_pair_at_another_power_of_two_does_not_change_it` panicked: two
+leaning pipes that cross in one closed loop as written, and in nothing at `2⁻¹`.
+
+```text
+Cylinder { axis: { origin: (-8, -1, 251659264), direction: (0, 0, 1) },
+           radius: 1.0737299303163968e128 }
+Cylinder { axis: { origin: (R, R, R), direction: (0.6739228415507578, 0, 0.7388017349980658) },
+           radius: 1 }
+```
+
+The second direction has **no `y` component at all**, so every point of that
+axis sits at `y = R`, the first axis sits at `y = -1`, and the distance between
+them is exactly `R + 1`. `where_two_leaning_pipes_cross` asks `ρ₁ + ρ₂ − δ`
+first, and with `ρ₁ = R` and `δ = R + 1` that whole question reduces to
+
+```text
+ρ₂ − 1  =  1/√(a²+c²) − 1
+```
+
+for the second direction's `a` and `c`. Exactly, in rationals:
+
+| spelling | `a` | `a²+c² − 1` | so |
+|---|---|---|---|
+| as the fuzzer decoded it | `0.6739228415507578` | `−1.87e-17` | `ρ₂ > 1`, one closed loop |
+| after the harness rebuilt it | `0.6739228415507579` | `+1.31e-16` | `ρ₂ < 1`, nothing |
+
+**Both certified answers are right about the pipes they were handed.** The two
+spellings are not one pair written at two scales; they are two pairs, one bit
+apart, either side of a knife edge. Nothing in the kernel is wrong here, and the
+`Ok` on a margin of `1e-17` against coordinates of `1e128` is the exact level
+doing what §29 built it for.
+
+### 98.2 `Axis::new` is not idempotent, and a test that rebuilt an axis paid for it
+
+The harness scaled a surface by rebuilding it, and rebuilt the axis with
+`Axis::new(scaled_origin, axis.direction())`. `Axis::new` scales the direction
+it is given to length one — which is not a no-op on a direction that is already
+one, because it divides by the largest component and normalizes again, and both
+round. Measured over 100 000 random directions: **24 750 come back with other
+bits**, pinned by `rebuilding_an_axis_from_its_own_direction_moves_it_and_moving_its_origin_does_not`.
+
+**This is a footgun and not a broken promise, and the difference matters.**
+`Axis::new` claims that two vectors *exactly* along one line give the same axis
+bit for bit, and §22.6 is why. That claim holds —
+`an_axis_is_the_same_however_long_the_direction_naming_it_was` and the 210 000
+pairs beside it already say so. A stored direction is the rounded normalizing of
+whatever built the axis, so it lies exactly along nothing, and the claim has
+nothing to say about it.
+
+Nothing in `src/` rebuilds an axis this way. `Axis::transformed` was written
+against exactly this and says so: *"a read that moves bits is a read nobody can
+do twice."* What was missing was the same thing for a scaling, which is not an
+isometry, so `Axis::moved_to` is it — the origin moves, the direction is carried
+across untouched, and there is nothing left to round.
+
+### 98.3 What a factor of one proves
+
+`scaled(pair, 2⁰)` — a factor of **one**, no scaling at all — already turned
+`Curves` into `Nothing`. That is the whole diagnosis in one call, and it is what
+says the oracle and not the arithmetic: a scaling helper that changes an answer
+at factor one is not testing scaling.
+
+The seed is checked in as
+`fuzz/corpus/where_two_surfaces_cross/d04e004125fd3d455bd578e6ccfe36949b05bf9e`,
+so `every_seed_in_the_checked_in_corpus_names_its_crossing_honestly` replays it
+in the ordinary suite. Without the fix it panics there in the same words the
+night did; with it, 831 seeds pass.
+
+**The oracle was weakened by this and is not weakened by the fix.** It was
+comparing the pair against a rescaled *and* slightly tilted copy, so every
+disagreement it could ever report was a disagreement about one of two things and
+it could not say which. It now compares the pair against the pair.
+
+### 98.4 The night was running a justfile from two days earlier
+
+The same night kept none of the six artifacts it found. `latest` named the crash
+and no artifact count, and the only copies sat in the gitignored
+`fuzz/artifacts/` — which is the exact loss §91 added the copy-out to stop, two
+days after it landed.
+
+`just` hands bash the whole recipe body before the first line of it runs, and
+`fuzz-overnight` then checks out the watermark. The reflog of the nightly
+worktree:
+
+```text
+6e71fe6  checked out 2026-09-11 22:04:17, and held there all of 2026-09-13
+9b82e9e  checked out 2026-09-14 00:10:02, by the night that was already running
+```
+
+`34ba0ad`, which added the copy-out, was committed 2026-09-13 11:52. So the body
+running that night had been read from a commit that predated its own fix. **Every
+change to this recipe would have taken effect the night after it landed**, which
+is a cost nobody had priced because nobody had noticed paying it.
+
+The recipe now re-execs itself after the checkout, so a night runs the justfile
+it is fuzzing. **A night advances once**: the commit it lands on is the newest
+green there was a moment ago, so the recipe taking over would almost always find
+nothing to move to and stop by itself — but "almost always" is a bound on CI's
+timing and not on the loop, so `RCAD_FUZZ_ALREADY_ADVANCED` makes it a bound on
+the loop. Once is also the honest reading of §90: the night follows the last
+green commit as of when it started.
+
+Two arms of `check-fuzz-overnight-selftest` hold it. The fixture's two commits
+disagree on purpose — the night starts on the real recipe and advances to one
+whose `fuzz-overnight` does nothing but name itself — so the marker in the
+output is which body ran, and the arm reads the exit status last, because a
+night that carried on with the wrong body goes on to build and fuzz and then
+fails or passes for reasons of its own.
+
+### 98.5 A crash that had already been fixed, sitting where nothing would re-find it
+
+`fuzz/artifacts/where_two_surfaces_cross/` also held
+`crash-cba396f88aa1063b9d879100bded7b9fcd0d5f95`, dated 2026-09-12. It replays
+clean on `main`: fixed in the two days since, and never re-found, because
+libFuzzer does not read that directory back as a seed. Nobody was told either
+way. Everything there is now copied to
+`~/rcad-fuzz-logs/artifacts-rescued-2026-09-14/`.
+
+## 99. What a week of sessions cost, and the eight things that were paying for nothing, 2026-09-14
+
+Every session transcript in this repo and its worktrees with activity between
+2026-09-07 and 2026-09-14 was read and priced: 13 573 API calls, 1 805 M billed
+input tokens, 6 M output. At list rates — Opus 5 at $5/$25 per MTok, cache reads
+at $0.50 — that is **$1 163 for the week**.
+
+The method matters, because the naive reading is wrong by 1.85x. A transcript
+writes one JSONL entry per content block and **repeats the same `usage` object
+on each of them**, so a thinking block, a text block and three tool calls from
+one API response appear as five entries all claiming the same token counts.
+Dedupe by `message.id` before summing anything.
+
+### 99.1 It is round-trips that cost, not output
+
+**72.5% of the bill is cache reads**: the same context read again on every turn.
+Raw tool output for the entire week was 4.3 M tokens. The bill is **420x the
+information**. A `grep` that returns forty bytes at 250 000 tokens of context
+costs a quarter of a million tokens, and would have cost the same returning
+nothing.
+
+Everything below follows from that one ratio. The lever is never "print less";
+it is "take fewer turns", or "take them somewhere the context is small".
+
+Three numbers set the scale. The median call bills 117 000 tokens and the mean
+133 000. **Calls above 150 000 are 34% of calls and 55% of the bill**; above
+200 000, 19% of calls and 35%; above 250 000, 7% and 16%. And **only 11% of
+calls issue more than one tool call**, so the commonest shape in the corpus is a
+quarter-million-token call that asks one question.
+
+### 99.2 Where it went
+
+By what the call was doing, as a share of the $1 163:
+
+- finding things — `grep`/`sed`/`cat`/`find` $228, `Read` $62, `git log`/`show`/
+  `diff` $90, `just decision*` $30, `just src` $22 — **$481, 41%**
+- `Edit` of source, $134, at a mean context of 142 000
+- answering the user with no tool at all, $70
+- running one test or the suite, $53; `gate` runs, $39, plus a further 145 calls
+  that grepped the redirected gate log for three numbers the recipe already had
+- `docs/decisions.md` reads and edits, $48
+- the `open-questions.md` ritual, $53 — 263 `Edit`s against 57 `Write`s, and 128
+  `question-check` calls whose **median result was 31 bytes**, because the
+  checker prints nothing when the file is clean
+- lane, worktree and disk bookkeeping, $38
+
+By where the work ran: main sessions on Opus, 66%, at a mean context of 166 000.
+Subagents on Opus, 26%, at 97 000. Subagents on Sonnet, 3%. Six Haiku calls all
+week.
+
+### 99.3 The refusals that cost a turn each
+
+333 calls were refused by the worktree-isolation guard, which rejects a `git`
+command it cannot prove stays inside the worktree — a `~/git/...` path inside a
+loop or a `$( )` is the usual shape. Each refusal buys a retry at full context:
+**~40 M tokens, 1.2% of the week**, for commands that were never run. A further
+37 were refused by the permission classifier and 16 by the patching hook.
+
+The patching hook's 16 are the system working: that is 16 heredocs that did not
+silently fail to match. The guard's 333 are not, and the fix is in how commands
+are written rather than in the guard.
+
+### 99.4 The eight changes
+
+Approved as a batch by Mattias on 2026-09-14, each with the measurement that
+argues it:
+
+1. **`just fuzz-triage`** — the night already keeps its artifacts and writes
+   `latest`; nothing said what the bytes *meant*, so every morning re-derived it
+   by hand through `cargo +nightly fuzz run`. The fuzz worktrees were 30% of the
+   week. The recipe decodes an artifact through the target's own harness and
+   prints the reconstruction line a regression test needs — which is what the
+   20-to-40 `Edit` round-trips at the tail of a bug session were spent writing.
+2. **A `lookup` lane** (`.claude/agents/lookup.md`), read-only and on Sonnet, for
+   any question needing more than two probes. Against $481 of finding things at
+   150 000 tokens a call, a lane that starts at 34 000 and bills at a fifth the
+   rate costs about a tenth for the same answer.
+3. **Batch independent read-only probes into one call.** 1 655 read-only calls
+   directly followed another: 9% of the bill spent on the split alone.
+4. **`gate` ends with its own summary**, so the 145 follow-up greps become none.
+5. **One `Write` per round of questions**, and a hook that runs the checker on
+   write and speaks only when it finds something.
+6. **`just release-lanes`**, and disk work through `clean-targets`. One session
+   unlocked fifteen worktrees in fifteen calls at 137 000 tokens each.
+7. **A lower context budget from a single source, and a `SessionStart` hook that
+   says when `guardrails` is missing.** On 2026-09-08 session 83dcf00a ran to
+   322 000 tokens with the budget hook not installed; the first anyone knew was
+   being asked why the nagging had stopped. A handoff costs one call to write
+   and a 46 000-token floor to resume, so it repays itself after about ten
+   calls — the economic threshold is far below where sessions actually stop.
+8. **Mechanical lanes default to Sonnet**, named by kind in the `delegating`
+   skill. Subagent-Opus was $300 against subagent-Sonnet's $35.
+
+### 99.5 What this section is not
+
+It is not a budget, and the numbers in it are a week's measurement rather than a
+bound. **Do not update them in place.** A count goes stale on the next push —
+§77's tally of CI runs went stale twice inside a day — and a figure here that
+drifts is worse than no figure, because the argument it was carrying keeps
+reading as measured. Re-measure and write a new section; leave this one as the
+record of what was true on 2026-09-14.
+
+## 100. A tool call is billed the context it is made at, decided 2026-09-14
+
+A recipe that answers in three steps — the sessions, then the headings, then one
+body — is cheap for a person and expensive for an agent, and `just question` was
+built the first way and called the second way. This section is why the default
+changed, and the rule it generalises to.
+
+Do not update the figures below in place. §99.5 says why, and §77's CI tally went
+stale twice inside a day to prove it. They are measurements of the week of
+2026-09-07 and they stay that.
+
+### 100.1 The measurement
+
+Across the five longest transcripts in this repo, the mean assistant turn billed
+144 000 to 182 000 input tokens against 850 to 1 300 output — a ratio between
+110 and 198 to one — and 97 % of the input was cache reads. Over the whole week,
+13 621 calls billed 1 805 M input for 6.0 M output.
+
+The questions apparatus was $57 of a $1 163 bill. All of its recipe calls
+together returned about 123 kB — roughly 31 000 tokens — for that $57, a ratio
+near 470 to 1. `question-check` was the extreme: 128 calls, **median result 31
+bytes**, because on a clean file it prints nothing. 92 % of question-work calls
+did nothing else in the same call, at a median context of 150 000, which is 28 %
+above the session-wide median — the work happens late, when a turn costs most.
+
+### 100.2 The rule, and the number that makes it usable
+
+**A call costs the context it is made at, not the bytes it returns.** Both sides
+of that are cache reads at the same rate, so the trade is rate-independent and
+holds for a Sonnet lane as well as an Opus session.
+
+One avoidable round trip costs about what carrying 2 200 extra resident tokens
+for 73 further turns costs — 166 000 divided by 2 200 at the main-session mean,
+60 at the all-calls mean. The largest `open-questions.md` in the tree is 8 687
+bytes, about 2 200 tokens. So printing a whole file beats **one** avoidable
+follow-up in any session with fewer than about 73 turns left.
+
+Two consequences, and they are not the same rule:
+
+- **Batch independent probes into one call.** Three greps in one message cost one
+  round trip; in three messages they cost three.
+- **Write a file you already hold with one `Write`.** Batching does not extend to
+  edits that depend on each other. Three `Edit`s in one message to this very
+  document duplicated a block and cost two more round trips to find and fix than
+  the single `Write` would have.
+
+### 100.3 What it changed
+
+`just question <hash>` prints every open question in full. `--labels` is the old
+listing, `--all` includes answered entries, `--json` is for a program, and naming
+labels prints those, answered or not. Violations are **named** under the output
+rather than counted: a count is not actionable, and the second call that makes it
+actionable pays for the whole conversation again to learn three lines.
+
+`just question-tui` is the entry point for a person. Naming it that way is what
+settles the default — before, every terseness in `just question` was justified by
+a finite screen and cheap keystrokes, which describes the caller it does not have.
+
+### 100.4 The better reason, which is not about money
+
+A malformed entry has no parsable label. `compact` can say no more than `??×1`,
+the label listing no more than `??` with a line number, and the TUI drops it
+entirely (`questions-tui.py:493` keeps `if e["labels"]`). Printing bodies by
+default is the only view in which a broken entry is readable and fixable.
+
+That is a correctness gain and it would be worth making at zero token cost. A
+question that goes missing while the line looks complete is the one failure this
+apparatus cannot have — §59.2 is the time it happened.
+
+## 101. Three rescue nights replayed against 04f6085, and nothing earned a seed
+
+```text
+find ~/rcad-fuzz-logs/artifacts-rescued-2026-09-11 \
+     ~/rcad-fuzz-logs/artifacts-rescued-2026-09-13 \
+     ~/rcad-fuzz-logs/artifacts-rescued-2026-09-14 -type f | wc -l
+350
+```
+
+Three rescue directories, replayed against `04f6085` (origin/main, gate-green
+there at 1877 tests). The honest answer is that none of the 350 is a live
+kernel bug and none of them earns a seed — every one either fails to decode at
+all, or replays into an outcome shape this rescue itself repeats several times
+and `docs/decisions.md` §95 already names as common. `fuzz/corpus/` is
+unchanged by this section.
+
+### 101.1 What was where, and the one night that needed attributing first
+
+`2026-09-11` and `2026-09-14` keep each artifact under its target's own
+directory — `find ~/rcad-fuzz-logs/artifacts-rescued-2026-09-11 -maxdepth 2
+-type d` names `two_solids_fused_by_a_stranger` (253), `where_two_surfaces_cross`
+(3) and an empty `no_model_makes_the_writer_panic`; `2026-09-14` names
+`where_two_surfaces_cross` (6) and three more empty ones. `2026-09-13` is flat —
+88 files, no target directory — and `just fuzz-triage` takes the target off the
+artifact's *parent directory name*, so pointed at that night directly it would
+report all 88 as "did not come back clean" without ever running the decoder.
+
+That night's own `fuzz-fuse.log` carries the answer. Its "Recommended
+dictionary" (libFuzzer prints one per target, learned from that run's own
+coverage) includes the byte string `\000\003\001\000\000%\000\000\000Y@\003`,
+and every one of the 88 files opens with that same string or a one-byte
+mutation of it (`400301...`, `a90301...`, `6f0301...`) — checked with `head -c
+12 <file> | xxd -p` against all 88, no exception. `fuzz.log`,
+`fuzz-reader.log` and `fuzz-writer.log` (the other three targets that ran that
+night) report zero crash artifacts and finish "Done N runs in 7198 second(s)"
+each, and the live `fuzz/artifacts/<target>/` directories for the other three
+targets are empty — so nothing else that night could have produced these 88.
+Decoding three samples, including two of the one-byte mutations, with `mise
+exec -- cargo run -q -p rcad-fuzz-explain -- two_solids_fused_by_a_stranger
+<file>` confirms it directly: all three decode into an `AHalf { .. }` pair and
+replay. The 88 were copied into a per-target layout under this session's
+scratchpad (`night13/artifacts/two_solids_fused_by_a_stranger/`) and triaged
+from there — the recipe itself was not touched.
+
+A stronger form of the same evidence sat in the tree already and did not need
+running anything: 7 of the 88 — `158d358d..`, `5b8430a6..`, `66172e27..`,
+`66d6743f..`, `8cc43081..`, `b0794805..`, `c29fad84..` — are byte-identical
+(full trailing sha1) to files already checked into
+`fuzz/corpus/two_solids_fused_by_a_stranger/`. A file the corpus regression
+test replays as that target *is* that target; the dictionary match and the
+decode were both corroborating what the corpus itself already said.
+
+### 101.2 `two_solids_fused_by_a_stranger`: 247 of 253 do not even decode
+
+```text
+mise exec -- just fuzz-triage ~/rcad-fuzz-logs/2026-09-11 04f6085
+...
+247 of 256 input(s) did not come back clean on 04f6085
+```
+
+All 247 are in the fuse subdirectory (`grep -c "neither half of" triage.log` =
+`grep -c "still fails on 04f6085: exit" triage.log` = 247, exact match), and
+every one carries the identical message: `neither half of N bytes is a saved
+Model`. That is `rcad-fuzz-explain`'s own decode step
+(`crates/rcad-fuzz-explain/src/lib.rs:364`, `two_models_for_the_fuse`) failing
+before it ever calls the fuse — both halves fail `postcard::from_bytes::<Model>`
+and the function returns `Err` without attempting a replay.
+
+**That is not a stale format.** `two_solids_fused_by_a_stranger` bytes carry
+`FORMAT_VERSION` (`crates/rcad-topo/src/serialize.rs:133`) as the first thing
+written, and a mismatch is refused with a named error
+(`Error::WrongFormatVersion`, guarded by its own test,
+`a_model_written_by_a_different_version_of_the_format_is_refused`). It last
+moved 2 → 3 at `3f384cf`, 2026-09-01 — ten days before this rescue's earliest
+night and untouched since (`git log -p --follow -- crates/rcad-topo/src/serialize.rs`,
+current value confirmed `3` at `crates/rcad-topo/src/serialize.rs:133`). A
+throwaway probe crate under this session's scratchpad, path-depending on this
+tree's `rcad-topo` for `Model` and on the workspace's own `postcard`, decoded
+both halves of every one of the 253 fuse artifacts and peeked the leading
+varint with `postcard::take_from_bytes::<u32>` before attempting the full
+decode. Of the 500 halves that fail, 453 fail with `postcard::Error::SerdeDeCustom`
+— the wrapper `Model`'s `Deserialize` uses for its *own* checks
+(`check_keys_resolve`, `check_nothing_is_used_more_than_once`,
+`check_everything_has_an_owner`, `check_shape_is_possible`, all in
+`serialize.rs`) — and of those, 342 carry a leading varint that reads exactly
+`3`, the current version, not a stale one. The other 47 fail with a raw
+`postcard` structural error (`DeserializeBadOption` 38, `DeserializeBadVarint`
+7, `DeserializeUnexpectedEnd` 2) — bytes that are not shaped like postcard's
+wire format at all, version aside — and 34 of those 47 *also* carry a leading
+`3`: the corruption a mutation left behind reaches past the version byte
+either way. 376 of the 500, across both groups, read a leading `3`.
+
+So the 247 are fuzzer mutations of real, current-format seeds, most of them
+landing on a leading version byte a mutation left untouched while corrupting
+the arena underneath it — exactly the failure mode `Model`'s own consistency
+checks exist to refuse, and 90% of the time do. `Err` here is `rcad-fuzz-explain`'s
+crate doc comment working as documented (*"`Err` is only ever 'these bytes are
+not a case of this target at all'"*, `lib.rs:78`) for the right reason: not
+because the format moved out from under them, but because most of what a
+byte-level mutation produces is not a self-consistent `Model`, then or now.
+Nothing decoded for the corpus regression test to gain either
+(`every_model_the_fuse_fuzzer_kept_is_fused_again.rs` only counts what
+decodes). They earn nothing.
+
+The remaining 6 of 253 decode and replay clean — 0 of them panic. §101.3 covers
+what they, and the 88 from `2026-09-13`, actually reached.
+
+### 101.3 The 94 that do decode, and why they are duplicates in kind
+
+`grep -c "outcome: panicked" triage-*.log` is `0` across all three nights'
+logs — no artifact in this rescue reproduces a live kernel bug. What the 94
+decoding `two_solids_fused_by_a_stranger` artifacts (6 from `2026-09-11`, 88
+from `2026-09-13`, all confirmed clean by `mise exec -- just fuzz-triage
+<night> 04f6085` reporting `0 of 88` and `6` of the `9` clean entries for
+`2026-09-11`) reach breaks into four shapes:
+
+- **82** `outcome: succeeded — nothing was fused: no half held a solid to
+  fuse` (3 from `2026-09-11`, 79 from `2026-09-13`, all with byte-identical
+  outcome text).
+- **5** `outcome: succeeded —` an ordinary completed fuse — 1 `Difference made
+  1 solids` (`2026-09-11`) and 4 `Union made 1 solids` (`2026-09-13`).
+  `one_sided` is the *common* draw over the checked-in corpus (`one_sided: 569`
+  of `682` fuses, §95.6), not the rare one, and both rules are already named
+  in its control-seed table (§95's four control seeds).
+- **4** `outcome: refused — rcad_topo::Error::CannotMeshAFace { .. why:
+  CoordinateOutOfRange { .. why: TooSmall } }` (1 from `2026-09-11`, 3 from
+  `2026-09-13`) — the same refusal, recurring inside this one rescue batch
+  alone.
+- **3** `outcome: refused — rcad_topo::Error::Undecidable { .. predicate:
+  "where three surfaces meet" .. }` (1 from `2026-09-11`, 2 from
+  `2026-09-13`) — §95's own doc comment already names `Undecidable` raised by
+  "where three surfaces meet" as one of "the interesting half" of the
+  checked-in corpus's refusals.
+
+Nothing here is a shape the corpus does not already reach, and the two
+refusal kinds are shown recurring inside a rescue of only 94 decoding
+artifacts — not evidence of rarity.
+
+### 101.4 `where_two_surfaces_cross`: six of nine were already checked in
+
+```text
+mise exec -- just fuzz-triage ~/rcad-fuzz-logs/2026-09-14 04f6085
+...
+2 of 6 input(s) did not come back clean on 04f6085
+```
+
+9 artifacts total (3 from `2026-09-11`, 6 from `2026-09-14`). Comparing every
+rescued file's trailing sha1 against every `fuzz/corpus/*/` file's trailing
+sha1 — `find ~/rcad-fuzz-logs -type f \( -name 'crash-*' -o -name
+'slow-unit-*' \) -printf '%f\n' | sed 's/^.*-//' | sort -u` against `find
+fuzz/corpus -type f -printf '%f\n' | sed 's/^.*-//' | sort -u`, then `comm
+-12` — finds 6 exact matches in this target: `crash-3f9c76a3..`,
+`slow-unit-6a164a91..` and `crash-a2acceace0..` from `2026-09-11` (all 3 of
+that night's artifacts), plus `crash-cba396f8..`, `crash-d04e0041..` and
+`slow-unit-b9068e9e..` from `2026-09-14` (3 of that night's 6, not the 2 an
+earlier pass here reported — `d04e0041..` is a bare-hash corpus filename
+under the same underscored directory name that hid the 7 fuse matches; see
+below for why). The 3 remaining `2026-09-14` files all decode and
+replay clean — `outcome: succeeded — SurfaceMeet::Curves, N of them` in every
+case, the dominant shape already in an 831-file corpus.
+
+Across all 350 rescued files that same `comm` finds 13 exact matches — the 6
+here plus the 7 fuse matches of §101.1 — and 337 whose trailing sha1 matches
+no corpus file. **This lane's own brief had it right at "337 sha1s appear in
+no file under `fuzz/corpus/`"**; an earlier pass here reported 345 and 5
+because its corpus side was built with `find fuzz/corpus -type f | sed
+'s/^.*-//'` — `sed` operating on the full path rather than the basename. A
+corpus filename that is a bare sha1 under an underscored directory name (no
+dash anywhere, e.g. `fuzz/corpus/two_solids_fused_by_a_stranger/158d358d..`)
+has nothing for `s/^.*-//` to cut, so the whole path passed through unchanged
+and never matched a bare 40-character hash from the rescued side; only the
+`crash-`/`slow-unit-`-prefixed corpus files (which do carry a dash) were ever
+being compared. `-printf '%f\n'` before the `sed`, taking the basename first,
+is the fix, and it is what the two `find` commands above do.
+
+### 101.5 A panic that belongs to the explain tool, not the kernel
+
+`slow-unit-b9068e9ed0f147c54aec5b6b35af2f152303b761` — already checked into
+`fuzz/corpus/where_two_surfaces_cross/` — makes `rcad-fuzz-explain` itself
+panic, exit 101, both under `cargo run` and the release binary:
+
+```text
+thread 'main' panicked at crates/rcad-fuzz-explain/src/../../rcad-geom/tests/fuzzing/mod.rs:726:9:
+9.332114885078756e-187 is past what one byte of exponent reaches
+```
+
+Line 726 is `written_as_numbers`, a helper that packs a float into the
+`bytes_for` reconstruction line the explain tool prints so a case can be
+pasted into a test — it is not reached by replaying the case itself, and its
+own doc comment documents this exact panic: *"If a number cannot be written
+down that way, which means a seed was asked for that no decoder could have
+produced."* `grep -n "bytes_for\|written_as_numbers" \
+crates/rcad-geom/tests/every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs`
+finds neither name — the gate-covered corpus regression test never calls this
+helper, so it does not hit this panic, and `just gate` is unaffected. This is
+a known limit of the diagnostic tool's own repro-line writer, on a seed
+already in the corpus; nothing to promote and nothing in `crates/` to fix from
+this lane.
+
+(One other `2026-09-14` file, `slow-unit-7e62ebe6..`, was killed mid-replay in
+this session at ~3 minutes under a debug build — not a hang: the release
+binary (`cargo build -q -p rcad-fuzz-explain --release`, then run directly)
+replays it in under a second, `outcome: succeeded`, exit 0.)
+
+### 101.6 Why zero, and not "the two that looked most interesting"
+
+Every artifact in this rescue lands in one of three buckets, and none of the
+three earns a seed:
+
+- **Does not decode** (247) — fuzzer mutations of real, current-format seeds
+  that a mutation broke, refused by `Model`'s own consistency checks or by
+  `postcard`'s wire format itself (§101.2's evidence). Nothing for the corpus
+  regression test to gain, since it only counts what decodes.
+- **Decodes, replays clean, new (not already in the corpus)** (90: 87 of the
+  94 `two_solids_fused_by_a_stranger` artifacts of §101.3, plus 3
+  `where_two_surfaces_cross` from `2026-09-14`) — every outcome shape recurs
+  inside this rescue batch alone, or is named in §95 as already the corpus's
+  common case.
+- **Already checked in** (13: 7 `two_solids_fused_by_a_stranger`, all from
+  `2026-09-13`, §101.1; 6 `where_two_surfaces_cross` — 3 from `2026-09-11`,
+  3 from `2026-09-14`, §101.4) — byte-identical to a file under
+  `fuzz/corpus/` already.
+
+`fuzz/corpus/` §95.1 measured 1751 fuse seeds and this file's own corpus
+regression test reports `ok: 265, refused: 417` over `682` fuses already —
+hundreds of completions and refusals a commit can already break. Adding more
+of the same four shapes because they came from a rescue rather than because
+they reach something new is exactly the cost §95's neighbour section warns
+against: "a corpus that grows by one night of one bug's duplicates costs every
+later run." So `fuzz/corpus/` is unchanged by this lane.
+
+## 102. Nothing said where the work was, recorded 2026-09-14
+
+### 102.1 What it cost to find out
+
+Asked "where does this repo stand, and what is next", a session starting cold
+spent twelve tool calls and one lookup lane. The answer, once assembled, was
+four sentences long: M0–M5 are built, M6 has not started, two branches carry
+unlanded work, and the named-unit chain stopped on 2026-09-05.
+
+Every part of that was in the repository. None of it was in one place.
+
+`docs/roadmap.md` has **one commit in the whole history** — `0a8aa33`, the
+scaffold, alongside 236 on `docs/decisions.md`. That is not neglect, it is §1
+working: the roadmap is the north star and not a description of this codebase,
+so it lists M0–M6 with no status markers and correctly never gains any. It can
+never answer "what is next" because answering that would make it the second
+thing it was told not to be.
+
+`docs/decisions.md` is 27 000 lines under a 98-line table of contents that is
+genuinely good, and still cannot answer it either. The TOC is ordered by
+recording date and its titles are incidents — *"A box that rounded itself
+away"*, *"A night that crashed on its own oracle"*. That is the right shape for
+a record of what was settled and the wrong shape for a summary of where the
+settling has got to.
+
+Outside `decisions.md`, grepping every `.md`, every `.toml` and the `justfile`:
+the only mentions of M5 or M6 anywhere are the roadmap's plan list and one
+past-tense cost anecdote in `CLAUDE.md`.
+
+### 102.2 §0, and why not a file of its own
+
+§60's argument applies directly: a second record beside the thing itself is a
+second thing to disagree. A `docs/status.md` would have to carry the deferrals
+— §43.8 item 8, §43.8 item 12, §89.7 — and those are already sentences in
+`decisions.md`. Two copies of a deferral is one deferral that gets closed in
+one place.
+
+So the summary goes **into** `decisions.md`, as `## 0. Where the work is`.
+Section zero rather than an unnumbered block because `check-decisions` requires
+every heading to be addressable by number and checks that the numbers ascend:
+`0` satisfies both with no change to that recipe, sorts above §1 in
+`decisions-toc`, and `just decision 0` reaches it like any other section. An
+unnumbered `## Where the work is` would have had to be exempted, and an
+exemption in a check is where the next unaddressable heading goes to hide.
+
+### 102.3 What the check can and cannot hold it to
+
+`check-where-the-work-is` cannot check the judgement. Whether the unit named in
+§0 is still the unit is not a property of the file, and a check that pretended
+otherwise would either fail on every new section or pass on a block two
+milestones stale.
+
+It holds the three things that are properties of the file, each of which makes
+a stale block read as a current one:
+
+- **A cited section that no longer exists.** §0 points at the sections that
+  defer its work, and §71 is four renumberings in one session. A block citing a
+  §43.8 that became §44.8 still reads as current.
+- **A `reviewed:` date `date -d` cannot parse.** `just status` prints the
+  block's age from that line; an unparsable date prints no age at all, which
+  looks exactly like a block reviewed this morning.
+- **Fifty non-blank lines.** `decisions.md` is 27 000 lines because nothing
+  capped it, which is right for a record and fatal for a summary. The cap is
+  what keeps §0 a thing that gets re-read.
+
+Age is printed rather than enforced, for the same reason: how stale is too
+stale is a judgement, and a survey that refuses to run because nobody has
+touched §0 in a fortnight is a survey that gets deleted.
+
+### 102.4 `git cherry`, not ahead-of-main
+
+The row nothing printed before is which branches carry work `main` does not
+have, and `just lanes` cannot answer it: it lists worktrees, and a worktree is
+not a branch.
+
+The obvious implementation is wrong. On 2026-09-14 this tree had 28 local
+branches; `git rev-list --count main..<branch>` called five of them unmerged.
+Three of those five carried nothing: `merge/justfile`'s single commit added
+`fuzz-cones-and-tori`, a recipe that had been on `main` for days by another
+route, and two `worktree-agent-*` branches held commits that reached `main`
+split into two. Ahead-of-main counts reachability; what a reader wants is what
+is unlanded, and the two disagree on every branch whose commits got there by a
+cherry-pick, a rebase or a split.
+
+`git cherry main <branch>` compares patch ids and marks an already-applied
+commit `-`. Counting only its `+` lines turns the five-branch answer into a
+two-branch one with no human reading five diffs. It also skips merge commits
+entirely, which is the same thing wanted here: a lane that merged `main` into
+itself has landed nothing.
+
+The remaining 23 branches are counted and not listed. The count is what says
+the sweep ran at all — §55's rule that an empty answer must fail rather than
+pass quietly — and listing 23 names nobody has to act on is how a survey stops
+being read, which is §99's finding about the recipes nobody ran.
+
+## 103. A plane, a cone and a coaxial pipe, closed without running, recorded 2026-09-15
+
+### 103.1 It earned nothing, and here is how that is known
+
+§53 was planned on 2026-09-05 in ten subsections — a name, six corrections, a
+falsifiable sentence, five lanes, two gates, a spike and a prediction. No lane
+ran. It is closed here on the decision of 2026-09-15, and the closing report is
+that the unit is entirely unstarted.
+
+That is not inferred from silence. Five things say it, and each was checked:
+
+1. **No section after §53 cites any of §53.1–§53.10.** `just decisions-find
+   '§53\.[0-9]'` answers with §53's own subsections and nothing else.
+2. **The two gates appear nowhere outside §53.** `decisions-find 'G1|G2'`
+   reaches §53.4, §53.7 and one unrelated use in §96.5. A gate that ran would
+   have a section; §45, §47 and §49 are what that looks like.
+3. **`where_one_plane_and_two_curved_surfaces_meet` is still at
+   `crates/rcad-geom/src/three_surfaces.rs:543`** — the exact line §53.3 cited
+   ten days ago, as the place the coaxial cone-and-pipe road was to go.
+4. **The word `coaxial` does not occur in `three_surfaces.rs`.** Lane A's
+   reduction — two curved surfaces crossing in a conic put that conic in a
+   plane, so `{P, S1, S2}` becomes `{P, Q, S1}` — is absent.
+5. **`MeetOfThree::At` still documents its points as "running along the line the
+   two planes cross in".** §53.3's second falsifier was that this order clause
+   be replaced by one that survives two parallel planes. It was not.
+
+So the sentence §53.3 set out to earn — *where three surfaces meet is worked out
+when a cone and a pipe are proved coaxial and one plane cuts them* — is not
+earned, and the refusal it was going to remove still stands.
+
+### 103.2 What the nine days went to instead
+
+§55 through §102, recorded 2026-09-06 to 2026-09-14: defect fixes found by the
+fuse and the marcher (§78, §80, §82, §85, §87, §89, §93, §94), the nightly fuzz
+apparatus and its failures (§81, §90, §91, §95, §96, §98, §101), and tooling,
+gate and cost work (§77, §79, §83, §92, §99, §100, §102).
+
+**None of it was wasted and none of it was §53.** That is the finding. The unit
+was a plan for pushing the kernel's answers forward; the nine days were spent
+making the kernel's existing answers trustworthy and the sessions that produce
+them affordable. Both are work this project wants. What it did not have was
+anything that noticed the plan had been abandoned — which is §102's whole
+subject, and §53 sitting unclosed for nine days is the sharpest example of the
+thing §0 now exists to prevent.
+
+### 103.3 Two predictions this leaves unscored
+
+**§52.13 is unscored, and stays unscored.** §53.7 charge 3 was to be how §53
+scored it: *mutate what each load-bearing test claims to watch, and confirm it
+fails*. Charge 3 never ran. §52.13's prediction — that a test would be blind,
+its number coming from precisely the test that was named — therefore has no
+verdict, and inventing one now from a gate nobody ran would be exactly the
+offence §52 was recording. It is carried to §104.6.
+
+**§53.10 is inherited, not scored.** It was always a bet about the *next* unit:
+*the next unit's largest error will be in a claim its spike made that no merged
+test carries.* The next unit is §104, so it goes there unchanged.
+
+### 103.4 What was learned about running the work
+
+The six units before this one each closed with a section. This one needed a
+person to be asked before anyone could tell it had not. A plan is cheap to write
+and there is no cost anywhere to leaving one open, so the only thing that closes
+a unit is somebody looking — and until §0 there was nowhere for the looking to
+be recorded when it found nothing.
+
+The cheap countermeasure is already in place and is not a new rule: `just
+status` prints §0 and its age. A unit that has been open a fortnight with no
+section citing it is visible in one call to anybody who runs it.
+
+## 104. The hollow — the unit after a plane, a cone and a coaxial pipe, recorded 2026-09-15
+
+*Planning section. Written before any lane runs, against `main` at `6939147`.
+Its numbers are re-derived here and name the command that produced them,
+per §51.6; where a claim has no command behind it yet, it says so in place of
+citing one.*
+
+### 104.1 The name, and what the unit is
+
+**The unit is called *the hollow*, and the roadmap's M6 number is left alone**,
+which is §44.1's rule and the reason every unit since has had a name. Roadmap
+§12 keeps M6 for local operations as a whole; this unit is the first of them.
+
+The name is the operation: shelling turns a solid into a hollow one. Roadmap §8
+orders the local operations by difficulty and puts it first — *"Shelling /
+thickening — offset all faces, retrim. Easiest."* — and that ordering is the
+decision of 2026-09-15, taken over starting at fillets.
+
+**What exists today is nothing.** `grep -ril 'fillet\|chamfer\|shelling\|
+draft_angle' crates --include=*.rs` reaches one test file, whose name is about
+crossings. There is no local operation in this kernel, so this unit does not
+extend one.
+
+### 104.2 §13 is not satisfied yet, and that is the first gate
+
+**§13 says a part with no named consumer is not built.** Shelling is a feature
+and not a correctness gap, so §13 governs it, and CLAUDE.md says so in those
+words.
+
+`grep -inE 'shell|thicken|fillet|chamfer|offset|draft' docs/consumers.md`
+returns no demand for any local operation. `rscene` has asked for a great many
+things and this is not among them.
+
+So the unit's first obligation is not code. Either a consumer raises the demand
+the way `docs/consumers.md` records demands being raised, decided and landed, or
+§13 is argued with and the record changed — CLAUDE.md's principle 6 permits the
+second and forbids quietly doing neither. **No lane runs until one of those two
+has happened.** This section names it rather than assuming the roadmap's
+ordering is itself a consumer, because it is not: the roadmap is the north star
+and §1 says it is not a description of this codebase.
+
+### 104.3 The sentence the unit earns
+
+> **A solid whose faces are planes can be hollowed to a wall of one thickness,
+> and the result passes `Model::validate()`.**
+
+Planes only, and one thickness, because that is the case whose offset is exact.
+Offsetting a NURBS face has no exact NURBS answer in general — roadmap §8 says
+so and §6 says why — and a unit that promised the general case would be
+promising a number before its measurement, which §53.3 is the fourth unit in a
+row to have been caught doing.
+
+Falsifiable two ways, and **neither test exists yet**; writing them is the
+unit's first lane, and naming them here rather than citing a line number is
+§53.9's rule applied honestly:
+
+- a box hollowed at thickness `t` has the volume of the box less the volume of
+  the box inset by `t` on all six sides, to the tolerance the policy certifies;
+  and
+- the hollowed solid's outer shell is the original solid's, face for face, so
+  the provenance of every outer face survives the operation.
+
+### 104.4 What stays out
+
+- **Fillets, chamfers, draft, sweeps, lofts and offsets.** Roadmap §8's order,
+  and each is its own unit.
+- **Non-planar faces.** The reason is §104.3's, and lifting it is the unit
+  after this one if this one lands.
+- **Variable thickness, and leaving faces open.** Both are what a shelling API
+  grows next; neither has a consumer either, and §13 applies to them exactly as
+  it applies to the whole.
+
+### 104.5 What is not decided here
+
+**The waves.** §53.4 and its four predecessors each named the lanes, their one
+deliverable and their write-set before any lane ran, and that is the shape this
+section is missing. It is missing deliberately: §104.2 is unanswered, and lanes
+briefed against an unsettled scope are lanes that get re-briefed.
+
+### 104.6 The predictions
+
+**Inherited from §53.10, unchanged**, because §53 never ran and the bet was
+always about whichever unit came next:
+
+> **The next unit's largest error will be in a claim its spike made that no
+> merged test carries.** Score it by taking every sentence in the planning
+> section sourced to the spike and naming the merged test that would fail if it
+> were false. A sentence with no such test is the specimen.
+
+This section has no spike, so the bet's surface today is §104.3's two
+falsifiers, both of which are declared as not-yet-written rather than cited.
+
+**Carried from §52.13 by way of §103.3**, still unscored: that a load-bearing
+test would turn out to be blind — its number coming from precisely the test that
+was named. This unit's closing gate scores it, by mutating what each such test
+claims to watch and confirming it fails. That is §53.7 charge 3, inherited whole
+because it was never spent.
+
+**This unit's own prediction, for the one after it:**
+
+> **The largest error will be in what the hollowed solid's provenance claims.**
+> §104.3's second falsifier says every outer face keeps its identity through the
+> operation, and that is the kind of claim a test can assert about the faces it
+> happens to build while being false about the faces a retrim splits. Score it
+> by hollowing a solid whose faces the operation must divide, not one whose
+> faces survive whole.
+
+## 105. Sixty-five seeds in our own corpus killed the tool that explains them, fixed 2026-09-14
+
+`rcad-fuzz-explain` prints a `bytes_for` line so a fuzz case can be pasted
+straight into a test. On `b013ac4` it died on **65 of the 4709 seeds already
+checked into `fuzz/corpus`** — including the one `just fuzz-triage` opened
+every morning. The number it refused to write down was representable, and the
+writer had a second spelling for it that fits; that makes it a **gap and not a
+limit** (§16.10), so it was fixed rather than deferred. `75d954e` is the test
+and the fix, `36b8d63` the doc comment, merged as `6939147`.
+
+The arithmetic is the small part. The part worth the record is that a
+diagnostic tool had no test of its own while the thing it diagnoses had 4709
+inputs — and that a green sweep of all 4709 would still have missed the same
+fault at the other end of the range.
+
+### 105.1 What died, and on how many
+
+```text
+mise exec -- cargo run -q -p rcad-fuzz-explain -- where_two_surfaces_cross \
+  fuzz/corpus/where_two_surfaces_cross/slow-unit-b9068e9ed0f147c54aec5b6b35af2f152303b761
+
+thread 'main' panicked at crates/rcad-geom/tests/fuzzing/mod.rs:726:9:
+9.332114885078756e-187 is past what one byte of exponent reaches
+```
+
+Exit 101. §101.5 met this one seed and read it as a known limit of the repro
+writer. Sweeping the whole corpus on `b013ac4` says it was not one seed and it
+was not a limit: **4709 seeds, 2361 exit 0, 2283 exit 1, 65 exit 101.** All 65
+are in `where_two_surfaces_cross` and every other target had zero. The 65 carry
+**21 distinct numbers**, smallest magnitude `-2.191809349008403e-193`, largest
+`-1.4708981359843996e-185`. The 2283 that exit 1 are graceful decode refusals
+of deliberate garbage, which is the tool working.
+
+The same sweep after the merge: **4709 seeds, 2426 exit 0, 2283 exit 1, zero
+panics.** 2361 + 65 = 2426, so exactly the 65 converted and nothing else moved.
+`just gate` on the merge: **PASS, exit 0, 1892 tests** — 1877 before, plus five
+new tests in each of the three test binaries that pull in the fuzzing module.
+
+Those four counts are Mattias's own sweeps, run by his own script, and this
+lane publishes them as given. Everything else below this lane derived itself
+and says so where it does.
+
+### 105.2 Wanting the largest whole number is a preference, never a requirement
+
+A number goes into the seed as a whole number of thirty-one bits and one byte
+of exponent, and the byte counts in steps of five — each step is a factor of
+thirty-two. `written_as_numbers` picked the step that made the whole number as
+large as it could, and then asserted that step fit in the byte:
+
+```text
+steps = ceil((|n|.log2() - 31) / 5)      # the largest whole number
+if |n / 2^(5·steps)| >= 2^31 { steps += 1 }
+assert!((-128..=127).contains(&steps))   # the old check
+```
+
+Wanting the largest whole number is a preference and never a requirement.
+Dropping one step divides the whole number by thirty-two and names the
+**identical** value, so wherever the preferred spelling ran off the end of the
+byte, a smaller one did not. `9.332114885078756e-187` wants a step of `-129`
+for a whole number of `136247104`; at `-128`, the smallest step there is, it is
+a whole `4257722` and reads back bit for bit. The number was representable and
+the writer could not spell it. Clamping the step into the byte is the whole of
+the fix.
+
+That is the shape §16.10 names a gap: the answer exists and the arithmetic
+could not reach it. A limit gets deferred; a gap gets fixed.
+
+### 105.3 Where the test was missing, which is the part worth the record
+
+Nothing in the suite ever reached this writer with a number the decoder had
+produced. The corpus replays run the other way — bytes in, geometry out — so
+they exercise `a_number` and never `written_as_numbers`. §101.5 checked exactly
+that and found it reassuring: the gate-covered regression test does not call
+the helper, so `just gate` was unaffected. It was the wrong thing to be
+reassured by. The gate being unaffected is the same fact as the helper having
+no test.
+
+So a seed that killed `just fuzz-triage` every morning sat in `fuzz/corpus`
+with no red test anywhere in the tree. The tool that exists to explain a fuzz
+failure was the one piece of the fuzzing code with nothing fuzzing it, and the
+corpus it reads from had 4709 inputs.
+
+The fix's test closes it the direct way: take every number the decoder can hand
+back, write it down, read it back, and require the same bits. That is seven
+whole numbers against all 256 exponent bytes, plus the two ends that must still
+panic.
+
+### 105.4 The blind spot, which a green sweep does not cover
+
+`fuzz/corpus` holds only small magnitudes here, so the sweep of 4709 proves
+nothing about the other end of the range. **The same fault exists at the top,
+and no sweep of this corpus could have found it.** `i32::MIN` at exponent byte
+`127` is `-3.061802069160839e+200`; it wants a step of `128`, and one byte
+stops at `127`, where it is spelled as exactly `i32::MIN`. It took reasoning
+about the encoding, not evidence from the night, and it is covered by a
+constructed test rather than by a seed.
+
+This lane re-derived the scale of both ends rather than taking it on the fix
+lane's word — transcribing both versions of the arithmetic above into a
+standalone `rustc` program under the scratchpad and running the grid `n = whole
+· 2^(5·byte)` over `whole ∈ {1, -1, 2^31-1, -2^31, 3, 12345}` and all 256
+exponent bytes:
+
+```text
+maximising step outside the byte: 21 of 1536
+  1 at bytes -128..-123 (6)      -1 at bytes -128..-123 (6)
+  3 at bytes -128..-124 (5)   12345 at bytes -128..-126 (3)
+  -2147483648 at byte 127 (1)
+```
+
+Twenty at the bottom of the range and exactly one at the top — and that one is
+`i32::MIN` alone, because `i32::MAX` is a hair under `2^31` and its step lands
+inside the byte. A corpus of small numbers finds the twenty and can never find
+the one.
+
+That is §16.10's rule turned around. The section makes a claim of impossibility
+show a demonstration; a measurement's blind spot deserves the same treatment,
+because "4709 seeds, zero panics" reads as a clean bill and is not one. Name
+what the measurement could not see.
+
+### 105.5 The check that survived is stricter, not looser
+
+A clamp that silently truncates would trade a panic for a wrong answer, which
+is the wrong direction for this kernel. The new assert moves off the step and
+onto the whole number the clamped step leaves, and tests it at **both** ends:
+
+```rust
+let whole = (number / 2f64.powi(steps * FIVES_PER_STEP)).round();
+let spellable =
+    (-2f64.powi(31)..2f64.powi(31)).contains(&whole) && (whole != 0.0) == (*number != 0.0);
+assert!(spellable, "{number:e} is past what five bytes reach");
+```
+
+Too wide and the whole number will not fit in thirty-one bits; too fine and it
+rounds away. The `(whole != 0.0) == (*number != 0.0)` half is the one that
+earns its place: a number below half of `2^-640` clamps to step `-128`, rounds
+to a whole `0`, and passes the range test — without that half the clamp turns a
+panic into a number written down as zero. Transcribing the old and new writers
+side by side, a third of `2^-640` panicked under the old assert (step `-134`,
+outside the byte) and panics under the new one with `whole = 0`; with the clamp
+and without the zero test it would have been written out as `0` and exited
+cleanly.
+
+NaN moved the same way, and it moved from silence to a crash. The old writer
+cast NaN through `as i32`, which saturates to `0`, so a NaN went into the repro
+line as the number zero and nothing said a word; the new check fails the range
+test and panics. Infinity panicked under both writers — the fix lane's note
+said it was new, and it was not — but under the old one it panicked on
+`i32::MAX · 5` overflowing before the clamp ever ran, which is the arithmetic
+and not the number, and a build with the overflow checks off wrapped instead and
+blamed a `NaN`. Clamping the wanted step before the bump check multiplies it
+sends infinity through the very check above: the step is `127`, `inf / 2^635` is
+still `inf`, and that is not inside thirty-one bits — so every build now refuses
+infinity for being too wide to spell, and says so naming the number. Crash over
+corrupt, in the one place that had been quietly corrupting.
+
+### 105.6 This does not overturn §101
+
+§101 replayed 350 rescued artifacts against `04f6085` and promoted no seed,
+because none of them was a live kernel bug. **That stands.** Every one of these
+65 is the repro-line writer in `rcad-fuzz-explain`, not the kernel: the seeds
+replay fine, and what died was the printing of the paste-into-a-test line
+afterwards. `fuzz/corpus/` is still unchanged by either section — nothing here
+was promoted, because all 65 were already checked in.
+
+What §101 got wrong is narrower and is in §101.5: it read one panicking seed as
+a known limit of the diagnostic tool and stopped. It was 65 seeds, and it was a
+gap. The lesson is the one in §105.3 — "the gate does not cover it" is a reason
+to look harder, not a reason to relax.
+
+## 106. The board, recorded 2026-09-15
+
+### 106.1 Three decisions each took state out of a place, and none put it back
+
+Asked why it is so hard to see the plan, the answer is not that anybody was
+careless. It is that three decisions, each right on its own, between them left
+nowhere for the state of the work to live.
+
+- **`docs/roadmap.md` may not carry state.** This file's own preamble says it is
+  the north star and *"a roadmap, not a specification of this codebase"*, and §1
+  exists so a later reader does not see the code disagree with it and "fix" the
+  code back. That is why it has one commit in the repository's whole history. A
+  checkbox in it would be the first edit down a road that ends with the roadmap
+  describing the tree, which is the one thing it must not do.
+- **The M-numbers were abandoned.** §44.1 found that "M6" named three different
+  bodies of work in three documents and replaced the numbering with named
+  units — `the door`, `the cut`, `the six arms`. That was right, and it has a
+  cost nobody priced: **a unit chain is sequential and a roadmap is a tree.** A
+  chain shows the node it is on. It can never show the board.
+- **This file is append-only.** Everything in it is true of the moment it was
+  written. §43.8's *"what M5 hands to M6"* was an accurate list on its day and
+  nothing updates it; §53 sat open for nine days and §103 is what finding that
+  out cost.
+
+So the plan was in a file forbidden to have state, the schedule was in a chain
+that can only show one node, and the record cannot be edited. Nobody decided
+that the state should be invisible. It fell between three decisions.
+
+### 106.2 `docs/plan.md`, and why it is not a second record
+
+§60 says a second record beside the thing itself is a second thing to disagree,
+and that objection has to be answered before adding a file.
+
+It is answered by what `plan.md` does **not** contain. It holds no titles and no
+item list: a line is a roadmap number, a state and the evidence, nothing more.
+`just plan` renders it against `docs/roadmap.md`'s own headings, so the titles
+exist once, in the roadmap. `check-plan` derives the item list from the roadmap
+on both sides of a comparison and fails when they differ, in either direction —
+so a roadmap that grows a subsection cannot leave a plan quietly reading
+complete over a roadmap that has moved.
+
+What is left in `plan.md` is the one thing genuinely recorded nowhere else:
+whether a thing is built. Before this, establishing that `4.3 Differential
+geometry` does not exist meant grepping for fundamental forms, curvature types
+and Frenet frames and reasoning from the absence. That is not a record, it is a
+re-derivation, and it was paid for again every time anyone asked.
+
+### 106.3 A box is ticked against evidence, not against an opinion
+
+The states are `done`, `partly`, `todo`, `unaudited` and `n/a`. A line carries
+the module or the test that stands behind its state, and for `done` the check
+holds every path it names against the disk. That is §15.6's rule — a published
+bound needs a test — applied to a published checkbox.
+
+The check cannot decide whether the evidence *proves* the item, and does not
+try. What it removes is the failure that kills a status file: a tick that
+outlives the thing it was ticked for. `7.3 done on crates/rcad-topo/src/
+classify.rs` fails the moment that file is renamed, which is exactly when a
+hand-maintained board would have started lying.
+
+`unaudited` exists so that the file can be honest about the difference between
+*not built* and *nobody looked*. The first audit, 2026-09-15 against `6939147`,
+left none — three read-only lanes covered all 26 items — but a roadmap that
+grows an item gets `unaudited` by default rather than `todo`, because assuming
+the new thing is unbuilt is a guess like any other.
+
+### 106.4 What this is for: cutting lanes
+
+`just plan open` is the list of everything unfinished, each line already naming
+what is missing. A unit is a set of those lines; a lane is one of them. That is
+the step that was missing between "§53 is the current unit" and a brief — the
+unit sections name their lanes (§53.4 and its four predecessors all do), but
+nothing said where the candidates come from, so each unit's arms were derived
+afresh from whatever was in mind that week.
+
+The first audit's answer, for the record: 13 done, 7 partly, 5 todo, 1 not a
+build item. The five `todo` are differential geometry, approximation, local
+operations, healing and the scratch allocator; the seven `partly` each say in
+their own line what is missing, and three of those — the freeform intersection
+path, `Extrema`, and the general curve–surface case — are deferred for want of
+a consumer rather than unattempted, per §13 and §24.1.
+
+### 106.5 It took the number that was already taken
+
+This section was written as §105 and renumbered in the merge. §105 had been
+picked, used and landed on `main` by another lane while this work was in
+progress, and nothing noticed until `git merge main` put the two blocks against
+each other.
+
+The rule that would have caught it already exists and was followed for §102,
+§103 and §104 and then not for this one: pick a number with `git log --all
+-S'## N. '`, which sees every branch, rather than against the file in front of
+you. `origin/main` under-counts what lanes have queued. The cost was a
+three-edit merge resolution and every `§105` in this branch having to be
+re-pointed; the cost of the check is one command.
+
+## 107. What actually blocks the STEP corpus, measured 2026-09-15
+
+Five lanes over two days asked which lever opens the corpus. Four of them
+priced one hypothesis each and three of those bought a zero. The fifth stopped
+asking one hypothesis at a time and measured the whole stack, and its table is
+what §0's unit is now cut from.
+
+**The baseline it is read against: 98 of 367 files import** — 97 of 323 KiCad,
+1 of 44 NIST, `just t how_often_a_real_file_imports --no-capture`. The probe
+agrees with that number by a different route: 106 files give it no reason at
+all, 8 of those for a gate that stops the walk before it starts, and 106 − 8 =
+98. That agreement is asserted per file in the example itself, which panics if
+a file imports and the probe still finds a reason.
+
+### 107.1 The number that prices a fix
+
+§45.2 says the count of files a blocker stops **first** is an upper bound and
+never a projection, and three lanes then paid for that sentence: upper bounds of
+75, 55 and 663 edges delivered 1, 0 and 0 files. What prices a fix is the count
+of files that have **only** that reason, and no walk that stops at the first
+refusal can take it. `rcad_step::probe` is the walk that does not stop, and
+this is what it found over both corpora:
+
+| files where it is the only reason | reason |
+|---:|---|
+| **97** | a corner is not on the curved face the file says it is on |
+| **44** | this crossing runs where its two surfaces are too nearly parallel to follow it |
+| **18** | a face walks a closed edge against the way its surface winds |
+| **17** | a curve this kernel does not hold: `B_SPLINE_CURVE_WITH_KNOTS` |
+| **7** | this crossing comes in two pieces and no half-space square to both surfaces can be written down in `f64` |
+| **6** | a surface this kernel does not hold: `SURFACE_OF_REVOLUTION` |
+| **5** | could not settle the decisions the answer depends on |
+| **4** | a loop this reader does not walk: `VERTEX_LOOP` |
+| **3** | a solid with a void in it |
+| **3** | a vertex of a face is too far from the face's plane |
+
+with a tail of nine reasons worth one or two files each, and 8 files in the
+fatal bucket — two length units, an assembly occurrence, a void, no size.
+
+**Co-occurrence is what makes those numbers real, and it splits them in two.**
+The 44 **never appear beside another reason in any file**: 44 files hang on that
+one question and nothing else. The 97 sit alone in 97 of the 99 files that have
+them. Against that, `B_SPLINE_CURVE_WITH_KNOTS` is in 68 files and alone in 17 —
+22 of them also want a B-spline *surface*, 18 a surface of revolution, 10 a
+bounded surface, 7 a vertex loop. The spline path is not one lever, it is four,
+and §50.6 already records the surface as built and reachable from nothing.
+
+§47.3 named the 44, the 18 and the 7 a unit earlier, from the opposite
+direction — the files that stopped being called a corner miss when `brep.rs`
+stopped overwriting the builder's own refusal. Two independent routes, the same
+three rows.
+
+### 107.2 Two rows were published wrong, and the reason generalises
+
+The table above is the second one. The first was taken on the lane's own
+branch, which is based on two earlier measurement lanes whose commits were never
+reverted: `75e32bee` accepts a closed `B_SPLINE_CURVE_WITH_KNOTS` edge as going
+right round, and `89716dae` accepts *any* unheld curve between two distinct
+planes as straight. Both are knowingly unsound and both were live under the
+probe. Landing the probe on a clean tree and re-running moved two rows:
+
+| | on the lane's tree | on `main` |
+|---|---:|---:|
+| `B_SPLINE_SURFACE_WITH_KNOTS` alone | 13 | **1** |
+| files carrying the spline-edge refusal | 56 | **68** |
+| KiCad files with exactly one reason | 196 | **184** |
+| KiCad files with exactly two | 24 | **36** |
+
+The accepts were removing the spline-edge refusal from 12 files, which promoted
+the surface refusal beside it to *sole* reason in each. **The 97, the 44, the 18
+and the 7 are identical on both trees**, so the unit this chose is not affected
+— but a lane that had gone at the B-spline surface on the strength of 13 files
+would have found 1.
+
+**The probe's own honesty check could not catch it**, and that is the part worth
+keeping. It asserts that a file `Import::read` imports gives the probe no
+reason — but both halves ran on the same patched tree, so the check compared a
+patched reader against a patched probe and passed. A measurement carries the
+tree it was taken on, and the only defence is to re-run it on the tree the
+number will be published against. It cost one re-run here because the probe was
+landing anyway; it would have cost a lane if the number had gone into a brief.
+
+The refusal's own *name* moved too, for the same reason:
+`an arc this reader could not name` was the patched tree's invented refusal for
+an open spline edge it would not guess at, and on `main` the reason reads `a
+curve this kernel does not hold: B_SPLINE_CURVE_WITH_KNOTS`, which is what the
+reader has always said.
+
+### 107.3 Healing is the biggest bucket and its own trigger does not fire
+
+§42.9 settled the healing fork as option A — refuse by name, heal nothing — and
+§44.6 wrote D's trigger so it could fire: *D fires when, after the named gaps
+close, more than half the still-refused files are refused for a miss larger than
+`f64` rounding.* It scored the trigger at 50–56% on §43.5's data, called that
+"exactly on its own boundary", and said it becomes decidable only when a lane
+publishes a per-file refusal reason. That lane has now run.
+
+269 files are refused. 99 of them carry a corner off a curved face. **That is
+37%, and the trigger does not fire** — it has moved away from its boundary
+rather than onto it, because the named gaps closed and took files out of the
+denominator on the other side.
+
+**Two things keep that from being the final score, and both are named here
+rather than assumed away.** It reads all 99 as the beyond-`f64` kind, and
+§43.5's 88/73 split of the then-161 was taken before the arithmetic gap closed,
+so the split wants re-deriving against today's tree before healing is priced
+again. And 37% is not a small number: this section scores the trigger, it does
+not argue that healing is the wrong thing to build.
+
+### 107.4 What landed, and what it costs the gate
+
+`rcad_step::probe` and `ProbeReport` are public; `probe_solid` and `ProbeWalk`
+sit beside `Walk` in `brep.rs`; `examples/blocker_depth_probe.rs` prints the
+five deliverables above. `Walk::build` and `Walk::what_stopped_the_build` take
+`&self` rather than `self`, which costs nothing — `build` already cloned the
+builder.
+
+**The rule that makes the counts mean anything is that nothing which lost an
+entity is asked to assemble what is left of it.** A dropped edge leaves a wire
+that cannot close and a dropped bound leaves a face with a hole in it, and
+`add_wire`/`add_face` then report *that hole* as a second reason the file does
+not have. Take the guard out and `the builder or the sweep: a wire does not
+close` appears in two of the five tests immediately, which is how it is known to
+be load-bearing rather than argued to be. At the shell level the same rule is
+applied and **is not known to cost anything**: `add_shell` took a block's five
+remaining faces without complaint when the sixth was dropped. It is kept there
+anyway, so the numbers do not depend on which level a future check lands at.
+
+Five tests in `what_the_depth_probe_finds_behind_the_first_refusal.rs`, all off
+the `a_block` fixture that imports: a file that imports gives no reason, a file
+broken two independent ways names both where the reader names one, one break is
+one reason at the edge and at the face, and a gate before the solids reports
+fatal and nothing else. `just gate` PASS at 1903 tests.
+
+§56.7 is why the probe landed rather than dying with its lane: its four corpus
+numbers were taken by a probe that was deleted, so nothing re-takes them and
+nothing goes red when they stop being true. The three parse-level censuses from
+the round before this one landed as examples on the same argument (`ac77965b`).
+
+### 107.5 The unit this cut
+
+The 44 crossings too nearly parallel to follow, with the 18 closed edges walked
+against their surface's winding behind them. It is the biggest bucket that is a
+*gap* rather than a decision to reopen: one reason, never mixed with another in
+any file, inside the kernel's own arithmetic, with no §42.9 to argue down. And
+§16.10 makes the demonstration part of the deliverable rather than an extra —
+"no ordering of the arithmetic helps" was true of orderings and silent about
+scalings once before (§16.10), so the unit names the family of fixes it
+considered and says why that family is the only one, or it finds the answer.
+
+What it is **not** is the file count. Healing's 97 is that, and §107.3 is why
+this unit is not it.
+
+## 108. A night that fuzzed nothing because a reboot took its PATH, fixed 2026-09-15
+
+The night of 2026-09-15 started at 00:10:21, advanced to `1fe32c5b`, and was
+over at 00:10:23. `~/rcad-fuzz-logs/latest` read
+
+```
+2026-09-15 00:10  BUILD FAILED  /home/mattias/rcad-fuzz-logs/2026-09-15
+```
+
+and `2026-09-15/build.log` was one line: `cargo: command not found`. Eight hours
+of fuzzing, none of it spent. §81 put the night on a timer so nobody has to
+remember it; the cost of that is that nobody notices when it stops, and this
+stopped for a day before anyone asked.
+
+### 108.1 It was the machine, not the tree
+
+The first guess is always the commit the night advanced onto, because §90 makes
+the night move and moving is the thing that changed. It was not that. The build
+line — `justfile`'s `(cd fuzz && RUSTFLAGS=… cargo +nightly fuzz build)` — is
+**byte-identical** in `9b82e9e8`, which the night of the 14th ran for eight
+hours, and in `1fe32c5b`, which failed in two seconds. Nothing in the diff
+between them touches `mise.toml` or `rust-toolchain.toml`.
+
+What is between the two runs is a reboot. `journalctl --user -u
+rcad-fuzz.service` prints it plainly:
+
+```
+Sep 14 08:10:02  rcad-fuzz.service: Consumed 7h 59min 45.618s CPU time.
+-- Boot ea84b2d91538474a9674565329d6c75a --
+Sep 15 00:10:23  the fuzz targets did not build, so nothing was fuzzed
+```
+
+and the user manager's PID goes 3546 → 2113 across it.
+
+**The way to find a fault like this is to take away what the environment
+supplies and run it again** — §77.6's rule, and the third time it has been the
+answer here. Reproducing the manager's environment exactly and running the
+night's own build line in it gives `cargo: command not found`, exit 127, the
+same line as `build.log`; prepending `~/.cargo/bin` and changing nothing else
+gives `Finished \`release\` profile … in 1m 03s`, exit 0.
+
+### 108.2 Inherited is not set
+
+`systemctl --user show-environment` carries no `~/.cargo/bin`. `cargo` here is
+rustup's shim in that directory, and the only files on this machine that add it
+are `~/.bashrc` and `~/.profile`; there is no `~/.config/environment.d/`.
+systemd `--user` reads none of those. mise supplies `just`, `cargo-fuzz` and
+`kache` from its install dirs and pins no rust, so `mise exec --` does not
+supply `cargo` either — which is checkable and was checked.
+
+So the honest statement of the fault is: **the unit never had a durable source
+of `cargo`, and for five nights it did not need one.** Why it did not is an
+inference and is marked as one — the pre-reboot manager's environment is not
+recoverable, so "the PATH was inherited from a login session" is the only
+explanation consistent with what *is* measurable (no durable source exists now,
+none existed in any file then, and the boundary is a boot) rather than something
+this section watched happen.
+
+The fix is one line in `tooling/systemd/rcad-fuzz.service`:
+
+```
+Environment=PATH=%h/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+```
+
+The unit already named `%h/.local/bin/mise` absolutely, with a comment saying
+systemd starts without a profile. The reasoning was right and was carried one
+binary short of where it needed to go.
+
+Verified end to end and not only at the build line: a real `fuzz-overnight`,
+75 seconds wide, run by systemd `--user` with exactly the `Environment=` the
+installed unit now carries, reported `5 targets, nothing found` and exited 0.
+
+**`fuzz-cones-and-tori` had never run a night.** It entered `fuzz_all` in
+`1fe32c5b` — the commit this very run advanced onto — so the one night it would
+first have run is the night that did not run. That short verification run is the
+first time the cone and torus target has been fuzzed by the timer at all.
+
+### 108.3 Two copies of the unit, and nothing made them agree
+
+`tooling/systemd/rcad-fuzz.service` is tracked here; `~/.config/systemd/user/`
+holds a **copy**, not a symlink, and systemd runs the copy. Nothing compared
+them. That is §60's shape — a second record beside the thing itself — and it had
+a price on the day: the fix above lands in a directory systemd will never read,
+so writing it changed nothing about tonight until somebody copied it over.
+
+`just check-fuzz-unit` is now in `gate_steps`. **An installed copy must match
+the tracked one; a machine with no installed copy is not checked**, because
+almost nowhere runs the night and a runner has no `~/.config/systemd/user` at
+all, so absence is the ordinary case and not a finding. Half an install — one of
+the pair on disk — is a failure, because that is somebody copying by hand and
+stopping, which is this same mistake one file earlier.
+
+The gap is named rather than claimed away: **this cannot tell a machine that
+never installed the timer from one where the installed file was removed.** Both
+look identical from here and only the second is a problem. What it catches is
+the case that cost the night — installed, and behind the tree.
+
+A symlink would delete the second record outright and was rejected on its own
+evidence: the tree that would hold it is `rcad-nightly-fuzz`, which
+`git checkout --detach`es itself every night under §90, so the unit would change
+under the running service.
+
+**Every tree on an older base fails this check until the fix lands**, because it
+has the old unit tracked and the new one installed. That is the check working
+rather than misfiring, and it is nobody's business to fix from inside such a
+lane. `check-corpus` has had the same shape since §79 — a tracked manifest
+against a thing outside the tree — so the repo already takes this trade, and the
+remedy is the same one: land it and rebase. It is a reason to merge promptly, not
+a reason to soften the check.
+
+### 108.4 What the morning found anyway, and the two nights that found it twice
+
+`just fuzz-triage /home/mattias/rcad-fuzz-logs/2026-09-14 main` against
+`a2a93b9a`: **0 of 6 inputs did not come back clean.** Both crashes replay clean
+and were already seeded — `crash-d04e0041…` was fixed by `9c29cae0`, the scaling
+oracle tilting the axis it scaled. All four slow units decode, replay clean, and
+land on the same outcome: `SurfaceMeet::Curves, 2 of them`, harness at
+`Asked { points: 0, orders: 1, scalings: 2 }`.
+
+Only one of the four was in the corpus. The other three were in
+`~/rcad-fuzz-logs/artifacts-rescued-2026-09-14/` and in the gitignored
+`fuzz/artifacts/` of a worktree, which is exactly the arrangement §91 was
+written about — and §91's cost is now measured rather than predicted:
+`262c17e4…`, found 2026-09-13 00:12, and `7e62ebe6…`, found 2026-09-14 00:11,
+**are the same case.** Same second cylinder — origin `[0, 32, 1]`, axis `+z`,
+radius `1.375` — and a first cylinder differing only in its z-origin,
+`822083584.0` against `805306368.0`, same radius `167774208.0`. Two nights, one
+shape, neither seeded, so the fuzzer paid for the same discovery twice.
+
+All three are now in `fuzz/corpus/where_two_surfaces_cross/`, renamed the way
+§93 renamed its crash — a name that says what it is, with the hash kept so it
+still points back at the night:
+
+```
+slow-unit-a-huge-pipe-crossing-a-small-one-262c17e4…
+slow-unit-the-same-pair-with-the-big-pipe-moved-7e62ebe6…
+slow-unit-a-huge-pipe-and-a-hair-thin-one-5dddf2a9…
+```
+
+**All four slow units are one huge pipe against one small one** — radii
+`167774208.0`, `2147482112.0`, `50397183.0` against `1.375`, `1.0` and
+`4.3e-19`. That reads as one question about scale and not as four findings, and
+what it costs is open: `262c17e4…` alone took 3m47s to replay in a debug build.
+Left as a question rather than answered here, because the answer is measurement
+this section did not do.
+
+### 108.5 The one sentence the night said to a person was the wrong one
+
+`build.log` had `cargo: command not found` in it the whole time. What the night
+printed to the journal, under that, was
+
+> nightly is not pinned by this repo (docs/decisions.md §29.9);
+> `rustup toolchain install nightly` is the usual answer
+
+which is good advice about a thing that was not wrong. A log nobody opens and a
+sentence that misdirects the person who does is worse than the sentence not
+being there: it spends the reader's first guess.
+
+The hint now branches on `command -v cargo`, and says, when there is none, that
+the toolchain is not the question, prints the PATH it had, and names
+`check-fuzz-unit` as the thing that answers whether systemd is running the unit
+in the tree.
+
+`check-fuzz-overnight-selftest` gained an arm for it. **Its PATH is built by
+dropping every entry that holds a `cargo` and keeping the rest** — not by
+listing the tools the night needs into an empty directory, which was tried and
+is not a list anybody finishes: the first attempt died on `id`, which this
+justfile runs in a top-level backtick before any recipe body starts. Borrowing
+`/usr/bin:/bin` instead would have been worse and quieter, passing here where
+cargo lives under `~/.cargo` and testing nothing wherever cargo ships in a
+distribution package — §77.6 again, which is the fourth time that shape has come
+up in this repo.
+
+Where cargo *does* ship beside the coreutils the arm cannot run, and it says so
+by name rather than failing further down in a way that reads like the night's
+fault.
+
+The mutation is the proof and it was run: with the branch forced to the nightly
+sentence, the arm fails, and the output it fails on is
+`cargo: command not found` followed by the advice about rustup — the night of
+2026-09-15, reproduced on demand.
