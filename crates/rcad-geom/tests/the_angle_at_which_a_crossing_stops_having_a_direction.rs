@@ -196,6 +196,45 @@ fn scaling_both_normals_by_a_power_of_two_leaves_the_same_bits_behind() {
     }
 }
 
+/// **And the other half of that claim: a scale that is not a power of two does
+/// move the bits, and moving them is not the same as mending them.**
+///
+/// The test above is only worth reading if a scaling *could* have changed the
+/// answer, so here is one that does. A scale of three is not exact, so it
+/// reshuffles which orientations happen to cancel to zero — and the count that
+/// comes back is the point: it turns some refusals into answers **and some
+/// answers into refusals**, at the same lean. A fix that trades one for the
+/// other has not found the direction; it has moved which orientations get a
+/// wrong one instead of a refusal, which is the worse of the two (§16.10 —
+/// crash over corrupt).
+#[test]
+fn scaling_by_something_that_is_not_a_power_of_two_trades_refusals_for_wrong_answers() {
+    let mut spinner = Spinner(0x5eed_0006);
+    let lean = f64::EPSILON / 32.0;
+
+    let mut refused_plain_answered_scaled = 0_usize;
+    let mut answered_plain_refused_scaled = 0_usize;
+    for _ in 0..2000 {
+        let (u, t) = spinner.two_at_right_angles();
+        let v = leaned(u, t, lean);
+        let plain = u.cross(v).normalized().is_ok();
+        let scaled = (u * 3.0).cross(v * 3.0).normalized().is_ok();
+        refused_plain_answered_scaled += usize::from(!plain && scaled);
+        answered_plain_refused_scaled += usize::from(plain && !scaled);
+    }
+
+    println!(
+        "scaling by three rescued {refused_plain_answered_scaled} orientations and \
+         lost {answered_plain_refused_scaled}"
+    );
+    assert!(
+        refused_plain_answered_scaled > 0 && answered_plain_refused_scaled > 0,
+        "a scale that is not a power of two has to be shown moving the answer in \
+         both directions, and it moved {refused_plain_answered_scaled} one way and \
+         {answered_plain_refused_scaled} the other"
+    );
+}
+
 /// **Taking the cancellation out gets the arithmetic's own answer back, and it
 /// is worth nothing.**
 ///
@@ -239,10 +278,16 @@ fn taking_the_cancellation_out_of_the_cross_product_buys_nothing_against_the_tru
             worst_ratio = worst_ratio.max(plain_worst / compensated_worst);
         }
     }
+    println!("the plain one was never worse than {worst_ratio:.2} times the compensated one");
+    // The doc comment above and `which_way_the_crossing_runs` both publish "a
+    // factor of one and a half", so that is the number asserted rather than a
+    // round one well clear of it. This stood at `30.0` and the claim at `1.5`,
+    // which is §15.6's own bug: a bound is published with the test that holds it
+    // and not with a test twenty times slacker.
     assert!(
-        worst_ratio < 30.0,
-        "taking the cancellation out never bought more than a rounding or two of \
-         direction, and it bought {worst_ratio:.1} times here"
+        worst_ratio < 1.5,
+        "taking the cancellation out never bought more than half as much direction \
+         again, and it bought {worst_ratio:.2} times here"
     );
 }
 
