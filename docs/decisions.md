@@ -31131,3 +31131,124 @@ the fix will move by one ulp.
   that does not move is a result; a count nobody re-ran is not.
 - §22.6's same-ray property re-checked rather than assumed, even though §120.1
   says it is kept by construction.
+
+### 120.6 What ran, 2026-09-18
+
+`Vector::scaled_to_length_one_from_anywhere` is an exact power-of-two rescale
+that puts the largest component in `[1, 2)`, a sum of squares and a square root
+carried as two `f64` that add to about a hundred bits, and one division per
+component that rounds once instead of twice. `AHundredBits` and the four little
+functions under it are all of the double-double arithmetic there is; they live in
+`point.rs` under their one caller.
+
+The rescale does the job §120.1 said the old divide was doing and does it
+exactly: a power of two moves no mantissa bit, so the answer is a function of the
+exact ray rather than of a rounded one. **The `693` components the naive removal
+flushed to zero are not lost** — the worked case `(2⁻⁴⁸³, 2⁵¹⁶, 0)` comes back
+with an `x` of `1.87e-301`, because the scale is chosen from the largest
+*component* and not from the largest square.
+
+`a_unit_component_is_the_nearest_f64_to_the_exact_ratio` is the test §15.6 asks
+for, and it is a measurement rather than a memory:
+
+| | |
+| --- | --- |
+| components checked against an exact reference | 14 880 |
+| not the nearest `f64` | **0** |
+| not the nearest `f64`, dividing by the largest component and normalizing | 2 753, **18.50%** |
+| comparisons too wide for the exact arithmetic to carry | 213 |
+
+The reference decides nothing in `f64`. "`answer` is at least as close to `c/√Q`
+as `neighbour` is" becomes `2c` against `(answer + neighbour)·√Q`, and squaring
+both sides turns the root into `Q` and leaves an expansion whose sign
+`Exact::sign` names. Both scalings it needs are powers of two, so the sign it
+names is the sign of the unscaled question.
+
+**The old arithmetic is still in the test**, three lines of it, which is what
+makes 18.50% a number this tree produces rather than one it remembers. It is
+higher than §120.1's 9.93% because this sweep draws exponents across eight
+hundred binades and §120.1 drew directions; both are measurements of the same
+defect over different populations, and neither corrects the other.
+
+The test reaches down to about `2⁻⁹¹⁵` and not to `2⁻¹⁰¹²`, and that is the exact
+arithmetic's wall rather than a choice: squaring doubles an expansion's spread,
+and `WIDEST_SQUARABLE_SPREAD` (§29.6, §30.4) is 995 binades. The last twenty-odd
+binades of the published bound rest on §120.1's measurement, which used integer
+triples rather than this crate's expansions.
+
+### 120.7 What moved, and the three witnesses that dissolved
+
+Fourteen tests. Ten are counts, and they are re-measured in the same commit:
+
+| | before | after |
+| --- | --- | --- |
+| turns of two placed solids that keep the contact / lose it | 10 446 / 11 100 | 10 558 / 10 988 |
+| turned box pairs leaving an edge with one face along it (§39.4) | 107 | 104 |
+| slanted-line sweep, three candidates | 9 028, 3 271, 7 509 | 8 983, 3 747, 7 615 |
+| pipes the rounded moment wrongly folds, and the widest | 113, 3.94e-13 | 114, 2.27e-13 |
+| rebuilding an axis from its own direction, of 100 000 | over 1 000 | 992 |
+| the two cap measurements at an ordinary chamfer | over 2× | 1.32× |
+| a turned bar's mesh, against the untouched one | 566 / 566 | 582 / 566 |
+
+Two M0 measurement pins moved a rounding as well — the turned cube and the turned
+plate, both turned about `(1, 1, 1)`, whose stored direction moved.
+
+**Three tests were built on witnesses the change dissolved, and each needed a new
+one rather than a new number.** This is the part a count cannot carry:
+
+- `a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently`
+  needed a pair whose `f64` dot cancels where the exact one does not. `(1, 0, 3)`
+  against `(−12, −12, 4)` stopped cancelling — its `f64` dot is `−2.8e-17` now. A
+  sweep of small whole-number pipes against small whole-number planes found
+  dozens that still do; `(2, 0, 3)` against `(−12, −12, 8)` is the one pinned.
+  **§39's gap did not move with its witness.**
+- `a_point_a_radius_out_from_a_pipes_axis_is_measured_as_being_on_the_pipe` and
+  `the_two_shapes_store_their_directions_one_above_and_one_below_unit_length`
+  both need one direction storing above unit length and one below. `(1, 1, 0)`
+  crossed from below to above and `(1, 6, 0)` landed exactly on one, which is no
+  witness at all; `(1, 2, 0)` is below and `(1, 1, 0)` is above now.
+- `a_ball_that_just_fits_a_pipe_fits_it_down_any_axis` needs a direction that does
+  *not* store as a unit triple. `(1, 1, 1)` now does, so `(1, 2, 1)` stands in its
+  place.
+
+`the_two_finder_relay_pipes_written_with_one_radius_are_one_width` is the fourth,
+and it is the happy one: it pinned the normalize landing **one ulp below**
+`FRAC_1_SQRT_2` and now pins it landing on it. Its second claim — that a better
+normalize would move that gap rather than close it, because neither candidate
+doubles its square to one — was written as a prediction and held.
+
+§120.5 named `the_same_wall_built_from_a_longer_edge_is_the_same_plane` as a
+pinning site. **It did not move**: `Plane` does not go through this function.
+
+### 120.8 The corpus did not move, and §120.5's standing rates were stale
+
+`mise exec -- just t how_often_a_real_file_imports --no-capture`:
+
+```
+=== nist: 1 / 44 imported = 2.3%
+=== kicad: 114 / 323 imported = 35.3%
+```
+
+`mise exec -- just t every_file_that_stops_at_the_tangency_wall_names_the_edge_it_was_following --no-capture`:
+
+```
+files stopping at the tangency wall: 24
+```
+
+**Unmoved, and not merely unmoved by rate.** `assert_pinned_kicad_imports`
+compares the importing files against `KICAD_FILES_THAT_IMPORT` as a *set* and
+fails both ways (§44.10), and it passed — so the same 114 files import, not
+merely as many. A change that moves the stored bits of every axis in the kernel
+moved no real file across the line in either direction.
+
+§120.5 was written expecting `110 / 323 = 34.1%`. That figure is this file's own
+at §119 and older than the tree: the pinned set has held 114 names since before
+this lane started, and §-118's row already records `112/323`. A rate written down
+in prose goes stale where a by-name pin cannot, which is §44.10's whole argument
+arriving a second time.
+
+§22.6's same-ray property is checked rather than assumed, as §120.5 asks:
+`normalizing_alone_stores_a_different_direction_and_reducing_first_does_not`
+draws 210 000 pairs of proportional directions and still finds **0** that store
+different bits. §120.1 is right that a correctly rounded answer keeps the
+property by construction; the test is what says the construction holds.
