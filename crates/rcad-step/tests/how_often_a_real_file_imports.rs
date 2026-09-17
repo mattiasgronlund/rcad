@@ -618,7 +618,7 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
     );
 }
 
-/// The 112 KiCad files that import today, out of 323.
+/// The 114 KiCad files that import today, out of 323.
 ///
 /// **Pinned by name, not by rate** (§44.10): a rate cannot tell a reader which
 /// file moved. This list moves only by an edit to this constant, made by
@@ -679,6 +679,17 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
 /// through and the other four met a later blocker the same run, which is §44.11
 /// item 5 yet again. `Relay_SPST_SANYOU_SRD_Series_Form_A` is one of the four
 /// and its next blocker is a pipe tangent to a ball at a pin's rounded end.
+///
+/// **The homogeneous-cylinder lane then moved it from 112 to 114**, with nothing
+/// dropping out: `Relay_SPDT_Finder_32.21-x000` and
+/// `Relay_SPST_Finder_32.21-x300`. Both hold the identical pair of 0.3 mm bores
+/// crossing at 45°, which the equal-pipes family above should have caught and
+/// did not: `Cylinder::side_of` compared `|(p−o)×w|²` against a bare `r²`, so
+/// the width it certified was `r/‖w‖`, and `1/√2` is not an `f64` — the two
+/// bores were 1.5e-17 apart in width and crossed in a genuine quartic with two
+/// necks that narrow to about that. Making both sides of the comparison degree
+/// two in the direction makes a pipe `r` wide however its direction rounded, and
+/// the pair is the family again (`docs/decisions.md` §118.10).
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -757,12 +768,14 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Relay_DPDT_Omron_G6K-2P-Y.step",
     "Relay_DPDT_Omron_G6K-2P.step",
     "Relay_DPDT_Panasonic_JW2.step",
+    "Relay_SPDT_Finder_32.21-x000.step",
     "Relay_SPDT_Finder_40.31.step",
     "Relay_SPDT_Finder_40.51.step",
     "Relay_SPDT_HJR-4102.step",
     "Relay_SPDT_Omron_G6E.step",
     "Relay_SPDT_Omron_G6EK.step",
     "Relay_SPDT_StandexMeder_SIL_Form1C.step",
+    "Relay_SPST_Finder_32.21-x300.step",
     "Relay_SPST_StandexMeder_SIL_Form1A.step",
     "Relay_SPST_StandexMeder_SIL_Form1B.step",
     "Relay_StandexMeder_DIP_HighProfile.step",

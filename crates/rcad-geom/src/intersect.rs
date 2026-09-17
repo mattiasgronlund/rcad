@@ -891,7 +891,7 @@ fn where_two_pipes_side_by_side_cross(
 ) -> Result<SurfaceMeet> {
     let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
     let [mine, theirs] = [one, other].map(Cylinder::radius);
-    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let [my_way, _] = [one, other].map(|pipe| pipe.axis().direction().components());
     let at = [here, there].map(PredicatePoint::from);
     let four_lengths = Measures::ManyLengths { how_many: 4 };
 
@@ -900,28 +900,20 @@ fn where_two_pipes_side_by_side_cross(
         enclosing: || how_far_off_an_axis_enclosing(there, here, my_way),
         exactly: || how_far_off_an_axis_exactly(there, here, my_way),
     };
+    // A pipe is `r` wide whatever length its stored direction rounded to
+    // (`docs/decisions.md` §118.10), so the two are the same thickness exactly
+    // when `r₁² − r₂²` is zero. This used to be `r₁²W₂ − r₂²W₁`, degree four,
+    // because the width the cylinder predicate certified was then `rᵢ/√Wᵢ`.
     let same_thickness = Question {
         named: WHERE_TWO_PIPES_CROSS,
-        enclosing: || {
-            squared_enclosing(mine) * squared_length_enclosing(exactly(their_way))
-                - squared_enclosing(theirs) * squared_length_enclosing(exactly(my_way))
-        },
-        exactly: || {
-            Some(
-                Exact::product_of(mine, mine)?
-                    .times(&Exact::dot_of(their_way, their_way)?)?
-                    .minus(
-                        &Exact::product_of(theirs, theirs)?
-                            .times(&Exact::dot_of(my_way, my_way)?)?,
-                    ),
-            )
-        },
+        enclosing: || squared_enclosing(mine) - squared_enclosing(theirs),
+        exactly: || Some(Exact::product_of(mine, mine)?.minus(&Exact::product_of(theirs, theirs)?)),
     };
 
     match ask(&apart, Measures::Area, &at, policy, log)? {
-        // One axis, so the two are the same pipe when their certified radii
-        // agree and never meet at all when they do not.
-        Decision::Zero => match ask(&same_thickness, four_lengths, &at, policy, log)? {
+        // One axis, so the two are the same pipe when their radii agree and
+        // never meet at all when they do not.
+        Decision::Zero => match ask(&same_thickness, Measures::Area, &at, policy, log)? {
             Decision::Zero => Ok(SurfaceMeet::SameSurface),
             Decision::Pos | Decision::Neg => Ok(SurfaceMeet::Nothing),
             other => unreachable!("a sign question answers with a sign: {other:?}"),
