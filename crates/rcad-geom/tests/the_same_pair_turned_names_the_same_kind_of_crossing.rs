@@ -153,10 +153,15 @@ fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
 /// **It did not used to be.** Before §118.11 a pipe was every point `r/‖w‖` from
 /// its axis, so the question "does this ball rest inside this pipe" came out as
 /// `R²‖w‖² − r²`, which for `R = r = 1` is the sign of `‖w‖² − 1` — the stored
-/// direction's own rounding and nothing else about the geometry. This test
-/// counts that sign over the sixty-three turns below and finds it going **both
-/// ways**, which is why the old expectation here read `nothing` at one
-/// sixty-fourth and `two circles` at twenty.
+/// direction's own rounding and nothing else about the geometry, which is why
+/// the assertion this test used to carry read `nothing` at one sixty-fourth and
+/// `two circles` at twenty.
+///
+/// This counts that sign over the sixty-three turns below, in exact arithmetic
+/// because the answer is a handful of last bits from zero. **Measured: two
+/// circles 48 times, nothing at all 15 times, and the truthful answer not
+/// once.** The two turns the old assertion named are pinned inside the loop, so
+/// what is counted is the rule that really ran and not a rule that resembles it.
 #[test]
 fn a_ball_resting_along_a_whole_circle_inside_a_pipe_answers_one_circle_however_it_is_turned() {
     let resting = Crossing {
