@@ -94,6 +94,70 @@ fn a_planes_coefficients_written_at_any_scale_are_the_same_plane() {
     }
 }
 
+/// **A plane handed back its own coefficients is a different plane**, and
+/// [`Plane::moved_to`] is how to scale one without that.
+///
+/// The fold above is about *proportional* coefficients, and a stored normal is
+/// not proportional to anything: it is the rounded normalizing of whatever built
+/// it. Reducing and normalizing it a second time therefore moves it, the same
+/// second scaling [`rcad_geom::Axis::moved_to`] exists to avoid for a direction.
+///
+/// This is the demonstration behind the number in [`Plane::moved_to`]'s doc
+/// comment, and behind the plane arm of the fuzzing harness's `scaled`. The
+/// night of 2026-09-16 and the night of 2026-09-17 both crashed on it: a cone of
+/// slope `7.8e28` against a plane square to its axis is one circle, and the
+/// plane rebuilt for the scaled run leaned `2.8e-17` off the axis — far more
+/// than the `1/slope = 1.3e-29` that the cone's own side leans — so the scaled
+/// pair really was a hyperbola in two branches and the kernel was right about
+/// both.
+#[test]
+fn rebuilding_a_plane_from_its_own_coefficients_tilts_its_normal() {
+    let mut state = 0x243f_6a88_85a3_08d3_u64;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        f64::from(u32::try_from(state >> 33).expect("33 bits shifted off a u64 leave 31"))
+            / f64::from(u32::MAX >> 1)
+            - 1.0
+    };
+
+    let mut tilted = 0;
+    let mut moved_by_moved_to = 0;
+    let draws = 100_000;
+    for _ in 0..draws {
+        let Ok(plane) =
+            Plane::from_point_and_normal(Point::new(1.0, -2.0, 0.5), along(next(), next(), next()))
+        else {
+            continue;
+        };
+        let rebuilt =
+            Plane::from_coefficients(plane.coefficients()).expect("a unit normal has a length");
+        if rebuilt.normal().components() != plane.normal().components() {
+            tilted += 1;
+        }
+        let slid = plane
+            .moved_to(plane.offset() * 0.5)
+            .expect("a finite offset");
+        if slid.normal().components() != plane.normal().components() {
+            moved_by_moved_to += 1;
+        }
+    }
+
+    println!(
+        "{tilted} of {draws} plane normals moved when the plane was rebuilt from its own coefficients"
+    );
+    assert_eq!(
+        moved_by_moved_to, 0,
+        "moved_to is supposed to hand the stored normal straight back"
+    );
+    assert!(
+        tilted > draws / 5,
+        "only {tilted} of {draws} rebuilt normals moved, so the number in Plane::moved_to's doc \
+         comment no longer describes this arithmetic"
+    );
+}
+
 /// A negative radius names the same points as a positive one, and every round
 /// surface refuses it rather than folding it.
 ///

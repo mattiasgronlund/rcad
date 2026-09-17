@@ -23,10 +23,14 @@
 //! why the table's row and this file's rows are reported apart rather than added
 //! up (§17.7).
 //!
-//! Every seed here is hand-written, because no coverage-guided run has been made
-//! against this target yet. When one is, its minimised keepers land in the same
-//! directory and these rows move; the floors below are set low enough that they
-//! do not have to move with them.
+//! Every seed here was hand-written but two, and those two are the first
+//! keepers a coverage-guided run sent back: `a_plane_square_to_a_huge_cones_axis`
+//! and `a_plane_square_to_a_flatter_huge_cones_axis`, from the nights of
+//! 2026-09-17 and 2026-09-16. Both are the same defect, which was in the
+//! harness's own `scaled` rather than in the kernel — see the note on
+//! [`fuzzing`]'s `scaled`. More keepers land in the same directory and these rows
+//! move; the floors below are set low enough that they do not have to move with
+//! them.
 //!
 //! # Counted by category, and not only in total
 //!
@@ -50,7 +54,8 @@
 //!
 //! # Where the floors come from
 //!
-//! Measured on this tree on 2026-09-14, by
+//! Measured on this tree on 2026-09-14, and the corpus row again on 2026-09-17
+//! with the two keepers in it, by
 //!
 //! ```text
 //! cargo nextest run -p rcad-geom \
@@ -60,15 +65,15 @@
 //!
 //! | row | pairs | points | orders | scalings |
 //! |---|---|---|---|---|
-//! | corpus | 32 of 36 seeds | 352 | 12 | 24 |
+//! | corpus | 34 of 38 seeds | 377 | 14 | 28 |
 //! | soak | 94 060 of 200 000 draws | 830 | 11 435 | 22 770 |
 //!
 //! Each floor is roughly three quarters of what was measured, the convention the
 //! sibling file set, so it catches an oracle that has gone silent without failing
 //! on ordinary drift.
 //!
-//! **Twelve of the corpus's thirty-two pairs were named both ways round, and the
-//! other twenty were refused both ways.** That is the shape the sibling file's
+//! **Fourteen of the corpus's thirty-four pairs were named both ways round, and
+//! the other twenty were refused both ways.** That is the shape the sibling file's
 //! table row has too, and for the same reason: a cone against a ball or another
 //! cone, and a ring against anything curved, are curves of degree four and eight
 //! that nothing names yet. The order oracle is the one that still says something

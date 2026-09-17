@@ -571,6 +571,24 @@ fn writing_a_pair_at_another_power_of_two_does_not_change_it(pair: &[Surface; 2]
 /// above would then be comparing two different shapes and calling their
 /// agreement a property.
 ///
+/// **[`Plane::moved_to`] and not [`Plane::from_coefficients`], for the reason
+/// [`scaled_axis`] gives one function down.** Handing a stored normal back to
+/// `from_coefficients` reduces and normalizes an already-normalized vector and
+/// lands a bit away for most directions, so the plane that came out of here was
+/// not the plane that went in written larger — it was that plane leaning very
+/// slightly differently.
+///
+/// The nights of 2026-09-16 and 2026-09-17 both crashed on that, with the same
+/// axis direction both times: a cone of slope `7.8e28` with its apex at
+/// `3.6e103` against a plane square to its axis, which is one circle. The
+/// rebuilt plane leaned `2.8e-17` off the axis, and a cone's own side leans only
+/// `1/slope` — `1.3e-29` — so the rebuilt plane really was the steeper of the
+/// two and really did cut both nappes. `intersect` named one circle for the pair
+/// and a hyperbola in two branches for the rebuild, and it was right about both.
+/// `fuzz/corpus/where_a_cone_or_a_torus_crosses` carries the two seeds, and
+/// `rebuilding_a_plane_from_its_own_coefficients_tilts_its_normal` counts how
+/// often the rebuild moves a normal at all.
+///
 /// `Surface` is `#[non_exhaustive]` and this is another crate, so the wildcard
 /// is forced. All five arms that exist are named above it, and the wildcard
 /// panics: a sixth kind of surface must be scaled on purpose here, not skipped
@@ -578,12 +596,10 @@ fn writing_a_pair_at_another_power_of_two_does_not_change_it(pair: &[Surface; 2]
 fn scaled(surface: &Surface, by: i32) -> Option<Surface> {
     let factor = 2f64.powi(by);
     match surface {
-        Surface::Plane(flat) => {
-            let [a, b, c, d] = flat.coefficients();
-            Plane::from_coefficients([a, b, c, exactly_scaled(d, factor)?])
-                .ok()
-                .map(Surface::Plane)
-        }
+        Surface::Plane(flat) => flat
+            .moved_to(exactly_scaled(flat.offset(), factor)?)
+            .ok()
+            .map(Surface::Plane),
         Surface::Sphere(ball) => Sphere::new(
             scaled_place(ball.centre(), factor)?,
             exactly_scaled(ball.radius(), factor)?,

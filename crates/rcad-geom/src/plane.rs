@@ -352,6 +352,39 @@ impl Plane {
         self.origin() + u * along_u + v * along_v
     }
 
+    /// The same flat surface slid along its own normal until it sits `offset`
+    /// from the origin, facing along the same bits.
+    ///
+    /// **Scaling is what this is for**, and it is
+    /// [`Axis::moved_to`](crate::Axis::moved_to) for planes. Multiplying a model
+    /// by `2^k` multiplies a plane's offset and leaves its normal alone, because
+    /// a normal is a direction and not a length — so there is nothing left to
+    /// work out and nothing that should round. Going back through
+    /// [`Plane::from_coefficients`] instead reduces and normalizes an
+    /// already-normalized vector, and that is not the normal that went in:
+    /// **24 733 of 100 000** random directions come back with other bits when a
+    /// plane is rebuilt from its own coefficients, which
+    /// `rebuilding_a_plane_from_its_own_coefficients_tilts_its_normal` counts.
+    /// `rcad-topo`'s `arrange` says the same thing in prose one crate away,
+    /// where a moved plane moves a corner.
+    ///
+    /// That is a footgun and not a broken promise. [`Plane::from_coefficients`]
+    /// keeps what it claims — two *exactly* proportional coefficient sets give
+    /// the same plane bit for bit — and a stored normal is the rounded
+    /// normalizing of whatever built it, so it lies exactly along nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if `offset` is not a finite number.
+    pub fn moved_to(&self, offset: f64) -> Result<Self> {
+        if !offset.is_finite() {
+            return Err(Error::NotFinite {
+                what: "distance from the origin to a plane",
+            });
+        }
+        Ok(Self::holding(self.normal, offset))
+    }
+
     /// The same flat surface facing the other way.
     ///
     /// Same set of points, opposite normal, so every signed distance flips sign.
