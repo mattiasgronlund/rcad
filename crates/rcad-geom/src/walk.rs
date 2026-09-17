@@ -36,7 +36,9 @@ use rcad_predicates::{
 };
 
 use crate::exact::Exact;
-use crate::intersect::whether_a_cone_and_a_pipe_share_an_axis;
+use crate::intersect::{
+    Question, WHERE_TWO_PIPES_CROSS, ask, whether_a_cone_and_a_pipe_share_an_axis,
+};
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
@@ -652,6 +654,15 @@ fn what_a_run_between_these_two_lies_on(
             if one.axis().direction().cross(other.axis().direction()) == Vector::zero() {
                 return Ok(WhatARunLiesOn::StraightLine);
             }
+            // Two pipes of one width whose axes actually meet cross in two
+            // ellipses and not in a quartic, and the marcher cannot follow
+            // them: the four branches run into each other where the walls
+            // touch. Asked before the sort below, because the answer is the
+            // same either way round and the closed form does its own sorting.
+            if whether_two_pipes_are_one_width_on_axes_that_meet(&one, &other, policy, log)? {
+                return where_two_equal_pipes_on_crossing_axes_cut(&one, &other, run, policy, log)
+                    .map(WhatARunLiesOn::Conic);
+            }
             let certified = |pipe: &Cylinder| pipe.radius() / pipe.axis().direction().length();
             // Two pipes of the same certified radius are neither thinner, and
             // then which one is walked round has to be settled by the numbers
@@ -1156,6 +1167,188 @@ fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point;
     [middle + along * reach, middle - along * reach]
 }
 
+/// Whether two pipes that do not point one way are the same width **and** have
+/// axes that meet, which is the one pair of pipes whose crossing is flat.
+///
+/// Both halves are asked as certified sign questions rather than compared
+/// against a tolerance, because this family is exactly degenerate and not nearly
+/// so: the radii of a countersunk bore written out by a CAD system come from one
+/// literal, and two placements that share a coordinate put their axes in one
+/// plane to the bit. Asking it any other way would answer `true` for a pair that
+/// is merely close, and a pair that is merely close crosses in a quartic.
+///
+/// The widths are `ρᵢ = rᵢ/√Wᵢ` with `Wᵢ = ‖wᵢ‖²`, so `ρ₂ = ρ₁` exactly when
+/// `r₂²W₁ − r₁²W₂` is zero — degree four, and no root left to clear. The axes
+/// meet exactly when `(o₂ − o₁)·(w₁ × w₂)` is zero, which is the numerator of
+/// the distance between them and degree three. Neither is the eight-degree
+/// comparison [`intersect`](crate::intersect) runs out of room on (§29),
+/// because neither is a sum of roots: each is one polynomial against zero.
+///
+/// Both questions are symmetric under swapping the pair — swapping negates the
+/// volume and the radius difference and leaves what is being asked, which is
+/// whether they are zero — so this may be asked before the caller has settled
+/// which pipe is which.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when the policy will not certify either sign.
+fn whether_two_pipes_are_one_width_on_axes_that_meet(
+    one: &Cylinder,
+    other: &Cylinder,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    let at = [one, other].map(|pipe| PredicatePoint::from(pipe.axis().origin().coordinates()));
+    let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
+    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let [my_radius, their_radius] = [one, other].map(Cylinder::radius);
+
+    let squared = |value: [f64; 3]| {
+        (0..3).fold(Interval::exactly(0.0), |so_far, axis| {
+            so_far + Interval::exactly(value[axis]) * Interval::exactly(value[axis])
+        })
+    };
+    let same_width = Question {
+        named: WHERE_TWO_PIPES_CROSS,
+        enclosing: || {
+            Interval::exactly(their_radius) * Interval::exactly(their_radius) * squared(my_way)
+                - Interval::exactly(my_radius) * Interval::exactly(my_radius) * squared(their_way)
+        },
+        exactly: || {
+            Some(
+                Exact::product_of(their_radius, their_radius)?
+                    .times(&Exact::dot_of(my_way, my_way)?)?
+                    .minus(
+                        &Exact::product_of(my_radius, my_radius)?
+                            .times(&Exact::dot_of(their_way, their_way)?)?,
+                    ),
+            )
+        },
+    };
+    if ask(
+        &same_width,
+        Measures::ManyLengths { how_many: 4 },
+        &at,
+        policy,
+        log,
+    )? != Decision::Zero
+    {
+        return Ok(false);
+    }
+
+    let axes_meet = Question {
+        named: WHERE_TWO_PIPES_CROSS,
+        enclosing: || {
+            let sideways = [0, 1, 2].map(|axis| {
+                let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+                Interval::exactly(my_way[next]) * Interval::exactly(their_way[after])
+                    - Interval::exactly(my_way[after]) * Interval::exactly(their_way[next])
+            });
+            (0..3).fold(Interval::exactly(0.0), |so_far, axis| {
+                so_far
+                    + (Interval::exactly(there[axis]) - Interval::exactly(here[axis]))
+                        * sideways[axis]
+            })
+        },
+        exactly: || {
+            let sideways = Exact::cross_of(&Exact::of_each(my_way), their_way)?;
+            Exact::dot_of_two_exact(&Exact::gap_between(here, there), &sideways)
+        },
+    };
+    Ok(ask(&axes_meet, Measures::Volume, &at, policy, log)? == Decision::Zero)
+}
+
+/// The ellipse two pipes of one width on axes that meet cross in, picked out of
+/// the two of them by the run's own ends and half-spaces.
+///
+/// # Two planes, at any crossing angle
+///
+/// Written about the point where the axes meet, with `ê` and `û` the two unit
+/// directions and `ρ` the width both share, the two pipes are
+/// `‖p‖² − (p·ê)² = ρ²` and `‖p‖² − (p·û)² = ρ²`. Subtracting leaves
+/// `(p·(û − ê))·(p·(û + ê)) = 0`, so every point of the crossing is on one of
+/// the two bisector planes, whatever the angle between the axes. Each plane cuts
+/// a pipe in an ellipse: `ρ` across, and `ρ` over the sine of the angle the
+/// plane's own in-plane direction makes with the axis the long way.
+///
+/// **The pair is sorted before the ellipses are built**, for the reason the two
+/// balls are (§34): `û − ê` turns into `ê − û` when the caller writes the pair
+/// the other way round, and an ellipse whose long axis vector has flipped starts
+/// somewhere else, which moves the vertex `where_a_closed_crossing_starts` puts
+/// on the loop.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when an ellipse's own numbers do
+/// not come out finite, and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when what is on the run
+/// holds both ellipses or neither.
+fn where_two_equal_pipes_on_crossing_axes_cut(
+    one: &Cylinder,
+    other: &Cylinder,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    let (first, second) = if Surface::Cylinder(*one)
+        .how_it_sorts_against(&Surface::Cylinder(*other))
+        == Ordering::Greater
+    {
+        (other, one)
+    } else {
+        (one, other)
+    };
+    which_of_these_circles_this_run_is(
+        the_two_ellipses_equal_pipes_on_crossing_axes_cut(first, second),
+        run,
+        policy,
+        log,
+    )
+}
+
+/// The two ellipses, the one whose plane the axes' sum lies in first.
+fn the_two_ellipses_equal_pipes_on_crossing_axes_cut(
+    first: &Cylinder,
+    second: &Cylinder,
+) -> Vec<Conic> {
+    let [mine, theirs] = [first, second].map(|pipe| {
+        let along = pipe.axis().direction();
+        along * along.length().recip()
+    });
+    let radius = first.radius() / first.axis().direction().length();
+    let sideways = mine.cross(theirs);
+    let across = sideways * sideways.length().recip();
+    let middle = where_two_axes_meet(first, second);
+
+    [theirs + mine, theirs - mine]
+        .into_iter()
+        .map(|bisector| {
+            let the_long_way = bisector * bisector.length().recip();
+            // The ellipse is as long as the pipe is wide over the sine of the
+            // angle the plane's own long direction leans away from the axis,
+            // and for two unit vectors that sine is the length of their cross.
+            let reach = radius / the_long_way.cross(mine).length();
+            Conic {
+                centre: middle,
+                across: the_long_way * reach,
+                and: across * radius,
+                size: how_big_this_is(&[middle], &[reach, radius]),
+            }
+        })
+        .collect()
+}
+
+/// Where two axes that are known to meet do meet.
+///
+/// The foot of the common perpendicular on the first axis, which is the
+/// crossing point itself once the two are known to reach each other.
+fn where_two_axes_meet(first: &Cylinder, second: &Cylinder) -> Point {
+    let [mine, theirs] = [first, second].map(|pipe| pipe.axis().direction());
+    let sideways = mine.cross(theirs);
+    let between = second.axis().origin() - first.axis().origin();
+    first.axis().origin() + mine * (between.cross(theirs).dot(sideways) / sideways.length_squared())
+}
+
 /// The two places one pipe reaches furthest along its own axis through another,
 /// one on each of the two loops the pair can leave.
 ///
@@ -1453,20 +1646,48 @@ impl Conic {
         self.size
     }
 
-    /// How far `point` sits off this circle, measured in its own plane and
+    /// How far `point` sits off this conic, measured in its own plane and
     /// across it.
     ///
-    /// Only ever asked of a circle — both semi-axes the same length — which is
-    /// the whole of what a plane and a torus cross in. Two candidates that lie
-    /// in one plane and differ only in radius are told apart by the first term;
-    /// the second is what says a point is on the plane at all.
+    /// Two candidates that lie in one plane and differ only in size are told
+    /// apart by the first term; the second is what says a point is on the plane
+    /// at all.
+    ///
+    /// **A circle takes the exact distance and anything else takes a first-order
+    /// one**, because there is no closed form for how far a point sits off an
+    /// ellipse. `(x/a)² + (y/b)² − 1` divided by the length of its own gradient
+    /// is that distance to first order, which is all a *test* of being on the
+    /// curve needs: a point on it reads zero either way, and a point off it
+    /// reads something of the right size. The two agree in the limit for a
+    /// circle, and the circle arm is kept anyway so that the torus and the
+    /// coaxial cone — the two callers that only ever ask about circles, and
+    /// whose answers are compared against a bound a few ulps wide — get the same
+    /// bits they always did.
+    ///
+    /// A point at the centre of an ellipse has no gradient to divide by; it
+    /// comes back as the whole of the reach, which is honest and is the branch
+    /// `a_point_at_an_ellipses_own_centre_is_not_on_it` pins. A circle at its own
+    /// centre already read the same way.
     fn how_far_off_it(&self, point: Point) -> f64 {
         let out = point - self.centre;
-        let radius = self.across.length();
-        let across = out.dot(self.across) / radius;
-        let and = out.dot(self.and) / self.and.length();
-        let up = out - self.across * (across / radius) - self.and * (and / self.and.length());
-        (across.hypot(and) - radius).abs() + up.length()
+        let reach = self.across.length();
+        let other_way = self.and.length();
+        let across = out.dot(self.across) / reach;
+        let and = out.dot(self.and) / other_way;
+        let up = out - self.across * (across / reach) - self.and * (and / other_way);
+
+        let in_the_plane = if reach == other_way {
+            (across.hypot(and) - reach).abs()
+        } else {
+            let residual = (across / reach).powi(2) + (and / other_way).powi(2) - 1.0;
+            let slope = (2.0 * across / (reach * reach)).hypot(2.0 * and / (other_way * other_way));
+            if slope > 0.0 {
+                residual.abs() / slope
+            } else {
+                reach
+            }
+        };
+        in_the_plane + up.length()
     }
 
     /// The furthest from its own centre this conic goes.
@@ -2250,14 +2471,26 @@ fn the_two_circles_a_cone_and_a_pipe_cut(cone: &Cone, pipe: &Cylinder) -> Vec<Co
         .collect()
 }
 
-/// Which of a handful of candidate circles the run names, told by its ends and
-/// by the half-spaces on it.
+/// Which of a handful of candidate conics the run names, told by its ends and,
+/// where those do not settle it, by the half-spaces on it.
 ///
-/// **Two shapes of crossing need this and they are not alike.** A plane cuts a
-/// torus in two circles, and a cone and a pipe on one axis cut two more; in both
-/// the pair of surfaces names *both* circles and only the run says which. A run
-/// with neither an end nor a picker on it takes the only candidate there is,
-/// which is how a plane resting on a torus's tube gets its one circle.
+/// **Three shapes of crossing need this and they are not alike.** A plane cuts a
+/// torus in two circles, a cone and a pipe on one axis cut two more, and two
+/// pipes of one width on axes that meet cut two ellipses; in all three the pair
+/// of surfaces names *both* and only the run says which. A run with neither an
+/// end nor a picker on it takes the only candidate there is, which is how a
+/// plane resting on a torus's tube gets its one circle.
+///
+/// # The ends answer first, and a picker is only a tie-break
+///
+/// A picker on a run that came out of a file picks **an arc** and not a curve:
+/// `rcad-step` builds it from the chord between the edge's two vertices, so it
+/// rules out the far half of the very curve the edge is on. Asked as a curve
+/// question — which is what putting the candidate's point at angle zero to it
+/// does — it throws away the right answer about half the time. So the ends are
+/// asked on their own first and the pickers only run where the ends left more
+/// than one candidate standing, which is every run that has no ends at all and
+/// so every run `intersect` builds.
 ///
 /// # Errors
 ///
@@ -2277,26 +2510,34 @@ fn which_of_these_circles_this_run_is(
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     }
 
-    let picked_by: &[Picker] = match run.run() {
-        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
-    };
     let ends: Vec<Point> = run
         .ends()
         .into_iter()
         .filter(|end| *end != nowhere_in_particular())
         .map(|end| Point::from(end.enclosure().map(middle_of)))
         .collect();
+    let on_the_ends: Vec<Conic> = candidates
+        .into_iter()
+        .filter(|circle| {
+            let deviation =
+                POINT_ALONG_A_CROSSING_ROUNDOFF * circle.the_size_it_was_worked_out_from();
+            ends.iter()
+                .all(|end| circle.how_far_off_it(*end) <= deviation)
+        })
+        .collect();
+    if let [only] = on_the_ends.as_slice() {
+        return Ok(*only);
+    }
 
+    let picked_by: &[Picker] = match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
+    };
     let mut held: Vec<Conic> = Vec::new();
-    for circle in candidates {
+    for circle in on_the_ends {
         let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * circle.the_size_it_was_worked_out_from();
-        let holds_every_end = ends
-            .iter()
-            .all(|end| circle.how_far_off_it(*end) <= deviation);
-        if holds_every_end
-            && (picked_by.is_empty()
-                || every_half_space_holds(picked_by, circle.at(0.0), deviation, policy, log)?)
+        if picked_by.is_empty()
+            || every_half_space_holds(picked_by, circle.at(0.0), deviation, policy, log)?
         {
             held.push(circle);
         }
@@ -2366,6 +2607,51 @@ mod tests {
 
     use super::*;
     use crate::Vector;
+
+    /// A two-to-one ellipse in the `xy` plane, five wide and two and a half up.
+    fn a_stretched_ellipse() -> Conic {
+        Conic {
+            centre: Point::origin(),
+            across: Vector::new(5.0, 0.0, 0.0),
+            and: Vector::new(0.0, 2.5, 0.0),
+            size: 5.0,
+        }
+    }
+
+    /// The end of the short axis is **on** the ellipse, and the circle formula
+    /// read it as two and a half out.
+    ///
+    /// The whole of what stopped two bores of one width from being drawn once
+    /// the closed form had built them: `which_of_these_circles_this_run_is` asks
+    /// each candidate whether it holds the run's ends, and the answer for an
+    /// ellipse was a distance to a circle of its long radius.
+    #[test]
+    fn a_point_on_an_ellipses_short_axis_is_on_the_ellipse() {
+        let ellipse = a_stretched_ellipse();
+        assert!(ellipse.how_far_off_it(Point::new(0.0, 2.5, 0.0)) < 1e-15);
+        assert!(ellipse.how_far_off_it(Point::new(5.0, 0.0, 0.0)) < 1e-15);
+        assert!(ellipse.how_far_off_it(Point::new(0.0, 0.0, 1.0)) > 1.0);
+    }
+
+    /// A point at an ellipse's own centre has no gradient to divide by, and it
+    /// is not on the ellipse.
+    #[test]
+    fn a_point_at_an_ellipses_own_centre_is_not_on_it() {
+        assert_eq!(a_stretched_ellipse().how_far_off_it(Point::origin()), 5.0);
+    }
+
+    /// A circle goes on reading exactly what it read before.
+    #[test]
+    fn the_circle_arm_still_takes_the_plain_distance() {
+        let circle = Conic {
+            centre: Point::origin(),
+            across: Vector::new(3.0, 0.0, 0.0),
+            and: Vector::new(0.0, 3.0, 0.0),
+            size: 3.0,
+        };
+        assert_eq!(circle.how_far_off_it(Point::new(4.0, 0.0, 0.0)), 1.0);
+        assert_eq!(circle.how_far_off_it(Point::origin()), 3.0);
+    }
 
     fn a_ball_and_the_meridian_of_its_seam() -> (Surface, Surface, Picker) {
         let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a ball"));
