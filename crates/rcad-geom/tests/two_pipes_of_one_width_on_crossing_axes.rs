@@ -192,6 +192,71 @@ fn two_bores_of_one_width_crossing_at_a_right_angle_meet_in_the_ellipse_the_file
     );
 }
 
+/// The same headline at an angle that is not square, where the two ellipses are
+/// **different lengths** and the one above cannot tell a right answer from a
+/// lazy one.
+///
+/// Every size checked in this file was at a right angle, and a right angle is
+/// the one place where `r/|sin(θ/2)|` and `r/|cos(θ/2)|` come out equal. So a
+/// closed form that had quietly assumed the equal case would have passed
+/// everything here, and `docs/decisions.md` §118.9 named exactly that as the
+/// live suspicion about the two Finder relays. It is not what is wrong with
+/// them (§118.10), and this is the demonstration.
+///
+/// `(3, 4, 0)` and `(4, 3, 0)` are the same three magnitudes in another order,
+/// which is what keeps the pair inside the family — see the note at the top of
+/// this file. They lean at `cos θ = 24/25`, so `tan(θ/2) = 1/7` and the two
+/// semi-majors are `r√50` and `r√50/7`: a long thin ellipse and one barely
+/// rounder than the bore itself, differing by a factor of seven.
+#[test]
+fn bores_that_lean_rather_than_cross_square_meet_in_two_ellipses_of_different_lengths() {
+    let middle = Point::new(1.85, 5.85, -3.3);
+    let radius = 0.1;
+    let [one, other] = two_pipes_crossing_at(
+        middle,
+        [Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 3.0, 0.0)],
+        radius,
+    );
+
+    // The ellipse lies in the plane its own bisector spans with the common
+    // perpendicular, so the plane that holds it is named by the *other*
+    // bisector: the long one about `(1, 1, 0)` is picked out by `(1, -1, 0)`.
+    let long_way = radius * 50.0_f64.sqrt();
+    for (normal, semi_major) in [
+        (Vector::new(1.0, -1.0, 0.0), long_way),
+        (Vector::new(1.0, 1.0, 0.0), long_way / 7.0),
+    ] {
+        let walked = walk(
+            &the_piece_in_the_plane(middle, normal, &other),
+            [&Surface::Cylinder(one), &Surface::Cylinder(other)],
+            Deflection::of(1e-9).expect("a deflection above zero"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("two equal bores leaning on each other cross in two ellipses");
+
+        let points = walked.points();
+        let out_to = |start: f64, pick: fn(f64, f64) -> f64| {
+            points
+                .iter()
+                .map(|point| (*point - middle).length())
+                .fold(start, pick)
+        };
+
+        let reach = out_to(0.0, f64::max);
+        assert!(
+            (reach - semi_major).abs() < 1e-6,
+            "the plane about {normal:?} holds the ellipse {semi_major} long and the walk \
+             reached {reach}"
+        );
+        let closest = out_to(f64::INFINITY, f64::min);
+        assert!(
+            (closest - radius).abs() < 1e-6,
+            "both ellipses are the bore's own radius across and the walk came in to {closest}"
+        );
+    }
+}
+
 /// Every point of every generated pair's crossing is on both pipes.
 #[test]
 fn every_point_walked_round_one_of_the_two_ellipses_is_on_both_pipes() {

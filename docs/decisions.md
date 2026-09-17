@@ -35,9 +35,9 @@ pair**, two equal pipes whose axes cross. §118 is the demonstration §16.10
 wanted: two ellipses in closed form, and two classifiers that disagree.
 §107.1's "44" was never a classification.
 
-**What is left:** §118.9's two 45° files; §111.3's expansion tier; §113.7's
-`LoopsTouch` out of the mesher, where the files §115 rescued stop next; and
-§115.4's one file whose `f64` hint and the certified rule disagree.
+**What is left:** §118.10's homogeneity question, holding the two 45° files;
+§111.3's expansion tier; §113.7's `LoopsTouch`, where the files §115 rescued
+stop next; and §115.4's one file whose `f64` hint and the rule disagree.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, and healing, the biggest bucket, is refused by name in §42.9. §45.2
@@ -30581,8 +30581,119 @@ are equal. So either the new arm does not reach these two, or they refuse on a
 different edge than the one the census reads. **Which of those it is has not
 been established**, and this section does not guess.
 
+**It was neither, and §118.10 has the demonstration.** The arm is angle-general;
+the edge is the one the census names; what fails is one step earlier, in
+recognising the pair as the family at all. Read the two guesses above as the
+guesses they were.
+
 **Read §118.3's "for any crossing angle" as the algebra it is, not as a claim
 about the code.** The algebra holds; whether the implementation covers the
 unequal-semi-major case is exactly what these two files put in doubt, and it is
 the first thing to measure next. §16.10: the demonstration is owed for the
 claim as written, and at 45° it has not been given.
+
+### 118.10 Neither of §118.9's two guesses; the family test cannot pass at 45°, measured 2026-09-17
+
+§118.9 offered two: the new arm does not cover unequal semi-majors, or the two
+files refuse on a different edge than the census reads. **Both are wrong.** The
+demonstration §16.10 asked for is below, and it is a third thing.
+
+**They refuse on the same family, on the edge the census names.** Both files
+hold the *identical* pair — the same twelve numbers, which is why they fall
+together:
+
+```
+#1146/#1016  origin (18.3, -1.19, 10.4)                   direction (0, 1, 0)          radius 0.3
+#1318/#1176  origin (17.227867965644, 8.597867965644, 10.4) direction (0.707106781187, -0.707106781187, 0)  radius 0.3
+```
+
+And the file carries the closed form, as it did at 90°:
+`#1160 = ELLIPSE('',#1161,0.324717660088,0.3)`, and `0.3/cos(22.5°) =
+0.324717660088`. §118.3's semi-major formula is confirmed at 45° **by the file**.
+
+**The arm covers unequal semi-majors.** `reach = radius /
+the_long_way.cross(mine).length()` is the sine of the angle the bisector leans
+from the axis, computed per ellipse, so it is angle-general as written.
+`pairs_of_directions` in `two_pipes_of_one_width_on_crossing_axes.rs` has been
+walking `(3,4,0)`-shaped pairs at 16° all along. What was missing was a check on
+the **sizes** away from a right angle — every size assertion in that file was at
+90°, the one angle where `r/|sin(θ/2)|` and `r/|cos(θ/2)|` are equal, so a
+closed form that had assumed the equal case would have passed the lot.
+`bores_that_lean_rather_than_cross_square_meet_in_two_ellipses_of_different_lengths`
+is that check: `(3,4,0)` against `(4,3,0)`, `cos θ = 24/25`, semi-majors `r√50`
+and `r√50/7`. It passes, and with the reach forced to `r√2` it fails while the
+90° headline test beside it still passes. **That is the measurement that
+falsifies §118.9's first guess**, and the fact that it had to be written is
+§118.9's real lesson.
+
+#### What actually happens
+
+`whether_two_pipes_are_one_width_on_axes_that_meet` returns **`false`**, so the
+pair never reaches the closed form and falls through to the quartic and the
+marcher. Of its two halves:
+
+- **the axes meet** — exactly. `w₁ × w₂ = (0, 0, -a)` and both origins are at
+  `z = 10.4`, so the triple product is bit-zero.
+- **the widths match** — exactly **not**. `Axis::new` scales every direction to
+  length one, and at 45° that is `1/√2`, which no `f64` is. The stored direction
+  comes back as `0.70710678118654746171500846685376…`, so `‖w₂‖² = 1 − 1.6e-16`
+  exactly, against `‖w₁‖² = 1` exactly for `(0, 1, 0)`. The question
+  `r₂²‖w₁‖² − r₁²‖w₂‖²` is then about `+1.5e-17`, and the exact arm certifies
+  `Pos`.
+
+**A tolerant policy does not rescue it, at any working size.** Measured at
+`tolerant(1.0)`, `(10.0)` and `(100.0)`: the same refusal, unchanged.
+`Strictness::TolerantFallback` is a fallback for a sign the filter left
+*undecided*, and this sign is not undecided — it is certified non-zero, on an
+enclosure that never straddles zero. Tolerance has no entry point here. Anyone
+reaching for one to close this should read that sentence first.
+
+#### The root is one step further down, and `Cylinder` already says so
+
+`Cylinder::side_of` takes the sign of `|(p − o) × w|² − r²`. That is degree two
+in `w` on the left and degree **zero** on the right — not homogeneous — so the
+surface it certifies is the pipe of radius `r/‖w‖`, and `‖w‖` is whatever the
+normalize rounded to. The predicate's own doc comment has said this since it was
+written: *"the surface this predicate is certified against is the pipe of radius
+`radius / length(stored direction)` — displaced from the one the caller named by
+something of order `radius * 1e-16`."* Seven sites in `walk.rs` divide by that
+length to recover the width, which is correct given the convention and is what
+makes the convention visible.
+
+The consequence had not been drawn: **two pipes written with the same radius
+literal are the same width in this kernel only when their axis directions round
+to the same `‖w‖²`.** That is why the family works at 90° — `(0,1,0)` and
+`(0,0,1)` are exactly unit — and why the test file generates its pairs as
+permutations of one triple of magnitudes, which is the only other way to get
+there. It is written down in that file's module doc, in prose, and that prose
+never reached this record; §118.8's lesson, one section later and unheeded.
+
+So `§118.3`'s "for any crossing angle" is sound as algebra **and** as code. What
+fails at 45° is membership: the pair cannot be *recognised* as the family,
+because as stored it is not the family — it is two pipes whose widths differ by
+`1.5e-17`, crossing in a genuine quartic with two necks that narrow to about
+that, and the marcher is not wrong to give up on it.
+
+#### Gap or limit, and what is not yet decided
+
+By §16.10 this is a **gap**: the crossing of the surfaces as stored exists, and
+the arithmetic cannot reach it. But the fix family is not in `walk.rs`, and
+naming it is what §16.10 requires before anyone writes that this cannot be done:
+
+1. **Make the cylinder predicate homogeneous in `w`** — compare `|(p − o) × w|²`
+   against `r²‖w‖²`. Both sides are then degree two in `w`, a cylinder means
+   what its own doc says it means regardless of how its direction rounded, the
+   seven divisions in `walk.rs` collapse to `r`, and these two files import.
+   It also fixes the same drift under `Cylinder::transformed`, which §32.3
+   deliberately leaves un-normalized. It changes the certified meaning of every
+   non-axis-aligned cylinder in the kernel, so it is a decision and not a patch.
+2. **Follow the quartic.** The answer differs from the two ellipses by `1e-17`.
+3. **Widen the family test.** Banned by its own doc and by the tolerance rule: a
+   pair that is merely close crosses in a quartic, and this is the test that
+   keeps those out.
+
+**Option 1 is the only one that reaches the answer, and it is not taken here.**
+`Plane::side_of_point` carries the same caveat for the same reason, so the
+question is whether this kernel's surfaces are the ones the caller named or the
+ones the normalize rounded to — and that is Mattias's to settle, not a lane's.
+Until it is, the two Finder relays stay refused and the census stays 24/0/0/2.
