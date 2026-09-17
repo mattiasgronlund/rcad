@@ -723,36 +723,27 @@ impl Error {
     /// Moving names the pair it did look at, and costs one rounding per
     /// surface.
     ///
-    /// **Only the two variants that carry a `Surface` are listed, and a new one
+    /// **Only the two variants that carry a `Surface` are named, and a new one
     /// is not added here by default** — the same rule, and for the same reason,
     /// as `rcad-topo`'s `walking_along_this_edge_refused`: a refusal carrying
     /// geometry has to be *decided* about rather than swept in. Everything else
-    /// comes back untouched, because everything else says nothing about where
-    /// anything is.
+    /// is handed back as it came, because everything else says nothing about
+    /// where anything is.
+    ///
+    /// An `if let` over the two rather than a `match` with a last arm, because
+    /// that last arm would be a wildcard over this crate's own enum and §40 is
+    /// about where the next variant goes to be ignored. Naming the two is the
+    /// whole of the rule above, and this spelling is the one that cannot grow a
+    /// silent third case.
     #[must_use]
-    pub fn with_its_surfaces_moved(self, movement: &crate::Isometry) -> Self {
-        let moved = |surfaces: Box<[crate::Surface; 2]>| {
-            Box::new([
-                surfaces[0].transformed(movement),
-                surfaces[1].transformed(movement),
-            ])
-        };
-        match self {
-            Self::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, at } => {
-                Self::CannotFollowACrossingWhereItsSurfacesAreTangent {
-                    surfaces: moved(surfaces),
-                    at,
-                }
-            }
-            Self::CannotFollowACrossingBecauseNoStepStaysOnIt {
-                surfaces,
-                shortenings,
-            } => Self::CannotFollowACrossingBecauseNoStepStaysOnIt {
-                surfaces: moved(surfaces),
-                shortenings,
-            },
-            untouched => untouched,
+    pub fn with_its_surfaces_moved(mut self, movement: &crate::Isometry) -> Self {
+        if let Self::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, .. }
+        | Self::CannotFollowACrossingBecauseNoStepStaysOnIt { surfaces, .. } = &mut self
+        {
+            surfaces[0] = surfaces[0].transformed(movement);
+            surfaces[1] = surfaces[1].transformed(movement);
         }
+        self
     }
 }
 

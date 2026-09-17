@@ -158,7 +158,8 @@ fn what_a_surface_moved_out_of_a_frame_and_back_into_it_costs() {
         let there_and_back = tangency(a_ball_somewhere())
             .with_its_surfaces_moved(&movement)
             .with_its_surfaces_moved(&movement.inverse());
-        let Error::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, .. } = there_and_back
+        let Error::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, .. } =
+            there_and_back
         else {
             panic!("still the same refusal")
         };

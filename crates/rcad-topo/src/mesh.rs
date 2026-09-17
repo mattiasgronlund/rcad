@@ -3168,11 +3168,7 @@ mod tests {
         };
 
         let solid = model.solid(ball).expect("this model made the key");
-        let where_the_model_holds_it = solid
-            .faces()
-            .next()
-            .expect("a ball has one face")
-            .surface();
+        let where_the_model_holds_it = solid.faces().next().expect("a ball has one face").surface();
         let refusal = solid
             .mesh(
                 Deflection::of(0.1).expect("a length"),
