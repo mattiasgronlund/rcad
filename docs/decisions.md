@@ -35,9 +35,9 @@ pair**, two equal pipes whose axes cross. §118 is the demonstration §16.10
 wanted: two ellipses in closed form, and two classifiers that disagree.
 §107.1's "44" was never a classification.
 
-**What is left:** §118's closed form for the 6, in flight; §111.3's expansion
-tier; §113.7's `LoopsTouch` out of the mesher, where the files §115 rescued stop
-next; and §115.4's one file whose `f64` hint and the certified rule disagree.
+**What is left:** §118.9's two 45° files; §111.3's expansion tier; §113.7's
+`LoopsTouch` out of the mesher, where the files §115 rescued stop next; and
+§115.4's one file whose `f64` hint and the certified rule disagree.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, and healing, the biggest bucket, is refused by name in §42.9. §45.2
@@ -30527,6 +30527,11 @@ and four files carried them: `Relay_1-Form-A/B/C_Schrack-RYII` and
 on this corpus** — not a file, which was already true, and no longer an account
 of a refusal either.
 
+That is about one population and not about the word "undecided" in general: the
+`side of a half-space` decisions reached through `walk` from `Model::validate`.
+It says nothing about the census's `Verdict::CannotTell`, which is a different
+measurement on a different route, and §118.9 has two of those left.
+
 `whether_a_tolerant_policy_buys_anything_a_certified_one_does_not` went red on
 `left_undecided > 0` rather than passing over an empty population. That is
 §113.7's rule earning its keep: the floor is what stops a property quietly
@@ -30541,4 +30546,43 @@ file, could not have found it, and the stale-claim pass found it only because a
 test failed. A measured claim that lives only in a test's prose is one neither
 pass covers. Prefer the assertion to the sentence.
 
-Where that measurement goes now is open at the time of writing, as Q4.
+Where that measurement goes now is open at the time of writing, as Q4. It went
+to the hand-built rings, and §118.8's own wording was too broad until the audit
+below caught it.
+
+### 118.9 Four of the six, not six, and the other two are 45° — measured on what was pushed
+
+*Written after the push of `f2590235`, by an audit agent that was not any of the
+lanes, which is the rule §117.6 paid for.*
+
+The census does **not** shrink. It is still 26 files, and what moved is inside
+the bucket:
+
+| | before this unit | `f2590235`, pushed |
+|---|---|---|
+| files whose only reason is the near-parallel crossing | 26 | **26** |
+| tangent — touch without crossing, a limit | 20 | **24** |
+| transverse — they really cross, a gap | 0 | 0 |
+| undecided — no test here knows the pair | 6 | **2** |
+
+Two files started importing (kicad 110/323 → **112/323**, nist 1/44 unmoved) and
+two others reached this wall for the first time, so the total stayed flat — the
+same interaction §117.6 was written about, in the same direction, one unit later.
+
+**Four of the six are decided. Two are not**, and they are
+`kicad/Relay_SPDT_Finder_32.21-x000.step` and
+`kicad/Relay_SPST_Finder_32.21-x300.step`: equal radii `0.3`, axis gap exactly
+zero, and axes **45°** apart rather than 90°.
+
+**That is the same family by §118.3's own algebra**, which cancels the quadratic
+part for any crossing angle and gives semi-majors `r/|sin(θ/2)|` and
+`r/|cos(θ/2)|` — at 45° those are different from each other, where at 90° they
+are equal. So either the new arm does not reach these two, or they refuse on a
+different edge than the one the census reads. **Which of those it is has not
+been established**, and this section does not guess.
+
+**Read §118.3's "for any crossing angle" as the algebra it is, not as a claim
+about the code.** The algebra holds; whether the implementation covers the
+unequal-semi-major case is exactly what these two files put in doubt, and it is
+the first thing to measure next. §16.10: the demonstration is owed for the
+claim as written, and at 45° it has not been given.
