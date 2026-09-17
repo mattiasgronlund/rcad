@@ -2074,9 +2074,65 @@ few and grepping for them is cheap — `cannot`, `never`, `always`, `no ordering
 `nothing`, `only`, `impossible`, `unreachable`, `by construction`, `suffices`,
 `covers`, `reachable only`. A whole crate holds a dozen or two. Each is a work
 item with a definite question, and the answer is a demonstration or a rewritten
-sentence. `.claude/skills/claim-audit` is the pass, and it is deliberately **not**
-a code review: pointing a reviewer at defects finds defects, and these are not
-defects until someone asks what the sentence rules out.
+sentence. The `practices:claim-audit` skill is the pass, and it is deliberately
+**not** a code review: pointing a reviewer at defects finds defects, and these
+are not defects until someone asks what the sentence rules out.
+
+#### A claim can also go stale, and the pass above will not catch it
+
+*Added 2026-09-17, after one unit wrote the same defect five times in a day.*
+
+Everything above is about a claim that was **wrong when it was written**. The
+§110–§113 unit produced five of the other kind: **true when written, and still
+written after the thing it described had moved.**
+
+- `assemble.rs`'s `.expect("…already ruled out the one case…")` — true until a
+  second error arrived beside the one it had ruled out.
+- `one_step`'s `# Errors` naming the tangency variant — stale within hours,
+  because §110.1 split the shortening budget off that path the same morning.
+- §110.2's "**first** trial", asserted from an error that carries no trial
+  index — so nothing could have contradicted it either way.
+- A test whose name said a crossing was *only a rounding*, about a crossing that
+  turned out to be real.
+- A test named after one KiCad file, which §112 rescued out from under it the
+  same day. The assertion was right and its fixture had moved (§113.7).
+
+A sixth was sitting in this very section: the pointer just above used to read
+`.claude/skills/claim-audit`, written when the skills lived in this repo and
+left behind when they moved into the `practices` plugin. Corrected in place,
+because a wrong path is not an argument to withdraw.
+
+**What separates these from the three species above is time, not kind.** Every
+one was a demonstration when it was written. What failed is that nothing tied
+the sentence to the thing it described, so moving the thing left the sentence
+standing — and a reader meets a well-written sentence and believes it, exactly
+as the section above says.
+
+The markers are different too, which is why this is a different pass and a much
+cheaper one. The audit above greps for `cannot`, `never`, `by construction`. A
+stale claim has no such word in it; what it has is a **name** — a variant, a
+file, a count, a call site. So the pass is: *when you move a name, grep for the
+sentences that carry it, in the same commit that moves it.*
+
+**The rule is a test rule, not a prose rule.** A claim that names something that
+can move has to be written so that moving the thing **fails something**, rather
+than merely making a sentence untrue:
+
+- Prefer a property over "whichever things do X", with a floor that goes red on
+  an empty set, to a named fixture. A named fixture is a claim with a fuse in
+  it, and the floor is what stops the property passing over nothing once the
+  last case is rescued. §113.7 is the worked example.
+- Select on the thing the claim is about, never on the symptom you are
+  asserting. §113.7 again: selecting the files *by whether they named an entity*
+  would have made a regression empty the set instead of failing the test.
+- Do not assert what the evidence cannot carry. "First trial", read off an error
+  with no trial index, is a sentence nothing can check. Carry the index or drop
+  the word.
+
+This is a sub-section rather than a section of its own on purpose. It is the
+same rule as §16.10 — a claim needs something that can fail — applied to a claim
+that decays instead of one that was born wrong, and splitting the two is how the
+next reader finds only one of them.
 
 ### 16.11 The dynamic-range check is a ratio, and cannot see absolute magnitude
 
