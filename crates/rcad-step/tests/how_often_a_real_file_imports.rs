@@ -618,7 +618,7 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
     );
 }
 
-/// The 110 KiCad files that import today, out of 323.
+/// The 112 KiCad files that import today, out of 323.
 ///
 /// **Pinned by name, not by rate** (§44.10): a rate cannot tell a reader which
 /// file moved. This list moves only by an edit to this constant, made by
@@ -668,6 +668,17 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
 /// the same run, and `LED_D5.0mm-3` still has the closed-edge reason itself.
 /// That last one is the open end of §115 — the reader's hint and the certified
 /// rule disagree about that file, and which of them is right is not measured.
+///
+/// **The equal-pipes lane then moved it from 110 to 112**, with nothing dropping
+/// out: `Relay_DPDT_Omron_G6K-2P` and `Relay_DPDT_Omron_G6K-2P-Y`. Two pipes of
+/// one width whose axes meet cross in two ellipses, and `walk` used to hand that
+/// pair to the marcher, which walked into the point where the four branches meet
+/// and gave up saying the two surfaces were *too nearly parallel to follow* — a
+/// reason that was not true of them. Six KiCad files were being stopped first by
+/// exactly that, measured with `blocker_depth_probe`; two came all the way
+/// through and the other four met a later blocker the same run, which is §44.11
+/// item 5 yet again. `Relay_SPST_SANYOU_SRD_Series_Form_A` is one of the four
+/// and its next blocker is a pipe tangent to a ball at a pin's rounded end.
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -743,6 +754,8 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Relay_DPDT_Finder_40.52.step",
     "Relay_DPDT_Omron_G5V-2.step",
     "Relay_DPDT_Omron_G6H-2.step",
+    "Relay_DPDT_Omron_G6K-2P-Y.step",
+    "Relay_DPDT_Omron_G6K-2P.step",
     "Relay_DPDT_Panasonic_JW2.step",
     "Relay_SPDT_Finder_40.31.step",
     "Relay_SPDT_Finder_40.51.step",

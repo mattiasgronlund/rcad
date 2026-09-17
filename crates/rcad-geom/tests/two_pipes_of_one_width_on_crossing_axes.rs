@@ -51,7 +51,14 @@ const DIRECTION_SHAPES: [[f64; 3]; 5] = [
 fn pairs_of_directions() -> Vec<[Vector; 2]> {
     let mut written: Vec<Vector> = Vec::new();
     for shape in DIRECTION_SHAPES {
-        for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+        for order in [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ] {
             for signs in [[1.0, 1.0, 1.0], [1.0, -1.0, 1.0], [-1.0, 1.0, 1.0]] {
                 let turned = Vector::new(
                     shape[order[0]] * signs[0],
@@ -162,7 +169,10 @@ fn two_bores_of_one_width_crossing_at_a_right_angle_meet_in_the_ellipse_the_file
     // inside the gap between `0.1414…` and the `0.1` an unstretched circle
     // would have given.
     let points = walked.points();
-    assert!(points.len() > 8, "an ellipse walked finely has points on it");
+    assert!(
+        points.len() > 8,
+        "an ellipse walked finely has points on it"
+    );
     let out_to = |start: f64, pick: fn(f64, f64) -> f64| {
         points
             .iter()
@@ -262,8 +272,8 @@ fn the_namer_and_the_walker_agree_this_family_is_exactly_degenerate() {
                     "the namer sees two ellipses touching and says so: {named:?}"
                 );
 
-                let [this_way, that_way] = pair
-                    .map(|pipe| pipe.axis().direction().normalized().expect("a direction"));
+                let [this_way, that_way] =
+                    pair.map(|pipe| pipe.axis().direction().normalized().expect("a direction"));
                 for bisector in [that_way + this_way, that_way - this_way] {
                     let drawn = walk(
                         &the_piece_in_the_plane(middle, bisector, &pair[1]),
