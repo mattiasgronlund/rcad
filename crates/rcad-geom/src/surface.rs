@@ -325,10 +325,11 @@ impl Surface {
     /// to pick which of the two surfaces either side of a closed edge names the
     /// way that edge runs, and `rcad-topo`'s `the_curved_one_of` already asks its
     /// own copy of the same bits. The two have to land on the same surface or a
-    /// file gets imported walked against a rule it was read by. **Nothing outside
-    /// this crate asks yet**, so this stays `pub(crate)`: the `rcad-step` reader
-    /// that will ask is the rest of this work, and the widening belongs in the
-    /// commit that brings the caller with it.
+    /// file gets imported walked against a rule it was read by. **`rcad-step`'s
+    /// reader is the caller this was widened for**, in `brep.rs`'s own
+    /// `the_curved_one_of`, which is what turns a `CLOSED_SHELL`'s closed edges
+    /// the way this kernel stores them rather than the way the file's flags
+    /// happened to read (`docs/decisions.md` §115).
     ///
     /// **A pipe, a cone and a bend written with the axis pointing the other way
     /// sort apart here, on purpose.** The two spellings are one surface, and
@@ -342,7 +343,7 @@ impl Surface {
     /// round and gets the same corners in the same order, bit for bit, so the
     /// row they sort into never mattered.
     #[must_use]
-    pub(crate) fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
+    pub fn how_it_sorts_against(&self, other: &Surface) -> Ordering {
         let (mine, my_numbers) = self.the_numbers_it_is_written_with();
         let (theirs, their_numbers) = other.the_numbers_it_is_written_with();
         mine.cmp(&theirs).then_with(|| {

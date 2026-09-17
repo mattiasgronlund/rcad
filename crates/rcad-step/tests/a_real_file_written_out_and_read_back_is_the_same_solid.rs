@@ -110,7 +110,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     }
 
     assert_eq!(
-        denominator, 97,
+        denominator, 110,
         "the count of KiCad files that import must not shift without somebody saying so"
     );
     assert_eq!(
@@ -122,16 +122,16 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 }
 
 /// The 45 imported KiCad files this kernel can write back out and read back as
-/// the same solid, out of the 97 that import.
+/// the same solid, out of the 110 that import.
 ///
 /// **Pinned by name, not by rate**, for the reason `KICAD_FILES_THAT_IMPORT` is
 /// (§44.10): a rate cannot say which file moved. Regenerate it from the failing
 /// assertion, which prints what appeared and what disappeared.
 ///
-/// # The 52 that are missing are the writer's gap and not the reader's
+/// # The 65 that are missing are the writer's gap and not the reader's
 ///
 /// Every one of them fails as *writer refuses: an edge between a plane and a
-/// pipe names no curve* — 49 of those, two more for a pipe against a pipe, and
+/// pipe names no curve* — 60 of those, four more for a pipe against a pipe, and
 /// one for a plane against a ball. A file only reaches here **after** importing
 /// and passing the full sweep, so the solid is sound and the kernel simply has
 /// no `SURFACE_CURVE` to write for the circle where a flat face meets a round
@@ -139,12 +139,13 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 ///
 /// **That gap is older than this list, and neither the curved rounding nor the
 /// two-step wire created it.** At `d23c700` this run said 45 of 46 with one such
-/// refusal; it now says 45 of 97 with 52. So **this list is exactly the old 46
+/// refusal; it now says 45 of 110 with 65. So **this list is exactly the old 46
 /// less `Relay_DPDT_Finder_30.22.step`, which already failed**, nothing that
-/// used to round trip stopped, and every file the two later lanes brought in —
-/// the curved rounding's fifty and the two-step wire's one — runs into the same
-/// writer. Closing that is a writer lane and not this list's business. What this
-/// list is for is that the 45 which do round trip cannot quietly become 44.
+/// used to round trip stopped, and every file the three later lanes brought in —
+/// the curved rounding's fifty, the two-step wire's one and the closed-edge
+/// lane's thirteen (§115) — runs into the same writer. Closing that is a writer
+/// lane and not this list's business. What this list is for is that the 45 which
+/// do round trip cannot quietly become 44.
 const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "LED_Rectangular_W3.0mm_H2.0mm.step",
     "LED_Rectangular_W3.9mm_H1.8mm.step",
