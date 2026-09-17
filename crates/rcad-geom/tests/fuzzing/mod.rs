@@ -662,6 +662,102 @@ fn exactly_scaled(value: f64, factor: f64) -> Option<f64> {
     (scaled.is_finite() && scaled / factor == value).then_some(scaled)
 }
 
+/// **Scaling by one has to hand back the surface it was given, in every arm.**
+///
+/// This is the check §98.3 named and nobody built. The night of 2026-09-14
+/// found its crash by calling `scaled(pair, 2⁰)` — a factor of one, no scaling
+/// at all — and watching the answer change, and then the fix went into the arm
+/// that had crashed. The plane arm was the same defect, left standing, and the
+/// nights of 2026-09-16 and 2026-09-17 both died on it (§114).
+///
+/// [`writing_a_pair_at_another_power_of_two_does_not_change_it`] cannot catch
+/// this itself. It reports that a scaling changed the answer and has no way to
+/// say whether the scaling or the rebuild changed it — which is why both nights
+/// read as kernel crashes. Checked in bits rather than with `PartialEq`, because
+/// one unit in the last place of a direction is the whole of what went wrong
+/// twice.
+#[cfg(test)]
+mod scaling_by_one {
+    use super::{Axis, Cone, Cylinder, Plane, Point, Sphere, Surface, Torus, Vector, scaled};
+
+    #[test]
+    fn scaling_any_surface_by_one_hands_back_the_bits_it_was_given() {
+        for surface in one_of_every_kind() {
+            let same = scaled(&surface, 0).expect("a factor of one scales anything");
+            for (which, (before, after)) in every_number_of(&surface)
+                .into_iter()
+                .zip(every_number_of(&same))
+                .enumerate()
+            {
+                assert_eq!(
+                    before.to_bits(),
+                    after.to_bits(),
+                    "number {which} of {surface:?} came back as {after:e} and not {before:e}"
+                );
+            }
+        }
+    }
+
+    /// One surface of each kind `scaled` has an arm for, all on one slanted
+    /// direction.
+    ///
+    /// Slanted because rebuilding an axis-aligned direction divides by a one and
+    /// normalizes a length that is already exactly one, so it moves nothing and
+    /// such a surface would pass here under either arithmetic. On this direction
+    /// the old plane arm moves the **offset** by a unit
+    /// in the last place — `2.22` came back `2.2199999999999998` — rather than
+    /// the normal, which is the same rebuild landing on the other half of the
+    /// plane. Which of the two moves is a property of the direction;
+    /// `rebuilding_a_plane_from_its_own_coefficients_tilts_its_normal` is where
+    /// the normal's share is counted, over 100 000 of them.
+    fn one_of_every_kind() -> Vec<Surface> {
+        let leaning = Vector::new(0.36, -0.48, 0.8);
+        let axis = Axis::new(Point::new(1.5, -2.25, 0.75), leaning).expect("a direction of length");
+        vec![
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(1.5, -2.25, 0.75), leaning)
+                    .expect("a normal of length"),
+            ),
+            Surface::Sphere(Sphere::new(Point::new(1.5, -2.25, 0.75), 3.5).expect("a real ball")),
+            Surface::Cylinder(Cylinder::new(axis, 3.5).expect("a real pipe")),
+            Surface::Cone(Cone::new(axis, 7.8e28).expect("a real cone")),
+            Surface::Torus(Torus::new(axis, 3.5, 0.75).expect("a real ring")),
+        ]
+    }
+
+    /// Every number the surface carries, in a fixed order.
+    ///
+    /// `Surface` is `#[non_exhaustive]` and this is another crate, so the
+    /// wildcard is forced. It panics for the reason [`scaled`]'s does: a sixth
+    /// kind of surface is scaled on purpose or not at all.
+    fn every_number_of(surface: &Surface) -> Vec<f64> {
+        let with_axis = |axis: Axis, sizes: &[f64]| {
+            let mut numbers = axis.origin().coordinates().to_vec();
+            numbers.extend(axis.direction().components());
+            numbers.extend(sizes);
+            numbers
+        };
+        match surface {
+            Surface::Plane(flat) => {
+                let mut numbers = flat.normal().components().to_vec();
+                numbers.push(flat.offset());
+                numbers
+            }
+            Surface::Sphere(ball) => {
+                let mut numbers = ball.centre().coordinates().to_vec();
+                numbers.push(ball.radius());
+                numbers
+            }
+            Surface::Cylinder(pipe) => with_axis(pipe.axis(), &[pipe.radius()]),
+            Surface::Cone(cone) => with_axis(cone.axis(), &[cone.slope()]),
+            Surface::Torus(ring) => {
+                with_axis(ring.axis(), &[ring.ring_radius(), ring.tube_radius()])
+            }
+            other => panic!("nothing here can read the numbers out of {other:?}"),
+        }
+    }
+}
+
 /// The bytes a pair of surfaces would be decoded from, for writing a corpus out.
 ///
 /// [`written_as_numbers`] picks the exponents, and **every number
