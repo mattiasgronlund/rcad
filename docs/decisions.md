@@ -30507,3 +30507,33 @@ is a test that goes red if the two ever disagree about this family again —
 generated pairs rather than a named fixture, with a floor that fails on an empty
 set, per §16.10's test rule. Chosen by Mattias on 2026-09-17 as Q3 (a) with
 (c)'s test.
+
+### 118.8 The closed form emptied the corpus's undecided set, and a floor caught it
+
+Answering this family in closed form takes it off the quartic route, and that
+route was where every remaining undecided decision in either corpus arose. The
+count goes **31 to 0**.
+
+The 31 were all `side of a half-space`, all on a run that was already refused,
+and four files carried them: `Relay_1-Form-A/B/C_Schrack-RYII` and
+`Relay_SPDT_Finder_34.51_Vertical`. On the merged tree `just gate` prints, for
+`certified` and for all three tolerant budgets, over both corpora, `worst wobble
+0e0` and an empty record map. So **a tolerant policy now buys nothing measurable
+on this corpus** — not a file, which was already true, and no longer an account
+of a refusal either.
+
+`whether_a_tolerant_policy_buys_anything_a_certified_one_does_not` went red on
+`left_undecided > 0` rather than passing over an empty population. That is
+§113.7's rule earning its keep: the floor is what stops a property quietly
+asserting about nothing once the last case is rescued, and it is the only reason
+this was noticed in the same unit that caused it.
+
+**Where the claim was written is the part worth carrying.** It was in two test
+doc comments — `whether_a_tolerant_policy_reaches_the_half_spaces_on_a_run.rs`
+and the corpus file above — and in no section of this document; searching every
+phrasing of it here returns nothing. So §16.10's audit pass, which reads this
+file, could not have found it, and the stale-claim pass found it only because a
+test failed. A measured claim that lives only in a test's prose is one neither
+pass covers. Prefer the assertion to the sentence.
+
+Where that measurement goes now is open at the time of writing, as Q4.
