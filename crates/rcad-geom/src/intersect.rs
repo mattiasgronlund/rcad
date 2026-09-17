@@ -9,11 +9,21 @@
 //!
 //! A plane's normal is scaled to length one on the way in and that division
 //! rounds, so [`Plane::side_of_point`] is certified about the plane the *stored*
-//! numbers name; the same goes for a pipe, whose certified radius is
-//! `radius / length(stored direction)`. Write "does this plane cut this ball" as
-//! `R² − (n·c − d)²` and it answers about a ball of radius `R/‖n‖` — a different
-//! ball, by about `1e-16·R`. Every discriminant here therefore carries `n·n` and
-//! `w·w`, which costs three products and two sums each.
+//! numbers name. Write "does this plane cut this ball" as `R² − (n·c − d)²` and
+//! it answers about a ball of radius `R/‖n‖` — a different ball, by about
+//! `1e-16·R`. Every discriminant here therefore carries `n·n`, which costs three
+//! products and two sums.
+//!
+//! **A pipe is not one of those.** `Cylinder::side_of` takes the sign of
+//! `|(p − o) × w|² − r²(w·w)`, both halves degree two in the stored direction, so
+//! a pipe is exactly `r` wide whatever length `w` rounded to
+//! (`docs/decisions.md` §118.11). What that costs here is not a `w·w` beside the
+//! radius but the **same degree in `w` on every term** of a discriminant:
+//! `A + r² − W·R²` asks about a pipe `r/√W` wide, and `A + W(r² − R²)` asks
+//! about the one the caller named. Where every term is already degree zero in
+//! `w` the factor comes out altogether — a plane parallel to an axis cuts a pipe
+//! of radius `r` on `n·n·r² − (n·o − d)²`, and the stored direction's length
+//! does not enter at all.
 //!
 //! **The rule, and it is the load-bearing one: an intersector's discriminants
 //! are polynomials in the same stored numbers `SideOfSurface` reads, with no
@@ -28,6 +38,8 @@
 //! arithmetic declining because a product would overflow or fall into the
 //! subnormals. Every refusal below traces to that, and each one is a **gap**
 //! rather than a limit: the answer exists and the arithmetic could not reach it.
+
+use core::cmp::Ordering;
 
 use rcad_predicates::{
     Decision, Filtered, Interval, Measures, Point as PredicatePoint, Policy, Predicate,
@@ -344,21 +356,23 @@ fn where_a_plane_and_a_pipe_cross(
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
 
-    // Parallel to the axis. The discriminant is `n·n · r² − w·w · (n·o − d)²`,
-    // an area: the pipe's radius against the distance from its axis to the
-    // plane, both squared, each in the metric its own stored numbers name.
+    // Parallel to the axis. The discriminant is `n·n · r² − (n·o − d)²`, an
+    // area: the pipe's radius against the distance from its axis to the plane,
+    // both squared. The plane's own normal length is carried because the stored
+    // normal is only nearly unit; the pipe's is not, because a pipe is `r` wide
+    // in the metric of the world and not of its own direction (§118.11). That
+    // makes this degree two where it used to be degree four.
     let room = Question {
         named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
         enclosing: || {
             let reach = dot_enclosing(exactly(normal), exactly(origin)) - Interval::exactly(d);
-            squared_length_enclosing(exactly(normal)) * squared_enclosing(radius)
-                - squared_length_enclosing(exactly(along)) * reach * reach
+            squared_length_enclosing(exactly(normal)) * squared_enclosing(radius) - reach * reach
         },
         exactly: || {
             let reach = Exact::dot_of(normal, origin)?.minus(&Exact::of(d));
             let room = Exact::dot_of(normal, normal)?
                 .times(&Exact::product_of(radius, radius)?)?
-                .minus(&Exact::dot_of(along, along)?.times(&reach.times(&reach)?)?);
+                .minus(&reach.times(&reach)?);
             Some(room)
         },
     };
@@ -393,7 +407,7 @@ fn where_a_plane_and_a_pipe_cross(
 /// be square to the cutting plane's normal, and that the plane pass through the
 /// axis origin with nothing rounded. **Neither has to be**, and §28.2 said so
 /// and left the work here. Where the two lines sit relative to the picking plane
-/// is a comparison between their own separation, `√(ρ² − g²)`, and how far that
+/// is a comparison between their own separation, `√(r² − g²)`, and how far that
 /// plane strayed — a question with an answer rather than a condition to be
 /// arranged. [`two_lines_told_apart`] asks it, and §29 records what that closed
 /// and what stayed.
@@ -422,10 +436,7 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
             - Interval::exactly(flat.offset()),
         root_enclosing(squared_normal),
     );
-    let skin = quotient_or_everything(
-        Interval::exactly(pipe.radius()),
-        root_enclosing(squared_direction),
-    );
+    let skin = Interval::exactly(pipe.radius());
     let out = root_enclosing(skin * skin - in_front * in_front);
 
     let on_each_line = [1.0, -1.0].map(|side| {
@@ -511,14 +522,17 @@ fn where_two_balls_cross(
 /// centre sits off the axis, `W = w·w`, and
 ///
 /// ```text
-/// V  = A + r² − W·R²          the eighth-degree discriminant's inner half
-/// Δ  = V² − 4r²A              its own discriminant
+/// V  = A + W(r² − R²)         the eighth-degree discriminant's inner half
+/// Δ  = V² − 4r²AW             its own discriminant
 /// ```
 ///
-/// Then `W(R² − (ρ∓a)²) = −V ± 2r√A`, where `ρ = r/√W` is the pipe's certified
-/// radius and `a = √(A/W)` the centre's distance off the axis. The root is what
-/// stops those two being polynomials on their own; `Δ` is their product, and the
-/// pair `(sign V, sign Δ)` settles both signs without ever taking it (§27.1).
+/// Then `W(R² − (r∓a)²) = −V ± 2r√(AW)`, with `a = √(A/W)` the centre's distance
+/// off the axis and `r` the pipe's width as stored — no `√W` under it, because
+/// the pipe is `r` wide whatever its direction rounded to (§118.11). Both halves
+/// of `V` are degree two in `w`, which is what makes `Δ` a polynomial: the root
+/// is what stops the two tangency readings being polynomials on their own, `Δ`
+/// is their product, and the pair `(sign V, sign Δ)` settles both signs without
+/// ever taking it (§27.1).
 ///
 /// The five answers: the ball misses the pipe, rests on it at one point, cuts it
 /// in one loop, cuts it in two, or — where the two are tangent *along* the
@@ -560,6 +574,7 @@ fn where_a_ball_and_a_pipe_cross(
                 - Interval::exactly(4.0)
                     * squared_enclosing(skin)
                     * how_far_off_an_axis_enclosing(centre, origin, along)
+                    * squared_length_enclosing(exactly(along))
         },
         exactly: || {
             let room = how_far_a_ball_reaches_past_a_pipe_exactly(ball, pipe)?;
@@ -567,7 +582,8 @@ fn where_a_ball_and_a_pipe_cross(
                 room.times(&room)?.minus(
                     &Exact::product_of(2.0, 2.0)?
                         .times(&Exact::product_of(skin, skin)?)?
-                        .times(&how_far_off_an_axis_exactly(centre, origin, along)?)?,
+                        .times(&how_far_off_an_axis_exactly(centre, origin, along)?)?
+                        .times(&Exact::dot_of(along, along)?)?,
                 ),
             )
         },
@@ -609,7 +625,7 @@ fn where_a_ball_and_a_pipe_cross(
 ///
 /// **This is the planar special case of the ball-and-pipe row** (§24.5), and it
 /// is where the marcher gets an answer it can be differenced against: both
-/// circles lie in planes square to the axis, at `±√(R² − ρ²)` from the centre,
+/// circles lie in planes square to the axis, at `±√(R² − r²)` from the centre,
 /// and each has the pipe's own radius.
 fn a_ball_centred_on_a_pipes_axis(
     ball: &Sphere,
@@ -618,26 +634,18 @@ fn a_ball_centred_on_a_pipes_axis(
     log: &mut ProvenanceLog,
 ) -> Result<SurfaceMeet> {
     let radius = ball.radius();
-    let along = pipe.axis().direction().components();
     let skin = pipe.radius();
     let at = [ball.centre(), pipe.axis().origin()]
         .map(|place| PredicatePoint::from(place.coordinates()));
 
-    // `W·R² − r²`, an area: the ball's radius against the pipe's, each in the
-    // metric its own stored numbers name.
+    // `R² − r²`, an area: the ball's radius against the pipe's, both in the
+    // metric of the world. The stored direction's length used to be carried on
+    // the ball's side and cannot be now — both radii mean the same thing
+    // (§118.11) — so this is two products where it was five.
     let room = Question {
         named: WHERE_A_BALL_AND_A_PIPE_CROSS,
-        enclosing: || {
-            squared_length_enclosing(exactly(along)) * squared_enclosing(radius)
-                - squared_enclosing(skin)
-        },
-        exactly: || {
-            Some(
-                Exact::dot_of(along, along)?
-                    .times(&Exact::product_of(radius, radius)?)?
-                    .minus(&Exact::product_of(skin, skin)?),
-            )
-        },
+        enclosing: || squared_enclosing(radius) - squared_enclosing(skin),
+        exactly: || Some(Exact::product_of(radius, radius)?.minus(&Exact::product_of(skin, skin)?)),
     };
     match ask(&room, Measures::Area, &at, policy, log)? {
         Decision::Pos => {
@@ -657,19 +665,27 @@ fn a_ball_centred_on_a_pipes_axis(
 /// How far, along the axis, the nearer of two loops keeps away from the plane
 /// through the ball's centre.
 ///
-/// `√(D₋/W)` with `D₋ = W·R² − r² − A − 2r√A`, which the caller has already
+/// `√(D₋/W)` with `D₋ = W·(R² − r²) − A − 2r√(AW)`, which the caller has already
 /// decided is above zero. An enclosure and not a number, because the root is
 /// taken twice and neither lands on an `f64`.
+///
+/// This is `W·(R² − (r + a)²)` written out, with `a = √(A/W)` the centre's
+/// distance off the axis. The `√W` beside `2r√A` is the whole of what §118.11
+/// changed here: a pipe of width `r` reaches `r` out from its axis in the metric
+/// of the world, so the term that pairs its radius against a distance is scaled
+/// like a distance and not like a squared direction.
 fn how_far_apart_two_loops_are(ball: &Sphere, pipe: &Cylinder) -> Interval {
     let centre = ball.centre().coordinates();
     let along = pipe.axis().direction().components();
     let origin = pipe.axis().origin().coordinates();
     let off_the_axis = how_far_off_an_axis_enclosing(centre, origin, along);
     let squared_direction = squared_length_enclosing(exactly(along));
-    let reach = squared_direction * squared_enclosing(ball.radius())
-        - squared_enclosing(pipe.radius())
+    let reach = squared_direction
+        * (squared_enclosing(ball.radius()) - squared_enclosing(pipe.radius()))
         - off_the_axis
-        - Interval::exactly(2.0) * Interval::exactly(pipe.radius()) * root_enclosing(off_the_axis);
+        - Interval::exactly(2.0)
+            * Interval::exactly(pipe.radius())
+            * root_enclosing(off_the_axis * squared_direction);
     root_enclosing(quotient_or_everything(reach, squared_direction))
 }
 
@@ -770,10 +786,11 @@ fn squared_sideways_enclosing(u: [f64; 3], v: [f64; 3]) -> Interval {
 /// The one point a ball resting against a pipe shares with it, as the box it is
 /// known to be inside.
 ///
-/// The contact is on the line from the axis out to the centre: `o + hŵ + ρê`,
+/// The contact is on the line from the axis out to the centre: `o + hŵ + rê`,
 /// with `h` how far along the axis the centre sits and `ê` the unit direction
 /// from the axis to it. Both roots come out of numbers the caller has already
-/// decided are above zero.
+/// decided are above zero. `ê` is a unit direction, so the step out along it is
+/// the stored `r` itself and nothing divides by the axis length (§118.11).
 fn where_a_ball_rests_against_a_pipe(ball: &Sphere, pipe: &Cylinder) -> PredicatePoint {
     let centre = ball.centre().coordinates();
     let along = pipe.axis().direction().components();
@@ -787,10 +804,7 @@ fn where_a_ball_rests_against_a_pipe(ball: &Sphere, pipe: &Cylinder) -> Predicat
     let sideways: [Interval; 3] =
         core::array::from_fn(|axis| from_the_origin[axis] - direction[axis] * up_the_axis);
     let off_the_axis = root_enclosing(squared_length_enclosing(sideways));
-    let skin = quotient_or_everything(
-        Interval::exactly(pipe.radius()),
-        root_enclosing(squared_direction),
-    );
+    let skin = Interval::exactly(pipe.radius());
 
     PredicatePoint::Constructed(core::array::from_fn(|axis| {
         Interval::exactly(origin[axis])
@@ -799,18 +813,18 @@ fn where_a_ball_rests_against_a_pipe(ball: &Sphere, pipe: &Cylinder) -> Predicat
     }))
 }
 
-/// `V = A + r² − W·R²` as an enclosure.
+/// `V = A + W·(r² − R²)` as an enclosure.
 fn how_far_a_ball_reaches_past_a_pipe_enclosing(ball: &Sphere, pipe: &Cylinder) -> Interval {
     let along = pipe.axis().direction().components();
     how_far_off_an_axis_enclosing(
         ball.centre().coordinates(),
         pipe.axis().origin().coordinates(),
         along,
-    ) + squared_enclosing(pipe.radius())
-        - squared_length_enclosing(exactly(along)) * squared_enclosing(ball.radius())
+    ) + squared_length_enclosing(exactly(along))
+        * (squared_enclosing(pipe.radius()) - squared_enclosing(ball.radius()))
 }
 
-/// `V = A + r² − W·R²`, exactly.
+/// `V = A + W·(r² − R²)`, exactly.
 fn how_far_a_ball_reaches_past_a_pipe_exactly(ball: &Sphere, pipe: &Cylinder) -> Option<Exact> {
     let along = pipe.axis().direction().components();
     let radius = ball.radius();
@@ -821,8 +835,11 @@ fn how_far_a_ball_reaches_past_a_pipe_exactly(ball: &Sphere, pipe: &Cylinder) ->
             pipe.axis().origin().coordinates(),
             along,
         )?
-        .plus(&Exact::product_of(skin, skin)?)
-        .minus(&Exact::dot_of(along, along)?.times(&Exact::product_of(radius, radius)?)?),
+        .plus(
+            &Exact::dot_of(along, along)?.times(
+                &Exact::product_of(skin, skin)?.minus(&Exact::product_of(radius, radius)?),
+            )?,
+        ),
     )
 }
 
@@ -877,12 +894,19 @@ fn where_two_pipes_cross(
 /// straight, so it is decided by the twelfth-degree discriminant §27.1 wrote
 /// down and nothing here has to be drawn.
 ///
-/// Write `A = ‖(o₂−o₁) × w₁‖²` and `E = A·W₂ − r₁²W₂ − r₂²W₁`, which is
-/// `W₁W₂(δ² − ρ₁² − ρ₂²)` for the true distance `δ` between the axes. Then
-/// `E² − 4r₁²r₂²W₁W₂` is `(W₁W₂)²(δ²−(ρ₁+ρ₂)²)(δ²−(ρ₁−ρ₂)²)`, and its sign
-/// alone settles the answer: below zero the two circles of the cross-section
-/// cut each other twice, at zero they rest against each other, above zero one
-/// is clear of the other or swallowed by it and either way they never meet.
+/// Write `A = ‖(o₂−o₁) × w₁‖²` and `E = A − W₁(r₁² + r₂²)`, which is
+/// `W₁(δ² − r₁² − r₂²)` for the true distance `δ` between the axes. Then
+/// `E² − 4r₁²r₂²W₁²` is `W₁²(δ²−(r₁+r₂)²)(δ²−(r₁−r₂)²)`, and its sign alone
+/// settles the answer: below zero the two circles of the cross-section cut each
+/// other twice, at zero they rest against each other, above zero one is clear
+/// of the other or swallowed by it and either way they never meet.
+///
+/// **The second pipe's own direction is not in any of that**, and that is
+/// §118.11 rather than an oversight. The axes run along one line, so `w₂` says
+/// nothing the first direction has not already said, and once both radii mean
+/// the same thing the discriminant stops asking. It was degree twelve when the
+/// two widths were `rᵢ/√Wᵢ` and had to be brought to a common metric; it is
+/// degree eight now.
 fn where_two_pipes_side_by_side_cross(
     one: &Cylinder,
     other: &Cylinder,
@@ -901,7 +925,7 @@ fn where_two_pipes_side_by_side_cross(
         exactly: || how_far_off_an_axis_exactly(there, here, my_way),
     };
     // A pipe is `r` wide whatever length its stored direction rounded to
-    // (`docs/decisions.md` §118.10), so the two are the same thickness exactly
+    // (`docs/decisions.md` §118.11), so the two are the same thickness exactly
     // when `r₁² − r₂²` is zero. This used to be `r₁²W₂ − r₂²W₁`, degree four,
     // because the width the cylinder predicate certified was then `rᵢ/√Wᵢ`.
     let same_thickness = Question {
@@ -944,7 +968,7 @@ fn where_two_pipes_side_by_side_cross(
 /// that has to be worked out well: `across` places both lines along the line
 /// between the axes, which the picking plane reads as nothing.
 ///
-/// # Why `X` is not `√(ρ₁² − across²)`
+/// # Why `X` is not `√(r₁² − across²)`
 ///
 /// It is, as arithmetic, and that subtraction is where the row used to give up on
 /// a pair it had already decided. The two pipes' crossing has been settled by
@@ -952,22 +976,22 @@ fn where_two_pipes_side_by_side_cross(
 /// zero — and then naming the two halves of it could fail, which is §16.10's gap
 /// and not a limit.
 ///
-/// Write `δ` for the distance between the axes and `ρᵢ` for the certified radii.
-/// A thin pipe whose axis lies on a fat one's skin has `δ = ρ₁` and `across =
-/// ρ₁ − ρ₂²/(2ρ₁)`, so `ρ₁² − across²` is `ρ₂²` arrived at by subtracting two
-/// numbers that agree to `ρ₂²/ρ₁²` of themselves. Past `ρ₁ ≈ 2²⁶·ρ₂` — a 67 m
+/// Write `δ` for the distance between the axes and `rᵢ` for the two widths.
+/// A thin pipe whose axis lies on a fat one's skin has `δ = r₁` and `across =
+/// r₁ − r₂²/(2r₁)`, so `r₁² − across²` is `r₂²` arrived at by subtracting two
+/// numbers that agree to `r₂²/r₁²` of themselves. Past `r₁ ≈ 2²⁶·r₂` — a 67 m
 /// pipe against a 1 m one — `f64` has no bits left to hold the answer in, the
 /// enclosure straddles zero, and the two lines cannot be shown to be either side
 /// of anything. The same pair asked the other way round has `across ≈ 0` and
 /// decides, which is what made it an order-dependent answer.
 ///
 /// So `X` is taken from the discriminant instead, which the caller has already
-/// found the sign of. Heron's factorisation of `4δ²X² = 4δ²ρ₁² −
-/// (δ²+ρ₁²−ρ₂²)²` is `−(δ²−(ρ₁+ρ₂)²)(δ²−(ρ₁−ρ₂)²)`, and that product is the
-/// discriminant divided by `(W₁W₂)²`. With `δ² = A/W₁` that comes out as
+/// found the sign of. Heron's factorisation of `4δ²X² = 4δ²r₁² −
+/// (δ²+r₁²−r₂²)²` is `−(δ²−(r₁+r₂)²)(δ²−(r₁−r₂)²)`, and that product is the
+/// discriminant divided by `W₁²`. With `δ² = A/W₁` that comes out as
 ///
 /// ```text
-/// X²  =  −(E² − 4r₁²r₂²W₁W₂)  /  (4·A·W₁·W₂²)
+/// X²  =  −(E² − 4r₁²r₂²W₁²)  /  (4·A·W₁)
 /// ```
 ///
 /// in the stored numbers alone, with no subtraction of two nearly equal large
@@ -978,8 +1002,6 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
     let here = one.axis().origin();
     let along = one.axis().direction();
     let squared_direction = squared_length_enclosing(exactly(along.components()));
-    let squared_theirs_direction =
-        squared_length_enclosing(exactly(other.axis().direction().components()));
     let between = other.axis().origin() - here;
     let towards = between - along * (between.dot(along) / along.length_squared());
 
@@ -990,14 +1012,7 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
     let up = cross_enclosing(exactly(along.components()), sideways)
         .map(|part| quotient_or_everything(part, root_enclosing(squared_direction)));
 
-    let [mine, theirs] = [one, other].map(|pipe| {
-        quotient_or_everything(
-            Interval::exactly(pipe.radius()),
-            root_enclosing(squared_length_enclosing(exactly(
-                pipe.axis().direction().components(),
-            ))),
-        )
-    });
+    let [mine, theirs] = [one, other].map(|pipe| Interval::exactly(pipe.radius()));
     let across = quotient_or_everything(
         apart * apart + mine * mine - theirs * theirs,
         Interval::exactly(2.0) * apart,
@@ -1017,11 +1032,7 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
         );
     let out = root_enclosing(quotient_or_everything(
         -overlap,
-        Interval::exactly(4.0)
-            * squared_gap
-            * squared_direction
-            * squared_theirs_direction
-            * squared_theirs_direction,
+        Interval::exactly(4.0) * squared_gap * squared_direction,
     ));
 
     let on_each_line = [1.0, -1.0].map(|side| {
@@ -1049,29 +1060,33 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
 /// along, and its discriminant comes out as
 ///
 /// ```text
-/// sin²α · [ ρ₂² − (δ + ρ₁·cos θ)² ]
+/// sin²α · [ r₂² − (δ + r₁·cos θ)² ]
 /// ```
 ///
-/// with `α` the angle between the axes, `δ` the distance between them and `ρᵢ`
-/// the certified radii. So the whole shape of the crossing is decided by where
-/// `ρ₂` sits against `δ ± ρ₁`: above both, the second pipe swallows the first's
+/// with `α` the angle between the axes, `δ` the distance between them and `rᵢ`
+/// the two widths. So the whole shape of the crossing is decided by where
+/// `r₂` sits against `δ ± r₁`: above both, the second pipe swallows the first's
 /// whole cross-section and leaves two closed loops; between them, one; below
-/// both, two again with the pipes' roles the other way round; and past `δ − ρ₁`
+/// both, two again with the pipes' roles the other way round; and past `δ − r₁`
 /// on the far side, nothing at all.
 ///
-/// # Why this is where the exact level runs out
+/// # Why the exact level reaches this at all
 ///
-/// Those three comparisons are between a sum of two radii and a distance,
-/// measured in three different metrics: `ρᵢ = rᵢ/√Wᵢ` and `δ = |T|/√K` for
-/// polynomials `T` and `K` in the stored numbers. Clearing the roots costs eight
-/// degrees, and `docs/decisions.md` §29 measures what happens then — the
-/// expansion that has to be squared is already five hundred binary orders wide
-/// for two ordinary pipes, and squaring it falls off the bottom of `f64`.
+/// Those three comparisons are between a sum of two radii and a distance. Two of
+/// the three numbers are now stored `f64`s outright — a pipe is `r` wide and no
+/// root is taken to find that out (§118.11) — and the third is `δ = |T|/√K` for
+/// polynomials `T` and `K` in the stored numbers. **One root, and multiplying
+/// through by `√K` clears it.** What is left,
+/// [`how_two_radii_and_a_gap_compare_exactly`], is a comparison between two
+/// degree-six polynomials with no `Wᵢ` anywhere in it.
 ///
-/// What is here instead: the comparison is *enclosed*, which decides it wherever
-/// the two sides are not on a knife edge, and the exact level runs where the two
-/// stored directions have exactly the same length — which is every pair whose
-/// axes are coordinate directions, and so the whole of §24.18's control.
+/// Until §118.11 the widths were `rᵢ/√Wᵢ` and there were three roots in three
+/// different metrics. Clearing them cost eight degrees and put a degree-twenty
+/// expansion against a degree-sixteen one, which `docs/decisions.md` §29
+/// measured at five hundred binary orders wide for two ordinary pipes — too wide
+/// to square where it stood, so the exact level ran only where the two stored
+/// directions happened to have the same length. That restriction is gone: the
+/// expansion §29 could not square is not built any more.
 fn where_two_leaning_pipes_cross(
     one: &Cylinder,
     other: &Cylinder,
@@ -1082,15 +1097,14 @@ fn where_two_leaning_pipes_cross(
     let reach = |mine: f64, theirs: f64, gap: f64| Question {
         named: WHERE_TWO_PIPES_CROSS,
         enclosing: move || {
-            let [first, second] = certified_radii_enclosing(one, other);
-            first * Interval::exactly(mine)
-                + second * Interval::exactly(theirs)
+            Interval::exactly(one.radius()) * Interval::exactly(mine)
+                + Interval::exactly(other.radius()) * Interval::exactly(theirs)
                 + how_far_apart_two_axes_are_enclosing(one, other) * Interval::exactly(gap)
         },
         exactly: move || how_two_radii_and_a_gap_compare_exactly(one, other, mine, theirs, gap),
     };
 
-    // ρ₁ + ρ₂ − δ. Below zero the two are clear of each other.
+    // r₁ + r₂ − δ. Below zero the two are clear of each other.
     match ask(&reach(1.0, 1.0, -1.0), Measures::Length, &at, policy, log)? {
         Decision::Neg => return Ok(SurfaceMeet::Nothing),
         Decision::Zero => {
@@ -1102,7 +1116,7 @@ fn where_two_leaning_pipes_cross(
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
 
-    // ρ₂ − ρ₁ − δ. Above zero the second pipe takes the whole of the first's
+    // r₂ − r₁ − δ. Above zero the second pipe takes the whole of the first's
     // cross-section and what is left is two loops.
     match ask(&reach(-1.0, 1.0, -1.0), Measures::Length, &at, policy, log)? {
         Decision::Pos => return two_loops_either_side_of_a_pipe(one, other),
@@ -1111,7 +1125,7 @@ fn where_two_leaning_pipes_cross(
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
 
-    // ρ₂ − ρ₁ + δ, which is the row above with the two pipes the other way
+    // r₂ − r₁ + δ, which is the row above with the two pipes the other way
     // round and the sign of the gap flipped.
     match ask(&reach(-1.0, 1.0, 1.0), Measures::Length, &at, policy, log)? {
         Decision::Pos => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
@@ -1128,7 +1142,7 @@ fn where_two_leaning_pipes_cross(
 ///
 /// The separating plane is `(ŵ₁ − (ŵ₁·ŵ₂)ŵ₂) · (p − o₂) = 0` — the part of the
 /// thin pipe's direction that lies across the fat one — and every point of the
-/// crossing sits at least `√(ρ₂² − (δ + ρ₁)²)` from it.
+/// crossing sits at least `√(r₂² − (δ + r₁)²)` from it.
 ///
 /// # The normal is written square, and is not the direction that was asked for
 ///
@@ -1152,8 +1166,8 @@ fn where_two_leaning_pipes_cross(
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the best of the three
 /// does not lean far enough. Writing `n̂ = α·â + β·b̂` in the two directions
 /// across the axis, a loop point sits `a` along `â` and `b` along `b̂` with
-/// `a² + b² = ρ₂²`, and it is at least `√(ρ₂² − (δ + ρ₁)²)` along `â` — so `|b|`
-/// is at most `δ + ρ₁` and the reading is at least `α·√(ρ₂² − (δ+ρ₁)²) − |β|·(δ + ρ₁)`.
+/// `a² + b² = r₂²`, and it is at least `√(r₂² − (δ + r₁)²)` along `â` — so `|b|`
+/// is at most `δ + r₁` and the reading is at least `α·√(r₂² − (δ+r₁)²) − |β|·(δ + r₁)`.
 /// Still a **gap** where that does not clear the offset's own rounding: the two
 /// loops are there and they are tellable apart.
 fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<SurfaceMeet> {
@@ -1178,7 +1192,7 @@ fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<Su
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
 
-    let [thin_radius, fat_radius] = certified_radii_enclosing(thin, fat);
+    let [thin_radius, fat_radius] = [thin, fat].map(|pipe| Interval::exactly(pipe.radius()));
     let apart = how_far_apart_two_axes_are_enclosing(thin, fat);
     let reach = apart + thin_radius;
     let clear = root_enclosing(fat_radius * fat_radius - reach * reach);
@@ -1251,7 +1265,7 @@ fn how_a_picking_half_space_lies_across_an_axis(
 /// The one point two leaning pipes resting against each other share, as the box
 /// it is known to be inside.
 ///
-/// It is on the common perpendicular, `ρ₁` along it from the first axis.
+/// It is on the common perpendicular, `r₁` along it from the first axis.
 fn where_two_leaning_pipes_rest_against_each_other(
     one: &Cylinder,
     other: &Cylinder,
@@ -1259,7 +1273,7 @@ fn where_two_leaning_pipes_rest_against_each_other(
     let here = one.axis().origin().coordinates();
     let there = other.axis().origin().coordinates();
     let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
-    let [mine, _] = certified_radii_enclosing(one, other);
+    let mine = Interval::exactly(one.radius());
 
     let ways = [my_way, their_way].map(|way| {
         let squared = squared_length_enclosing(exactly(way));
@@ -1289,18 +1303,6 @@ fn where_two_leaning_pipes_rest_against_each_other(
             + ways[0][axis] * up
             + sideways[axis] * mine * Interval::exactly(towards)
     }))
-}
-
-/// The two certified radii, `rᵢ / √(wᵢ·wᵢ)`, as enclosures.
-fn certified_radii_enclosing(one: &Cylinder, other: &Cylinder) -> [Interval; 2] {
-    [one, other].map(|pipe| {
-        let along = pipe.axis().direction().components();
-        let squared = Exact::dot_of(along, along).map_or_else(
-            || squared_length_enclosing(exactly(along)),
-            |exact| exact.enclosure(),
-        );
-        quotient_or_everything(Interval::exactly(pipe.radius()), root_enclosing(squared))
-    })
 }
 
 /// `δ = |T| / √K`, the distance between two leaning axes, as an enclosure.
@@ -1366,37 +1368,50 @@ fn exactly_how_far_apart_two_axes_are(
     ))
 }
 
-/// A number with the same sign as `mine·ρ₁ + theirs·ρ₂ + gap·δ`, exactly, where
-/// the arithmetic can reach it.
+/// A number with the same sign as `mine·r₁ + theirs·r₂ + gap·δ`, exactly.
 ///
 /// **A sign and not the value**, because the value is not a polynomial in the
-/// stored numbers — it is a sum of three square roots, `rᵢ/√Wᵢ` and `|T|/√K`.
-/// What *is* a polynomial is the comparison once the roots are squared away, and
-/// squaring them away is where this runs out of room.
+/// stored numbers: `δ = |T|/√K` carries a square root. It is the only one left.
+/// The two widths are the stored `rᵢ` themselves — §118.11 — where they used to
+/// be `rᵢ/√Wᵢ`, and that is what turns this from the worst comparison in the
+/// file into one of the cheapest.
 ///
-/// Write everything scaled by the positive number `W₁W₂K`:
+/// # Clearing the one root
+///
+/// Write `S = mine·r₁ + theirs·r₂`, a polynomial in two stored numbers with no
+/// root in it at all. `K > 0`, so multiplying through by `√K` keeps the sign:
 ///
 /// ```text
-/// M = r₁²W₂K + r₂²W₁K − T²W₁W₂        (ρ₁² + ρ₂² − δ², scaled)
-/// N = 2r₁r₂K√(W₁W₂)                    (2ρ₁ρ₂, scaled)
+/// S·√K + gap·|T|
 /// ```
 ///
-/// Then `(mine·ρ₁ + theirs·ρ₂)² − δ²` is `M + mine·theirs·N`, and the sign of a
-/// sum of two numbers whose signs are known is either one of those signs or the
-/// sign of the difference of their squares. So the whole comparison comes down
-/// to `sign(M)` — degree eight — and, where that does not settle it,
-/// `sign(M² − N²)` with `N² = 4r₁²r₂²K²W₁W₂`, which is degree sixteen against
-/// M's twenty.
+/// Both halves have a sign that is read off rather than computed. `sign(S√K)` is
+/// `sign(S)`, and since both radii are above zero that is `sign(mine)` when the
+/// two agree and which radius is the larger when they do not — one `f64`
+/// comparison either way. `sign(gap·|T|)` is `sign(gap)` unless `T` is nothing.
 ///
-/// **That last one is what runs out.** `Exact::times` refuses as soon as a
-/// product's low half would land among the subnormals, and `M` for two ordinary
-/// pipes is already five hundred binary orders wide, so squaring it falls off
-/// the bottom of `f64`. Where the two stored directions have the same squared
-/// length the root `√(W₁W₂)` is rational and none of this is needed at all,
-/// which is why every pair whose axes are coordinate directions is decided here
-/// and a general rotation is not.
-/// `the_question_two_leaning_pipes_ask_is_too_wide_to_square_where_it_stands` is
-/// the demonstration, and §29 is the argument it belongs to.
+/// Where the two halves pull the same way, or either is nothing, that settles
+/// it. Where they pull against each other, `sign(S√K + gap|T|)` is
+/// `sign(S)·sign(S²K − T²)`, and with `mine` and `theirs` each `±1`
+///
+/// ```text
+/// S²  =  r₁² + r₂² + 2·mine·theirs·r₁r₂
+/// ```
+///
+/// so `S²K − T²` is **degree six against degree six, and has no `Wᵢ` in it**.
+///
+/// # What that replaced
+///
+/// The old widths `rᵢ/√Wᵢ` put three roots in three different metrics against
+/// each other. Clearing them cost eight degrees and left `sign(M² − N²)` with
+/// `M = r₁²W₂K + r₂²W₁K − T²W₁W₂` at degree twenty against `N² = 4r₁²r₂²K²W₁W₂`
+/// at sixteen — and `M` for two ordinary pipes is five hundred binary orders
+/// wide, so squaring it fell off the bottom of `f64` and this level ran only
+/// where `W₁ = W₂` made `√(W₁W₂)` rational. `docs/decisions.md` §29 is that
+/// measurement, and
+/// `the_question_two_leaning_pipes_ask_is_too_wide_to_square_where_it_stands`
+/// still demonstrates it about `Exact`. **Nothing here builds that expansion any
+/// more**, so what §29 recorded as unsquarable is no longer asked.
 fn how_two_radii_and_a_gap_compare_exactly(
     one: &Cylinder,
     other: &Cylinder,
@@ -1404,10 +1419,12 @@ fn how_two_radii_and_a_gap_compare_exactly(
     theirs: f64,
     gap: f64,
 ) -> Option<Exact> {
+    debug_assert!(
+        [mine, theirs, gap].iter().all(|side| side.abs() == 1.0),
+        "the three are signs, and squaring them away above assumed each is one"
+    );
     let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
     let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
-    let squared_mine = Exact::dot_of(my_way, my_way)?;
-    let squared_theirs = Exact::dot_of(their_way, their_way)?;
     let sideways = Exact::cross_of(&Exact::of_each(my_way), their_way)?;
     let squared_sideways = Exact::squared_length_of(&sideways)?;
     let volume = (0..3).try_fold(Exact::of(0.0), |so_far, axis| {
@@ -1420,9 +1437,9 @@ fn how_two_radii_and_a_gap_compare_exactly(
         )
     })?;
 
-    // The sign of `mine·ρ₁ + theirs·ρ₂`, from `ρ₂² − ρ₁² = (r₂²W₁ − r₁²W₂)/W₁W₂`
-    // where the two pull against each other.
-    let squared_gap = squared_mine.times(&squared_theirs)?;
+    // The sign of `mine·r₁ + theirs·r₂`. Both radii are above zero, so where the
+    // two pull against each other it is which of them is wider — a comparison of
+    // two stored numbers, where it used to be the sign of `r₂²W₁ − r₁²W₂`.
     let radii = if mine * theirs > 0.0 {
         if mine > 0.0 {
             Decision::Pos
@@ -1430,14 +1447,11 @@ fn how_two_radii_and_a_gap_compare_exactly(
             Decision::Neg
         }
     } else {
-        let bigger = Exact::product_of(other.radius(), other.radius())?
-            .times(&squared_mine)?
-            .minus(&Exact::product_of(one.radius(), one.radius())?.times(&squared_theirs)?);
-        match (bigger.sign(), theirs > 0.0) {
-            (Decision::Zero, _) => Decision::Zero,
-            (Decision::Pos, true) | (Decision::Neg, false) => Decision::Pos,
-            (Decision::Pos, false) | (Decision::Neg, true) => Decision::Neg,
-            _ => return None,
+        match (other.radius().partial_cmp(&one.radius()), theirs > 0.0) {
+            (Some(Ordering::Equal), _) => Decision::Zero,
+            (Some(Ordering::Greater), true) | (Some(Ordering::Less), false) => Decision::Pos,
+            (Some(Ordering::Greater), false) | (Some(Ordering::Less), true) => Decision::Neg,
+            (None, _) => return None,
         }
     };
     let along_the_gap = match volume.sign() {
@@ -1453,18 +1467,15 @@ fn how_two_radii_and_a_gap_compare_exactly(
         (this_sign, Decision::Zero) => this_sign,
         (Decision::Pos, Decision::Pos) => Decision::Pos,
         (Decision::Neg, Decision::Neg) => Decision::Neg,
-        (bigger_first, _) => {
-            let squared_difference = how_two_squares_compare_exactly(
+        (radii_sign, _) => {
+            let out_reaches = whether_two_radii_out_reach_a_gap_exactly(
                 one,
                 other,
                 mine * theirs,
-                &squared_mine,
-                &squared_theirs,
                 &squared_sideways,
-                &squared_gap,
                 &volume,
             )?;
-            match (squared_difference, bigger_first == Decision::Pos) {
+            match (out_reaches, radii_sign == Decision::Pos) {
                 (Decision::Zero, _) => Decision::Zero,
                 (Decision::Pos, true) | (Decision::Neg, false) => Decision::Pos,
                 (Decision::Pos, false) | (Decision::Neg, true) => Decision::Neg,
@@ -1480,70 +1491,35 @@ fn how_two_radii_and_a_gap_compare_exactly(
     }))
 }
 
-/// The sign of `(mine·ρ₁ + theirs·ρ₂)² − δ²`, scaled by the positive `W₁W₂K`.
+/// The sign of `S²K − T²`: whether the two widths together out-reach the gap
+/// between the axes.
 ///
-/// `M + together·N` with `M` and `N` as [`how_two_radii_and_a_gap_compare_exactly`]
-/// writes them. `N` is never below zero, so where `M` pulls the same way the
-/// sign is `M`'s; where they pull against each other it is the sign of
-/// `M² − N²`, and that is the one that can run out of range.
-#[allow(clippy::too_many_arguments)]
-fn how_two_squares_compare_exactly(
+/// `together` is `mine·theirs`, the one thing the caller's two signs leave in
+/// `S² = r₁² + r₂² + 2·together·r₁r₂`. Degree six on each side, and every factor
+/// is a product of stored numbers, so this decides unless one of them leaves
+/// `f64`'s range.
+fn whether_two_radii_out_reach_a_gap_exactly(
     one: &Cylinder,
     other: &Cylinder,
     together: f64,
-    squared_mine: &Exact,
-    squared_theirs: &Exact,
     squared_sideways: &Exact,
-    squared_gap: &Exact,
     volume: &Exact,
 ) -> Option<Decision> {
-    let radii_apart = Exact::product_of(one.radius(), one.radius())?
-        .times(squared_theirs)?
-        .plus(&Exact::product_of(other.radius(), other.radius())?.times(squared_mine)?)
-        .times(squared_sideways)?
-        .minus(&volume.times(volume)?.times(squared_gap)?);
-    let leaning_the_same_way = (together > 0.0) == (radii_apart.sign() != Decision::Neg);
-    if radii_apart.sign() == Decision::Zero {
-        // `M` is nothing, so the answer is `together·N`, and `N` is above zero
-        // for two real radii.
-        return Some(if together > 0.0 {
-            Decision::Pos
-        } else {
-            Decision::Neg
-        });
-    }
-    if leaning_the_same_way {
-        return Some(radii_apart.sign());
-    }
-
-    // `M² − N²`, with `N² = 4r₁²r₂²K²W₁W₂`. `M` for two ordinary leaning pipes
-    // is five hundred binary orders wide, so its square does not fit where it
-    // stands; `square_minus` slides both sides up together, which cannot change
-    // a sign (`docs/decisions.md` §31.4).
-    let together_squared = Exact::product_of(2.0 * one.radius(), 2.0 * other.radius())?
-        .times(&Exact::product_of(one.radius(), other.radius())?)?
-        .times(squared_sideways)?
-        .times(squared_sideways)?
-        .times(squared_gap)?;
-    let against = radii_apart.square_minus(&together_squared)?;
+    let widths = Exact::product_of(one.radius(), one.radius())?
+        .plus(&Exact::product_of(other.radius(), other.radius())?)
+        .plus(&Exact::product_of(
+            2.0 * together * one.radius(),
+            other.radius(),
+        )?);
     Some(
-        match (against.sign(), radii_apart.sign() == Decision::Pos) {
-            (Decision::Zero, _) => Decision::Zero,
-            (Decision::Pos, true) => Decision::Pos,
-            (Decision::Pos, false) => Decision::Neg,
-            (Decision::Neg, _) => {
-                if together > 0.0 {
-                    Decision::Pos
-                } else {
-                    Decision::Neg
-                }
-            }
-            _ => return None,
-        },
+        widths
+            .times(squared_sideways)?
+            .minus(&volume.times(volume)?)
+            .sign(),
     )
 }
 
-/// `E² − 4r₁²r₂²W₁W₂` as an enclosure.
+/// `E² − 4r₁²r₂²W₁²` as an enclosure.
 ///
 /// Below zero the two cross in two lines, and then this same reading says how far
 /// apart those lines are — see [`two_lines_between_two_pipes`].
@@ -1551,62 +1527,63 @@ fn how_deeply_two_side_by_side_pipes_overlap_enclosing(
     one: &Cylinder,
     other: &Cylinder,
 ) -> Interval {
-    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let [my_way, _] = [one, other].map(|pipe| pipe.axis().direction().components());
     let room = how_much_room_two_side_by_side_pipes_leave_enclosing(one, other);
+    let squared_mine = squared_length_enclosing(exactly(my_way));
     room * room
         - Interval::exactly(4.0)
             * squared_enclosing(one.radius())
             * squared_enclosing(other.radius())
-            * squared_length_enclosing(exactly(my_way))
-            * squared_length_enclosing(exactly(their_way))
+            * squared_mine
+            * squared_mine
 }
 
-/// `E² − 4r₁²r₂²W₁W₂`, exactly.
+/// `E² − 4r₁²r₂²W₁²`, exactly.
 fn how_deeply_two_side_by_side_pipes_overlap_exactly(
     one: &Cylinder,
     other: &Cylinder,
 ) -> Option<Exact> {
-    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let [my_way, _] = [one, other].map(|pipe| pipe.axis().direction().components());
     let room = how_much_room_two_side_by_side_pipes_leave_exactly(one, other)?;
+    let squared_mine = Exact::dot_of(my_way, my_way)?;
     Some(
         room.times(&room)?.minus(
             &Exact::product_of(2.0, 2.0)?
                 .times(&Exact::product_of(one.radius(), one.radius())?)?
                 .times(&Exact::product_of(other.radius(), other.radius())?)?
-                .times(&Exact::dot_of(my_way, my_way)?)?
-                .times(&Exact::dot_of(their_way, their_way)?)?,
+                .times(&squared_mine)?
+                .times(&squared_mine)?,
         ),
     )
 }
 
-/// `E = A·W₂ − r₁²W₂ − r₂²W₁` as an enclosure.
+/// `E = A − W₁(r₁² + r₂²)` as an enclosure.
 fn how_much_room_two_side_by_side_pipes_leave_enclosing(
     one: &Cylinder,
     other: &Cylinder,
 ) -> Interval {
     let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
-    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let [my_way, _] = [one, other].map(|pipe| pipe.axis().direction().components());
     let squared_mine = squared_length_enclosing(exactly(my_way));
-    let squared_theirs = squared_length_enclosing(exactly(their_way));
-    how_far_off_an_axis_enclosing(there, here, my_way) * squared_theirs
-        - squared_enclosing(one.radius()) * squared_theirs
-        - squared_enclosing(other.radius()) * squared_mine
+    how_far_off_an_axis_enclosing(there, here, my_way)
+        - squared_mine * (squared_enclosing(one.radius()) + squared_enclosing(other.radius()))
 }
 
-/// `E = A·W₂ − r₁²W₂ − r₂²W₁`, exactly.
+/// `E = A − W₁(r₁² + r₂²)`, exactly.
 fn how_much_room_two_side_by_side_pipes_leave_exactly(
     one: &Cylinder,
     other: &Cylinder,
 ) -> Option<Exact> {
     let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
-    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let [my_way, _] = [one, other].map(|pipe| pipe.axis().direction().components());
     let squared_mine = Exact::dot_of(my_way, my_way)?;
-    let squared_theirs = Exact::dot_of(their_way, their_way)?;
     Some(
-        how_far_off_an_axis_exactly(there, here, my_way)?
-            .times(&squared_theirs)?
-            .minus(&Exact::product_of(one.radius(), one.radius())?.times(&squared_theirs)?)
-            .minus(&Exact::product_of(other.radius(), other.radius())?.times(&squared_mine)?),
+        how_far_off_an_axis_exactly(there, here, my_way)?.minus(
+            &squared_mine.times(
+                &Exact::product_of(one.radius(), one.radius())?
+                    .plus(&Exact::product_of(other.radius(), other.radius())?),
+            )?,
+        ),
     )
 }
 
@@ -2452,11 +2429,12 @@ fn a_cones_apex_sits_on_a_pipes_axis(cone: &Cone, pipe: &Cylinder) -> impl Predi
 /// [`two_loops_either_side_of_a_ball`], which has to charge itself a sideways
 /// reach.
 ///
-/// `w_c·(x − a)` is `±r·‖w_c‖/(slope·‖w_p‖)`: the pipe's certified radius
-/// `r/‖w_p‖` over the slope is how far along the unit axis a circle sits, and
-/// reading it with the stored direction multiplies by `‖w_c‖`. **The two lengths
-/// are both carried** because the two stored directions run along one line
-/// without being one triple.
+/// `w_c·(x − a)` is `±r·‖w_c‖/slope`: the pipe is `r` wide (§118.11), `r/slope`
+/// is how far along the *unit* cone axis a circle sits, and reading that with
+/// the stored direction multiplies by `‖w_c‖`. **Only the cone's own length is
+/// carried.** The pipe's used to be divided out here as well, because the width
+/// it certified was then `r/‖w_p‖`, and the two stored directions run along one
+/// line without being one triple — so the two lengths did not cancel.
 ///
 /// # Errors
 ///
@@ -2495,13 +2473,15 @@ fn two_circles_round_a_shared_axis(cone: &Cone, pipe: &Cylinder) -> Result<Surfa
     ))
 }
 
-/// `r·‖w_c‖/(slope·‖w_p‖)`, which is what the cone's own stored direction reads
-/// at either of the two circles, as an enclosure.
+/// `r·‖w_c‖/slope`, which is what the cone's own stored direction reads at
+/// either of the two circles, as an enclosure.
 fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> Interval {
-    let reach = |direction: [f64; 3]| root_enclosing(squared_length_enclosing(exactly(direction)));
+    let up_the_cone = root_enclosing(squared_length_enclosing(exactly(
+        cone.axis().direction().components(),
+    )));
     quotient_or_everything(
-        Interval::exactly(pipe.radius()) * reach(cone.axis().direction().components()),
-        Interval::exactly(cone.slope()) * reach(pipe.axis().direction().components()),
+        Interval::exactly(pipe.radius()) * up_the_cone,
+        Interval::exactly(cone.slope()),
     )
 }
 
@@ -2536,12 +2516,14 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 /// [`Picker::InsideAPipe`] names the inner. That second one is the only
 /// picker in the kernel that says inside, and this is what needed it.
 ///
-/// **What that costs when the two circles are a rounding apart.** The picking
-/// pipe's certified radius is `R / ‖w‖` rather than `R`, so a pair whose gap
-/// `√(r² − t²)` is smaller than a rounding of `R` is not provably either side of
-/// it, and the sign question downstream comes back
-/// [`Decision::Zero`] or [`Decision::Undecidable`] and the caller refuses. The
-/// naming is still right; what is undecidable is a real knife edge.
+/// **That costs nothing now.** The picking pipe is `R` wide, exactly the radius
+/// it was built with, because a pipe means the same thing whatever its stored
+/// direction rounded to (§118.11). So the two circles sit `√(r² − t²)` either
+/// side of it and the only way the sign question downstream comes back
+/// [`Decision::Zero`] or [`Decision::Undecidable`] is a torus whose tube really
+/// does reach its own ring. It used to cost a rounding of `R`: the picking
+/// pipe's certified radius was `R / ‖w‖`, and a pair whose gap was smaller than
+/// that was refused for the axis's own rounding rather than for its shape.
 fn where_a_plane_and_a_torus_cross(
     flat: &Plane,
     ring: &Torus,
@@ -3263,6 +3245,42 @@ mod tests {
         assert_eq!(run.run(), &EdgeRun::RightRoundWhereItsFacesCross);
     }
 
+    /// A ball that just fits a pipe still just fits it when the axis is written
+    /// along a direction whose stored triple is not a unit one.
+    ///
+    /// The whole of §118.11 in one pair. Both radii are two and the centre is
+    /// exactly on the axis, so the ball rests against the pipe along one circle
+    /// and that is the answer whatever `‖w‖` rounded to. The discriminant used to
+    /// be `W·R² − r²`, whose sign for equal radii **is** the sign of the stored
+    /// direction's own rounding, so every axis but a coordinate one answered
+    /// "nothing" or "two circles" — and `Cylinder::side_of` said at the same time
+    /// that the ball's equator was exactly on the skin.
+    ///
+    /// The `assert_ne!` is the demonstration that the pair is a real one: put a
+    /// coordinate direction in and the old form answered correctly too. It also
+    /// rules out the directions that only look awkward — `(3, 5, 7)` and
+    /// `(2, 3, 4)` both store as exactly unit triples, and a case built on either
+    /// would have passed before this change as well.
+    #[test]
+    fn a_ball_that_just_fits_a_pipe_fits_it_down_any_axis() {
+        for along in [[1.0, 1.0, 1.0], [1.0, 2.0, 0.0]] {
+            let pipe = a_pipe(along, [0.0, 0.0, 0.0], 2.0);
+            let Surface::Cylinder(stored) = pipe else {
+                panic!("a pipe is a pipe");
+            };
+            let squared = Vector::from(stored.axis().direction().components()).length_squared();
+            assert_ne!(
+                squared, 1.0,
+                "a direction along {along:?} does not store as a unit triple, which is what \
+                 makes this pair worth asking about"
+            );
+
+            let met = crossing(&a_ball([0.0, 0.0, 0.0], 2.0), &pipe);
+            let run = one_run(&met);
+            assert_eq!(run.run(), &EdgeRun::RightRoundWhereItsFacesCross);
+        }
+    }
+
     /// A ball off to one side of a pipe, reaching into it: one closed loop, and
     /// a genuine quartic rather than anything that lies in a plane.
     #[test]
@@ -3837,12 +3855,13 @@ mod tests {
     /// load-bearing — put any one of them back and the two orders agreed
     /// already.
     ///
-    /// Both orders reach the same third sign question, `ρ₂ − ρ₁ + δ`, whose
+    /// Both orders reach the same third sign question, `r₂ − r₁ + δ`, whose
     /// enclosure straddles zero, so both go to the exact level. There the answer
     /// turned on `W₁W₂`, which came back as eight entries one way round and nine
     /// the other — the same number, and only the shorter of the two could be
     /// multiplied by what came next. `Exact` is canonical now, so there is one
-    /// list of entries and one answer.
+    /// list of entries and one answer, and since §118.11 the exact arm does not
+    /// form `W₁W₂` at all.
     fn a_pipe_leaning_a_hair(along: [f64; 3], through: [f64; 3]) -> Surface {
         a_pipe(along, through, 1.999_999_999_068_677_4)
     }
