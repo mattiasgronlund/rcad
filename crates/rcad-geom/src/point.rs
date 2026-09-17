@@ -736,8 +736,9 @@ impl Axis {
     /// two spellings of one surface two surfaces.
     ///
     /// Three ways in, none of them hypothetical: [`Axis::new`] is public and
-    /// [`Vector::scaled_to_length_one_from_anywhere`] divides by two positive
-    /// numbers, so a `DIRECTION` written `(-0.,0.,1.)` — which 93 of the checked
+    /// [`Vector::scaled_to_length_one_from_anywhere`] multiplies by a positive
+    /// power of two and divides by a positive length, so neither step turns a
+    /// signed zero back up and a `DIRECTION` written `(-0.,0.,1.)` — which 93 of the checked
     /// corpus's files hold — reaches storage through `rcad-step`'s `geometry.rs`
     /// as it came; [`Axis::reversed`] negates, and negating `0.0` gives `-0.0`;
     /// and a turn can hand back `-0.0` for a component that was `0.0`.
@@ -1473,8 +1474,9 @@ mod tests {
         );
         assert_eq!(
             the_scaling_kept_the_sign, 12,
-            "the scaling divides by two positive numbers, so it turns no signed zero back up and \
-             all twelve spellings with one in the direction should survive it"
+            "the scaling multiplies by a positive power of two and divides by a positive length, \
+             so it turns no signed zero back up and all twelve spellings with one in the \
+             direction should survive it"
         );
     }
 

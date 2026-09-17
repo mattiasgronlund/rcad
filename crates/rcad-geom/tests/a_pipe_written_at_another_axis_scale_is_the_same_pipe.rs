@@ -64,8 +64,9 @@
 //! - **Checking two spellings against each other instead of against the
 //!   geometry.** Scaling a written direction by a small whole number does not
 //!   move the stored bits at all — `Vector::scaled_to_length_one_from_anywhere`
-//!   divides by the largest component first, and `3·(1, 2, 0) / 6` is exactly
-//!   `(1, 2, 0) / 2` — so two spellings can agree perfectly and both be wrong
+//!   is a function of the ratios between the components, and `3·(1, 2, 0)` has
+//!   the same ratios as `(1, 2, 0)` — so two spellings can agree perfectly and
+//!   both be wrong
 //!   by the same `1e-16`. Every assertion here is against `Decision::Zero`,
 //!   which is what the geometry says, and never against the other spelling.
 //! - **A probe point that is not where it is meant to be.** A failure then
