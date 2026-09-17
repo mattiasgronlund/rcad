@@ -138,8 +138,16 @@ const THE_DISTANCE_TO_THE_CURVE_CLIMBS_PAST_THIS: f64 = 100.0;
 /// | leaning | 0.008 | 0.008 | 0.010 |
 /// | turned | 0.012 | 0.012 | 0.013 |
 /// | the quartic control | 0.738 | 0.738 | 0.738 |
-/// | the quartic headline | 0.355 | 0.429 | 0.429 |
-/// | the band | 0.410 | 0.410 | 0.477 |
+/// | the quartic headline | 0.541 | 0.726 | 0.726 |
+/// | the band | 0.389 | 0.389 | 0.477 |
+///
+/// **The two marched rows were re-measured when the marcher stopped measuring
+/// against a pipe `r(1/‖w‖ − 1)` narrower than the one it was handed**
+/// (§118.11). The headline read `0.355 | 0.361 | —` before that, and the change
+/// moves both halves of the share at once: the marcher settles its points
+/// against the surface the caller named, and this file's own `how_far_off` reads
+/// them against it too. The band's `0.410 | 0.410` is older than that and was
+/// already reading `0.389` before this lane touched anything.
 ///
 /// **Those six measure per-surface distance, which is not what the bound is
 /// named after.** The leaning-cap row below them measures distance to the curve
@@ -159,10 +167,11 @@ const THE_DISTANCE_TO_THE_CURVE_CLIMBS_PAST_THIS: f64 = 100.0;
 /// publishes a bound it measured for the run rather than a fixed multiple of
 /// anything, so a share there is a share of that and of nothing else.
 ///
-/// **The quartic control's margin is thin and it does not shrink.** A search
-/// finds 0.738 of its own bound at every corpus width tried, and the band and
-/// the headline both climb as the corpus widens. The bound holds and one is
-/// still the failure, but nothing measured here says it holds by a wide margin.
+/// **The quartic rows' margins are thin and they do not shrink.** A search
+/// finds 0.738 of the control's own bound at every corpus width tried and 0.726
+/// of the headline's from ×2 on, and the band climbs as the corpus widens. The
+/// bound holds and one is still the failure, but nothing measured here says it
+/// holds by a wide margin.
 const NO_POINT_MAY_USE_ALL_OF_ITS_BOUND: f64 = 1.0;
 
 /// The control: whole numbers, planes square to an axis.
@@ -780,8 +789,8 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
         Surface::Sphere(ball) => ((point - ball.centre()).length() - ball.radius()).abs(),
         Surface::Cylinder(pipe) => {
             let along = pipe.axis().direction();
-            ((point - pipe.axis().origin()).cross(along).length() - pipe.radius()).abs()
-                / along.length()
+            ((point - pipe.axis().origin()).cross(along).length() / along.length() - pipe.radius())
+                .abs()
         }
         Surface::Cone(cone) => {
             let along = cone.axis().direction();

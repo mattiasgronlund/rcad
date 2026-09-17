@@ -114,7 +114,7 @@ fn two_pipes_crossing_at(middle: Point, ways: [Vector; 2], radius: f64) -> [Cyli
 /// cancels two large numbers and reads perfect however wrong the point is.
 fn how_far_off_the_pipe(pipe: &Cylinder, point: Point) -> f64 {
     let along = pipe.axis().direction();
-    ((point - pipe.axis().origin()).cross(along).length() - pipe.radius()).abs() / along.length()
+    ((point - pipe.axis().origin()).cross(along).length() / along.length() - pipe.radius()).abs()
 }
 
 /// The run that names the piece of the crossing lying in the plane through
