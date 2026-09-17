@@ -28815,3 +28815,96 @@ predicate of the kind `march.rs` already has, plus an `# Errors` change on the
 function, plus this entry. That is a lane of its own, owning `validate.rs`, an
 `rcad-topo` test and the new predicate. One corpus file depends on it, so
 nothing about the ordering is urgent.
+
+## 111. The sign §109.7 found was earned, and the numbers it was earned about were not
+
+§109.7 said the closed-edge rule *"certifies a sign it has not earned"* and read
+that as an arithmetic fault: a naked `> 0.0` over a cross product of squared norm
+`2.55e-29`. The lane that went to fix it measured the chain and found the
+arithmetic innocent. Every figure below was measured in this lane;
+`a_hemisphere_sitting_on_a_pipe_of_the_same_radius_barely_crosses_it_at_all` in
+`crates/rcad-topo/src/validate.rs` is the measurement, run without the corpus.
+
+### 111.1 The file's own numbers, and why they reproduce off the corpus
+
+`kicad/LED_D5.0mm-3.step` is a dome on a body of the same radius. It writes
+
+```text
+#39 = SPHERICAL_SURFACE('',#40,2.5);      #41 = (2.54, -5.051514762044E-015, 9.1)
+#73 = CYLINDRICAL_SURFACE('',#74,2.5);    #75 = (2.54, -3.030908857227E-015, 9.1)
+#76 = DIRECTION('',(-0.E+000, 3.330669073875E-016, -1.));
+#22 = VERTEX_POINT('',#23);               #23 = (5.04, -5.051514762044E-015, 9.1)
+```
+
+Both radii are `2.5`, so the two are meant to be **exactly tangent** along the
+equator and the file's own rounding — an axis three femtometres out and a centre
+two femtometres off it — is the whole of what makes them cross at all. Four
+CARTESIAN_POINTs and a DIRECTION is the entire input, which is why the test is a
+unit test in `rcad-topo` and not a corpus test: the corpus is where the shape was
+*found*, not what it needs to be re-measured.
+
+At `#22` the rule computes
+
+```text
+∇S = (2.5, 0, 0)
+∇T = (2.5, -2.020605904817e-15, -6.729969597663193e-31)
+∇S × ∇T = (0, 1.682492399415798e-30, -5.0515147620424996e-15)
+ẑ × ∇S   = (0, 2.5, 0)
+(∇S × ∇T) · (ẑ × ∇S) = 4.206230998539495e-30
+```
+
+which is §109.7's two figures to the digit, independently arrived at. The
+`‖∇S × ∇T‖²` over `‖∇S‖²‖∇T‖²` is `6.5e-31`: the two surfaces meet at `8.1e-16`
+radians, under four `f64` steps of one.
+
+### 111.2 The arithmetic is exact, so enclosing it changes nothing
+
+**This is the finding, and it was a surprise.** Enclose that chain in interval
+arithmetic over those numbers and it proves `Pos` with a width of about `1e-45`.
+Read the five lines above and the reason is plain: every one of them is a single
+product or a subtraction of numbers far apart, with nothing to cancel against.
+The `4.2e-30` is not a rounding surviving a cancellation — it is the exact value
+of the expression the stored numbers name. `> 0.0` gave the right answer.
+
+So the fix §109.7 called for — *"a fresh interval predicate of the kind `march.rs`
+already has"* — was tried, measured, and does not reach this input. Boxing the
+gradients but keeping the corner exact does not reach it either: `∇S` is
+`at − centre` on coordinates that subtract exactly, so its enclosure has no
+width, and `ẑ × ∇S` then kills the one component of `∇S × ∇T` that carries any.
+
+**Naming the family of fixes, per §16.10.** What is left is the inputs. `at` is a
+decimal rounded to `f64` and is on neither surface; one `f64` step in its `y` is
+`1.8e-15` against a `∇T · ŷ` of `-2.0e-15`, so moving the corner inside the box
+it is known to turns the sign over. That is the same fact §39 already wrote down
+for `not_provably_off`, which boxes a corner by
+`Model::what_writing_a_point_down_costs` for exactly this reason. So the fix is
+the corner arriving as a **box** and both gradients being worked out over it —
+not a tolerance, and not a wider filter: the established width, already computed,
+carried one function further.
+
+### 111.3 What landed, and the one line it cannot reach
+
+The rule's arithmetic is now `which_way_a_closed_crossing_turns` in
+`crates/rcad-geom/src/which_way_a_closed_crossing_turns.rs`, answering with a
+[`Decision`] and all four of its cases, and
+`a_closed_crossing_is_walked_the_way_it_is_stored` matching them: a sign either
+way, `Zero` for two surfaces that touch rather than cross, and
+`Error::CannotTellWhichWayAClosedEdgeRuns` carrying the width that straddled.
+CLAUDE.md's *"a predicate returns `Decision`, never a bare sign"* is now true of
+this rule, and a wire that is only the rounding in its own cross product is
+refused where it used to be signed — `a_wire_that_is_only_the_rounding_in_its_own_cross_product_is_refused`.
+
+**It does not change what the LED file does**, for §111.2's reason. That file
+still refuses, and the refusal is still the dishonest one: `the model is broken: a
+face walks a closed edge against the way its surface winds`, which blames the
+file for a direction the kernel guessed. `just t how_often_a_real_file_imports
+--no-capture` names it, and the rates beside it were `kicad: 97 / 323 = 30.0%`
+and `nist: 1 / 44 = 2.3%` — unmoved, which is the point.
+
+**The one line this lane could not write** is in a file it did not own.
+`which_way_a_closed_edge_is_walked` in `crates/rcad-topo/src/fuse/assemble.rs`
+ends `.expect("the curved check just above already ruled out the one case this
+returns an error for")`, and there are two such cases now. Nothing in the gate
+reaches it — the fuse's own crossings are not this thin — but the sentence is
+false as it stands, and boxing the corner will need that call site to pass the
+box. Whoever takes §111.2 takes `assemble.rs` with `validate.rs`.
