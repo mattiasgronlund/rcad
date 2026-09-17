@@ -266,15 +266,58 @@ fn the_settling_did_not_land_on_both(surfaces: [&Surface; 2], at: Point) -> bool
 /// span.
 ///
 /// Each round moves the point by the two signed distances, corrected for the two
-/// normals not being square to each other: with `c` the cosine of the angle
-/// between them the step is `(s₁ − s₂c)/(1 − c²)` along the first and
-/// `(s₂ − s₁c)/(1 − c²)` along the second. That is the exact solution of the
-/// linearised pair, so on a quadric it converges as Newton does.
+/// normals not being square to each other. With `c` the cosine of the angle
+/// between them, the exact solution of the linearised pair moves `(s₁ − s₂c)/(1 − c²)`
+/// along the first normal and `(s₂ − s₁c)/(1 − c²)` along the second, so on a
+/// quadric it converges as Newton does.
+///
+/// # The two subtractions that are not written down the way they are named
+///
+/// `1 − c·c` and `s₁ − s₂c` both cancel to nothing as the two surfaces come
+/// parallel, and the tightest crossing a ball on a pipe can express — one
+/// rounding of radius apart, leaning `2.1e-8` — already lands past the end of
+/// both. There `c` **rounds to exactly one**, so `1 − c·c` is exactly zero, and
+/// that zero was the whole of the marcher's reachable near-tangency refusal
+/// (`docs/decisions.md` §110.3: all 44 corpus files stopped there). One step
+/// less parallel it is `6.66e-16` where the truth is `4.44e-16`, a fifty per
+/// cent error in the size of every move. `s₁ − s₂c` collapses beside it: with
+/// `c` rounded to one and the two distances equal it is exactly zero too, so a
+/// denominator mended on its own would leave the point sitting still.
+///
+/// Both have a spelling that says the same thing without the cancellation, and
+/// neither changes what is computed anywhere else:
+///
+/// ```text
+/// 1 − c² = (1 − c)(1 + c)     1 − c = ‖u − v‖²/2     1 + c = ‖u + v‖²/2
+/// s₁ − s₂c = (s₁ − s₂) + s₂(1 − c)
+/// ```
+///
+/// The two halves of the denominator are **sums of squares**, so neither can
+/// cancel at all, and their product carries the near-tangency in `1 − c` alone
+/// where it is a relative error and not an absolute one. The numerator's
+/// subtraction becomes `s₁ − s₂`, which is the distance between the two
+/// surfaces at the point and is what the answer is actually made of.
+///
+/// **This is deliberately not the sum-and-difference form**, which spells the
+/// pair as `(s₁ + s₂)/(1 + c)` and `(s₁ − s₂)/(1 − c)` and has no cancellation
+/// in it anywhere. That form is worse: where the normals are square to each
+/// other and one distance is far larger than the other, it reaches `u·s₁ + v·s₂`
+/// by cancelling two terms of size `s₁` against each other, and the `s₂` part is
+/// lost. Measured, it pushed a coarse walk's published bound from inside the
+/// pipe the crossing is drawn on to `1.26e6` against a pipe `1.05e6` across.
+///
+/// `docs/decisions.md` §112 has both measurements and what the change did to the
+/// refusal rate.
 ///
 /// # Errors
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when the two
-/// normals are parallel enough that the correction cannot be worked out.
+/// normals are bit-for-bit the same vector, or bit-for-bit opposite, so `1 − c`
+/// or `1 + c` is exactly zero and there is no plane to correct in. That is the
+/// same wall [`which_way_the_crossing_runs`] has, and
+/// `the_angle_at_which_a_crossing_stops_having_a_direction` shows it to be a
+/// limit rather than a gap. A normal that is not a number arrives here as the
+/// same refusal, which is the mis-report that function's doc comment records.
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a round lands somewhere that
 /// is not a point.
@@ -283,16 +326,18 @@ fn settled(surfaces: [&Surface; 2], from: Point) -> Result<Point> {
     for _ in 0..ROUNDS_OF_SETTLING {
         let [(first, one_way), (second, other_way)] =
             surfaces.map(|surface| how_far_off_and_which_way(surface, here));
-        let leaning = one_way.dot(other_way);
-        let across = 1.0 - leaning * leaning;
+        let leaning_apart = (one_way - other_way).length_squared() * 0.5;
+        let leaning_together = (one_way + other_way).length_squared() * 0.5;
+        let across = leaning_apart * leaning_together;
         if across <= 0.0 || !across.is_finite() {
             return Err(gave_up(
                 surfaces,
                 WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
             ));
         }
-        let along_one = (first - second * leaning) / across;
-        let along_other = (second - first * leaning) / across;
+        let between_them = first - second;
+        let along_one = (between_them + second * leaning_apart) / across;
+        let along_other = (-between_them + first * leaning_apart) / across;
         here = here - one_way * along_one - other_way * along_other;
         if !here.is_finite() {
             return Err(Error::CannotWorkOutHowBigACrossingIs);
@@ -461,12 +506,52 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 /// publishes. Splitting on whether the trial overshot leaves the fine walk at
 /// `0.577` exactly (`docs/decisions.md` §89).
 ///
+/// # A trial that cannot be measured at all is a trial, not an answer
+///
+/// The three questions a trial asks — settle the far end, settle the middle,
+/// read the direction at the far end — can each refuse, and a refusal there is
+/// about the **trial point**, not about where the step started from. [`march`]
+/// takes `tangent` from [`which_way_the_crossing_runs`] at `here`, so the two
+/// surfaces are known to cross transversally at `here` before this is ever
+/// called; shortening walks the trial back towards that point, which is the same
+/// answer this function already gives every other kind of bad trial.
+///
+/// **This used to propagate the first such refusal straight out**, which is why
+/// a coarse walk asking `f64::MAX / 4` of room could stop on a pair it crosses
+/// perfectly well: one step that long lands the settling somewhere it diverges
+/// from, and a point that has run away to `1e307` and come back onto a pipe's own
+/// axis has no normal to settle against. Nothing about that is the two surfaces
+/// being tangent.
+///
+/// Nothing is swallowed: the last refusal is kept, and it is what comes back if
+/// all [`SHORTENINGS_BEFORE_GIVING_UP`] of them refuse, so a crossing that really
+/// is tangent still says so and still names its site.
+///
+/// **A refused trial is retried at the square root of the ask, not at half of
+/// it.** Halving searches the exponent one bit at a time, and the coarse walk
+/// starts at `f64::MAX / 4`: measured, fifty halvings of `2.25e307` reach
+/// `9.3e43` and every one of them refuses, because the whole range is still
+/// absurd. A trial that could not be settled has said nothing about the curve —
+/// not even how long it is, which is what the chord rule below reads off a short
+/// trial — so the one thing known is that the ask was too big by an unknown
+/// number of orders of magnitude, and the search that finds that is over the
+/// exponent rather than the value. Eleven roots take `2.25e307` to about one.
+/// The `min` is what keeps it a shortening: below an ask of one, a root would
+/// grow the step, so it halves there instead.
+///
 /// # Errors
 ///
-/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when shortening
-/// the step [`SHORTENINGS_BEFORE_GIVING_UP`] times still leaves a piece that
-/// strays too far, which means the curve is not being followed rather than that
-/// the budget was tight.
+/// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] when shortening the
+/// step [`SHORTENINGS_BEFORE_GIVING_UP`] times still leaves a piece that strays
+/// too far. This is reachable and carries its own name —
+/// `a_step_asked_the_wrong_way_round_a_circle_is_refused_as_stepping_and_not_tangency`
+/// is the demonstration — but no walk reaches it, because a walk takes its
+/// direction from the point it is standing on.
+///
+/// Whatever a trial refused with, when every trial refused. Today that is
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] or
+/// [`Error::CannotWorkOutHowBigACrossingIs`], from [`settled`] or
+/// [`which_way_the_crossing_runs`].
 fn one_step(
     surfaces: [&Surface; 2],
     here: Point,
@@ -475,13 +560,18 @@ fn one_step(
     room: f64,
 ) -> Result<(Point, f64)> {
     let mut step = from;
+    let mut why_the_last_trial_could_not_be_measured = None;
     for _ in 0..SHORTENINGS_BEFORE_GIVING_UP {
-        let next = settled(surfaces, here + tangent * step)?;
-        let straight_on = next - here;
-        let middle = here + straight_on * 0.5;
-        let sagitta = (settled(surfaces, middle)? - middle).length();
-        let turned = which_way_the_crossing_runs(surfaces, next)?.dot(tangent);
-        let chord = straight_on.length();
+        let (next, chord, sagitta, turned) = match what_a_trial_of_this_length_measures(
+            surfaces, here, tangent, step,
+        ) {
+            Ok(measured) => measured,
+            Err(why) => {
+                why_the_last_trial_could_not_be_measured = Some(why);
+                step = step.sqrt().min(step * 0.5);
+                continue;
+            }
+        };
         if sagitta <= room * SAGITTA_MAY_TAKE
             && sagitta <= chord * SAGITTA_MAY_TAKE_OF_ITS_CHORD
             && turned >= 0.0
@@ -503,10 +593,35 @@ fn one_step(
             step * 0.5
         };
     }
-    Err(Error::CannotFollowACrossingBecauseNoStepStaysOnIt {
-        surfaces: Box::new([*surfaces[0], *surfaces[1]]),
-        shortenings: SHORTENINGS_BEFORE_GIVING_UP,
-    })
+    Err(why_the_last_trial_could_not_be_measured.unwrap_or_else(|| {
+        Error::CannotFollowACrossingBecauseNoStepStaysOnIt {
+            surfaces: Box::new([*surfaces[0], *surfaces[1]]),
+            shortenings: SHORTENINGS_BEFORE_GIVING_UP,
+        }
+    }))
+}
+
+/// Where a step of `step` lands, how long the straight piece it leaves behind
+/// is, how far that piece bows away from the crossing at its middle, and how
+/// much of the direction it was asked to go in it is still going in.
+///
+/// # Errors
+///
+/// Whatever [`settled`] or [`which_way_the_crossing_runs`] refuse with at the
+/// trial point. [`one_step`] reads that as a trial to shorten rather than as an
+/// answer.
+fn what_a_trial_of_this_length_measures(
+    surfaces: [&Surface; 2],
+    here: Point,
+    tangent: Vector,
+    step: f64,
+) -> Result<(Point, f64, f64, f64)> {
+    let next = settled(surfaces, here + tangent * step)?;
+    let straight_on = next - here;
+    let middle = here + straight_on * 0.5;
+    let sagitta = (settled(surfaces, middle)? - middle).length();
+    let turned = which_way_the_crossing_runs(surfaces, next)?.dot(tangent);
+    Ok((next, straight_on.length(), sagitta, turned))
 }
 
 /// The refusal the four questions that read the two normals raise, carrying the
@@ -908,8 +1023,8 @@ mod tests {
     /// - [`how_far_off_the_crossing`] answers, with a bound of `1.05e-8`, so its
     ///   enclosed sine did not reach zero;
     /// - [`which_way_the_crossing_runs`] answers;
-    /// - [`one_step`] refuses — and it refuses **from [`settled`], on its very
-    ///   first trial**, not from running out of shortenings.
+    /// - [`one_step`] **used to refuse** — from [`settled`], on its very first
+    ///   trial, not from running out of shortenings.
     ///
     /// **That last line is the one the site tag changed.** Until the refusal
     /// carried [`WhereFollowingACrossingGaveUp`] this test could only see that
@@ -918,19 +1033,23 @@ mod tests {
     /// lands somewhere the two normals round to parallel, and `1 − c·c` is
     /// exactly zero there. §109.6's own untested hypothesis — that `settled`'s
     /// Newton correction reaches zero at a lean of `2.5e-8` while `|u×v|²` is
-    /// still good at `4.9e-11` — is what is happening, and §110 records it.
+    /// still good at `4.9e-11` — is what was happening, and §110 records it.
     ///
-    /// **Whether the settling was right to give up is still not settled here**,
-    /// and this test claims nothing about it. What it does claim is where to
-    /// look: not at the cross of two normals, whose limit
-    /// `the_angle_at_which_a_crossing_stops_having_a_direction` pins at
-    /// `1.1e-16` and which nothing reachable ever asks.
+    /// **And it was a gap, not a limit** (§16.10). `1 − c·c` is a subtraction of
+    /// two numbers that have both rounded to one; `(1 − c)(1 + c)`, with each
+    /// half taken as half a squared length, is the same quantity with no
+    /// subtraction of near-equal numbers in it, and at this lean it hands back
+    /// `4.4e-16` where the subtraction hands back exactly zero. The answer was
+    /// representable the whole time. This test measures both spellings at the
+    /// very point that used to refuse, and then walks the crossing that used to
+    /// be unreachable. `docs/decisions.md` §112.
     ///
-    /// The other side of the pin is four roundings of radius, a lean of
-    /// `4.2e-8`, where the whole march goes through — so the wall is at the
-    /// reachable floor and not somewhere the sweep happened to stop.
+    /// The limit is still there, eight powers of ten further down, where the two
+    /// normals are bit-for-bit the same vector —
+    /// `the_angle_at_which_a_crossing_stops_having_a_direction` pins it at
+    /// `1.1e-16` and shows that nothing recovers a direction below it.
     #[test]
-    fn the_settling_and_not_the_stepping_gives_up_on_a_ball_a_rounding_bigger_than_its_pipe() {
+    fn a_ball_a_rounding_bigger_than_its_pipe_is_walked_once_the_lean_stops_being_a_subtraction() {
         let a_ball_this_many_roundings_bigger_than_its_pipe = |roundings: u64| {
             let pipe_radius = 1.0_f64;
             let ball_radius = f64::from_bits(pipe_radius.to_bits() + roundings);
@@ -969,23 +1088,66 @@ mod tests {
         let tangent = which_way_the_crossing_runs(surfaces, start)
             .expect("and the cross of the two normals answers here too");
 
-        assert_eq!(
-            one_step(surfaces, start, tangent, 0.01, 0.01).map(|(_, chord)| chord),
-            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
-                surfaces: Box::new([ball, pipe]),
-                at: WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
-            }),
-            "one_step gives up, and it gives up settling its first trial rather than \
-             running out of shortenings"
+        // The first trial `one_step` takes, and the one it used to die on. Both
+        // spellings of `1 − c²` are read here rather than argued about.
+        let [(_, one_way), (_, other_way)] = surfaces
+            .map(|surface| how_far_off_and_which_way(surface, start + tangent * 0.01));
+        let leaning = one_way.dot(other_way);
+        let by_subtracting = 1.0 - leaning * leaning;
+        let by_multiplying = (one_way - other_way).length_squared()
+            * 0.5
+            * ((one_way + other_way).length_squared() * 0.5);
+        println!(
+            "at the first trial the two normals lean c − 1 = {:e}; \
+             1 − c·c is {by_subtracting:e} and (1 − c)(1 + c) is {by_multiplying:e}",
+            leaning - 1.0
         );
         assert_eq!(
-            march(surfaces, on_the_crossing, 0.01, 1 << 16).map(|walked| walked.points.len()),
-            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
-                surfaces: Box::new([ball, pipe]),
-                at: WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
-            }),
-            "so this is the refusal the whole march hands back, and it names the pair \
-             and the question rather than only the enclosing solid"
+            by_subtracting, 0.0,
+            "the subtraction is the whole of the old refusal: c rounds to exactly one \
+             at the first trial, so `1 − c·c` is exactly zero"
+        );
+        // `1 − c² = sin²θ`, and the lean is measured above, so this is the
+        // closed form and not a tolerance.
+        let truth = lean * lean;
+        assert!(
+            (by_multiplying / truth - 1.0).abs() < 1e-2,
+            "and the product of the two halves is the answer that was there all along: \
+             {by_multiplying:e} against a true sin² of {truth:e}"
+        );
+
+        let chord = one_step(surfaces, start, tangent, 0.01, 0.01)
+            .expect("so one_step takes its first trial rather than giving up on it")
+            .1;
+        assert!(
+            chord > 0.0,
+            "and the step it took went somewhere: {chord:e}"
+        );
+
+        let walked = march(surfaces, on_the_crossing, 0.01, 1 << 16)
+            .expect("and the whole march goes through at the tightest lean this pair has");
+        assert!(
+            walked.points.len() > 20,
+            "drawing the circle rather than stopping on it: {} points",
+            walked.points.len()
+        );
+        // The crossing of a ball threaded on its own pipe's axis is two circles
+        // of the pipe's radius at ±√(R² − r²), and the seed is a point of one of
+        // them. That is a closed form, so every marched point is checked against
+        // it rather than against the marcher.
+        let [across, _, up] = on_the_crossing.coordinates();
+        let furthest_off = walked
+            .points
+            .iter()
+            .map(|point| {
+                let [x, y, z] = point.coordinates();
+                (x.hypot(y) - across).abs().max((z.abs() - up).abs())
+            })
+            .fold(0.0_f64, f64::max);
+        assert!(
+            furthest_off < 1e-7,
+            "and the points it drew are on that circle, not merely near the pair: \
+             the furthest sat {furthest_off:e} off it"
         );
 
         let (ball, pipe, on_the_crossing) = a_ball_this_many_roundings_bigger_than_its_pipe(4);
