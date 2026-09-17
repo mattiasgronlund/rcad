@@ -29648,6 +29648,43 @@ rather than the text. Either the raise site moves them back or the doc comment
 says which frame they are in; `march.rs` and `mesh.rs` belong to different
 lanes, so this is recorded rather than done.
 
+### 113.7 §112 landed beside this and moved the set, and where the rescued go next
+
+§112 and this section were built at the same time and merged together, so the
+44 of §113.1 was already historical when it was written down. §112 took the
+cancelling subtraction out of `settled`, and measured on the merged tree:
+
+```text
+mise exec -- just t every_file_that_stops_at_the_tangency_wall_names_the_edge_it_was_following
+```
+
+**24 corpus files still stop at the tangency wall**, all of them under
+`kicad/`, and all 24 name an `EDGE_CURVE` with exactly two faces walking it.
+The other twenty get past the marcher now. §113.1's before-and-after is what
+this change did to the 44 that existed when it ran, and is not a count of
+anything today.
+
+**The rescued twenty do not import — they stop at the next wall, and it is a
+third bucket.** `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`, one of the
+twenty, now refuses with
+
+```text
+TheSolidTheFileDescribesIsNotOne { solid: #15, why: CannotMeshAFace {
+  face: …, why: LoopsTouch { corner: 7, side: 4 } } }
+```
+
+which is neither §112's arithmetic nor §113's naming: it is the mesher's own,
+it names a `FaceKey` of a model the caller never sees, and so it publishes the
+whole solid for the same reason the tangency wall used to. Nobody is chasing it
+yet and this is the record that it is there.
+
+**That is also why this section's test names no file.** It named that one, and
+half a day later the file it named was rescued out from under it — the
+assertion still right, the fixture gone. It asserts over whichever files stop
+at the wall now, with a floor of one so that the day the last is rescued it
+goes red rather than green over an empty set. A floor at 24 would go red for
+the good news instead, which is the other way to get this wrong.
+
 ## 114. The same oracle defect, one arm along, fixed 2026-09-17
 
 §98 is the night of 2026-09-14 that crashed on its own oracle. This is that
