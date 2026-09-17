@@ -137,7 +137,8 @@ fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
 ///
 /// A ball of radius one whose middle sits on the axis of a pipe of radius one
 /// rests against the pipe all the way round a single circle. That circle is
-/// where `r² − ρ²` is exactly zero, so it is the same kind of edge as a plane
+/// where `R² − r²` is exactly zero for the ball's `R` and the pipe's `r`, so it
+/// is the same kind of edge as a plane
 /// resting on a ball: turning the pair rounds both radii, and whichever way the
 /// last bits fall the answer changes. A sixty-fourth of a turn about `(1, 1, 1)`
 /// makes the ball miss the pipe altogether; twenty sixty-fourths makes it cut
@@ -301,7 +302,7 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
             one.normal().cross(other.normal()).length_squared() == 0.0
         }
         // A ball whose middle is on a pipe's axis and whose radius is the pipe's
-        // rests against the pipe along a whole circle. `r² − ρ²` is exactly zero
+        // rests against the pipe along a whole circle. `R² − r²` is exactly zero
         // there, so a rounding of either radius either lifts the ball clear or
         // splits the circle in two —
         // `a_ball_resting_along_a_whole_circle_inside_a_pipe_is_a_knife_edge`

@@ -3,21 +3,29 @@
 //! Subtracting the two implicit forms about the point where the axes meet
 //! leaves `(p·(û − ê))·(p·(û + ê)) = 0`, so the crossing is the two bisector
 //! planes and nothing else — at **every** crossing angle and not only at a
-//! right angle. Each plane cuts a pipe in an ellipse `ρ` across and longer the
+//! right angle. Each plane cuts a pipe in an ellipse `r` across and longer the
 //! other way, so the whole crossing is two ellipses that touch each other at
 //! the two points where the walls do.
 //!
 //! # Why the pairs are written as permutations of one direction
 //!
 //! Both halves of the question are asked **exactly**: the widths match when
-//! `r₂²‖w₁‖² − r₁²‖w₂‖²` is zero and the axes meet when `(o₂ − o₁)·(w₁ × w₂)`
-//! is. [`Axis`] scales every direction to length one, so `‖w‖²` for a stored
-//! direction is a sum of three rounded squares and not exactly one — two
-//! directions that are not the same three numbers in some order will not have
-//! the same `‖w‖²` and the pair is then not the degenerate family at all. A
-//! permutation with signs is the same three magnitudes, so its `‖w‖²` is the
-//! same sum of the same rounded squares, bit for bit. That is the family a CAD
-//! system writes out, which states its bores on coordinate directions.
+//! `r₂² − r₁²` is zero and the axes meet when `(o₂ − o₁)·(w₁ × w₂)` is.
+//!
+//! The width half used to read the stored directions as well — it was
+//! `r₂²‖w₁‖² − r₁²‖w₂‖²`, because the surface the predicate certified was then
+//! the pipe of radius `rᵢ/‖wᵢ‖`. [`Axis`] scales every direction to length one,
+//! so `‖w‖²` for a stored direction is a sum of three rounded squares and not
+//! exactly one: two directions that are not the same three numbers in some
+//! order did not have the same `‖w‖²`, and the pair was then not the degenerate
+//! family at all. A permutation with signs is the same three magnitudes, so its
+//! `‖w‖²` is the same sum of the same rounded squares, bit for bit.
+//!
+//! §118.11 lifted that: a pipe is its own `r` wide whatever length its
+//! direction rounded to, so any two pipes written from one radius literal are
+//! now the degenerate family however their axes point. The pairs below stay
+//! permutations because that is what a CAD system writes out, stating its bores
+//! on coordinate directions — not because the question still needs it.
 //!
 //! # The halves have to agree about which family this is
 //!

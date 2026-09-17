@@ -44,14 +44,19 @@ pub const SIDE_OF_CONE: &str = "side of cone";
 ///
 /// # What is certified
 ///
-/// **The slope exactly, and the axis to a rounding.** Unlike a
-/// [`Cylinder`](crate::Cylinder), whose certified radius is
-/// `radius / length(stored direction)`, the expression here divides through by
-/// `|w|²` cleanly: `|x × w|²/|w|² − slope²·((x·w)/|w|)²` is `|x_⊥|² − slope²x_∥²`
-/// whatever `|w|` is. So the surface the predicate is certified about is the
-/// cone of **exactly** this slope about the line the stored [`Axis`] names. What
-/// rounds is where that line is, which is [`Axis::new`]'s rounding and not this
-/// type's.
+/// **The slope exactly, and the axis to a rounding.** The expression here
+/// divides through by `|w|²` cleanly: `|x × w|²/|w|² − slope²·((x·w)/|w|)²` is
+/// `|x_⊥|² − slope²x_∥²` whatever `|w|` is. So the surface the predicate is
+/// certified about is the cone of **exactly** this slope about the line the
+/// stored [`Axis`] names. What rounds is where that line is, which is
+/// [`Axis::new`]'s rounding and not this type's.
+///
+/// This used to be the sentence that set a cone apart from a
+/// [`Cylinder`](crate::Cylinder), whose certified radius was once
+/// `radius / length(stored direction)`. §118.11 put `‖w‖²` on both sides of the
+/// pipe's own comparison, so a pipe reads the same way now and there is no
+/// surface left here whose stored size means something other than the number
+/// the caller wrote.
 ///
 /// Serializes as `(axis, slope)` and is re-checked on the way in.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

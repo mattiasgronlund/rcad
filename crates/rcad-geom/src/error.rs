@@ -332,7 +332,7 @@ pub enum Error {
     /// The family of fixes, shortest first. (a) **A cone and a pipe on one axis
     /// is done**, and it was neither planar nor one sign question. There is no
     /// shape question in it at all: a cone is double-napped and a pipe's radius
-    /// is above zero, so `slope·|h| = ρ` has exactly two roots and the answer is
+    /// is above zero, so `slope·|h| = r` has exactly two roots and the answer is
     /// **always exactly two circles**, with no `Pos/Zero/Neg` table like the one
     /// `a_ball_centred_on_a_pipes_axis` turns on. What is asked instead is
     /// whether the pair shares an axis, and that is **two** sign questions —

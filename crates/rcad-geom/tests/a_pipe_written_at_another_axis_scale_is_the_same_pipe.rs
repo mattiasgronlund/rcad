@@ -2,21 +2,25 @@
 //! and which of the infinitely many vectors along the line someone wrote down
 //! cannot move it.
 //!
-//! **This kernel does not have that property yet**, and `docs/decisions.md`
-//! §118.10 is the argument. `Cylinder::side_of` takes the sign of
-//! `|(p − o) × w|² − r²`. That is degree two in `w` on the left and degree zero
-//! on the right, so what it certifies is the pipe of radius `r / ‖w‖` — and
-//! `‖w‖` is only one to within a rounding. `Axis::new` scales a direction to
-//! length one and that division rounds; `Axis::transformed`, which
-//! `Cylinder::transformed` goes through, does not scale it again at all
-//! (§32.3). So two pipes written with the same radius literal are the same
-//! width here only when their two directions happen to round to the same
-//! `‖w‖²`, which is why the 45° pair out of
-//! `kicad/Relay_SPDT_Finder_32.21-x000.step` is refused where the 90° pairs are
-//! not.
+//! **This kernel has that property since §118.11**, and `docs/decisions.md`
+//! §118.10 is the argument that got it there. `Cylinder::side_of` takes the
+//! sign of `|(p − o) × w|² − r²‖w‖²`, degree two in `w` on both sides, so the
+//! length the direction was stored at cancels and the surface certified is the
+//! pipe the caller named.
 //!
-//! So these tests are red, deliberately, until the predicate is made
-//! homogeneous — `r² ‖w‖²` on the right, §118.10's option 1.
+//! It compared against a bare `r²` until then, degree zero on the right, so what
+//! it certified was the pipe of radius `r / ‖w‖` — and `‖w‖` is only one to
+//! within a rounding. `Axis::new` scales a direction to length one and that
+//! division rounds; `Axis::transformed`, which `Cylinder::transformed` goes
+//! through, does not scale it again at all (§32.3). So two pipes written with
+//! the same radius literal were the same width only when their two directions
+//! happened to round to the same `‖w‖²`, which is why the 45° pair out of
+//! `kicad/Relay_SPDT_Finder_32.21-x000.step` was refused where the 90° pairs
+//! were not.
+//!
+//! **This file was written red**, deliberately, against a kernel that had not
+//! been fixed yet. It went green when §118.10's option 1 landed, and it stays
+//! here as what pins the property.
 //!
 //! # The one point every test here asks about, and why it has teeth
 //!
@@ -31,25 +35,25 @@
 //! Write it out and the predicate's value is
 //!
 //! ```text
-//! |(0, 0, r) × (wx, wy, 0)|² − r²  =  r²(wx² + wy²) − r²  =  r²(‖w‖² − 1),
+//! |(0, 0, r) × (wx, wy, 0)|²  =  r²(wx² + wy²)  =  r²‖w‖²,
 //! ```
 //!
-//! exactly, and the cascade reaches that sign exactly. So the answer is the
-//! sign of `‖w‖² − 1` and **nothing else**: there is no rounding in this test
-//! for a failure to be blamed on. Made homogeneous the right-hand side becomes
-//! `r²‖w‖²`, the two cancel to bit zero, and the answer is `Zero` for every
-//! direction and every length it was written at.
+//! exactly, and that is the right-hand side the predicate now subtracts. The two
+//! cancel to bit zero, so the answer is `Zero` for every direction and every
+//! length it was written at. Against the old bare `r²` the value was
+//! `r²(‖w‖² − 1)`, just as exactly, and the cascade reached that sign exactly —
+//! so the answer was the sign of `‖w‖² − 1` and **nothing else**, with no
+//! rounding in this test for a failure to be blamed on.
 //!
 //! The teeth are in how tight `Zero` is, and the margin is under one ulp.
 //! `one_ulp_either_side_of_the_skin_is_outside_and_inside` shows the
-//! neighbouring two `f64` heights are already decided `Pos` and `Neg`, so
-//! nothing looser than the skin itself is left to ask about. At `r = 0.3` the
-//! 45° direction below stores a `‖w‖²` that is `1.8e-16` short of one, which
-//! puts the surface the kernel certifies `r(1/‖w‖ − 1) = 2.7e-17` outside the
-//! one that was named — half of the `5.6e-17` ulp. So the skin is the only
-//! height of the three whose answer the defect can move, and it moves it. A
-//! probe a whole ulp out would sit on the same side of both surfaces and prove
-//! nothing at all.
+//! neighbouring two `f64` heights are decided `Pos` and `Neg`, so nothing
+//! looser than the skin itself is left to ask about. At `r = 0.3` the 45°
+//! direction below stores a `‖w‖²` that is `1.8e-16` short of one, which put the
+//! surface the kernel certified `r(1/‖w‖ − 1) = 2.7e-17` outside the one that
+//! was named — half of the `5.6e-17` ulp. So the skin was the only height of the
+//! three whose answer the defect could move, and it moved it. A probe a whole
+//! ulp out would sit on the same side of both surfaces and prove nothing at all.
 //!
 //! # What would make these pass for the wrong reason
 //!
@@ -69,8 +73,9 @@
 //!   `a_pipe_about_an_exactly_unit_direction_already_holds_the_probe_point`
 //!   asks the same question of the one direction that stores exactly, and
 //!   `one_ulp_either_side_of_the_skin_is_outside_and_inside` brackets the
-//!   height. Both pass today, so the point is where it is claimed to be and the
-//!   only thing varying in the three reds is `‖w‖`.
+//!   height. Both passed while the other three were red, so the point is where
+//!   it is claimed to be and the only thing that varied in those three was
+//!   `‖w‖`.
 //! - **An inexact probe point.** At the pipes' own origins in that STEP file,
 //!   `10.4 + 0.3` is not an `f64`, so `p − o` would carry an error of `8.9e-16`
 //!   — sixteen times the effect being measured, and enough to drown it either
@@ -86,7 +91,8 @@
 //! nothing between it and the real number. Its square doubled is still
 //! `1 − 1.8e-16`, because no `f64` squares to a half. So there is no direction
 //! for this axis that would store better, and rounding the normalize more
-//! carefully cannot close this. Only making the predicate homogeneous can.
+//! carefully could not have closed this. Only making the predicate homogeneous
+//! could, and §118.11 did.
 
 // The literals here are a STEP file's own digits and the `f64` they land on,
 // and which bits get stored is the whole subject. `FRAC_1_SQRT_2` is named
@@ -105,12 +111,12 @@ const RADIUS: f64 = 0.3;
 /// The control: a pipe whose stored direction is exactly a unit vector holds
 /// the probe point on its skin today.
 ///
-/// `(0, 1, 0)` normalizes to itself, so `‖w‖²` is exactly one and the missing
-/// factor is the number one. This is what tells a red below apart from a probe
-/// point built somewhere it was not meant to be: the same point, the same
-/// radius and the same arithmetic come out `Zero` here, so the only thing left
-/// varying in the three tests that follow is the length the direction got
-/// stored at.
+/// `(0, 1, 0)` normalizes to itself, so `‖w‖²` is exactly one and the factor
+/// that used to be missing is the number one. This is what told the reds below
+/// apart from a probe point built somewhere it was not meant to be: the same
+/// point, the same radius and the same arithmetic came out `Zero` here while
+/// they failed, so the only thing left varying in the three tests that follow is
+/// the length the direction got stored at.
 #[test]
 fn a_pipe_about_an_exactly_unit_direction_already_holds_the_probe_point() {
     let pipe = a_pipe_about_a_flat_line_through_the_origin(Vector::new(0.0, 1.0, 0.0));
@@ -272,15 +278,15 @@ fn turning_a_pipe_and_turning_it_back_leaves_its_skin_where_it_was() {
 /// already `Pos` and `Neg`.
 ///
 /// This is the evidence that the probe point has teeth. One ulp at `0.3` is
-/// `5.6e-17`, and the surface the un-homogeneous predicate certifies for the
-/// 45° direction is `2.7e-17` off the named one — half an ulp, so the skin is
-/// the only height of the three whose answer the defect can change, and it
-/// changes it. A probe further out would agree with both surfaces and prove
+/// `5.6e-17`, and the surface the un-homogeneous predicate certified for the
+/// 45° direction was `2.7e-17` off the named one — half an ulp, so the skin was
+/// the only height of the three whose answer the defect could change, and it
+/// changed it. A probe further out would agree with both surfaces and prove
 /// nothing.
 ///
-/// This one passes today. It is here so that a later reader can tell a real
-/// green on the three tests above from a green bought by moving the probe
-/// somewhere slack.
+/// This one passed while the other three were red, and it is here so that a
+/// later reader can tell their real green from a green bought by moving the
+/// probe somewhere slack.
 #[test]
 fn one_ulp_either_side_of_the_skin_is_outside_and_inside() {
     let just_outside = f64::from_bits(RADIUS.to_bits() + 1);

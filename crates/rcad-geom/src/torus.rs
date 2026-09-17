@@ -43,11 +43,14 @@ pub const SIDE_OF_TORUS: &str = "side of torus";
 /// which is a polynomial in the numbers as stored, with no division and no
 /// square root. Its zero set is **exactly** the torus of radii `R` and `r` about
 /// the line the stored [`Axis`] names, whatever length that axis's direction
-/// came out at — the `w·w` cancels the same way the cone's `|w|²` does. So
-/// unlike a [`Cylinder`](crate::Cylinder), whose certified radius is
-/// `radius / length(stored direction)`, both of a torus's radii are the numbers
-/// the caller wrote. What rounds is where the axis line is, which is
-/// [`Axis::new`]'s rounding and not this type's.
+/// came out at — the `w·w` cancels the same way the cone's `|w|²` does. So both
+/// of a torus's radii are the numbers the caller wrote. What rounds is where the
+/// axis line is, which is [`Axis::new`]'s rounding and not this type's.
+///
+/// A [`Cylinder`](crate::Cylinder) was the exception to that for a while, its
+/// certified radius being `radius / length(stored direction)`. §118.11 put
+/// `‖w‖²` on both sides of the pipe's comparison too, so every surface in this
+/// crate now means the sizes its caller wrote.
 ///
 /// # Why a tube wider than its ring is refused rather than repaired
 ///

@@ -71,10 +71,16 @@ use crate::{Error, Result, Surface};
 /// rescales neither, and the radius is carried over exactly. The origin slips
 /// `POINT_ROUNDOFF · L`; the direction slips `POINT_ROUNDOFF` as a unit vector,
 /// which moves the axis under a point at most `2L` away by
-/// `2 · POINT_ROUNDOFF · L`; and the certified radius `r/‖w‖` moves by
-/// `r · POINT_ROUNDOFF / ‖w‖²`, under `POINT_ROUNDOFF · L`. **Four again.**
+/// `2 · POINT_ROUNDOFF · L`; and the certified radius does not move at all.
+/// **Three, and it used to be four.** The fourth was the radius term: the
+/// certified radius was `r/‖w‖`, which a turned direction moved by
+/// `r · POINT_ROUNDOFF / ‖w‖²`. §118.11 put `‖w‖²` on both sides of the pipe's
+/// comparison, so the certified radius is now the stored `r` and
+/// `Axis::transformed` carries it over untouched.
 ///
-/// So the worst is four plus the point's one, which is `90 · f64::EPSILON · L`.
+/// So the worst is the **plane's** four plus the point's one, which is
+/// `90 · f64::EPSILON · L`, the same total as before — a pipe used to tie with a
+/// plane and now comes in under it.
 /// The constant is `128`, about seven, and the room left over is the same room
 /// [`Isometry::POINT_ROUNDOFF`] leaves for second-order terms — a rounding is a
 /// relative slip of the *computed* value rather than of the true one — taken
