@@ -618,7 +618,7 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
     );
 }
 
-/// The 97 KiCad files that import today, out of 323.
+/// The 110 KiCad files that import today, out of 323.
 ///
 /// **Pinned by name, not by rate** (§44.10): a rate cannot tell a reader which
 /// file moved. This list moves only by an edit to this constant, made by
@@ -655,12 +655,34 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
 /// warning — a count of files a blocker stops **first** is an upper bound on
 /// what removing it is worth, never a projection — governs the two-step item
 /// exactly as it governs the curved one, and 75 was that upper bound.
+///
+/// **The closed-edge lane then moved it from 97 to 110** (§115): the nine
+/// `LED_D1.8mm_*_Horizontal`, three more Finder relays and `SW_NKK_BB15AH`,
+/// with nothing dropping out. Those thirteen were being refused as *a face
+/// walks a closed edge against the way its surface winds*, which the reader was
+/// earning for itself by handing `ORIENTED_EDGE.orientation` through on an edge
+/// with one corner, where it means nothing.
+///
+/// **Sixteen files carried that reason and thirteen came through**, which is
+/// §44.11 item 5 again and this time from both sides: two met a later blocker
+/// the same run, and `LED_D5.0mm-3` still has the closed-edge reason itself.
+/// That last one is the open end of §115 — the reader's hint and the certified
+/// rule disagree about that file, and which of them is right is not measured.
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
     "Fuse_0805_2012Metric.step",
     "Fuse_1206_3216Metric.step",
     "Fuse_1210_3225Metric.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z1.6mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z4.9mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z8.2mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O3.81mm_Z1.6mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O3.81mm_Z4.9mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O3.81mm_Z8.2mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O6.35mm_Z1.6mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O6.35mm_Z4.9mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O6.35mm_Z8.2mm.step",
     "LED_D2.0mm_W4.0mm_H2.8mm_FlatTop.step",
     "LED_D2.0mm_W4.8mm_H2.5mm_FlatTop.step",
     "LED_Rectangular_W3.0mm_H2.0mm.step",
@@ -718,9 +740,12 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "PinHeader_2x36_P2.54mm_Vertical.step",
     "PinHeader_2x39_P2.54mm_Horizontal.step",
     "Relay_DPDT_Finder_30.22.step",
+    "Relay_DPDT_Finder_40.52.step",
     "Relay_DPDT_Omron_G5V-2.step",
     "Relay_DPDT_Omron_G6H-2.step",
     "Relay_DPDT_Panasonic_JW2.step",
+    "Relay_SPDT_Finder_40.31.step",
+    "Relay_SPDT_Finder_40.51.step",
     "Relay_SPDT_HJR-4102.step",
     "Relay_SPDT_Omron_G6E.step",
     "Relay_SPDT_Omron_G6EK.step",
@@ -753,6 +778,7 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "SW_DIP_SPSTx11_Piano_CTS_Series194-11MSTN_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx12_Piano_10.8x32.04mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx12_Piano_CTS_Series194-12MSTN_W7.62mm_P2.54mm.step",
+    "SW_NKK_BB15AH.step",
 ];
 
 /// Every KiCad file that imports must be one of [`KICAD_FILES_THAT_IMPORT`],
