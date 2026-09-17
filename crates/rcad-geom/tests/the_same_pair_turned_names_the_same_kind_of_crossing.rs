@@ -233,11 +233,13 @@ fn a_ball_resting_along_a_whole_circle_inside_a_pipe_answers_one_circle_however_
                 "and `two circles` at twenty sixty-fourths"
             );
         }
-        match old {
-            Decision::Pos => the_old_rule_said_two_circles += 1,
-            Decision::Neg => the_old_rule_said_nothing += 1,
-            Decision::Zero => the_old_rule_agreed += 1,
-            other => panic!("a sum of exact squares has a sign: {other:?}"),
+        if old == Decision::Pos {
+            the_old_rule_said_two_circles += 1;
+        } else if old == Decision::Neg {
+            the_old_rule_said_nothing += 1;
+        } else {
+            assert_eq!(old, Decision::Zero, "a sum of exact squares has a sign");
+            the_old_rule_agreed += 1;
         }
     }
 

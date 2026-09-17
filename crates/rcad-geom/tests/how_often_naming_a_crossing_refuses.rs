@@ -25,6 +25,13 @@
 //! that refuses, it refuses for the one reason §27.1 named, and the refusal is a
 //! **gap**: the same pair written back near the origin is decided.
 //!
+//! **Every other row's sign threshold is zero, and the last of them got there on
+//! 2026-09-17.** The quartic turned family was the holdout, at two tenths of a
+//! percent; §118.11 took the stored direction's length out of the comparison two
+//! leaning pipes ask and the rate went to nothing.
+//! [`A_TURNED_QUARTIC_CROSSING_MAY_REFUSE`] carries the arithmetic and the
+//! property that retired with the rate.
+//!
 //! # A rate on its own says nothing
 //!
 //! Every row also counts what the answers *were*. A regression that made every
@@ -57,14 +64,6 @@ use crossings::{
 /// corpus can be an order of magnitude wider than the one next door in
 /// `rcad-topo` without costing anything.
 const MEASURED_CASES: u32 = 2048;
-
-/// How many times over [`MEASURED_CASES`] the knife-edge demonstration draws.
-///
-/// Twenty, and the number follows a rate rather than a preference:
-/// `every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn`
-/// is about a refusal that used to be 4.64% of its family and is now 0.03% of
-/// it, so the draws had to go up by about the same factor to keep reaching one.
-const DRAWS_A_KNIFE_EDGE_NOW_TAKES: u32 = 20;
 
 /// **§24.18 criterion 6's threshold, and it is zero.**
 ///
@@ -158,27 +157,47 @@ const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.04;
 
 /// How much of the quartic pairs' turned family may refuse for want of a sign.
 ///
-/// **Two tenths of a percent, down from eight, and §32 is what moved it.**
+/// **Zero, down from two tenths of a percent, and §118.11 is what finished it.**
 /// Deciding which of the four shapes two leaning pipes cross in compares
-/// `ρ₁ ± ρ₂` against `δ`, and those are `rᵢ/√Wᵢ` and `|T|/√K` — three square
-/// roots in three metrics. Clearing the roots takes squaring an expansion five
-/// hundred binary orders wide. That does not fit where it stands and does fit
-/// somewhere else, so the comparison is slid up the range before it is squared
-/// and slid nowhere back: a sign is unchanged by multiplying by a positive power
-/// of two, so nothing about the answer is approximate.
+/// `ρ₁ ± ρ₂` against `δ`, and those used to be `rᵢ/√Wᵢ` and `|T|/√K` — three
+/// square roots in three metrics, and clearing them took squaring an expansion
+/// five hundred binary orders wide. §32 slid that comparison up the range before
+/// squaring it and got the rate to 0.00% on the shipped corpus and 0.03% over
+/// twenty times as many draws. §118.11 then made a pipe `r` wide rather than
+/// `r/‖w‖` wide, so `ρᵢ = rᵢ`, the `√Wᵢ` leave the comparison altogether, and the
+/// expansion whose own spread was past the window a slide has to land in stops
+/// existing.
 ///
-/// Measured on the shipped corpus: 0% on the lattice, **0.00% turned**, and
-/// 0.03% over twenty times as many draws. What is left is the expansion whose
-/// own spread is past the window a slide has to land in, which is a spread no
-/// scale narrows — and every one of those is still a knife edge a rotation made,
-/// which
+/// **This row is now the strong assertion its planar sibling above is**, for the
+/// same §27.1 reason and with the same response owed if it ever fires: find
+/// which product left the range, do not raise this number.
+///
+/// Measured on the shipped corpus: 0% on the lattice, **0% turned**, and 0 over
+/// 409 604 draws on each of two seeds — 820 000 turned quartic pairs without one
+/// sign refusal between them.
+///
+/// # The property that went with the rate
+///
 /// `every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn`
-/// demonstrates. The generator draws radii up to five and places up to six apart
-/// in whole numbers, so a lattice pipe pair is *exactly* tangent surprisingly
-/// often — five apart with radii of two and three is one of them — and §28.6
-/// already recorded that turning such a pair leaves it genuinely no longer
-/// tangent, by a few last bits.
-const A_TURNED_QUARTIC_CROSSING_MAY_REFUSE: f64 = 0.002;
+/// used to stand here. It took each refusal, untouched the turn, and showed the
+/// original was settled — which is what told a knife edge a rotation made apart
+/// from a timid filter, and what earned the 0.002 above. It drew twenty times
+/// what the rows around it do because the refusal had already fallen to 0.03%.
+///
+/// **It is retired rather than re-aimed, because what it measured is gone.** The
+/// family it drew from refuses no signs at all now, so its own vacuity guard —
+/// `refused > 0` — is what failed. The only family in this file still refusing
+/// for want of a sign is `a_crossing_somewhere_else`, and
+/// `every_crossing_a_scaling_refuses_is_one_the_same_shapes_on_the_lattice_can_name`
+/// already asks exactly this question of exactly those 217 refusals: take away
+/// the thing that caused the refusal, and the answer comes back. Pointing a
+/// second property at the same family would be one property written twice
+/// (§13 rule 5), and two suites that go green together for one reason are one
+/// suite.
+///
+/// What stands in its place is this constant at zero. A threshold of zero says
+/// more than "under 0.2%, and each of the few was a knife edge" ever did.
+const A_TURNED_QUARTIC_CROSSING_MAY_REFUSE: f64 = 0.0;
 
 /// How much of the knife-edge family may refuse for want of a sign.
 ///
@@ -280,90 +299,6 @@ fn how_often_a_certified_naming_of_a_turned_quartic_crossing_refuses() {
     tally.share_that_refused_is_within(A_TURNED_QUARTIC_CROSSING_MAY_REFUSE);
     tally.share_that_lacked_a_half_space_is_within(A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE);
     tally.enough_of_them_crossed();
-}
-
-/// The turned quartic family's refusals are **knife edges a rotation made**, and
-/// this is the demonstration rather than the paragraph.
-///
-/// A lattice pipe pair five apart with radii of two and three rests exactly
-/// against itself. Turn it and the stored numbers move, so it no longer does —
-/// by a few last bits, which is exactly where the comparison between a sum of
-/// two radii and a distance has nothing left to stand on. §28.6 recorded this
-/// shape for criterion 9; here it is what a refusal rate is made of.
-///
-/// So: every turned pair that could not be named is one whose *untouched*
-/// original the same code settles — either by naming it or by saying it is one
-/// of the two configurations whose crossing runs through itself, which is a
-/// knife edge as much as a tangency is. That is what tells this rate apart from
-/// a timid filter (§14.7).
-///
-/// **It draws twenty times what the rows above do**, because the refusal it is
-/// about is now 0.03% of the family rather than 4.64% and 2048 draws reach none
-/// of it. A property with nothing to measure passes for the wrong reason, which
-/// is the failure §14.7 is about, so the draws follow the rate down.
-#[test]
-fn every_turned_quartic_crossing_that_refuses_was_exactly_tangent_before_the_turn() {
-    let mut runner = TestRunner::new_with_rng(
-        configured(
-            soak::cases(MEASURED_CASES)
-                .checked_mul(DRAWS_A_KNIFE_EDGE_NOW_TAKES)
-                .expect("that many draws is more than one run can count"),
-        ),
-        soak::seeded(),
-    );
-    let refused = Cell::new(0usize);
-    let steady = Cell::new(0usize);
-
-    let outcome = runner.run(&a_quartic_turned_crossing(), |crossing| {
-        let [first, second] = crossing.surfaces();
-        if !matches!(
-            intersect(
-                &first,
-                &second,
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            ),
-            Err(Error::Undecidable { .. })
-        ) {
-            return Ok(());
-        }
-        refused.set(refused.get() + 1);
-
-        let mut before_the_turn = crossing;
-        before_the_turn.turn = None;
-        let [first, second] = before_the_turn.surfaces();
-        if !matches!(
-            intersect(
-                &first,
-                &second,
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            ),
-            Err(Error::Undecidable { .. })
-        ) {
-            steady.set(steady.get() + 1);
-        }
-        Ok(())
-    });
-    if let Err(why) = outcome {
-        panic!("{why}");
-    }
-
-    println!(
-        "of {} refused turned crossings, {} were settled before the turn",
-        refused.get(),
-        steady.get()
-    );
-    assert!(
-        refused.get() > 0,
-        "this property measures nothing unless the turned family actually refuses something"
-    );
-    assert_eq!(
-        steady.get(),
-        refused.get(),
-        "every one of these is a pair the turn put on a knife edge, so the same shapes \
-         untouched have to be settled one way or the other"
-    );
 }
 
 /// **The band**, and the family §28.5 said the corpus could not reach.
