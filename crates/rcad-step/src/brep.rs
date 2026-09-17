@@ -128,6 +128,9 @@ struct Walk {
     wire_names: Vec<EntityId>,
     face_names: Vec<EntityId>,
     face_surfaces: Vec<Surface>,
+    /// The surfaces either side of each closed edge, filled in before any face
+    /// of the shell is described — see [`Walk::find_the_closed_edges`].
+    closed_edges: BTreeMap<EntityId, Vec<Surface>>,
 }
 
 impl Walk {
@@ -143,6 +146,7 @@ impl Walk {
             wire_names: Vec::new(),
             face_names: Vec::new(),
             face_surfaces: Vec::new(),
+            closed_edges: BTreeMap::new(),
         }
     }
 
@@ -154,13 +158,65 @@ impl Walk {
         shell: EntityId,
     ) -> Result<(), Refusal> {
         let faces = reading.references_at(shell, "CLOSED_SHELL", 1)?;
+        self.find_the_closed_edges(reading, &faces);
         let mut skin: Vec<(DraftFace, Orientation)> = Vec::with_capacity(faces.len());
-        for face in faces {
-            skin.push(self.describe_the_face(reading, face)?);
+        for face in &faces {
+            skin.push(self.describe_the_face(reading, *face)?);
         }
         self.builder
             .add_shell(&skin)
             .map_err(|why| self.refused(shell, why))
+    }
+
+    /// Record the surfaces either side of every closed edge of the shell,
+    /// before any face of it is described.
+    ///
+    /// **A closed edge's [`Orientation`] cannot be read off one face, which is
+    /// the whole reason this pass exists.** An edge with one corner has nothing
+    /// in its ends to say which way round it goes, so what says instead is the
+    /// *pair* of surfaces either side of it — and a face being described knows
+    /// only its own. See [`Walk::which_way_round_a_closed_edge_is_stored`] for
+    /// the rule this feeds, and `docs/decisions.md` §115 for why the file's own
+    /// flags cannot answer it.
+    ///
+    /// A face this cannot read is passed over rather than refused. Describing it
+    /// is about to refuse it by name, or — in a [`ProbeWalk`] — to record the
+    /// reason and carry on, and a second copy of that decision here could only
+    /// come to disagree with the first.
+    fn find_the_closed_edges(&mut self, reading: &Reading<'_>, faces: &[EntityId]) {
+        for face in faces {
+            let Ok(keyword) =
+                reading.keyword_of(self.brep, *face, &["ADVANCED_FACE", "FACE_SURFACE"])
+            else {
+                continue;
+            };
+            let Ok((surface, _)) = self.surface_of_the_face(reading, *face, keyword) else {
+                continue;
+            };
+            let Ok(bounds) = reading.references_at(*face, keyword, 1) else {
+                continue;
+            };
+            for bound in bounds {
+                let Ok((loop_id, _)) = self.loop_of_bound(reading, *face, bound) else {
+                    continue;
+                };
+                let Ok(uses) = reading.references_at(loop_id, "EDGE_LOOP", 1) else {
+                    continue;
+                };
+                for use_of_an_edge in uses {
+                    let Ok(edge_curve) = reading.reference_at(use_of_an_edge, "ORIENTED_EDGE", 3)
+                    else {
+                        continue;
+                    };
+                    if an_edge_with_one_corner(reading, edge_curve) {
+                        self.closed_edges
+                            .entry(edge_curve)
+                            .or_default()
+                            .push(surface);
+                    }
+                }
+            }
+        }
     }
 
     /// One `ADVANCED_FACE`: the surface it sits on, the wires that trim it, and
@@ -187,14 +243,7 @@ impl Walk {
         face: EntityId,
     ) -> Result<(DraftFace, Orientation), Refusal> {
         let keyword = reading.keyword_of(self.brep, face, &["ADVANCED_FACE", "FACE_SURFACE"])?;
-        let sits_on = reading.reference_at(face, keyword, 2)?;
-        let written = reading.surface_at(face, sits_on)?;
-        let same_sense = reading.flag_at(face, keyword, 3)?;
-        let (surface, used) = match (written.as_plane(), same_sense) {
-            (_, true) => (written, Orientation::Forward),
-            (Some(flat), false) => (Surface::Plane(flat.reversed()), Orientation::Forward),
-            (None, false) => (written, Orientation::Reversed),
-        };
+        let (surface, used) = self.surface_of_the_face(reading, face, keyword)?;
 
         let bounds = reading.references_at(face, keyword, 1)?;
         let outer_first = self.outer_bound_first(reading, face, &bounds, &surface)?;
@@ -209,6 +258,27 @@ impl Walk {
         self.face_names.push(face);
         self.face_surfaces.push(surface);
         Ok((drafted, used))
+    }
+
+    /// The surface a face sits on as it is stored, and how the shell uses it.
+    ///
+    /// The two-line table is [`Walk::describe_the_face`]'s, and it is here
+    /// because [`Walk::find_the_closed_edges`] needs the same answer a whole
+    /// pass earlier — read twice off one spelling rather than written twice.
+    fn surface_of_the_face(
+        &self,
+        reading: &Reading<'_>,
+        face: EntityId,
+        keyword: &'static str,
+    ) -> Result<(Surface, Orientation), Refusal> {
+        let sits_on = reading.reference_at(face, keyword, 2)?;
+        let written = reading.surface_at(face, sits_on)?;
+        let same_sense = reading.flag_at(face, keyword, 3)?;
+        Ok(match (written.as_plane(), same_sense) {
+            (_, true) => (written, Orientation::Forward),
+            (Some(flat), false) => (Surface::Plane(flat.reversed()), Orientation::Forward),
+            (None, false) => (written, Orientation::Reversed),
+        })
     }
 
     /// The bounds of a face with the outer one first, which is the order
@@ -474,6 +544,15 @@ impl Walk {
     }
 
     /// One `ORIENTED_EDGE`, as one use of one edge running one way round.
+    ///
+    /// **[`Orientation`] means two different things and the file answers only
+    /// one of them.** On an edge with two corners it means *from the start
+    /// corner towards the end one*, and `ORIENTED_EDGE.orientation` against the
+    /// bound's own says exactly that. On a **closed** edge there are no two
+    /// corners to run between, and this kernel gives the word its other meaning
+    /// — the way the curved surface either side of the edge winds — which the
+    /// file never wrote down. [`Walk::which_way_round_a_closed_edge_is_stored`]
+    /// works it out; `docs/decisions.md` §115.
     fn describe_the_coedge(
         &mut self,
         reading: &Reading<'_>,
@@ -481,8 +560,11 @@ impl Walk {
         walk_it_backwards: bool,
     ) -> Result<DraftCoedge, Refusal> {
         let edge_curve = reading.reference_at(oriented, "ORIENTED_EDGE", 3)?;
-        let forwards = reading.flag_at(oriented, "ORIENTED_EDGE", 4)? != walk_it_backwards;
+        let along_the_loop = reading.flag_at(oriented, "ORIENTED_EDGE", 4)? != walk_it_backwards;
         let edge = self.describe_the_edge(reading, edge_curve)?;
+        let forwards = self
+            .which_way_round_a_closed_edge_is_stored(reading, edge_curve, along_the_loop)?
+            .unwrap_or(along_the_loop);
         let coedge = self
             .builder
             .add_coedge(
@@ -496,6 +578,103 @@ impl Walk {
             .map_err(|why| self.refused(oriented, why))?;
         self.coedge_names.push(oriented);
         Ok(coedge)
+    }
+
+    /// Which way round a closed edge this use of it goes, or `None` for an edge
+    /// whose two corners already say.
+    ///
+    /// **The rule is `rcad-topo`'s and this only reads it.** A closed edge is
+    /// stored running the way the curved surface either side of it winds, which
+    /// is what [`Surface::the_way_its_first_coordinate_runs_at`] gives;
+    /// `Model::validate` reads the same rule back with
+    /// `a_closed_crossing_is_walked_the_way_it_is_stored` and refuses by
+    /// `AClosedEdgeIsWalkedAgainstItsSurface` when a coedge disagrees. So
+    /// [`Orientation::Forward`] on a closed edge is this use of it travelling
+    /// that way and nothing else — `ORIENTED_EDGE.orientation` answers a
+    /// different question and agreeing with this one is luck (§115).
+    ///
+    /// Which of the two surfaces names the direction is [`the_curved_one_of`],
+    /// and it has to be the one `rcad-topo` picks or the file is walked against
+    /// the very rule it is read by.
+    ///
+    /// **The sign is a hint and not a decision, which is what makes plain `f64`
+    /// allowed here** — the same standing [`Walk::area_swept_by`]'s sweep has.
+    /// `Model::validate` asks the certified question of this edge moments
+    /// later, so a hint that came out wrong is a refusal by name and never a
+    /// solid with a seam running backwards.
+    ///
+    /// A travel that dots to exactly zero against the winding is the one place
+    /// the hint is a guess: `which_way_a_closed_crossing_turns` reads the
+    /// surface's latitude there, and this has no gradient to build one from.
+    /// [`Orientation::Forward`] is the guess and that named refusal is the cost.
+    fn which_way_round_a_closed_edge_is_stored(
+        &self,
+        reading: &Reading<'_>,
+        edge_curve: EntityId,
+        along_the_loop: bool,
+    ) -> Result<Option<bool>, Refusal> {
+        if !an_edge_with_one_corner(reading, edge_curve) {
+            return Ok(None);
+        }
+        let Some(carried_by) = self.closed_edges.get(&edge_curve) else {
+            return Ok(None);
+        };
+        let at = reading.reference_at(edge_curve, "EDGE_CURVE", 1)?;
+        let corner = self.point_of_vertex(reading, at)?;
+        let Some(winding) = the_curved_one_of(carried_by)
+            .and_then(|curved| curved.the_way_its_first_coordinate_runs_at(corner))
+        else {
+            return Ok(None);
+        };
+        let Some(travel) =
+            self.which_way_a_closed_edge_is_travelled(reading, edge_curve, corner, along_the_loop)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(travel.dot(winding) >= 0.0))
+    }
+
+    /// Which way this use of a closed edge travels in space, at its one corner.
+    ///
+    /// The `CIRCLE` or `ELLIPSE` under the edge turns the way a right hand turns
+    /// about its own axis, so `w × (corner − centre)` is where its parameter
+    /// goes; `EDGE_CURVE.same_sense` and the way the loop uses the edge each
+    /// turn that round.
+    ///
+    /// **An ellipse's tangent is not exactly that, and the difference cannot
+    /// change which way round it goes.** The true tangent `(−a sin t, b cos t)`
+    /// dots `w × (corner − centre)` to `ab`, which is positive whatever `t` is,
+    /// so the two never point opposite ways round the axis. The caller reads a
+    /// sign and not an angle, which is the standing an ellipse already has in
+    /// [`Walk::area_an_arc_bulges_past_its_chord`].
+    ///
+    /// `None` for a curve kind that is neither, which [`Walk::run_along`] has
+    /// already refused this edge by name for.
+    fn which_way_a_closed_edge_is_travelled(
+        &self,
+        reading: &Reading<'_>,
+        edge_curve: EntityId,
+        corner: Point,
+        along_the_loop: bool,
+    ) -> Result<Option<Vector>, Refusal> {
+        let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3)?;
+        let Some(held) = reading.file().instance(curve) else {
+            return Ok(None);
+        };
+        let keyword = match held.parts()[0].keyword() {
+            "CIRCLE" => "CIRCLE",
+            "ELLIPSE" => "ELLIPSE",
+            _ => return Ok(None),
+        };
+        let position = reading.reference_at(curve, keyword, 1)?;
+        let place = reading.placement_at(curve, position)?;
+        let round = place.axis.cross(corner - place.origin);
+        let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)?;
+        Ok(Some(if along_the_loop == along_the_curve {
+            round
+        } else {
+            -round
+        }))
     }
 
     /// One `EDGE_CURVE`, described once however many faces walk it.
@@ -995,6 +1174,7 @@ impl ProbeWalk {
     fn probe_the_shell(&mut self, reading: &Reading<'_>, shell: EntityId) -> Result<(), Refusal> {
         let faces = reading.references_at(shell, "CLOSED_SHELL", 1)?;
         let face_count = faces.len();
+        self.walk.find_the_closed_edges(reading, &faces);
         let mut skin: Vec<(DraftFace, Orientation)> = Vec::with_capacity(face_count);
         for face in faces {
             if let Some(described) = self.probe_the_face(reading, face) {
@@ -1155,6 +1335,40 @@ impl ProbeWalk {
 /// infinite offset, or a chord and an axis that are along each other so the
 /// cross product has no length. Both are the file's numbers and neither is
 /// reachable from a well-formed arc.
+/// Whether an `EDGE_CURVE` starts and ends at the same `VERTEX_POINT`, which is
+/// what [`EdgeRun::RightRoundWhereItsFacesCross`] is named for.
+///
+/// **Two `VERTEX_POINT`s at the same coordinates are two corners here too**, the
+/// same as everywhere else in this walk — see [`Walk::describe_the_vertex`]. An
+/// edge between those does not close, and asking it to be walked by the
+/// closed-edge rule would be reading a rule off a wire that is open.
+fn an_edge_with_one_corner(reading: &Reading<'_>, edge_curve: EntityId) -> bool {
+    matches!(
+        (
+            reading.reference_at(edge_curve, "EDGE_CURVE", 1),
+            reading.reference_at(edge_curve, "EDGE_CURVE", 2),
+        ),
+        (Ok(start), Ok(end)) if start == end
+    )
+}
+
+/// Which of the surfaces either side of a closed edge names which way it runs.
+///
+/// **The same pick `rcad-topo`'s `the_curved_one_of` makes, and it has to be the
+/// same one.** A plane never names one — two planes cross in a straight line,
+/// which does not close — and where both are curved the order over the numbers
+/// each surface is written with settles it, so that both faces of the edge land
+/// on one surface however the file happened to write the pair down.
+/// [`Surface::how_it_sorts_against`] is that order, and `rcad-topo` sorts its own
+/// copy of the same bits into the same rows.
+fn the_curved_one_of(carried_by: &[Surface]) -> Option<Surface> {
+    carried_by
+        .iter()
+        .filter(|surface| surface.as_plane().is_none())
+        .copied()
+        .min_by(Surface::how_it_sorts_against)
+}
+
 fn a_half_space_holding_both(corners: [Point; 2], facing: Vector) -> Option<HalfSpace> {
     let below = |corner: Point| {
         let terms = facing.components().into_iter().zip(corner.coordinates());
