@@ -13,7 +13,9 @@
 //! pipe the namer measures with is a rounding wider or narrower than the pipe
 //! that was written down.
 //!
-//! So these tests are red, deliberately, until `intersect.rs` uses `rᵢ`.
+//! So two of the five tests here are red, deliberately, until `intersect.rs`
+//! uses `rᵢ`. The other three are the controls that say the red is the kernel's
+//! and not the probe geometry's.
 //!
 //! # The one crossing every test here asks about, and why it has teeth
 //!
@@ -210,6 +212,33 @@ fn one_ulp_wider_or_narrower_is_already_clear_or_already_crossing() {
     assert!(
         matches!(crossing, Ok(SurfaceMeet::Curves(_))),
         "one ulp narrower than {GAP} the two pipes cut through each other, not {crossing:?}",
+    );
+}
+
+/// The wrong answer is not only on the knife edge: for the longer-stored shape
+/// it reaches a whole ulp past it.
+///
+/// `(1, 6, 0)` stores a direction whose squared length is `2.5e-16` above one,
+/// which is more than the `2.2e-16` an ulp of the gap is worth. So pulling the
+/// two axes one ulp closer than `RADIUS + RADIUS` — where the two pipes
+/// genuinely cut through each other, by a thin lens but by a real one — is
+/// still not enough to get a crossing back out of the namer.
+///
+/// This one is red on the base too, and it is the answer to anyone reading the
+/// red above as a knife-edge quibble: there is no knife edge here, the pipes
+/// overlap, and the kernel says they miss.
+#[test]
+fn pipes_that_overlap_are_still_reported_as_missing_when_their_axes_stored_long() {
+    let [across, mirrored] = mirrored_directions(SHAPES[1]);
+    let narrower = GAP.next_down();
+    let crossing = name_the_crossing(&two_pipes_resting_against_each_other(
+        across, mirrored, narrower,
+    ));
+    assert!(
+        matches!(crossing, Ok(SurfaceMeet::Curves(_))),
+        "axes {narrower} apart is nearer than {RADIUS} + {RADIUS}, so two pipes about \
+         {:?} and its mirror cut through each other, not {crossing:?}",
+        SHAPES[1],
     );
 }
 
