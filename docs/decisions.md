@@ -35,9 +35,9 @@ pair**, two equal pipes whose axes cross. §118 is the demonstration §16.10
 wanted: two ellipses in closed form, and two classifiers that disagree.
 §107.1's "44" was never a classification.
 
-**What is left:** §118.10's homogeneity question, holding the two 45° files;
-§111.3's expansion tier; §113.7's `LoopsTouch`, where the files §115 rescued
-stop next; and §115.4's one file whose `f64` hint and the rule disagree.
+**What is left:** §113.7's `LoopsTouch`, where the files §115 rescued stop
+next; §118.11's unfinished half of `intersect.rs`, which would retire §29's
+width; §111.3's expansion tier; and §115.4's hint against the certified rule.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, and healing, the biggest bucket, is refused by name in §42.9. §45.2
@@ -30409,6 +30409,22 @@ It is never called. Its only caller is `FaceView::crossed_with`
 yet ... Its consumer is named and it is not in this milestone." That is §13
 working as intended, and it is also why the check has never run on a real file.
 
+**Corrected 2026-09-17, on §118.11's lane's report.** The two sentences above
+are wrong about *which* function has the dead caller, and the sentence "it is
+never called" is false as written. `where_two_leaning_pipes_cross` **is** called,
+from `where_two_pipes_cross` (`intersect.rs:868`), in the live `Decision::Pos`
+arm of the two-pipe dispatch. What has `FaceView::crossed_with` for a caller is
+the public entry two frames above it, `pub fn intersect` (`intersect.rs:151`).
+
+**The conclusion the section rests on is unaffected**, and it is the reachability
+of the entry, not of the leaf: no path from `Import::read` reaches `intersect`,
+so the named refusal never runs on an imported file. Everything below this
+paragraph stands. But read the claim as "import cannot reach this classifier",
+which is what was measured, and never as "this function is dead" — a lane read
+the loose version, went to check it against the file, and found it false, which
+is exactly the cost §16.10 is about. A reachability claim names the frame it is
+about.
+
 What import runs instead is `rcad_geom::walk`:
 
 ```
@@ -30642,10 +30658,24 @@ marcher. Of its two halves:
   and the exact arm certifies `Pos`.
 
   **A better normalize cannot close this, and that is worth knowing before
-  anyone tries.** The stored component is not merely near `1/√2`, it *is*
-  `f64::consts::FRAC_1_SQRT_2` — the nearest `f64` to `1/√2`, with nothing
-  between it and the real number. `2c²` is still `1 − 1.77e-16`, because no `f64`
-  squares to a half. The rounding is already optimal and the gap survives it.
+  anyone tries** — but not for the reason first written here. The stored
+  component is `0.7071067811865475`, which is **one ulp below**
+  `f64::consts::FRAC_1_SQRT_2`; `Axis::new`'s normalize is not correctly rounded.
+  That is a real if tiny defect and it is *not* what holds this family back.
+  Even the nearest `f64` does not help: `2c² − 1` is `−1.7730231858351654e-16`
+  for the value stored and `+1.3671617315323846e-16` for `FRAC_1_SQRT_2`. No
+  `f64` doubles its square to one, so rounding the normalize better **moves** the
+  gap and does not close it.
+
+  **This paragraph first said the opposite** — that the normalize already lands
+  on the nearest `f64` — on a lane's report, taken without re-deriving it, one
+  turn after the same session wrote that a lane's word for a number is not
+  evidence. `1/math.sqrt(2)` is two roundings and lands a ulp low, which is how
+  both the lane and the check agreed and were both wrong. The correction never
+  reached `main`; the gate caught it, because the test carrying the same claim
+  was merged beside it and the two halves were only ever run together by the
+  dispatcher. **That is the argument for gating the merged tree and not the
+  lanes.**
 
 **A tolerant policy does not rescue it, at any working size.** Measured at
 `tolerant(1.0)`, `(10.0)` and `(100.0)`: the same refusal, unchanged.
@@ -30704,6 +30734,10 @@ named or the ones the normalize rounded to, and that is Mattias's to settle, not
 a lane's. Until it is, the two Finder relays stay refused and the census stays
 24/0/0/2.
 
+**Settled the same day: Mattias chose option 1, and §118.11 is it.** The two
+relays import, and the undecided bucket is empty. Read the paragraph above as
+the state when this section was written.
+
 #### Correction: `Plane` is not the follow-on, and this section said it was
 
 The paragraph above used to end *"`Plane::side_of_point` carries the same caveat
@@ -30740,3 +30774,87 @@ The second is the **namer**, where `walk.rs` is the walker — the two halves §
 is about — so fixing one without the other would re-create §118 pointing the
 other way. `cone.rs` was checked and is homogeneous already, both of its terms
 being degree two in `w`.
+
+### 118.11 A pipe is the one the caller named, built 2026-09-17
+
+Option 1 of §118.10, chosen by Mattias on 2026-09-17 off that section's table.
+`Cylinder::side_of` now takes the sign of `|(p − o) × w|² − r²‖w‖²`. Both sides
+are degree two in `w`, so a cylinder means what its own doc comment always said
+it meant — every point exactly `radius` from the axis — whatever length the
+direction was written or rounded to.
+
+**kicad import 112/323 → 114/323**, nist 1/44 unmoved, read off the gate's own
+run. The two files are the §118.9 pair,
+`kicad/Relay_SPDT_Finder_32.21-x000.step` and
+`kicad/Relay_SPST_Finder_32.21-x300.step`, and no pinned file stopped importing.
+The census's undecided bucket, 2 at §118.9, is now empty: **26 → 24 files at the
+wall, 24 tangent, 0 transverse, 0 undecided.** `just gate`: 1952 tests.
+
+#### The three arms, and the bound that did not move
+
+`exactly` builds `‖w‖²` as three `two_product` squares summed, then scales it by
+`radius²` and by that product's roundoff in turn — the shape `cone.rs` already
+uses. Buffers were re-derived rather than nudged: `LONGEST_DIRECTION_SQUARED = 6`,
+`LONGEST_RADIUS_TERM = 24`, and `LONGEST_CYLINDER_TOTAL` loses its old `+ 2`,
+which was exactly the old bare `r²`.
+
+`SIDE_OF_CYLINDER_ERROR_BOUND` **stays at `(10 + 80ε)ε`, and that is a
+re-derivation and not an omission**: the radius term's rounding chain reaches
+`(1+ε)⁶`, and six is under the cross-product side's ten, so ten still governs.
+§15.6 wants the arithmetic written down where a published bound survives a
+change, and it is, in the constant's own doc.
+
+#### Two sites the brief's own grep missed
+
+The brief named seven `direction().length()` hits. **Only five were width
+recoveries**; two are `direction * length().recip()`, unit-direction
+normalizations that stay. And the grep missed two sites that alias the direction
+first — `where_a_plane_cuts_a_pipe`, whose `radius_down_the_slope` was
+`r‖n‖/|n·w|`, the *old* certified radius times the correct lean, and which gains
+a `* along.length()` because the true stretch is `‖n‖‖w‖/|n·w|`; and a test
+helper. **A write-set table built from a grep is a table with holes in it** where
+an expression binds the thing it divides by to a local first. §118.10's own count
+of seven is wrong for the same reason and is left standing above as the
+measurement it was.
+
+#### What is left in `intersect.rs`, and why it was not done
+
+`intersect.rs` is written **throughout** in the old convention and only the one
+`same_thickness` question moved. The rest does not come apart piecemeal:
+`certified_radii_enclosing` (`:1294`) returns `rᵢ/√(wᵢ·wᵢ)` and its `enclosing`
+arm pairs with `how_two_radii_and_a_gap_compare_exactly`'s `exactly` arm inside
+one `Question`. **Changing one without the other lets level 3 certify a sign the
+enclosure does not bracket**, which is worse than the disagreement it would fix.
+Three live callers at `:1085`, `:1181`, `:1262`, and the docs carrying the
+convention at `:12`, `:880`, `:955`, `:1055`, `:2455`, `:2498`, `:2540`.
+
+**There is a prize in that lane and not only a tidy-up.** With `ρᵢ = rᵢ` the
+leaning-pipes comparison `ρ₁ ± ρ₂` against `δ = |T|/√K` clears to `(r₁ ± r₂)²K`
+against `T²`, with **no `W` anywhere** — and that is the expansion §29 records as
+five hundred binary orders wide and unsquarable where it stands. It would stop
+existing. `the_question_two_leaning_pipes_ask_is_too_wide_to_square_where_it
+_stands` is a self-contained test of `Exact` and survives either way; §29's
+*geometric* claim would need revisiting, and §16.10 says a claim that something
+cannot be done is owed a demonstration when the ground under it moves.
+
+#### The test that fails without it
+
+`a_pipe_about_a_forty_five_degree_axis_is_exactly_its_own_radius_wide`: a unit
+pipe about `(1,1,0)`, and the point `(0,0,1)` exactly one radius out. Its own
+`assert_ne!(w₀² + w₁², 1.0)` is the demonstration that the old form's exact value
+`2a² − 1` is non-zero, so the old predicate certified `Neg` where the truthful
+answer is `Zero`.
+
+Beside it, `a_pipe_written_at_another_axis_scale_is_the_same_pipe.rs` puts every
+probe at `(0, 0, r)` on a pipe through the origin lying in the `xy` plane, so
+`p − o` is exact and the predicate collapses to `r²(‖w‖² − 1)` — the sign of the
+stored direction's own rounding and nothing else. It was written red, against
+`235226b3`, by a lane with no write access to `src/`, and the failing sign went
+**both ways** across its cases, which is what separates the defect from a probe
+point built in the wrong place.
+
+One trap it recorded: `scaled_to_length_one_from_anywhere` divides by the largest
+component first, so `(1,2,0)` and `(3,6,0)` store **identically**. A test
+asserting that two spellings of one direction agree would pass vacuously. Every
+assertion in that file is against `Decision::Zero` — the geometry — and never
+against the other spelling.
