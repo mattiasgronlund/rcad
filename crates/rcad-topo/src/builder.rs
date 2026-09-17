@@ -633,20 +633,22 @@ struct Written {
 /// If the sweep names an edge this build did not write. The model it swept is
 /// the one written two lines earlier and holds nothing else, so an edge of it
 /// that is not in `edges` is a bug here.
-fn which_described_edge_the_sweep_meant(scratch: &Model, edges: &[EdgeSlot], why: Error) -> Error {
-    match why {
-        Error::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, why } => {
-            let slot = edge.slot_in(scratch.id());
-            let described_at = edges
-                .iter()
-                .position(|&written| written == slot)
-                .expect("the sweep ran on the solid this build just wrote and on nothing else");
-            Error::ADraftEdgeHasACrossingThatCannotBeFollowed {
-                edge: described_at,
-                why,
-            }
-        }
-        other => other,
+fn which_described_edge_the_sweep_meant(
+    scratch: &Model,
+    edges: &[EdgeSlot],
+    refusal: Error,
+) -> Error {
+    let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, why } = refusal else {
+        return refusal;
+    };
+    let slot = edge.slot_in(scratch.id());
+    let described_at = edges
+        .iter()
+        .position(|&written| written == slot)
+        .expect("the sweep ran on the solid this build just wrote and on nothing else");
+    Error::ADraftEdgeHasACrossingThatCannotBeFollowed {
+        edge: described_at,
+        why,
     }
 }
 

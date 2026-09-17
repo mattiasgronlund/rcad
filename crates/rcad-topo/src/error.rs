@@ -942,12 +942,12 @@ impl From<rcad_geom::Error> for Error {
 /// rather than being buried a layer deeper, for §17.7's reason: what gave up
 /// belongs in the undecided tier whoever was walking.
 pub(crate) fn walking_along_this_edge_refused(edge: EdgeKey, why: rcad_geom::Error) -> Error {
-    match why {
-        rcad_geom::Error::Undecidable { records } => Error::Undecidable { records },
-        other => Error::ACrossingAlongThisEdgeCouldNotBeFollowed {
-            edge,
-            why: Box::new(other),
-        },
+    if matches!(why, rcad_geom::Error::Undecidable { .. }) {
+        return why.into();
+    }
+    Error::ACrossingAlongThisEdgeCouldNotBeFollowed {
+        edge,
+        why: Box::new(why),
     }
 }
 
