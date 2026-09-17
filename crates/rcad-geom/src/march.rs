@@ -562,16 +562,15 @@ fn one_step(
     let mut step = from;
     let mut why_the_last_trial_could_not_be_measured = None;
     for _ in 0..SHORTENINGS_BEFORE_GIVING_UP {
-        let (next, chord, sagitta, turned) = match what_a_trial_of_this_length_measures(
-            surfaces, here, tangent, step,
-        ) {
-            Ok(measured) => measured,
-            Err(why) => {
-                why_the_last_trial_could_not_be_measured = Some(why);
-                step = step.sqrt().min(step * 0.5);
-                continue;
-            }
-        };
+        let (next, chord, sagitta, turned) =
+            match what_a_trial_of_this_length_measures(surfaces, here, tangent, step) {
+                Ok(measured) => measured,
+                Err(why) => {
+                    why_the_last_trial_could_not_be_measured = Some(why);
+                    step = step.sqrt().min(step * 0.5);
+                    continue;
+                }
+            };
         if sagitta <= room * SAGITTA_MAY_TAKE
             && sagitta <= chord * SAGITTA_MAY_TAKE_OF_ITS_CHORD
             && turned >= 0.0
@@ -1090,8 +1089,8 @@ mod tests {
 
         // The first trial `one_step` takes, and the one it used to die on. Both
         // spellings of `1 − c²` are read here rather than argued about.
-        let [(_, one_way), (_, other_way)] = surfaces
-            .map(|surface| how_far_off_and_which_way(surface, start + tangent * 0.01));
+        let [(_, one_way), (_, other_way)] =
+            surfaces.map(|surface| how_far_off_and_which_way(surface, start + tangent * 0.01));
         let leaning = one_way.dot(other_way);
         let by_subtracting = 1.0 - leaning * leaning;
         let by_multiplying = (one_way - other_way).length_squared()
