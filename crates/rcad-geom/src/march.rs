@@ -658,10 +658,7 @@ fn how_far_off_and_which_way(surface: &Surface, at: Point) -> (f64, Vector) {
             let out = at - pipe.axis().origin();
             let sideways = out - along * (out.dot(along) / along.length_squared());
             let reach = sideways.length();
-            (
-                (reach * along.length() - pipe.radius()) / along.length(),
-                sideways * reach.recip(),
-            )
+            (reach - pipe.radius(), sideways * reach.recip())
         }
         // Nothing in this crate marches a crossing with a cone on it — every
         // pair that reaches the marcher is a quartic, and
@@ -750,7 +747,11 @@ fn how_far_off_a_ball_enclosing(ball: &Sphere, at: Point) -> (Interval, [Interva
     )
 }
 
-/// `(‖(p − o) × w‖ − r) / √(w·w)`, and the unit direction out from the axis.
+/// `‖(p − o) × w‖ / √(w·w) − r`, and the unit direction out from the axis.
+///
+/// The radius is subtracted from a plain distance and not from one scaled by
+/// `√(w·w)`: a pipe's surface is every point exactly `radius` from the axis,
+/// whatever length the stored direction rounded to (§118.11).
 fn how_far_off_a_pipe_enclosing(pipe: &Cylinder, at: Point) -> (Interval, [Interval; 3]) {
     let along = exactly(pipe.axis().direction().components());
     let squared_direction = squared_length_enclosing(along);
@@ -760,10 +761,7 @@ fn how_far_off_a_pipe_enclosing(pipe: &Cylinder, at: Point) -> (Interval, [Inter
         core::array::from_fn(|axis| out[axis] - along[axis] * up)
     };
     let reach = root_enclosing(squared_length_enclosing(sideways));
-    let off = quotient_or_everything(
-        reach * root_enclosing(squared_direction) - Interval::exactly(pipe.radius()),
-        root_enclosing(squared_direction),
-    );
+    let off = reach - Interval::exactly(pipe.radius());
     (
         off,
         sideways.map(|part| quotient_or_everything(part, reach)),
@@ -838,6 +836,8 @@ fn furthest_from_zero(value: Interval) -> Interval {
 mod tests {
     use super::*;
     use crate::Axis;
+    use core::cmp::Ordering;
+    use rcad_predicates::{Decision, Point as PredicatePoint, SideOfSurface};
 
     fn a_ball(centre: [f64; 3], radius: f64) -> Surface {
         Surface::Sphere(Sphere::new(Point::from(centre), radius).expect("a radius"))
@@ -1405,5 +1405,87 @@ mod tests {
             march([&ball, &pipe], Point::new(3.0, 0.0, 4.0), 0.01, 4),
             Err(Error::TooManyPointsAlongOneCrossing { most: 4 })
         );
+    }
+
+    /// A pipe is the points exactly its own radius from its axis (§118.11), and
+    /// both of the marcher's distances have to be measured against that pipe and
+    /// not against one `r(1/‖w‖ − 1)` narrower.
+    ///
+    /// # Why this point can see a difference of `1e-16 · r`
+    ///
+    /// Every pipe here runs through the coordinate origin along a line lying
+    /// flat in the `xy` plane, and the probe is `(0, 0, r)` — the construction
+    /// `a_pipe_written_at_another_axis_scale_is_the_same_pipe.rs` is built on.
+    /// The `z` axis is square to the `xy` plane, so that point is **exactly** `r`
+    /// from every one of those lines, and every number the two distances are
+    /// worked out from is exact:
+    ///
+    /// - `p − o` is `(0, 0, r)` down to the bit, the origin being all zeros;
+    /// - `(p − o) · w` is exactly zero, the direction having no `z`, so the
+    ///   sideways part is `(0, 0, r)` again with nothing rounded off it;
+    /// - `r = 0.5` squares exactly and roots back exactly, so `reach` is `0.5`
+    ///   and [`root_enclosing`] hands back an enclosure of no width at all.
+    ///
+    /// So the plain answer is `0.5 − 0.5` and the enclosure is `[0, 0]`, with no
+    /// rounding anywhere for a failure to be blamed on. Divide by `‖w‖` instead
+    /// and the answer is the direction's own rounding: the lever is a stored
+    /// `‖w‖²` that is not one, which is what the second assertion below pins.
+    ///
+    /// The two directions are not two spellings of one line —
+    /// `Vector::scaled_to_length_one_from_anywhere` divides by the widest
+    /// component first, so `(1, 2, 0)` and `(3, 6, 0)` store identically and a
+    /// test comparing two spellings would pass vacuously. Each is asked about
+    /// the geometry instead, and they straddle: `(1, 1, 0)` stores a `‖w‖²` one
+    /// rounding below one and `(1, 6, 0)` one rounding above, so the old form
+    /// was wrong in both directions and not just short.
+    #[test]
+    fn a_point_a_radius_out_from_a_pipes_axis_is_measured_as_being_on_the_pipe() {
+        let radius = 0.5;
+        let on_the_skin = Point::new(0.0, 0.0, radius);
+
+        for (written, rounded) in [
+            ([1.0, 1.0, 0.0], Ordering::Less),
+            ([1.0, 6.0, 0.0], Ordering::Greater),
+        ] {
+            let surface = a_pipe(written, [0.0, 0.0, 0.0], radius);
+            let Surface::Cylinder(pipe) = surface else {
+                unreachable!("a_pipe builds a pipe")
+            };
+            let stored = pipe.axis().direction();
+            assert_eq!(
+                stored.components()[2],
+                0.0,
+                "{written:?} was meant to store a direction lying flat in the xy plane",
+            );
+            assert_eq!(
+                stored.length_squared().total_cmp(&1.0),
+                rounded,
+                "{written:?} stores {stored:?}, whose squared length is {:e} from one — \
+                 a row whose squared length is one exactly has no rounding in it to tell \
+                 the two pipes apart, and the two rows have to fall either side of one",
+                stored.length_squared() - 1.0,
+            );
+            assert_eq!(
+                pipe.side_of(PredicatePoint::from(on_the_skin.coordinates())),
+                Decision::Zero,
+                "the kernel certifies that {on_the_skin:?} is on the pipe about {stored:?}, \
+                 and the marcher has to be measuring against that same pipe",
+            );
+
+            let (off, _) = how_far_off_and_which_way(&surface, on_the_skin);
+            assert_eq!(
+                off, 0.0,
+                "a point a radius out from the axis of the pipe about {stored:?} is on it",
+            );
+
+            let (enclosed, _) = how_far_off_enclosing(&surface, on_the_skin);
+            assert_eq!(
+                (enclosed.lo(), enclosed.hi()),
+                (0.0, 0.0),
+                "everything this enclosure is built from is exact, so what it certifies \
+                 about a point on the skin of the pipe about {stored:?} is zero and \
+                 nothing either side of it",
+            );
+        }
     }
 }

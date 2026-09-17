@@ -298,8 +298,8 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
         Surface::Sphere(ball) => ((point - ball.centre()).length() - ball.radius()).abs(),
         Surface::Cylinder(pipe) => {
             let along = pipe.axis().direction();
-            ((point - pipe.axis().origin()).cross(along).length() - pipe.radius()).abs()
-                / along.length()
+            ((point - pipe.axis().origin()).cross(along).length() / along.length() - pipe.radius())
+                .abs()
         }
         Surface::Cone(cone) => {
             let along = cone.axis().direction();

@@ -59,7 +59,7 @@ fn how_far_off_the_cone(cone: &Cone, point: Point) -> f64 {
 /// How far `point` sits off the pipe, measured the same way.
 fn how_far_off_the_pipe(pipe: &Cylinder, point: Point) -> f64 {
     let along = pipe.axis().direction();
-    ((point - pipe.axis().origin()).cross(along).length() - pipe.radius()).abs() / along.length()
+    ((point - pipe.axis().origin()).cross(along).length() / along.length() - pipe.radius()).abs()
 }
 
 /// The measurement above reads zero on a point that is on both surfaces and
