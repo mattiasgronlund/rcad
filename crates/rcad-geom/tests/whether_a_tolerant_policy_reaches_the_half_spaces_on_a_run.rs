@@ -10,19 +10,26 @@
 //! place was told a decision worth picometres could not be made, and nothing
 //! spent its budget on it.
 //!
-//! Measured over both STEP corpora, that was every undecided decision either of
-//! them leaves behind: 31 of them, all `side of a half-space`, all reached from
-//! `Model::validate` checking which way a flat face's wire winds.
-//! `crates/rcad-step/tests/whether_a_tolerant_policy_buys_anything_a_certified_one_does_not.rs`
-//! is that measurement; this file is the one decision it is made of, built by
-//! hand so it can be read.
+//! **This file is where that measurement lives, and it is hand-built for a
+//! reason.** It used to be measured over the two STEP corpora as well, in
+//! `crates/rcad-step/tests/whether_a_tolerant_policy_buys_anything_a_certified_one_does_not.rs`.
+//! Every undecided decision either corpus left behind came from one family —
+//! two equal-radius cylinders whose axes cross — through the quartic crossing
+//! route. `walk` answers that family in closed form now, so neither corpus
+//! leaves a single decision undecided under any policy and the measurement
+//! there had nothing left to measure. The rings below are not rescued by a
+//! closed form and cannot be emptied out from under it the same way.
 //!
 //! # What the budget buys, and what it does not
 //!
 //! It buys the caller a **resolved** decision and an account of it:
 //! [`Cause::UndecidableResolved`] with a wobble on it, rather than a record that
 //! says only "gave up". That is the difference [`a_tolerant_budget_resolves_a_half_space_on_the_boundary`]
-//! measures.
+//! measures on one decision, and
+//! [`every_decision_a_certified_walk_gives_up_on_is_settled_by_a_budget_wide_enough`]
+//! over a whole family of them, with a floor that goes red the moment the
+//! family stops leaving anything undecided — which is the floor that caught the
+//! corpus and is the reason it stands here now.
 //!
 //! It does **not** move which piece of the crossing is picked, and
 //! [`resolving_the_half_space_does_not_change_which_piece_is_picked`] is that
@@ -30,7 +37,7 @@
 //! out on [`Decision::Neg`] and on nothing else, so an undecided half-space
 //! already held the piece and a resolved [`Decision::Zero`] holds it too. A
 //! tolerant importer therefore gets the same solids and a better account of
-//! them — which is exactly what the corpus reports.
+//! them.
 
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point,
@@ -38,10 +45,10 @@ use rcad_geom::{
 };
 use rcad_predicates::{Cause, Decision, Policy, ProvenanceLog, Record};
 
-/// A ring four across the middle with a tube one thick, so a plane down its
-/// axis cuts two circles of radius one centred four either side of the axis.
-fn a_ring() -> Torus {
-    Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring")
+/// A ring `across` across the middle with a tube one thick, so a plane down its
+/// axis cuts two circles of radius one centred `across` either side of the axis.
+fn a_ring(across: f64) -> Torus {
+    Torus::new(Axis::z(), across, 1.0).expect("a tube narrower than its ring")
 }
 
 /// A plane holding the ring's axis, which is what cuts the two meridian
@@ -52,29 +59,33 @@ fn a_plane_through_the_axis() -> Plane {
 }
 
 /// A run named as one of the two meridian circles by a half-space whose own
-/// boundary passes exactly through the witness on it.
+/// boundary sits at `x = −boundary_at`.
 ///
 /// Each candidate circle is asked at its own angle zero, which is its centre
-/// plus its `across`: `(−5, 0, 0)` for the circle centred at `(−4, 0, 0)` and
-/// `(5, 0, 0)` for its sibling at `(4, 0, 0)`. Every one of those coordinates is
-/// a whole number an `f64` holds exactly, which is what lets the picker be put
+/// plus its own radius: `(−(across + 1), 0, 0)` for the circle centred at
+/// `(−across, 0, 0)` and `(across + 1, 0, 0)` for its sibling at
+/// `(across, 0, 0)`. Every coordinate the tests below hand in is a whole number
+/// or a half, which an `f64` holds exactly — that is what lets the picker be put
 /// **on** a witness rather than near it.
 ///
-/// `x ≤ −5` holds the far circle's witness on its boundary and rules the near
-/// one out at `x = 5`, so exactly one of the two circles is picked and the walk
-/// has an answer to give — the tie the other arrangement produces would refuse
-/// under either policy and say nothing about a budget.
+/// `x ≤ −boundary_at` has to hold the far circle's witness and rule the near
+/// one out, so that exactly one of the two circles is picked and the walk has an
+/// answer to give: the tie the other arrangement produces would refuse under
+/// either policy and say nothing about a budget.
 ///
-/// The witness is not a point but the box `POINT_ALONG_A_CROSSING_ROUNDOFF · 4`
-/// wide the walk knows the circle to within, and that box straddles the
-/// picker's boundary. So the half-space is honestly undecided: the answer is
-/// not a rounding it could have got right.
-fn a_run_picked_by_a_half_space_it_sits_on() -> NamedRun {
+/// At `boundary_at = across + 1` the boundary passes exactly through the far
+/// witness. That witness is not a point but the box
+/// `POINT_ALONG_A_CROSSING_ROUNDOFF · 4` wide the walk knows the circle to
+/// within, and the box straddles the boundary — so the half-space is honestly
+/// undecided and the answer is not a rounding it could have got right. At any
+/// smaller `boundary_at` the box clears the boundary and the half-space is
+/// decided outright.
+fn a_run_picked_by_a_half_space_at(across: f64, boundary_at: f64) -> NamedRun {
     let picker = Picker::InFrontOf(
-        HalfSpace::new(Vector::new(-1.0, 0.0, 0.0), 5.0).expect("a normal with a length"),
+        HalfSpace::new(Vector::new(-1.0, 0.0, 0.0), boundary_at).expect("a normal with a length"),
     );
     NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
-        and: Surface::Torus(a_ring()),
+        and: Surface::Torus(a_ring(across)),
         picked_by: [picker].into_iter().collect(),
     })
     .expect("a piece of a crossing with a picker on it")
@@ -82,13 +93,16 @@ fn a_run_picked_by_a_half_space_it_sits_on() -> NamedRun {
 
 /// Walk that run under `policy`, and hand back what came of it and every record
 /// it left.
-fn walked_under(policy: &Policy) -> (Result<Vec<Point>, Error>, Vec<Record>) {
-    let ring = a_ring();
+fn walked_under(
+    policy: &Policy,
+    across: f64,
+    boundary_at: f64,
+) -> (Result<Vec<Point>, Error>, Vec<Record>) {
     let flat = a_plane_through_the_axis();
     let mut log = ProvenanceLog::new();
     let walked = walk(
-        &a_run_picked_by_a_half_space_it_sits_on(),
-        [&Surface::Plane(flat), &Surface::Torus(ring)],
+        &a_run_picked_by_a_half_space_at(across, boundary_at),
+        [&Surface::Plane(flat), &Surface::Torus(a_ring(across))],
         Deflection::of(0.05).expect("a positive deflection"),
         policy,
         &mut log,
@@ -96,6 +110,10 @@ fn walked_under(policy: &Policy) -> (Result<Vec<Point>, Error>, Vec<Record>) {
     .map(|along| along.points().to_vec());
     (walked, log.records().to_vec())
 }
+
+/// The ring four across the middle with its picker sitting exactly on the far
+/// witness, which is the one arrangement the two tests below are written about.
+const A_RING_AND_A_PICKER_ON_ITS_WITNESS: (f64, f64) = (4.0, 5.0);
 
 /// The one record a walk of that run leaves, whichever policy walked it.
 fn the_one_record(records: &[Record]) -> &Record {
@@ -116,7 +134,8 @@ fn the_one_record(records: &[Record]) -> &Record {
 /// through, which is the other way to get a tolerant policy wrong.
 #[test]
 fn a_tolerant_budget_resolves_a_half_space_on_the_boundary() {
-    let (_, certified) = walked_under(&Policy::certified());
+    let (across, boundary_at) = A_RING_AND_A_PICKER_ON_ITS_WITNESS;
+    let (_, certified) = walked_under(&Policy::certified(), across, boundary_at);
     let wobble = the_one_record(&certified).wobble(100.0);
     assert!(
         wobble > 0.0,
@@ -143,7 +162,7 @@ fn a_tolerant_budget_resolves_a_half_space_on_the_boundary() {
         "this test needs a budget that covers {wobble:e}, and {:e} does not",
         wide.max_wobble()
     );
-    let (_, resolved) = walked_under(&wide);
+    let (_, resolved) = walked_under(&wide, across, boundary_at);
     let approximation = the_one_record(&resolved)
         .approximation()
         .expect("a tolerant policy that covers the wobble resolves the decision and says so");
@@ -162,7 +181,7 @@ fn a_tolerant_budget_resolves_a_half_space_on_the_boundary() {
         "this test needs a budget that does not cover {wobble:e}, and {:e} does",
         narrow.max_wobble()
     );
-    let (_, refused) = walked_under(&narrow);
+    let (_, refused) = walked_under(&narrow, across, boundary_at);
     assert_eq!(
         the_one_record(&refused).approximation(),
         None,
@@ -185,13 +204,15 @@ fn a_tolerant_budget_resolves_a_half_space_on_the_boundary() {
 ///
 /// `every_half_space_holds` rules a piece out on [`Decision::Neg`] and on
 /// nothing else, so a half-space that could not tell already held the piece and
-/// one resolved to [`Decision::Zero`] holds it too. This is why the STEP corpus
-/// reports the same solids under both policies while the records differ, and
-/// saying so here is cheaper than reading that off 1101 pairs of runs.
+/// one resolved to [`Decision::Zero`] holds it too. This one arrangement is
+/// where that is read off the points themselves;
+/// [`every_decision_a_certified_walk_gives_up_on_is_settled_by_a_budget_wide_enough`]
+/// asks it of the whole family at once and compares what the walk handed back.
 #[test]
 fn resolving_the_half_space_does_not_change_which_piece_is_picked() {
-    let (certified, _) = walked_under(&Policy::certified());
-    let (tolerant, _) = walked_under(&Policy::tolerant(100.0));
+    let (across, boundary_at) = A_RING_AND_A_PICKER_ON_ITS_WITNESS;
+    let (certified, _) = walked_under(&Policy::certified(), across, boundary_at);
+    let (tolerant, _) = walked_under(&Policy::tolerant(100.0), across, boundary_at);
     let certified = certified.expect("one of the two circles is picked and the other is not");
     assert_eq!(
         tolerant.as_deref(),
@@ -203,4 +224,167 @@ fn resolving_the_half_space_does_not_change_which_piece_is_picked() {
         "a circle of radius one walked to a deflection of 0.05 takes more than two steps, or \
          this is comparing almost nothing"
     );
+}
+
+/// **Every decision a certified walk gives up on is settled by a budget wide
+/// enough, and settling them refuses nothing.**
+///
+/// This is the measurement the two STEP corpora used to carry. It moved here
+/// when a closed form for two equal-radius cylinders whose axes cross emptied
+/// the corpus's undecided set, and the floor moved with it: `left_undecided > 0`
+/// is what stops this passing over nothing the day the same thing happens to
+/// these rings. The count lives in the assertions and nowhere in the prose,
+/// which is the whole of why it can be trusted a month from now.
+///
+/// **The family is chosen by how each ring and picker is built and never by
+/// what the walk said about it.** Half the runs put the picker's boundary
+/// exactly on a witness and half put it half a unit clear, and both halves are
+/// walked and counted. That second half is what `runs_that_decided_everything`
+/// buys: if the walk ever started leaving a record on a decision it could make,
+/// counting records would stop being counting decisions given up on, and this
+/// goes red instead of quietly counting the wrong thing.
+#[test]
+fn every_decision_a_certified_walk_gives_up_on_is_settled_by_a_budget_wide_enough() {
+    let wide = Policy::tolerant(100.0);
+    let narrow = Policy::tolerant(1.0);
+    let runs = runs_to_walk();
+
+    let mut left_undecided = 0;
+    let mut runs_that_decided_everything = 0;
+    let mut runs_that_walked_to_points = 0;
+    let mut settled_on_a_wide_budget = 0;
+    let mut settled_on_a_narrow_budget = 0;
+    let mut still_given_up_on_a_wide_budget = 0;
+    let mut worst_wobble = 0.0_f64;
+    let mut walks_that_moved = Vec::new();
+
+    for &(across, boundary_at) in &runs {
+        let (certified, gave_up_on) = walked_under(&Policy::certified(), across, boundary_at);
+        left_undecided += how_many_were_given_up_on(&gave_up_on);
+        if gave_up_on.is_empty() {
+            runs_that_decided_everything += 1;
+        }
+        for record in &gave_up_on {
+            worst_wobble = worst_wobble.max(record.wobble(100.0));
+        }
+        if certified.as_ref().is_ok_and(|points| points.len() > 2) {
+            runs_that_walked_to_points += 1;
+        }
+
+        let (widely, on_a_wide_budget) = walked_under(&wide, across, boundary_at);
+        settled_on_a_wide_budget += how_many_a_budget_settled(&on_a_wide_budget);
+        still_given_up_on_a_wide_budget += how_many_were_given_up_on(&on_a_wide_budget);
+        settled_on_a_narrow_budget +=
+            how_many_a_budget_settled(&walked_under(&narrow, across, boundary_at).1);
+
+        if certified != widely {
+            walks_that_moved.push(format!(
+                "a ring {across} across picked at x <= -{boundary_at}: certified walked to \
+                 {certified:?} and a tolerant one to {widely:?}"
+            ));
+        }
+    }
+
+    assert_eq!(
+        runs_that_walked_to_points,
+        runs.len(),
+        "every one of these pickers holds one circle and rules the other out, so every walk has \
+         a circle to hand back, and {runs_that_walked_to_points} of {} did",
+        runs.len()
+    );
+    assert!(
+        left_undecided > 0,
+        "not one of these {} walks left a decision undecided, so this says nothing about what a \
+         budget does with one — which is exactly how the corpus this measurement came from \
+         stopped being a measurement",
+        runs.len()
+    );
+    assert!(
+        runs_that_decided_everything > 0,
+        "every one of these walks left a record behind, so counting records is counting every \
+         decision rather than the ones that were given up on"
+    );
+
+    assert!(
+        wide.wobble_is_acceptable(worst_wobble),
+        "this needs a budget that covers the worst wobble of {worst_wobble:e}, and {:e} does not",
+        wide.max_wobble()
+    );
+    assert_eq!(
+        settled_on_a_wide_budget, left_undecided,
+        "a budget of {:e} covers every one of those {left_undecided} decisions, so every one has \
+         to come back settled, and {settled_on_a_wide_budget} did",
+        wide.max_wobble()
+    );
+    assert_eq!(
+        still_given_up_on_a_wide_budget, 0,
+        "a budget that covers every wobble here leaves nothing given up on, and \
+         {still_given_up_on_a_wide_budget} were"
+    );
+
+    assert!(
+        !narrow.wobble_is_acceptable(worst_wobble),
+        "this needs a budget that does not cover {worst_wobble:e}, and {:e} does",
+        narrow.max_wobble()
+    );
+    assert_eq!(
+        settled_on_a_narrow_budget, 0,
+        "a budget of {:e} covers no wobble here, so it may settle nothing, and it settled \
+         {settled_on_a_narrow_budget}",
+        narrow.max_wobble()
+    );
+
+    assert!(
+        walks_that_moved.is_empty(),
+        "settling a half-space moved which piece of a crossing the walk handed back, on {} of \
+         these runs: {walks_that_moved:#?}",
+        walks_that_moved.len()
+    );
+    println!(
+        "{left_undecided} decisions given up on over {} runs, worst wobble {worst_wobble:e}, all \
+         settled on a {:e} budget and none on a {:e} one",
+        runs.len(),
+        wide.max_wobble(),
+        narrow.max_wobble()
+    );
+}
+
+/// The rings walked above, as `(across, boundary_at)`: six with the picker's
+/// boundary exactly on the far witness, and the same six with it half a unit
+/// clear of both.
+///
+/// Six sizes rather than one, because one fixture is a claim with a fuse in it.
+/// A closed form that rescued a single ring would leave the other five, and the
+/// count above moves rather than the file quietly staying true.
+fn runs_to_walk() -> Vec<(f64, f64)> {
+    let mut runs = Vec::new();
+    for across in [2.0, 3.0, 4.0, 5.0, 6.0, 7.0] {
+        runs.push((across, across + 1.0));
+        runs.push((across, across + 0.5));
+    }
+    runs
+}
+
+/// How many of those records are of a decision nothing could settle.
+fn how_many_were_given_up_on(records: &[Record]) -> usize {
+    records
+        .iter()
+        .filter(|record| matches!(record.outcome(), Decision::Undecidable { .. }))
+        .count()
+}
+
+/// How many of those records are of a decision a budget was spent on.
+///
+/// Keyed on the cause the record itself carries, so a record filed under a
+/// cause this file has never heard of counts as unsettled rather than being
+/// quietly counted as settled.
+fn how_many_a_budget_settled(records: &[Record]) -> usize {
+    records
+        .iter()
+        .filter(|record| {
+            record
+                .approximation()
+                .is_some_and(|approximation| approximation.cause() == Cause::UndecidableResolved)
+        })
+        .count()
 }
