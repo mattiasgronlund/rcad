@@ -29182,10 +29182,10 @@ Three things in that table, and each is a separate claim:
 - **The truth is `4.41e-16`** — `sin²` of the lean the test measures — and
   `|u×v|²` returns it to three digits where the subtraction returns zero. §109.6
   recorded this as an untested hypothesis. It is now tested.
-- **A refusal was not even the worst of it.** See §112.1a, which is the finding
+- **A refusal was not even the worst of it.** See §112.2, which is the finding
   this unit did not go looking for.
 
-### 112.1a The refusal was the half that announced itself
+### 112.2 The refusal was the half that announced itself
 
 Everything above and everything below is about a refusal, because a refusal is
 what three lanes were pointed at. **The more serious half of this defect was a
@@ -29220,7 +29220,7 @@ producing exactly the silent garbage §6.3 names, eight powers of ten above wher
 anyone was looking for it, and what would have caught it was measuring the
 arithmetic against a closed form rather than watching for an `Err`.
 
-### 112.2 Two subtractions, and neither of them had to be written that way
+### 112.3 Two subtractions, and neither of them had to be written that way
 
 The Newton correction is `(s₁ − s₂c)/(1 − c²)` along the first normal and
 `(s₂ − s₁c)/(1 − c²)` along the second. **Both halves cancel**, and mending the
@@ -29277,7 +29277,7 @@ sit off a crossing drawn on a pipe `1.048576e6` across — **a bound that no lon
 says where on the pipe the points are.** `1 − c² = (1 − c)(1 + c)` keeps the
 original grouping and touches only the two expressions that cancel.
 
-### 112.3 What it did
+### 112.4 What it did
 
 The command for every number below is `mise exec -- just t -p rcad-geom
 --no-fail-fast`, except the corpus one, which is named where it is used.
@@ -29299,7 +29299,7 @@ The command for every number below is `mise exec -- just t -p rcad-geom
   here.
 - **No test moved the other way.** 807 of 807 in `rcad-geom`.
 
-### 112.4 The refusal that is left is the limit, and it is a different one
+### 112.5 The refusal that is left is the limit, and it is a different one
 
 `settled` still refuses, and now it refuses where `which_way_the_crossing_runs`
 does: when `‖u − v‖` or `‖u + v‖` is exactly zero, meaning the two normals are
@@ -29313,7 +29313,7 @@ two `f64` normals for any arithmetic to find.
 So the two walls that §109.5 and §110 kept apart have become one wall, at the
 place the earlier lanes' arithmetic said it should be all along.
 
-### 112.5 Two claims in `one_step`, one broken and one that had rotted
+### 112.6 Two claims in `one_step`, one broken and one that had rotted
 
 The lane was briefed to audit one sentence. Both of `one_step`'s are wrong, and
 the second only became wrong when the first fix landed.
@@ -29361,7 +29361,7 @@ collapsing the step in one go — started landing on a pipe's own axis instead,
 where the normal is `NaN`. The old code was no more robust; it was luckier. Both
 halves of this section are the fragility, not the luck.
 
-### 112.6 What happens to a normal that is not a number, measured rather than hoped
+### 112.7 What happens to a normal that is not a number, measured rather than hoped
 
 The paragraph above says a trajectory landed somewhere the normal is `NaN`. That
 is a correctness question and not a colourful detail, because `NaN` propagating
@@ -29401,7 +29401,7 @@ one refuses, and each names the site it refused at:
 | `march` | `SettlingAPointOntoBothSurfaces` |
 
 So it is a **refusal**, not a number and not a shortening — except inside
-`one_step`, where §112.5's change turns `settled`'s refusal into a shortening and
+`one_step`, where §112.6's change turns `settled`'s refusal into a shortening and
 a retry, which is why the gate is green rather than because the `NaN` stopped
 happening. The distance to the surface at that point is an *ordinary number*
 (`-1.0` for a unit pipe); only the direction is not. A guard that watched the
