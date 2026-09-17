@@ -30636,10 +30636,16 @@ marcher. Of its two halves:
   `z = 10.4`, so the triple product is bit-zero.
 - **the widths match** — exactly **not**. `Axis::new` scales every direction to
   length one, and at 45° that is `1/√2`, which no `f64` is. The stored direction
-  comes back as `0.70710678118654746171500846685376…`, so `‖w₂‖² = 1 − 1.6e-16`
-  exactly, against `‖w₁‖² = 1` exactly for `(0, 1, 0)`. The question
-  `r₂²‖w₁‖² − r₁²‖w₂‖²` is then about `+1.5e-17`, and the exact arm certifies
-  `Pos`.
+  comes back as `0.70710678118654746171500846685376…`, so
+  `‖w₂‖² = 1 − 1.7730231858351654e-16` exactly, against `‖w₁‖² = 1` exactly for
+  `(0, 1, 0)`. The question `r₂²‖w₁‖² − r₁²‖w₂‖²` is then `+1.5957208672516487e-17`,
+  and the exact arm certifies `Pos`.
+
+  **A better normalize cannot close this, and that is worth knowing before
+  anyone tries.** The stored component is not merely near `1/√2`, it *is*
+  `f64::consts::FRAC_1_SQRT_2` — the nearest `f64` to `1/√2`, with nothing
+  between it and the real number. `2c²` is still `1 − 1.77e-16`, because no `f64`
+  squares to a half. The rounding is already optimal and the gap survives it.
 
 **A tolerant policy does not rescue it, at any working size.** Measured at
 `tolerant(1.0)`, `(10.0)` and `(100.0)`: the same refusal, unchanged.
