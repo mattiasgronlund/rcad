@@ -942,10 +942,12 @@ impl From<rcad_geom::Error> for Error {
 /// [`rcad_geom::walk`] names the two surfaces it gave up between and cannot
 /// name the edge: it was handed two surfaces and a run and never saw a model.
 /// Matching those surfaces back to an edge by value is what `docs/decisions.md`
-/// §110.4 tried, and it is worse than it looked — the mesher walks a face in a
-/// frame of its own, so the surfaces that reach the marcher are a rigid motion
-/// away from the ones the model stores. The edge is carried rather than
-/// recovered.
+/// §110.4 tried. The marcher does still work in a frame of the mesher's own, but
+/// the pair no longer *leaves* the mesher in it: §116 moves it back, so what a
+/// caller reads is in the model's frame. A match by value is therefore exact
+/// where the face's placement is a shift, and strays about a part in `1e13`
+/// where it is a turn (§116.4). The edge is carried rather than recovered
+/// because carrying it is exact either way.
 ///
 /// An undecided *operation* still comes through as [`Error::Undecidable`]
 /// rather than being buried a layer deeper, for §17.7's reason: what gave up

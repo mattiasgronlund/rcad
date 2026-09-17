@@ -30137,8 +30137,14 @@ ones the model stores"*. Every sentence of it is still true **of the marcher**,
 and the conclusion a reader draws from it is now false: what leaves the mesher
 is in the model's frame. That file belonged to no lane of this unit and was not
 edited here. It is a doc comment that went stale the same way §110's `# Errors`
-clause did within hours of being written, and it should be corrected when
-someone owns that file.
+clause did within hours of being written.
+
+**Corrected while this section was merged**, by the dispatcher rather than by a
+lane, since no lane of this unit owned the file. The paragraph now says what is
+true of each half separately — the marcher does still work in a frame of the
+mesher's own, and the pair no longer leaves the mesher in it — and points at
+§116.4 for what a match by value costs, which is nothing for a shift and about
+a part in `1e13` for a turn.
 
 Not attempted here: §110.4's other half, carrying the **face keys** so
 `rcad-step` can turn a pair into two `#id`s. Moving the surfaces makes a match
