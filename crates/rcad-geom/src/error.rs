@@ -516,7 +516,15 @@ pub enum Error {
     /// margin, and `clippy::result_large_err` measures the whole `Result`.
     #[error("this crossing runs where its two surfaces are too nearly parallel to follow it, {at}")]
     CannotFollowACrossingWhereItsSurfacesAreTangent {
-        /// The two surfaces whose crossing was being followed.
+        /// The two surfaces whose crossing was being followed, **in the frame
+        /// whoever asked was working in** — the same numbers a caller of
+        /// [`walk`](crate::walk) passed, and a caller of
+        /// `SolidView::mesh` its own model's.
+        ///
+        /// A layer that works in a frame of its own moves them back with
+        /// [`Error::with_its_surfaces_moved`] before handing the refusal on,
+        /// which is what the mesher does and `docs/decisions.md` §116 is the
+        /// argument for.
         surfaces: Box<[crate::Surface; 2]>,
         /// Which of the marcher's questions ran out of angle.
         at: WhereFollowingACrossingGaveUp,
@@ -541,7 +549,9 @@ pub enum Error {
     /// §16.10 wants a demonstration either way and there is not one yet.
     #[error("no step along this crossing stayed on it, after {shortenings} shortenings")]
     CannotFollowACrossingBecauseNoStepStaysOnIt {
-        /// The two surfaces whose crossing was being followed.
+        /// The two surfaces whose crossing was being followed, in the frame
+        /// whoever asked was working in — see the variant above for what that
+        /// means and who has to do something about it.
         surfaces: Box<[crate::Surface; 2]>,
         /// How many times the step was shortened before the marcher gave up.
         shortenings: usize,
@@ -685,6 +695,65 @@ pub enum Error {
         /// The decisions that could not be settled.
         records: rcad_predicates::ProvenanceLog,
     },
+}
+
+impl Error {
+    /// This refusal with whatever surfaces it carries moved by `movement`.
+    ///
+    /// **For a caller that worked in a frame of its own and has to hand the
+    /// refusal back in the frame it was asked in.** Nothing in this crate needs
+    /// it: whoever calls [`walk`](crate::walk) is handed back a refusal about
+    /// the very surfaces it passed in. `rcad-topo`'s mesher is the caller that
+    /// does — it shifts a face's numbers near the origin before walking its
+    /// edges, because the crossing evaluator charges its rounding against the
+    /// biggest number it was handed (§17.3, §39.7 item 2). So the pair the
+    /// marcher gave up between is a rigid motion away from the pair the model
+    /// holds, and a caller that matched
+    /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] to read
+    /// `surfaces` got numbers that were not its model's.
+    /// `docs/decisions.md` §113.6 recorded that and §116 is the argument for
+    /// fixing it here.
+    ///
+    /// **The pair is moved rather than swapped for the pair that was handed
+    /// over.** A caller knows which two surfaces it passed and could put those
+    /// back exactly, with no rounding at all — but they are not always the pair
+    /// the refusal is about. [`walk`](crate::walk) reads the second surface off
+    /// the run itself where an edge has one face on both sides, which is what a
+    /// seam is, so a swap would name a surface the marcher never looked at.
+    /// Moving names the pair it did look at, and costs one rounding per
+    /// surface.
+    ///
+    /// **Only the two variants that carry a `Surface` are listed, and a new one
+    /// is not added here by default** — the same rule, and for the same reason,
+    /// as `rcad-topo`'s `walking_along_this_edge_refused`: a refusal carrying
+    /// geometry has to be *decided* about rather than swept in. Everything else
+    /// comes back untouched, because everything else says nothing about where
+    /// anything is.
+    #[must_use]
+    pub fn with_its_surfaces_moved(self, movement: &crate::Isometry) -> Self {
+        let moved = |surfaces: Box<[crate::Surface; 2]>| {
+            Box::new([
+                surfaces[0].transformed(movement),
+                surfaces[1].transformed(movement),
+            ])
+        };
+        match self {
+            Self::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, at } => {
+                Self::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                    surfaces: moved(surfaces),
+                    at,
+                }
+            }
+            Self::CannotFollowACrossingBecauseNoStepStaysOnIt {
+                surfaces,
+                shortenings,
+            } => Self::CannotFollowACrossingBecauseNoStepStaysOnIt {
+                surfaces: moved(surfaces),
+                shortenings,
+            },
+            untouched => untouched,
+        }
+    }
 }
 
 /// Which of the marcher's questions ran out of angle between two surfaces.

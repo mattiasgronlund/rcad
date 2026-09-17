@@ -606,6 +606,23 @@ impl BuildingAMesh {
     /// which of its two faces was walked first. It is a choice of direction
     /// rather than a second opinion about position: a reversed list is the same
     /// points.
+    ///
+    /// # What a refusal from here is in, and why it is not what was walked
+    ///
+    /// The points ride back out of [`the_frame_this_face_is_meshed_in`] and so
+    /// does the refusal: a `rcad_geom::Error` carrying two `Surface`s has them
+    /// moved by [`Error::with_its_surfaces_moved`](rcad_geom::Error::with_its_surfaces_moved)
+    /// before it goes anywhere. Handing the shifted pair out is handing out
+    /// numbers that are in a frame this function chose, which nothing outside
+    /// this file can name — a published field that lies, which is what
+    /// `docs/decisions.md` §113.6 found and §116 argues the fix for.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`rcad_geom::walk`] refuses with, through
+    /// [`walking_along_this_edge_refused`], and
+    /// [`Error::MoreMeshPointsThanASolidWillHold`] when the points this edge
+    /// alone adds take the mesh past its cap.
     fn walk(
         &mut self,
         edge: EdgeView<'_>,
@@ -615,6 +632,7 @@ impl BuildingAMesh {
         log: &mut ProvenanceLog,
     ) -> Result<Vec<u32>> {
         let back = the_frame_this_face_is_meshed_in(face);
+        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         let (from, to) = ends_in_the_stored_order(edge);
         let run = NamedRun::new(
             edge.stored_run()
@@ -631,7 +649,9 @@ impl BuildingAMesh {
             policy,
             log,
         )
-        .map_err(|why| walking_along_this_edge_refused(edge.key(), why))?;
+        .map_err(|why| {
+            walking_along_this_edge_refused(edge.key(), why.with_its_surfaces_moved(&there))
+        })?;
         let mut points = along_it.points().to_vec();
         if self.points.len() + points.len() > MOST_POINTS_A_MESH_WILL_HOLD {
             return Err(Error::MoreMeshPointsThanASolidWillHold {
@@ -674,7 +694,6 @@ impl BuildingAMesh {
 
         let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
         self.worst = self.worst.max(along_it.deviation().magnitude() + moving);
-        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         Ok(points
             .into_iter()
             .map(|along| {
