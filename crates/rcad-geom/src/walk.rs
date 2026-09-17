@@ -665,13 +665,12 @@ fn what_a_run_between_these_two_lies_on(
                 return where_two_equal_pipes_on_crossing_axes_cut(&one, &other, run, policy, log)
                     .map(WhatARunLiesOn::Conic);
             }
-            let certified = |pipe: &Cylinder| pipe.radius() / pipe.axis().direction().length();
-            // Two pipes of the same certified radius are neither thinner, and
+            // Two pipes of the same radius are neither thinner, and
             // then which one is walked round has to be settled by the numbers
             // they store rather than by which of them the caller wrote first —
             // otherwise the seed, and the vertex `where_a_closed_crossing_starts`
             // puts on the loop, move when the pair is swapped.
-            let mine_is_thinner = match certified(&one).total_cmp(&certified(&other)) {
+            let mine_is_thinner = match one.radius().total_cmp(&other.radius()) {
                 Ordering::Equal => {
                     Surface::Cylinder(one).how_it_sorts_against(&Surface::Cylinder(other))
                         != Ordering::Greater
@@ -1153,7 +1152,7 @@ impl AnEndlessBend for HyperbolaBranch {
 /// the pipe will do, so the pipe's own basis stands in.
 fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point; 2] {
     let along = pipe.axis().direction() * pipe.axis().direction().length().recip();
-    let skin = pipe.radius() / pipe.axis().direction().length();
+    let skin = pipe.radius();
     let out = ball.centre() - pipe.axis().origin();
     let up = out.dot(along);
     let sideways = out - along * up;
@@ -1179,12 +1178,19 @@ fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point;
 /// plane to the bit. Asking it any other way would answer `true` for a pair that
 /// is merely close, and a pair that is merely close crosses in a quartic.
 ///
-/// The widths are `ρᵢ = rᵢ/√Wᵢ` with `Wᵢ = ‖wᵢ‖²`, so `ρ₂ = ρ₁` exactly when
-/// `r₂²W₁ − r₁²W₂` is zero — degree four, and no root left to clear. The axes
-/// meet exactly when `(o₂ − o₁)·(w₁ × w₂)` is zero, which is the numerator of
-/// the distance between them and degree three. Neither is the eight-degree
-/// comparison [`intersect`](crate::intersect) runs out of room on (§29),
-/// because neither is a sum of roots: each is one polynomial against zero.
+/// A pipe is `rᵢ` wide whatever its stored direction's length turned out to be
+/// (`docs/decisions.md` §118.10), so `ρ₂ = ρ₁` exactly when `r₂² − r₁²` is zero
+/// — degree two in the radii and degree zero in the directions. It used to be
+/// `r₂²‖w₁‖² − r₁²‖w₂‖²`, degree four, because the surface the predicate
+/// certified was then the pipe of radius `rᵢ/‖wᵢ‖` and the stored lengths had to
+/// be carried along. That form answered `false` for a bore and a countersink
+/// written from one radius literal whenever their two directions rounded to
+/// different lengths, which is what the two Finder relays in the STEP corpus
+/// refused on. The axes meet exactly when `(o₂ − o₁)·(w₁ × w₂)` is zero, which
+/// is the numerator of the distance between them and degree three. Neither is
+/// the eight-degree comparison [`intersect`](crate::intersect) runs out of room
+/// on (§29), because neither is a sum of roots: each is one polynomial against
+/// zero.
 ///
 /// Both questions are symmetric under swapping the pair — swapping negates the
 /// volume and the radius difference and leaves what is being asked, which is
@@ -1205,36 +1211,20 @@ fn whether_two_pipes_are_one_width_on_axes_that_meet(
     let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
     let [my_radius, their_radius] = [one, other].map(Cylinder::radius);
 
-    let squared = |value: [f64; 3]| {
-        (0..3).fold(Interval::exactly(0.0), |so_far, axis| {
-            so_far + Interval::exactly(value[axis]) * Interval::exactly(value[axis])
-        })
-    };
     let same_width = Question {
         named: WHERE_TWO_PIPES_CROSS,
         enclosing: || {
-            Interval::exactly(their_radius) * Interval::exactly(their_radius) * squared(my_way)
-                - Interval::exactly(my_radius) * Interval::exactly(my_radius) * squared(their_way)
+            Interval::exactly(their_radius) * Interval::exactly(their_radius)
+                - Interval::exactly(my_radius) * Interval::exactly(my_radius)
         },
         exactly: || {
             Some(
                 Exact::product_of(their_radius, their_radius)?
-                    .times(&Exact::dot_of(my_way, my_way)?)?
-                    .minus(
-                        &Exact::product_of(my_radius, my_radius)?
-                            .times(&Exact::dot_of(their_way, their_way)?)?,
-                    ),
+                    .minus(&Exact::product_of(my_radius, my_radius)?),
             )
         },
     };
-    if ask(
-        &same_width,
-        Measures::ManyLengths { how_many: 4 },
-        &at,
-        policy,
-        log,
-    )? != Decision::Zero
-    {
+    if ask(&same_width, Measures::Area, &at, policy, log)? != Decision::Zero {
         return Ok(false);
     }
 
@@ -1317,7 +1307,7 @@ fn the_two_ellipses_equal_pipes_on_crossing_axes_cut(
         let along = pipe.axis().direction();
         along * along.length().recip()
     });
-    let radius = first.radius() / first.axis().direction().length();
+    let radius = first.radius();
     let sideways = mine.cross(theirs);
     let across = sideways * sideways.length().recip();
     let middle = where_two_axes_meet(first, second);
@@ -1368,8 +1358,7 @@ fn where_one_pipe_reaches_across_another(thin: &Cylinder, fat: &Cylinder) -> [Po
         let along = pipe.axis().direction();
         along * along.length().recip()
     });
-    let [thin_skin, fat_skin] =
-        [thin, fat].map(|pipe| pipe.radius() / pipe.axis().direction().length());
+    let [thin_skin, fat_skin] = [thin, fat].map(Cylinder::radius);
     let leaning = thin_way.dot(fat_way);
     let sideways = thin_way.cross(fat_way);
     let across = sideways * sideways.length().recip();
@@ -1863,8 +1852,11 @@ fn where_a_plane_cuts_a_ball(flat: &Plane, ball: &Sphere) -> Result<Conic> {
 ///
 /// The centre is where the axis meets the plane. Across the pipe the ellipse is
 /// the pipe's own radius; along the plane's slope it is that radius stretched by
-/// how far the plane leans, which is `√(n·n) / |n·w|` — and that is a division
+/// how far the plane leans, which is `‖n‖‖w‖ / |n·w|` — and that is a division
 /// by the very number "is this plane parallel to the axis" decided is not zero.
+/// The `‖w‖` is there because `n·w` reads the stored direction at whatever
+/// length it has while the lean is an angle, and the pipe is `radius` wide at
+/// any such length (`docs/decisions.md` §118.10).
 ///
 /// # Panics
 ///
@@ -1891,8 +1883,8 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
     let middle = pipe.axis().origin() + along * up_the_axis;
 
     let (across, and) = two_directions_in(flat, along);
-    let radius_across = pipe.radius() / along.length();
-    let radius_down_the_slope = pipe.radius() * normal.length() / leans.abs();
+    let radius_across = pipe.radius();
+    let radius_down_the_slope = pipe.radius() * normal.length() * along.length() / leans.abs();
 
     Ok(Conic {
         centre: middle,
@@ -1900,7 +1892,7 @@ fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
         and: and * radius_down_the_slope,
         size: how_big_this_is(
             &[middle, pipe.axis().origin()],
-            &[pipe.radius(), radius_across, radius_down_the_slope],
+            &[radius_across, radius_down_the_slope],
         ),
     })
 }
@@ -2449,13 +2441,13 @@ fn where_a_coaxial_cone_and_pipe_cut(
 /// The two circles a cone and a pipe on one axis cross in, the one the axis
 /// points towards first.
 ///
-/// Both have the pipe's certified radius `r/‖w_p‖`, and they sit that over the
-/// slope along the axis from the apex either way — which is the `±ρ/slope` the
-/// namer proved there were exactly two of.
+/// Both have the pipe's radius, and they sit that over the slope along the axis
+/// from the apex either way — which is the `±ρ/slope` the namer proved there
+/// were exactly two of.
 fn the_two_circles_a_cone_and_a_pipe_cut(cone: &Cone, pipe: &Cylinder) -> Vec<Conic> {
     let along = cone.axis().direction();
     let up = along * along.length().recip();
-    let radius = pipe.radius() / pipe.axis().direction().length();
+    let radius = pipe.radius();
     let standoff = radius / cone.slope();
     let (across, and) = cone.basis();
 
@@ -3029,8 +3021,9 @@ mod tests {
             Surface::Sphere(ball) => ((point - ball.centre()).length() - ball.radius()).abs(),
             Surface::Cylinder(pipe) => {
                 let along = pipe.axis().direction();
-                ((point - pipe.axis().origin()).cross(along).length() - pipe.radius()).abs()
-                    / along.length()
+                ((point - pipe.axis().origin()).cross(along).length() / along.length()
+                    - pipe.radius())
+                .abs()
             }
             Surface::Cone(cone) => {
                 let along = cone.axis().direction();
