@@ -438,9 +438,11 @@ pub fn walk(
 ///
 /// **That is a gap and not a limit**, and the reason it is still here is that
 /// closing it changes a `pub` signature that `rcad-topo`'s fuse and half a dozen
-/// test files call. Nothing measured reaches a picker through this door: the 31
-/// undecided half-spaces the STEP corpus leaves behind all come in through
-/// [`walk`], from `Model::validate` checking which way a flat face's wire winds.
+/// test files call. Nothing measured reaches a picker through this door: while
+/// the STEP corpus still left undecided half-spaces behind they all came in
+/// through [`walk`], from `Model::validate` checking which way a flat face's
+/// wire winds, and since the closed form below the corpus leaves none at all
+/// (`docs/decisions.md` §118.8).
 ///
 /// **"Nothing measured" is a fact about the paths one corpus takes, not about
 /// this door, so here is the door itself.** Inside the kernel the only callers

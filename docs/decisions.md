@@ -891,8 +891,13 @@ reach it — `Import::read` builds and validates, and `SolidView::mesh` never as
 which piece of a crossing a run is. A backtrace census over the STEP corpus found
 every undecided half-space arriving through `walk`, from `Model::validate`
 checking which way a flat face's wire winds, and none through this door. **This
-lane took no census and re-measured nothing**; the count and the paths are the
-doc comment's, which publishes 31 undecided half-spaces, all through `walk`.
+lane took no census and re-measured nothing**; the count and the paths were the
+doc comment's, which published 31 undecided half-spaces, all through `walk`.
+**§118.8 has since emptied that population** — the closed form for two equal
+pipes on crossing axes took the whole family off the quartic route, so the
+corpus now leaves nothing undecided anywhere and the census above is a fact
+about a tree this one no longer is. The deferral's argument does not rest on
+the number, and the residual below is why.
 
 **The honest residual, which the deferral does not make go away.** A census is a
 fact about the paths one corpus took, not about the door. An application that
