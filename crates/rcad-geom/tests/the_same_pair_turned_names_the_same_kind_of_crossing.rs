@@ -20,15 +20,21 @@
 //! printed. They are exactly the two configurations a rounding of the inputs can
 //! move across:
 //!
-//! - **a tangency** — a plane resting on a ball, two balls resting on each
-//!   other, or a ball resting all the way round the inside of a pipe — where the
-//!   discriminant is exactly zero; and
+//! - **a tangency** — a plane resting on a ball, or two balls resting on each
+//!   other — where the discriminant is exactly zero; and
 //! - **two directions exactly square or exactly parallel**: a plane along a
 //!   pipe's axis, or two parallel planes. The pipe one is the surprise. A plane
 //!   *not* parallel to an endless pipe always cuts it in an ellipse, however far
 //!   away it is, so "parallel and well clear of it" answers `Nothing` and the
 //!   smallest tilt turns that into an enormous ellipse. The knife edge there is
 //!   not a near miss; it is the whole of the `Nothing` answer.
+//!
+//! A ball resting all the way round the inside of a pipe used to be a third
+//! one, and §118.11 took it off the list: both its radii survive a turn
+//! untouched, so the resting does too. [`is_on_a_knife_edge`] says what the arm
+//! was and why it went, and
+//! [`a_ball_resting_along_a_whole_circle_inside_a_pipe_answers_one_circle_however_it_is_turned`]
+//! counts what the old rule answered instead.
 //!
 //! Everything else has a discriminant clear of zero by more than a rotation can
 //! move it, and for those the kind is the same before and after. §28 records the
@@ -45,8 +51,8 @@
 //! ranges over rather than by reading the property — which is the whole of
 //! §16.10's method (§30).
 //!
-//! Measured: **1485 of 2048 planar pairs compared and 564 skipped, 1619 of 2048
-//! quartic pairs compared and 430 skipped.**
+//! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1621 of 2048
+//! quartic pairs compared and 429 skipped.**
 
 #![forbid(unsafe_code)]
 
@@ -58,7 +64,8 @@ use std::cell::Cell;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
 use rcad_geom::{Error, Surface, SurfaceMeet, intersect};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::expansion::{expansion_sign, expansion_sum, two_product};
+use rcad_predicates::{Decision, Policy, ProvenanceLog};
 
 use crossings::{Crossing, Elsewhere, Piece, Turn, a_lattice_crossing, a_quartic_lattice_crossing};
 
@@ -88,7 +95,7 @@ const REJECTS_ALLOWED_PER_CASE: u32 = 4;
 /// It is not higher because of what the control family *is*: every direction on
 /// the lattice is a coordinate axis, so two of them are exactly parallel or
 /// exactly square far more often than two directions drawn at random would be.
-/// Measured on the shipped corpus: 1485 of 2048 compared, 564 skipped.
+/// Measured on the shipped corpus: 1486 of 2048 compared, 564 skipped.
 const MOST_PLANAR_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
 
 /// How many of the quartic pairs have to survive it.
@@ -96,8 +103,8 @@ const MOST_PLANAR_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
 /// Half. The generator draws radii up to five and places them up to six apart in
 /// whole numbers, so a lattice pipe pair is exactly tangent surprisingly often —
 /// five apart with radii of two and three is one — and every one of those is a
-/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1619 of
-/// 2048 compared, 430 skipped.
+/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1621 of
+/// 2048 compared, 429 skipped.
 const MOST_QUARTIC_PAIRS_MUST_BE_COMPARED: f64 = 0.5;
 
 /// The four pairs whose crossing lies in a plane.
@@ -132,25 +139,31 @@ fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
     );
 }
 
-/// The knife edge a ball and a pipe have, which [`is_on_a_knife_edge`] had no
-/// arm for until this case was written.
+/// The pair that used to be this file's third knife edge, and is not one any
+/// more.
 ///
-/// A ball of radius one whose middle sits on the axis of a pipe of radius one
-/// rests against the pipe all the way round a single circle. That circle is
-/// where `R² − r²` is exactly zero for the ball's `R` and the pipe's `r`, so it
-/// is the same kind of edge as a plane
-/// resting on a ball: turning the pair rounds both radii, and whichever way the
-/// last bits fall the answer changes. A sixty-fourth of a turn about `(1, 1, 1)`
-/// makes the ball miss the pipe altogether; twenty sixty-fourths makes it cut
-/// two circles.
+/// A ball of radius one whose middle sits **on the origin the pipe's axis runs
+/// through** rests against a pipe of radius one all the way round a single
+/// circle. Turning the pair leaves both radii alone — a radius is a scalar and a
+/// rotation does not touch it — and carries the ball's middle and the axis'
+/// origin to the same place, because they are the same place. So the resting is
+/// exact after every turn, and one circle is the truthful answer to all
+/// sixty-four of them.
 ///
-/// **Both turned answers are honest**, which is why the pair has to be skipped
-/// rather than fixed: the turned surfaces genuinely no longer rest on each
-/// other. Without the arm, the property above draws this pair — the generator
-/// places a ball anywhere and gives both it and a pipe a radius from one to
-/// five — compares it, and fails.
+/// **It did not used to be.** Before §118.11 a pipe was every point `r/‖w‖` from
+/// its axis, so the question "does this ball rest inside this pipe" came out as
+/// `R²‖w‖² − r²`, which for `R = r = 1` is the sign of `‖w‖² − 1` — the stored
+/// direction's own rounding and nothing else about the geometry, which is why
+/// the assertion this test used to carry read `nothing` at one sixty-fourth and
+/// `two circles` at twenty.
+///
+/// This counts that sign over the sixty-three turns below, in exact arithmetic
+/// because the answer is a handful of last bits from zero. **Measured: two
+/// circles 48 times, nothing at all 15 times, and the truthful answer not
+/// once.** The two turns the old assertion named are pinned inside the loop, so
+/// what is counted is the rule that really ran and not a rule that resembles it.
 #[test]
-fn a_ball_resting_along_a_whole_circle_inside_a_pipe_is_a_knife_edge() {
+fn a_ball_resting_along_a_whole_circle_inside_a_pipe_answers_one_circle_however_it_is_turned() {
     let resting = Crossing {
         first: Piece::Ball {
             centre: [0, 0, 0],
@@ -178,21 +191,83 @@ fn a_ball_resting_along_a_whole_circle_inside_a_pipe_is_a_knife_edge() {
         ("curves", 1),
         "the ball touches the pipe along one whole circle"
     );
-    assert_eq!(
-        kind_of(&named(&turned_by(1).surfaces()).expect("the turned pair is named")),
-        ("nothing", 0),
-        "a sixty-fourth of a turn rounds the ball just clear of the pipe"
+
+    let mut the_old_rule_said_two_circles = 0;
+    let mut the_old_rule_said_nothing = 0;
+    let mut the_old_rule_agreed = 0;
+    for steps in 1..64 {
+        let surfaces = turned_by(steps).surfaces();
+        assert_eq!(
+            kind_of(&named(&surfaces).expect("the turned pair is named")),
+            ("curves", 1),
+            "a turn moves the resting circle and does not undo the resting, so every one of \
+             these is still one circle"
+        );
+
+        let [Surface::Sphere(ball), Surface::Cylinder(pipe)] = surfaces else {
+            panic!("this pair is a ball and a pipe, in that order");
+        };
+        assert_eq!(ball.radius(), 1.0, "a rotation does not touch a radius");
+        assert_eq!(pipe.radius(), 1.0, "nor this one");
+        assert_eq!(
+            (ball.centre() - pipe.axis().origin())
+                .cross(pipe.axis().direction())
+                .length_squared(),
+            0.0,
+            "the ball's middle and the axis' origin are the same place, so a rotation carries \
+             them to the same place"
+        );
+
+        let old = how_a_stored_directions_squared_length_compares_with_one(
+            pipe.axis().direction().components(),
+        );
+        // The two turns the assertion this test used to carry named, and the
+        // two answers it recorded. They pin the rule rebuilt here to the one
+        // that actually ran.
+        if steps == 1 {
+            assert_eq!(
+                old,
+                Decision::Neg,
+                "the old test read `nothing` at one sixty-fourth"
+            );
+        }
+        if steps == 20 {
+            assert_eq!(
+                old,
+                Decision::Pos,
+                "and `two circles` at twenty sixty-fourths"
+            );
+        }
+        if old == Decision::Pos {
+            the_old_rule_said_two_circles += 1;
+        } else if old == Decision::Neg {
+            the_old_rule_said_nothing += 1;
+        } else {
+            assert_eq!(old, Decision::Zero, "a sum of exact squares has a sign");
+            the_old_rule_agreed += 1;
+        }
+    }
+
+    println!(
+        "of 63 turns of one resting ball, the pre-§118.11 rule said two circles for \
+         {the_old_rule_said_two_circles}, nothing at all for {the_old_rule_said_nothing}, and \
+         one circle for {the_old_rule_agreed}"
+    );
+    assert!(
+        the_old_rule_said_two_circles > 0 && the_old_rule_said_nothing > 0,
+        "this test is a demonstration that the old answer was a rounding rather than the \
+         geometry, and it demonstrates nothing unless that rounding went both ways"
     );
     assert_eq!(
-        kind_of(&named(&turned_by(20).surfaces()).expect("the turned pair is named")),
-        ("curves", 2),
-        "twenty sixty-fourths rounds it the other way and the circle splits in two"
+        the_old_rule_agreed, 0,
+        "and the sharper half of it: of sixty-three turns of one resting ball the old rule \
+         reached the truthful answer not once"
     );
 
     assert!(
-        is_on_a_knife_edge(&resting.surfaces()),
-        "a pair whose kind two different turns change in two different directions is a knife \
-         edge, and the property above compares it unless this says so"
+        !is_on_a_knife_edge(&resting.surfaces()),
+        "a pair every turn above answers the same way is not a knife edge, and the properties \
+         above skip it if this says it is"
     );
 }
 
@@ -292,6 +367,17 @@ fn kind_of(met: &SurfaceMeet) -> (&'static str, usize) {
 ///
 /// Asked of the surfaces and not of the answer, because the plane-and-pipe case
 /// is a knife edge even when the answer is `Nothing`. See the file's opening.
+///
+/// # The arm §118.11 deleted
+///
+/// A ball resting all the way round the inside of a pipe exactly as wide as it
+/// is used to be a third knife edge here, and it is not one any more. A turn
+/// leaves both radii alone, `R² − r²` is exactly zero after it as well as
+/// before, and a ball no wider than the pipe can never swallow a whole
+/// cross-section of it however far off the axis a turn nudges its middle. The
+/// arm was there because the old question carried the stored direction's
+/// squared length on the ball's side, and `‖w‖²R² − r²` is that direction's
+/// rounding wearing a discriminant's clothes.
 fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
     match surfaces {
         [Surface::Plane(flat), Surface::Cylinder(pipe)]
@@ -300,20 +386,6 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
         }
         [Surface::Plane(one), Surface::Plane(other)] => {
             one.normal().cross(other.normal()).length_squared() == 0.0
-        }
-        // A ball whose middle is on a pipe's axis and whose radius is the pipe's
-        // rests against the pipe along a whole circle. `R² − r²` is exactly zero
-        // there, so a rounding of either radius either lifts the ball clear or
-        // splits the circle in two —
-        // `a_ball_resting_along_a_whole_circle_inside_a_pipe_is_a_knife_edge`
-        // shows one turn doing each.
-        [Surface::Sphere(ball), Surface::Cylinder(pipe)]
-        | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
-            ball.radius() == pipe.radius()
-                && (ball.centre() - pipe.axis().origin())
-                    .cross(pipe.axis().direction())
-                    .length_squared()
-                    == 0.0
         }
         // Two pipes down one direction cross in straight lines and a lean turns
         // that into two closed loops, so this is the quartic family's version of
@@ -327,6 +399,27 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
         }
         _ => false,
     }
+}
+
+/// The sign of `w·w − 1`, worked out in exact arithmetic.
+///
+/// This is the whole of the rule a ball-and-pipe crossing used to run on when
+/// both radii are one: `dot(w, w)·R² − r²` with `R = r = 1`. It has to be exact
+/// to be the same rule — the answer is a handful of last bits from zero, and
+/// `Vector::length_squared` rounds three times on the way there and says `Zero`
+/// where the truth is either side of it.
+fn how_a_stored_directions_squared_length_compares_with_one(along: [f64; 3]) -> Decision {
+    let squares = along.map(|step| {
+        let (product, roundoff) = two_product(step, step);
+        [roundoff, product]
+    });
+    let mut two_of_them = [0.0; 4];
+    let used = expansion_sum(&squares[0], &squares[1], &mut two_of_them);
+    let mut all_three = [0.0; 6];
+    let used = expansion_sum(&two_of_them[..used], &squares[2], &mut all_three);
+    let mut less_one = [0.0; 7];
+    let used = expansion_sum(&all_three[..used], &[-1.0], &mut less_one);
+    expansion_sign(&less_one[..used])
 }
 
 fn a_turn() -> impl Strategy<Value = Turn> {

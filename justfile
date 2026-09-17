@@ -381,7 +381,33 @@ check-fuzz-builds:
 # binding as covering the variant. Written plainly as
 # `Decision::Undecidable { enclosure }` — which is what the narrowing wanted
 # anyway — the same match stops warning. The arm itself did not move.
-wildcard_arms := "88"
+#
+#     ef7cf664  the pipe-convention conversion  83 direct + 3 composite = 86
+#
+# Two go away and none arrive. **Both are composite and neither is a new kind of
+# movement**: each was a `_ => return None` over `Decision` inside a tuple, in
+# `intersect.rs`, leaving `Undecidable` the one variant its match never named.
+# `how_two_squares_compare_exactly` is gone outright — with a pipe `r` wide
+# rather than `r/‖w‖` wide, what two leaning pipes ask clears to `(r₁ ± r₂)²K`
+# against `T²` and no longer needs the five-hundred-order expansion that
+# function existed to square (`docs/decisions.md` §118.11). The other is in
+# `how_two_radii_and_a_gap_compare_exactly`, where the radii's sign was read off
+# an `Exact` difference and is now `other.radius().partial_cmp(&one.radius())`:
+# both radii mean the same thing, so the sign of the difference *is* the sign of
+# the comparison. `Ordering` is not one of ours, so the scan stops counting that
+# site at all. The direct half does not move.
+#
+#     lane-settle-the-turned-pair  after the resting ball  83 direct + 4 composite = 87
+#
+# The one new point is the mirror of the composite point at 89: `is_on_a_knife_edge`
+# in `the_same_pair_turned_names_the_same_kind_of_crossing.rs` **loses** the
+# ball-and-pipe arm it grew there, so that match leaves three of `Surface`'s
+# variants unnamed where it left two. A ball resting all the way round the
+# inside of a pipe is not a knife edge any more — §118.11 leaves both radii
+# untouched by a turn, so the resting survives it — and an arm that skips a pair
+# the property can now compare is a hole in the property. Two more quartic pairs
+# get compared for the point.
+wildcard_arms := "87"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
