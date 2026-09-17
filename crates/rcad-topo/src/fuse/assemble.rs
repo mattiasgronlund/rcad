@@ -2020,7 +2020,7 @@ impl Edges {
             }
         };
         let forward = if from == to {
-            which_way_a_closed_edge_is_walked(meet, at)
+            which_way_a_closed_edge_is_walked(meet, at)?
                 .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?
         } else {
             self.made[edge].ends[0] == from
@@ -2046,13 +2046,28 @@ impl Edges {
 /// as the used gradients are the stored ones. Where the rule turns the piece
 /// round, `sides_of` turns every side of it round with it and the face's use
 /// says so — which is what the sweep reads.
-fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Option<bool> {
+///
+/// # Errors
+///
+/// Whatever [`a_closed_crossing_is_walked_the_way_it_is_stored`] gives up with,
+/// which is [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the wire round the
+/// crossing is shorter than the rounding in the cross product that built it
+/// (§111).
+///
+/// **This used to be an `.expect`**, on the argument that the flat check below
+/// ruled out the one error the rule could give. That argument was about
+/// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] and stayed written down after a
+/// second error arrived beside it. A fuse's arguments are a caller's solids and
+/// a reader's file, so a crossing this thin is caller input and gets an `Err`
+/// rather than a panic — and a green gate is not a demonstration that no input
+/// reaches it (§16.10).
+fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Result<Option<bool>> {
     let [mine, partner] = meet.carried_by;
     if the_curved_one_of(&meet.carried_by).is_none() {
         // Two planes cross in a straight line, which does not close, so nothing
         // reaches here — and a wire with no curved surface either side of it has
         // no longitude to run along.
-        return Some(true);
+        return Ok(Some(true));
     }
     a_closed_crossing_is_walked_the_way_it_is_stored(
         [&mine, &partner],
@@ -2060,7 +2075,6 @@ fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Option<bool>
         at,
         meet.material_side,
     )
-    .expect("the curved check just above already ruled out the one case this returns an error for")
 }
 
 /// Which of the two arcs between an edge's two corners this face walks, as the

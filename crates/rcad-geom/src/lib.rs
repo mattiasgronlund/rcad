@@ -87,6 +87,7 @@ mod surface;
 mod three_surfaces;
 mod torus;
 mod walk;
+mod which_way_a_closed_crossing_turns;
 
 pub use crate::along_a_crossing::{ROUND_A_CROSSING, which_comes_first_round_a_crossing};
 pub use crate::bspline_curve::{BSplineCurve, REFINEMENT_ROUNDOFF};
@@ -127,6 +128,7 @@ pub use crate::walk::{
     POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF, PointsAlongACrossing, ROOM_LEFT_TO_REFINE_A_WALK, walk,
     where_a_closed_crossing_starts,
 };
+pub use crate::which_way_a_closed_crossing_turns::which_way_a_closed_crossing_turns;
 
 /// How far the nearest `f64` triple to a point sits from that point, per unit
 /// of the point's largest coordinate.
