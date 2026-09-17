@@ -55,8 +55,8 @@ fn every_file_that_stops_at_the_tangency_wall_names_the_edge_it_was_following() 
 
     for family in ["nist", "kicad"] {
         for path in files_under(&root.join(family)) {
-            let bytes = fs::read(&path)
-                .unwrap_or_else(|why| panic!("reading {}: {why}", path.display()));
+            let bytes =
+                fs::read(&path).unwrap_or_else(|why| panic!("reading {}: {why}", path.display()));
             let Ok(file) = StepFile::read(&bytes) else {
                 continue;
             };
@@ -169,7 +169,10 @@ fn edges_of_bound(file: &StepFile, bound: EntityId) -> Vec<EntityId> {
     let Some(loop_id) = record.attribute(1).and_then(Value::as_reference) else {
         return Vec::new();
     };
-    let Some(edge_loop) = file.instance(loop_id).and_then(|held| held.part("EDGE_LOOP")) else {
+    let Some(edge_loop) = file
+        .instance(loop_id)
+        .and_then(|held| held.part("EDGE_LOOP"))
+    else {
         return Vec::new();
     };
     let Some(steps) = edge_loop.attribute(1).and_then(Value::as_list) else {
