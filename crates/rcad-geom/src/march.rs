@@ -1312,6 +1312,89 @@ mod tests {
         );
     }
 
+    /// **Every way into the marcher refuses at a point whose normal is not a
+    /// number, and none of them hands one back.**
+    ///
+    /// The place is a pipe's own axis, where `sideways * reach.recip()` is
+    /// `0 * inf`. It matters because `settled` can *land* there: driven from an
+    /// absurd trial step, its Newton iterate ran away to `1e307` and came back
+    /// onto `[0, 0, 0]`, which is the thin pipe's axis in
+    /// `the_same_two_pipes_with_a_fatter_thin_one_are_walked`. So this is not a
+    /// point only a caller could ask about.
+    ///
+    /// `NaN` quietly propagating is neither of this repo's two answers — it is
+    /// not a panic on a broken invariant and not an `Err` on bad input — so what
+    /// is checked here is that every entry point turns it into an `Err`. The
+    /// guard in [`settled`] is `!across.is_finite()`, and it catches this
+    /// because a `NaN` normal makes both squared lengths `NaN`.
+    ///
+    /// **Each of them names the site it actually refused at**, and the sites are
+    /// asserted rather than the mere fact of a refusal, because that is what
+    /// would notice a guard moving. Reading the source suggests
+    /// [`how_far_off_the_crossing`] should slip past its first guard —
+    /// `leaning.lo() <= 0.0` is *false* for a `NaN`, as every comparison against
+    /// one is — and be caught further down by `!reach.hi().is_finite()`. It is
+    /// not: it refuses at the sine guard. The enclosing arithmetic does not hand
+    /// that comparison a `NaN` to be fooled by, so the interval layer is doing
+    /// work here that the plain `f64` layer above it could not.
+    #[test]
+    fn nothing_hands_back_a_point_whose_normal_is_not_a_number() {
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 1.0);
+        let ball = a_ball([0.0, 0.0, 0.0], 2.0);
+        let surfaces = [&pipe, &ball];
+        let on_the_axis = Point::new(0.0, 0.0, 0.0);
+
+        let (how_far, no_way_out) = how_far_off_and_which_way(&pipe, on_the_axis);
+        assert!(
+            !no_way_out.is_finite(),
+            "a pipe has no outward direction on its own axis, and got {no_way_out:?}"
+        );
+        assert!(
+            how_far.is_finite(),
+            "though the distance to it is an ordinary number, {how_far:e}, which is \
+             why a guard that only watched the distance would miss this"
+        );
+
+        let refused_at = |outcome: Result<()>| match outcome {
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent { at, .. }) => Some(at),
+            _ => None,
+        };
+        for (what, outcome, expected) in [
+            (
+                "settled",
+                settled(surfaces, on_the_axis).map(|_| ()),
+                WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+            ),
+            (
+                "how_far_off_the_crossing",
+                how_far_off_the_crossing(surfaces, on_the_axis).map(|_| ()),
+                WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
+            ),
+            (
+                "settled_with_a_bound",
+                settled_with_a_bound(surfaces, on_the_axis).map(|_| ()),
+                WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+            ),
+            (
+                "which_way_the_crossing_runs",
+                which_way_the_crossing_runs(surfaces, on_the_axis).map(|_| ()),
+                WhereFollowingACrossingGaveUp::CrossingTheTwoNormalsForADirection,
+            ),
+            (
+                "march",
+                march(surfaces, on_the_axis, 0.1, 1 << 10).map(|_| ()),
+                WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+            ),
+        ] {
+            assert_eq!(
+                refused_at(outcome),
+                Some(expected),
+                "{what} must refuse at a point whose normal is not a number, and name \
+                 the site it refused at"
+            );
+        }
+    }
+
     /// The cap is a refusal and not a truncated answer, which is what stops a
     /// caller reading a partly walked loop as a whole one (§24.10).
     #[test]

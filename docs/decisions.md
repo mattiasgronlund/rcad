@@ -29182,10 +29182,43 @@ Three things in that table, and each is a separate claim:
 - **The truth is `4.41e-16`** — `sin²` of the lean the test measures — and
   `|u×v|²` returns it to three digits where the subtraction returns zero. §109.6
   recorded this as an untested hypothesis. It is now tested.
-- **A refusal was not even the worst of it.** One step less parallel the
-  subtraction returns `6.66e-16` against a truth of `4.44e-16`: a **fifty per
-  cent error in the denominator of every Newton move**, which is a wrong answer
-  and not a refusal, and nothing was reporting it.
+- **A refusal was not even the worst of it.** See §112.1a, which is the finding
+  this unit did not go looking for.
+
+### 112.1a The refusal was the half that announced itself
+
+Everything above and everything below is about a refusal, because a refusal is
+what three lanes were pointed at. **The more serious half of this defect was a
+wrong answer**, and nothing in the tree was reporting it.
+
+Read the third row of the table again. At a step of `1e-6` — a lean *less*
+parallel than the one that refuses, and squarely inside the range the marcher
+walks every day — `1 − c·c` returns `6.66134e-16` where the truth is
+`4.44089e-16`. That is **fifty per cent wrong**, in the denominator of both
+Newton corrections, and it does not refuse: it hands back a number, the settling
+uses it, and the point moves by two thirds of what it should have.
+
+Nothing caught that, and the reason is worth keeping. `1 − c·c` reaching exactly
+zero is self-announcing — it trips `across <= 0.0` and becomes an honest refusal,
+which is why it is the thing that got looked at. `1 − c·c` being merely half
+wrong is silent, and the band where it is silent is **wider** than the band where
+it refuses: the subtraction is losing digits from the moment `c` gets within a
+few roundings of one, and only falls off the end some way further in. A unit
+framed around "why does this refuse" would have measured the wall, fixed nothing,
+and left the wrong answers either side of it in place.
+
+The repair is the same one — the cancellation is the same cancellation — so this
+section records what the fix is worth rather than asking for another one. What it
+changes is which sentence goes at the top: the marcher was not only giving up
+where it should not, it was quietly mis-settling points where it did not give up.
+
+Roadmap §6.3 calls near-tangential contact the place kernels produce silent
+garbage, and `march.rs`'s own module comment says the certified deviation is what
+stops the silence. It does still stop it — the deviation bound is worked out with
+enclosing arithmetic and never touched this subtraction. But the *stepping* was
+producing exactly the silent garbage §6.3 names, eight powers of ten above where
+anyone was looking for it, and what would have caught it was measuring the
+arithmetic against a closed form rather than watching for an `Err`.
 
 ### 112.2 Two subtractions, and neither of them had to be written that way
 
@@ -29327,3 +29360,74 @@ on luck — its first trial settling to *somewhere* finite, then the chord rule
 collapsing the step in one go — started landing on a pipe's own axis instead,
 where the normal is `NaN`. The old code was no more robust; it was luckier. Both
 halves of this section are the fragility, not the luck.
+
+### 112.6 What happens to a normal that is not a number, measured rather than hoped
+
+The paragraph above says a trajectory landed somewhere the normal is `NaN`. That
+is a correctness question and not a colourful detail, because `NaN` propagating
+quietly is neither of this repo's two answers: it is not a panic on a broken
+invariant and not an `Err` on bad caller input. Every comparison against one is
+`false`, so a guard written as `if x <= 0.0 { refuse }` waves it through.
+
+**It is reachable, and that is new.** `a_normal_that_is_not_a_number_is_reported_as_two_surfaces_being_tangent`
+pinned the mis-report and said explicitly that it was *not* fixed because the
+lane "could not demonstrate that `march` reaches it — `settled` would have to
+leave a point on a ball's centre", and §16.10 wants a demonstration for "no
+caller hits this" too. It does reach it. Instrumenting `settled` to print its
+iterate each round, on the two pipes of
+`the_same_two_pipes_with_a_fatter_thin_one_are_walked`, the last four rounds run
+
+```text
+[3.1994025547765454e196, -2.854116061397334e206, -2.2471164185778946e307]
+[-4.149515568880993e180, -2.854116061397334e206, 0.0]
+[0.0, 0.0, -3.6250807591402947e105]
+[0.0, 0.0, 0.0]
+```
+
+and `[0, 0, 0]` is that file's thin pipe's axis. So the settling can *land* on the
+one place a normal does not exist, from an absurd trial step, and the question
+"does anything hand that point back" had to be answered.
+
+**It does not.** `nothing_hands_back_a_point_whose_normal_is_not_a_number`
+(`march.rs`) puts a point on a pipe's own axis and checks all five ways in. Every
+one refuses, and each names the site it refused at:
+
+| asked | refuses at |
+|---|---|
+| `settled` | `SettlingAPointOntoBothSurfaces` |
+| `how_far_off_the_crossing` | `BoundingHowFarOffTheCrossingAPointIs` |
+| `settled_with_a_bound` | `SettlingAPointOntoBothSurfaces` |
+| `which_way_the_crossing_runs` | `CrossingTheTwoNormalsForADirection` |
+| `march` | `SettlingAPointOntoBothSurfaces` |
+
+So it is a **refusal**, not a number and not a shortening — except inside
+`one_step`, where §112.5's change turns `settled`'s refusal into a shortening and
+a retry, which is why the gate is green rather than because the `NaN` stopped
+happening. The distance to the surface at that point is an *ordinary number*
+(`-1.0` for a unit pipe); only the direction is not. A guard that watched the
+distance would have missed all of this, which is why the test asserts that too.
+
+**One thing reading the source gets wrong, and the test corrects.**
+`how_far_off_the_crossing` looks like it should slip past its first guard, since
+`leaning.lo() <= 0.0` is `false` for a `NaN`, and be caught only by
+`!reach.hi().is_finite()` further down. It is not: it refuses at the sine guard.
+The enclosing arithmetic never hands that comparison a `NaN` to be fooled by — the
+interval layer is doing work the plain `f64` layer above it could not. That is
+recorded because it was predicted wrongly first, and checked second.
+
+**What is still open.** The test covers the family by the *place* — a pipe's
+axis, a ball's centre — and not by the *route*. It does not demonstrate that
+`settled` landing on such a point always ends in a refusal for every pair and
+every trial length; it demonstrates that the five entry points refuse when handed
+one, and that `one_step` shortens rather than dying when a trial produces one. A
+`NaN` arriving through some arm of `how_far_off_and_which_way` this test does not
+build — the cone's and the torus's both divide by a `reach` that can be zero — is
+untested. **That is the honest boundary of what this lane characterised**, and a
+lane that wants to close it should go at `how_far_off_and_which_way` and ask which
+of its five arms can produce a non-finite normal at a finite point, rather than at
+`march`.
+
+The mis-report the older test pins is also still a mis-report: all five of these
+say `CannotFollowACrossingWhereItsSurfacesAreTangent`, and a pipe's axis is not a
+tangency. Fixing that wants a name for the other case, which is `error.rs` and
+another lane's file.
