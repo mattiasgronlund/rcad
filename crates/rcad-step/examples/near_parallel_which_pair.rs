@@ -1,7 +1,9 @@
-//! Of the 44 corpus files whose only probe reason is "this crossing runs
+//! Of the corpus files whose only probe reason is "this crossing runs
 //! where its two surfaces are too nearly parallel to follow it"
-//! (`docs/decisions.md` §107.1), a census already found *a* tangent face pair
-//! in every one of them and called all 44 LIMIT. **That census never checked
+//! (`docs/decisions.md` §107.1 counted 44 of them; this run finds 24 that
+//! report it at all, and none at all where it is one reason among several —
+//! §117 records that and does not claim to know why), a census already found
+//! *a* tangent face pair in every one and called them all LIMIT. **That census never checked
 //! the tangent pair it found is the pair that actually refused** — a file's
 //! `reasons` set is one deduplicated string however many pairs contributed
 //! it, so a file could hold a genuinely tangent pair *and* a transverse pair
@@ -22,63 +24,63 @@
 //!   --example near_parallel_which_pair
 //! ```
 //!
-//! # What that run printed, on 2026-09-16
+//! # What that run printed, on 2026-09-17
 //!
 //! ```text
-//! === summary over the 44 files ===
-//!   ThisEntityOfTheSolidWasRefused (an #id to read a pair from): 0
-//!   TheSolidTheFileDescribesIsNotOne (no entity, whole-solid form):     44
+//! === summary over the 24 files ===
+//!   ThisEntityOfTheSolidWasRefused (an #id to read a pair from): 24
+//!   TheSolidTheFileDescribesIsNotOne (no entity, whole-solid form):      0
 //!   anything else (succeeded, or a different refusal):                   0
+//!   of the 24 with a named entity:
+//!     TANGENT — touch without crossing, a limit:  18
+//!     TRANSVERSE — they really cross, a GAP:       0
+//!     THEY NEVER MEET — no crossing to follow:     0
+//!     UNDECIDED — no test here knows the pair:     6
+//!     no surface pair readable from the file:      0
 //! ```
 //!
-//! All 44 of them, and every single one the same line:
+//! **Not one of the 24 is a plain crossing the marcher failed to follow.**
+//! Eighteen are a ball capping a pipe — same radius, the ball's centre exactly
+//! on the pipe's axis, so the two touch all the way round and there is no
+//! crossing to follow. Six are two pipes of the same radius crossing at right
+//! angles with their axes actually meeting, which is the one shape
+//! [`evaluate_pipe_against_pipe`] refuses to call either way.
 //!
-//! ```text
-//!   TheSolidTheFileDescribesIsNotOne: solid #15, why: geometry: this crossing
-//!   runs where its two surfaces are too nearly parallel to follow it
-//! ```
+//! # Why the earlier "all transverse, a GAP" was not a measurement
 //!
-//! So **this plan does not work, and the reason is a design one and not a
-//! bug.** `Refusal::ThisEntityOfTheSolidWasRefused` names an entity only when
-//! `SolidBuilder::which_entity_the_builder_meant` (`brep.rs:902`) recognizes
-//! the `rcad_topo::Error` it was handed, and that function names six
-//! `ADraft…` variants and answers `None` to everything else. The near-parallel
-//! crossing is none of the six: it is
-//! `rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent`, a unit
-//! variant carrying no fields, and it arrives wrapped as
-//! `rcad_topo::Error::Geometry` — which is what the `geometry:` in every line
-//! above is. Inside `SolidBuilder::build` the one step that can produce an
-//! `Error::Geometry` at all is `scratch.validate`, so the refusal is the
-//! sweep's and the sweep does not say which pair of surfaces it was looking
-//! at. `what_stopped_the_build` (`brep.rs:727`) therefore takes the `None`
-//! branch and publishes the whole-solid form, naming the `MANIFOLD_SOLID_BREP`
-//! — `#15` in all 44, which are all KiCad files from one writer — and nothing
-//! narrower.
+//! Before this, [`evaluate_surfaces`] knew plane/plane, plane/cylinder and
+//! cylinder/cylinder, carried a `bool` called `confirmed_limit`, and answered
+//! `false` for everything else — which printed as "TRANSVERSE — a gap".
+//! Cylinder/sphere was none of the three, so every one of the eighteen was the
+//! default arm of a `match` reporting itself as a verdict.
+//! `docs/decisions.md` §113.5 caught that; §117 records what the numbers are
+//! once a test actually runs. The `bool` is now a [`Verdict`] with a fourth
+//! case, so "no test here knows this pair" can no longer come out as "they
+//! really cross".
 //!
-//! **The census's hole is therefore still open, and this example cannot close
-//! it.** `pair_for_entity` and `evaluate_surfaces` below are never reached: 0
-//! files took the `ThisEntityOfTheSolidWasRefused` arm, so the tangency test
-//! was applied to no pair at all. They are kept, rather than deleted, because
-//! they are the half that runs the moment an `#id` does come back.
+//! The six had a second version of the same fault. The cylinder/cylinder arm
+//! called a pair transverse whenever the axes were more than
+//! [`DEGENERATE_DEG`] from parallel, and the distance it printed beside that
+//! verdict was one pipe's **origin** measured against the other's axis — the
+//! point the file happened to write down, not a property of the pair. It read
+//! `0.400000000000` against a touch at `0.200000000000` for pairs whose axes
+//! in fact pass through each other, distance `0`.
 //!
 //! # What the refusal carries now, and why that is still not an `#id`
 //!
 //! `docs/decisions.md` §110 gave the refusal the two `Surface`s the marcher
-//! gave up between, and which of its questions gave up. Run again on
-//! 2026-09-17, all 44 files answer
-//! **"asked while settling a point onto both of them"** — one site out of five,
-//! and not either of the two the census was written against.
+//! gave up between, and which of its questions gave up. Turning those two
+//! surfaces back into two `#id`s was tried and **does not work**: matched
+//! against every surface this reader wrote down for the file, the pair scores
+//! **0 matches**. The surfaces the sweep is holding are a translation away
+//! from the ones the reader wrote. Naming the pair by `#id` that way needs
+//! whatever carries that translation, which is `rcad-topo`'s and not this
+//! crate's; §110 records the measurement and leaves the cause open.
 //!
-//! Turning those two surfaces back into two `#id`s was tried and **does not
-//! work**: matched against every surface this reader wrote down for the file,
-//! the pair scores **0 matches**, not one and not several. The surfaces the
-//! sweep is holding are a translation away from the ones the reader wrote —
-//! one file refuses between a pipe at `(0, 0, 1)` and a ball at `(0, 0, 11.3)`
-//! while its faces sit at `(23.3, ±4.5, ·)` and `(-0.7, ±4.5, ·)`; another
-//! refuses about a ball at `z = 0` whose only matching face is the same ball at
-//! `z = 10`. Naming the pair by `#id` needs whatever carries that translation,
-//! which is `rcad-topo`'s and not this crate's. §110 records the measurement
-//! and leaves the cause open.
+//! This example does not need it. It reads both faces out of the file's own
+//! topology, so both sit in the same frame the file wrote them in and the
+//! translation cancels between them — every number below is a distance or an
+//! angle *between the two*, and never a position.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -109,24 +111,43 @@ const DEGENERATE_DEG: f64 = 2.0;
 fn main() {
     let root = corpus();
     let mut qualifying: Vec<(&'static str, String, StepFile)> = Vec::new();
+    let mut among_others = 0usize;
+    let mut what_else_they_say: BTreeSet<String> = BTreeSet::new();
     for family in ["nist", "kicad"] {
         let mut files = files_under(&root.join(family));
         files.sort();
         for path in files {
-            if let Some(file) = qualifies(&path) {
-                qualifying.push((family, name_of(&path), file));
+            match how_it_refuses(&path) {
+                HowItRefuses::OnlyTheMarcherGaveUp(file) => {
+                    qualifying.push((family, name_of(&path), file));
+                }
+                HowItRefuses::TheMarcherGaveUpAmongOthers(others) => {
+                    among_others += 1;
+                    what_else_they_say.extend(others);
+                }
+                HowItRefuses::SomethingElse => {}
             }
         }
     }
 
     println!("=== files whose only probe reason is the near-parallel crossing ===");
     println!("  found {}", qualifying.len());
+    println!(
+        "  and {among_others} more where it is one reason among several, so which entity the \
+         reader stopped at proves nothing — not classified below"
+    );
+    for reason in &what_else_they_say {
+        println!("    those also refuse for: {reason}");
+    }
 
     let mut named_entity = 0usize;
     let mut whole_solid = 0usize;
     let mut other = 0usize;
     let mut confirmed_tangent = 0usize;
     let mut transverse_gap = 0usize;
+    let mut never_meet = 0usize;
+    let mut cannot_tell = 0usize;
+    let mut no_pair_readable = 0usize;
 
     for (family, name, file) in &qualifying {
         let mut log = ProvenanceLog::new();
@@ -148,18 +169,41 @@ fn main() {
                         let evidence = evaluate_pair(file, a, b);
                         println!("    refusing pair: {a} ({kind_a}) / {b} ({kind_b})");
                         println!("    {}", evidence.detail);
-                        if evidence.confirmed_limit {
-                            confirmed_tangent += 1;
-                            println!("    verdict: TANGENT — a genuine limit");
-                        } else {
-                            transverse_gap += 1;
-                            println!("    verdict: TRANSVERSE — a gap, not a limit");
+                        match evidence.verdict {
+                            Verdict::Tangent => {
+                                confirmed_tangent += 1;
+                                println!(
+                                    "    verdict: TANGENT — they touch without crossing, a \
+                                     genuine limit"
+                                );
+                            }
+                            Verdict::Transverse => {
+                                transverse_gap += 1;
+                                println!(
+                                    "    verdict: TRANSVERSE — they really cross, so this is a gap"
+                                );
+                            }
+                            Verdict::NeverMeet => {
+                                never_meet += 1;
+                                println!(
+                                    "    verdict: THEY NEVER MEET — there is no crossing to follow"
+                                );
+                            }
+                            Verdict::CannotTell => {
+                                cannot_tell += 1;
+                                println!(
+                                    "    verdict: UNDECIDED — no test here measured this pair"
+                                );
+                            }
                         }
                     }
-                    None => println!(
-                        "    could not read a surface pair for entity {entity} from the file's \
-                         own text"
-                    ),
+                    None => {
+                        no_pair_readable += 1;
+                        println!(
+                            "    could not read a surface pair for entity {entity} from the \
+                             file's own text"
+                        );
+                    }
                 }
             }
             Err(Refusal::TheSolidTheFileDescribesIsNotOne { solid, why }) => {
@@ -178,10 +222,12 @@ fn main() {
     println!("  TheSolidTheFileDescribesIsNotOne (no entity, whole-solid form):     {whole_solid}");
     println!("  anything else (succeeded, or a different refusal):                   {other}");
     if named_entity > 0 {
-        println!(
-            "  of the {named_entity} with a named entity: {confirmed_tangent} confirmed \
-             tangent, {transverse_gap} transverse (a GAP)"
-        );
+        println!("  of the {named_entity} with a named entity:");
+        println!("    TANGENT — touch without crossing, a limit:  {confirmed_tangent}");
+        println!("    TRANSVERSE — they really cross, a GAP:      {transverse_gap}");
+        println!("    THEY NEVER MEET — no crossing to follow:    {never_meet}");
+        println!("    UNDECIDED — no test here knows the pair:    {cannot_tell}");
+        println!("    no surface pair readable from the file:     {no_pair_readable}");
     }
 }
 
@@ -229,21 +275,43 @@ fn name_of(path: &Path) -> String {
         .into_owned()
 }
 
-/// The file, parsed, if `probe` finds it refuses for exactly the one reason
-/// this census is about and nothing else.
-fn qualifies(path: &Path) -> Option<StepFile> {
+/// What `probe` says about one file, as far as this census cares.
+enum HowItRefuses {
+    /// The marcher giving up on a crossing, and nothing else. These are the
+    /// files the census classifies: the one entity the reader stopped at can
+    /// only be the marcher's, because there is nothing else to blame.
+    OnlyTheMarcherGaveUp(StepFile),
+    /// The marcher gave up, but the file refuses for other reasons too, so the
+    /// entity the reader stopped at need not be the marcher's one. Carries
+    /// those other reasons.
+    TheMarcherGaveUpAmongOthers(Vec<String>),
+    /// The marcher never gave up on this file.
+    SomethingElse,
+}
+
+fn how_it_refuses(path: &Path) -> HowItRefuses {
     let bytes = fs::read(path).unwrap_or_else(|why| panic!("reading {}: {why}", path.display()));
     let file = StepFile::read(&bytes)
         .unwrap_or_else(|why| panic!("{}: every file in the corpus parses: {why}", path.display()));
     let mut log = ProvenanceLog::new();
     let found = probe(&file, &Policy::certified(), &mut log);
-    let only_this = found.fatal.is_empty()
-        && found.reasons.len() == 1
-        && found
-            .reasons
-            .iter()
-            .any(|reason| is_the_marcher_giving_up(reason));
-    only_this.then_some(file)
+    if !found
+        .reasons
+        .iter()
+        .any(|reason| is_the_marcher_giving_up(reason))
+    {
+        return HowItRefuses::SomethingElse;
+    }
+    let others: Vec<String> = found
+        .reasons
+        .iter()
+        .filter(|reason| !is_the_marcher_giving_up(reason))
+        .map(|reason| reason.to_string())
+        .collect();
+    if found.fatal.is_empty() && others.is_empty() {
+        return HowItRefuses::OnlyTheMarcherGaveUp(file);
+    }
+    HowItRefuses::TheMarcherGaveUpAmongOthers(others)
 }
 
 /// Whether one of `probe`'s reason strings is the marcher giving up on a
@@ -289,7 +357,7 @@ fn pair_for_entity(
 fn evaluate_pair(file: &StepFile, a: EntityId, b: EntityId) -> PairEvidence {
     let faces = faces_of(file);
     let (Some(surface_a), Some(surface_b)) = (faces.get(&a), faces.get(&b)) else {
-        return PairEvidence::uncomputable("a face's surface did not parse");
+        return PairEvidence::cannot_tell("a face's surface did not parse");
     };
     evaluate_surfaces(surface_a, surface_b)
 }
@@ -398,6 +466,10 @@ enum SurfaceGeom {
         axis: [f64; 3],
         radius: f64,
     },
+    Sphere {
+        centre: [f64; 3],
+        radius: f64,
+    },
     Other(String),
 }
 
@@ -405,6 +477,7 @@ fn kind_name(surface: &SurfaceGeom) -> &str {
     match surface {
         SurfaceGeom::Plane { .. } => "PLANE",
         SurfaceGeom::Cylinder { .. } => "CYLINDRICAL_SURFACE",
+        SurfaceGeom::Sphere { .. } => "SPHERICAL_SURFACE",
         SurfaceGeom::Other(keyword) => keyword,
     }
 }
@@ -430,6 +503,12 @@ fn surface_of(file: &StepFile, id: EntityId) -> Option<SurfaceGeom> {
                 axis,
                 radius,
             })
+        }
+        "SPHERICAL_SURFACE" => {
+            let position = reference_at(record, 1)?;
+            let (centre, _) = placement_of(file, position)?;
+            let radius = number_at(record, 2)?;
+            Some(SurfaceGeom::Sphere { centre, radius })
         }
         other => Some(SurfaceGeom::Other(other.to_owned())),
     }
@@ -480,14 +559,35 @@ fn number_of(value: &Value) -> Option<f64> {
 
 struct PairEvidence {
     detail: String,
-    confirmed_limit: bool,
+    verdict: Verdict,
+}
+
+/// What a pair's own numbers say once a test that knows that pair has run.
+///
+/// The fourth case is the whole point of this type. It used to be a `bool`,
+/// and every pair no test here knew came back `false` — which printed as
+/// "TRANSVERSE — a gap". That is the default arm of a `match` reporting
+/// itself as a measurement, and it is what `docs/decisions.md` §113.5 caught.
+/// `CannotTell` is a result, not a failure, and it must never be folded into
+/// `Transverse`.
+enum Verdict {
+    /// The two surfaces touch without crossing, so there is no crossing for
+    /// the marcher to follow. The refusal is a limit.
+    Tangent,
+    /// The two surfaces really do cross, so a crossing is there and the
+    /// marcher failed to follow it. The refusal is a gap.
+    Transverse,
+    /// The two surfaces have no point in common at all.
+    NeverMeet,
+    /// No test here knows this pair of shapes.
+    CannotTell,
 }
 
 impl PairEvidence {
-    fn uncomputable(why: &str) -> Self {
+    fn cannot_tell(why: &str) -> Self {
         PairEvidence {
             detail: why.to_owned(),
-            confirmed_limit: false,
+            verdict: Verdict::CannotTell,
         }
     }
 }
@@ -496,12 +596,16 @@ fn evaluate_surfaces(a: &SurfaceGeom, b: &SurfaceGeom) -> PairEvidence {
     match (a, b) {
         (SurfaceGeom::Plane { normal: n1, .. }, SurfaceGeom::Plane { normal: n2, .. }) => {
             let Some(angle) = angle_deg(*n1, *n2) else {
-                return PairEvidence::uncomputable("a plane's normal did not normalize");
+                return PairEvidence::cannot_tell("a plane's normal did not normalize");
             };
             let folded = angle.min(180.0 - angle);
             PairEvidence {
                 detail: format!("normals {folded:.6} deg from parallel"),
-                confirmed_limit: folded < DEGENERATE_DEG,
+                verdict: if folded < DEGENERATE_DEG {
+                    Verdict::Tangent
+                } else {
+                    Verdict::Transverse
+                },
             }
         }
         (
@@ -522,7 +626,7 @@ fn evaluate_surfaces(a: &SurfaceGeom, b: &SurfaceGeom) -> PairEvidence {
         ) => {
             let (Some(angle), Some(unit_normal)) = (angle_deg(*axis, *normal), normalize(*normal))
             else {
-                return PairEvidence::uncomputable("the axis or the normal did not normalize");
+                return PairEvidence::cannot_tell("the axis or the normal did not normalize");
             };
             let deviation = (angle - 90.0).abs();
             let distance = dot(sub(*cylinder_origin, *origin), unit_normal).abs();
@@ -532,7 +636,11 @@ fn evaluate_surfaces(a: &SurfaceGeom, b: &SurfaceGeom) -> PairEvidence {
                     "axis {deviation:.6} deg short of lying in the plane; axis-to-plane \
                      distance {distance:.12} vs radius {radius:.12}"
                 ),
-                confirmed_limit: deviation < DEGENERATE_DEG && matches_radius,
+                verdict: if deviation < DEGENERATE_DEG && matches_radius {
+                    Verdict::Tangent
+                } else {
+                    Verdict::Transverse
+                },
             }
         }
         (
@@ -546,28 +654,177 @@ fn evaluate_surfaces(a: &SurfaceGeom, b: &SurfaceGeom) -> PairEvidence {
                 axis: a2,
                 radius: r2,
             },
-        ) => {
-            let (Some(angle), Some(unit_a1)) = (angle_deg(*a1, *a2), normalize(*a1)) else {
-                return PairEvidence::uncomputable("an axis did not normalize");
-            };
-            let folded = angle.min(180.0 - angle);
-            let distance = length(cross(unit_a1, sub(*o2, *o1)));
-            let matches_external = close(distance, r1 + r2);
-            let matches_internal = close(distance, (r1 - r2).abs());
-            PairEvidence {
-                detail: format!(
-                    "axes {folded:.6} deg from parallel; axis-to-axis distance {distance:.12} \
-                     vs r1+r2={:.12} / |r1-r2|={:.12}",
-                    r1 + r2,
-                    (r1 - r2).abs()
-                ),
-                confirmed_limit: folded < DEGENERATE_DEG && (matches_external || matches_internal),
-            }
-        }
-        _ => PairEvidence::uncomputable(
-            "not one of plane/plane, plane/cylinder or cylinder/cylinder",
+        ) => evaluate_pipe_against_pipe(*o1, *a1, *r1, *o2, *a2, *r2),
+        (
+            SurfaceGeom::Cylinder {
+                origin,
+                axis,
+                radius: pipe_radius,
+            },
+            SurfaceGeom::Sphere {
+                centre,
+                radius: ball_radius,
+            },
+        )
+        | (
+            SurfaceGeom::Sphere {
+                centre,
+                radius: ball_radius,
+            },
+            SurfaceGeom::Cylinder {
+                origin,
+                axis,
+                radius: pipe_radius,
+            },
+        ) => evaluate_ball_against_pipe(*centre, *ball_radius, *origin, *axis, *pipe_radius),
+        _ => PairEvidence::cannot_tell(
+            "no test here knows this pair: it is not plane/plane, plane/cylinder, \
+             cylinder/cylinder or cylinder/sphere",
         ),
     }
+}
+
+/// Whether two pipes touch without crossing, really cross, or never meet.
+///
+/// Parallel axes and leaning axes are two different questions, and the
+/// distance that answers one does not answer the other.
+///
+/// **Parallel.** The pipes meet in straight lines, and the whole question is
+/// the distance `d` between the two axes against `r1 + r2` and `|r1 - r2|`:
+/// equal to either, they touch along one line; between them, they cross in two
+/// lines; outside them, they never meet. Same three cases as the ball and the
+/// pipe below, for the same reason.
+///
+/// **Leaning.** `d` now means the distance between two lines that are not
+/// parallel, which is a different formula — the old one measured one pipe's
+/// origin against the other's axis, which is whatever point the file happened
+/// to write down and not a property of the pair at all. Either pipe runs off
+/// to infinity along its own axis and so leaves any bounded distance from the
+/// other's axis, so once the two walls reach each other at the common
+/// perpendicular they must cut: `d > r1 + r2` is never meeting, `d = r1 + r2`
+/// is a touch at exactly that one point, and anything less is a real crossing.
+/// Radii do not have a second case here — no pipe can hide inside another it
+/// is not parallel to.
+///
+/// The one leaning pair this does not answer is two pipes of the same radius
+/// `r` whose axes actually cross. Put those axes along `z` and `x`: the walls
+/// meet where `x² = z²` and `y² = r² - x²`, which is two whole ellipses, and
+/// the two ellipses cross each other at `(0, ±r, 0)` — which is exactly where
+/// the two walls' normals line up, `(0, ±r, 0)` for both. So a crossing is
+/// there to follow everywhere but at two points, and at those two points the
+/// walls touch and four branches meet. Neither "touch without crossing" nor
+/// "really cross" is the truth about that pair, so it is `CannotTell`, named
+/// rather than swept into `Transverse`.
+fn evaluate_pipe_against_pipe(
+    o1: [f64; 3],
+    a1: [f64; 3],
+    r1: f64,
+    o2: [f64; 3],
+    a2: [f64; 3],
+    r2: f64,
+) -> PairEvidence {
+    let (Some(angle), Some(unit_a1), Some(unit_a2)) =
+        (angle_deg(a1, a2), normalize(a1), normalize(a2))
+    else {
+        return PairEvidence::cannot_tell("an axis did not normalize");
+    };
+    let folded = angle.min(180.0 - angle);
+    let touch_outside = r1 + r2;
+    let between_axes = cross(unit_a1, unit_a2);
+    let leaning = length(between_axes);
+    if folded < DEGENERATE_DEG {
+        let distance = length(cross(unit_a1, sub(o2, o1)));
+        let touch_inside = (r1 - r2).abs();
+        let detail = format!(
+            "axes {folded:.6} deg from parallel; axis-to-axis distance {distance:.12} vs a touch \
+             from outside at {touch_outside:.12} / from inside at {touch_inside:.12}"
+        );
+        let verdict = if close(distance, touch_outside) || close(distance, touch_inside) {
+            Verdict::Tangent
+        } else if distance > touch_outside || distance < touch_inside {
+            Verdict::NeverMeet
+        } else {
+            Verdict::Transverse
+        };
+        return PairEvidence { detail, verdict };
+    }
+    let distance = dot(sub(o2, o1), between_axes).abs() / leaning;
+    let detail = format!(
+        "axes {folded:.6} deg from parallel, leaning on each other; the two axes pass \
+         {distance:.12} apart vs a touch at {touch_outside:.12}"
+    );
+    let verdict = if close(distance, touch_outside) {
+        Verdict::Tangent
+    } else if distance > touch_outside {
+        Verdict::NeverMeet
+    } else if close(distance, 0.0) && close(r1, r2) {
+        return PairEvidence::cannot_tell(
+            "two leaning pipes of the same radius whose axes cross meet in two whole ellipses \
+             that cross each other at the two points where the walls touch — a crossing is \
+             there to follow, except at those two points, and this test does not answer for \
+             them",
+        );
+    } else {
+        Verdict::Transverse
+    };
+    PairEvidence { detail, verdict }
+}
+
+/// Whether a ball and a pipe touch without crossing, really cross, or never
+/// meet, from the only two numbers that settle it.
+///
+/// Put the pipe's axis along `z`. A ball of radius `rs` whose centre sits a
+/// distance `e` from that axis meets the pipe wall of radius `rc` where
+/// `(z - h)² = rs² - rc² - e² + 2·rc·e·cos t`, going round the pipe by `t`.
+/// The right-hand side runs between `rs² - (rc + e)²` and `rs² - (rc - e)²`,
+/// so the whole question is where `rs` sits against `rc + e` and `|rc - e|`:
+///
+/// - `rs` equal to either one: the right-hand side just reaches zero and the
+///   two surfaces **touch without crossing**. With the centre on the axis
+///   (`e = 0`) the two values are the same number, `rc`, and the touch runs
+///   all the way round — a ball capping a pipe, which is the capsule end
+///   `docs/decisions.md` §113.5 worked out by hand. With the centre off the
+///   axis they are different numbers and the touch is a single point.
+/// - `rs` between them, or above `rc + e`: the right-hand side is positive
+///   somewhere, so a real crossing curve exists — **they really cross**.
+/// - `rs` below `|rc - e|`: the right-hand side is negative everywhere and
+///   **they never meet**.
+///
+/// Those five are every case, because `rs`, being one real number, is either
+/// equal to one of the two values, between them, above both, or below both.
+/// So this answers every ball-and-pipe pair, and never `CannotTell` — bar an
+/// axis that will not normalize, which is a broken file and not a shape.
+fn evaluate_ball_against_pipe(
+    centre: [f64; 3],
+    ball_radius: f64,
+    pipe_origin: [f64; 3],
+    pipe_axis: [f64; 3],
+    pipe_radius: f64,
+) -> PairEvidence {
+    let Some(unit_axis) = normalize(pipe_axis) else {
+        return PairEvidence::cannot_tell("the pipe's axis did not normalize");
+    };
+    let off_axis = length(cross(unit_axis, sub(centre, pipe_origin)));
+    let touch_outside = pipe_radius + off_axis;
+    let touch_inside = (pipe_radius - off_axis).abs();
+    let where_it_would_touch = if close(off_axis, 0.0) {
+        "the ball's centre is on the pipe's axis, so a touch runs all the way round"
+    } else {
+        "the ball's centre is off the pipe's axis, so a touch is one point"
+    };
+    let detail = format!(
+        "ball centre {off_axis:.12} from the pipe's axis; ball radius {ball_radius:.12} vs a \
+         touch from outside at {touch_outside:.12} / from inside at {touch_inside:.12} — \
+         {where_it_would_touch}"
+    );
+    let verdict = if close(ball_radius, touch_outside) || close(ball_radius, touch_inside) {
+        Verdict::Tangent
+    } else if ball_radius < touch_inside {
+        Verdict::NeverMeet
+    } else {
+        Verdict::Transverse
+    };
+    PairEvidence { detail, verdict }
 }
 
 fn close(measured: f64, target: f64) -> bool {
