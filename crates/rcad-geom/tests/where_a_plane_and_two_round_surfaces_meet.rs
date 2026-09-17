@@ -458,10 +458,17 @@ fn how_many_corners_two_bars_running_the_same_way_have_is_what_the_closed_form_s
 /// How many of the ninety tangent rows above the turn leaves undecided.
 ///
 /// Square to the axes **not one of the ninety refuses**, so the whole of this is
-/// the turn and not the geometry. The other twenty-five come back with a count
+/// the turn and not the geometry. The other thirty-nine come back with a count
 /// about the two bars the turned numbers actually name, which are a rounding
 /// away from touching and may genuinely miss or genuinely cross.
-const TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED: usize = 65;
+///
+/// It was 65 until §118.11's convention reached `three_surfaces.rs`. A pipe's
+/// discriminant used to take off a bare `r²` against terms that were degree two
+/// in the direction, so it was certified about a pipe `r/‖w‖` wide rather than
+/// the one whose skin was being asked about; fourteen of the ninety went
+/// undecided for that reason alone and now decide. Measured on the merged tree,
+/// not on the lane that moved it.
+const TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED: usize = 51;
 
 /// Which three surfaces they are decides the answer, and which face asked first
 /// does not (§31.3).
