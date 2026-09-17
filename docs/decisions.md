@@ -29201,6 +29201,15 @@ by:
   turns the key back into the description's own index against the edge list
   `write_into` already builds.
 
+**Only the two walls that are about following a crossing are wrapped** — the
+tangency one and the stepping one. `walk` also refuses because it could not
+place a point as close to the crossing as asked, because it could not name which
+of two arcs this is, and because it could not decide; none of those is a
+crossing that could not be followed. Wrapping every refusal the walk hands back
+was tried first, and eight tests in four files went red reading those refusals
+by the shape they have always had. The blast radius was the cheap half of that
+signal; the name being a lie for them was the real one.
+
 `rcad-step` then reads that index off `edge_names` exactly as the three
 draft-edge refusals beside it do, and `which_entity_the_builder_meant` stops
 answering `None`. Every *other* sweep refusal still answers `None` and is still

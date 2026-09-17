@@ -927,8 +927,17 @@ impl From<rcad_geom::Error> for Error {
     }
 }
 
-/// The same conversion for a refusal raised while walking along one edge, which
-/// keeps the edge.
+/// The same conversion for the two walls that are about following a crossing,
+/// which keep the edge they were following.
+///
+/// **Only those two.** `walk` refuses for other reasons too — it could not
+/// place a point as close to the crossing as it was asked to, it could not name
+/// which of two arcs this is, it could not decide — and none of those is a
+/// crossing that could not be followed. Wrapping them under a name that says it
+/// was would make the name a lie and cost every caller that reads one of them
+/// an extra layer for nothing; they go on through [`Error::Geometry`]
+/// unchanged. A new refusal is not added to this list by default, which is the
+/// point of spelling the two out.
 ///
 /// [`rcad_geom::walk`] names the two surfaces it gave up between and cannot
 /// name the edge: it was handed two surfaces and a run and never saw a model.
@@ -942,7 +951,11 @@ impl From<rcad_geom::Error> for Error {
 /// rather than being buried a layer deeper, for §17.7's reason: what gave up
 /// belongs in the undecided tier whoever was walking.
 pub(crate) fn walking_along_this_edge_refused(edge: EdgeKey, why: rcad_geom::Error) -> Error {
-    if matches!(why, rcad_geom::Error::Undecidable { .. }) {
+    if !matches!(
+        why,
+        rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. }
+            | rcad_geom::Error::CannotFollowACrossingBecauseNoStepStaysOnIt { .. }
+    ) {
         return why.into();
     }
     Error::ACrossingAlongThisEdgeCouldNotBeFollowed {
