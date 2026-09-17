@@ -3459,19 +3459,30 @@ mod tests {
         );
     }
 
-    /// A wire whose whole length is the rounding in its own cross product is
-    /// refused rather than signed.
+    /// A crossing a third of an `f64` step wide is refused, though its sign is
+    /// there to be had.
     ///
-    /// `(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` are the same direction written
-    /// twice, so the cross product of them is zero — but none of the six products
-    /// it takes is exact, and `0.2 × 0.9` and `0.3 × 0.6` are two different
-    /// roundings of one number. What comes out is the difference between two
-    /// rounding errors, and `> 0.0` used to read a direction off it.
+    /// `(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` look like one direction written
+    /// twice and are not. The doublings are exact — `0.2` is `2 × 0.1` and `0.6`
+    /// is `2 × 0.3`, to the bit — so the `z` of the cross product is exactly
+    /// zero, but `0.3` is **not** `3 × 0.1` and `0.9` is **not** `9 × 0.1`, so
+    /// the other two components are genuinely nonzero. Worked out exactly over
+    /// the stored doubles the cross product is
+    /// `(2.7755575615628914e-17, -1.3877787807814457e-17, 0)`, which is
+    /// `7.39e-17` of the two vectors that made it.
     ///
-    /// This is the test that separates the two shas: on `fbab36ff` the rule
-    /// answers `Ok(Some(false))` here, certified, with nothing behind it (§111.3).
+    /// **So this is a real crossing and not a rounding**, and the answer exists:
+    /// the exact dot is `-6.93889390390722838e-18`, and `fbab36ff` reads its sign
+    /// correctly as `Ok(Some(false))`. Refusing it is a *gap* (§16.10) that an
+    /// exact-expansion tier would close, and §111.3 keeps that question open
+    /// rather than pretending the refusal is obviously right.
+    ///
+    /// What the enclosure runs into is that the true difference in the `y`
+    /// component is exactly one ulp of the two products it comes from, while an
+    /// interval holds each product to half an ulp — so the enclosure of the
+    /// difference is one ulp wide and the answer sits on its edge.
     #[test]
-    fn a_wire_that_is_only_the_rounding_in_its_own_cross_product_is_not_signed() {
+    fn a_crossing_barely_one_f64_step_wide_is_refused_although_its_sign_exists() {
         let ball =
             Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a ball at the origin"));
         let flat = Surface::Plane(
@@ -3479,17 +3490,18 @@ mod tests {
                 .expect("the plane z = 0"),
         );
         let corner = Point::new(0.1, 0.2, 0.3);
-        let twice_over = [Vector::new(0.1, 0.2, 0.3), Vector::new(0.3, 0.6, 0.9)];
-        assert_ne!(
-            twice_over[0].cross(twice_over[1]),
-            Vector::zero(),
-            "the whole point is that f64 makes this look like a direction"
+        let nearly_one_direction = [Vector::new(0.1, 0.2, 0.3), Vector::new(0.3, 0.6, 0.9)];
+        let walked = nearly_one_direction[0].cross(nearly_one_direction[1]);
+        assert_eq!(
+            walked.components(),
+            [2.7755575615628914e-17, -1.3877787807814457e-17, 0.0],
+            "f64 gets the exact cross product here, so the crossing is real"
         );
 
         assert!(matches!(
             a_closed_crossing_is_walked_the_way_it_is_stored(
                 [&ball, &flat],
-                twice_over,
+                nearly_one_direction,
                 corner,
                 Decision::Neg,
             ),
