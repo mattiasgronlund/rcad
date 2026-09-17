@@ -1,5 +1,7 @@
 use rcad_predicates::ProvenanceLog;
 
+use crate::EdgeKey;
+
 /// What went wrong.
 ///
 /// Bad caller input and broken models are errors. A predicate that could not
@@ -786,6 +788,47 @@ pub enum Error {
         edge: usize,
     },
 
+    /// The sweep could not walk along the crossing one edge of the description
+    /// runs on.
+    ///
+    /// [`Error::ACrossingAlongThisEdgeCouldNotBeFollowed`] said the same thing
+    /// about a key in the throwaway model
+    /// [`SolidBuilder::build`](crate::SolidBuilder::build) swept, and that model
+    /// is dropped the moment the build refuses. So the key is turned back into
+    /// the position the caller handed the edge over at, which is the one address
+    /// a caller can still look up — `rcad-step` keeps the `#id` it read each
+    /// edge from in exactly that order.
+    ///
+    /// **The message is the geometry's own and does not name the position.**
+    /// `probe` deduplicates a file's reasons by their text, so a position in the
+    /// text would split one wall into as many reasons as there are edges that
+    /// hit it, and a caller holding an index into its own description does not
+    /// learn anything from being read it back.
+    #[error("geometry: {why}")]
+    ADraftEdgeHasACrossingThatCannotBeFollowed {
+        /// Which edge of the description, counting from zero.
+        edge: usize,
+        /// What the marcher gave up on, which carries the two surfaces and
+        /// which of its questions it gave up at.
+        why: Box<rcad_geom::Error>,
+    },
+
+    /// The sweep could not walk along the crossing one edge runs on.
+    ///
+    /// This is [`Error::Geometry`] with the edge attached. The marcher's own
+    /// refusal carries the two surfaces it gave up between, and coordinates are
+    /// not an address: a caller that wants to know which edge of *its* model
+    /// that was could only match those surfaces back by value, which
+    /// `docs/decisions.md` §110.4 measured at zero matches out of forty-four
+    /// files. The key is the address, and the sweep has it in hand.
+    #[error("geometry: {why}")]
+    ACrossingAlongThisEdgeCouldNotBeFollowed {
+        /// The edge whose crossing could not be followed.
+        edge: EdgeKey,
+        /// What the marcher gave up on.
+        why: Box<rcad_geom::Error>,
+    },
+
     /// A second shell was described, and a solid built face by face has one.
     ///
     /// A void inside a solid, and a solid in two separate lumps, are both
@@ -881,6 +924,30 @@ impl From<rcad_geom::Error> for Error {
             rcad_geom::Error::Undecidable { records } => Error::Undecidable { records },
             other => Error::Geometry(other),
         }
+    }
+}
+
+/// The same conversion for a refusal raised while walking along one edge, which
+/// keeps the edge.
+///
+/// [`rcad_geom::walk`] names the two surfaces it gave up between and cannot
+/// name the edge: it was handed two surfaces and a run and never saw a model.
+/// Matching those surfaces back to an edge by value is what `docs/decisions.md`
+/// §110.4 tried, and it is worse than it looked — the mesher walks a face in a
+/// frame of its own, so the surfaces that reach the marcher are a rigid motion
+/// away from the ones the model stores. The edge is carried rather than
+/// recovered.
+///
+/// An undecided *operation* still comes through as [`Error::Undecidable`]
+/// rather than being buried a layer deeper, for §17.7's reason: what gave up
+/// belongs in the undecided tier whoever was walking.
+pub(crate) fn walking_along_this_edge_refused(edge: EdgeKey, why: rcad_geom::Error) -> Error {
+    match why {
+        rcad_geom::Error::Undecidable { records } => Error::Undecidable { records },
+        other => Error::ACrossingAlongThisEdgeCouldNotBeFollowed {
+            edge,
+            why: Box::new(other),
+        },
     }
 }
 
