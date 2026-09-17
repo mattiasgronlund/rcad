@@ -30,14 +30,14 @@ and the site and falsified §109.6 — the wall is `settled`, not `one_step`.
 (KiCad import 97/323 → 110/323), moved the refusal's surfaces into the caller's
 frame, and gave the census a real test where it had a default arm. §117.6, on
 the merged tree: of the 26 files that stop there, **20 are a limit** — a ball
-capping a pipe, touching along a whole circle — **none is transverse**, and **6
-are argued a gap** in §117.2, two equal pipes whose axes cross. That last is an
-argument and not yet a demonstration, which by §16.10 is what the unit still
-owes. §107.1's "44" was never a classification.
+capping a pipe — **none is transverse**, and **6 are the exact self-touching
+pair**, two equal pipes whose axes cross. §118 is the demonstration §16.10
+wanted: two ellipses in closed form, and two classifiers that disagree.
+§107.1's "44" was never a classification.
 
-**What is left:** the 6 (§117.2); §111.3's expansion tier; §113.7's `LoopsTouch`
-out of the mesher, where the files §115 rescued stop next; and §115.4's one file
-whose `f64` hint and the certified rule disagree.
+**What is left:** §118's closed form for the 6, in flight; §111.3's expansion
+tier; §113.7's `LoopsTouch` out of the mesher, where the files §115 rescued stop
+next; and §115.4's one file whose `f64` hint and the certified rule disagree.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, and healing, the biggest bucket, is refused by name in §42.9. §45.2
@@ -30253,6 +30253,10 @@ could follow all four branches. Nobody is building that yet. What is recorded
 here is that six of the corpus's twenty-four refusals are that shape and not a
 gap in a filter.
 
+**§118 corrects the paragraph above.** Measured on `90006e7b`: the pair is
+exactly degenerate rather than nearly so, the answer is two ellipses in closed
+form, and the fix family is not a marcher. The counts in this section stand.
+
 ### 117.3 The `bool` was the bug, and the cylinder/cylinder arm had it twice
 
 `PairEvidence` carried `confirmed_limit: bool`. Every pair no arm of
@@ -30348,3 +30352,158 @@ tree and no other. Where a number *is* the point of a section, it has to be
 re-derived on the tree that is actually pushed, by somebody who is not the lane
 that produced it. The count above is the audit lane's, not Lane C's, for exactly
 that reason.
+
+## 118. There are two cylinder/cylinder classifiers and the live one has no self-touching check, measured 2026-09-17
+
+§117.2 recorded the six undecided files as a pair no test here answers, and said
+the fix family was "a marcher that splits the curve at the two singular points".
+Measured on `90006e7b`, that is the wrong family, and the reason is a split the
+record did not mention: **this kernel classifies a cylinder/cylinder crossing in
+two different places, the two disagree about this family, and the one STEP
+import actually runs is the one without the check.**
+
+Nothing below changes a count in §117. The 26, the 20 and the 6 all reproduce on
+`90006e7b`. What changes is what the 6 *are*.
+
+### 118.1 The six are exactly degenerate, not nearly so
+
+`kicad/Relay_SPST_SANYOU_SRD_Series_Form_A.step`, the pair the census names for
+that file, is `#54` and `#86`: both `CYLINDRICAL_SURFACE`, both radius `0.1`
+written as the same literal, so `ρ₂ − ρ₁` is bit-zero and no rounding is
+involved. The axes are `(1,0,0)` through `(1.75,5.85,-3.3)` and `(0,-1,0)`
+through `(1.85,6.25,-3.3)`. Those two lines meet at `(1.85,5.85,-3.3)`: the
+first is `(t, 5.85, -3.3)`, the second is `(1.85, 6.25-s, -3.3)`, and they agree
+at `t = 1.85`, `s = 0.4`. The common normal is `(0,0,-1)`, and the two `z`
+coordinates are the same literal `-3.3`, so their difference is exactly `0.0`
+whatever the decimals round to — the axis gap `δ` is bit-zero as well.
+
+So this family is exactly degenerate. It is not a near miss that a tighter
+filter would resolve, and it is not a case where a scaling would reach a sign.
+Both quantities the question turns on are exactly zero in `f64`.
+
+That is one file worked out by hand. **All six say the same**, once the census
+was made to print the numbers it had been discarding (§118.5): every one is two
+equal radii to the last bit and an axis gap of exactly `0.000000000000`, all at
+`90.000000` degrees. Four are radius `0.1` and two — the Omron `G6K-2P` pair —
+are radius `0.2`, which is worth knowing because it rules out the one remaining
+way this could have been an accident of a single value.
+
+### 118.2 The path import takes never asks the question `intersect.rs` answers
+
+`crates/rcad-geom/src/intersect.rs`'s `where_two_leaning_pipes_cross` (`:1083`)
+asks exactly this. It compares `ρ₂ − ρ₁ − δ` through the certified cascade —
+`ask(&reach(...), Measures::Length, &at, policy, log)`, exact arithmetic
+underneath — and on `Decision::Zero` it refuses by name with
+`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo` (`:1117`). Every `Ok`
+arm there requires a strict `Pos` or `Neg`. On the data in §118.1 it would
+return that error.
+
+It is never called. Its only caller is `FaceView::crossed_with`
+(`crates/rcad-topo/src/cross.rs:82`), in a module carrying
+`#![allow(dead_code)]` and, at `cross.rs:18-25`, "Nothing in this crate calls it
+yet ... Its consumer is named and it is not in this milestone." That is §13
+working as intended, and it is also why the check has never run on a real file.
+
+What import runs instead is `rcad_geom::walk`:
+
+```
+Import::read → Model::validate → winding_of
+  → the_ring_a_wire_traces (rcad-topo/src/validate.rs:2132)
+  → rcad_geom::walk → follow_the_quartic
+  → march (rcad-geom/src/walk.rs:768)
+```
+
+`walk`'s own `[Surface::Cylinder, Surface::Cylinder]` arm (`walk.rs:648-674`)
+handles parallel axes, then falls unconditionally to
+`a_quartic_picked_up_at(where_one_pipe_reaches_across_another(&thin, &fat))`.
+It never reads `run`, and it has no equal-radius case at all. So the pair is
+seeded and marched, and `march` refuses at the tangency with "this crossing runs
+where its two surfaces are too nearly parallel to follow it" (`error.rs:517`).
+
+`march(` has exactly one non-test call site in the whole workspace, so this is
+the only path any imported file can take.
+
+**The message is true about the tangent direction and misleading about the
+configuration.** The surfaces are not nearly parallel along the run; they are
+exactly tangent at exactly two points, and the curve runs through itself there.
+The kernel already has a name for that shape and this path cannot reach it.
+
+### 118.3 The answer is two ellipses, and the file already carries it
+
+Two cylinders of the same radius `r` whose axes cross, directions `e` and `u`.
+Subtract the implicit forms and the quadratic part cancels:
+
+```
+|p|² − (p·e)² = r²   and   |p|² − (p·u)² = r²
+⟹ (p·u)² − (p·e)² = 0
+⟹ (p·(u−e)) · (p·(u+e)) = 0
+```
+
+That is two planes through the point where the axes cross — the bisector planes
+— so the crossing is two ellipses, for **any** crossing angle and not only the
+90° these six have. Each has semi-minor `r`; the semi-majors are `r/|sin(θ/2)|`
+and `r/|cos(θ/2)|`, equal at 90°.
+
+The file agrees, which is the part that settles it. The refused edge is
+`#21 = EDGE_CURVE('',#22,#24,#26,.T.)` and `#26 = ELLIPSE('',#27,
+0.141421356237, 0.1)` — semi-minor `0.1`, semi-major `0.1·√2`, exactly what the
+formula gives. `Walk::run_along` (`rcad-step/src/brep.rs:738-741`) already
+accepts `"ELLIPSE"` and stores it as an `EdgeRun`. The importer parses the right
+answer, stores it, and then the validator throws it away to march a quartic.
+
+The shape of the fix is already in the file next door. One arm below the broken
+one, `[Surface::Cone(cone), Surface::Cylinder(pipe)]` (`walk.rs:677-683`) is
+also a degenerate pair whose crossing is two conics, and it reads the stored run
+to say which: `where_a_coaxial_cone_and_pipe_cut(&cone, &pipe, run, policy,
+log).map(WhatARunLiesOn::Conic)`, under the comment "this arm reads the run:
+which of the two circles it is, is the picker's to say".
+
+### 118.4 So it is a gap, and §13 cannot defer it
+
+§16.9's test: a refusal is a **limit** when the answer does not exist, and a
+**gap** when it does and the arithmetic could not reach it. The answer here
+exists, is exactly representable, and needs no marching — so it is a gap, and
+§13's no-named-consumer rule may not defer it (§16.10 says so in as many words).
+
+It also needs no reversal of §24.10. Nothing in this family is undecidable: the
+degeneracy is proven exactly, and the two ellipses follow in closed form.
+`march.rs:931`'s `marching_from_where_a_crossing_runs_through_itself_has_no_direction_to_follow`
+stays right about what a *marcher* can do at a singular point. The answer is to
+not be marching.
+
+### 118.5 Why nobody could check it: the census throws its own evidence away
+
+`crates/rcad-step/examples/near_parallel_which_pair.rs` computed a `detail`
+string with the axis gap and the angle, and then the undecided branch `return`ed
+`PairEvidence::cannot_tell(...)` before that string was ever used. So all six
+printed their prose with no numbers attached, and "axes that pass through each
+other" in §117.2 could not be checked by a reader. This unit fixed it: the
+undecided branch now prints the two radii, the angle and the gap, which is what
+§118.1's second paragraph is read off.
+
+Its `close` is `RADIUS_RELATIVE_TOL = 1e-9` — nine orders looser than the
+exactness `intersect.rs` requires. So §117.2's claim was made at `1e-9`, and it
+happens also to be true exactly, and nothing recorded which of the two had been
+established. That is the §16.10 lesson again in a new place: do not assert what
+the evidence you kept can carry, and keep the evidence.
+
+### 118.6 What §117.2 should now be read as saying
+
+Its counts stand and its verdict stands: the six are not transverse, and folding
+them into transverse would still be wrong. What does not stand is the last
+paragraph. "A marcher that splits the curve at the two singular points" is one
+fix family, and it is not the cheap one or the right one; the closed form is.
+"Nobody is building that yet" was true of the marcher and is not a reason to
+leave the gap open.
+
+Read §117.2 with this section beside it.
+
+### 118.7 The duplication itself stays, with a test on it
+
+Converging the two classifiers is not this unit's work: `cross.rs`'s consumer is
+named and belongs to a later milestone, so deleting the unreachable one is wrong
+and wiring import through it is bigger than a lane. What this unit owes instead
+is a test that goes red if the two ever disagree about this family again —
+generated pairs rather than a named fixture, with a floor that fails on an empty
+set, per §16.10's test rule. Chosen by Mattias on 2026-09-17 as Q3 (a) with
+(c)'s test.
