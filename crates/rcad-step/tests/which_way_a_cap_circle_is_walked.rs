@@ -104,7 +104,11 @@ fn a_round_bar_imports_whichever_way_round_its_wall_axis_is_written() {
 /// the wall takes each the opposite way from the cap that shares it.
 fn a_round_bar(radius: f64, height: f64, the_wall_axis_points_up: bool) -> String {
     let (r, h) = (real(radius), real(height));
-    let wall_axis = if the_wall_axis_points_up { "#11" } else { "#13" };
+    let wall_axis = if the_wall_axis_points_up {
+        "#11"
+    } else {
+        "#13"
+    };
     let mut text = a_header(".MILLI.");
     text.push_str(&format!(
         "#10=CARTESIAN_POINT('',(0.,0.,0.));\n\
