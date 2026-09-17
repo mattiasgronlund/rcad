@@ -36,7 +36,9 @@ use rcad_predicates::{
 };
 
 use crate::exact::Exact;
-use crate::intersect::whether_a_cone_and_a_pipe_share_an_axis;
+use crate::intersect::{
+    Question, WHERE_TWO_PIPES_CROSS, ask, whether_a_cone_and_a_pipe_share_an_axis,
+};
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
@@ -652,6 +654,17 @@ fn what_a_run_between_these_two_lies_on(
             if one.axis().direction().cross(other.axis().direction()) == Vector::zero() {
                 return Ok(WhatARunLiesOn::StraightLine);
             }
+            // Two pipes of one width whose axes actually meet cross in two
+            // ellipses and not in a quartic, and the marcher cannot follow
+            // them: the four branches run into each other where the walls
+            // touch. Asked before the sort below, because the answer is the
+            // same either way round and the closed form does its own sorting.
+            if whether_two_pipes_are_one_width_on_axes_that_meet(&one, &other, policy, log)? {
+                return where_two_equal_pipes_on_crossing_axes_cut(
+                    &one, &other, run, policy, log,
+                )
+                .map(WhatARunLiesOn::Conic);
+            }
             let certified = |pipe: &Cylinder| pipe.radius() / pipe.axis().direction().length();
             // Two pipes of the same certified radius are neither thinner, and
             // then which one is walked round has to be settled by the numbers
@@ -1154,6 +1167,187 @@ fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point;
     let reach = (radius * radius - nearest * nearest).max(0.0).sqrt();
     let middle = pipe.axis().origin() + along * up + towards * skin;
     [middle + along * reach, middle - along * reach]
+}
+
+/// Whether two pipes that do not point one way are the same width **and** have
+/// axes that meet, which is the one pair of pipes whose crossing is flat.
+///
+/// Both halves are asked as certified sign questions rather than compared
+/// against a tolerance, because this family is exactly degenerate and not nearly
+/// so: the radii of a countersunk bore written out by a CAD system come from one
+/// literal, and two placements that share a coordinate put their axes in one
+/// plane to the bit. Asking it any other way would answer `true` for a pair that
+/// is merely close, and a pair that is merely close crosses in a quartic.
+///
+/// The widths are `ρᵢ = rᵢ/√Wᵢ` with `Wᵢ = ‖wᵢ‖²`, so `ρ₂ = ρ₁` exactly when
+/// `r₂²W₁ − r₁²W₂` is zero — degree four, and no root left to clear. The axes
+/// meet exactly when `(o₂ − o₁)·(w₁ × w₂)` is zero, which is the numerator of
+/// the distance between them and degree three. Neither is the eight-degree
+/// comparison [`intersect`](crate::intersect) runs out of room on (§29),
+/// because neither is a sum of roots: each is one polynomial against zero.
+///
+/// Both questions are symmetric under swapping the pair — swapping negates the
+/// volume and the radius difference and leaves what is being asked, which is
+/// whether they are zero — so this may be asked before the caller has settled
+/// which pipe is which.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when the policy will not certify either sign.
+fn whether_two_pipes_are_one_width_on_axes_that_meet(
+    one: &Cylinder,
+    other: &Cylinder,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    let at = [one, other].map(|pipe| PredicatePoint::from(pipe.axis().origin().coordinates()));
+    let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
+    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let [my_radius, their_radius] = [one, other].map(Cylinder::radius);
+
+    let squared = |value: [f64; 3]| {
+        (0..3).fold(Interval::exactly(0.0), |so_far, axis| {
+            so_far + Interval::exactly(value[axis]) * Interval::exactly(value[axis])
+        })
+    };
+    let same_width = Question {
+        named: WHERE_TWO_PIPES_CROSS,
+        enclosing: || {
+            Interval::exactly(their_radius) * Interval::exactly(their_radius) * squared(my_way)
+                - Interval::exactly(my_radius) * Interval::exactly(my_radius) * squared(their_way)
+        },
+        exactly: || {
+            Some(
+                Exact::product_of(their_radius, their_radius)?
+                    .times(&Exact::dot_of(my_way, my_way)?)?
+                    .minus(
+                        &Exact::product_of(my_radius, my_radius)?
+                            .times(&Exact::dot_of(their_way, their_way)?)?,
+                    ),
+            )
+        },
+    };
+    if ask(
+        &same_width,
+        Measures::ManyLengths { how_many: 4 },
+        &at,
+        policy,
+        log,
+    )? != Decision::Zero
+    {
+        return Ok(false);
+    }
+
+    let axes_meet = Question {
+        named: WHERE_TWO_PIPES_CROSS,
+        enclosing: || {
+            let sideways = [0, 1, 2].map(|axis| {
+                let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+                Interval::exactly(my_way[next]) * Interval::exactly(their_way[after])
+                    - Interval::exactly(my_way[after]) * Interval::exactly(their_way[next])
+            });
+            (0..3).fold(Interval::exactly(0.0), |so_far, axis| {
+                so_far
+                    + (Interval::exactly(there[axis]) - Interval::exactly(here[axis]))
+                        * sideways[axis]
+            })
+        },
+        exactly: || {
+            let sideways = Exact::cross_of(&Exact::of_each(my_way), their_way)?;
+            Exact::dot_of_two_exact(&Exact::gap_between(here, there), &sideways)
+        },
+    };
+    Ok(ask(&axes_meet, Measures::Volume, &at, policy, log)? == Decision::Zero)
+}
+
+/// The ellipse two pipes of one width on axes that meet cross in, picked out of
+/// the two of them by the run's own ends and half-spaces.
+///
+/// # Two planes, at any crossing angle
+///
+/// Written about the point where the axes meet, with `ê` and `û` the two unit
+/// directions and `ρ` the width both share, the two pipes are
+/// `‖p‖² − (p·ê)² = ρ²` and `‖p‖² − (p·û)² = ρ²`. Subtracting leaves
+/// `(p·(û − ê))·(p·(û + ê)) = 0`, so every point of the crossing is on one of
+/// the two bisector planes, whatever the angle between the axes. Each plane cuts
+/// a pipe in an ellipse: `ρ` across, and `ρ` over the sine of the angle the
+/// plane's own in-plane direction makes with the axis the long way.
+///
+/// **The pair is sorted before the ellipses are built**, for the reason the two
+/// balls are (§34): `û − ê` turns into `ê − û` when the caller writes the pair
+/// the other way round, and an ellipse whose long axis vector has flipped starts
+/// somewhere else, which moves the vertex `where_a_closed_crossing_starts` puts
+/// on the loop.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when an ellipse's own numbers do
+/// not come out finite, and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when what is on the run
+/// holds both ellipses or neither.
+fn where_two_equal_pipes_on_crossing_axes_cut(
+    one: &Cylinder,
+    other: &Cylinder,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    let (first, second) = if Surface::Cylinder(*one).how_it_sorts_against(&Surface::Cylinder(*other))
+        == Ordering::Greater
+    {
+        (other, one)
+    } else {
+        (one, other)
+    };
+    which_of_these_circles_this_run_is(
+        the_two_ellipses_equal_pipes_on_crossing_axes_cut(first, second),
+        run,
+        policy,
+        log,
+    )
+}
+
+/// The two ellipses, the one whose plane the axes' sum lies in first.
+fn the_two_ellipses_equal_pipes_on_crossing_axes_cut(
+    first: &Cylinder,
+    second: &Cylinder,
+) -> Vec<Conic> {
+    let [mine, theirs] = [first, second].map(|pipe| {
+        let along = pipe.axis().direction();
+        along * along.length().recip()
+    });
+    let radius = first.radius() / first.axis().direction().length();
+    let sideways = mine.cross(theirs);
+    let across = sideways * sideways.length().recip();
+    let middle = where_two_axes_meet(first, second);
+
+    [theirs + mine, theirs - mine]
+        .into_iter()
+        .map(|bisector| {
+            let the_long_way = bisector * bisector.length().recip();
+            // The ellipse is as long as the pipe is wide over the sine of the
+            // angle the plane's own long direction leans away from the axis,
+            // and for two unit vectors that sine is the length of their cross.
+            let reach = radius / the_long_way.cross(mine).length();
+            Conic {
+                centre: middle,
+                across: the_long_way * reach,
+                and: across * radius,
+                size: how_big_this_is(&[middle], &[reach, radius]),
+            }
+        })
+        .collect()
+}
+
+/// Where two axes that are known to meet do meet.
+///
+/// The foot of the common perpendicular on the first axis, which is the
+/// crossing point itself once the two are known to reach each other.
+fn where_two_axes_meet(first: &Cylinder, second: &Cylinder) -> Point {
+    let [mine, theirs] = [first, second].map(|pipe| pipe.axis().direction());
+    let sideways = mine.cross(theirs);
+    let between = second.axis().origin() - first.axis().origin();
+    first.axis().origin() + mine * (between.cross(theirs).dot(sideways) / sideways.length_squared())
 }
 
 /// The two places one pipe reaches furthest along its own axis through another,
