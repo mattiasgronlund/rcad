@@ -1179,8 +1179,9 @@ fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point;
 /// is merely close, and a pair that is merely close crosses in a quartic.
 ///
 /// A pipe is `rᵢ` wide whatever its stored direction's length turned out to be
-/// (`docs/decisions.md` §118.10), so `ρ₂ = ρ₁` exactly when `r₂² − r₁²` is zero
-/// — degree two in the radii and degree zero in the directions. It used to be
+/// (`docs/decisions.md` §118.11), so the two widths match exactly when
+/// `r₂² − r₁²` is zero — degree two in the radii and degree zero in the
+/// directions. It used to be
 /// `r₂²‖w₁‖² − r₁²‖w₂‖²`, degree four, because the surface the predicate
 /// certified was then the pipe of radius `rᵢ/‖wᵢ‖` and the stored lengths had to
 /// be carried along. That form answered `false` for a bore and a countersink
@@ -1256,11 +1257,11 @@ fn whether_two_pipes_are_one_width_on_axes_that_meet(
 /// # Two planes, at any crossing angle
 ///
 /// Written about the point where the axes meet, with `ê` and `û` the two unit
-/// directions and `ρ` the width both share, the two pipes are
-/// `‖p‖² − (p·ê)² = ρ²` and `‖p‖² − (p·û)² = ρ²`. Subtracting leaves
+/// directions and `r` the radius both share, the two pipes are
+/// `‖p‖² − (p·ê)² = r²` and `‖p‖² − (p·û)² = r²`. Subtracting leaves
 /// `(p·(û − ê))·(p·(û + ê)) = 0`, so every point of the crossing is on one of
 /// the two bisector planes, whatever the angle between the axes. Each plane cuts
-/// a pipe in an ellipse: `ρ` across, and `ρ` over the sine of the angle the
+/// a pipe in an ellipse: `r` across, and `r` over the sine of the angle the
 /// plane's own in-plane direction makes with the axis the long way.
 ///
 /// **The pair is sorted before the ellipses are built**, for the reason the two
@@ -2442,7 +2443,7 @@ fn where_a_coaxial_cone_and_pipe_cut(
 /// points towards first.
 ///
 /// Both have the pipe's radius, and they sit that over the slope along the axis
-/// from the apex either way — which is the `±ρ/slope` the namer proved there
+/// from the apex either way — which is the `±r/slope` the namer proved there
 /// were exactly two of.
 fn the_two_circles_a_cone_and_a_pipe_cut(cone: &Cone, pipe: &Cylinder) -> Vec<Conic> {
     let along = cone.axis().direction();

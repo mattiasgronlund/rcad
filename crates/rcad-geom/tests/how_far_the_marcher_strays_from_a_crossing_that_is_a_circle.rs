@@ -11,8 +11,9 @@
 //! pipe**, so [`walk`] hands it to the marcher like any other degree-four
 //! crossing and nothing in the evaluator knows it is special. And what the two
 //! surfaces cross in is two circles whose radius and height anybody can write
-//! down: the pipe's own certified radius `ρ = r/‖w‖`, at `±√(R² − ρ²)` along the
-//! axis from the ball's centre.
+//! down: the pipe's own radius `r`, at `±√(R² − r²)` along the axis from the
+//! ball's centre. That radius is the number the caller wrote, whatever length
+//! the stored direction rounded to (§118.11).
 //!
 //! So the marcher's points are differenced against **a formula and not against
 //! another of our own implementations**, which is what makes this a ground truth
@@ -133,7 +134,7 @@ impl Threaded {
     /// How far `at` really is from the nearer of the two circles the two
     /// surfaces cross in.
     ///
-    /// The circle is `ρ` from the axis and `√(R² − ρ²)` along it from the ball's
+    /// The circle is `r` from the axis and `√(R² − r²)` along it from the ball's
     /// centre, so the distance to it is the length of the two-vector made of how
     /// far off each of those the point is. Written in the pipe's own frame,
     /// where the axis is a coordinate direction and none of it rounds.

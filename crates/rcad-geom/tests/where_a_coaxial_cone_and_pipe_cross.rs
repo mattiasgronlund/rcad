@@ -1,9 +1,9 @@
 //! A cone and a pipe on one axis cross in two circles, and every other cone
 //! against a pipe is still refused.
 //!
-//! The two circles sit `ρ/slope` along the axis from the apex either way, one in
+//! The two circles sit `r/slope` along the axis from the apex either way, one in
 //! each nappe, and there is **no shape question**: a cone is double-napped and a
-//! pipe's radius is above zero, so `slope·|h| = ρ` has exactly two roots
+//! pipe's radius is above zero, so `slope·|h| = r` has exactly two roots
 //! whatever the two surfaces are. So this file has no table of shapes to walk.
 //! What it has instead is the boundary: the pairs that share an axis are named,
 //! the pairs that lean or stand off it are refused, and nothing else in the
@@ -96,7 +96,7 @@ fn a_cone_and_a_pipe_on_one_axis_cross_in_two_circles() {
     }
 }
 
-/// The two circles are `ρ/slope` up and down the axis, and the pickers hold one
+/// The two circles are `r/slope` up and down the axis, and the pickers hold one
 /// each.
 ///
 /// Written for a pipe of radius two and a cone of slope one half, so the

@@ -144,8 +144,9 @@ const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.005;
 /// arranging it: **the three normals `f64` can hold exactly square to a
 /// direction are not the direction that separates the two loops**, and the best
 /// of them can be up to 45° off it. Writing `n̂ = α·â + β·b̂`, a loop is picked
-/// when `α·√(ρ₂² − (δ+ρ₁)²)` beats `|β|·(δ + ρ₁)`, and a fat pipe barely wider
-/// than the thin one inside it does not clear that.
+/// when `α·√(r₂² − (δ+r₁)²)` beats `|β|·(δ + r₁)` for the two pipes' radii and
+/// the distance `δ` between their axes, and a fat pipe barely wider than the
+/// thin one inside it does not clear that.
 ///
 /// A **gap** and not a limit: the two loops are there, they are tellable apart,
 /// and what runs out is `f64`'s supply of vectors exactly square to a given
