@@ -184,8 +184,8 @@ impl Cylinder {
 
 /// Inside, on, or outside, decided through the cascade.
 ///
-/// The sign of `|(point - axis origin) × axis direction|² - radius²`:
-/// [`Decision::Neg`] inside the pipe, [`Decision::Pos`] outside,
+/// The sign of `|(point - axis origin) × axis direction|² - radius²·|axis
+/// direction|²`: [`Decision::Neg`] inside the pipe, [`Decision::Pos`] outside,
 /// [`Decision::Zero`] exactly on the skin.
 ///
 /// A point with exact `f64` coordinates always gets a certified answer, as long
@@ -195,14 +195,24 @@ impl Cylinder {
 ///
 /// # What is certified here
 ///
-/// The axis direction was scaled to length one when the [`Axis`] was built, and
-/// that division rounds. So the stored direction has length one only to within
-/// a rounding, and the surface this predicate is certified against is the pipe
-/// of radius `radius / length(stored direction)` — displaced from the one the
-/// caller named by something of order `radius * 1e-16`. Every answer below is
-/// exact about the numbers as stored. It is not exact about the pipe those
-/// numbers were rounded from. The same caveat, for the same reason, applies to
-/// [`Plane::side_of_point`](crate::Plane::side_of_point).
+/// The pipe of radius exactly `radius`, whatever the stored direction's length
+/// turned out to be.
+///
+/// Both sides of the comparison are degree two in the direction, so scaling the
+/// direction by any number at all scales the whole value by the square of it and
+/// leaves every sign alone. That matters because the direction is *not* a unit
+/// vector: [`Axis::new`] divides by a length and the division rounds, and
+/// [`Cylinder::transformed`] does not re-normalize at all (§32.3). Until
+/// `docs/decisions.md` §118.10 this compared against a bare `radius²`, which is
+/// degree zero, so the surface certified was the pipe of radius
+/// `radius / length(stored direction)` — and two pipes written with the same
+/// radius literal were then the same width only when their directions happened
+/// to round to the same length.
+///
+/// Every answer below is still only exact about the numbers as stored, and a
+/// plane's offset was measured against a normal that had already rounded — so
+/// [`Plane::side_of_point`](crate::Plane::side_of_point) keeps its own version
+/// of the caveat, which this one no longer shares.
 ///
 /// # Input that is not made of real numbers
 ///
@@ -230,7 +240,8 @@ impl SideOfSurface for Cylinder {
     }
 }
 
-/// `|(point - origin) × direction|² - radius²`, evaluated three ways.
+/// `|(point - origin) × direction|² - radius²·|direction|²`, evaluated three
+/// ways.
 struct HowFarFromTheSkin {
     cylinder: Cylinder,
     point: PredicatePoint,
@@ -258,29 +269,36 @@ impl Predicate for HowFarFromTheSkin {
         // the components here covers the permanent's squares too.
         let halves = cross_product_halves_if_normal(from_origin, direction)?;
         let components = halves.map(|(left, right)| left - right);
+        let direction_squared =
+            direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2];
         let stays_accurate = components
             .iter()
             .all(|&component| product_is_normal(component, component))
-            && product_is_normal(radius, radius);
+            && direction
+                .iter()
+                .all(|&along| product_is_normal(along, along))
+            && product_is_normal(radius, radius)
+            && product_is_normal(radius * radius, direction_squared);
         if !stays_accurate {
             return None;
         }
 
-        let radius_squared = radius * radius;
+        let skin = radius * radius * direction_squared;
         let squares = components.map(|component| component * component);
 
         // Each cross-product component is a difference, so it can cancel and
         // its own magnitude says nothing about the rounding it carries. The
         // permanent has to use the sum of the two halves instead, squared
-        // because the component is squared.
+        // because the component is squared. The radius term is a sum of
+        // positives, so it stands for its own size.
         let spread = halves.map(|(left, right)| {
             let reach = left.abs() + right.abs();
             reach * reach
         });
-        let permanent = spread[0] + spread[1] + spread[2] + radius_squared;
+        let permanent = spread[0] + spread[1] + spread[2] + skin;
 
         Some(Filtered {
-            value: squares[0] + squares[1] + squares[2] - radius_squared,
+            value: squares[0] + squares[1] + squares[2] - skin,
             error_bound: SIDE_OF_CYLINDER_ERROR_BOUND * permanent,
         })
     }
@@ -300,7 +318,8 @@ impl Predicate for HowFarFromTheSkin {
             component * component
         };
         let radius = Interval::exactly(self.cylinder.radius);
-        squared(0) + squared(1) + squared(2) - radius * radius
+        let direction_squared = along[0] * along[0] + along[1] * along[1] + along[2] * along[2];
+        squared(0) + squared(1) + squared(2) - radius * radius * direction_squared
     }
 
     fn exactly(&self) -> Option<Decision> {
@@ -329,16 +348,58 @@ impl Predicate for HowFarFromTheSkin {
             core::mem::swap(&mut total, &mut merged);
         }
 
+        // `r²‖w‖²`, exactly: the three squares of the stored direction summed,
+        // then scaled by each half of `r²` in turn. Every step declines rather
+        // than rounds.
+        let mut direction_squared = [0.0f64; LONGEST_DIRECTION_SQUARED];
+        let mut direction_squared_len = 0;
+        let mut direction_merged = [0.0f64; LONGEST_DIRECTION_SQUARED];
+        for along in direction {
+            if !product_is_exact(along, along) {
+                return None;
+            }
+            let (square, square_roundoff) = two_product(along, along);
+            direction_squared_len = expansion_sum(
+                &direction_squared[..direction_squared_len],
+                &[square_roundoff, square],
+                &mut direction_merged,
+            );
+            core::mem::swap(&mut direction_squared, &mut direction_merged);
+        }
+
         let radius = self.cylinder.radius;
         if !product_is_exact(radius, radius) {
             return None;
         }
-        let (radius_squared, roundoff) = two_product(radius, radius);
-        total_len = expansion_sum(
-            &total[..total_len],
-            &[-roundoff, -radius_squared],
-            &mut merged,
+        let (radius_squared, radius_roundoff) = two_product(radius, radius);
+        if !direction_squared[..direction_squared_len]
+            .iter()
+            .all(|&entry| {
+                product_is_exact(entry, radius_squared) && product_is_exact(entry, radius_roundoff)
+            })
+        {
+            return None;
+        }
+        let mut by_square = [0.0f64; 2 * LONGEST_DIRECTION_SQUARED];
+        let by_square_len = scale_expansion(
+            &direction_squared[..direction_squared_len],
+            -radius_squared,
+            &mut by_square,
         );
+        let mut by_roundoff = [0.0f64; 2 * LONGEST_DIRECTION_SQUARED];
+        let by_roundoff_len = scale_expansion(
+            &direction_squared[..direction_squared_len],
+            -radius_roundoff,
+            &mut by_roundoff,
+        );
+        let mut skin = [0.0f64; LONGEST_RADIUS_TERM];
+        let skin_len = expansion_sum(
+            &by_square[..by_square_len],
+            &by_roundoff[..by_roundoff_len],
+            &mut skin,
+        );
+
+        total_len = expansion_sum(&total[..total_len], &skin[..skin_len], &mut merged);
 
         match expansion_sign(&merged[..total_len]) {
             Decision::Neg => Some(Decision::Neg),
@@ -431,8 +492,14 @@ fn cross_component(
 /// `(1 + epsilon)^10 - 1 <= 10*epsilon + 45*epsilon^2 + ...` times the
 /// permanent.
 ///
-/// The radius term travels two roundings, so the ten covers it. The
-/// `80*epsilon^2` covers the higher-order terms and the rounding of the
+/// The radius term `radius² * |direction|²` sits at `(1 + epsilon)^6`, so the
+/// ten covers it too. Squaring a direction component is one rounding and the two
+/// sums that fold the three squares together are a second and third, putting the
+/// squared length at `(1 + epsilon)³`; `radius * radius` is one rounding on its
+/// own; multiplying those two carries both and adds a rounding, which is five;
+/// and the subtraction that made ten on the cross-product side makes six here.
+///
+/// The `80*epsilon^2` covers the higher-order terms and the rounding of the
 /// permanent itself; what it has to beat is about `45*epsilon`.
 ///
 /// Every step of that argument is a *relative* one, so as with every bound of
@@ -451,8 +518,16 @@ const LONGEST_CROSS_COMPONENT: usize = 8;
 /// The square of one of those.
 const LONGEST_SQUARED_COMPONENT: usize = 2 * LONGEST_CROSS_COMPONENT * LONGEST_CROSS_COMPONENT;
 
-/// Three squared components and a squared radius, exactly.
-const LONGEST_CYLINDER_TOTAL: usize = 3 * LONGEST_SQUARED_COMPONENT + 2;
+/// Three two-entry squares of the stored direction components, summed: two
+/// entries, then four, then six.
+const LONGEST_DIRECTION_SQUARED: usize = 6;
+
+/// `radius²·|direction|²`: the squared length scaled by each of `r²`'s two
+/// entries, which doubles its length each time, and the two results summed.
+const LONGEST_RADIUS_TERM: usize = 4 * LONGEST_DIRECTION_SQUARED;
+
+/// Three squared cross components and the radius term, exactly.
+const LONGEST_CYLINDER_TOTAL: usize = 3 * LONGEST_SQUARED_COMPONENT + LONGEST_RADIUS_TERM;
 
 impl TryFrom<(Axis, f64)> for Cylinder {
     type Error = Error;
@@ -649,6 +724,33 @@ mod tests {
             pipe.side_of(PredicatePoint::from([1.0, 1.0, 0.0])),
             Decision::Neg,
             "this point is on the axis itself"
+        );
+    }
+
+    /// `1/√2` is not an `f64`, so a 45° axis stores a direction whose squared
+    /// length is `1 - 1.6e-16` and not one.
+    ///
+    /// Before the comparison was made homogeneous in the direction
+    /// (`docs/decisions.md` §118.10) the surface certified here was the pipe of
+    /// radius `radius / length(stored direction)`, and a point exactly one
+    /// radius out from this axis came back [`Decision::Neg`] — an exact answer
+    /// about a pipe nobody asked for.
+    #[test]
+    fn a_pipe_about_a_forty_five_degree_axis_is_exactly_its_own_radius_wide() {
+        let slanted = Axis::new(Point::origin(), Vector::new(1.0, 1.0, 0.0)).unwrap();
+        let stored = slanted.direction().components();
+        assert_ne!(
+            stored[0] * stored[0] + stored[1] * stored[1],
+            1.0,
+            "the normalize rounded, and this difference from one is exactly what the old \
+             comparison against a bare radius² certified as Neg"
+        );
+
+        let pipe = Cylinder::new(slanted, 1.0).unwrap();
+        assert_eq!(
+            pipe.side_of(PredicatePoint::from([0.0, 0.0, 1.0])),
+            Decision::Zero,
+            "straight up from the axis, one radius out"
         );
     }
 
