@@ -758,12 +758,12 @@ fn evaluate_pipe_against_pipe(
     } else if distance > touch_outside {
         Verdict::NeverMeet
     } else if close(distance, 0.0) && close(r1, r2) {
-        return PairEvidence::cannot_tell(
-            "two leaning pipes of the same radius whose axes cross meet in two whole ellipses \
-             that cross each other at the two points where the walls touch — a crossing is \
-             there to follow, except at those two points, and this test does not answer for \
-             them",
-        );
+        return PairEvidence::cannot_tell(&format!(
+            "radii {r1:.12} / {r2:.12}; {detail} — two leaning pipes of the same radius whose \
+             axes cross meet in two whole ellipses that cross each other at the two points \
+             where the walls touch — a crossing is there to follow, except at those two \
+             points, and this test does not answer for them"
+        ));
     } else {
         Verdict::Transverse
     };
