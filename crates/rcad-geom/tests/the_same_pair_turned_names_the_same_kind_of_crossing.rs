@@ -20,15 +20,21 @@
 //! printed. They are exactly the two configurations a rounding of the inputs can
 //! move across:
 //!
-//! - **a tangency** — a plane resting on a ball, two balls resting on each
-//!   other, or a ball resting all the way round the inside of a pipe — where the
-//!   discriminant is exactly zero; and
+//! - **a tangency** — a plane resting on a ball, or two balls resting on each
+//!   other — where the discriminant is exactly zero; and
 //! - **two directions exactly square or exactly parallel**: a plane along a
 //!   pipe's axis, or two parallel planes. The pipe one is the surprise. A plane
 //!   *not* parallel to an endless pipe always cuts it in an ellipse, however far
 //!   away it is, so "parallel and well clear of it" answers `Nothing` and the
 //!   smallest tilt turns that into an enormous ellipse. The knife edge there is
 //!   not a near miss; it is the whole of the `Nothing` answer.
+//!
+//! A ball resting all the way round the inside of a pipe used to be a third
+//! one, and §118.11 took it off the list: both its radii survive a turn
+//! untouched, so the resting does too. [`is_on_a_knife_edge`] says what the arm
+//! was and why it went, and
+//! [`a_ball_resting_along_a_whole_circle_inside_a_pipe_answers_one_circle_however_it_is_turned`]
+//! counts what the old rule answered instead.
 //!
 //! Everything else has a discriminant clear of zero by more than a rotation can
 //! move it, and for those the kind is the same before and after. §28 records the
@@ -45,8 +51,8 @@
 //! ranges over rather than by reading the property — which is the whole of
 //! §16.10's method (§30).
 //!
-//! Measured: **1485 of 2048 planar pairs compared and 564 skipped, 1619 of 2048
-//! quartic pairs compared and 430 skipped.**
+//! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1621 of 2048
+//! quartic pairs compared and 429 skipped.**
 
 #![forbid(unsafe_code)]
 
@@ -89,7 +95,7 @@ const REJECTS_ALLOWED_PER_CASE: u32 = 4;
 /// It is not higher because of what the control family *is*: every direction on
 /// the lattice is a coordinate axis, so two of them are exactly parallel or
 /// exactly square far more often than two directions drawn at random would be.
-/// Measured on the shipped corpus: 1485 of 2048 compared, 564 skipped.
+/// Measured on the shipped corpus: 1486 of 2048 compared, 564 skipped.
 const MOST_PLANAR_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
 
 /// How many of the quartic pairs have to survive it.
@@ -97,8 +103,8 @@ const MOST_PLANAR_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
 /// Half. The generator draws radii up to five and places them up to six apart in
 /// whole numbers, so a lattice pipe pair is exactly tangent surprisingly often —
 /// five apart with radii of two and three is one — and every one of those is a
-/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1619 of
-/// 2048 compared, 430 skipped.
+/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1621 of
+/// 2048 compared, 429 skipped.
 const MOST_QUARTIC_PAIRS_MUST_BE_COMPARED: f64 = 0.5;
 
 /// The four pairs whose crossing lies in a plane.
@@ -250,6 +256,12 @@ fn a_ball_resting_along_a_whole_circle_inside_a_pipe_answers_one_circle_however_
         "and the sharper half of it: of sixty-three turns of one resting ball the old rule \
          reached the truthful answer not once"
     );
+
+    assert!(
+        !is_on_a_knife_edge(&resting.surfaces()),
+        "a pair every turn above answers the same way is not a knife edge, and the properties \
+         above skip it if this says it is"
+    );
 }
 
 fn the_same_kind_before_and_after(family: BoxedStrategy<Crossing>, floor: f64) {
@@ -348,6 +360,17 @@ fn kind_of(met: &SurfaceMeet) -> (&'static str, usize) {
 ///
 /// Asked of the surfaces and not of the answer, because the plane-and-pipe case
 /// is a knife edge even when the answer is `Nothing`. See the file's opening.
+///
+/// # The arm §118.11 deleted
+///
+/// A ball resting all the way round the inside of a pipe exactly as wide as it
+/// is used to be a third knife edge here, and it is not one any more. A turn
+/// leaves both radii alone, `R² − r²` is exactly zero after it as well as
+/// before, and a ball no wider than the pipe can never swallow a whole
+/// cross-section of it however far off the axis a turn nudges its middle. The
+/// arm was there because the old question carried the stored direction's
+/// squared length on the ball's side, and `‖w‖²R² − r²` is that direction's
+/// rounding wearing a discriminant's clothes.
 fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
     match surfaces {
         [Surface::Plane(flat), Surface::Cylinder(pipe)]
@@ -356,20 +379,6 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
         }
         [Surface::Plane(one), Surface::Plane(other)] => {
             one.normal().cross(other.normal()).length_squared() == 0.0
-        }
-        // A ball whose middle is on a pipe's axis and whose radius is the pipe's
-        // rests against the pipe along a whole circle. `R² − r²` is exactly zero
-        // there, so a rounding of either radius either lifts the ball clear or
-        // splits the circle in two —
-        // `a_ball_resting_along_a_whole_circle_inside_a_pipe_is_a_knife_edge`
-        // shows one turn doing each.
-        [Surface::Sphere(ball), Surface::Cylinder(pipe)]
-        | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
-            ball.radius() == pipe.radius()
-                && (ball.centre() - pipe.axis().origin())
-                    .cross(pipe.axis().direction())
-                    .length_squared()
-                    == 0.0
         }
         // Two pipes down one direction cross in straight lines and a lean turns
         // that into two closed loops, so this is the quartic family's version of
