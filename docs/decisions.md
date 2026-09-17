@@ -15,34 +15,44 @@ Each decision cites the roadmap section it comes from or contradicts.
 
 ## 0. Where the work is
 
-reviewed: 2026-09-15
+reviewed: 2026-09-17
 
-**unit:** *a crossing too nearly parallel to follow* — the 44 corpus files that
+**unit:** *a crossing too nearly parallel to follow* — the corpus files that
 hang on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off
 §107's table, with the 18 closed edges walked against their surface's winding
-to follow it. No lane runs yet. §16.10 governs it: "too nearly parallel to
-follow" is a claim that something cannot be done, so the unit owes a
-demonstration either way — a gap if a scaling or a reformulation reaches the
-sign, a limit if none does.
+to follow it. §16.10 governs it: "too nearly parallel to follow" is a claim that
+something cannot be done, so the unit owes a demonstration either way — a gap if
+a scaling or a reformulation reaches the sign, a limit if none does.
 
-The measurement that chose it is closed, and §107 is what it found. Five lanes
-reported: roadmap §4.2 is not the lever, the B-spline edge is worth 17 files
-alone against 68 tangled, and the biggest bucket of all — 97 files with a corner
-off a curved face — is healing, which §42.9 refuses by name and whose own
-trigger in §44.6 scores 37% against a 50% bar. §45.2 still governs every count:
-a file count a blocker stops *first* is an upper bound, never a projection.
+**Two waves have run, and the demonstration is in.** §110–§113 named the pair
+and the site and falsified §109.6 — the wall is `settled`, not `one_step`.
+§115–§117 walked closed edges by this kernel's rule instead of the file's flag
+(KiCad import 97/323 → 110/323), moved the refusal's surfaces into the caller's
+frame, and gave the census a real test where it had a default arm. §117.6, on
+the merged tree: of the 26 files that stop there, **20 are a limit** — a ball
+capping a pipe, touching along a whole circle — **none is transverse**, and **6
+are argued a gap** in §117.2, two equal pipes whose axes cross. That last is an
+argument and not yet a demonstration, which by §16.10 is what the unit still
+owes. §107.1's "44" was never a classification.
 
-**parked:** *the hollow*, §104, opened 2026-09-15. Shelling: a solid whose faces
-are planes, hollowed to a wall of one thickness. It is the first of roadmap
-§8's local operations, which the roadmap calls M6; §44.1 is why it has a name
-instead. **No lane runs, and none will yet** — §104.2 has the reason: §13 wants
-a named consumer and `docs/consumers.md` records none for any local operation.
-Mattias left it parked on 2026-09-15 rather than argue §13 down, because the
+**What is left:** the 6 (§117.2); §111.3's expansion tier; §113.7's `LoopsTouch`
+out of the mesher, where the files §115 rescued stop next; and §115.4's one file
+whose `f64` hint and the certified rule disagree.
+
+The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
+the lever, and healing, the biggest bucket, is refused by name in §42.9. §45.2
+still governs every count: a file count a blocker stops *first* is an upper
+bound, never a projection.
+
+**parked:** *the hollow*, §104, opened 2026-09-15 — shelling a plane-faced solid
+to a wall of one thickness, the first of roadmap §8's local operations (§44.1 is
+why it has a name instead of M6). **No lane runs, and none will yet:** §104.2 has
+the reason — §13 wants a named consumer and `docs/consumers.md` records none for
+any local operation. Mattias parked it rather than argue §13 down, because the
 corpus has a consumer today and shelling does not.
 
 The unit before it, §53 `a plane, a cone and a coaxial pipe`, is closed by §103
-having earned nothing. It was planned on 2026-09-05 and no lane ever ran; §55
-through §102 are defect fixes, fuzz work and tooling instead.
+having earned nothing; §55 through §102 are defect fixes, fuzz work and tooling.
 
 **the board is not here.** `docs/plan.md` has one line per roadmap item with
 its state and the evidence; `just plan` renders it, `just plan open` lists what
@@ -61,10 +71,9 @@ is left, and `just status` prints the counts. Audited 2026-09-15: 13 done,
 - §52.13 — unscored. The gate that was to score it, §53.7 charge 3, never ran;
   §104.6 carries it.
 
-This section is §0 so that it sorts above §1 and `just decision 0` reaches it;
-`just status` prints it, and `check-where-the-work-is` holds it to its shape.
-§102 argues why it is here rather than in `docs/roadmap.md` or a file of its
-own.
+This section is §0 so it sorts above §1 and `just decision 0` reaches it; `just
+status` prints it and `check-where-the-work-is` holds its shape. §102 argues why
+it is here and not in `docs/roadmap.md` or a file of its own.
 
 ## 1. Departures from the roadmap
 
