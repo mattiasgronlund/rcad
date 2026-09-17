@@ -28887,7 +28887,7 @@ the corner arriving as a **box** and both gradients being worked out over it —
 not a tolerance, and not a wider filter: the established width, already computed,
 carried one function further.
 
-### 111.3 What landed, and the one line it cannot reach
+### 111.3 What landed, and what separates the two shas
 
 The rule's arithmetic is now `which_way_a_closed_crossing_turns` in
 `crates/rcad-geom/src/which_way_a_closed_crossing_turns.rs`, answering with a
@@ -28896,8 +28896,19 @@ The rule's arithmetic is now `which_way_a_closed_crossing_turns` in
 way, `Zero` for two surfaces that touch rather than cross, and
 `Error::CannotTellWhichWayAClosedEdgeRuns` carrying the width that straddled.
 CLAUDE.md's *"a predicate returns `Decision`, never a bare sign"* is now true of
-this rule, and a wire that is only the rounding in its own cross product is
-refused where it used to be signed — `a_wire_that_is_only_the_rounding_in_its_own_cross_product_is_refused`.
+this rule.
+
+**What separates the two shas, measured both ways.**
+`a_wire_that_is_only_the_rounding_in_its_own_cross_product_is_not_signed` puts
+`(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` in as the two used gradients. They are the
+same direction written twice, so their cross product is zero — but `0.2 × 0.9`
+and `0.3 × 0.6` are two different roundings of one number and none of the six
+products is exact, so what comes out is the difference between two rounding
+errors. On `fbab36ff` the rule answers **`Ok(Some(false))`**: a certified sign
+with nothing behind it. Here it answers
+`Err(Error::CannotTellWhichWayAClosedEdgeRuns { .. })`. The test was run on both
+trees, the second in a detached worktree at `fbab36ff` with `is_err()` in place
+of the variant the base does not have.
 
 **It does not change what the LED file does**, for §111.2's reason. That file
 still refuses, and the refusal is still the dishonest one: `the model is broken: a
@@ -28906,10 +28917,29 @@ file for a direction the kernel guessed. `just t how_often_a_real_file_imports
 --no-capture` names it, and the rates beside it were `kicad: 97 / 323 = 30.0%`
 and `nist: 1 / 44 = 2.3%` — unmoved, which is the point.
 
-**The one line this lane could not write** is in a file it did not own.
+### 111.4 The fuse propagates it, because a green gate is not a demonstration
+
 `which_way_a_closed_edge_is_walked` in `crates/rcad-topo/src/fuse/assemble.rs`
-ends `.expect("the curved check just above already ruled out the one case this
-returns an error for")`, and there are two such cases now. Nothing in the gate
-reaches it — the fuse's own crossings are not this thin — but the sentence is
-false as it stands, and boxing the corner will need that call site to pass the
-box. Whoever takes §111.2 takes `assemble.rs` with `validate.rs`.
+ended `.expect("the curved check just above already ruled out the one case this
+returns an error for")`. That sentence was written when the rule had one error in
+it and stayed written down when a second arrived, so the change above turned a
+refusal into a **panic** on the fuse's path.
+
+The first draft of this entry argued the case away — *"nothing in the gate reaches
+it, the fuse's own crossings are not this thin"*. That is the shape §16.10 names
+and refuses: a claim about today's callers standing in for a claim about the
+public API. A fuse's arguments are a caller's solids and a reader's file, and this
+repo's rule is **panic on broken internal invariants, return `Err` on bad caller
+input** — so an input that drives the rule to `Undecidable` there is data, not a
+bug, and an `Err` is the only correct answer whether or not one is known.
+
+So it propagates. The function returns `Result<Option<bool>>` and `Sides::of`,
+which already returned a `Result` and already used `?` on the pole case one line
+along, takes it with a `?`. No new error kind and no new refusal reason — the
+`Error::CannotTellWhichWayAClosedEdgeRuns` the rule raises now travels out of the
+fuse the way every other refusal does. The doc comment says what it errors with
+instead of asserting it cannot.
+
+**What is still outstanding** is §111.2: the corner arriving as a box. That
+change needs both call sites, and `assemble.rs` is now written so that it costs a
+third argument there rather than an unwinding of a panic.

@@ -3459,6 +3459,44 @@ mod tests {
         );
     }
 
+    /// A wire whose whole length is the rounding in its own cross product is
+    /// refused rather than signed.
+    ///
+    /// `(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` are the same direction written
+    /// twice, so the cross product of them is zero — but none of the six products
+    /// it takes is exact, and `0.2 × 0.9` and `0.3 × 0.6` are two different
+    /// roundings of one number. What comes out is the difference between two
+    /// rounding errors, and `> 0.0` used to read a direction off it.
+    ///
+    /// This is the test that separates the two shas: on `fbab36ff` the rule
+    /// answers `Ok(Some(false))` here, certified, with nothing behind it (§111.3).
+    #[test]
+    fn a_wire_that_is_only_the_rounding_in_its_own_cross_product_is_not_signed() {
+        let ball =
+            Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a ball at the origin"));
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the plane z = 0"),
+        );
+        let corner = Point::new(0.1, 0.2, 0.3);
+        let twice_over = [Vector::new(0.1, 0.2, 0.3), Vector::new(0.3, 0.6, 0.9)];
+        assert_ne!(
+            twice_over[0].cross(twice_over[1]),
+            Vector::zero(),
+            "the whole point is that f64 makes this look like a direction"
+        );
+
+        assert!(matches!(
+            a_closed_crossing_is_walked_the_way_it_is_stored(
+                [&ball, &flat],
+                twice_over,
+                corner,
+                Decision::Neg,
+            ),
+            Err(Error::CannotTellWhichWayAClosedEdgeRuns { .. })
+        ));
+    }
+
     /// `kicad/LED_D5.0mm-3.step`'s dome and body, lifted out of the file so the
     /// numbers §109.7 reports can be re-measured without the corpus.
     ///

@@ -146,7 +146,7 @@ mod tests {
     /// the difference the cross product takes is the two roundings and nothing
     /// else. A sign read off that is a coin toss; the enclosure says so.
     #[test]
-    fn a_wire_that_is_only_the_rounding_in_its_own_cross_product_is_refused() {
+    fn a_direction_written_twice_over_leaves_a_wire_of_only_rounding() {
         let round = Vector::new(0.1, 0.2, 0.3);
         let straight = Vector::new(0.3, 0.6, 0.9);
         let walked = round.cross(straight);
