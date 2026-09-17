@@ -29012,12 +29012,24 @@ So the fix §109.7 called for — *"a fresh interval predicate of the kind `marc
 already has"* — was tried, measured, and does not reach this input.
 
 Going one step further and boxing the **gradients** as well, while keeping the
-corner exact, is expected not to reach it either, and that step was **reasoned
-and not measured**: `∇S` is `at − centre` on coordinates that subtract exactly,
-so its enclosure has no width, and `ẑ × ∇S` is then exactly `(0, 2.5, 0)`, which
-multiplies the one component of `∇S × ∇T` that would carry any width by exactly
-zero. Whoever takes §111.2 should measure it before relying on it — it is the
-cheap half of the change they are making anyway.
+corner exact, does not reach it either. **That was reasoned here and then
+measured by the wave-1 gate agent**, which built an outer enclosure with a
+`nextafter` of slack per operation and got
+`[4.2062309985394852e-30, 4.2062309985395062e-30]` — width `2.1e-44`, `Pos`
+proved, no refusal. That enclosure is strictly wider than a tight one, so a tight
+one refuses no sooner.
+
+**The reason first written down here was wrong, and the correction is the
+interesting part.** This section claimed `∇S` has no width because `at − centre`
+subtracts exactly, and that `ẑ × ∇S` is then exactly `(0, 2.5, 0)` and multiplies
+the one component carrying any width by exactly zero. Under boxing none of that
+holds: `∇S` does carry width, `ẑ × ∇S` is not exact, and the surviving `y`
+component is not multiplied by zero. The sign survives for a different reason —
+**nothing in the chain cancels**. `(at − centre) · axis` is a single
+non-cancelling product, so `∇T.z` is known to a relative rounding rather than an
+absolute one, and the result sits about `2e14` of its own enclosure widths away
+from zero. An enclosure only loses a sign where a subtraction eats the leading
+digits, and there is no such subtraction anywhere in these five lines.
 
 **Naming the family of fixes, per §16.10.** What is left is the inputs. `at` is a
 decimal rounded to `f64` and is on neither surface; one `f64` step in its `y` is
@@ -29041,16 +29053,62 @@ CLAUDE.md's *"a predicate returns `Decision`, never a bare sign"* is now true of
 this rule.
 
 **What separates the two shas, measured both ways.**
-`a_wire_that_is_only_the_rounding_in_its_own_cross_product_is_not_signed` puts
-`(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` in as the two used gradients. They are the
-same direction written twice, so their cross product is zero — but `0.2 × 0.9`
-and `0.3 × 0.6` are two different roundings of one number and none of the six
-products is exact, so what comes out is the difference between two rounding
-errors. On `fbab36ff` the rule answers **`Ok(Some(false))`**: a certified sign
-with nothing behind it. Here it answers
+`a_crossing_barely_one_f64_step_wide_is_refused_although_its_sign_exists` puts
+`(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` in as the two used gradients. On
+`fbab36ff` the rule answers **`Ok(Some(false))`**; here it answers
 `Err(Error::CannotTellWhichWayAClosedEdgeRuns { .. })`. The test was run on both
 trees, the second in a detached worktree at `fbab36ff` with `is_err()` in place
 of the variant the base does not have.
+
+**That test was called `a_wire_that_is_only_the_rounding_in_its_own_cross_product_is_not_signed`,
+and the name was a false claim.** The wave-1 gate agent caught it; this section
+had said *"the same direction written twice, so their cross product is zero"* and
+*"what comes out is the difference between two rounding errors"*. Both sentences
+are wrong, and checking them in exact rational arithmetic over the stored doubles
+takes a minute:
+
+```text
+0.2 == 2 × 0.1  exactly : True        0.3 == 3 × 0.1  exactly : False
+0.6 == 2 × 0.3  exactly : True        0.9 == 9 × 0.1  exactly : False
+```
+
+So the third components are not proportional to the first two, the two triples
+are **not parallel**, and their exact cross product is
+`(2.7755575615628914e-17, -1.3877787807814457e-17, 0)` — the `z` exactly zero
+because the doublings are exact, the other two genuinely nonzero. The crossing is
+thin but **real**: `‖∇S × ∇T‖ / (‖∇S‖‖∇T‖)` is `7.39e-17`, about a third of an
+`f64` step of one.
+
+Two more things fall out, and both matter more than the name. The `f64` cross
+product is **equal to the exact one componentwise** — each cancelling difference
+is between two products within a factor of two of each other, so the subtraction
+is exact and only the two product roundings are in it. And the exact dot is
+`-6.93889390390722838e-18`, negative. **So `fbab36ff` was not certifying a sign
+with nothing behind it. It was giving the right answer.**
+
+#### Refusing this is a gap and not a limit, and that is left open on purpose
+
+§16.10's test is whether the answer exists. It does: the sign of
+`(∇S × ∇T) · (ẑ × ∇C)` is a polynomial in nine stored doubles, and this repo
+already owns a level that always decides such a thing for exact `f64` inputs —
+`rcad_predicates::expansion`, the cascade's third level. `which_way_a_closed_crossing_turns`
+stops at the second. So the refusal is a **gap**, and the family of fixes is one
+member wide: an exact-expansion tier under the interval one, the same shape
+`orient3d` already has. It is not a wider filter and not a tolerance.
+
+**Why it straddles is worth keeping too.** The true difference in the `y`
+component is exactly `-1.000` ulp of the two products it comes from, and an
+interval encloses each product to ±½ ulp — so the enclosure of the difference is
+±1 ulp and the true value sits precisely on its edge. This is the cleanest
+possible example of a second-level refusal that a third level settles.
+
+**Not built here, deliberately.** A refusal is the safe answer and nothing is
+wrong while it stands. But the record must not read as though refusing were
+obviously right: it costs an answer that `fbab36ff` got, and the next lane
+inherits a live question rather than a settled one. Note also that the second
+tier (§36.6, §36.18 — latitude after longitude) still engages only on an exact
+`Decision::Zero`, so an expansion tier has to decide which tier answers before it
+decides the sign.
 
 **It does not change what the LED file does**, for §111.2's reason. That file
 still refuses, and the refusal is still the dishonest one: `the model is broken: a

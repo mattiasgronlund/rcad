@@ -140,20 +140,27 @@ mod tests {
         );
     }
 
-    /// The answer the old comparison against `0.0` gave and could not support.
+    /// A crossing the second level cannot settle, which a third level could.
     ///
-    /// `0.2 × 0.9` and `0.3 × 0.6` are the same number and neither is exact, so
-    /// the difference the cross product takes is the two roundings and nothing
-    /// else. A sign read off that is a coin toss; the enclosure says so.
+    /// `(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` are a real crossing a third of an
+    /// `f64` step wide, not a rounding: the doublings inside them are exact but
+    /// `0.3` is not `3 × 0.1`, so the cross product is genuinely nonzero and
+    /// `f64` even computes it exactly. What stops the enclosure is that the `y`
+    /// component's true value is one ulp of the two products behind it, and an
+    /// interval holds each of those to half an ulp.
+    ///
+    /// **Refusing is therefore a gap and not a limit** (§16.10, §111.3). The sign
+    /// is a polynomial in the stored doubles and the cascade's third level always
+    /// decides such a thing; this predicate stops at the second. Left open on
+    /// purpose, and this test is where the next lane starts.
     #[test]
-    fn a_direction_written_twice_over_leaves_a_wire_of_only_rounding() {
+    fn a_crossing_barely_one_f64_step_wide_has_no_sign_the_enclosure_can_prove() {
         let round = Vector::new(0.1, 0.2, 0.3);
         let straight = Vector::new(0.3, 0.6, 0.9);
-        let walked = round.cross(straight);
-        assert_ne!(
-            walked,
-            Vector::zero(),
-            "the whole point is that f64 makes this look like a direction"
+        assert_eq!(
+            round.cross(straight).components(),
+            [2.7755575615628914e-17, -1.3877787807814457e-17, 0.0],
+            "f64 gets the exact cross product here, so the crossing is real"
         );
         assert!(matches!(
             which_way_a_closed_crossing_turns([round, straight], round, Vector::new(1.0, 0.0, 0.0)),
