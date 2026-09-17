@@ -1432,20 +1432,24 @@ mod tests {
     /// `‖w‖²` that is not one, which is what the second assertion below pins.
     ///
     /// The two directions are not two spellings of one line —
-    /// `Vector::scaled_to_length_one_from_anywhere` divides by the widest
-    /// component first, so `(1, 2, 0)` and `(3, 6, 0)` store identically and a
-    /// test comparing two spellings would pass vacuously. Each is asked about
-    /// the geometry instead, and they straddle: `(1, 1, 0)` stores a `‖w‖²` one
-    /// rounding below one and `(1, 6, 0)` one rounding above, so the old form
+    /// `Vector::scaled_to_length_one_from_anywhere` is a function of the ratios
+    /// between the components, so `(1, 2, 0)` and `(3, 6, 0)` store identically
+    /// and a test comparing two spellings would pass vacuously. Each is asked
+    /// about the geometry instead, and they straddle: `(1, 2, 0)` stores a `‖w‖²`
+    /// one rounding below one and `(1, 1, 0)` one rounding above, so the old form
     /// was wrong in both directions and not just short.
+    ///
+    /// The pair was `(1, 1, 0)` below and `(1, 6, 0)` above until §120's
+    /// correctly rounded normalize moved every stored direction: `(1, 1, 0)`
+    /// crossed to the other side of one and `(1, 6, 0)` landed exactly on it.
     #[test]
     fn a_point_a_radius_out_from_a_pipes_axis_is_measured_as_being_on_the_pipe() {
         let radius = 0.5;
         let on_the_skin = Point::new(0.0, 0.0, radius);
 
         for (written, rounded) in [
-            ([1.0, 1.0, 0.0], Ordering::Less),
-            ([1.0, 6.0, 0.0], Ordering::Greater),
+            ([1.0, 2.0, 0.0], Ordering::Less),
+            ([1.0, 1.0, 0.0], Ordering::Greater),
         ] {
             let surface = a_pipe(written, [0.0, 0.0, 0.0], radius);
             let Surface::Cylinder(pipe) = surface else {

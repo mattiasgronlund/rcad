@@ -311,6 +311,10 @@ fn a_plane_whose_normal_is_not_a_fixed_point_of_scaling() -> Plane {
 /// **Both halves are asserted, and the second is what stops this going quiet.**
 /// A turn that keeps every contact would make the count meaningless, so the
 /// test insists that a real share of the turns keep it too.
+///
+/// The split was `(10446, 11100)` until §120's correctly rounded normalize moved
+/// every axis these turns are built about. The shape of the answer did not move
+/// with it — a hair over half the turns still lose the contact.
 #[test]
 fn a_contact_between_two_solids_at_two_placements_does_not_survive_every_turn() {
     let mut kept = 0;
@@ -334,7 +338,7 @@ fn a_contact_between_two_solids_at_two_placements_does_not_survive_every_turn() 
     );
     assert_eq!(
         (kept, lost),
-        (10446, 11100),
+        (10558, 10988),
         "the two moved planes agree for this many of the turns the fuse suites draw"
     );
 }

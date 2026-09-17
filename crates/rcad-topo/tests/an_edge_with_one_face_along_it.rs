@@ -232,8 +232,10 @@ fn how_often_one_pair_of_turned_boxes_leaves_such_an_edge() {
         }
     }
     assert_eq!(fuses, 624);
-    assert_eq!(one_face, 107, "an edge with one face along it, §39.4's row");
-    assert_eq!(answered, 517);
+    // 107 and 517 until §120's correctly rounded normalize moved the axis every
+    // one of these turns is built about.
+    assert_eq!(one_face, 104, "an edge with one face along it, §39.4's row");
+    assert_eq!(answered, 520);
     assert_eq!(something_else, 0);
 }
 

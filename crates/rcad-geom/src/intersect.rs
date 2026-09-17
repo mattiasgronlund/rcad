@@ -3258,12 +3258,13 @@ mod tests {
     ///
     /// The `assert_ne!` is the demonstration that the pair is a real one: put a
     /// coordinate direction in and the old form answered correctly too. It also
-    /// rules out the directions that only look awkward — `(3, 5, 7)` and
-    /// `(2, 3, 4)` both store as exactly unit triples, and a case built on either
-    /// would have passed before this change as well.
+    /// rules out the directions that only look awkward — `(2, 3, 4)` stores as
+    /// an exactly unit triple, and a case built on it would have passed before
+    /// this change as well. `(1, 1, 1)` was one of the two here until §120's
+    /// correctly rounded normalize made it store exactly unit too.
     #[test]
     fn a_ball_that_just_fits_a_pipe_fits_it_down_any_axis() {
-        for along in [[1.0, 1.0, 1.0], [1.0, 2.0, 0.0]] {
+        for along in [[1.0, 2.0, 1.0], [1.0, 2.0, 0.0]] {
             let pipe = a_pipe(along, [0.0, 0.0, 0.0], 2.0);
             let Surface::Cylinder(stored) = pipe else {
                 panic!("a pipe is a pipe");

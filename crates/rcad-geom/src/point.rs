@@ -1192,12 +1192,12 @@ mod tests {
                 checked += 1;
                 if !nearest {
                     wrong += 1;
-                    println!("{direction:?} rounds axis {axis} to {answer:e}, which is not nearest");
+                    println!(
+                        "{direction:?} rounds axis {axis} to {answer:e}, which is not nearest"
+                    );
                 }
                 let old_answer = old_unit.components()[axis];
-                if old_answer == 0.0
-                    || frame.is_the_nearest(old_answer, component) != Some(true)
-                {
+                if old_answer == 0.0 || frame.is_the_nearest(old_answer, component) != Some(true) {
                     wrong_the_old_way += 1;
                 }
             }
@@ -1329,12 +1329,17 @@ mod tests {
     ///
     /// The test above is about two vectors that lie *exactly* along one line,
     /// and that promise holds. A stored direction is not such a vector: it is
-    /// the rounded normalizing of whatever built the axis, so dividing it by
-    /// its own largest component and normalizing again rounds a second time and
-    /// lands somewhere else. The pair of pipes the night of 2026-09-14 crashed
-    /// on turned on exactly one such bit — one spelling crossed in a closed loop
-    /// and the other in nothing, and both were right about the pipes they were
-    /// given.
+    /// the rounded normalizing of whatever built the axis, so normalizing it
+    /// again rounds a second time and can land somewhere else. The pair of pipes
+    /// the night of 2026-09-14 crashed on turned on exactly one such bit — one
+    /// spelling crossed in a closed loop and the other in nothing, and both were
+    /// right about the pipes they were given.
+    ///
+    /// §120's correctly rounded normalize made this much rarer without making it
+    /// go away: a stored direction is now the nearest `f64` to its own ratio, and
+    /// normalizing such a triple usually hands the same triple back. **992 of
+    /// 100 000 still move**, which is why the threshold below is half a percent
+    /// and not the one percent it was.
     #[test]
     fn rebuilding_an_axis_from_its_own_direction_moves_it_and_moving_its_origin_does_not() {
         let mut seed = 0x2545_f491_4f6c_dd1d_u64;
@@ -1376,7 +1381,7 @@ mod tests {
             "only {drawn} of 100 000 draws named a direction, so this is measuring the generator"
         );
         assert!(
-            rebuilding_moved_it * 100 > drawn,
+            rebuilding_moved_it * 200 > drawn,
             "going back through Axis::new is meant to move a stored direction often enough to be \
              worth a method of its own, and here it moved {rebuilding_moved_it} of {drawn}"
         );

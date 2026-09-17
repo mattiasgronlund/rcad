@@ -221,9 +221,10 @@ fn a_ball_resting_along_a_whole_circle_inside_a_pipe_answers_one_circle_however_
         let old = how_a_stored_directions_squared_length_compares_with_one(
             pipe.axis().direction().components(),
         );
-        // The two turns the assertion this test used to carry named, and the
-        // two answers it recorded. They pin the rule rebuilt here to the one
-        // that actually ran.
+        // Two turns that witness the old rule going each way, pinning the rule
+        // rebuilt here to the one that actually ran. The second was twenty
+        // sixty-fourths until §120's correctly rounded normalize moved every
+        // turned axis; twenty reads `nothing` now and two reads `two circles`.
         if steps == 1 {
             assert_eq!(
                 old,
@@ -231,12 +232,8 @@ fn a_ball_resting_along_a_whole_circle_inside_a_pipe_answers_one_circle_however_
                 "the old test read `nothing` at one sixty-fourth"
             );
         }
-        if steps == 20 {
-            assert_eq!(
-                old,
-                Decision::Pos,
-                "and `two circles` at twenty sixty-fourths"
-            );
+        if steps == 2 {
+            assert_eq!(old, Decision::Pos, "and `two circles` at two sixty-fourths");
         }
         if old == Decision::Pos {
             the_old_rule_said_two_circles += 1;

@@ -7092,6 +7092,12 @@ mod naming_a_surface {
     ///
     /// The counts are the point and are asserted exactly, so a fourth candidate
     /// that did better would have to move them.
+    ///
+    /// They were `(40 000, 9 028, 3 271, 7 509, 9 028)` until §120's correctly
+    /// rounded normalize moved every stored direction under the sweep. The
+    /// ordering the test is about did not move with them: the foot from the
+    /// origin still folds fewest, the rounded moment still folds every pair the
+    /// cross product proves is one line, and no candidate reaches all of them.
     #[test]
     fn no_way_of_naming_a_slanted_line_folds_the_slides_a_caller_can_reach() {
         let mut tried = 0;
@@ -7133,7 +7139,7 @@ mod naming_a_surface {
                 by_zeroing_the_leaning_coordinate,
                 by_the_rounded_moment
             ),
-            (40_000, 9_028, 3_271, 7_509, 9_028),
+            (40_000, 8_983, 3_747, 7_615, 8_983),
             "the sweep, or what the three candidates make of it, moved"
         );
     }
@@ -7147,6 +7153,12 @@ mod naming_a_surface {
     /// by pair rather than the sentence claiming it. Rounding the exact moment
     /// back to three `f64`s then names some of them as one, which is a corrupt
     /// solid where the unfolded slide is only a duplicate name.
+    ///
+    /// It was `(1 344, 113, 3.94e-13)` until §120's correctly rounded normalize
+    /// moved every stored direction. A hair more collide now and the widest of
+    /// them is a hair narrower, which is what a different rounding of the same
+    /// directions does; the verdict — the key is worse than the defect — is the
+    /// same either way.
     #[test]
     fn a_moment_rounded_back_to_three_f64s_names_pipes_that_are_two_lines_as_one() {
         let mut tried = 0;
@@ -7191,7 +7203,7 @@ mod naming_a_surface {
 
         assert_eq!(
             (tried, collided, widest),
-            (1_344, 113, 3.938_227_581_713_538_7e-13),
+            (1_344, 114, 2.273_736_754_432_320_6e-13),
             "the sweep, or the price of the rounded key over it, moved"
         );
     }

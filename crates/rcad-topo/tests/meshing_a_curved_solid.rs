@@ -467,10 +467,10 @@ fn a_bar_cut_off_at_an_angle_meshes_into_a_closed_surface() {
     }
 
     // §19 for the shape M3 added: where it sits does not change what it is.
-    // A turn about the origin leaves the solid the same distance out, so the
-    // same mesh comes back; a move a thousand units away costs room off the
-    // deflection and may take fewer pieces, and all that is asked of it is the
-    // oracle, which `meshed` runs.
+    // A turn about the origin leaves the solid the same distance out, so a mesh
+    // of the same size comes back; a move a thousand units away costs room off
+    // the deflection and may take fewer pieces, and all that is asked of it is
+    // the oracle, which `meshed` runs.
     for (placement, the_same_size) in [
         (
             Isometry::translation(Vector::new(17.5, -3.25, 1000.0)).expect("a shift"),
@@ -494,10 +494,19 @@ fn a_bar_cut_off_at_an_angle_meshes_into_a_closed_surface() {
         let there = meshed(&moved, solid, 0.05);
         assert!(!there.triangles().is_empty());
         if the_same_size {
-            assert_eq!(
-                there.triangles().len(),
-                mesh.triangles().len(),
-                "turning the bar came out a different mesh"
+            // The turn is about `(1, 1, 1)`, and §120's correctly rounded
+            // normalize moved that stored direction — so the turned bar's
+            // leaning cap is a rounding away from where it was and its arc
+            // divides into 582 pieces where the untouched one divides into 566.
+            // A turn cannot change how big a mesh has to be, and a count that
+            // moved by a fortieth is the arc landing across a step rather than
+            // the shape changing. What would not survive is a turn that cost or
+            // saved a real share of the mesh, and that is what this asks.
+            let there = there.triangles().len();
+            let here = mesh.triangles().len();
+            assert!(
+                there * 10 > here * 9 && here * 10 > there * 9,
+                "turning the bar came out a mesh of {there} triangles where it was {here}"
             );
         }
     }

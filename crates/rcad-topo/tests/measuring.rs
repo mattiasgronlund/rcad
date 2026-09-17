@@ -343,12 +343,17 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
         (
             "a cube of side three, turned a third of a turn",
             a_turned_cube_of_side_three,
+            // Re-pinned by §120: the turn is about `(1, 1, 1)`, whose stored
+            // direction moved when the normalize started rounding correctly, so
+            // every coordinate of the turned cube moved a rounding with it. The
+            // five numbers were 4628293042053316612, 4632796641680687106,
+            // 13603122674472583168, 13826050856027422716 and 4617315517961601024.
             [
-                4628293042053316612,
-                4632796641680687106,
-                13603122674472583168,
-                13826050856027422716,
-                4617315517961601024,
+                4628293042053316605,
+                4632796641680687102,
+                13596367275031527424,
+                13826050856027422708,
+                4617315517961601023,
             ],
         ),
         (
@@ -365,11 +370,16 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
         (
             "a plate with a hole, turned",
             a_turned_plate_with_a_hole,
+            // Re-pinned by §120, like the turned cube above and for the same
+            // reason. The five numbers were 4643774165772402688,
+            // 4644618590702534656, 13605374474286268416, 4613937818241073152
+            // and 4620974692658839552; the middle one is the centroid's `x`,
+            // which is a rounding either side of zero and crossed it.
             [
-                4643774165772402688,
-                4644618590702534656,
-                13605374474286268416,
-                4613937818241073152,
+                4643774165772402687,
+                4644618590702534655,
+                4379750637617807360,
+                4613937818241073156,
                 4620974692658839552,
             ],
         ),

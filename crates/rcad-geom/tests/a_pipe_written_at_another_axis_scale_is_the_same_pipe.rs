@@ -188,25 +188,26 @@ fn the_two_finder_relay_pipes_written_with_one_radius_are_one_width() {
     )
     .expect("#1318's axis");
 
-    // The normalize does **not** land on the nearest `f64` to `1/√2`: it comes
-    // back one ulp below `FRAC_1_SQRT_2`. That is worth pinning both ways round,
-    // because the interesting claim is the second one — a better normalize would
-    // not help either, since neither candidate doubles its square to one. So the
-    // gap this test is about survives any rounding of the direction, and nobody
-    // reading it should reach for a better normalize.
+    // The normalize lands on `FRAC_1_SQRT_2`, the nearest `f64` to `1/√2`, which
+    // is §120's bound at forty-five degrees. It used to come back one ulp below
+    // it, and that is worth saying here because the interesting claim is the
+    // second one and it did not change with the bits: `FRAC_1_SQRT_2` does not
+    // double its square to one either, and neither does the ulp below it. So the
+    // gap this test is about survived a better normalize, which is what the old
+    // comment here predicted and what this one records.
     let stored = at_forty_five_degrees.direction().components();
     assert_eq!(
         stored,
-        [FRAC_1_SQRT_2.next_down(), -FRAC_1_SQRT_2.next_down(), 0.0],
-        "the normalize lands one ulp below the nearest f64 to 1/√2",
+        [FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0],
+        "the normalize lands on the nearest f64 to 1/√2",
     );
-    for candidate in [stored[0], FRAC_1_SQRT_2] {
+    for candidate in [FRAC_1_SQRT_2.next_down(), FRAC_1_SQRT_2] {
         assert_ne!(
             candidate * candidate + candidate * candidate,
             1.0,
-            "neither the direction stored nor the nearest f64 to 1/√2 doubles \
-             its square to one, so rounding the normalize better would move \
-             this gap rather than close it: {candidate:?}",
+            "neither the nearest f64 to 1/√2 nor the ulp below it doubles its \
+             square to one, so rounding the normalize better moved this gap \
+             rather than closing it: {candidate:?}",
         );
     }
 

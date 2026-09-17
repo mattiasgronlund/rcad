@@ -66,12 +66,12 @@
 //!   already. Nothing looser than the knife edge itself is left to ask about.
 //! - **Checking two spellings of one pipe against each other.** Scaling a
 //!   written direction by a small whole number does not move the stored bits at
-//!   all — `Vector::scaled_to_length_one_from_anywhere` divides by the largest
-//!   component first — so two spellings can agree perfectly and both be wrong
-//!   by the same `1e-16`. Every assertion here is against the crossing the
-//!   geometry has, and never against another spelling of it.
+//!   all — `Vector::scaled_to_length_one_from_anywhere` is a function of the
+//!   ratios between the components — so two spellings can agree perfectly and
+//!   both be wrong by the same `1e-16`. Every assertion here is against the
+//!   crossing the geometry has, and never against another spelling of it.
 //! - **A defect that only ever pushes one way.** `W` lands below one for
-//!   `(1, 1, 0)` and above one for `(1, 6, 0)`, so the two reds below fail in
+//!   `(1, 2, 0)` and above one for `(1, 1, 0)`, so the two reds below fail in
 //!   opposite directions: one reports a crossing where the pipes only touch,
 //!   the other reports nothing at all.
 //!   `the_two_shapes_store_their_directions_one_above_and_one_below_unit_length`
@@ -89,10 +89,14 @@ const GAP: f64 = 1.0;
 
 /// The two direction shapes the mirrored pairs are built from.
 ///
-/// `(1, 1, 0)` stores a direction whose squared length is a rounding **below**
-/// one and `(1, 6, 0)` one a rounding **above** it, which is what makes the two
+/// `(1, 2, 0)` stores a direction whose squared length is a rounding **below**
+/// one and `(1, 1, 0)` one a rounding **above** it, which is what makes the two
 /// cases below fail opposite ways on the base.
-const SHAPES: [[f64; 3]; 2] = [[1.0, 1.0, 0.0], [1.0, 6.0, 0.0]];
+///
+/// It was `(1, 1, 0)` below and `(1, 6, 0)` above until §120's correctly rounded
+/// normalize moved every stored direction: `(1, 1, 0)` crossed to the other side
+/// of one and `(1, 6, 0)` landed exactly on it, which is no witness at all.
+const SHAPES: [[f64; 3]; 2] = [[1.0, 2.0, 0.0], [1.0, 1.0, 0.0]];
 
 /// The control: two pipes whose stored directions are exactly unit vectors
 /// already touch at one point.
