@@ -28867,10 +28867,15 @@ The `4.2e-30` is not a rounding surviving a cancellation — it is the exact val
 of the expression the stored numbers name. `> 0.0` gave the right answer.
 
 So the fix §109.7 called for — *"a fresh interval predicate of the kind `march.rs`
-already has"* — was tried, measured, and does not reach this input. Boxing the
-gradients but keeping the corner exact does not reach it either: `∇S` is
-`at − centre` on coordinates that subtract exactly, so its enclosure has no
-width, and `ẑ × ∇S` then kills the one component of `∇S × ∇T` that carries any.
+already has"* — was tried, measured, and does not reach this input.
+
+Going one step further and boxing the **gradients** as well, while keeping the
+corner exact, is expected not to reach it either, and that step was **reasoned
+and not measured**: `∇S` is `at − centre` on coordinates that subtract exactly,
+so its enclosure has no width, and `ẑ × ∇S` is then exactly `(0, 2.5, 0)`, which
+multiplies the one component of `∇S × ∇T` that would carry any width by exactly
+zero. Whoever takes §111.2 should measure it before relying on it — it is the
+cheap half of the change they are making anyway.
 
 **Naming the family of fixes, per §16.10.** What is left is the inputs. `at` is a
 decimal rounded to `f64` and is on neither surface; one `f64` step in its `y` is
