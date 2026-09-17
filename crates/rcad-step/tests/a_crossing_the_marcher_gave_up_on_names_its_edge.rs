@@ -40,8 +40,9 @@ const GIVE_UP_ON_A_CROSSING: [&str; 3] = [
 fn a_crossing_the_marcher_gave_up_on_names_the_edge_it_was_following() {
     let root = corpus();
     for name in GIVE_UP_ON_A_CROSSING {
-        let bytes = fs::read(root.join(name))
-            .unwrap_or_else(|why| panic!("{name} is in the corpus this test is written against: {why}"));
+        let bytes = fs::read(root.join(name)).unwrap_or_else(|why| {
+            panic!("{name} is in the corpus this test is written against: {why}")
+        });
         let file = StepFile::read(&bytes).unwrap_or_else(|why| panic!("{name} parses: {why}"));
         let mut log = ProvenanceLog::new();
 
@@ -108,7 +109,10 @@ fn edges_of_bound(file: &StepFile, bound: EntityId) -> Vec<EntityId> {
     let Some(loop_id) = record.attribute(1).and_then(Value::as_reference) else {
         return Vec::new();
     };
-    let Some(edge_loop) = file.instance(loop_id).and_then(|held| held.part("EDGE_LOOP")) else {
+    let Some(edge_loop) = file
+        .instance(loop_id)
+        .and_then(|held| held.part("EDGE_LOOP"))
+    else {
         return Vec::new();
     };
     let Some(steps) = edge_loop.attribute(1).and_then(Value::as_list) else {

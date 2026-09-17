@@ -2179,7 +2179,6 @@ fn the_two_surfaces_along_this_edge(
     [mine, across]
 }
 
-
 impl RingAWireTraces {
     /// Which way this ring winds round `normal`, when its own area outweighs
     /// what walking it at `deflection` could have hidden — and `None` when it
