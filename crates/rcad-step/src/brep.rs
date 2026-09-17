@@ -897,14 +897,24 @@ impl Walk {
     ///
     /// Every draft entity was pushed onto its own name list in the order the
     /// builder handed the handle out, so the index the refusal names is the
-    /// position in that list. A refusal that names no entity — the sweep's own,
-    /// which is about the solid as a whole — comes back `None`.
+    /// position in that list. A refusal that names no entity comes back `None`.
+    ///
+    /// **The sweep's own refusals used to be all of that `None`**, and the one
+    /// this reader meets most was the whole of it: 44 KiCad files stopped on a
+    /// crossing the marcher could not follow, and every one of them published
+    /// `#15`, the `MANIFOLD_SOLID_BREP` (`docs/decisions.md` §109.1). That
+    /// refusal names an edge now —
+    /// [`rcad_topo::Error::ADraftEdgeHasACrossingThatCannotBeFollowed`] — and an
+    /// `EDGE_CURVE` names the two faces either side of it, which is the pair the
+    /// marcher gave up between. Every *other* sweep refusal is still `None` and
+    /// still about the solid as a whole.
     fn which_entity_the_builder_meant(&self, why: &rcad_topo::Error) -> Option<EntityId> {
         let (names, index) = match why {
             rcad_topo::Error::ADraftPointIsNotFinite { vertex } => (&self.vertex_names, *vertex),
             rcad_topo::Error::ADraftEdgeHasNoLength { edge }
             | rcad_topo::Error::ADraftEdgeIsWalkedTheSameWayTwice { edge }
-            | rcad_topo::Error::ADraftEdgeIsNotWalkedByTwoCoedges { edge, .. } => {
+            | rcad_topo::Error::ADraftEdgeIsNotWalkedByTwoCoedges { edge, .. }
+            | rcad_topo::Error::ADraftEdgeHasACrossingThatCannotBeFollowed { edge, .. } => {
                 (&self.edge_names, *edge)
             }
             rcad_topo::Error::ADraftEntityIsUsedTwice { entity, index }

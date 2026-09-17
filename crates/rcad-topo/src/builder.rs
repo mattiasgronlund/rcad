@@ -311,6 +311,10 @@ impl SolidBuilder {
     /// close along an edge, and then whatever [`Model::validate`] makes of the
     /// solid — which is where the geometry is judged: a corner off its own
     /// surface, a wire winding the wrong way, a shell whose faces point inwards.
+    /// A sweep refusal about the crossing an edge runs on arrives as
+    /// [`Error::ADraftEdgeHasACrossingThatCannotBeFollowed`], naming the
+    /// position that edge was described at rather than a key into a model the
+    /// caller never sees.
     ///
     /// # Panics
     ///
@@ -330,13 +334,13 @@ impl SolidBuilder {
         self.check_every_edge_is_walked_once_each_way()?;
 
         let mut scratch = Model::new(model.scale());
-        self.write_into(&mut scratch, shell);
+        let written = self.write_into(&mut scratch, shell);
         let mut mine = ProvenanceLog::new();
         let swept = scratch.validate(policy, &mut mine);
         mine.drain_into(log);
-        swept?;
+        swept.map_err(|why| which_described_edge_the_sweep_meant(&scratch, &written.edges, why))?;
 
-        let solid = self.write_into(model, shell);
+        let solid = self.write_into(model, shell).solid;
         model.check_touched_solid(solid);
         Ok(model.key_for_solid(solid))
     }
@@ -548,7 +552,7 @@ impl SolidBuilder {
     /// This walks the same description in the same order into a fresh arena
     /// twice, so the only way the two can differ is if this function is not a
     /// function of its arguments.
-    fn write_into(&self, model: &mut Model, shell: &[(usize, Orientation)]) -> SolidSlot {
+    fn write_into(&self, model: &mut Model, shell: &[(usize, Orientation)]) -> Written {
         let vertices: Vec<VertexSlot> = self
             .points
             .iter()
@@ -600,11 +604,51 @@ impl SolidBuilder {
                 })
                 .collect(),
         );
-        model.add_solid(SmallVec::from_buf([ShellUse {
+        let solid = model.add_solid(SmallVec::from_buf([ShellUse {
             shell: skin,
             loc: Isometry::identity(),
             orient: Orientation::Forward,
-        }]))
+        }]));
+        Written { solid, edges }
+    }
+}
+
+/// One solid written into an arena, and the edges it became.
+///
+/// The edges are kept in the order they were described, so a refusal the sweep
+/// raises about one of them can be handed back as the position the caller
+/// described it at. Nothing else the sweep names needs this yet.
+struct Written {
+    solid: SolidSlot,
+    edges: Vec<EdgeSlot>,
+}
+
+/// The same refusal with the position the caller described the edge at, in
+/// place of a key into a model that is about to be dropped.
+///
+/// Everything else comes through untouched.
+///
+/// # Panics
+///
+/// If the sweep names an edge this build did not write. The model it swept is
+/// the one written two lines earlier and holds nothing else, so an edge of it
+/// that is not in `edges` is a bug here.
+fn which_described_edge_the_sweep_meant(
+    scratch: &Model,
+    edges: &[EdgeSlot],
+    refusal: Error,
+) -> Error {
+    let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, why } = refusal else {
+        return refusal;
+    };
+    let slot = edge.slot_in(scratch.id());
+    let described_at = edges
+        .iter()
+        .position(|&written| written == slot)
+        .expect("the sweep ran on the solid this build just wrote and on nothing else");
+    Error::ADraftEdgeHasACrossingThatCannotBeFollowed {
+        edge: described_at,
+        why,
     }
 }
 

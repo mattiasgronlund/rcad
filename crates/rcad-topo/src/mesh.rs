@@ -30,6 +30,7 @@ use rcad_predicates::{
 };
 use smallvec::SmallVec;
 
+use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
 use crate::validate::{side_of_surface, the_way_it_is_parametrised_about};
 use crate::view::{EdgeView, FaceView, VertexView, WireStepView, WireView};
@@ -629,7 +630,8 @@ impl BuildingAMesh {
             Deflection::of(room * WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO)?,
             policy,
             log,
-        )?;
+        )
+        .map_err(|why| walking_along_this_edge_refused(edge.key(), why))?;
         let mut points = along_it.points().to_vec();
         if self.points.len() + points.len() > MOST_POINTS_A_MESH_WILL_HOLD {
             return Err(Error::MoreMeshPointsThanASolidWillHold {
