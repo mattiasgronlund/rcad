@@ -2994,7 +2994,7 @@ fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceL
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, EdgeRun, Orientation, Plane, Scale, Sphere, Vector};
+    use rcad_geom::{Axis, Cylinder, EdgeRun, Orientation, Plane, Scale, Sphere, Vector};
     use rcad_predicates::{Decision, Interval};
 
     use crate::validate::a_closed_crossing_is_walked_the_way_it_is_stored;
@@ -3108,6 +3108,121 @@ mod tests {
         assert!(
             matches!(refusal, Error::AWireDoesNotFanIntoALoopToMesh { .. }),
             "got {refusal:?}"
+        );
+    }
+
+    /// A refusal about two tangent surfaces names them where the **model**
+    /// holds them, not where the mesher worked them out.
+    ///
+    /// `docs/decisions.md` §116, and §113.6 for the defect. The pair reaches
+    /// the marcher in [`the_frame_this_face_is_meshed_in`], which is a frame
+    /// this file picked and nothing outside it can name — so a caller matching
+    /// the refusal and reading `surfaces` got numbers belonging to no model at
+    /// all. A **placed** solid is what makes the two frames differ by something
+    /// a test can see: the ball below sits at `(1024, 2048, 4096)` and the
+    /// mesher works it out about the origin.
+    ///
+    /// **The tangency is real and not a rounding.** A pipe of the ball's own
+    /// radius, its axis through the centre and square to the meridian, holds
+    /// the whole meridian circle: at every point of it the ball's normal is
+    /// `out/‖out‖` and the pipe's is `sideways/‖sideways‖`, and `sideways` is
+    /// `out` with nothing taken off it, because `out` is square to the axis
+    /// there and that dot product is exactly zero. The two normals are the same
+    /// bits, so `‖u − v‖²` is exactly zero and the settling has nothing to
+    /// divide by — which is [`WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces`],
+    /// the site all 44 corpus files of §110.3 stop at.
+    ///
+    /// **The route is `Deserialize` and not a builder**, as for the two tests
+    /// above: `SolidBuilder::build` walks the crossing in its own sweep and
+    /// would refuse this description before a model existed, and
+    /// [`SolidView::mesh`](crate::SolidView::mesh) is public in its own right.
+    #[test]
+    fn a_placed_solids_tangency_refusal_names_its_surfaces_where_the_model_holds_them() {
+        const RADIUS: f64 = 1.0;
+        let a_long_way_off = Isometry::translation(Vector::new(1024.0, 2048.0, 4096.0))
+            .expect("a shift down the axes");
+
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let ball = model
+            .add_ball(RADIUS, &a_long_way_off)
+            .expect("a ball of radius one, placed");
+
+        let touching_all_along_the_meridian = Cylinder::new(
+            Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("the y axis"),
+            RADIUS,
+        )
+        .expect("a pipe of radius one");
+        let seam = model
+            .data()
+            .edges
+            .keys()
+            .next()
+            .expect("a ball has one edge");
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = model.data().edges[seam].run.clone()
+        else {
+            panic!("a ball's seam is part of a crossing")
+        };
+        model.data_mut().edges[seam].run = EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Cylinder(touching_all_along_the_meridian),
+            picked_by,
+        };
+
+        let solid = model.solid(ball).expect("this model made the key");
+        let where_the_model_holds_it = solid
+            .faces()
+            .next()
+            .expect("a ball has one face")
+            .surface();
+        let refusal = solid
+            .mesh(
+                Deflection::of(0.1).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a seam running where its two surfaces touch cannot be followed");
+
+        let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. } = &refusal else {
+            panic!("got {refusal:?}")
+        };
+        let rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, at } =
+            &**why
+        else {
+            panic!("got {why:?}")
+        };
+        assert_eq!(
+            *at,
+            rcad_geom::WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+            "the normals are the same bits, so it is the settling that has nothing to divide by"
+        );
+
+        let ball_it_named = surfaces
+            .iter()
+            .find(|surface| matches!(surface, Surface::Sphere(_)))
+            .expect("one of the pair is the ball");
+        assert_eq!(
+            *ball_it_named, where_the_model_holds_it,
+            "the refusal names the ball where the model holds it, and the model holds it at \
+             (1024, 2048, 4096)"
+        );
+        let Surface::Sphere(named) = ball_it_named else {
+            panic!("just matched on it")
+        };
+        assert_ne!(
+            named.centre(),
+            Point::origin(),
+            "the origin is where the mesher works this face out, and no model has a ball there"
+        );
+
+        let Some(Surface::Cylinder(pipe)) = surfaces
+            .iter()
+            .find(|surface| matches!(surface, Surface::Cylinder(_)))
+        else {
+            panic!("the other of the pair is the pipe")
+        };
+        assert_eq!(
+            pipe.axis().origin(),
+            Point::new(1024.0, 2048.0, 4096.0),
+            "and the pipe rode out of the frame with it"
         );
     }
 
