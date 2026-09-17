@@ -9,8 +9,10 @@
 use core::ops::{Add, Mul, Neg, Sub};
 
 use nalgebra as na;
+use rcad_predicates::expansion::{product_is_exact, two_diff, two_product, two_sum};
 use serde::{Deserialize, Serialize};
 
+use crate::exact::{binary_exponent, multiplied_by_a_power_of_two};
 use crate::isometry::Isometry;
 use crate::{Error, Result};
 
@@ -316,25 +318,38 @@ impl Vector {
     /// The same direction, scaled to length one, and the same bits for every
     /// vector along one line however long it was.
     ///
-    /// This divides by the largest component first and then normalizes what is
-    /// left. Every component is then in `[-1, 1]` with the largest exactly `±1`,
-    /// so the length is between one and the root of three.
+    /// **Every component above `2^-1012` comes back correctly rounded** — the
+    /// nearest `f64` there is to the exact ratio between that component and the
+    /// exact length. Below `2^-1012` it can be one ulp out, which is the last
+    /// three binades before the subnormals and no direction anyone draws.
+    /// `a_unit_component_is_the_nearest_f64_to_the_exact_ratio` is the test
+    /// §15.6 asks for.
     ///
-    /// It once earned its place by keeping the squares out of the subnormals,
-    /// which [`Vector::length`] now does for every caller. What it still does
-    /// and plain normalizing still does not is the part below.
+    /// Two steps get there.
     ///
-    /// **The first division is not exact**, and the doc here used to say it was.
-    /// `a/|m|` is one correctly rounded division and lands on a different real
-    /// number than `a` did; what is exact is that the largest component comes
-    /// out as `±1`. What that first division *does* buy is that the answer
-    /// depends on the ratios between the components and on nothing else, so two
-    /// vectors along one line give the same direction however long each of them
-    /// was — which is what [`Axis::new`] needs and §22.6 is about.
+    /// The vector is first multiplied by the exact power of two that puts its
+    /// largest component in `[1, 2)`. A power of two moves no mantissa bit, so
+    /// what comes out is the *same ray*, not a rounding of it, and the answer
+    /// then depends on the ratios between the components and on nothing else:
+    /// two vectors along one line give the same direction however long each of
+    /// them was, which is what [`Axis::new`] needs and §22.6 is about. A
+    /// component more than about a thousand binades below the largest does lose
+    /// bits on the way down, and cannot matter: its share of the unit vector is
+    /// smaller than the smallest `f64`.
+    ///
+    /// Then the length of the scaled vector is worked out to about a hundred
+    /// bits, held as two `f64` that sum to it, and each scaled component is
+    /// divided by that pair. A hundred bits is fifty more than the answer keeps,
+    /// so the fifty-third is already settled when the division rounds it.
+    ///
+    /// **Dividing by the largest component and then normalizing is what this
+    /// used to do**, and it was out by up to three ulp. The divide was not what
+    /// cost the bit — `(1, 1, 0)` has a largest component of one, so there it is
+    /// the identity — rounding the square root and then rounding the division
+    /// was. `docs/decisions.md` §120.
     ///
     /// It is not [`Vector::normalized`] itself, because that one is called on
-    /// vectors that are already directions and dividing twice rounds differently
-    /// from dividing once.
+    /// vectors that are already directions and rounding them again moves them.
     ///
     /// # Errors
     ///
@@ -349,7 +364,18 @@ impl Vector {
         if widest == 0.0 {
             return Err(Error::ZeroLength { what });
         }
-        Vector::new(x / widest, y / widest, z / widest).normalized_as(what)
+        let up_to_one = -binary_exponent(widest);
+        let scaled = [
+            multiplied_by_a_power_of_two(x, up_to_one),
+            multiplied_by_a_power_of_two(y, up_to_one),
+            multiplied_by_a_power_of_two(z, up_to_one),
+        ];
+        let length = square_root_to_a_hundred_bits(sum_of_the_squares_to_a_hundred_bits(scaled));
+        Ok(Vector::new(
+            divided_by_a_hundred_bit_number(scaled[0], length),
+            divided_by_a_hundred_bit_number(scaled[1], length),
+            divided_by_a_hundred_bit_number(scaled[2], length),
+        ))
     }
 
     /// Dividing by the length is done at the scale the length was measured at,
@@ -412,6 +438,82 @@ impl Vector {
             })
         }
     }
+}
+
+/// A number held as two `f64` that sum to it, the high one carrying its size
+/// and the low one the bits the high one had no room for.
+///
+/// One `f64` holds fifty-three bits of a number; a pair of them holds about a
+/// hundred, which is what [`Vector::scaled_to_length_one_from_anywhere`] needs
+/// to round the fifty-third bit of its answer the right way. The pair is always
+/// kept so that adding the two together gives the high one back — that is what
+/// [`two_sum`] returns and why every one of these ends with a call to it.
+type AHundredBits = (f64, f64);
+
+/// `x² + y² + z²`, to a hundred bits.
+///
+/// A square too small to square exactly is added with a low half of zero. The
+/// bits that throws away are below `2^-969` while the total is at least one,
+/// because the largest component is in `[1, 2)` by the time this is called —
+/// eight hundred binades below the last bit the pair carries.
+fn sum_of_the_squares_to_a_hundred_bits(components: [f64; 3]) -> AHundredBits {
+    let mut total = (0.0, 0.0);
+    for component in components {
+        let square = if product_is_exact(component, component) {
+            two_product(component, component)
+        } else {
+            (component * component, 0.0)
+        };
+        total = sum_of(total, square);
+    }
+    total
+}
+
+/// The square root of a hundred-bit number, to a hundred bits.
+///
+/// One Newton step away from the `f64` root: `√v ≈ r + (v - r²) / 2r`. A Newton
+/// step doubles the digits that are right and the `f64` root already has
+/// fifty-three of them, so the pair that comes out has the hundred. The caller
+/// always passes a value of at least one, so the root is never zero.
+fn square_root_to_a_hundred_bits(value: AHundredBits) -> AHundredBits {
+    let root = value.0.sqrt();
+    let gap = difference_of(value, two_product(root, root));
+    two_sum(root, (gap.0 + gap.1) / (2.0 * root))
+}
+
+/// `numerator / length`, rounded once rather than twice.
+///
+/// The first division is the `f64` answer, good to fifty-three bits. What is
+/// left over after taking it back out is worked out against the whole hundred-
+/// bit length, so the correction carries the bits the first division dropped,
+/// and the single add at the end is the only place the answer rounds.
+fn divided_by_a_hundred_bit_number(numerator: f64, length: AHundredBits) -> f64 {
+    let first = numerator / length.0;
+    if first == 0.0 {
+        return first;
+    }
+    let taken_back_out = if product_is_exact(first, length.0) {
+        two_product(first, length.0)
+    } else {
+        (first * length.0, 0.0)
+    };
+    let left_over = difference_of(
+        (numerator, 0.0),
+        sum_of(taken_back_out, (first * length.1, 0.0)),
+    );
+    first + (left_over.0 + left_over.1) / length.0
+}
+
+/// Two hundred-bit numbers added, to a hundred bits.
+fn sum_of(left: AHundredBits, right: AHundredBits) -> AHundredBits {
+    let (high, carried) = two_sum(left.0, right.0);
+    two_sum(high, carried + left.1 + right.1)
+}
+
+/// Two hundred-bit numbers subtracted, to a hundred bits.
+fn difference_of(left: AHundredBits, right: AHundredBits) -> AHundredBits {
+    let (high, carried) = two_diff(left.0, right.0);
+    two_sum(high, carried + left.1 - right.1)
 }
 
 impl Add<Vector> for Vector {
@@ -672,7 +774,10 @@ impl From<Axis> for (Point, Vector) {
 mod tests {
     use core::cmp::Ordering;
 
+    use rcad_predicates::Decision;
+
     use super::*;
+    use crate::exact::Exact;
     use crate::{Cone, Cylinder, Surface, Torus};
 
     #[test]
@@ -908,12 +1013,18 @@ mod tests {
     /// every whole-number multiple of it from two to ninety-seven — two hundred
     /// and ten thousand pairs that name one direction twice.
     ///
-    /// Dividing by the largest component first makes what comes out depend on
+    /// Scaling by an exact power of two first makes what comes out depend on
     /// the ratios between the components and on nothing else, and the ratios of
     /// two multiples of one vector are the same real numbers, so they round the
     /// same way. Normalizing alone divides by two lengths that are not multiples
     /// of each other in `f64`, and **38.1% of these pairs land on two different
     /// directions** because of it.
+    ///
+    /// This is §22.6's same-ray property, and it is checked here rather than
+    /// argued from the correct rounding of §120: a correctly rounded answer is a
+    /// function of the exact ray and so keeps the property by construction, but
+    /// "by construction" is the kind of sentence that is true right up until the
+    /// scaling loses a bit.
     #[test]
     fn normalizing_alone_stores_a_different_direction_and_reducing_first_does_not() {
         let mut drawn = 0usize;
@@ -961,9 +1072,256 @@ mod tests {
         );
         assert_eq!(
             reducing_first_differed, 0,
-            "reducing by the largest component makes the answer a function of the ratios, and a \
-             ratio does not care how long the vector was"
+            "scaling by a power of two makes the answer a function of the ratios, and a ratio \
+             does not care how long the vector was"
         );
+    }
+
+    /// **Every component of a direction above `2^-1012` is the `f64` nearest to
+    /// the exact ratio it stands for**, which is the bound
+    /// [`Vector::scaled_to_length_one_from_anywhere`] publishes and the test
+    /// §15.6 asks for.
+    ///
+    /// Nothing here is decided in `f64`. An answer is right when it is at least
+    /// as close to the true `c / √Q` as each of its two neighbours is, and
+    /// "closer to `answer` than to `neighbour`" is `2c` against
+    /// `(answer + neighbour)·√Q`. Squaring both sides turns the root into `Q`
+    /// and leaves `(2c)² - (answer + neighbour)²·Q`, whose sign an expansion
+    /// names exactly.
+    ///
+    /// The old arithmetic is measured beside it rather than remembered: divide
+    /// by the largest component and then normalize is three lines below, and it
+    /// misses the nearest `f64` on about one component in ten. That is what
+    /// makes this a test the change was needed for and not a test of whatever
+    /// the code happens to do.
+    #[test]
+    fn a_unit_component_is_the_nearest_f64_to_the_exact_ratio() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+
+        let mut directions = vec![
+            Vector::new(1.0, 1.0, 0.0),
+            Vector::new(1.0, 1.0, 1.0),
+            Vector::new(3.0, 4.0, 5.0),
+            Vector::new(2f64.powi(-483), 2f64.powi(516), 0.0),
+        ];
+        for x in -6i32..=6 {
+            for y in -6i32..=6 {
+                for z in -6i32..=6 {
+                    let triple = Vector::new(f64::from(x), f64::from(y), f64::from(z));
+                    if triple != Vector::zero() {
+                        directions.push(triple);
+                    }
+                }
+            }
+        }
+        // Mantissas out of the generator and exponents spread as wide as four
+        // hundred binades, so the drawn directions reach well past anything a
+        // lattice of small whole numbers holds.
+        for _ in 0..3_000 {
+            let mut drawn = || {
+                let bits = next();
+                let mantissa = f64::from(u32::try_from(bits >> 32).expect("thirty-two bits"))
+                    / f64::from(u32::MAX)
+                    - 0.5;
+                let exponent = i32::try_from(bits % 801).expect("under a thousand") - 400;
+                multiplied_by_a_power_of_two(mantissa, exponent)
+            };
+            let triple = Vector::new(drawn(), drawn(), drawn());
+            if triple != Vector::zero() {
+                directions.push(triple);
+            }
+        }
+
+        // Divide by the largest component, then normalize: what `Axis::new`
+        // called until §120, kept here so the comparison is a measurement.
+        let the_old_way = |direction: &Vector| {
+            let [x, y, z] = direction.components();
+            let widest = x.abs().max(y.abs()).max(z.abs());
+            Vector::new(x / widest, y / widest, z / widest).normalized()
+        };
+
+        let mut checked = 0usize;
+        let mut wrong = 0usize;
+        let mut wrong_the_old_way = 0usize;
+        let mut too_wide_to_square = 0usize;
+        let mut below_the_bound = 0usize;
+
+        for direction in directions {
+            let Ok(unit) = direction.scaled_to_length_one_from_anywhere("direction") else {
+                continue;
+            };
+            let Ok(old_unit) = the_old_way(&direction) else {
+                continue;
+            };
+            let Some(frame) = ExactFrame::around(direction) else {
+                too_wide_to_square += 1;
+                continue;
+            };
+            for axis in 0..3 {
+                let answer = unit.components()[axis];
+                let component = frame.components[axis];
+                assert_eq!(
+                    answer == 0.0,
+                    component == 0.0 || answer.abs() < f64::MIN_POSITIVE,
+                    "a zero unit component and a zero input component go together, and {direction:?} \
+                     has one without the other on axis {axis}"
+                );
+                if answer == 0.0 {
+                    below_the_bound += usize::from(component != 0.0);
+                    continue;
+                }
+                assert_eq!(
+                    answer < 0.0,
+                    component < 0.0,
+                    "{direction:?} came back pointing the other way on axis {axis}"
+                );
+                if answer.abs() < 2f64.powi(-1012) {
+                    below_the_bound += 1;
+                    continue;
+                }
+                let Some(nearest) = frame.is_the_nearest(answer, component) else {
+                    too_wide_to_square += 1;
+                    continue;
+                };
+                checked += 1;
+                if !nearest {
+                    wrong += 1;
+                    println!("{direction:?} rounds axis {axis} to {answer:e}, which is not nearest");
+                }
+                let old_answer = old_unit.components()[axis];
+                if old_answer == 0.0
+                    || frame.is_the_nearest(old_answer, component) != Some(true)
+                {
+                    wrong_the_old_way += 1;
+                }
+            }
+        }
+
+        println!(
+            "{checked} components checked against an exact reference: {wrong} not correctly \
+             rounded, against {wrong_the_old_way} ({:.2}%) for dividing by the largest component \
+             and normalizing. {below_the_bound} components below 2^-1012 and \
+             {too_wide_to_square} comparisons too wide to square.",
+            100.0 * wrong_the_old_way as f64 / checked as f64
+        );
+        assert!(
+            checked >= 10_000,
+            "only {checked} components reached the exact reference, which is not the measurement \
+             this claims to be"
+        );
+        assert_eq!(
+            wrong, 0,
+            "every component above 2^-1012 is meant to be the nearest f64 to its exact ratio"
+        );
+        assert!(
+            wrong_the_old_way * 50 > checked,
+            "the old arithmetic is what this change replaced, and if it misses the nearest f64 \
+             only {wrong_the_old_way} times out of {checked} then this test is not the one §15.6 \
+             asks for"
+        );
+    }
+
+    /// One direction, scaled so that this crate's exact arithmetic can carry
+    /// the whole comparison.
+    ///
+    /// Two scalings, and both are multiplications by a power of two, which move
+    /// no mantissa bit: the ratios the answer is a function of are the same
+    /// before and after. The first puts the largest component in `[1, 2)`, so
+    /// the length is between one and the root of three. The second lifts the
+    /// smallest component up to `2^-400`, which is not where an [`Exact`] stops
+    /// squaring — that is `2^-484` — but where the *product* of two of them
+    /// stops being exact. The comparison multiplies the squared length by a
+    /// three-entry square: the squared length's lowest entry sits at about
+    /// `2^(2·smallest − 53)` and the square's at about `2^-104`, and their
+    /// product has to stay above the `2^-969` [`product_is_exact`] wants.
+    ///
+    /// So a triple spread wider than about nine hundred binades has no scale
+    /// that carries this comparison, and comes back `None` rather than being
+    /// decided in `f64`. That is the same wall `exact::WIDEST_SQUARABLE_SPREAD`
+    /// names, a little further up.
+    struct ExactFrame {
+        components: [f64; 3],
+        lift: i32,
+        squared_length: Exact,
+    }
+
+    impl ExactFrame {
+        fn around(direction: Vector) -> Option<Self> {
+            let [x, y, z] = direction.components();
+            let widest = x.abs().max(y.abs()).max(z.abs());
+            if widest == 0.0 {
+                return None;
+            }
+            let up_to_one = -binary_exponent(widest);
+            let components = [
+                multiplied_by_a_power_of_two(x, up_to_one),
+                multiplied_by_a_power_of_two(y, up_to_one),
+                multiplied_by_a_power_of_two(z, up_to_one),
+            ];
+            let smallest = components
+                .iter()
+                .filter(|component| **component != 0.0)
+                .map(|component| binary_exponent(*component))
+                .min()?;
+            let lift = (-400 - smallest).max(0);
+            if lift > 500 {
+                return None;
+            }
+            let lifted = [
+                multiplied_by_a_power_of_two(components[0], lift),
+                multiplied_by_a_power_of_two(components[1], lift),
+                multiplied_by_a_power_of_two(components[2], lift),
+            ];
+            Some(Self {
+                components,
+                lift,
+                squared_length: Exact::dot_of(lifted, lifted)?,
+            })
+        }
+
+        /// Whether `answer` is at least as close to `component / √Q` as either
+        /// of its neighbours, or `None` when the exact arithmetic could not
+        /// carry the comparison.
+        ///
+        /// The answer and the component are lifted together by the power of two
+        /// that puts the answer in `[1, 2)`; the component then lands near the
+        /// length, which is between one and the root of three. Both sides of the
+        /// comparison carry the same power of two, so the sign is the sign of
+        /// the unlifted question.
+        fn is_the_nearest(&self, answer: f64, component: f64) -> Option<bool> {
+            let answer = answer.abs();
+            let component = component.abs();
+            let to_one = -binary_exponent(answer);
+            let twice_the_component = multiplied_by_a_power_of_two(
+                multiplied_by_a_power_of_two(component, to_one),
+                self.lift + 1,
+            );
+            let lifted_answer = multiplied_by_a_power_of_two(answer, to_one);
+            let gap_from = |neighbour: f64| {
+                let lifted = multiplied_by_a_power_of_two(neighbour, to_one);
+                let both = Exact::product_of(lifted_answer, lifted_answer)?
+                    .plus(&Exact::product_of(lifted_answer, lifted)?)
+                    .plus(&Exact::product_of(lifted_answer, lifted)?)
+                    .plus(&Exact::product_of(lifted, lifted)?);
+                Some(
+                    Exact::product_of(twice_the_component, twice_the_component)?
+                        .minus(&both.times(&self.squared_length)?)
+                        .sign(),
+                )
+            };
+            let below = gap_from(answer.next_down())?;
+            let above = gap_from(answer.next_up())?;
+            Some(
+                matches!(below, Decision::Pos | Decision::Zero)
+                    && matches!(above, Decision::Neg | Decision::Zero),
+            )
+        }
     }
 
     /// **Rebuilding an axis from its own direction moves it, and
