@@ -16,6 +16,7 @@ use rcad_predicates::{
 use slotmap::SecondaryMap;
 
 use crate::builder::the_ends_are_the_whole_of_it;
+use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on, what_trims_this_face};
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot};
@@ -2098,8 +2099,10 @@ struct RingAWireTraces {
 /// # Errors
 ///
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] for a curved step the walk
-/// came back empty-handed from, whatever else [`rcad_geom::walk`] refuses, and
-/// whatever [`NamedRun::new`] makes of a run whose ends do not match it.
+/// came back empty-handed from, whatever else [`rcad_geom::walk`] refuses —
+/// wrapped as [`Error::ACrossingAlongThisEdgeCouldNotBeFollowed`], which
+/// carries the edge the marcher never saw — and whatever [`NamedRun::new`]
+/// makes of a run whose ends do not match it.
 fn the_ring_a_wire_traces(
     model: &Model,
     face: FaceView<'_>,
@@ -2126,7 +2129,8 @@ fn the_ring_a_wire_traces(
             [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
         )?;
         let along = the_two_surfaces_along_this_edge(model, face, edge);
-        let walked = rcad_geom::walk(&run, [&along[0], &along[1]], deflection, policy, log)?;
+        let walked = rcad_geom::walk(&run, [&along[0], &along[1]], deflection, policy, log)
+            .map_err(|why| walking_along_this_edge_refused(edge.key(), why))?;
         let strays = walked.deviation().magnitude();
         if walked.points().is_empty() && deflection.length() <= strays {
             return Err(rcad_geom::Error::CannotPlaceAPointThatCloseToACrossing {
