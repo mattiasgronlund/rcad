@@ -25712,6 +25712,57 @@ has more in it than the fixture put there, and pinning the number would make the
 arm pass or fail on a property of the machine rather than of the recipe. That is
 §77.6's mistake, and this is the third time it has been available to make.
 
+### 91.5 The morning tool called two live crashes clean, recorded 2026-09-17
+
+`just fuzz-triage` read `rcad-fuzz-explain`'s **exit code** as its verdict. That
+crate exits 0 "when the bytes decoded to a case and the case replayed, whatever
+the case then did" — `crates/rcad-fuzz-explain/src/main.rs` says so in the
+sentence above `fn main`, deliberately, because a decoder that died on a
+crashing input could not report one. So a replay that panicked exited 0 exactly
+like one that answered, and the recipe printed both of these on the same entry:
+
+```text
+outcome: panicked — … writing this pair at 2^-1 changed what it crosses in.
+still fails on main: no — it decoded and replayed clean
+```
+
+and then totalled `0 of 8 input(s) did not come back clean on main`. The answer
+was **two of eight**, both of them the cone-against-plane scaling crash of §91.2's
+family, on `fbab36ff`, which was `main`'s tip that morning. Confirmed by hand
+before anything was changed: the same command on
+`crash-89994c6f26f3142366aee9b02b26d32baca87c38` prints `outcome: panicked` and
+exits `0`.
+
+The contract was never ambiguous. `Outcome` is three variants and its doc comment
+says "the three arms are the three `just fuzz-triage` was written against" — so
+the recipe had an answer written for it on stdout and read a different question's
+answer instead.
+
+**Why four green arms did not see it.** Every fixture in
+`check-fuzz-triage-selftest` is bytes that do not decode (`not a real crash
+input`, `nor is this one`), which exit non-zero. The panicking-replay path — the
+one the recipe exists for — had no arm at all, and arm one asserts only that the
+string `still fails on HEAD` appears somewhere, not what follows it. This is
+§77.6's shape once more: every arm was passing for a property of its fixture
+rather than of the recipe.
+
+**The fix splits deciding from producing.** `fuzz-triage-verdict` takes the
+decoder's exit code and its stdout and prints the verdict, exiting non-zero when
+the input counts against the tally; `fuzz-triage` calls it. Deciding needs only
+text, so the gate can put all five cases in front of it — panicked, succeeded,
+refused, never-replayed, and a fourth outcome nobody has written yet — without a
+workspace, a nightly build, or an input that panics.
+
+**No arm owns an input that panics, and that is the point.** An artifact that
+crashes for ever is the one thing this kernel is trying not to have, so an arm
+built on one goes red on the day the bug is fixed. Canned text has no such
+expiry.
+
+A `refused` replay counts as **gone, not failing**. Giving up by name is an
+answer (§17.4), and a crash artifact that now refuses is a crash that no longer
+reproduces. A fourth outcome counts against the tally and says the contract has
+moved, rather than passing as clean on a name this recipe has never seen.
+
 ## 92. What 352 branches and 45 worktrees were actually holding, recorded 2026-09-13
 
 *An audit of everything uncommitted or unmerged in this repo, run because the
