@@ -645,9 +645,7 @@ fn a_ball_centred_on_a_pipes_axis(
     let room = Question {
         named: WHERE_A_BALL_AND_A_PIPE_CROSS,
         enclosing: || squared_enclosing(radius) - squared_enclosing(skin),
-        exactly: || {
-            Some(Exact::product_of(radius, radius)?.minus(&Exact::product_of(skin, skin)?))
-        },
+        exactly: || Some(Exact::product_of(radius, radius)?.minus(&Exact::product_of(skin, skin)?)),
     };
     match ask(&room, Measures::Area, &at, policy, log)? {
         Decision::Pos => {
@@ -1194,8 +1192,7 @@ fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<Su
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
 
-    let [thin_radius, fat_radius] =
-        [thin, fat].map(|pipe| Interval::exactly(pipe.radius()));
+    let [thin_radius, fat_radius] = [thin, fat].map(|pipe| Interval::exactly(pipe.radius()));
     let apart = how_far_apart_two_axes_are_enclosing(thin, fat);
     let reach = apart + thin_radius;
     let clear = root_enclosing(fat_radius * fat_radius - reach * reach);
@@ -3246,6 +3243,42 @@ mod tests {
         let met = crossing(&a_ball([0.0, 0.0, 0.0], 2.0), &pipe);
         let run = one_run(&met);
         assert_eq!(run.run(), &EdgeRun::RightRoundWhereItsFacesCross);
+    }
+
+    /// A ball that just fits a pipe still just fits it when the axis is written
+    /// along a direction whose stored triple is not a unit one.
+    ///
+    /// The whole of §118.11 in one pair. Both radii are two and the centre is
+    /// exactly on the axis, so the ball rests against the pipe along one circle
+    /// and that is the answer whatever `‖w‖` rounded to. The discriminant used to
+    /// be `W·R² − r²`, whose sign for equal radii **is** the sign of the stored
+    /// direction's own rounding, so every axis but a coordinate one answered
+    /// "nothing" or "two circles" — and `Cylinder::side_of` said at the same time
+    /// that the ball's equator was exactly on the skin.
+    ///
+    /// The `assert_ne!` is the demonstration that the pair is a real one: put a
+    /// coordinate direction in and the old form answered correctly too. It also
+    /// rules out the directions that only look awkward — `(3, 5, 7)` and
+    /// `(2, 3, 4)` both store as exactly unit triples, and a case built on either
+    /// would have passed before this change as well.
+    #[test]
+    fn a_ball_that_just_fits_a_pipe_fits_it_down_any_axis() {
+        for along in [[1.0, 1.0, 1.0], [1.0, 2.0, 0.0]] {
+            let pipe = a_pipe(along, [0.0, 0.0, 0.0], 2.0);
+            let Surface::Cylinder(stored) = pipe else {
+                panic!("a pipe is a pipe");
+            };
+            let squared = Vector::from(stored.axis().direction().components()).length_squared();
+            assert_ne!(
+                squared, 1.0,
+                "a direction along {along:?} does not store as a unit triple, which is what \
+                 makes this pair worth asking about"
+            );
+
+            let met = crossing(&a_ball([0.0, 0.0, 0.0], 2.0), &pipe);
+            let run = one_run(&met);
+            assert_eq!(run.run(), &EdgeRun::RightRoundWhereItsFacesCross);
+        }
     }
 
     /// A ball off to one side of a pipe, reaching into it: one closed loop, and
