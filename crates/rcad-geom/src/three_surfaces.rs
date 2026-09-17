@@ -692,21 +692,24 @@ fn how_a_ball_is_written(ball: &Sphere) -> Option<HowASurfaceIsWritten> {
     })
 }
 
-/// `‖(p − o) × w‖² − r²`, which is [`Cylinder`]'s own sign expression, opened
-/// out as `(w·w)(p·p) − (p·w)²` plus what the axis point leaves.
+/// `‖(p − o) × w‖² − r²(w·w)`, which is [`Cylinder`]'s own sign expression,
+/// opened out as `(w·w)(p·p) − (p·w)²` plus what the axis point leaves.
 ///
-/// The radius is squared against nothing, the way
-/// [`SideOfSurface`](rcad_predicates::SideOfSurface) does it — the pipe these
-/// numbers name has radius `r/‖w‖`, and scaling the radius differently here
-/// would write out a different pipe from the one the sign predicate reads
-/// (§27.1).
+/// **The radius is squared against `w·w`**, because everything else here is
+/// degree two in the stored direction and `r²` on its own is degree zero. Scale
+/// `w` by any number and every one of these nine, three and one coefficients
+/// scales by the square of it, so the surface they name is the pipe of radius
+/// exactly `r` whatever length the direction got stored at — which is the
+/// surface [`SideOfSurface`](rcad_predicates::SideOfSurface) certifies for a
+/// pipe since §118.10. Take the `w·w` away and the constant term alone stops
+/// scaling, and what is written out is the pipe of radius `r/‖w‖` (§27.1).
 fn how_a_pipe_is_written(pipe: &Cylinder) -> Option<HowASurfaceIsWritten> {
     let along = pipe.axis().direction().components();
     let origin = pipe.axis().origin().coordinates();
     let mut written = how_a_ruled_surface_is_written(along, origin, &Exact::of(1.0))?;
-    written.constant = written
-        .constant
-        .minus(&Exact::product_of(pipe.radius(), pipe.radius())?);
+    written.constant = written.constant.minus(
+        &Exact::product_of(pipe.radius(), pipe.radius())?.times(&Exact::dot_of(along, along)?)?,
+    );
     Some(written)
 }
 
@@ -1341,11 +1344,13 @@ fn where_a_line_meets_a_ring(
 ///
 /// with `A` and `B` quadratics in `s`, so the whole is a quartic whose every
 /// coefficient is a polynomial in the numbers as stored. **Both radii are
-/// squared against `m²` and neither against `w·w`**, which is the same rule
-/// [`Torus`] is certified under and the opposite of a pipe's: a torus's stored
-/// radii are the numbers the caller wrote, and a discriminant that scaled them
-/// by the axis's length would be certified about a different ring from the one
-/// the sign predicate is (§27.1).
+/// squared against `m²` and neither carries a `w·w` of its own**, because both
+/// sit inside a term the `(w·w)` out front already multiplies. That makes the
+/// quartic degree two in `w` all through, so the ring these numbers name is the
+/// one the caller's two radii describe whatever length the direction got stored
+/// at — the same rule [`Torus`]'s own sign predicate is certified under, and the
+/// same rule a pipe follows since §118.10, though a pipe has to be handed its
+/// `w·w` by hand because nothing else multiplies its radius (§27.1).
 fn how_a_ring_cuts_the_line(line: &ALine, ring: &Torus) -> Option<[Term; 5]> {
     let along = ring.axis().direction().components();
     let reach = the_line_offset_to(line, ring.centre().coordinates())?;
@@ -1488,35 +1493,47 @@ fn how_a_ball_cuts_the_line(line: &ALine, ball: &Sphere) -> Option<Quadratic> {
     })
 }
 
-/// `‖(V + s·D) × w‖² − m²r²` for the pipe's stored axis direction `w`, a
+/// `‖(V + s·D) × w‖² − m²r²(w·w)` for the pipe's stored axis direction `w`, a
 /// **degree fourteen** discriminant.
 ///
-/// The radius is squared against `m²` and not against `m²‖w‖²`, because
-/// [`SideOfSurface`](rcad_predicates::SideOfSurface) for a pipe is
-/// `‖(p − o) × w‖² − r²` — so the pipe these numbers name has radius `r/‖w‖`,
-/// and a discriminant that scaled the radius differently would be certified
-/// about a different pipe from the one the sign predicate is (§27.1).
+/// The radius is squared against `m²(w·w)` and not against `m²` alone, so that
+/// these three numbers name the pipe of radius exactly `r` — which is what
+/// [`SideOfSurface`](rcad_predicates::SideOfSurface) has certified for a pipe
+/// since §118.10 made it homogeneous in `w`. A discriminant that left the `w·w`
+/// out would be certified about the pipe of radius `r/‖w‖` instead, and the two
+/// halves of a meet would be answering about surfaces a rounding apart (§27.1).
+///
+/// **The `w·w` does not move the degree.** `A` is `‖D × w‖²` at six, `B` is
+/// `(D × w)·(V × w)` at seven and `C` is now eight on both of its terms where
+/// the radius term used to be six, so `B² − A·C` is fourteen either way — and it
+/// is only now that `A·C`'s two halves are the same degree as each other.
+/// `how_many_f64_the_discriminant_of_a_line_and_a_quadric_takes_to_hold` below
+/// measures what that costs in `f64` rather than arguing it.
 fn how_a_pipe_cuts_the_line(line: &ALine, pipe: &Cylinder) -> Option<Quadratic> {
     let along = pipe.axis().direction().components();
     let reach = the_line_offset_to(line, pipe.axis().origin().coordinates())?;
     let sideways = cross_of(&line.direction, along)?;
     let across = cross_of(&reach, along)?;
+    let axis_squared = Term::Exactly(Exact::dot_of(along, along)?);
     Some(Quadratic {
         squared: squared_length_of(&sideways)?,
         half_linear: dot_of(&sideways, &across)?,
-        constant: squared_length_of(&across)?.minus(&squared_radius_of(line, pipe.radius())?),
+        constant: squared_length_of(&across)?
+            .minus(&squared_radius_of(line, pipe.radius())?.times(&axis_squared)?),
     })
 }
 
 /// `‖(V + s·D) × w‖² − slope²·((V + s·D)·w)²` for the cone's stored axis
 /// direction `w`.
 ///
-/// **No `m²` correction, and that is the cone being easier than the pipe rather
-/// than the correction being forgotten.** A pipe's constant term compares an
-/// area against `r²`, so writing the line with its divisor left in makes the
-/// radius carry `m²` — see [`squared_radius_of`]. Both halves here are degree
-/// two in `V + s·D` and the slope is a pure ratio, so the divisor factors out of
-/// the whole expression and every sign read off it is untouched.
+/// **Neither an `m²` nor a `w·w` correction, and that is the cone being easier
+/// than the pipe rather than two corrections being forgotten.** A pipe's
+/// constant term compares an area against `r²`, which is degree zero in both the
+/// line's divisor and the stored direction, so it has to be given `m²(w·w)` to
+/// match — see [`squared_radius_of`]. A cone has no radius: both halves here are
+/// degree two in `V + s·D` and degree two in `w`, and the slope is a pure ratio,
+/// so the divisor and the direction's length both factor out of the whole
+/// expression and every sign read off it is untouched.
 fn how_a_cone_cuts_the_line(line: &ALine, cone: &Cone) -> Option<Quadratic> {
     let along = cone.axis().direction().components();
     let up = along.map(Term::of);
@@ -1548,6 +1565,11 @@ fn the_line_offset_to(line: &ALine, place: [f64; 3]) -> Option<[Term; 3]> {
 
 /// `m²r²`, which is what a radius has to be compared against once the line has
 /// been written with its divisor left in.
+///
+/// That is the whole of it for a ball, whose sign expression is
+/// `‖p − c‖² − R²` and carries no direction. A pipe multiplies what comes back
+/// by `w·w` on top, because its other side is `‖x × w‖²` — see
+/// [`how_a_pipe_cuts_the_line`].
 fn squared_radius_of(line: &ALine, radius: f64) -> Option<Term> {
     line.divided_by
         .times(&line.divided_by)?
