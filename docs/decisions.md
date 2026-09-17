@@ -30693,7 +30693,44 @@ naming it is what §16.10 requires before anyone writes that this cannot be done
    keeps those out.
 
 **Option 1 is the only one that reaches the answer, and it is not taken here.**
-`Plane::side_of_point` carries the same caveat for the same reason, so the
-question is whether this kernel's surfaces are the ones the caller named or the
-ones the normalize rounded to — and that is Mattias's to settle, not a lane's.
-Until it is, the two Finder relays stay refused and the census stays 24/0/0/2.
+The question it raises is whether this kernel's surfaces are the ones the caller
+named or the ones the normalize rounded to, and that is Mattias's to settle, not
+a lane's. Until it is, the two Finder relays stay refused and the census stays
+24/0/0/2.
+
+#### Correction: `Plane` is not the follow-on, and this section said it was
+
+The paragraph above used to end *"`Plane::side_of_point` carries the same caveat
+for the same reason"*, naming it the obvious next step. **That is wrong, and a
+read-only sweep of every direction-length dependence in the kernel is what
+caught it.**
+
+`Plane::side_of_point` takes the sign of `n·p − d`, and `d` is never an
+independent literal: every constructor co-derives it from the *same* stored
+normal — `from_point_and_normal` (`plane.rs:129`) computes
+`offset = normal.dot(point − origin)` after normalizing, and `from_coefficients`
+and `transformed` carry the pair together. So the expression is degree **one** in
+`n` on both sides. Scale `n` by `k` and the whole thing scales by `k`; the zero
+set does not move and the sign does not change. It is already homogeneous.
+
+The cylinder's defect is the opposite shape: `radius` is an independent literal,
+never re-derived from `w`, compared against a quantity that scales with `‖w‖²`.
+Nothing about `Plane` has that shape.
+
+What is true of both — and what the predicate doc comments mean when they say
+"the same caveat" — is the weak claim: each is exact about the numbers as
+stored, not about the geometry those numbers were rounded from. That is
+universal to every unit vector in this kernel and no homogeneity fix touches it.
+**Reading the weak claim as the strong one is what produced the wrong sentence**,
+and it is the same mistake as §118's own: reasoning about what the kernel "does"
+from a doc comment rather than from the arithmetic under it. If normalize's
+direction rounding is worth attacking, it is a different question from this one
+and wants its own section.
+
+Two dependencies that *are* the cylinder's shape came out of the same sweep, and
+both are fixed with it rather than after it: `walk.rs`'s `same_width` question
+and `intersect.rs`'s `same_thickness` (`where_two_pipes_side_by_side_cross`).
+The second is the **namer**, where `walk.rs` is the walker — the two halves §118
+is about — so fixing one without the other would re-create §118 pointing the
+other way. `cone.rs` was checked and is homogeneous already, both of its terms
+being degree two in `w`.
