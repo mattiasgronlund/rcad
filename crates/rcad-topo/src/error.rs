@@ -831,6 +831,30 @@ pub enum Error {
         enclosure: f64,
     },
 
+    /// Which way a closed edge runs round its two surfaces could not be settled.
+    ///
+    /// The rule is `which_way_a_closed_crossing_turns`, and it answers with a
+    /// [`Decision`](rcad_predicates::Decision) like any predicate. Three of its
+    /// four answers are usable: a sign either way says which way the edge runs,
+    /// and [`Decision::Zero`](rcad_predicates::Decision::Zero) says the two
+    /// surfaces touch rather than cross there and the edge has no direction to
+    /// name. The fourth is this.
+    ///
+    /// Its own error rather than [`Error::Undecidable`] because there is no log
+    /// to carry: the rule takes no [`Policy`](rcad_predicates::Policy) and keeps
+    /// no records — it is three cross products and a dot, and the width that
+    /// straddled zero is the whole of what there is to say. It is what a
+    /// hemisphere sitting on a pipe of the same radius and very nearly the same
+    /// axis comes back with: the wire round that crossing is shorter than the
+    /// rounding in the cross product that built it (`docs/decisions.md` §111).
+    #[error(
+        "could not tell which way a closed edge runs round its surfaces; the enclosure that straddled was {enclosure} wide"
+    )]
+    CannotTellWhichWayAClosedEdgeRuns {
+        /// How wide the enclosure that straddled zero was.
+        enclosure: f64,
+    },
+
     /// The operation ran out of things it could prove.
     ///
     /// Carries the records of every decision that could not be settled, so the
