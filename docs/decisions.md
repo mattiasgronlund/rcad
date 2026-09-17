@@ -29881,6 +29881,7 @@ morning line has to be read twice, and the crash is the finding. With the bug
 fixed, the next night is the measurement — if `fuzz-cones-and-tori` still loses
 its slice, it is losing it to something else, and that is worth knowing on its
 own rather than hidden behind a swallowed crash.
+
 ## 115. A cap circle is walked by this kernel's rule and not by the file's flag, fixed 2026-09-17
 
 **`Orientation` means two different things and a STEP file answers only one of
@@ -29992,6 +29993,7 @@ than bit for bit.** They came out two ulps apart — the mesher summing one bar'
 faces in the order one spelling puts them in and the other's in the other. Two
 ulps is not a fact about the bar, and a test that pinned them would be measuring
 the summation order.
+
 ## 116. The refusal's surfaces are the caller's, not the mesher's, fixed 2026-09-17
 
 §113.6 recorded a published field that lies, one day old: the `surfaces` on
@@ -30150,12 +30152,18 @@ Not attempted here: §110.4's other half, carrying the **face keys** so
 `rcad-step` can turn a pair into two `#id`s. Moving the surfaces makes a match
 by value possible where the placement is a shift and not a turn (§116.4), which
 is better than it was and is not the same thing as carrying the keys.
+
 ## 117. Every pair at the near-parallel wall is a ball on a pipe or a pair of crossed pipes, measured 2026-09-17
 
 §113.5 said the example's "transverse" was the default arm of a `match`
 reporting itself as a verdict, and that a cylinder/sphere case in
 `evaluate_surfaces` is what closes §109.1's hole. This is that case, and the
 census with a test behind it.
+
+**Every count in this section is `44c59a7e`'s, and the merged tree's are not the
+same — §117.6.** The run below is kept exactly as it printed rather than
+restated, because it is the measurement §117.1 to §117.5 reason about; the
+conclusions all survived, and only the counts moved.
 
 Command, from a worktree of `44c59a7e`:
 
@@ -30289,3 +30297,45 @@ file's own topology, so both sit in the frame the file wrote them in, and every
 quantity it compares is a distance or an angle **between the two** — never a
 position. Whatever translation is applied to the pair is applied to both halves
 and cancels. That is why a census could be finished while §110 stays open.
+
+*"Still open" was already false when this merged: §116 landed in the same wave
+and moves the pair back into the model's frame. §117.6. The argument above is
+untouched and is the better one — this census never reads the refusal's
+surfaces, so it held either way.*
+
+### 117.6 Measured again on the merged tree: 26 files, not 24
+
+*Written at merge time, 2026-09-17, by the dispatcher rather than by the lane.
+Everything above is a worktree of `44c59a7e`; this is `6b0badfa`, which is this
+section together with §115 and §116.*
+
+§115 landed in the same merge and rescued thirteen more KiCad files into
+importing. Two of those get **further** than they used to and reach the
+near-parallel wall for the first time, so the wall's set **grew**:
+
+| | `44c59a7e`, above | `6b0badfa`, merged |
+|---|---|---|
+| files whose only reason is the near-parallel crossing | 24 | **26** |
+| tangent — touch without crossing, a limit | 18 | **20** |
+| transverse — they really cross, a gap | 0 | 0 |
+| they never meet | 0 | 0 |
+| undecided — no test here knows the pair | 6 | 6 |
+
+Three routes agree on 26: the example's own count, the set
+`every_file_that_stops_at_the_tangency_wall_names_the_edge_it_was_following`
+selects, and the refusal tally in `how_often_a_real_file_imports`'s log. §115's
+own rates are unmoved by the merge — kicad 110/323, nist 1/44, re-derived on
+this tree rather than carried across from the lane's.
+
+**Every conclusion above survives the move.** Both newcomers are tangent, so
+§117.1's ball-capping-a-pipe family gained two and lost none; the six undecided
+are the same six, still two equal pipes crossing at right angles; and transverse
+is still empty, which is the claim §113.5 actually wanted.
+
+**This is the stale-claim shape of §16.10 happening inside a single merge**, for
+the second time in two days — §112 moved §113's fixture the same way yesterday.
+A lane measures on the base it was cut from, and its number is a fact about that
+tree and no other. Where a number *is* the point of a section, it has to be
+re-derived on the tree that is actually pushed, by somebody who is not the lane
+that produced it. The count above is the audit lane's, not Lane C's, for exactly
+that reason.
