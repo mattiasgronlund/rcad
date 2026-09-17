@@ -503,8 +503,49 @@ pub enum Error {
     /// The two are told apart by the naming half:
     /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] is what a
     /// tangency along a whole curve comes back as before anything is walked.
-    #[error("this crossing runs where its two surfaces are too nearly parallel to follow it")]
-    CannotFollowACrossingWhereItsSurfacesAreTangent,
+    ///
+    /// **It carries the two surfaces and which question gave up on them**,
+    /// because a refusal that carries neither cannot be told from the three
+    /// other things the marcher used to raise it with, and a caller holding a
+    /// whole solid has no way back to the pair. `docs/decisions.md` §110, and
+    /// §109.1 for the 44 corpus files whose verdicts rested on a message that
+    /// named the enclosing solid and nothing else.
+    ///
+    /// Boxed for the same reason the closed-run variant above is: a bare pair of
+    /// [`Surface`](crate::Surface)s is the largest thing in this enum by a wide
+    /// margin, and `clippy::result_large_err` measures the whole `Result`.
+    #[error("this crossing runs where its two surfaces are too nearly parallel to follow it, {at}")]
+    CannotFollowACrossingWhereItsSurfacesAreTangent {
+        /// The two surfaces whose crossing was being followed.
+        surfaces: Box<[crate::Surface; 2]>,
+        /// Which of the marcher's questions ran out of angle.
+        at: WhereFollowingACrossingGaveUp,
+    },
+
+    /// A crossing could not be followed because no step along it, however short,
+    /// stayed on it.
+    ///
+    /// **A different wall from the one above, and eight powers of ten away from
+    /// it** (`docs/decisions.md` §109.6). The three questions that read the two
+    /// normals — settling a point, bounding how far off it is, and crossing the
+    /// normals for a direction — all answer without complaint at the tightest
+    /// lean a ball on a pipe can be given, `2.1e-8`, and this is what refuses
+    /// there. Sharing one name with them is what made the corpus census count
+    /// stepping failures as tangency.
+    ///
+    /// Whether this is a gap or a limit is **not settled**. The shortening
+    /// budget's own doc comment says reaching the end of it "means the curve is
+    /// not being followed rather than that the budget was tight", and §109.6
+    /// turned that sentence back into the open question it is: at a lean the
+    /// geometry can really present, the other two questions answer fine.
+    /// §16.10 wants a demonstration either way and there is not one yet.
+    #[error("no step along this crossing stayed on it, after {shortenings} shortenings")]
+    CannotFollowACrossingBecauseNoStepStaysOnIt {
+        /// The two surfaces whose crossing was being followed.
+        surfaces: Box<[crate::Surface; 2]>,
+        /// How many times the step was shortened before the marcher gave up.
+        shortenings: usize,
+    },
 
     /// A crossing too small, where it sits, for any `f64` point to be on both
     /// the surfaces that make it.
@@ -644,6 +685,55 @@ pub enum Error {
         /// The decisions that could not be settled.
         records: rcad_predicates::ProvenanceLog,
     },
+}
+
+/// Which of the marcher's questions ran out of angle between two surfaces.
+///
+/// Four questions rather than four lines of source: a line number goes stale on
+/// the next edit, and what a reader of a refusal wants to know is *what was
+/// being asked* when the angle ran out. Two of the four read the two normals
+/// directly, one divides by the sine between them, and one is not the marcher's
+/// at all — it is the ordering question a plane resting along a ring's tube has
+/// no answer to.
+///
+/// **This is what tells the honest tangency apart from the near-tangency the
+/// arithmetic merely could not reach**, which is the distinction §16.10 asks for
+/// and the one the corpus census could not make (`docs/decisions.md` §109.2).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WhereFollowingACrossingGaveUp {
+    /// Settling a point onto both surfaces: the two normals lean so little that
+    /// the Newton correction has nothing left to divide by.
+    SettlingAPointOntoBothSurfaces,
+    /// Bounding how far a point really sits off the crossing: the sine of the
+    /// angle between the two surfaces could not be told from zero, so there is
+    /// no bound to be had at all.
+    BoundingHowFarOffTheCrossingAPointIs,
+    /// The same bound, worked out and larger than any number there is.
+    TheBoundOnHowFarOffIsBiggerThanAnyNumber,
+    /// Crossing the two normals for the direction the curve runs in, which came
+    /// back with no length to point anywhere with.
+    CrossingTheTwoNormalsForADirection,
+    /// Ordering points round the one circle a plane resting along a ring's tube
+    /// touches it in, where the two surfaces touch rather than cross.
+    OrderingTheCircleAPlaneRestsOnARingAlong,
+}
+
+impl core::fmt::Display for WhereFollowingACrossingGaveUp {
+    fn fmt(&self, into: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let asking = match self {
+            Self::SettlingAPointOntoBothSurfaces => "settling a point onto both of them",
+            Self::BoundingHowFarOffTheCrossingAPointIs => "bounding how far off a point sits",
+            Self::TheBoundOnHowFarOffIsBiggerThanAnyNumber => {
+                "bounding how far off a point sits, which overflowed"
+            }
+            Self::CrossingTheTwoNormalsForADirection => "crossing the two normals for a direction",
+            Self::OrderingTheCircleAPlaneRestsOnARingAlong => {
+                "ordering the circle a plane rests on a ring along"
+            }
+        };
+        write!(into, "asked while {asking}")
+    }
 }
 
 /// The result of anything in this crate that can refuse.
