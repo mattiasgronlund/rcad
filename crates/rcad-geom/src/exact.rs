@@ -749,16 +749,21 @@ mod how_far_exact_arithmetic_reaches {
         );
     }
 
-    /// The question two leaning pipes ask does **not** fit, and this is the
-    /// demonstration §24.17 asks for.
+    /// An expansion five hundred binary orders wide does **not** square where it
+    /// stands, and this is the demonstration §24.17 asks for.
     ///
-    /// Deciding which of the four shapes two leaning pipes cross in compares
-    /// `ρ₁ ± ρ₂` against `δ`, and those are `rᵢ/√Wᵢ` and `|T|/√K` — three square
-    /// roots in three different metrics. Clearing them takes squaring
-    /// `r₁²W₂K + r₂²W₁K − T²W₁W₂`, and that expansion is already **five hundred
-    /// binary orders wide**: its smallest entry is `2^-504` of its largest, so
-    /// the square of that entry lands a thousand orders down, past the bottom of
-    /// `f64`.
+    /// These numbers are the ones two leaning pipes used to ask about. Until
+    /// §118.11 a pipe was `rᵢ/√Wᵢ` wide and the gap between two axes `|T|/√K`,
+    /// so deciding which of the four shapes the pipes cross in put three square
+    /// roots in three different metrics against each other, and clearing them
+    /// took squaring `r₁²W₂K + r₂²W₁K − T²W₁W₂`. **The kernel does not build
+    /// that expansion any more** — a pipe is `r` wide, the `Wᵢ` leave the
+    /// comparison, and `intersect.rs` asks degree six against degree six. §119.
+    ///
+    /// What survives that move is this test, because the width was never a fact
+    /// about pipes. The expansion is still five hundred binary orders wide: its
+    /// smallest entry is `2^-504` of its largest, so the square of that entry
+    /// lands a thousand orders down, past the bottom of `f64`.
     ///
     /// **No scaling of the inputs reaches it.** Multiplying every length by a
     /// power of two multiplies every entry of the expansion by the same factor,

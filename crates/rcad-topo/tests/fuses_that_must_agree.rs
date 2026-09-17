@@ -2823,10 +2823,12 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
         "the same plane, named off a longer edge"
     );
     // Both land on the same number, and it is one ulp under the correctly
-    // rounded 1/√2. Canonical is not the same as closest: normalizing divides
-    // by a square root that has already been rounded, and no ordering of that
-    // division recovers the last bit. What §22.6 was about is the two walls
-    // agreeing, and they do.
+    // rounded 1/√2. Canonical and closest are not in tension — a correctly
+    // rounded normalize is a function of the exact ray, so two proportional
+    // spellings still store the same bits — and no ordering recovers this bit
+    // because ordering is the wrong family: carrying more of them does. §120
+    // books that as a gap, and fixing it moves the literal below by one ulp.
+    // What §22.6 was about is the two walls agreeing, and they do.
     let canonical = 0.707_106_781_186_547_5_f64;
     assert_eq!(plane_of(1.0)[0], canonical);
     assert_eq!(
