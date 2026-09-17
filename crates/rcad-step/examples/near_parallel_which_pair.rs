@@ -59,11 +59,26 @@
 //! it.** `pair_for_entity` and `evaluate_surfaces` below are never reached: 0
 //! files took the `ThisEntityOfTheSolidWasRefused` arm, so the tangency test
 //! was applied to no pair at all. They are kept, rather than deleted, because
-//! they are the half that runs the moment an `#id` does come back. Closing the
-//! hole needs the refusal to carry the two surfaces the marcher gave up
-//! between — a kernel change in `rcad-geom`/`rcad-topo`, not a reading of the
-//! STEP text — and until then "the tangent pair the census found is the pair
-//! that refused" is unchecked, so all 44 LIMIT verdicts rest on it.
+//! they are the half that runs the moment an `#id` does come back.
+//!
+//! # What the refusal carries now, and why that is still not an `#id`
+//!
+//! `docs/decisions.md` §110 gave the refusal the two `Surface`s the marcher
+//! gave up between, and which of its questions gave up. Run again on
+//! 2026-09-17, all 44 files answer
+//! **"asked while settling a point onto both of them"** — one site out of five,
+//! and not either of the two the census was written against.
+//!
+//! Turning those two surfaces back into two `#id`s was tried and **does not
+//! work**: matched against every surface this reader wrote down for the file,
+//! the pair scores **0 matches**, not one and not several. The surfaces the
+//! sweep is holding are a translation away from the ones the reader wrote —
+//! one file refuses between a pipe at `(0, 0, 1)` and a ball at `(0, 0, 11.3)`
+//! while its faces sit at `(23.3, ±4.5, ·)` and `(-0.7, ±4.5, ·)`; another
+//! refuses about a ball at `z = 0` whose only matching face is the same ball at
+//! `z = 10`. Naming the pair by `#id` needs whatever carries that translation,
+//! which is `rcad-topo`'s and not this crate's. §110 records the measurement
+//! and leaves the cause open.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -72,10 +87,16 @@ use std::{env, fs};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{EntityId, Import, Refusal, StepFile, Value, probe};
 
-/// `ProbeReport::reasons`' own text for this refusal, confirmed against
-/// `near_parallel_census.rs`'s own constant of the same name.
-const TARGET_REASON: &str = "the builder or the sweep: geometry: this crossing runs where its two surfaces are too \
+/// How `ProbeReport::reasons`' own text for this refusal **starts**, the same
+/// two prefixes `near_parallel_census.rs` selects on and for the same reason:
+/// the message now ends with which of the marcher's questions gave up, so a
+/// whole-string match would select nothing (`docs/decisions.md` §110).
+const TANGENCY_REASON_STARTS: &str = "the builder or the sweep: geometry: this crossing runs where its two surfaces are too \
      nearly parallel to follow it";
+
+/// The stepping wall, which used to share the message above.
+const STEPPING_REASON_STARTS: &str =
+    "the builder or the sweep: geometry: no step along this crossing stayed on it";
 
 /// Relative slack allowed when comparing an axis-to-plane or axis-to-axis
 /// distance against the radius sum or difference a full-line tangency needs.
@@ -216,9 +237,19 @@ fn qualifies(path: &Path) -> Option<StepFile> {
         .unwrap_or_else(|why| panic!("{}: every file in the corpus parses: {why}", path.display()));
     let mut log = ProvenanceLog::new();
     let found = probe(&file, &Policy::certified(), &mut log);
-    let only_this =
-        found.fatal.is_empty() && found.reasons.len() == 1 && found.reasons.contains(TARGET_REASON);
+    let only_this = found.fatal.is_empty()
+        && found.reasons.len() == 1
+        && found
+            .reasons
+            .iter()
+            .any(|reason| is_the_marcher_giving_up(reason));
     only_this.then_some(file)
+}
+
+/// Whether one of `probe`'s reason strings is the marcher giving up on a
+/// crossing, under either of the two names that wall now has.
+fn is_the_marcher_giving_up(reason: &str) -> bool {
+    reason.starts_with(TANGENCY_REASON_STARTS) || reason.starts_with(STEPPING_REASON_STARTS)
 }
 
 fn keyword_of(file: &StepFile, id: EntityId) -> &str {

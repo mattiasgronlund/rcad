@@ -9,9 +9,10 @@
 //! # How
 //!
 //! First, [`rcad_step::probe`] finds the files whose `ProbeReport::reasons` is
-//! exactly one string — [`TARGET_REASON`], the reader's own wrapped form of
-//! that message — and whose `fatal` is empty. Same walk `blocker_depth_probe`
-//! uses, just filtered to one reason.
+//! exactly one string starting with [`TANGENCY_REASON_STARTS`] or
+//! [`STEPPING_REASON_STARTS`], the reader's own wrapped form of the marcher's
+//! two ways of giving up — and whose `fatal` is empty. Same walk
+//! `blocker_depth_probe` uses, just filtered to one reason.
 //!
 //! Second, for each of those files, this reads the file's own text — never the
 //! kernel's internals — to find every pair of `ADVANCED_FACE`s that share an
@@ -29,11 +30,15 @@
 //! does not make that file's refusal a limit.** `ProbeReport::reasons` is a
 //! `BTreeSet<String>` filled by `report.reasons.insert(kind_of(&why))`, and
 //! `kind_of` groups by the kind of thing that refused and drops the `#id`
-//! entirely. One entry therefore covers any number of distinct edges, and the
-//! six raise sites of this one error (`march.rs:286`, `:324`, `:328`, `:346`,
-//! `:416` and `along_a_crossing.rs:326`) all collapse to the same text. A
+//! entirely. One entry therefore covers any number of distinct edges. A
 //! genuinely tangent pair and a transverse pair the marcher gave up on early
 //! are indistinguishable from this output.
+//!
+//! **The raise site is no longer among what collapses.** `docs/decisions.md`
+//! §110 split the shortening budget out into its own error and gave the
+//! tangency one a `WhereFollowingACrossingGaveUp` that rides through into this
+//! text, so the five remaining sites each write a different reason string. The
+//! pair still does not, which is what keeps the paragraph above true.
 //!
 //! So there is exactly one way this census can earn LIMIT without naming the
 //! pair: when **every** computable adjacent pair in the file is tangent,
@@ -79,14 +84,27 @@ use std::{env, fs};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{EntityId, StepFile, Value, probe};
 
-/// `ProbeReport::reasons`' own text for this refusal — `kind_of` in
-/// `crates/rcad-step/src/import.rs` wraps `Error::CannotFollowACrossingWhereItsSurfacesAreTangent`'s
-/// message in "the builder or the sweep: geometry: …", and that wrapped form
-/// is what actually lands in the set, confirmed against
-/// `blocker_depth_probe`'s own pricing-table output before this constant was
-/// written.
-const TARGET_REASON: &str = "the builder or the sweep: geometry: this crossing runs where its two surfaces are too \
+/// How `ProbeReport::reasons`' own text for this refusal **starts** — `kind_of`
+/// in `crates/rcad-step/src/import.rs` wraps
+/// `Error::CannotFollowACrossingWhereItsSurfacesAreTangent`'s message in
+/// "the builder or the sweep: geometry: …", and that wrapped form is what
+/// actually lands in the set.
+///
+/// A prefix and no longer the whole string, because the refusal now names
+/// which of the marcher's questions gave up and the message ends with that
+/// (`docs/decisions.md` §110). Matching the whole string would have made this
+/// census silently count nothing the day that landed.
+const TANGENCY_REASON_STARTS: &str = "the builder or the sweep: geometry: this crossing runs where its two surfaces are too \
      nearly parallel to follow it";
+
+/// The other wall the marcher has, which used to share the message above and
+/// now has one of its own (`docs/decisions.md` §109.6, §110).
+///
+/// Counted into the same bucket here because this census's question is "which
+/// files stop only on the marcher giving up on a crossing", and both answers
+/// to that are the marcher giving up on a crossing.
+const STEPPING_REASON_STARTS: &str =
+    "the builder or the sweep: geometry: no step along this crossing stayed on it";
 
 /// Degrees short of the exact tangent configuration still counted as
 /// "sitting on it" rather than "genuinely crossing at an angle".
@@ -124,7 +142,7 @@ fn main() {
 
     assert!(
         !qualifying.is_empty(),
-        "no corpus file matched TARGET_REASON, so the string this census filters on has drifted \
+        "no corpus file matched either reason prefix, so the strings this census filters on have drifted \
          from what `kind_of` writes — every number below would be a count of nothing"
     );
 
@@ -263,9 +281,19 @@ fn read_and_probe(path: &Path) -> (StepFile, bool) {
         .unwrap_or_else(|why| panic!("{}: every file in the corpus parses: {why}", path.display()));
     let mut log = ProvenanceLog::new();
     let found = probe(&file, &Policy::certified(), &mut log);
-    let only_this =
-        found.fatal.is_empty() && found.reasons.len() == 1 && found.reasons.contains(TARGET_REASON);
+    let only_this = found.fatal.is_empty()
+        && found.reasons.len() == 1
+        && found
+            .reasons
+            .iter()
+            .any(|reason| is_the_marcher_giving_up(reason));
     (file, only_this)
+}
+
+/// Whether one of `probe`'s reason strings is the marcher giving up on a
+/// crossing, under either of the two names that wall now has.
+fn is_the_marcher_giving_up(reason: &str) -> bool {
+    reason.starts_with(TANGENCY_REASON_STARTS) || reason.starts_with(STEPPING_REASON_STARTS)
 }
 
 /// What this file's own text says about how its adjacent face pairs sit —
