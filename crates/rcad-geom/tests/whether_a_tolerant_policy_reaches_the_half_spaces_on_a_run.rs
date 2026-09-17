@@ -311,7 +311,8 @@ fn every_decision_a_certified_walk_gives_up_on_is_settled_by_a_budget_wide_enoug
         wide.max_wobble()
     );
     assert_eq!(
-        settled_on_a_wide_budget, left_undecided,
+        settled_on_a_wide_budget,
+        left_undecided,
         "a budget of {:e} covers every one of those {left_undecided} decisions, so every one has \
          to come back settled, and {settled_on_a_wide_budget} did",
         wide.max_wobble()
@@ -328,7 +329,8 @@ fn every_decision_a_certified_walk_gives_up_on_is_settled_by_a_budget_wide_enoug
         narrow.max_wobble()
     );
     assert_eq!(
-        settled_on_a_narrow_budget, 0,
+        settled_on_a_narrow_budget,
+        0,
         "a budget of {:e} covers no wobble here, so it may settle nothing, and it settled \
          {settled_on_a_narrow_budget}",
         narrow.max_wobble()
