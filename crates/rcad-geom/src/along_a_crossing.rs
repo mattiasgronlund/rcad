@@ -63,7 +63,9 @@ use rcad_predicates::{
 
 use crate::enclosure::{cross_enclosing, dot_enclosing, exactly};
 use crate::exact::Exact;
-use crate::{Cylinder, Error, Plane, Result, Surface, Torus, Vector};
+use crate::{
+    Cylinder, Error, Plane, Result, Surface, Torus, Vector, WhereFollowingACrossingGaveUp,
+};
 
 /// The name the ordering question goes by in provenance records.
 pub const ROUND_A_CROSSING: &str = "round a crossing";
@@ -323,7 +325,10 @@ fn the_way_a_circle_round_the_axis_winds(
         // into the one the plane rests on the tube along. The surfaces touch
         // there instead of crossing, so `∇S × ∇T` is zero all the way round and
         // no ordering follows from it.
-        Decision::Zero => Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent),
+        Decision::Zero => Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+            surfaces: Box::new([Surface::Plane(*flat), Surface::Torus(*ring)]),
+            at: WhereFollowingACrossingGaveUp::OrderingTheCircleAPlaneRestsOnARingAlong,
+        }),
         Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
         other => unreachable!("which side of a pipe a point is on is a sign: {other:?}"),
     }
@@ -630,7 +635,10 @@ mod tests {
         let on_it = PredicatePoint::from([4.0, 0.0, 1.0]);
         assert_eq!(
             which_comes_first_round_a_crossing([&resting, &ring], on_it, on_it, on_it),
-            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent)
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                surfaces: Box::new([resting, ring]),
+                at: WhereFollowingACrossingGaveUp::OrderingTheCircleAPlaneRestsOnARingAlong,
+            })
         );
         assert_eq!(
             out_of_the_tube_at([4.0, 0.0, 1.0]).cross(Vector::new(0.0, 0.0, 1.0)),

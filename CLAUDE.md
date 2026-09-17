@@ -27,8 +27,9 @@ the fix landed here.
 ```
 
 - **`questions`** — the parser, the status line, and the `asking-questions` skill.
-- **`guardrails`** — the two hooks: no in-place shell patching, and the context
-  budget that asks for a handoff.
+- **`guardrails`** — the three hooks: no in-place shell patching, the context
+  budget that asks for a handoff, and the one that runs the question checker when
+  `open-questions.md` is written.
 - **`practices`** — the nine shared skills, `code-quality` and `delegating`
   among them.
 
@@ -37,17 +38,31 @@ and names the command that installs it. **A missing `guardrails` means the
 patching hook is not running at all** — the rule in "Editing files" below is
 then only prose, and it was written because prose alone did not hold.
 
-CI has no Claude Code to install a plugin into, so it takes the other route
-`check-plugins` names: it clones the marketplace to `$RUNNER_TEMP` at a **pinned
-commit** and sets `CLAUDE_PLUGINS_ROOT`. Pinned so a push there cannot turn this
-repo red without a commit here; bump it in `.github/workflows/ci.yml`
-deliberately. That repo is **public** — the one public thing among these repos,
-settled deliberately so the clone needs no secret. Nothing checks that your
-*installed* plugins match the pin.
+CI has no Claude Code to install a plugin into, and since 2026-09-13 it does not
+clone the marketplace either. Each of the clone's three users turned out to be
+checking something a runner does not have, so those three arms skip there and say
+**"skipped, not passed"**: `check-plugins`, which asks whether Claude Code has
+been *told about* the plugins; the plugin arm of `check-hooks`, whose subject is a
+**PreToolUse** hook that fires in a session and never in a job; and
+`check-questions-selftest`, which ran the marketplace repo's own cases out of the
+clone and so tested that repo's tree rather than this one's — that repo runs them
+itself on every push now. `check-plugins` keeps its place at the head of `gate`,
+because a skip is not a reason to stop asking first.
+`.github/workflows/ci.yml` carries the whole argument, and `docs/decisions.md` §77.
 
-**That CI clones from GitHub is not a reason to repoint your marketplace at
-it.** `mattiasgronlund-local` is registered as a `directory` source, so it runs
-in place out of `~/git/mattiasgronlund/claude-questions` and
+The version this repo asks for is the `ref` in `.claude/settings.json`, and
+`check-declared.sh` fails a machine registered at a different one. Asking is all
+it can do: a committed entry does not register itself, so what governs is the ref
+`claude plugin marketplace add` was run with here. A **directory** source is named
+rather than failed, because a working tree is the supported way to run a version
+no tag ships yet.
+
+The marketplace repo is **public** — the one public thing among these repos, and
+deliberately so.
+
+**That it is on GitHub is not a reason to repoint your own marketplace at it.**
+`mattiasgronlund-local` is registered as a `directory` source, so it runs in
+place out of `~/git/mattiasgronlund/claude-questions` and
 `CLAUDE_PLUGINS_ROOT` resolves straight to that checkout. A `github` source
 installs to a version-stamped cache path instead
 (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`), which moves on
@@ -83,6 +98,31 @@ mise's `[env]`
 as `RUSTC_WRAPPER = "kache"`, which a non-interactive shell does not inherit —
 so every `cargo` and `just` in a lane's brief needs a `mise exec --` prefix.
 
+**`just status` answers "where does this repo stand" in one call**, and it is
+where to start rather than where to end up: what unit the work is in, who holds
+which lane, which **branches** carry work `main` does not have, how far the tip
+is past the last green, and how far `decisions.md` has got. Assembling that by
+hand took twelve tool calls and a lookup lane on 2026-09-14, and every
+ingredient was already in the justfile. The first row is the one a recipe
+cannot compute, so it is written down in `docs/decisions.md` **§0** — `just
+decision 0` — and **that section is edited by hand when the work moves**;
+`check-where-the-work-is` holds it to its shape but cannot tell you it is
+stale, so `status` prints its age instead. `docs/decisions.md` §102.
+
+Do not read the branch row off `just lanes`: `lanes` lists worktrees, and a
+worktree is not a branch. Do not derive it from ahead-of-main either — of the
+five branches that count called unmerged on 2026-09-14, three carried nothing,
+their commits having reached `main` by a cherry-pick or a split (§102.4).
+
+**`just plan` is the roadmap with a box beside every item, and `just plan open`
+is what is left** — the list a unit's lanes are cut from. `docs/roadmap.md`
+still may not carry state and still has one commit; `docs/plan.md` holds a
+line per item — the roadmap number, a state, the evidence — and the titles are
+rendered from the roadmap, so there is one copy of them. `check-plan` derives
+the item list from the roadmap on both sides and fails when they differ, and
+holds every path a `done` names against the disk. Edit `docs/plan.md` when a
+state moves; never add a checkbox to the roadmap. `docs/decisions.md` §106.
+
 ## Nobody works in the hub
 
 `/home/mattias/git/mattiasgronlund/rcad` is the **hub**. It owns `.git` and
@@ -108,7 +148,7 @@ worktree like any lane.
 and it is in `just gate`. A repository with one worktree is exempt, because a
 lone checkout is not a hub. `docs/decisions.md` §60.
 
-`docs/decisions.md` is 17 000 lines: `just decisions-toc` for the map, then
+`docs/decisions.md` is 27 000 lines: `just decisions-toc` for the map, then
 `just decision 49` or `just decision 49.6`. Never guess a line range.
 
 **Search it with `just decisions-find 'refusal rate'`, not with `grep`.** Grep
@@ -161,96 +201,24 @@ These are the ones that are expensive to notice late.
 
 ## Asking the user a decision
 
-Ask in prose, numbered, batched — `Q11`, `Q12` — with the recommendation and the
-narrowing spelled out. That works: 51 user messages on 2026-09-05, one of which
-was a correction. Do not reach for `AskUserQuestion` for a design batch; it caps
-at four questions of four options and would split one message into seven.
+**Every question goes in `open-questions.md` in this session's scratchpad, the
+same turn you ask it in the terminal.** A question asked only in the terminal
+scrolls away, and recovering it costs a full-context turn — which happened, and
+is why the file exists.
 
-**Every question also goes in `open-questions.md` in this session's scratchpad,
-the same turn you ask it.** A question asked only in the terminal scrolls away,
-and recovering it costs a full-context turn — which happened, and is why the file
-exists. Write each one the way the `grilling` skill formats a round — a heading
-line, the body under it, the recommendation last:
-
-```
-- [ ] **Q11** — Short heading, in one line?
-
-  The body, as many paragraphs as it takes. Backticks, `§` refs and file:line
-  belong here; this is the argument, not a summary of it.
-
-  - **(a)** the first option, on a line of its own
-  - **(b)** the second
-
-  ➡️ *Recommend (a), because …*
-```
-
-The checkbox line carries the label and the heading, and everything indented
-under it belongs to that question. `- [x]` and `→ answered: …` when the answer
-comes.
-
-**Options go on their own lines, lettered from `(a)` with no gaps.** Nothing can
-lift out of prose an option that was never marked, and until 2026-09-07 nothing
-was: 17 of 227 entries offered options and not one of them wrote the options as
-lines, which is why finding what `(a)` meant took reading the paragraph it was
-buried in. The heading, the option lines and the `➡️` line are the grammar; the
-body between them is free prose that no tool interprets.
-
-**`just question-check <hash>` names every violation, and it is your own file you
-run it on.** There is no list of grandfathered sessions: `/tmp` is swept at 30
-days, so a list of session ids would dangle within a month, and it would be a
-second record beside the thing itself (§60). A dead session's file cannot be
-fixed, so nothing judges it; yours can, so run this in the turn you write a
-question. `just question <hash>` announces a count of violations under the
-listing without spelling them out.
-
-**Write a round in one `Write`, not an `Edit` per entry.** Nobody else writes
-this file, so there is nothing to merge and no reason to go entry by entry.
-Over the week of 2026-09-07 it was written with 263 `Edit` calls against 57
-`Write`s, median edit 374 bytes, at a median context of 150 000 — the ritual of
-editing and then checking cost $53, of which the edits were $28 and what they
-carried was a few hundred bytes each.
-
-Nothing is ever dropped: an entry whose label does not parse is listed as `??`
-with its line number, and shows in the status line as `??×1`. The `asking-questions`
-skill has the full grammar and the shapes that break it.
-
-**The parser and that skill are not in this repo.** They live in the `questions`
-plugin, because a copy in each repo is a copy that goes stale — `rscene` carried
-one that still dropped the second label of a paired entry months after the fix
-landed here. So do the hooks and the shared skills; see "Three plugins" below.
-
-**Read one back with `just question`, never with `!cat`.** The status line shows
-the open labels collapsed, after the session's hash — `❓ 766405 K1-K4, Q2,
-Q4-Q6` — and that hash is the address: `just question 766405` lists the headings,
-`just question 766405 Q11` prints that one entry in full. `!cat` puts all of them
-in the conversation instead, and charges for every line on every later turn.
-
-**A label is a letter and a number, and the letter carries meaning.** `Q` for a
-grilling round or any plain decision — that is what the `grilling` skill's format
-already uses. A lane's findings take **the lane's own letter**, which is where
-`K1`-`K4` came from: they were Lane K's. Keep it, because "which lane is this
-from" is the first thing asked about a finding. The label goes straight after the
-checkbox; the status line reads it there and nowhere else, so a body is free to
-mention `M5` or `§52.11` without becoming a question.
-
-**One entry may carry two labels when one answer settles both** — `**Q7 / Q11**
-— …`, addressable as either. Both are counted and both are shown. Reading only
-the first is a bug that has been fixed once already: on 2026-09-06 the line
-showed fourteen of sixteen open questions and looked complete (`docs/decisions.md`
-§59.2).
-
-**Never in the tree.** Four sessions were live across these two repos on
-2026-09-05; a tracked file would have had all four writing to it. Per session
-also means the numbering is the session's own, so `Q3` means what it says in the
-conversation the user is looking at.
-
-The cost of that is the file dies with the session, so **carry every unanswered
-question into the handoff document.** Long argument still belongs in
-`docs/decisions.md` under the section it will become; the scratchpad file is what
-is outstanding, not why.
+**Read it back with `just question <hash>`, never with `!cat`.** The status line
+carries the hash and the open labels — `❓ 766405 K1-K4, Q2, Q4-Q6`. `just
+question` prints whole bodies because it is written for you; `just question-tui`
+is the one Mattias types. `docs/decisions.md` §100.
 
 End any turn that asks for a decision with a `## Waiting on you` block, last,
 after the prose.
+
+The grammar, how a round is written, what breaks the parser and how to read a
+file back cheaply are the **`asking-questions` skill's**, in the `questions`
+plugin. They are not repeated here: a copy in each repo is a copy that goes
+stale, and `rscene` carried one that still dropped the second label of a paired
+entry months after the fix landed.
 
 ## Tooling
 
@@ -262,13 +230,18 @@ after the prose.
 2026-09-07, so every `check-*` recipe is enforced on the runner too. Before that
 it ran four recipes and the `check-*` ones gated nothing but your own machine.
 
-**One arm is not the same there, and it is the only one.** `check-plugins` asks
-Claude Code whether the plugins are *declared* and not merely on disk; a runner
-has no config directory for that to be a question about, so it prints that it
-skipped and carries on. Everything else — the three directories, the parser
-selftest, every other `check-*` — runs on the runner exactly as it runs here.
-The skip is in `check-declared.sh` rather than in the `justfile`, so `rscene`
-gets the same one; `docs/decisions.md` §77.
+**Three arms are not the same there, and they are the only three.**
+`check-plugins`, the plugin arm of `check-hooks`, and `check-questions-selftest`
+each ask about something a runner does not have — Claude Code's own config, a
+**PreToolUse** hook, and the marketplace repo's tree — so they print that they
+skipped and carry on. Every other `check-*` runs on the runner exactly as it runs
+here. The skip is in `check-declared.sh` rather than in the `justfile`, so
+`rscene` gets the same one; `docs/decisions.md` §77, and the argument in full at
+the top of `.github/workflows/ci.yml`'s gate step.
+
+It was one arm until 2026-09-13, when the marketplace clone came out of CI and
+the other two lost the directory they had been reading — so an older document
+saying "one arm, and it is the only one" is describing the job before that.
 
 **`34266469454` is the first whole-gate green on `main`**, push of `e8ae455`
 (the recipe was still called `default` when it ran). Every green before it ran `just test`, so check what a run actually
@@ -332,6 +305,13 @@ starts at a 34 000-token floor rather than your 150 000 and bills at a fifth the
 rate, so the same answer costs about a tenth. `.claude/agents/lookup.md` is that
 lane: read-only, Sonnet, one question, and it dies with the answer. Two quick
 probes are still cheaper inline than a lane is; a hunt is not.
+
+**A call is billed the context it is made at, not what it prints.** That is the
+one rule the lookup lane, the batching rule under "Editing files" and `just
+question`'s whole-file default all come out of, and `docs/decisions.md` §100 has
+the arithmetic: a round trip you did not have to take costs about what carrying
+2 200 extra resident tokens for 73 more turns costs. So print the whole thing
+and read it once.
 
 ## Editing files
 

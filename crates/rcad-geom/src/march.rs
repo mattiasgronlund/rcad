@@ -37,7 +37,10 @@ use crate::enclosure::{
     cross_enclosing, dot_enclosing, exactly, gap_enclosing, quotient_or_everything, root_enclosing,
     squared_length_enclosing,
 };
-use crate::{Cone, Cylinder, Error, Plane, Point, Result, Sphere, Surface, Torus, Vector};
+use crate::{
+    Cone, Cylinder, Error, Plane, Point, Result, Sphere, Surface, Torus, Vector,
+    WhereFollowingACrossingGaveUp,
+};
 
 /// How much of the deflection budget the sagitta of one straight piece may take
 /// before the step is halved.
@@ -283,7 +286,10 @@ fn settled(surfaces: [&Surface; 2], from: Point) -> Result<Point> {
         let leaning = one_way.dot(other_way);
         let across = 1.0 - leaning * leaning;
         if across <= 0.0 || !across.is_finite() {
-            return Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent);
+            return Err(gave_up(
+                surfaces,
+                WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+            ));
         }
         let along_one = (first - second * leaning) / across;
         let along_other = (second - first * leaning) / across;
@@ -321,11 +327,17 @@ fn how_far_off_the_crossing(surfaces: [&Surface; 2], at: Point) -> Result<f64> {
     let sideways = cross_enclosing(first.1, second.1);
     let leaning = root_enclosing(squared_length_enclosing(sideways));
     if leaning.lo() <= 0.0 {
-        return Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent);
+        return Err(gave_up(
+            surfaces,
+            WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
+        ));
     }
     let reach = quotient_or_everything(first.0 + second.0, leaning);
     if !reach.hi().is_finite() {
-        return Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent);
+        return Err(gave_up(
+            surfaces,
+            WhereFollowingACrossingGaveUp::TheBoundOnHowFarOffIsBiggerThanAnyNumber,
+        ));
     }
     Ok(reach.hi())
 }
@@ -333,17 +345,95 @@ fn how_far_off_the_crossing(surfaces: [&Surface; 2], at: Point) -> Result<f64> {
 /// Which way the crossing runs at `at`: the two normals crossed together, scaled
 /// to length one.
 ///
+/// # At what lean this stops working, and why nothing rescues it
+///
+/// Measured, not reasoned. Two unit normals leaning `θ` apart cross to a vector
+/// of length `sin θ`, and each of its three components is a difference of two
+/// products of numbers no bigger than one — so each carries about a rounding of
+/// error **whatever the answer is**. Once `sin θ` falls to a rounding the
+/// components are that error and nothing else, and they cancel to exactly zero
+/// often enough to refuse: `crates/rcad-geom/tests/the_angle_at_which_a_crossing_stops_having_a_direction.rs`
+/// measures every orientation still answering down to a lean of `1.11e-16`, one
+/// rounding, and most of them refusing a sixteenth of a rounding below it.
+///
+/// **So this is cancellation and not underflow.** Underflow would want `sin θ`
+/// near `1e-308`, nineteen powers of ten further down, and it never gets a turn.
+///
+/// The family of fixes, and what each is worth:
+///
+/// - **Scaling either or both normals.** A power of two is exact, so the cross
+///   product comes back with the same significands and a moved exponent: a
+///   direction lost is lost by the same bits. `scaling_both_normals_by_a_power_of_two_leaves_the_same_bits_behind`
+///   checks that bit-for-bit at `2^±500` and `2^±60`. Anything that is not a
+///   power of two only adds a rounding of its own, and reshuffles which
+///   orientations happen to cancel to zero — turning a refusal into a wrong
+///   answer rather than a right one.
+/// - **A different order of the same subtractions**, which does not change that
+///   each component is a difference of two products of the same size.
+/// - **Taking the cancellation out**: a correctly rounded `a·b − c·d` by fused
+///   multiply-add, or a compensated sum, or an exactly rounded determinant.
+///   These do work — they hand back the direction the two `f64` normals really
+///   span at any lean at all — and it buys nothing, because by then the error is
+///   in the normals rather than in the cross product.
+///   `taking_the_cancellation_out_of_the_cross_product_buys_nothing_against_the_truth`
+///   measures both against the crossing's true direction and they stay within a
+///   factor of one and a half of each other all the way down.
+///
+/// That family is everything that reads only the two unit normals, and
+/// `one_rounding_of_either_normal_swings_the_direction_a_quarter_turn` is why it
+/// is everything: at a lean of one rounding, flipping the last bit of either
+/// normal swings the exactly computed cross product by more than half a radian.
+/// The direction is not in the inputs, so no function of the inputs can return
+/// it. A **limit**, not a gap (§16.10).
+///
+/// # And the refusal here is not the one a near-tangent crossing meets
+///
+/// Nothing that gets into [`march`] presents a lean anywhere near a rounding.
+/// [`walk`](fn@crate::walk) hands it exactly two pairs — a ball reaching across
+/// a pipe and one pipe reaching across another — and for the first of those
+/// `the_smallest_lean_a_ball_on_a_pipe_can_be_given_is_the_root_of_a_rounding`
+/// measures the smallest non-zero lean the pair can be *given* at `2.1e-8`,
+/// eight powers of ten above where this arithmetic fails, scale-invariantly so:
+/// the lean is a **square root** of the gap between the two radii, so one
+/// rounding of gap is the root of a rounding of lean. The step below it is not a
+/// smaller lean but no lean at all. **The other pair is not measured here**, so
+/// that floor is claimed for a ball on a pipe and not for surfaces in general.
+///
+/// Below that, and only there,
+/// `the_enclosing_bound_reaches_zero_before_the_plain_cross_of_normals_does`
+/// races this against [`how_far_off_the_crossing`], which [`march`] asks first:
+/// over 8 000 leans between `5.7e-14` and `1.7e-18` the enclosing sine had
+/// already reached zero at every one of the 1 782 where this lost its direction.
+///
+/// **At the leans a ball on a pipe really does reach it is neither of them.**
+/// `the_settling_and_not_the_stepping_gives_up_on_a_ball_a_rounding_bigger_than_its_pipe`
+/// takes that pair apart one call at a time: [`how_far_off_the_crossing`]
+/// answers with a bound of `1.05e-8`, this function answers, and [`one_step`]
+/// is what refuses — from [`settled`], on its first trial, because `1 − c·c` is
+/// exactly zero where the step lands. So the near-tangency wall the marcher
+/// actually has is the **settling's**, eight powers of ten above this one, and
+/// whether *that* refusal is a limit or a gap is not settled here.
+///
 /// # Errors
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when the two
 /// normals are parallel, so the crossing has no direction there.
+///
+/// **This also swallows a normal that is not a number**, which is a different
+/// thing and is reported as the wrong one:
+/// `a_normal_that_is_not_a_number_is_reported_as_two_surfaces_being_tangent`
+/// pins that. Whether [`march`] can settle a point onto the one place that
+/// happens — a ball's own centre — is not demonstrated either way here, so the
+/// mis-report is recorded rather than fixed.
 fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vector> {
     let [(_, one_way), (_, other_way)] =
         surfaces.map(|surface| how_far_off_and_which_way(surface, at));
-    one_way
-        .cross(other_way)
-        .normalized()
-        .map_err(|_| Error::CannotFollowACrossingWhereItsSurfacesAreTangent)
+    one_way.cross(other_way).normalized().map_err(|_| {
+        gave_up(
+            surfaces,
+            WhereFollowingACrossingGaveUp::CrossingTheTwoNormalsForADirection,
+        )
+    })
 }
 
 /// One step along the crossing, shortened until the straight piece it leaves
@@ -413,7 +503,24 @@ fn one_step(
             step * 0.5
         };
     }
-    Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent)
+    Err(Error::CannotFollowACrossingBecauseNoStepStaysOnIt {
+        surfaces: Box::new([*surfaces[0], *surfaces[1]]),
+        shortenings: SHORTENINGS_BEFORE_GIVING_UP,
+    })
+}
+
+/// The refusal the four questions that read the two normals raise, carrying the
+/// pair it refused about.
+///
+/// One function rather than four spellings of the same `Box::new`, because the
+/// pair is the half a caller cannot get back any other way and it would be easy
+/// to leave one site handing back a surface it happened to have rather than
+/// both.
+fn gave_up(surfaces: [&Surface; 2], at: WhereFollowingACrossingGaveUp) -> Error {
+    Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+        surfaces: Box::new([*surfaces[0], *surfaces[1]]),
+        at,
+    }
 }
 
 /// How far `at` sits off `surface`, signed, and the unit normal there.
@@ -686,7 +793,10 @@ mod tests {
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 3.0);
         assert_eq!(
             march([&ball, &pipe], Point::new(3.0, 0.0, 0.0), 0.01, 1 << 20),
-            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent),
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                surfaces: Box::new([ball, pipe]),
+                at: WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+            }),
             "a ball inscribed in a pipe touches it all the way round, so there is no crossing \
              to follow"
         );
@@ -709,7 +819,335 @@ mod tests {
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
         assert_eq!(
             march([&ball, &pipe], Point::new(-2.0, 0.0, 0.0), 0.01, 1 << 20),
-            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent)
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                surfaces: Box::new([ball, pipe]),
+                at: WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+            })
+        );
+    }
+
+    /// How far apart the two normals lean at `at`, as a sine: the length of the
+    /// cross product [`which_way_the_crossing_runs`] then tries to scale.
+    fn how_far_the_two_surfaces_lean_apart(surfaces: [&Surface; 2], at: Point) -> f64 {
+        let [(_, one_way), (_, other_way)] =
+            surfaces.map(|surface| how_far_off_and_which_way(surface, at));
+        one_way.cross(other_way).length()
+    }
+
+    /// **Why the cross of two normals cannot be what gives up on a ball on a
+    /// pipe.** `the_angle_at_which_a_crossing_stops_having_a_direction` says the
+    /// cross of two unit normals stops carrying a direction once they lean less
+    /// than about `1.1e-16` apart. This says the smallest lean this pair can be
+    /// *given* is `2.1e-8` — eight powers of ten above it — and that the step
+    /// below that is not a smaller lean but no lean at all.
+    ///
+    /// Which is not to say the marcher walks that crossing: it refuses it, with
+    /// this very error, from somewhere else. See
+    /// `the_stepping_gives_up_on_a_ball_a_rounding_bigger_than_its_pipe_and_not_the_normals`.
+    ///
+    /// A ball of radius `R` centred on a pipe of radius `r` crosses it where the
+    /// two normals lean `√(R² − r²)/R` apart. That is a **square root** of the
+    /// gap between the radii, so one rounding of gap — the least that two
+    /// different `f64` radii can differ by — comes out as the root of a
+    /// rounding, `√(2·2⁻⁵³) = 2.1e-8`. There is nothing between that and zero to
+    /// write down.
+    ///
+    /// Scale-invariantly so: the radii and the lean scale together, and the root
+    /// of a relative rounding does not know what scale it was taken at.
+    #[test]
+    fn the_smallest_lean_a_ball_on_a_pipe_can_be_given_is_the_root_of_a_rounding() {
+        for power in [-40i32, -20, 0, 20, 40] {
+            let pipe_radius = 2.0_f64.powi(power);
+            let ball_radius = f64::from_bits(pipe_radius.to_bits() + 1);
+            let ball = a_ball([0.0, 0.0, 0.0], ball_radius);
+            let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], pipe_radius);
+            let up = f64::sqrt(ball_radius * ball_radius - pipe_radius * pipe_radius);
+            let on_the_crossing = Point::new(pipe_radius, 0.0, up);
+
+            let lean = how_far_the_two_surfaces_lean_apart([&ball, &pipe], on_the_crossing);
+            assert!(
+                (1e-8..1e-7).contains(&lean),
+                "one rounding of radius at 2^{power} leans them {lean:e} apart, and the root \
+                 of a rounding is 2.1e-8"
+            );
+            which_way_the_crossing_runs([&ball, &pipe], on_the_crossing).unwrap_or_else(|why| {
+                panic!("a lean of {lean:e} is eight powers of ten clear of the noise: {why:?}")
+            });
+        }
+
+        let same = 3.0;
+        let ball = a_ball([0.0, 0.0, 0.0], same);
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], same);
+        let touching = Point::new(same, 0.0, 0.0);
+        assert_eq!(
+            how_far_the_two_surfaces_lean_apart([&ball, &pipe], touching),
+            0.0,
+            "the step below the root of a rounding is no lean at all"
+        );
+        assert_eq!(
+            which_way_the_crossing_runs([&ball, &pipe], touching),
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                surfaces: Box::new([ball, pipe]),
+                at: WhereFollowingACrossingGaveUp::CrossingTheTwoNormalsForADirection,
+            }),
+            "and there the refusal is right: two surfaces that touch have no crossing to follow"
+        );
+    }
+
+    /// **Which of the four places that raise this error is the one a real
+    /// near-tangent crossing meets.** Asked one call at a time rather than
+    /// reasoned about, because the answer is not the one the reasoning gave.
+    ///
+    /// A ball one rounding of radius bigger than the pipe it is centred on is
+    /// the tightest crossing that pair can express —
+    /// `the_smallest_lean_a_ball_on_a_pipe_can_be_given_is_the_root_of_a_rounding`
+    /// measures its lean at `2.1e-8`. At that lean:
+    ///
+    /// - [`settled`] leaves the seed exactly where it was, and
+    ///   [`the_settling_did_not_land_on_both`] is content;
+    /// - [`how_far_off_the_crossing`] answers, with a bound of `1.05e-8`, so its
+    ///   enclosed sine did not reach zero;
+    /// - [`which_way_the_crossing_runs`] answers;
+    /// - [`one_step`] refuses — and it refuses **from [`settled`], on its very
+    ///   first trial**, not from running out of shortenings.
+    ///
+    /// **That last line is the one the site tag changed.** Until the refusal
+    /// carried [`WhereFollowingACrossingGaveUp`] this test could only see that
+    /// [`one_step`] gave up, and `docs/decisions.md` §109.6 read that as the
+    /// shortening budget running out. It is not: the seed settles, the step
+    /// lands somewhere the two normals round to parallel, and `1 − c·c` is
+    /// exactly zero there. §109.6's own untested hypothesis — that `settled`'s
+    /// Newton correction reaches zero at a lean of `2.5e-8` while `|u×v|²` is
+    /// still good at `4.9e-11` — is what is happening, and §110 records it.
+    ///
+    /// **Whether the settling was right to give up is still not settled here**,
+    /// and this test claims nothing about it. What it does claim is where to
+    /// look: not at the cross of two normals, whose limit
+    /// `the_angle_at_which_a_crossing_stops_having_a_direction` pins at
+    /// `1.1e-16` and which nothing reachable ever asks.
+    ///
+    /// The other side of the pin is four roundings of radius, a lean of
+    /// `4.2e-8`, where the whole march goes through — so the wall is at the
+    /// reachable floor and not somewhere the sweep happened to stop.
+    #[test]
+    fn the_settling_and_not_the_stepping_gives_up_on_a_ball_a_rounding_bigger_than_its_pipe() {
+        let a_ball_this_many_roundings_bigger_than_its_pipe = |roundings: u64| {
+            let pipe_radius = 1.0_f64;
+            let ball_radius = f64::from_bits(pipe_radius.to_bits() + roundings);
+            let up = f64::sqrt(ball_radius * ball_radius - pipe_radius * pipe_radius);
+            (
+                a_ball([0.0, 0.0, 0.0], ball_radius),
+                a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], pipe_radius),
+                Point::new(pipe_radius, 0.0, up),
+            )
+        };
+
+        let (ball, pipe, on_the_crossing) = a_ball_this_many_roundings_bigger_than_its_pipe(1);
+        let surfaces = [&ball, &pipe];
+        let lean = how_far_the_two_surfaces_lean_apart(surfaces, on_the_crossing);
+        assert!(
+            (2e-8..3e-8).contains(&lean),
+            "the tightest crossing a ball on a pipe has leans 2.1e-8, not {lean:e}"
+        );
+
+        let start = settled(surfaces, on_the_crossing).expect("the seed is already on both");
+        assert_eq!(
+            start, on_the_crossing,
+            "the seed is exactly on both surfaces, so the settling has nowhere to move it"
+        );
+        assert!(
+            !the_settling_did_not_land_on_both(surfaces, start),
+            "a point exactly on both surfaces has landed on both"
+        );
+        let bound = how_far_off_the_crossing(surfaces, start)
+            .expect("the enclosed sine has not reached zero at a lean of 2.1e-8");
+        assert!(
+            (1e-8..2e-8).contains(&bound),
+            "a point that close to two surfaces leaning 2.1e-8 apart is known to \
+             1.05e-8, not {bound:e}"
+        );
+        let tangent = which_way_the_crossing_runs(surfaces, start)
+            .expect("and the cross of the two normals answers here too");
+
+        assert_eq!(
+            one_step(surfaces, start, tangent, 0.01, 0.01).map(|(_, chord)| chord),
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                surfaces: Box::new([ball, pipe]),
+                at: WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+            }),
+            "one_step gives up, and it gives up settling its first trial rather than \
+             running out of shortenings"
+        );
+        assert_eq!(
+            march(surfaces, on_the_crossing, 0.01, 1 << 16).map(|walked| walked.points.len()),
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                surfaces: Box::new([ball, pipe]),
+                at: WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+            }),
+            "so this is the refusal the whole march hands back, and it names the pair \
+             and the question rather than only the enclosing solid"
+        );
+
+        let (ball, pipe, on_the_crossing) = a_ball_this_many_roundings_bigger_than_its_pipe(4);
+        let surfaces = [&ball, &pipe];
+        let lean = how_far_the_two_surfaces_lean_apart(surfaces, on_the_crossing);
+        assert!(
+            (4e-8..5e-8).contains(&lean),
+            "four roundings of radius lean 4.2e-8 apart, not {lean:e}"
+        );
+        let walked = march(surfaces, on_the_crossing, 0.01, 1 << 16)
+            .expect("two roundings of lean further out, the whole march goes through");
+        assert!(
+            walked.points.len() > 20,
+            "and it draws the circle rather than stopping on it: {} points",
+            walked.points.len()
+        );
+    }
+
+    /// The shortening budget is reachable, and what it hands back is not the
+    /// tangency refusal.
+    ///
+    /// Asked of two balls half a radius apart, whose crossing is an honest
+    /// circle nothing leans along, and stepped **against** the way that circle
+    /// runs. The quarter-turn test compares the direction at the trial point
+    /// with the direction it was asked to go in, and those stay half a turn
+    /// apart however far the step is shortened — so all fifty tries fail and
+    /// none of it is about two surfaces coming parallel.
+    ///
+    /// **[`march`] never asks this**, because it takes its direction from
+    /// [`which_way_the_crossing_runs`] at the point it is standing on. So this
+    /// demonstrates the budget is a live path carrying its own name, and
+    /// nothing about how a real walk reaches it. Two ways of reaching it
+    /// through the sagitta tests instead were tried and neither works: on unit
+    /// balls and on balls a million across the midpoint settles onto both
+    /// surfaces exactly, the sagitta is `0.0`, and `0.0 <= room * 0.75` holds
+    /// however small the room is made.
+    #[test]
+    fn a_step_asked_the_wrong_way_round_a_circle_is_refused_as_stepping_and_not_tangency() {
+        let one = a_ball([0.0, 0.0, 0.0], 1.0);
+        let other = a_ball([0.5, 0.0, 0.0], 1.0);
+        let surfaces = [&one, &other];
+        let start = settled(surfaces, Point::new(0.25, 1.0, 0.0)).expect("a seed near the circle");
+        let backwards = -which_way_the_crossing_runs(surfaces, start)
+            .expect("two balls half a radius apart cross transversally");
+        assert_eq!(
+            one_step(surfaces, start, backwards, 0.1, 0.1).map(|(_, chord)| chord),
+            Err(Error::CannotFollowACrossingBecauseNoStepStaysOnIt {
+                surfaces: Box::new([one, other]),
+                shortenings: SHORTENINGS_BEFORE_GIVING_UP,
+            }),
+            "the budget running out is its own refusal and carries its own pair"
+        );
+    }
+
+    /// **Of the two arithmetic refusals, which gets there first.** [`march`]
+    /// asks [`how_far_off_the_crossing`] before it ever asks
+    /// [`which_way_the_crossing_runs`], and that one works the same sine out in
+    /// *enclosures* and refuses as soon as the enclosure reaches zero. An
+    /// enclosure of a cross product of two unit normals is about a rounding
+    /// wide, which is exactly the lean at which the plain cross product goes to
+    /// noise — so the plain one is never left holding a question it cannot
+    /// answer.
+    ///
+    /// Raced here rather than argued. The two normals are handed to the
+    /// enclosing branch **with no width at all**, which is the most generous
+    /// input it can be given — a real one comes out of
+    /// [`how_far_off_enclosing`] already widened by its own divisions. So a lean
+    /// where the exact-input enclosure has already reached zero is one where the
+    /// real one reached it sooner.
+    ///
+    /// **This is a race over leans from `5.7e-14` down to `1.7e-18`, and
+    /// nothing reachable presents one.** It says which of the two dies first
+    /// down there and no more than that; at the leans a ball on a pipe can
+    /// really be given, neither of them dies at all and the refusal comes from
+    /// [`one_step`] —
+    /// `the_stepping_gives_up_on_a_ball_a_rounding_bigger_than_its_pipe_and_not_the_normals`.
+    #[test]
+    fn the_enclosing_bound_reaches_zero_before_the_plain_cross_of_normals_does() {
+        let mut spinner = 0x5eed_0005_u64;
+        let mut roll = || {
+            spinner = spinner
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((spinner >> 11) as f64) / ((1u64 << 53) as f64) * 2.0 - 1.0
+        };
+
+        let mut raced = 0_usize;
+        let mut the_plain_cross_refused = 0_usize;
+        for _ in 0..500 {
+            let one_way = Vector::new(roll(), roll(), roll())
+                .normalized()
+                .expect("a direction");
+            let sideways = Vector::new(roll(), roll(), roll());
+            let across = (sideways - one_way * sideways.dot(one_way))
+                .normalized()
+                .expect("a direction square to the first");
+
+            for halvings in 44..60 {
+                let lean = 0.5_f64.powi(halvings);
+                let other_way = (one_way * lean.cos() + across * lean.sin())
+                    .normalized()
+                    .expect("leaning a unit vector leaves a unit vector");
+
+                let plain_refused = one_way.cross(other_way).normalized().is_err();
+                let enclosed = root_enclosing(squared_length_enclosing(cross_enclosing(
+                    exactly(one_way.components()),
+                    exactly(other_way.components()),
+                )));
+                let bound_refused = enclosed.lo() <= 0.0;
+
+                assert!(
+                    bound_refused || !plain_refused,
+                    "at a lean of {lean:e} the plain cross gave up while the enclosing sine \
+                     still had {:e} of room, so the plain refusal is reachable after all",
+                    enclosed.lo()
+                );
+                raced += 1;
+                the_plain_cross_refused += usize::from(plain_refused);
+            }
+        }
+        assert!(
+            the_plain_cross_refused > raced / 10,
+            "the sweep has to reach leans the plain cross really does refuse at, and it \
+             refused at only {the_plain_cross_refused} of {raced}"
+        );
+        println!(
+            "{the_plain_cross_refused} of {raced} leans lost the plain cross its direction, \
+             and the enclosing sine had already reached zero at every one of them"
+        );
+    }
+
+    /// **A finding, pinned rather than fixed.**
+    /// [`which_way_the_crossing_runs`] maps every way
+    /// [`Vector::normalized`](crate::Vector::normalized) can fail onto one
+    /// error, and one of those ways is not tangency at all: a normal with a
+    /// component that is not a number. At a ball's own centre the outward
+    /// direction is `0/0`, and the answer that comes back says the two surfaces
+    /// are tangent, which is a statement about a shape rather than about a
+    /// point that fell over.
+    ///
+    /// It is pinned and not fixed because the fix wants a name for the other
+    /// case and this lane could not demonstrate that [`march`] reaches it —
+    /// [`settled`] would have to leave a point on a ball's centre. §16.10 wants
+    /// a demonstration for "no caller hits this" too, so neither claim is made.
+    #[test]
+    fn a_normal_that_is_not_a_number_is_reported_as_two_surfaces_being_tangent() {
+        let ball = a_ball([0.0, 0.0, 0.0], 3.0);
+        let other = a_ball([0.0, 0.0, 1.0], 3.0);
+        let centre = Point::new(0.0, 0.0, 0.0);
+
+        let (_, no_way_out) = how_far_off_and_which_way(&ball, centre);
+        assert!(
+            !no_way_out.is_finite(),
+            "a ball has no outward direction at its own centre, and got {no_way_out:?}"
+        );
+        assert_eq!(
+            which_way_the_crossing_runs([&ball, &other], centre),
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                surfaces: Box::new([ball, other]),
+                at: WhereFollowingACrossingGaveUp::CrossingTheTwoNormalsForADirection,
+            }),
+            "two balls a third of a radius apart are nowhere near tangent, and this says they are"
         );
     }
 

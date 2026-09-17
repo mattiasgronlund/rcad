@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rcad_geom::{
     Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun, Orientation,
     Plane, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS,
-    Scale, Surface, Vector,
+    Scale, Surface, Vector, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -1509,36 +1509,23 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 /// answer back with it, and two spellings of one question is how those two come
 /// to disagree (§23.8).
 ///
-/// # One reference direction was not enough, and the second one finishes it
+/// # Where the arithmetic is
 ///
-/// Swapping the two faces negates `outward[0] × outward[1]` and leaves the
-/// longitude alone, so the two get opposite answers — while the dot is not zero.
-/// A ball poking a whisker through the side of a cube made it zero: write the dot
-/// out with `n` the plane's normal, `r` the radius vector at the corner, `R` the
-/// radius and `ẑ` the ball's axis and it is `(n·ẑ)R² − (n·r)(r·ẑ)`, so a plane
-/// parallel to the axis kills the first term and a corner on the equator the
-/// second. `> 0.0` was then `false` both ways round and the fuse wrote a solid
-/// whose one closed edge was walked twice the same way.
-///
-/// The direction the wire runs is a fact there — the circle is an honest crossing
-/// and `outward[0] × outward[1]` is a whole `2.4e-06` long — so this is a gap and
-/// not a limit (§16.10), and what it wants is a reference the wire cannot be
-/// square to. **The surface's own frame at the corner has three legs**, `∇C`, the
-/// longitude `ẑ × ∇C`, and the latitude `∇C × (ẑ × ∇C)`, mutually square and
-/// spanning. The wire is square to `∇C`, because it is a cross product with it,
-/// so it lives in the plane the other two span and, unless it has no length at
-/// all, cannot be square to both. Read
-/// the longitude first and keep every answer the rule gave before; read the
-/// latitude only where the longitude says exactly nothing, which is where the
-/// wire runs straight up the axis and the old rule guessed.
-///
-/// Zero against both leaves the wire with no length at all — it is square to `∇C`
-/// by construction, so being square to the longitude and the latitude too leaves
-/// it nothing to be but the zero vector — which is the two surfaces touching
-/// rather than crossing at `at` and has no direction to name, so it refuses the
-/// way a pole does.
+/// The two references it takes — the longitude first and the latitude where the
+/// longitude says exactly nothing — and why one of them was not enough are
+/// [`which_way_a_closed_crossing_turns`]'s, along with why the whole chain runs
+/// in interval arithmetic rather than against `0.0`. All this function does with
+/// the answer is read the material's side off it.
 ///
 /// # Errors
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when that rule comes back
+/// [`Decision::Undecidable`]. A predicate that cannot tell is a result and not a
+/// failure; naming which way an edge runs is an operation, and an operation with
+/// nothing left to return is a failure (§2.1, §4.1). It is what a hemisphere
+/// sitting on a pipe of the same radius and very nearly the same axis gives:
+/// the wire round that crossing is shorter than the rounding in the cross
+/// product that built it, so there is no sign there to read (§111).
 ///
 /// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] if neither surface is curved. Two
 /// planes cross in a straight line, which does not close, so no closed edge is
@@ -1559,6 +1546,11 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 /// corner, and that function's own `Ok(Some(_))` is never anything but
 /// [`Decision::Pos`] or [`Decision::Neg`] — it filters `Zero` out and turns
 /// `Undecidable` into an `Err` before it can reach here.
+///
+/// If [`which_way_a_closed_crossing_turns`] grows a fifth answer. [`Decision`]
+/// is `#[non_exhaustive]`, so a last arm is forced; a fifth kind of answer to
+/// "which way does it run" is this crate not having been taught something, which
+/// is a broken invariant and not a caller's bytes.
 pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     pair: [&Surface; 2],
     outward: [Vector; 2],
@@ -1568,28 +1560,26 @@ pub(crate) fn a_closed_crossing_is_walked_the_way_it_is_stored(
     let Some(curved) = the_curved_one_of(&[*pair[0], *pair[1]]) else {
         return Err(Invalid::ClosedEdgeBetweenTwoFlatFaces.into());
     };
-    let gradient = gradient_of(&curved, at);
-    let longitude = the_way_it_is_parametrised_about(&curved, at).cross(gradient);
-    // **At a pole there is no longitude to compare against** (§38.3). Every
-    // longitude runs through the one point there, so `ẑ × ∇C` is exactly the
-    // zero vector and the sign of a dot with it is not a fact about the shape.
-    // Nothing is guessed: the caller that writes an edge refuses, and the caller
-    // that reads one back skips, the same way it skips a face with no corner off
-    // its partner.
-    if longitude == Vector::zero() {
-        return Ok(None);
-    }
-    let walked = outward[0].cross(outward[1]);
-    let along_the_longitude = walked.dot(longitude);
-    let against_the_frame = if along_the_longitude == 0.0 {
-        walked.dot(gradient.cross(longitude))
-    } else {
-        along_the_longitude
+    let turning = which_way_a_closed_crossing_turns(
+        outward,
+        gradient_of(&curved, at),
+        the_way_it_is_parametrised_about(&curved, at),
+    );
+    let runs_along_stored = match turning {
+        Decision::Pos => true,
+        Decision::Neg => false,
+        // The wire has no length at all, which is the two surfaces touching
+        // rather than crossing at `at` — and at a pole the longitude is itself
+        // exactly zero, so the latitude is too and this is the answer there for
+        // the same reason (§38.3). Nothing is guessed: the caller that writes an
+        // edge refuses, and the caller that reads one back skips, the same way it
+        // skips a face with no corner off its partner.
+        Decision::Zero => return Ok(None),
+        Decision::Undecidable { enclosure } => {
+            return Err(Error::CannotTellWhichWayAClosedEdgeRuns { enclosure });
+        }
+        other => panic!("a fifth answer out of the closed-edge rule: {other:?}"),
     };
-    if against_the_frame == 0.0 {
-        return Ok(None);
-    }
-    let runs_along_stored = against_the_frame > 0.0;
     Ok(Some(match material_side {
         Decision::Neg => runs_along_stored,
         Decision::Pos => !runs_along_stored,
@@ -3466,6 +3456,124 @@ mod tests {
             walked([&flat, &ball], [straight, round]),
             walked([&ball, &flat], [round, straight]),
             "the flat face and the cap have to walk their shared circle opposite ways"
+        );
+    }
+
+    /// A crossing a third of an `f64` step wide is refused, though its sign is
+    /// there to be had.
+    ///
+    /// `(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` look like one direction written
+    /// twice and are not. The doublings are exact — `0.2` is `2 × 0.1` and `0.6`
+    /// is `2 × 0.3`, to the bit — so the `z` of the cross product is exactly
+    /// zero, but `0.3` is **not** `3 × 0.1` and `0.9` is **not** `9 × 0.1`, so
+    /// the other two components are genuinely nonzero. Worked out exactly over
+    /// the stored doubles the cross product is
+    /// `(2.7755575615628914e-17, -1.3877787807814457e-17, 0)`, which is
+    /// `7.39e-17` of the two vectors that made it.
+    ///
+    /// **So this is a real crossing and not a rounding**, and the answer exists:
+    /// the exact dot is `-6.93889390390722838e-18`, and `fbab36ff` reads its sign
+    /// correctly as `Ok(Some(false))`. Refusing it is a *gap* (§16.10) that an
+    /// exact-expansion tier would close, and §111.3 keeps that question open
+    /// rather than pretending the refusal is obviously right.
+    ///
+    /// What the enclosure runs into is that the true difference in the `y`
+    /// component is exactly one ulp of the two products it comes from, while an
+    /// interval holds each product to half an ulp — so the enclosure of the
+    /// difference is one ulp wide and the answer sits on its edge.
+    #[test]
+    fn a_crossing_barely_one_f64_step_wide_is_refused_although_its_sign_exists() {
+        let ball =
+            Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a ball at the origin"));
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the plane z = 0"),
+        );
+        let corner = Point::new(0.1, 0.2, 0.3);
+        let nearly_one_direction = [Vector::new(0.1, 0.2, 0.3), Vector::new(0.3, 0.6, 0.9)];
+        let walked = nearly_one_direction[0].cross(nearly_one_direction[1]);
+        assert_eq!(
+            walked.components(),
+            [2.7755575615628914e-17, -1.3877787807814457e-17, 0.0],
+            "f64 gets the exact cross product here, so the crossing is real"
+        );
+
+        assert!(matches!(
+            a_closed_crossing_is_walked_the_way_it_is_stored(
+                [&ball, &flat],
+                nearly_one_direction,
+                corner,
+                Decision::Neg,
+            ),
+            Err(Error::CannotTellWhichWayAClosedEdgeRuns { .. })
+        ));
+    }
+
+    /// `kicad/LED_D5.0mm-3.step`'s dome and body, lifted out of the file so the
+    /// numbers §109.7 reports can be re-measured without the corpus.
+    ///
+    /// The file writes `#39 = SPHERICAL_SURFACE('',#40,2.5)` on
+    /// `(2.54, -5.051514762044E-015, 9.1)` and
+    /// `#73 = CYLINDRICAL_SURFACE('',#74,2.5)` on
+    /// `(2.54, -3.030908857227E-015, 9.1)` with a direction of
+    /// `(-0, 3.330669073875E-016, -1)`, and `#22` is the corner they share at
+    /// `(5.04, -5.051514762044E-015, 9.1)`. A hemisphere sitting on a pipe of the
+    /// same radius and an axis three femtometres out: the two are meant to be
+    /// tangent and the file's own rounding is the whole of what makes them cross.
+    ///
+    /// **What this pins is how thin that crossing is**, because that is the fact
+    /// the rule has to be honest about and it is a fact about the shape rather
+    /// than about any one spelling of the arithmetic. `‖∇S × ∇T‖²` against
+    /// `‖∇S‖²‖∇T‖²` is the squared sine of the angle the two surfaces meet at,
+    /// and it comes to `6.5e-31` — an angle of `8.1e-16` radians, which is under
+    /// four `f64` steps of one.
+    ///
+    /// **It does not yet pin the rule's answer, and §111 says why.** The rule
+    /// still reads `Ok(Some(true))` here, and the arithmetic that gets it there
+    /// is exact — every product below is one rounding with nothing to cancel
+    /// against, so enclosing the chain over these numbers proves the same sign
+    /// rather than refusing. What is not earned is the numbers themselves: the
+    /// corner is a decimal rounded to `f64` and is on neither surface, and one
+    /// `f64` step in its `y` is `1.8e-15` against a `∇T·ŷ` of `-2.0e-15`. Moving
+    /// the corner inside the box it is known to turns the answer over. Closing
+    /// that needs the corner to arrive as a box and the gradients to be worked
+    /// out over it, which is a change to what this function takes.
+    #[test]
+    fn a_hemisphere_sitting_on_a_pipe_of_the_same_radius_barely_crosses_it_at_all() {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(2.54, -5.051514762044E-015, 9.1), 2.5).expect("the dome"),
+        );
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(
+                    Point::new(2.54, -3.030908857227E-015, 9.1),
+                    Vector::new(-0.0, 3.330669073875E-016, -1.0),
+                )
+                .expect("the body's axis"),
+                2.5,
+            )
+            .expect("the body"),
+        );
+        let corner = Point::new(5.04, -5.051514762044E-015, 9.1);
+
+        let round = gradient_of(&ball, corner);
+        let straight = gradient_of(&pipe, corner);
+        let walked = round.cross(straight);
+        assert_eq!(
+            walked.components(),
+            [0.0, 1.682492399415798e-30, -5.0515147620424996e-15],
+            "the wire §109.7 measured, out of the file's own numbers"
+        );
+
+        let squared_sine = walked.dot(walked) / (round.dot(round) * straight.dot(straight));
+        assert!(
+            squared_sine < 1e-30,
+            "the dome and the body meet at {} radians, which is more than the file writes",
+            squared_sine.sqrt()
+        );
+        assert!(
+            squared_sine.sqrt() < 4.0 * f64::EPSILON,
+            "an angle of a few f64 steps is the whole of what makes this hard"
         );
     }
 

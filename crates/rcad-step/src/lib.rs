@@ -166,7 +166,7 @@ pub use error::{Error, Problem};
 pub use graph::{
     BrokenReference, EntityId, Header, Instance, InstancesNamed, Record, StepFile, Value,
 };
-pub use import::Import;
+pub use import::{Import, ProbeReport, probe};
 pub use refusal::Refusal;
 pub use write::{CannotWrite, write};
 
