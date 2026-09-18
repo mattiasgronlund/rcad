@@ -355,6 +355,36 @@ fn a_hole_reaching_out_to_the_outline_is_refused() {
     );
 }
 
+/// The refusal says **where** the two loops touch, and not only which corner
+/// numbers touched.
+///
+/// A corner number is an address into the list of corners the caller handed
+/// over, which is fine for the caller that built it and useless to anyone
+/// further up: the kernel's mesher assembles that list itself out of walked
+/// wires, so its own caller never saw it. A point on the surface is a thing
+/// anybody holding the domain can find. `docs/decisions.md` §123.
+///
+/// The two corners on the outline here are `[8, 3]` and `[8, 5]`, and which of
+/// them the sweep meets first is the order the sides come out in and nothing a
+/// caller should depend on — so both are allowed, and each has to be exact. A
+/// plane's own two coordinates are not `x` and `y`, so the two places are asked
+/// of the surface rather than written out: what is claimed is that the point is
+/// the touching **corner** and not some other corner.
+#[test]
+fn a_hole_reaching_out_to_the_outline_says_where_it_touches() {
+    let outer = vec![[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]];
+    let hole = vec![[8.0, 3.0], [4.0, 4.0], [8.0, 5.0]];
+    let refusal = triangulate(&domain_of(flat(), outer, vec![hole]));
+    let Err(CannotTriangulate::LoopsTouch { at, .. }) = refusal else {
+        panic!("got {refusal:?}")
+    };
+    let on_the_outline = [flat().point_at(8.0, 3.0), flat().point_at(8.0, 5.0)];
+    assert!(
+        on_the_outline.contains(&at),
+        "the touch is at a corner of the hole, not at {at:?}"
+    );
+}
+
 /// The rest of the touching family, refused by the same one check.
 ///
 /// Sharing a corner outright, and resting a corner at a single point of

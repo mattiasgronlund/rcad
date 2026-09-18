@@ -1204,7 +1204,7 @@ impl BuildingAMesh {
         );
         let cut = match triangulate(&domain) {
             Ok(cut) => cut,
-            Err(why) => return Err(refusal_for(face, why, log)),
+            Err(why) => return Err(refusal_for(face, why, &corner_is, &self.points, log)),
         };
 
         // Everything past the corners this patch handed over is a point the
@@ -2962,24 +2962,48 @@ fn square_to(vector: Vector, way: Vector) -> Vector {
 
 /// What to hand back when the triangulator refuses a face.
 ///
-/// One of the refusals is not about the request at all. `CannotTellIfLoopsTouch`
-/// is an exact predicate that ran out of room, and `Undecidable` at the level of
-/// a whole operation is a failure rather than a result (§4.2) — so it goes in the
-/// log with its enclosure, where the caller can see which corner and how wide.
+/// **Two of the refusals count corners, and the count is this file's own.** The
+/// domain handed over was assembled here — a wire walked from wherever
+/// [`steps_from_somewhere_that_has_a_longitude`] chose to start, with a point
+/// dropped on every bend of every edge — so "the corner at 7" addresses a list
+/// no caller of [`SolidView::mesh`](crate::SolidView::mesh) ever saw. Both of
+/// them carry a place in space beside the count, and both places are moved into
+/// the **model's own frame** here, which is the same move §116 made for the
+/// tangency pair and for the same reason (§113.6, §123).
+///
+/// One of the two is not about the request at all. `CannotTellIfLoopsTouch` is
+/// an exact predicate that ran out of room, and `Undecidable` at the level of a
+/// whole operation is a failure rather than a result (§4.2) — so it goes in the
+/// log with its enclosure, where the caller can see the point and how wide.
 /// Every other refusal is about the deflection or about the loops, and neither is
 /// a thing a provenance log has anything to say about.
-fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceLog) -> Error {
-    let CannotTriangulate::CannotTellIfLoopsTouch { corner, enclosure } = why else {
+fn refusal_for(
+    face: FaceView<'_>,
+    why: CannotTriangulate,
+    corner_is: &[u32],
+    points: &[Point],
+    log: &mut ProvenanceLog,
+) -> Error {
+    if let CannotTriangulate::LoopsTouch { corner, side, .. } = why {
+        return Error::CannotMeshAFace {
+            face: face.key(),
+            why: CannotTriangulate::LoopsTouch {
+                corner,
+                side,
+                at: where_the_model_holds_this_corner(corner, corner_is, points),
+            },
+        };
+    }
+    let CannotTriangulate::CannotTellIfLoopsTouch {
+        corner, enclosure, ..
+    } = why
+    else {
         return Error::CannotMeshAFace {
             face: face.key(),
             why,
         };
     };
-    let at = face
-        .wires()
-        .flat_map(WireView::points)
-        .nth(corner)
-        .unwrap_or_else(Point::origin);
+    let at = where_the_model_holds_this_corner(corner, corner_is, points);
     log.push(Record::new(
         "orient2d",
         &[PredicatePoint::from(at.coordinates())],
@@ -2990,6 +3014,27 @@ fn refusal_for(face: FaceView<'_>, why: CannotTriangulate, log: &mut ProvenanceL
     Error::Undecidable {
         records: core::mem::take(log),
     }
+}
+
+/// Where the model holds the corner the triangulator numbered `corner`.
+///
+/// `corner_is` was filled loop by loop in the order the domain's corners went
+/// out — outer first, then the holes — so the two lists line up entry for entry,
+/// and the answer is a point of the solid's own table rather than one worked out
+/// again. A number past the end is this file having handed over a domain it
+/// cannot read back, which is a bug here and not bad input.
+///
+/// **This replaces a walk of the face's wires, which named a different point.**
+/// A wire has one point per coedge; a walked loop has those *and* every point
+/// the edge walk put between them, and it may start at another corner
+/// altogether — so `nth(corner)` into the wires' points agreed with the
+/// triangulator's numbering only on a face whose edges are all straight and
+/// whose walk happened not to be turned. §123.
+fn where_the_model_holds_this_corner(corner: usize, corner_is: &[u32], points: &[Point]) -> Point {
+    let at = *corner_is
+        .get(corner)
+        .expect("the triangulator numbered a corner this walk never handed it");
+    points[at as usize]
 }
 
 #[cfg(test)]
@@ -3060,6 +3105,94 @@ mod tests {
         assert!(
             matches!(refusal, Error::CurvedFaceWithAHoleGoesTooFarRound { .. }),
             "got {refusal:?}"
+        );
+    }
+
+    /// A refusal about two loops touching names the touch where the **model**
+    /// holds it, not where the mesher worked it out.
+    ///
+    /// `docs/decisions.md` §123, and §113.7 for the wall this is the third
+    /// bucket of. The refusal used to say `LoopsTouch { corner: 7, side: 4 }`
+    /// and nothing else, and those two numbers count corners of a domain
+    /// [`Mesher::hand_over`] assembled — so a caller reading them was reading an
+    /// address into a list it never built.
+    ///
+    /// **A placed solid is what makes the two frames differ by something a test
+    /// can see.** The box below sits at `(1024, 2048, 4096)` and its faces are
+    /// stored at the origin, so the mesher cuts the bottom cap up in the box's
+    /// own numbers and the point it would otherwise publish is `(8, 3, 0)` —
+    /// a point of no model at all.
+    ///
+    /// **The route is `Deserialize` and not a builder**, as for the two tests
+    /// above: no builder here puts a hole in a cap that reaches out and touches
+    /// its outline, and [`SolidView::mesh`](crate::SolidView::mesh) is public in
+    /// its own right.
+    ///
+    /// Which of the hole's two corners on the outline the sweep meets first is
+    /// the order [`every_side`](rcad_mesh) hands the sides out in, which is not
+    /// a thing to pin down here — so both are allowed, and each has to be exact.
+    #[test]
+    fn a_placed_solids_touching_loops_are_named_where_the_model_holds_them() {
+        let a_long_way_off = Isometry::translation(Vector::new(1024.0, 2048.0, 4096.0))
+            .expect("a shift down the axes");
+
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let square =
+            crate::ProfileBuilder::new(vec![[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a square eight across");
+        let box_of_eight = model
+            .add_extrusion(&square, 8.0, &a_long_way_off)
+            .expect("a box eight across and eight tall");
+
+        let cap = model
+            .data()
+            .faces
+            .iter()
+            .find(|(_, face)| {
+                face.surface
+                    .as_plane()
+                    .is_some_and(|flat| flat.signed_distance_to(Point::origin()) == 0.0)
+            })
+            .map(|(slot, _)| slot)
+            .expect("a box has a cap through the origin");
+
+        // Two corners exactly on the cap's own side from (8, 0) to (8, 8), which
+        // is the shape `refuse_loops_that_touch` was written for.
+        let corners = [
+            model.add_vertex(Point::new(8.0, 3.0, 0.0)),
+            model.add_vertex(Point::new(4.0, 4.0, 0.0)),
+            model.add_vertex(Point::new(8.0, 5.0, 0.0)),
+        ];
+        let coedges: SmallVec<[_; 4]> = (0..3)
+            .map(|at| {
+                let edge = model.add_edge(corners[at], corners[(at + 1) % 3]);
+                model.add_coedge(edge, Orientation::Forward)
+            })
+            .collect();
+        let hole = model.add_wire(coedges);
+        model.data_mut().faces[cap].wires.push(hole);
+
+        let refusal = model
+            .solid(box_of_eight)
+            .expect("this model made the key")
+            .mesh(
+                Deflection::of(1.0).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a hole touching its own outline cannot be cut up");
+
+        let Error::CannotMeshAFace {
+            why: CannotTriangulate::LoopsTouch { at, .. },
+            ..
+        } = refusal
+        else {
+            panic!("got {refusal:?}")
+        };
+        assert!(
+            at == Point::new(1032.0, 2051.0, 4096.0) || at == Point::new(1032.0, 2053.0, 4096.0),
+            "the touch is where the model holds the hole's corner, not at {at:?}"
         );
     }
 
