@@ -255,6 +255,40 @@ pub fn expansion_sign(expansion: &[f64]) -> Decision {
     }
 }
 
+/// `a * b - c * d`, exactly. `None` when either product would round, which is
+/// where exact arithmetic stops being exact.
+///
+/// This is the two by two determinant every larger one is built out of, and
+/// both `orient3d` and the three-plane meet expand along a column into three of
+/// them. One copy of it here rather than one in each file: the two products and
+/// their two roundoff terms are four entries that have to be summed in the
+/// right order, and a second copy is a second chance to get that wrong.
+///
+/// ```
+/// # use rcad_predicates::expansion::{difference_of_two_products, expansion_sign};
+/// # use rcad_predicates::Decision;
+/// // 2^53 + 1 is not an f64, but the difference of these two products is,
+/// // and plain f64 loses it.
+/// let big = 2f64.powi(53);
+/// let (entries, len) = difference_of_two_products(big + 2.0, 1.0, big, 1.0).unwrap();
+/// assert_eq!(&entries[..len], &[2.0]);
+/// assert_eq!(expansion_sign(&entries[..len]), Decision::Pos);
+/// ```
+pub fn difference_of_two_products(a: f64, b: f64, c: f64, d: f64) -> Option<([f64; 4], usize)> {
+    if !product_is_exact(a, b) || !product_is_exact(c, d) {
+        return None;
+    }
+    let (forwards, forwards_roundoff) = two_product(a, b);
+    let (backwards, backwards_roundoff) = two_product(c, d);
+    let mut out = [0.0; 4];
+    let len = expansion_sum(
+        &[forwards_roundoff, forwards],
+        &[-backwards_roundoff, -backwards],
+        &mut out,
+    );
+    Some((out, len))
+}
+
 /// `a + b` as a rounded sum plus the exact amount that rounding lost.
 ///
 /// The two returned values add up to `a + b` exactly whenever that sum is

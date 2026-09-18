@@ -2804,9 +2804,10 @@ fn plainly_fused(
 /// dividing `(0, 3, 0)` by `3` is exact — and the skew family is the first
 /// thing here that can tilt a wall.
 ///
-/// The constructor now divides by the largest-magnitude component first, so the
-/// answer depends on the ratios alone. This is the topology-side guard on that;
-/// `rcad-geom` has the arithmetic in
+/// The constructor now scales by an exact power of two and divides by a length
+/// carried to a hundred bits, so the answer depends on the ratios alone *and* is
+/// the nearest `f64` to the exact one. This is the topology-side guard on the
+/// first half; `rcad-geom` has the arithmetic in
 /// `a_plane_is_the_same_however_long_the_normal_naming_it_was`.
 #[test]
 fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
@@ -2822,24 +2823,21 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
         plane_of(3.0),
         "the same plane, named off a longer edge"
     );
-    // Both land on the same number, and it is one ulp under the correctly
-    // rounded 1/√2. Canonical and closest are not in tension — a correctly
-    // rounded normalize is a function of the exact ray, so two proportional
-    // spellings still store the same bits — and no ordering recovers this bit
-    // because ordering is the wrong family: carrying more of them does.
+    // Both land on the same number, and since §121 it is the nearest `f64` to
+    // 1/√2 rather than the ulp below. Canonical and closest are not in tension —
+    // a correctly rounded normalize is a function of the exact ray, so two
+    // proportional spellings still store the same bits.
     //
-    // §120 fixed that for `Axis::new` and left `Plane` alone, so this literal
-    // did not move and is not meant to: a plane still divides by its largest
-    // component and then normalizes, which rounds twice. §121 books the plane
-    // half, and when it runs this is one of the numbers that moves.
-    // What §22.6 was about is the two walls agreeing, and they do.
-    let canonical = 0.707_106_781_186_547_5_f64;
-    assert_eq!(plane_of(1.0)[0], canonical);
+    // The bit this used to lose was never lost to the ordering of the
+    // arithmetic; it was lost to rounding a square root and then rounding a
+    // division. Carrying a hundred bits of the root is what recovers it.
+    let stored = plane_of(1.0)[0];
+    assert_eq!(stored, core::f64::consts::FRAC_1_SQRT_2);
     assert_eq!(
-        canonical.to_bits() + 1,
-        core::f64::consts::FRAC_1_SQRT_2.to_bits(),
-        "one ulp under, and stated here so a change to it is a change somebody \
-         has to look at"
+        stored.to_bits() - 1,
+        0.707_106_781_186_547_5_f64.to_bits(),
+        "the ulp below is what a plane stored until §121, and naming it here \
+         makes a slide back to it something somebody has to look at"
     );
 }
 

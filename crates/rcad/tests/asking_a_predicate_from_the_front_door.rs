@@ -90,16 +90,22 @@ fn a_point_on_the_skin_of_a_pipe_is_neither_in_nor_out() {
 /// The doc tells a caller to reach for `orient3d` when they need the certified
 /// answer. Before the facade re-exported it, that was advice a caller who named
 /// only `rcad::` could not take.
+///
+/// **Which way each corner is off moved when the offset stopped rounding five
+/// times** (`docs/decisions.md` §132) — it was `Neg` for all three — so the
+/// three sides are named one at a time. What the test is about is that none of
+/// them is `Zero`.
 #[test]
 fn the_points_that_built_a_plane_are_not_on_the_plane_it_stored() {
     let corners = [[1.0, 2.0, 3.0], [4.0, 5.0, 7.0], [2.0, 9.0, 4.0]];
     let [first, second, third] = corners.map(|[x, y, z]| Point::new(x, y, z));
     let plane = Plane::through_three_points(first, second, third).expect("three points, one plane");
 
-    for corner in corners {
+    let certain_and_wrong = [Decision::Pos, Decision::Neg, Decision::Pos];
+    for (corner, side) in corners.into_iter().zip(certain_and_wrong) {
         assert_eq!(
             certified(plane.side_of_point(PredicatePoint::from(corner))),
-            Decision::Neg,
+            side,
             "the stored plane is certain, and wrong, about {corner:?}"
         );
         assert_eq!(

@@ -22,8 +22,9 @@ pub const SIDE_OF_A_HALF_SPACE: &str = "side of a half-space";
 /// already holds can write one — swap two of that direction's components and
 /// negate one, and the dot product becomes two products that are exact negatives
 /// — and a [`Plane`](crate::Plane) would round the squareness away on the way
-/// in, because it divides by the largest component and then by a square root
-/// (`docs/decisions.md` §32.3).
+/// in, because it divides by the length of the normal (`docs/decisions.md`
+/// §32.3). That division is correctly rounded since §121 and it still rounds:
+/// a better normalize stores a nearer direction, not the caller's own bits.
 ///
 /// **The invariant that buys is not one the type system states: a half-space is
 /// never a face's geometry and is never compared for face identity.** §17.1

@@ -32841,3 +32841,627 @@ and of `tooling/systemd/`; `mise exec -- just lanes`;
 `mise exec -- just check-fuzz-overnight-selftest` against the tree and against
 three mutants — the old sequential loop, a staggered start, and the copier taken
 out; `mise exec -- just gate`.
+
+## 130. §121 runs: a plane's normal is correctly rounded, and the ulp it gained cost a corner, measured 2026-09-18
+
+*§121 booked the plane half of §120 and said what the fix owes. This is the fix
+and the bill. The arithmetic change is four lines; what it moved is seven tests,
+four of which needed a **new witness** rather than a new number, and three of
+which are not pins at all but answers this kernel now gives differently. Those
+three are named in §130.5 and are **not** closed here.*
+
+### 130.1 What changed
+
+`Plane::from_point_and_normal` and `Plane::from_coefficients` were
+`reduced_by_largest_component` and then `normalized_as` — two divisions and a
+rounded square root between them, §121.2's 2 759-of-16 680. Both now call
+`Vector::scaled_to_length_one_from_anywhere`, the same function §120 gave
+`Axis::new`: an exact power-of-two rescale, a length carried to about a hundred
+bits, and one division per component.
+
+`reduced_by_largest_component` had no other caller and is gone. What it was also
+doing for `from_coefficients` was giving the offset a divisor that two
+proportional coefficient sets agree on, and `Plane::offset_of` does that instead:
+
+```rust
+-(d / widest) * unit_there
+```
+
+`widest` is the largest-magnitude of `a`, `b`, `c` and `unit_there` is the unit
+normal's component beside it, so `unit_there / widest` is `1 / |(a, b, c)|` and
+the length is never formed. Dividing `d` by the coefficient **first** is the
+whole of the §22.6 property: `d/m` and `s·d/s·m` are the same real number and so
+the same `f64`, and the unit normal is already the same for both. Multiplying `d`
+by `unit_there` first would not be — that product moves with `s`.
+
+The offset is two roundings where the old one was a division by a length that had
+already rounded twice. It is not correctly rounded, and it could be: the
+hundred-bit length is a private local in `point.rs` and exposing it is a change to
+a file this lane did not own. Named here rather than done.
+
+**The bare `normalized_as` in `Plane::basis` and the five sites beside it
+(§121.6's second bullet) was not touched** — another lane holds it. `basis()`
+reads the stored normal, so what it computes moves wherever the stored normal
+moved; the arithmetic at that line is untouched.
+
+### 130.2 The test that fails without it
+
+`the_same_wall_built_from_a_longer_edge_is_the_same_plane`, in
+`crates/rcad-topo/tests/fuses_that_must_agree.rs`. §120.5 named it as §120's tell
+and §121.5 corrected that: it could not have moved for §120 and it does move for
+this. It now asserts the stored coefficient is `FRAC_1_SQRT_2` itself, and
+separately that the ulp below it — `0.707_106_781_186_547_5`, what a plane stored
+until today — is one bit down, so a slide back is something somebody has to look
+at. Run against the old constructor it reads `0.7071067811865475` and fails.
+
+### 130.3 The four witnesses that dissolved, and the two counts that moved
+
+§120.7's warning, arriving. Four tests were built on a number the change made
+uninteresting, and each needed a new witness found by search:
+
+| test | what it needs | old | new |
+| --- | --- | --- | --- |
+| `a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently` | `f64` dot cancels, exact dot does not | pipe `(2,0,3)`, plane `(−12,−12,8)` | plane `(−12,−7,8)` |
+| `a_cross_product_of_unit_triples_can_round_to_zero` | two stored normals whose `f64` cross is zero and whose true cross is not | `(1,2,6)` and its `next_up` | `(2,6,7)` and its `next_up` |
+| `a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not` | a normal the constructor hands **straight back**, square to an axis in `f64` only | one triple | another, found in 200 000 draws |
+| `a_rounded_apex_and_a_rounded_lean_together_call_a_closed_ellipse_two_rulings` | the same, plus an apex an ulp off the plane | four numbers | four others, found in 400 000 draws |
+
+The first one has now dissolved **twice** — §120 killed `(1,0,3)`/`(−12,−12,4)`
+and this killed its replacement — and the gap it witnesses has not moved either
+time. The last two dissolved for a reason worth naming: a hand-written witness in
+those files has to be a **fixed point** of the constructor, or the test cannot say
+"the numbers below are the ones the doors read", and the old stored normals are
+not fixed points of a correctly rounded normalize.
+
+Two counts moved, both towards the fix:
+
+| | before | after |
+| --- | --- | --- |
+| normals that move when a plane is rebuilt from its own coefficients, of 100 000 | 24 733 | **1 053** |
+| the three normals written square to `(1, 3, 5)`, read in `f64` after storing | `0.0`, `0.0`, `1.1e−16` | `0.0`, `4.4e−16`, `−1.1e−16` |
+
+The first is `Plane::moved_to`'s published number and
+`rebuilding_a_plane_from_its_own_coefficients_tilts_its_normal` counts it; a
+twentieth of the footgun is still a footgun, and `moved_to` is still how to scale
+a plane. The second is
+`a_normal_written_square_to_a_direction_stops_being_square_once_a_plane_stores_it`,
+whose absolute `f64::EPSILON` bound held by luck and is now
+`SIGNED_DISTANCE_ROUNDOFF × largest coordinate` — the bound this file already
+publishes for exactly that dot product. **The §29.8 limit it demonstrates is
+untouched**: all three are still not square once stored, at the exact level,
+which is the assertion that matters.
+
+### 130.4 The corpus did not move by name, and the round trip did
+
+`mise exec -- just t how_often_a_real_file_imports --no-capture`:
+
+```
+=== nist: 1 / 44 imported = 2.3%
+=== kicad: 114 / 323 imported = 35.3%
+```
+
+`assert_pinned_kicad_imports` compares sets and fails both ways (§44.10), and it
+passed — the same 114 files, not merely as many.
+`every_file_that_stops_at_the_tangency_wall_names_the_edge_it_was_following`
+reads **24**, unmoved.
+
+**`every_kicad_file_that_imports_round_trips_to_the_same_solid` moved by one, and
+downwards.** 44 of 114 where it was 45, and the by-name pin says which:
+`PinHeader_2x08_P2.54mm_Vertical.step` stopped. Nothing was gained. Its line in
+the breakdown reads *"both sides refuse to fuse, but for different reasons: the
+model is broken: a vertex of a face is # away from the face's plane vs could not
+settle # decisions the answer depends on"* — the two sides used to refuse the
+same way and now do not, so the round trip no longer counts. A by-name pin
+catching one file in one direction is §44.10 working; **it is reported and not
+re-pinned.**
+
+### 130.5 What this bought, and the three answers it changed
+
+§17.1's claim holds: `proportional_coefficients_describe_the_same_plane_bit_for_bit`
+and `a_planes_coefficients_written_at_any_scale_are_the_same_plane` pass, and a
+correctly rounded normalize keeps the same-ray property by construction
+(§120.1) — the offset keeps it because `d` meets the coefficient before anything
+else.
+
+**Three things this kernel now answers differently, and none of them is a pin.**
+They are the reason this section is `measured` and not `fixed`:
+
+1. **A 45° cut through a lattice corner is no longer decided.**
+   `the_pieces_of_a_face_add_up_to_the_area_it_started_with` and
+   `presenting_the_same_cuts_the_other_way_round_gives_the_very_same_pieces` cut
+   the top of a cube of side two with `x = 0.5`, `y = 1.5` and `x + y = 2` —
+   three cut lines through one point, which is §22's whole subject. The corner
+   `(0.5, 1.5, 2)` used to come back from `meet_of_three_planes` as a
+   **zero-width** box and now comes back four ulps wide, so ordering it against
+   the same corner named exactly is `Undecidable` and `split_a_face` refuses.
+
+   The mechanism is arithmetic and was measured, not guessed. Cramer's numerator
+   for that `y` is `2c − 0.5c` for `c` the stored `1/√2`; `1.5c` is exactly
+   representable only when `c`'s mantissa is a multiple of four. The old `c` is
+   `0x3fe6a09e667f3bcc`, mantissa `6369051672525772`, a multiple of four. The
+   correctly rounded `c` is `0x3fe6a09e667f3bcd`, mantissa `6369051672525773`,
+   which is not. **The old answer was luck in the last two bits and the new one
+   cannot be arranged**: the nearest `f64` to `1/√2` is the nearest `f64` to
+   `1/√2`. This is a third horn of §32's "canonical or square, not both" —
+   canonical *and* closest costs exactness at rational corners of irrational
+   walls.
+
+2. **The skew family stopped producing not-a-solid answers at all.** `mise exec
+   -- just t how_often_a_certified_fuse_of_a_skew_pair_refuses --no-capture`:
+
+   ```
+   §22 headline: skew pairs, every rule: 429 fuses, 63 refused (14.7%), 0 not a solid (0.0%)
+       9 (2.10% of all fuses) named "a point inside a piece of a face"
+       30 (6.99% of all fuses) named "order along a crossing"
+       24 (5.59% of all fuses) named "side of plane"
+   ```
+
+   `A_SKEW_PAIR_IS_NOT_A_SOLID` is `0.47%–2.10%` and 0 is outside it, so the
+   vacuity guard fires. The refusal ceiling `SKEW_REFUSALS_MUST_STAY_BELOW` of
+   18% still holds at 14.7%, and `"order along a crossing"` is still the leading
+   cause at 30 — the number §22 records and the one that says this family is
+   still reaching the branch it was built for. What moved is the other two:
+   `"side of plane"` is 24 where this file records 12, and
+   `"a point inside a piece of a face"` is 9. **The before-column here is what
+   the file's own doc comments record, not something this lane ran**, and it is
+   worth re-measuring on the base tree before anything is concluded from it.
+
+   That the not-a-solid count went to zero is consistent with item 1: four faces
+   along one edge needs two edges that are the same edge *exactly*, and a
+   configuration whose corners stopped landing exactly stops producing it.
+
+3. **`validate.rs:2855` and `surface.rs:305` now say something false.** Both
+   describe a plane as dividing by its largest component. Neither is in this
+   lane's write set and neither was edited. `validate.rs`'s is the doc comment on
+   `a_plane_through_a_point_does_not_put_that_point_exactly_on_itself`, which
+   still passes; `surface.rs`'s is the sentence in `how_it_sorts_against` that
+   earns §32.5's trap for each of the five surfaces.
+
+### 130.6 What is left
+
+- The two `arrange` oracle tests and the skew vacuity band are **failing on this
+  branch**. They are not pins to update: item 1 above is a real answer the kernel
+  now gives, and turning either oracle into "this refuses now" would gut it. What
+  the cut set in those two tests should be, or whether a triple point with an
+  irrational wall through it is now a named gap, is a decision and not a lane's
+  to take alone.
+- `PinHeader_2x08_P2.54mm_Vertical.step`'s round trip, same reason.
+- The `from_coefficients` offset is two roundings and could be one (§130.1).
+- The two false sentences in §130.5 item 3.
+- §120.6's table owes the row §121.6's last bullet asks for: after this,
+  `the_old_way`'s 2 759 of 16 680 stops describing anything live and becomes a
+  measurement of the arithmetic `Plane` ran until 2026-09-18. It is recorded here
+  rather than in §120.6, because §120 is not this lane's section to edit.
+
+Commands run to reach this: `git log --oneline -1`; `git checkout -B
+lane-121-plane-normalize 381b7bef`; `mise exec -- just decision 121`,
+`121.1`–`121.6`, `120.6`–`120.8`; `mise exec -- just src
+scaled_to_length_one_from_anywhere`, `moved_to`; `mise exec -- cargo build
+--workspace --all-targets`; `mise exec -- just test` (2002 tests, 11 failing
+after the arithmetic change); `mise exec -- just t --no-fail-fast`; `mise exec --
+just t <name> --no-capture` for each failure; three throwaway sweeps written into
+the test modules of `along_a_crossing.rs`, `walk.rs` and `arrange.rs`, run, and
+reverted with `git checkout --`; a scratchpad `rustc` probe for the two mantissas
+in §130.5 item 1; `mise exec -- just t how_often_a_real_file_imports
+--no-capture`; `mise exec -- just t
+every_file_that_stops_at_the_tangency_wall_names_the_edge_it_was_following
+--no-capture`; `mise exec -- just t
+every_kicad_file_that_imports_round_trips_to_the_same_solid --no-capture`.
+
+## 131. The three-plane meet gets an exact tier, and it buys back two of §130's four, measured 2026-09-18
+
+*§130.5 named three answers this kernel started giving differently after §121
+rounded a plane's normal correctly, and §130.6 left them open because "what the
+cut set in those two tests should be" looked like a decision. It was not one.
+The corner those tests refuse is `(0.5, 1.5, 2)`, which is three whole numbers,
+and §16.10's test says an answer that exists and that the arithmetic could not
+reach is a **gap** — so the fix is the arithmetic and not the test. Cramer's
+rule now has a third level. Two of the four failures are gone; the other two
+were never this cause, and §131.4 says what they are instead.*
+
+### 131.1 What was built
+
+`meet_of_three_planes` was one level and is now two. `meet_of_three_planes_at_this_scale`
+is exactly the interval arithmetic that was there before and hands back the box
+rather than a `Point`; `the_exact_point_the_box_holds` is the new level, which
+asks Cramer's rule again through `crate::expansion`, where nothing rounds; and
+`pinned_down` is the one line that puts them together — the corner if level 3
+named it, the box if it did not. Both entry points run it, the plain one and
+`meet_after_rescaling_each_plane`, so a meet rescued by a power of two is
+sharpened on the same terms as one that was never out of range.
+
+**Level 3 checks rather than divides.** Exact arithmetic here is `+`, `-` and
+`*` (§2.3), so there is no exact quotient to compute — but there is a candidate
+and a multiplication. For a side of the box holding the `f64` values `q₁ … qₙ`,
+the coordinate is `qᵢ` exactly when `qᵢ · volume` is the substituted determinant
+exactly, and both of those are expansions. Two facts make that a proof and not a
+guess: the true coordinate is **inside** the box, because level 2's arithmetic
+is an enclosure, so if it is an `f64` at all it is one of the `qᵢ`; and `volume`
+is **not zero**, because level 2 certified that before it divided by it, so
+`q · volume` takes a different value for every `q` and at most one candidate can
+match. The second of those is asserted rather than assumed — a broken internal
+invariant panics (§2.1's half of the rule that is not about callers).
+
+The two by two determinant both `orient3d` and this expand along a column into
+moved to `expansion::difference_of_two_products`, which is where the only copy
+of it belongs; `orient3d::minor` is now one line calling it.
+
+A side of the box holding one `f64` needs no arithmetic at all: there is nowhere
+else in the box for the corner to be. That is the same reading
+`fuse::as_exact_as_it_is` and `de_boor::enclosed` already take of a zero-width
+enclosure, and it is now taken at the meet itself, where every caller gets it
+rather than the two that remembered to ask.
+
+### 131.2 The ordering, and why it is forced by something other than cost
+
+§122.2 settled that level 2 answers first and level 3 runs only where it did not
+commit, and settled it with a witness on which the other ordering is **wrong**
+rather than slow. This site inherits that ordering and owes no witness of its
+own, because it cannot have one: **level 3 here has nothing to ask until level 2
+has answered.** It has no division, so it cannot produce a quotient — only check
+one. Level 2's box is where the candidates come from and is what makes the check
+sound. An ordering that ran level 3 first would not be a worse answer; it would
+not be an algorithm.
+
+"Did not commit" is read here as **a side of the box with width in it**. A
+zero-width side is a commitment and is taken as one; a side four ulps across is
+level 2 saying it does not know which `f64` this is, which is the same shape as
+an enclosure that straddles zero.
+
+### 131.3 The corner, and the arithmetic that lost it
+
+The witness is `split_a_face` cutting the top of a cube of side two with
+`y = 1.5` and `x + y = 2`, in the order it hands them over —
+`[0, 0, 1, −2]`, `[0, 1, 0, −1.5]`, `[c, c, 0, −2c]` for `c` the stored `1/√2`.
+Level 2 comes back with the sides holding **6, 4 and 1** `f64`
+(`level_two_leaves_that_corner_in_a_box_six_f64_wide`), which is the box the
+refusal §130.5 records printed: `[0.4999999999999999, 0.5000000000000003]`,
+`[1.4999999999999996, 1.5000000000000002]`, `[2, 2]`. Level 3 names
+`(0.5, 1.5, 2)` out of it.
+
+§130.5's mechanism holds and this lane did not re-derive it: the numerator is
+`1.5c`, an `f64` only when `c`'s significand is a multiple of four, and the
+correctly rounded `c` is `0x3fe6a09e667f3bcd` where the old one was `…cc`. What
+is worth adding is that **this corner is reached by more than one trio and level
+2 does not lose all of them.** The same cube's same three cut lines meet at the
+same corner through `x = 0.5` instead of `y = 1.5`, and
+`[1, 0, 0, −0.5]`, `[c, c, 0, −2c]`, `[0, 0, 1, −2]` comes out of level 2 with
+one `f64` on every side — measured, by the same width probe. So the refusal was
+never "this corner is not reachable in `f64`"; it was one trio of three losing
+it, which is exactly what a gap looks like from the inside.
+
+`HOW_MANY_F64_ARE_WORTH_TRYING` is 16, and it is a **budget and not a bound**: a
+wider side can still hold an exact corner and this hands back the box for it.
+Six is what a real near miss measures, so the budget has room over the only one
+we have. `a_side_one_f64_past_the_budget_is_not_walked` pins both ends of it
+(§15.6).
+
+### 131.4 What came back, what did not, and the two causes that were never one
+
+§130.6 read all four failures as one cause. Two of them were.
+
+`mise exec -- just t the_pieces_of_a_face_add_up_to_the_area_it_started_with
+presenting_the_same_cuts_the_other_way_round_gives_the_very_same_pieces
+how_often_a_certified_fuse_of_a_skew_pair_refuses
+every_kicad_file_that_imports_round_trips_to_the_same_solid --no-fail-fast`, on
+`8a63fa2a`: **4 tests run, 0 passed, 4 failed**. The same command on this
+branch: **4 tests run, 2 passed, 2 failed**. The two `arrange` oracles pass as
+written; neither was touched.
+
+**The skew band moved towards its floor and did not reach it.** `mise exec --
+just t how_often_a_certified_fuse_of_a_skew_pair_refuses --no-capture`:
+
+```
+§22 headline: skew pairs, every rule: 429 fuses, 54 refused (12.6%), 1 not a solid (0.2%)
+    9 (2.10% of all fuses) named "a point inside a piece of a face"
+    27 (6.29% of all fuses) named "order along a crossing"
+    18 (4.20% of all fuses) named "side of plane"
+```
+
+§130.5 measured 63 refused (14.7%) and 0 not a solid on the base. So nine
+refusals are gone and one not-a-solid is back, against the three
+`A_SKEW_PAIR_IS_NOT_A_SOLID` was derived from. **The band still fails, and it is
+not re-measured here** — a band is re-measured when you can say why the new
+number is right, and 1 of 429 is a number with no argument behind it.
+
+**It is not the meet that is still losing them.** Level 3 was instrumented to
+print every time it asked and declined, and over one run of that family it
+declined **43 374 times** — on boxes one to four `f64` wide, every one of them a
+corner of two solids leaning at unrelated angles, whose coordinates are algebraic
+irrationals and are not `f64`. Those declines are correct. Three planes are the
+only route `where_three_planes_meet` takes to a plane-plane-plane corner
+(`three_surfaces.rs:450`), so there is no second path for this family's corners
+to be losing exactness on. Whatever the other two not-a-solid answers were, they
+are not a corner the meet could name and did not.
+
+**`PinHeader_2x08_P2.54mm_Vertical.step` is a different cause, and the error
+message says so.** `mise exec -- just t
+every_kicad_file_that_imports_round_trips_to_the_same_solid --no-capture` on
+this branch:
+
+```
+round trip: both sides refuse to fuse, but for different reasons: the model is
+broken: a vertex of a face is # away from the face's plane vs could not settle
+# decisions the answer depends on
+```
+
+A vertex off its own plane after a write and a read back is not an undecided
+ordering; it is the plane moving under a vertex that did not. §130.6 already
+names the suspect one line up from it: **`from_coefficients`'s offset is two
+roundings and could be one.** `offset_of` computes `-(d / widest) * unit_there`,
+and on a plane that is already unit the round trip evaluates
+`(offset / nᵢ) · nᵢ`, which two roundings need not bring back. That is a
+hypothesis with the error message behind it and **not a measurement** — nothing
+in this lane ran it — and `crates/rcad-geom/src/plane.rs` was outside this lane's
+write set, so it is named rather than fixed.
+
+**The whole suite, and the exit code read out of a file.** `mise exec -- just t
+--no-fail-fast`: **2 005 tests run, 2 003 passed, 2 failed**, and the two are
+the two above. `mise exec -- just gate` redirected to a file with its exit code
+echoed after it: `gate: FAIL  first failure: test (exit 100)`, and the file's
+last line is `EXIT=100`. That is read and not forecast. Nothing else in the gate
+moved: every `check-*` arm passed, and `lint` and `check-wildcards` passed after
+one `cargo fmt --all` and one `needless_range_loop` rewrite that a first gate run
+caught.
+
+### 131.5 What is left
+
+- The skew vacuity band, at 1 of 429 against a floor of 2. Not this lane's to
+  re-measure, and §131.4 says why.
+- `PinHeader_2x08_P2.54mm_Vertical.step`, and the one-rounding offset §131.4
+  points at. A lane, with §130.6's bullet, not a gate.
+- `Plane::meet_of_three`'s doc comment (`plane.rs:497`) now says "The answer is a
+  constructed point", which this makes false in the same way §130.5 item 3's two
+  sentences are false. Outside this lane's write set and not edited.
+- A side of the box wider than sixteen `f64` is still handed back whole even
+  where an exact corner is hiding in it. A **gap** by §16.10 and deferred, in the
+  shape §122.4 defers its own: the answer can exist and the budget declines to
+  look for it. The family of fixes is not one member wide here — a tighter level 2
+  would shrink the box, and Newton's step on the two expansions would name the
+  quotient without walking anything — so it needs an argument before it needs
+  code, and no witness of it has been produced.
+
+Commands run to reach this: `git log --oneline -1`; `git checkout -B
+lane-130-exact-meet 8a63fa2a`; `mise exec -- just decision 122`, `122.1`,
+`122.2`, `122.4`, `130`, `130.5`, `130.6`; `mise exec -- just src Point
+crates/rcad-predicates`, `from_coefficients crates/rcad-geom`, `offset_of
+crates/rcad-geom`, `as_exact_as_it_is`; the four-test command of §131.4 on
+`8a63fa2a` and again here; `mise exec -- just t -p rcad-predicates
+--no-fail-fast` (175 tests, all passing); two throwaway `eprintln!` probes in
+`planes.rs`, one to find the witness trio and one to count the declines, both
+removed before the commit; `mise exec -- cargo fmt --all`; `mise exec -- just t
+--no-fail-fast`; `mise exec -- just gate`, redirected to a file with `EXIT=$?`
+echoed after it and read back.
+
+**The base's four is taken on the brief's word and was not re-run here as a
+whole-suite count.** What this lane measured on `8a63fa2a` is the four named
+tests, by name: 0 passed, 4 failed.
+
+## 132. The plane offset rounds once, the named suspect was innocent, and the KiCad refusal is a check that grants no room, measured 2026-09-18
+
+*§130.6 and §131.4 named one suspect for the KiCad round trip —
+`Plane::from_coefficients`'s offset being two roundings — and §131.4 was
+explicit that nothing had run it. This ran it. **It is innocent: the STEP
+reader never calls `from_coefficients` at all.** What the offset rounding does
+cost is somewhere else entirely, and it is large: cutting
+`from_point_and_normal` from five roundings to one takes the skew family from
+54 refusals to 42 and puts `"side of plane"` back on the number that file's own
+doc comments record. Both remaining tests still fail, for two causes this names
+and neither of which is in this lane's write set.*
+
+### 132.1 The suspect, and the two commands that clear it
+
+`grep -rn "from_coefficients\|from_point_and_normal\|through_three_points"
+--include=*.rs crates/rcad-step/src` returns seven lines. Every one of them is
+`from_point_and_normal`. `grep -rn "from_coefficients" --include=*.rs crates/`
+returns twenty-five more, all of them doc comments, tests and
+`fuse/arrange.rs`. **There is no path from a STEP file to
+`Plane::from_coefficients`**, so its offset cannot be what moves a vertex off
+its plane on a write and a read back. A STEP `PLANE` is an `AXIS2_PLACEMENT_3D`
+— a point and a direction — and both ends of the round trip go through
+`from_point_and_normal`.
+
+That is the first half. The second is a measurement of what the round trip
+actually moves, from a throwaway probe under `crates/rcad-step/tests` that
+imports `PinHeader_2x08_P2.54mm_Vertical.step`, writes it, reads it back and
+compares the two models' planes coefficient by coefficient:
+
+```
+planes: 340 here, 340 there
+moved normals: 0, moved offsets: 147, worst offset ulps: 2
+```
+
+**No normal moves at all.** §121 bought that: a stored unit normal handed back
+to `scaled_to_length_one_from_anywhere` comes back bit for bit. 147 of 340
+offsets move, by at most two ulps, and every one of them is a 45° chamfer whose
+normal is `±1/√2`.
+
+### 132.2 What actually refuses, and which side of the round trip it is on
+
+§131.4 read the error message as the round-tripped model being broken. **It is
+the other way round on that file.** The same probe runs the test's own
+`cut_by_a_centered_box` on both sides and prints the two errors whole:
+
+```
+BEFORE: the model is broken: a vertex of a face is 0.000000000000004440892098500626 away from the face's plane
+AFTER:  could not settle 1 decisions the answer depends on
+```
+
+`BEFORE` is the model straight out of the file. The round trip is the side that
+gives the ordinary `Undecidable`. (On `PinHeader_1x11_P2.54mm_Vertical.step`,
+which this lane's change adds to the failure, the two are the other way about —
+same shape, opposite sides.)
+
+The refusal is `derive_a_corner`'s (`crates/rcad-topo/src/fuse/bake.rs:629`).
+A throwaway `eprintln!` there prints the corner, its box and every surface
+round it:
+
+```
+corner Point([-0.32, -17.46, -2.8400000000000056]) width 7.105427357601002e-15
+ plane [0.0, 1.0, 0.0, 17.46]                                                    distance 0.0
+ plane [-1.0, 0.0, 0.0, -0.32]                                                   distance 0.0
+ plane [1.7351675083568896e-18, 0.7071067811865476, -0.7071067811865476, 10.337901140947324]   distance 1.7763568394002505e-15
+ plane [-0.7071067811865476, -1.7351675083568896e-18, -0.7071067811865476, -2.23445742854949]  distance 4.440892098500626e-15
+```
+
+Four planes meet there: two axis-aligned walls and two 45° chamfers carrying a
+`1.7e-18` tilt the file wrote. Three of them are solved for the corner; the
+fourth reads `4.44e-15` — ten ulps of `2.84` — off it, and
+`side_of_surface` certifies that sign, so the corner is refused.
+
+**`Model::validate` allows that same disagreement and the fuse does not.**
+`what_writing_a_plane_down_costs` grants `MEASURING_SLACK ×
+Plane::SIGNED_DISTANCE_ROUNDOFF × largest_coordinate`, which on a model whose
+largest coordinate is `19.05` is `2.7e-13` — sixty times the miss. The model
+imports and passes the full sweep. `the_place_the_model_points_at`'s own doc
+comment states the rule this breaks: *"a solid `Model::validate` accepts is one
+the fuse has to be able to bake"* (§75.6). It grants the allowance when it
+**picks** among places, and the loop straight after it, which re-checks the
+picked point against every surface, grants none.
+
+### 132.3 Two fixes that are not it, each with the run that says so
+
+**Raising `HOW_MANY_F64_ARE_WORTH_TRYING` does not close it.** The box above is
+`7.105427357601002e-15` wide on its `z` side, which is exactly sixteen ulps of
+`2.84` — seventeen `f64`, one past §131.3's budget of sixteen. That looks like
+§131.5's deferred gap exactly, so the constant was set to `64` and the probe re-
+run. The refusal is unchanged, distance and all. The reason is that the true
+corner is not in the box: level 2's enclosure is centred on
+`-2.8400000000000056` and half of it is eight ulps, while `-2.84` is twelve and
+a half ulps away. The three planes chosen genuinely do not meet at `-2.84`.
+
+**Making the offset round once does not close it either, and it halves the
+miss.** With `from_point_and_normal` on the hundred-bit dot product the same
+probe prints a different corner and a smaller number:
+
+```
+corner Point([0.32, -18.1, -2.8399999999999967]) width 7.105427357601002e-15
+ ... distance -2.220446049250313e-15
+```
+
+`-2.84` is now inside the box, seven and a half ulps from the middle. Both
+changes together — one-rounding offset *and* a budget of 64 — were run, and the
+refusal still stands: the exact meet of those three planes is not an `f64`
+triple, because the `1.7e-18` tilt makes it a quotient no `f64` names. That is
+a **limit** of those three planes and not a gap. The gap is the fourth plane
+being asked a question with no room in it.
+
+### 132.4 What one rounding is worth, measured by taking the other half away
+
+The change is two spellings, both in this lane's write set.
+`Vector::dot_rounded_once` keeps each product exact and adds the three to a
+hundred bits, so `from_point_and_normal`'s offset rounds once where
+`Vector::dot` rounded five times. `Plane::offset_of` forms `d · unitᵢ` exactly
+and divides that by the widest coefficient, rounding once where dividing first
+and multiplying after rounded twice.
+
+Proportionality survives, and for a better reason than before. The old doc
+comment said dividing `d` by the coefficient first is *what makes two
+proportional coefficient sets agree*. Now **nothing rounds before the
+division**: `two_product` is exact, so scaling the plane by `s` scales
+numerator and denominator by exactly `s` and the quotient is the same real
+number. `proportional_coefficients_describe_the_same_plane_bit_for_bit` and
+`a_planes_coefficients_written_at_any_scale_are_the_same_plane` both pass
+unmodified.
+
+The two halves were measured apart, by putting `Vector::dot` back and running
+the two failing tests again. **`offset_of` alone changes nothing either test
+can see** — `429 fuses, 54 refused (12.6%), 1 not a solid`, and the same one
+pinned KiCad file stopped, which are §131.4's numbers to the fuse. **The whole
+of the movement is `from_point_and_normal`:**
+
+| | refused | "side of plane" | "a point inside a piece of a face" | not a solid |
+|---|---|---|---|---|
+| `381b7bef`, before §121 (file's own doc comments) | — | 12 | — | 3 |
+| `8a63fa2a`, §121 | 63 (14.7%) | 24 | 9 | 0 |
+| `5b02cca5`, §131 | 54 (12.6%) | 18 | 9 | 1 |
+| here | **42 (9.8%)** | **12** | **3** | 1 |
+
+`"side of plane"` lands back on the twelve that file records for the arithmetic
+before §121, and `"order along a crossing"` — the count §22 is about — sits at
+27 through all three of the last rows. **The offset's four extra roundings were
+costing a tenth of this family's `"side of plane"` decisions**, and they were
+costing them before §121 as well; §121 only made them visible by taking the
+normal's rounding away from underneath.
+
+`a_dot_product_rounded_once_keeps_a_term_three_products_and_two_adds_lose` is
+the test §15.6 asks for on the arithmetic itself: `(1,1,1) · (2⁶⁰, 1, −2⁶⁰)` is
+one, `Vector::dot` returns zero, and one rounding returns one.
+`a_planes_offset_from_its_coefficients_rounds_once_and_not_twice` pins the
+other spelling on a plane out of a 200 000-sample sweep in which the two
+spellings differed 52 355 times — a quarter of ordinary coefficient sets, not a
+contrived one.
+
+### 132.5 The skew band is still not re-measurable, and this says what would make it so
+
+`A_SKEW_PAIR_IS_NOT_A_SOLID` is `0.47%–2.10%`, which over 429 fuses is two to
+nine. It reads **1** here, as it did on §131's tree, and the guard still fires.
+
+**It is not widened.** §131.4 declined to re-measure on the grounds that one of
+429 is a number with no argument behind it, and that is still true — a second
+run of the same deterministic family is the same one, not a second opinion. What
+this lane adds is that the direction of travel is now explained rather than
+merely observed: three of the four rows above move together, and the one that
+moves them is the plane being nearer the plane the file names. Fewer refusals
+and fewer non-manifold results are the same fact about the same arithmetic.
+
+That is an argument for *why the number fell*, and it is still not an argument
+for *what the floor should be*, which is what a band needs. The band's job is
+vacuity: it says this family still reaches the four-faces-along-one-edge
+configuration it was built to reach. At one it still reaches it. Re-deriving the
+floor wants the family generated at more than one seed — the width of the
+distribution, not one draw from it — and **this lane did not do that and the
+band is left failing.** Widening it to fit a single observation is the one move
+that would waste §121, §130, §131 and this.
+
+### 132.6 What is left
+
+- **The KiCad round trip fails on two files now, where it failed on one.**
+  `PinHeader_2x08_P2.54mm_Vertical.step` and
+  `PinHeader_1x11_P2.54mm_Vertical.step`. §132.2 names the cause and it is a
+  check in `crates/rcad-topo/src/fuse/bake.rs`, outside this lane's write set:
+  `derive_a_corner` re-checks the corner it picked against every surface with a
+  bare certified sign, while every other reading of that same disagreement —
+  `check_flat_face`, `the_place_the_model_points_at` — grants `MEASURING_SLACK ×
+  SIGNED_DISTANCE_ROUNDOFF × size` and reads it from the one constant so that
+  the two cannot drift. The next step is to make the re-check read the same
+  allowance, and it owes the argument that doing so does not let through the
+  corner §70.3 is about; the two are told apart by *how far*, which is exactly
+  what the allowance measures and the bare sign does not.
+- **The skew vacuity band**, §132.5. The next step is to run the family at more
+  than one seed.
+- §131.5's own last bullet — a side of the box wider than the budget handed back
+  whole — **still has no witness**, and §132.3 is the negative result: the one
+  case that looked like it is not one.
+- §120.6's table still owes the row §121.6 and §130.6 both ask for.
+
+Commands run to reach this: `git log --oneline -1`; `git checkout -B
+lane-132-plane-offset 5b02cca5`; `mise exec -- just decision 121`, `130`,
+`131`, `130.5`, `130.6`, `131.1`, `131.3`, `131.4`, `131.5`; `mise exec -- just
+src from_coefficients crates/rcad-geom`, `offset_of crates/rcad-geom`,
+`scaled_to_length_one_from_anywhere`, `MEASURING_SLACK`,
+`what_writing_a_plane_down_costs`, `the_place_the_model_points_at`,
+`uncertainty`, `as_exact_as_it_is`; the two `grep` commands of §132.1; a
+throwaway probe test under `crates/rcad-step/tests`, an `eprintln!` in
+`bake.rs`, a witness sweep under `crates/rcad-geom/tests` and one temporary
+edit of `HOW_MANY_F64_ARE_WORTH_TRYING`, all four removed or reverted before
+the commit; `mise exec -- just t
+every_kicad_file_that_imports_round_trips_to_the_same_solid --no-capture`;
+`mise exec -- just t how_often_a_certified_fuse_of_a_skew_pair_refuses
+every_kicad_file_that_imports_round_trips_to_the_same_solid --no-fail-fast
+--no-capture`, once with both halves of the change and once with
+`from_point_and_normal` put back; `mise exec -- cargo build --workspace
+--all-targets`; `mise exec -- just t --no-fail-fast`; `mise exec -- just gate`,
+redirected to a file with `EXIT=$?` echoed after it and read back.
+
+**The gate's exit code is read and not forecast.** `mise exec -- just gate`
+into a file: the last line is `EXIT=100`, and the line above it is `gate: FAIL
+first failure: test (exit 100)`. Every arm before `test` passed, `lint` and
+`check-wildcards` among them. `mise exec -- just t --no-fail-fast`: **2 007
+tests run, 2 005 passed, 2 failed**, and the two are the two named above.
+
+**`## 132.` is taken here on instruction.** The pre-commit check
+`git log --all --oneline -S'## 132. ' -- docs/decisions.md` returns `e4331d8d`,
+a section of the same number on an unmerged branch. The session dispatching this
+lane holds that branch, has agreed to renumber its own three, and told this lane
+to take 132 anyway.
