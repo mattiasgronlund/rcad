@@ -19,45 +19,41 @@ reviewed: 2026-09-18
 
 **unit:** *a crossing too nearly parallel to follow* — the corpus files that
 hang on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off
-§107's table, with the 18 closed edges walked against their surface's winding
-to follow it. §16.10 governs it: "too nearly parallel to follow" is a claim that
-something cannot be done, so the unit owes a demonstration either way — a gap if
+§107's table. §16.10 governs it: "too nearly parallel to follow" is a claim
+that something cannot be done, so it owes a demonstration either way — a gap if
 a scaling or a reformulation reaches the sign, a limit if none does.
 
-**Four waves have run, and the demonstration is in.** §110–§113 named the pair
+**Five waves have run, and the demonstration is in.** §110–§113 named the pair
 and the site and falsified §109.6 — the wall is `settled`, not `one_step`.
-§115–§117 walked closed edges by this kernel's rule rather than the file's flag
-(KiCad import 97/323 → 110/323), leaving 26 files at the wall: **20 a limit,
-none transverse, 6 two equal pipes whose axes cross.** §118 answered those 6 in
-closed form and found two classifiers that disagree. §119 made a pipe `r` wide
-in every file and spent §29's *geometric* width claim. §122–§124 took the last
-three, the third as a finding and not a fix: §115.4's hint is not wrong and
-neither is the file — the certified rule asks both faces of one closed edge to
-be forward, and only one of them can be.
+§115–§117 walked closed edges by this kernel's rule and not the file's flag
+(KiCad import 97/323 → 110/323), leaving 26 at the wall: **20 a limit, none
+transverse, 6 equal pipes whose axes cross**, answered in closed form by §118
+and §119. §122–§124 took the last three, the third a finding: the certified
+rule asks both faces of one closed edge to be forward and only one can be.
+§127 landed §123.5's `FaceKey` half; §128 built §124's reproduction and
+confirmed it.
 
-**What is left:** §124's gap, with no reproduction yet (§124.4); §122.4's
-scale-and-retry; §123.5's `FaceKey` half; and §121, `Plane`'s normalize, booked
-inside §120 because it moves the stored bits of every plane.
+**What is left:** §122.4's scale-and-retry, written and **not on `main`** — it
+breaks fuse commutativity, and its own section arrives with that diagnosis; and
+§121, `Plane`'s normalize, booked inside §120 because it moves every plane's
+stored bits. §124's gap is deferred, below.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, and healing, the biggest bucket, is refused by name in §42.9. §45.2
-still governs every count: a file count a blocker stops *first* is an upper
-bound, never a projection.
+governs every count: a file count a blocker stops *first* is an upper bound.
 
 **parked:** *the hollow*, §104, opened 2026-09-15 — shelling a plane-faced solid
 to a wall of one thickness, the first of roadmap §8's local operations (§44.1 is
-why it has a name instead of M6). **No lane runs, and none will yet:** §104.2 has
-the reason — §13 wants a named consumer and `docs/consumers.md` records none for
-any local operation. Mattias parked it rather than argue §13 down, because the
-corpus has a consumer today and shelling does not.
+why it has a name instead of M6). **No lane runs, and none will yet:** §104.2
+has the reason — §13 wants a named consumer and `docs/consumers.md` records none
+for any local operation. Mattias parked it rather than argue §13 down.
 
 The unit before it, §53 `a plane, a cone and a coaxial pipe`, is closed by §103
-having earned nothing; §55 through §102 are defect fixes, fuzz work and tooling.
+having earned nothing; §55–§102 are defect fixes, fuzz work and tooling.
 
-**the board is not here.** `docs/plan.md` has one line per roadmap item with
-its state and the evidence; `just plan` renders it, `just plan open` lists what
-is left, and `just status` prints the counts. Audited 2026-09-15: 13 done,
-7 partly, 5 todo. §106.
+**the board is not here.** `docs/plan.md` has one line per roadmap item with its
+state and the evidence; `just plan` renders it, `just plan open` lists what is
+left. Audited 2026-09-15: 13 done, 7 partly, 5 todo. §106.
 
 **deferred, with the section that defers it:**
 
@@ -66,10 +62,14 @@ is left, and `just status` prints the counts. Audited 2026-09-15: 13 done,
 - §43.8 item 12 — healing option C, imported-corner slop, not built. Nothing
   closes it.
 - §89.7 — the cheap detector for a walk that does not close, deferred under
-  §13's no-named-consumer rule. Fine deflection still costs ~2.9s with no
-  cheap refusal ahead of it.
+  §13's no-named-consumer rule. Fine deflection still costs ~2.9s.
 - §52.13 — unscored. The gate that was to score it, §53.7 charge 3, never ran;
   §104.6 carries it.
+- §124's gap — deferred by Mattias on 2026-09-18, on §128.3's finding and not
+  §124's: a dome on a shaft has one closed seam **iff the two are tangent**, so
+  the gap is that whole family by construction and **no transversal version of
+  the shape exists to serve as a control** for a fix. One corpus file is in it,
+  a thin consumer under §13. What is missing is a second witness, not an argument.
 
 This section is §0 so it sorts above §1 and `just decision 0` reaches it; `just
 status` prints it and `check-where-the-work-is` holds its shape. §102 argues why
