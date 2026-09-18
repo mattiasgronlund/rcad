@@ -8,7 +8,7 @@ use rcad_predicates::{
 use serde::{Deserialize, Serialize};
 
 use crate::isometry::Isometry;
-use crate::point::{Point, Vector};
+use crate::point::{Point, Vector, a_hundred_bit_number_divided_by, product_to_a_hundred_bits};
 use crate::{Error, Result};
 
 /// The name the plane's sign predicate goes by in provenance records.
@@ -128,7 +128,7 @@ impl Plane {
             });
         }
         let normal = normal.scaled_to_length_one_from_anywhere("plane normal")?;
-        let offset = normal.dot(point - Point::origin());
+        let offset = normal.dot_rounded_once(point - Point::origin());
         if !offset.is_finite() {
             return Err(Error::NotFinite {
                 what: "distance from the origin to a plane",
@@ -206,12 +206,13 @@ impl Plane {
     /// furthest from zero — a unit vector's widest component is never below
     /// `1/√3`.
     ///
-    /// **Dividing `d` by the coefficient first is what makes two proportional
-    /// coefficient sets agree**, which is what a face being its plane needs
-    /// (`docs/decisions.md` §17.1, §22.6). `d / m` and `s·d / s·m` are the same
-    /// real number and therefore the same `f64` whatever `s` is, and `unit` is
-    /// already the same for both. Multiplying `d` by `unitᵢ` first would not be:
-    /// that product moves with `s`.
+    /// **Nothing rounds before the division, which is what makes two
+    /// proportional coefficient sets agree**, which is what a face being its
+    /// plane needs (`docs/decisions.md` §17.1, §22.6). `d · unitᵢ` is formed
+    /// exactly and held as a hundred bits, so `(d·unitᵢ) / m` and
+    /// `(s·d·unitᵢ) / (s·m)` are the same real number and round to the same
+    /// `f64`. Dividing `d` by the coefficient first bought that same agreement
+    /// and paid a second rounding for it (`docs/decisions.md` §132).
     fn offset_of(coefficients: Vector, unit: Vector, d: f64) -> f64 {
         let [a, b, c] = coefficients.components();
         let [along_a, along_b, along_c] = unit.components();
@@ -222,7 +223,7 @@ impl Plane {
         } else {
             (c, along_c)
         };
-        -(d / widest) * unit_there
+        -a_hundred_bit_number_divided_by(product_to_a_hundred_bits(d, unit_there), widest)
     }
 
     /// Which way the plane faces. Scaled to length one when the plane was built.
@@ -494,15 +495,19 @@ impl Plane {
 
     /// Where three planes meet.
     ///
-    /// The answer is a constructed point: a box the true meeting point is
-    /// somewhere inside. Cramer's rule needs a division, and dividing two
-    /// ranges almost never lands on an `f64`, so the box has real width even
-    /// when the three planes are square to each other.
+    /// The answer is an **exact point where the meeting point is an `f64`
+    /// triple and that can be proved, and a constructed point — a box the true
+    /// meeting point is somewhere inside — otherwise.** Cramer's rule needs a
+    /// division, and dividing two ranges almost never lands on an `f64`, so
+    /// most answers are boxes; `docs/decisions.md` §131 is the level that
+    /// names the corner when the box holds one, and this doc comment said
+    /// "constructed" for every answer until it did.
     ///
-    /// That width is the point of it. A predicate over a constructed point
-    /// cannot fall through to exact arithmetic, so it can genuinely come back
-    /// [`Decision::Undecidable`] — this is the geometry-side entry to the case
-    /// `docs/decisions.md` §2.5 asks M0 to reach.
+    /// Where the width is real it is the point of it. A predicate over a
+    /// constructed point cannot fall through to exact arithmetic, so it can
+    /// genuinely come back [`Decision::Undecidable`] — this is the
+    /// geometry-side entry to the case `docs/decisions.md` §2.5 asks M0 to
+    /// reach.
     ///
     /// # Errors
     ///
@@ -1103,6 +1108,37 @@ mod tests {
         assert!((recovered.offset() - plane.offset()).abs() < 1e-15);
     }
 
+    /// [`Plane::offset_of`] rounds once, and dividing before multiplying
+    /// rounded twice (`docs/decisions.md` §132, §129.6).
+    ///
+    /// The two spellings are the same real number and different `f64`. A sweep
+    /// of 200 000 random coefficient sets in `[-10, 10]` told them apart 52 355
+    /// times — a quarter — so this is an ordinary plane and not a contrived
+    /// one.
+    #[test]
+    fn a_planes_offset_from_its_coefficients_rounds_once_and_not_twice() {
+        let coefficients = [
+            8.477_658_241_021_57,
+            -8.986_484_763_473_53,
+            -8.740_426_871_854_805,
+            -7.512_026_851_469_46,
+        ];
+        let plane = Plane::from_coefficients(coefficients).expect("a plane");
+
+        let [_, widest, _, d] = coefficients;
+        let unit_there = plane.normal().y();
+        assert_eq!(
+            -(d / widest) * unit_there,
+            0.496_384_149_050_014_7,
+            "dividing first and then multiplying rounds twice"
+        );
+        assert_eq!(
+            plane.offset(),
+            0.496_384_149_050_014_66,
+            "forming the product exactly and dividing it rounds once"
+        );
+    }
+
     #[test]
     fn a_plane_facing_along_an_axis_comes_back_from_its_coefficients_bit_for_bit() {
         let plane = plane_at_height_two();
@@ -1196,20 +1232,27 @@ mod tests {
     /// All three points define the plane, so the truthful answer for each is
     /// `Zero`, and `orient3d` — which never divides — says so. Normalising the
     /// normal moved the stored plane off them, and the predicate is certain
-    /// about the plane it was given. The first point even has an `f64` distance
+    /// about the plane it was given. The third point even has an `f64` distance
     /// of exactly zero while the certified sign against the stored coefficients
-    /// is negative.
+    /// is positive.
+    ///
+    /// **The sides moved when the offset stopped rounding five times**
+    /// (`docs/decisions.md` §132): it was `Neg` for all three and the exactly
+    /// zero distance was the *first* point's. Which way each one is off is a
+    /// fact about the rounding and not about the geometry, so the three are
+    /// named one at a time rather than asserted to agree.
     #[test]
     fn the_points_that_defined_a_plane_are_not_on_the_plane_that_gets_stored() {
         let corners = [[1.0, 2.0, 3.0], [4.0, 5.0, 7.0], [2.0, 9.0, 4.0]];
         let [first, second, third] = corners.map(|[x, y, z]| Point::new(x, y, z));
         let plane = Plane::through_three_points(first, second, third).unwrap();
 
-        assert_eq!(plane.signed_distance_to(first), 0.0);
-        for corner in corners {
+        assert_eq!(plane.signed_distance_to(third), 0.0);
+        let certain_and_wrong = [Decision::Pos, Decision::Neg, Decision::Pos];
+        for (corner, side) in corners.into_iter().zip(certain_and_wrong) {
             assert_eq!(
                 plane.side_of_point(PredicatePoint::from(corner)),
-                Decision::Neg,
+                side,
                 "the stored plane is certain, and wrong, about {corner:?}"
             );
             assert_eq!(
