@@ -29144,10 +29144,20 @@ already has"* — was tried, measured, and does not reach this input.
 Going one step further and boxing the **gradients** as well, while keeping the
 corner exact, does not reach it either. **That was reasoned here and then
 measured by the wave-1 gate agent**, which built an outer enclosure with a
-`nextafter` of slack per operation and got
-`[4.2062309985394852e-30, 4.2062309985395062e-30]` — width `2.1e-44`, `Pos`
-proved, no refusal. That enclosure is strictly wider than a tight one, so a tight
-one refuses no sooner.
+`nextafter` of slack per operation around §111.1's value and still got `Pos`
+proved, no refusal. That enclosure is strictly wider than a tight one, so a
+tight one refuses no sooner.
+
+**The two exact edges this section first gave for that box do not belong
+here, and are struck rather than corrected.** They were never checked into the
+tree: the `nextafter`-slack procedure that produced them was run once by the
+wave-1 gate agent and not committed, so nothing in `crates/`, `tooling/` or the
+test suite can rebuild them — a search for the figures themselves and for
+`nextafter` over all three turns up nothing. A bare number with no procedure
+behind it to re-run is exactly the failure this file keeps having (see §124.1's
+correction), so what stands is the qualitative result above — boxing the
+gradients still proves `Pos` — and not the two figures that used to sit beside
+it.
 
 **The reason first written down here was wrong, and the correction is the
 interesting part.** This section claimed `∇S` has no width because `at − centre`
@@ -31791,10 +31801,17 @@ points, one face agrees with it and the other cannot.
 
 **The certified rule**, `a_closed_crossing_is_walked_the_way_it_is_stored`
 (`crates/rcad-topo/src/validate.rs:1556`), is run once per face, each time
-against the *other* face as `across`. §111.2 already proved its `turning`
-term — `(∇S × ∇T) · (ẑ × ∇S)`, `4.2062309985394852e-30` wide to
-`2.1e-44` either side of `Pos` — is not a coin toss for this file: it is an
-exact value of the stored numbers with nothing cancelling. What §111 did not
+against the *other* face as `across`. §111.1 already proved its `turning`
+term — `(∇S × ∇T) · (ẑ × ∇S)`, `4.206230998539495e-30` — is not a coin toss
+for this file: it is an exact value of the stored numbers with nothing
+cancelling, and §111.2's boxed enclosure of it still proves the same sign.
+(This section first cited the enclosure's lower edge as though it were the
+value itself, and called the enclosure's whole width the width "either side"
+of it — as if the box were twice as wide as it was. Both figures are now
+struck from §111.2 for a separate reason, that they do not reproduce; this
+one is a wording bug, independent of that. It is the fourth time this file
+has been wrong about a number quoted from itself rather than re-run, after
+§111.3, §115.4 and §120.5.) What §111 did not
 trace is the other half the rule needs, `material_side`
 (`which_side_of_it_this_face_lies_on`, `validate.rs:1608`), which reads the
 side of one corner **not** on the shared edge:
@@ -31989,11 +32006,28 @@ the Cauchy–Schwarz line 57 lines out, a winding vector whose `z` term is
 `8.3e-16` rather than `0`, and a sentence about NIST moving when §115.4 says it
 did not.
 
-**One claim could not be checked.** §124.1 quotes §111.2's `turning` value,
-`4.2062309985394852e-30`. It is asserted in no test — it appears only in this
-file — so §124.1 is quoting a decisions section for a number, which is the one
-thing §111.3, §115.4 and §120.5 between them have already been wrong about
-three times. Reproducing it means running `blocker_depth_probe`. Nobody has.
+**One claim could not be checked, and the remedy named for it was wrong.**
+§124.1 quoted §111.2's enclosure edge as if it were the `turning` value —
+corrected in §124.1 itself, to §111.1's `4.206230998539495e-30`. When this
+section was written, neither figure was asserted anywhere but in this file, so
+the debt it flagged was real. But `blocker_depth_probe` does not pay it. Its own
+doc comment says what it does: "turns what it finds into the number that
+actually prices a fix: not how many files a reason stops first, but how many
+files have **only** that reason and nothing else behind it" — a census over the
+whole STEP corpus, one row per file, of which import blocker sticks after the
+others are cleared. There is no path in it anywhere near a single edge's
+`turning` arithmetic, so running it would reproduce nothing here.
+
+**The debt is paid now, and by a test rather than by that probe.**
+`the_dome_and_pipe_from_the_led_file_turn_by_a_real_amount`
+(`crates/rcad-geom/tests/`) recomputes the five-line chain from §111.1's own
+four points and one direction, written in as literals, and asserts both the
+cross product and `4.206230998539495e-30`. It needs no corpus, because §111.1
+names the whole input. Its opening draws the distinction §124.1 lost — that this
+is the value and **not** §111.2's enclosure — and it reaches the same verdict on
+those edges that §111.2 above now records: the `nextafter`-slack procedure was
+never checked in, so there is nothing to call and no way to reproduce them bit
+for bit.
 
 The lesson is not that §124 was careless: it was explicit that it had run
 nothing, and it was right about the thing it was for. It is that a section which
