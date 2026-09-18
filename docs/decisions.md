@@ -23,24 +23,25 @@ hang on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off
 that something cannot be done, so it owes a demonstration either way — a gap if
 a scaling or a reformulation reaches the sign, a limit if none does.
 
-**Five waves have run, and the demonstration is in.** §110–§113 named the pair
+**Five waves have run and the demonstration is in.** §110–§113 named the pair
 and the site and falsified §109.6 — the wall is `settled`, not `one_step`.
 §115–§117 walked closed edges by this kernel's rule and not the file's flag
-(KiCad import 97/323 → 110/323), leaving 26 at the wall: **20 a limit, none
-transverse, 6 equal pipes whose axes cross**, answered in closed form by §118
-and §119. §122–§124 took the last three, the third a finding: the certified
-rule asks both faces of one closed edge to be forward and only one can be.
-§127 landed §123.5's `FaceKey` half, §128 built §124's reproduction and
-confirmed it, and §126 landed §122.4's scale-and-retry — clearing itself of the
-commutativity failure blamed on it, the rule it changes being unreachable from
-that family. **That failure was real and is now unreproduced**: §126.6.
+(KiCad import 97/323 → 110/323), leaving 26: **20 a limit, none transverse, 6
+equal pipes whose axes cross**, answered in closed form by §118 and §119.
+§122–§128 took the last three, the third a finding — the certified rule asks
+both faces of one closed edge to be forward and only one can be. §126 cleared
+itself of the commutativity failure blamed on it, and **that failure was real
+and is now unreproduced**: §126.6.
 
-**What is left:** §121, `Plane`'s normalize, which §120 books because it moves
-every plane's stored bits; and §126.6's counterexample. §124's gap is deferred.
+**§121 has landed** on 2026-09-18, with everything doing it needed: §129 its own
+run and the ulp that cost a corner, §130 the meet's exact tier, §132 the plane
+offset rounding once, §136 the corner allowance. `main` is `912cd168`.
+
+**What is left:** §126.6's counterexample; §124's, §136.4's and §125.6's gaps
+are deferred, not open work.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
-the lever, and healing, the biggest bucket, is refused by name in §42.9. §45.2
-governs every count: a file count a blocker stops *first* is an upper bound.
+the lever, healing is refused by name in §42.9, and §45.2 governs every count.
 
 **parked:** *the hollow*, §104, opened 2026-09-15 — shelling a plane-faced solid
 to a wall of one thickness, the first of roadmap §8's local operations (§44.1 is
@@ -65,15 +66,15 @@ left. Audited 2026-09-15: 13 done, 7 partly, 5 todo. §106.
   §13's no-named-consumer rule. Fine deflection still costs ~2.9s.
 - §52.13 — unscored. The gate that was to score it, §53.7 charge 3, never ran;
   §104.6 carries it.
-- §124's gap — deferred by Mattias on 2026-09-18, on §128.3's finding and not
-  §124's: a dome on a shaft has one closed seam **iff the two are tangent**, so
-  the gap is that whole family by construction and **no transversal version of
-  the shape exists to serve as a control** for a fix. One corpus file is in it,
-  a thin consumer under §13. What is missing is a second witness, not an argument.
+- §124's gap — deferred by Mattias on 2026-09-18 on §128.3's finding, which is
+  that the gap is a whole family by construction with no transversal control to
+  fix it against. What is missing is a second witness, not an argument.
+- §136.4 — the fuse's corner re-check is tighter than `Model::validate`, the
+  direction §75.6 forbids. Parked by Mattias on 2026-09-18 under §13; the
+  `#[ignore]`d repro fails loudly the day a part a hundred metres across arrives.
 
 This section is §0 so it sorts above §1 and `just decision 0` reaches it; `just
-status` prints it and `check-where-the-work-is` holds its shape. §102 argues why
-it is here and not in `docs/roadmap.md` or a file of its own.
+status` prints it, `check-where-the-work-is` holds its shape, §102 says why here.
 
 ## 1. Departures from the roadmap
 
