@@ -32299,8 +32299,9 @@ committed one, so no session has added a seed to it.
 recorded is a failure one session saw once and no run since has seen, in a
 property whose search is random, in a family this lane's code cannot enter. `mise
 exec -- just gate` on the merge is **exit 0, PASS, 2 000 tests** — `91423951`'s
-1 999 plus this lane's one new test — read off the exit code and not off the
-tail.
+1 999 plus §126.2's one new test — and **exit 0, PASS, 2 001 tests** once this
+section's test is in. Both read off the exit code, written to a file and echoed,
+and not off the tail of a pipe.
 
 Commands run to reach this: `git log --oneline -1`; `git checkout -B
 lane-126-symmetry 91423951`; `git merge --no-ff lane-scale-and-retry`; `mise exec
