@@ -33048,6 +33048,15 @@ hypothesis with the error message behind it and **not a measurement** — nothin
 in this lane ran it — and `crates/rcad-geom/src/plane.rs` was outside this lane's
 write set, so it is named rather than fixed.
 
+**The whole suite, and the exit code read out of a file.** `mise exec -- just t
+--no-fail-fast`: **2 005 tests run, 2 003 passed, 2 failed**, and the two are
+the two above. `mise exec -- just gate` redirected to a file with its exit code
+echoed after it: `gate: FAIL  first failure: test (exit 100)`, and the file's
+last line is `EXIT=100`. That is read and not forecast. Nothing else in the gate
+moved: every `check-*` arm passed, and `lint` and `check-wildcards` passed after
+one `cargo fmt --all` and one `needless_range_loop` rewrite that a first gate run
+caught.
+
 ### 131.5 What is left
 
 - The skew vacuity band, at 1 of 429 against a floor of 2. Not this lane's to
@@ -33073,4 +33082,10 @@ crates/rcad-geom`, `as_exact_as_it_is`; the four-test command of §131.4 on
 `8a63fa2a` and again here; `mise exec -- just t -p rcad-predicates
 --no-fail-fast` (175 tests, all passing); two throwaway `eprintln!` probes in
 `planes.rs`, one to find the witness trio and one to count the declines, both
-removed before the commit; `mise exec -- just gate`.
+removed before the commit; `mise exec -- cargo fmt --all`; `mise exec -- just t
+--no-fail-fast`; `mise exec -- just gate`, redirected to a file with `EXIT=$?`
+echoed after it and read back.
+
+**The base's four is taken on the brief's word and was not re-run here as a
+whole-suite count.** What this lane measured on `8a63fa2a` is the four named
+tests, by name: 0 passed, 4 failed.
