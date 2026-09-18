@@ -321,9 +321,11 @@ impl Vector {
     /// **Every component above `2^-1012` comes back correctly rounded** — the
     /// nearest `f64` there is to the exact ratio between that component and the
     /// exact length. Below `2^-1012` it can be one ulp out, which is the last
-    /// three binades before the subnormals and no direction anyone draws.
+    /// ten binades before the subnormals and no direction anyone draws.
     /// `a_unit_component_is_the_nearest_f64_to_the_exact_ratio` is the test
-    /// §15.6 asks for.
+    /// §15.6 asks for, and
+    /// `a_tiny_third_component_comes_back_untouched_into_the_subnormals` pins
+    /// the floor of the bound and everything under it.
     ///
     /// Two steps get there.
     ///
@@ -598,8 +600,8 @@ impl Axis {
     ///
     /// Only the direction of `direction` is read: two vectors along the same
     /// line give the same axis bit for bit however long each one is. That takes
-    /// dividing by the largest component before normalizing, which is what
-    /// [`Vector::scaled_to_length_one_from_anywhere`] does and what plain
+    /// an exact power-of-two rescale before the division by the length, which is
+    /// what [`Vector::scaled_to_length_one_from_anywhere`] does and what plain
     /// normalizing does not — `docs/decisions.md` §22.6 recorded the same defect
     /// for `Plane` and this one went unfixed because nothing built the same pipe
     /// two ways. A curved fuse does, the moment two solids are flush against
@@ -1092,9 +1094,22 @@ mod tests {
     ///
     /// The old arithmetic is measured beside it rather than remembered: divide
     /// by the largest component and then normalize is three lines below, and it
-    /// misses the nearest `f64` on about one component in ten. That is what
+    /// misses the nearest `f64` on nearly one component in five. That is what
     /// makes this a test the change was needed for and not a test of whatever
     /// the code happens to do.
+    ///
+    /// **How far down this reaches is measured too, and printed.** The exact
+    /// reference is [`ExactFrame`], which lifts the smallest component of a
+    /// triple to `2^-400` and gives up on a lift past 500, so it carries a
+    /// triple 900 binades wide and no wider — asserted below at 900 and 901
+    /// rather than read off the constant. Hand-written directions `(1, 2^-e, 0)`
+    /// claim every one of those binades; the drawn directions alone stopped
+    /// about a hundred short of them, because their exponents come out of a
+    /// range 800 wide. So the sweep pins the bound from the top down to `2^-900`
+    /// and the last 112 binades of `2^-1012` rest on §120.1's integer-triple
+    /// measurement instead. `a_tiny_third_component_comes_back_untouched_into
+    /// _the_subnormals` pins the floor itself by a route that needs no expansion
+    /// arithmetic at all.
     #[test]
     fn a_unit_component_is_the_nearest_f64_to_the_exact_ratio() {
         let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
@@ -1120,6 +1135,17 @@ mod tests {
                     }
                 }
             }
+        }
+        // A drawn triple spans at most eight hundred binades, which leaves the
+        // bottom hundred of what the exact reference can carry unclaimed. These
+        // claim them: the second component of each is the smallest thing any
+        // direction here is checked at.
+        for spread in 1..=900 {
+            directions.push(Vector::new(
+                1.0,
+                multiplied_by_a_power_of_two(1.0, -spread),
+                0.0,
+            ));
         }
         // Mantissas out of the generator and exponents spread as wide as four
         // hundred binades, so the drawn directions reach well past anything a
@@ -1152,6 +1178,7 @@ mod tests {
         let mut wrong_the_old_way = 0usize;
         let mut too_wide_to_square = 0usize;
         let mut below_the_bound = 0usize;
+        let mut smallest_checked = f64::INFINITY;
 
         for direction in directions {
             let Ok(unit) = direction.scaled_to_length_one_from_anywhere("direction") else {
@@ -1191,6 +1218,7 @@ mod tests {
                     continue;
                 };
                 checked += 1;
+                smallest_checked = smallest_checked.min(answer.abs());
                 if !nearest {
                     wrong += 1;
                     println!(
@@ -1208,8 +1236,30 @@ mod tests {
             "{checked} components checked against an exact reference: {wrong} not correctly \
              rounded, against {wrong_the_old_way} ({:.2}%) for dividing by the largest component \
              and normalizing. {below_the_bound} components below 2^-1012 and \
-             {too_wide_to_square} comparisons too wide to square.",
-            100.0 * wrong_the_old_way as f64 / checked as f64
+             {too_wide_to_square} comparisons too wide to square. The smallest \
+             component checked was 2^{}.",
+            100.0 * wrong_the_old_way as f64 / checked as f64,
+            binary_exponent(smallest_checked)
+        );
+        // Where the exact reference stops, measured rather than read off
+        // `ExactFrame::around`'s two constants.
+        let spread_of = |binades: i32| {
+            Vector::new(1.0, multiplied_by_a_power_of_two(1.0, -binades), 0.0)
+        };
+        assert!(
+            ExactFrame::around(spread_of(900)).is_some(),
+            "the exact reference is meant to carry a triple nine hundred binades wide"
+        );
+        assert!(
+            ExactFrame::around(spread_of(901)).is_none(),
+            "a triple wider than nine hundred binades has no scale that carries the comparison, \
+             so the reference must refuse it rather than decide it in f64"
+        );
+        assert!(
+            binary_exponent(smallest_checked) <= -900,
+            "the sweep is meant to reach as far down as the exact reference carries, and it \
+             stopped at 2^{}",
+            binary_exponent(smallest_checked)
         );
         assert!(
             checked >= 10_000,
@@ -1225,6 +1275,70 @@ mod tests {
             "the old arithmetic is what this change replaced, and if it misses the nearest f64 \
              only {wrong_the_old_way} times out of {checked} then this test is not the one §15.6 \
              asks for"
+        );
+    }
+
+    /// **`(1, 0, t)` with a tiny `t` is already its own unit vector**, so this
+    /// pins the floor of the published bound and everything under it, right down
+    /// to the smallest number an `f64` can hold.
+    ///
+    /// The true length is `√(1 + t²)`, which is `1` out by a relative `t²/2`.
+    /// At `t = 2^-e` that is `2^(-2e-1)`, and both components are scaled by it:
+    /// the true unit is `(1 - 2^(-2e-1), 0, t·(1 - 2^(-2e-1)))` to leading order.
+    /// A `f64` keeps 53 bits, so the nearest one to each of those is what it
+    /// started as the moment `2^(-2e-1)` is below half an ulp, `2^-54` — that is
+    /// `e ≥ 27`, and this starts at 600. So the correctly rounded answer here is
+    /// `(1.0, 0.0, t)` exactly, with nothing to round.
+    ///
+    /// **The premise is checked and not asserted.** Wherever the exact reference
+    /// of the test above can still carry the comparison — a triple 900 binades
+    /// wide and no wider — this asks it, and it agrees. Past 900 binades the
+    /// reference refuses, and the reasoning above is what carries the rest.
+    ///
+    /// **This does not fail without §120's change.** Divide by the largest
+    /// component and then normalize hands back `(1, 0, t)` here too, and the
+    /// assertion below says so rather than leaving it to be assumed: the length
+    /// it computes rounds to `1.0` and dividing by one moves nothing. So this
+    /// test is the half of §15.6 that says the published bound has a test, and
+    /// the sweep above is the half that says the bound is the new arithmetic's
+    /// and not the old one's.
+    #[test]
+    fn a_tiny_third_component_comes_back_untouched_into_the_subnormals() {
+        let mut agreed_with_the_exact_reference = 0usize;
+        for e in 600..=1074 {
+            let tiny = multiplied_by_a_power_of_two(1.0, -e);
+            let direction = Vector::new(1.0, 0.0, tiny);
+            let unit = direction
+                .scaled_to_length_one_from_anywhere("direction")
+                .expect("a direction with a component of one has a length");
+            assert_eq!(
+                unit,
+                Vector::new(1.0, 0.0, tiny),
+                "(1, 0, 2^-{e}) is already the nearest f64 triple to its own unit vector"
+            );
+            let old = Vector::new(1.0, 0.0, tiny)
+                .normalized()
+                .expect("a direction with a component of one has a length");
+            assert_eq!(
+                old,
+                unit,
+                "(1, 0, 2^-{e}) is where the old arithmetic and the new one agree, and this test \
+                 does not discriminate between them"
+            );
+            if let Some(frame) = ExactFrame::around(direction) {
+                assert_eq!(
+                    frame.is_the_nearest(tiny, frame.components[2]),
+                    Some(true),
+                    "the exact reference can still carry 2^-{e} and must agree that it rounds to \
+                     itself"
+                );
+                agreed_with_the_exact_reference += 1;
+            }
+        }
+        assert_eq!(
+            agreed_with_the_exact_reference, 301,
+            "the exact reference carries a triple 900 binades wide, so it is meant to check the \
+             first 301 of these and refuse the rest"
         );
     }
 
