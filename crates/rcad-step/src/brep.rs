@@ -1100,6 +1100,7 @@ impl Walk {
             | rcad_topo::Error::ADraftEntityIsUsedByNothing { entity, index } => {
                 (self.names_of(entity)?, *index)
             }
+            rcad_topo::Error::ADraftFaceCouldNotBeMeshed { face, .. } => (&self.face_names, *face),
             _ => return None,
         };
         names.get(index).copied()

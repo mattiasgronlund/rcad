@@ -13,6 +13,9 @@
 
 mod written_by_hand;
 
+use std::path::{Path, PathBuf};
+use std::{env, fs};
+
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{EntityId, Import, Refusal, StepFile};
 use written_by_hand::{a_block, a_plate_bounded_by_an_arc_and_its_chord, a_quarter_disc_plate};
@@ -443,4 +446,102 @@ fn a_file_whose_every_coordinate_is_zero_is_refused_by_name() {
         .replace("1.0", "0.0")
         .replace("1.E-7", "0.0");
     assert!(matches!(refusal(&flattened), Refusal::TheFileHasNoSize));
+}
+
+/// A file the mesher stops on names the face it could not cut into triangles,
+/// not the whole solid.
+///
+/// `docs/decisions.md` §123.5's half of §123: the mapping's own
+/// `ADraftEdgeHasACrossingThatCannotBeFollowed` already turned a crossing
+/// refusal's key into the position an edge was described at
+/// (`a_crossing_the_marcher_gave_up_on_names_its_edge.rs`), and
+/// `ADraftFaceCouldNotBeMeshed` is the same move for a face the sweep's own
+/// mesher gives up on — `builder::tests::a_face_the_sweep_cannot_mesh_names_its_own_position`
+/// in `rcad-topo` shows the same refusal from a hand-built solid; this shows
+/// it reachable from bytes.
+///
+/// Same shape as `a_crossing_the_marcher_gave_up_on_names_its_edge.rs`: a
+/// property over whichever corpus files bottom out here, and not a named
+/// file, because a rescue can empty the set the way §112 emptied the
+/// tangency wall's (that file's own note on why it names none).
+#[test]
+fn a_face_the_mesher_cannot_cut_up_names_its_own_advanced_face() {
+    let root = corpus();
+    let mut stopped_there = Vec::new();
+
+    for family in ["nist", "kicad"] {
+        for path in files_under(&root.join(family)) {
+            let bytes =
+                fs::read(&path).unwrap_or_else(|why| panic!("reading {}: {why}", path.display()));
+            let Ok(file) = StepFile::read(&bytes) else {
+                continue;
+            };
+            let mut log = ProvenanceLog::new();
+            let Err(refusal) = Import::read(&file, &Policy::certified(), &mut log) else {
+                continue;
+            };
+            let Refusal::ThisEntityOfTheSolidWasRefused { entity, why, .. } = &refusal else {
+                continue;
+            };
+            if !matches!(**why, rcad_topo::Error::ADraftFaceCouldNotBeMeshed { .. }) {
+                continue;
+            }
+            let name = path.display().to_string();
+            stopped_there.push(name.clone());
+
+            assert_eq!(
+                keyword_of(&file, *entity),
+                "ADVANCED_FACE",
+                "{name} refused about {entity}, and a mesher that cannot cut a face into \
+                 triangles is refusing that face: {why}"
+            );
+        }
+    }
+
+    println!(
+        "files stopping at the mesher, on a face: {}\n  {}",
+        stopped_there.len(),
+        stopped_there.join("\n  ")
+    );
+    assert!(
+        !stopped_there.is_empty(),
+        "no corpus file stops at the mesher over a face any more, so this proved nothing. That \
+         is either very good news, or the mapping stopped naming the face. Find out which, then \
+         retire this test or fix what broke."
+    );
+}
+
+fn keyword_of(file: &StepFile, id: EntityId) -> &str {
+    file.instance(id)
+        .and_then(|instance| instance.parts().first())
+        .map_or("<unknown>", |record| record.keyword())
+}
+
+fn files_under(directory: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|kind| kind == "step"))
+        .collect();
+    found.sort();
+    found
+}
+
+fn corpus() -> PathBuf {
+    let root = env::var_os("RCAD_STEP_CORPUS").unwrap_or_else(|| {
+        panic!(
+            "RCAD_STEP_CORPUS is not set. Point it at a directory holding nist/ and kicad/ — this \
+             test does not skip on a missing corpus."
+        )
+    });
+    let root = PathBuf::from(root);
+    assert!(
+        root.is_dir(),
+        "RCAD_STEP_CORPUS points at {}, which is not a directory",
+        root.display()
+    );
+    root
 }

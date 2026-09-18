@@ -829,6 +829,30 @@ pub enum Error {
         why: Box<rcad_geom::Error>,
     },
 
+    /// The sweep could not cut one face of the description into triangles.
+    ///
+    /// [`Error::CannotMeshAFace`] said the same thing about a key in the
+    /// throwaway model [`SolidBuilder::build`](crate::SolidBuilder::build)
+    /// swept, and that model is dropped the moment the build refuses. So the
+    /// key is turned back into the position the caller handed the face over
+    /// at, which is the one address a caller can still look up — `rcad-step`
+    /// keeps the `#id` it read each face from in exactly that order.
+    /// `docs/decisions.md` §123.5, and §113.4 for the edge this is the same
+    /// move for.
+    ///
+    /// **The message is the triangulator's own and does not name the
+    /// position.** `probe` deduplicates a file's reasons by their text, so a
+    /// position in the text would split one wall into as many reasons as
+    /// there are faces that hit it, and a caller holding an index into its
+    /// own description does not learn anything from being read it back.
+    #[error("triangulating: {why}")]
+    ADraftFaceCouldNotBeMeshed {
+        /// Which face of the description, counting from zero.
+        face: usize,
+        /// What the triangulator gave up on.
+        why: rcad_mesh::CannotTriangulate,
+    },
+
     /// A second shell was described, and a solid built face by face has one.
     ///
     /// A void inside a solid, and a solid in two separate lumps, are both
