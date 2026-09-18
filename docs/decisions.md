@@ -31942,3 +31942,116 @@ decisions-find 'LED_D5.0mm-3'`, `'closed edge'`,
 `RCAD_STEP_CORPUS=<corpus> mise exec -- cargo run -p rcad-step --release
 --example blocker_depth_probe`; `RCAD_STEP_CORPUS=<corpus> mise exec -- just t
 how_often_a_real_file_imports --no-capture`.
+
+## 126. The closed-crossing rule reads a crossing written too small on a copy scaled up, fixed 2026-09-18
+
+*§122.4 booked one fix and named one thing it would not reach. Both are here:
+the crossing that was written far too small to multiply has its sign back, and
+the case that survives the fix has a test of its own with a number in it — 26
+exponents tried, 26 refusals, which is every exact copy that vector has.*
+
+### 126.1 What was built
+
+`which_way_a_closed_crossing_turns` was three functions and is now five. The two
+levels moved into `both_levels_of_the_rule` — the enclosure, then the exact
+level wherever the enclosure could not tell — because the public function now
+runs that pair twice: once on the numbers the caller wrote, and, where they
+defeat both levels, once on a copy of the four vectors with **each vector
+multiplied by its own power of two**.
+
+Each vector on its own, rather than one shared exponent, is what §122.4's
+multilinearity buys and it is not a refinement: a gradient of ordinary size
+beside an axis written at `2^-900` is two separate problems, and one exponent
+read off all four would have to solve both at once. Both references are degree
+one in `outward[0]`, `outward[1]` and `axis` and degree one or two in
+`gradient`, so scaling any one of them by `s > 0` multiplies the answer by a
+power of `s` — positive, so the sign is the input's sign.
+
+The exponent per vector brings that vector's **largest** component into
+`[1, 2)`: the largest is the one that would overflow, and every smaller
+component then sits as far above the bottom of the range as the vector's own
+spread allows. `brought_into_range` returns `None` rather than a rounded copy if
+any component leaves the normal range on the way, because a copy that lost bits
+is different geometry and a sign proved about it says nothing about the input.
+`each_vector_brought_into_range` also answers `None` when no vector moved, so a
+retry that would re-run the same numbers is not taken.
+
+A refusal out of the retry is **discarded and the original one kept**. Both are
+`Decision::Undecidable`, but only the first carries a width the caller can read:
+an enclosure measured on the scaled copy is a width in somebody else's units.
+
+**No new arithmetic.** `binary_exponent` and `multiplied_by_a_power_of_two` were
+already `pub(crate)` in `rcad-geom`'s `exact.rs`, used by `isometry.rs` and
+`point.rs`. `rcad-predicates` carries its own pair in `power_of_two.rs`, also
+`pub(crate)`, and that duplication is older than this lane and was left alone:
+merging them means widening one crate's public surface for two functions of four
+lines each, and that is a decision with an owner rather than a lane's aside.
+
+### 126.2 The witness has its sign
+
+`a_crossing_written_far_too_small_to_multiply_is_still_refused` is now
+`a_crossing_written_far_too_small_to_multiply_is_settled_on_a_copy_scaled_up`.
+The input is unchanged — §122.3's witness crossing with both gradients scaled by
+`2^-600`, axis left at `(1, 0, 0)` — and it answered
+`Decision::Undecidable { .. }`; it answers `Decision::Pos`.
+
+The test holds the retry to its story rather than taking the answer on its own:
+the enclosure level is asserted to refuse and the exact level is asserted to
+return `None`, both called directly on the numbers as written, so the retry
+cannot be quietly credited with work either of those did. And it asserts the
+answer equals `which_way_a_closed_crossing_turns` on the **unscaled** witness,
+which is what "a positive factor cannot change a sign" means as a test rather
+than as a sentence.
+
+### 126.3 What is still refused, and how many scales were tried
+
+`a_vector_spread_across_the_whole_range_has_no_scale_that_works` is the case
+§122.4 named and would not assume: `axis = (2^1000, 0, 2^-1020)`, against the
+ordinary witness crossing. `Exact` multiplies a pair only where the product
+stays exact, which is the window from `2^-969` to the top of the range — about
+1992 binades wide. This axis spans `2^2020`, wider than the window, so against a
+gradient of order one there is no exponent at all: lift the small component clear
+of the subnormals and the large one overflows.
+
+**The test walks the family rather than arguing it.** Exponents `-1100..=1100`
+are tried on the axis, each copy kept only if every component that was nonzero is
+still normal, and the exact level is asked for a sign on each one that survives.
+**26 exact copies exist — `2^-2` through `2^23` — and all 26 decline.** That is
+the whole of the family §122.4's fix belongs to, so what is missing for this
+input is arithmetic wider than a pair of `f64`s per product and not a better
+scale to read it at (§16.10, §29).
+
+The exponents whose copy is *not* exact are skipped, and the test would be
+worthless without that: at `2^-1100` the small component flushes to zero and the
+rule answers `Decision::Pos` — for an axis with one component gone, which is a
+different crossing. That answer was measured, not supposed, and it is the reason
+`brought_into_range` checks normality instead of trusting the exponent it picked.
+
+### 126.4 Measured
+
+`mise exec -- just gate` is exit 0 at **1976 tests**, 3 integration tests and 24
+doc tests. The lane's diff adds exactly one `#[test]` and removes none — the
+witness was renamed, not replaced — so that is `d1e573a4`'s count plus one,
+derived from the diff rather than measured on the base.
+
+The corpus did not move: `mise exec -- just t how_often_a_real_file_imports
+--no-capture` prints `nist: 1 / 44 imported = 2.3%` and `kicad: 114 / 323
+imported = 35.3%`, the same two rates §122.3 recorded, and
+`assert_pinned_kicad_imports` passes, which is what actually says no file changed
+side. That is the expected answer rather than a disappointing one: a STEP file
+whose gradients come out at `2^-600` is not what the corpus holds, and this fix
+is for the numbers the public API accepts rather than for the ones today's
+importer happens to produce (§16.10).
+
+One wildcard arm was avoided rather than added. The first cut of the retry
+matched `Pos | Neg | Zero` and sent `_` to the old refusal, which took
+`check-wildcards` from 87 to 88; it is written as a `matches!` against
+`Decision::Undecidable` instead, and the count is back at 87 (§40).
+
+Commands run to reach this: `git log --oneline -1`; `git checkout -B
+lane-scale-and-retry d1e573a4`; `mise exec -- just decision 122`, `122.1`–`122.4`;
+`mise exec -- just src product_is_exact`; direct `Read` of
+`which_way_a_closed_crossing_turns.rs`, `power_of_two.rs`; `mise exec -- just t
+-E 'test(/closed_crossing/)'`; `mise exec -- just t
+a_vector_spread_across_the_whole_range_has_no_scale_that_works`; `mise exec --
+just gate`; `mise exec -- just t how_often_a_real_file_imports --no-capture`.
