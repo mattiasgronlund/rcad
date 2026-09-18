@@ -610,12 +610,22 @@ fn where_the_model_puts_a_corner(
 /// same number, so nothing reaches it that the selector would have stopped.
 ///
 /// The size is read off the corner rather than off the model, as
-/// [`what_writing_the_corner_down_cost`] argues, and that leaves this check
-/// **tighter** than `Model::validate`'s own reading, which uses the model's
-/// largest coordinate. The surfaces are in hand here where the selector has
-/// only two points, but they do not offer a better size: a plane's origin is
-/// whatever point it was written down against and not the reach of the face,
-/// so there is nothing wider here to read that is about this corner.
+/// [`what_writing_the_corner_down_cost`] argues. The surfaces are in hand here
+/// where the selector has only two points, but they do not offer a better size:
+/// a plane's origin is whatever point it was written down against and not the
+/// reach of the face, so there is nothing wider here to read that is about this
+/// corner.
+///
+/// **That leaves this check tighter than `Model::validate`'s own reading, and
+/// tighter is the wrong direction — it is a gap, not a margin.** `validate`
+/// scales by the model's largest coordinate; this floors the corner's own at
+/// one. So a corner near the origin of a large model is granted far less room
+/// here than the number `validate` measured it against, and §75.6's rule is
+/// that a solid `validate` accepts is one the fuse has to be able to bake.
+/// `a_corner_at_the_origin_of_a_big_model_is_refused_for_a_miss_validate_allows`
+/// is that gap, measured and left open as §136.4. It is **older than this
+/// growth and much narrower because of it**: the re-check used to ask with no
+/// room at all, so every miss was a refusal.
 ///
 /// Every triple failing is not a geometry error: it is a corner nothing can
 /// place, which leaves the operation with nothing to return, so it is
@@ -887,9 +897,11 @@ mod tests {
     use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Sphere, Surface, Vector};
     use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 
-    use super::{Bounds, bake, derive_a_corner};
+    use super::{Bounds, bake, derive_a_corner, what_writing_the_corner_down_cost};
     use crate::VertexKey;
+    use crate::validate::{MEASURING_SLACK, side_of_surface};
     use crate::{Error, Model, SolidKey};
+    use rcad_predicates::Decision;
 
     fn a_cube_of_side_two() -> (Model, SolidKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -1261,6 +1273,233 @@ mod tests {
         assert!(
             matches!(refused, Err(Error::Undecidable { .. })),
             "two places both holding the stored corner is not an answer, it was {refused:?}"
+        );
+    }
+
+    /// A fourth plane that misses the corner by less than writing the corner
+    /// down cost is agreement, and asking it about the bare corner was not.
+    ///
+    /// Three planes place a corner. The fourth was fitted through *other*
+    /// corners of its own face and had its normal scaled to length one on the
+    /// way in, so it passes a few ulps from where the three cross. Asking it
+    /// about a box of no width asks it to agree bit for bit with a number it
+    /// never saw, and it does not.
+    ///
+    /// **The sizes are `PinHeader_1x11_P2.54mm_Vertical.step`'s own**, read off
+    /// the corner that actually failed rather than invented: the part runs
+    /// 20.64 mm along `y`, its 45° chamfer came off the file with a `2.45e-18`
+    /// tilt in its direction cosines, and that plane read `3.553e-15` — one ulp
+    /// of that `y` — from the corner three others placed. The allowance there
+    /// is `2.933e-13`, so the miss is 82 times inside it and this is not a
+    /// marginal call. Both pin headers in the corpus stopped round-tripping
+    /// without the growth, which is what `every_kicad_file_that_imports_round_
+    /// trips_to_the_same_solid` pins and this demonstrates (§16.10).
+    ///
+    /// **The first assertion is what stops this being a tautology.** It checks
+    /// that the bare corner still reads a *certified* sign, so the test cannot
+    /// go green by the fourth plane having quietly become agreeable — it fails
+    /// on the unfixed code because of the last assertion, and it fails on a
+    /// kernel where the miss stopped being provable because of the first.
+    #[test]
+    fn a_fourth_plane_a_few_ulps_off_the_corner_three_others_place_is_agreement() {
+        let (model, cube) = a_cube_of_side_two();
+        let vertex = corners_as_stored(&model, cube)[0].0;
+        let corner = Point::new(-0.32, -20.64, -2.84);
+        let exactly_the_corner = PredicatePoint::from(corner.coordinates());
+
+        let face_through_the_corner = |normal| {
+            Surface::Plane(
+                Plane::from_point_and_normal(corner, normal).expect("an axis is a direction"),
+            )
+        };
+        let a_pin_header_chamfer_misses_by = 3.552713678800501e-15;
+        let tilted = Plane::from_point_and_normal(corner, Vector::new(-1.0, -2.4539e-18, -1.0))
+            .expect("a 45 degree wall with a tilt is still a direction");
+        let chamfer = tilted
+            .moved_to(tilted.offset() + a_pin_header_chamfer_misses_by)
+            .expect("a plane a few ulps along its own normal");
+
+        assert!(
+            matches!(
+                side_of_surface(&Surface::Plane(chamfer), exactly_the_corner),
+                Decision::Pos | Decision::Neg
+            ),
+            "the bare corner reads a certified sign, which is the refusal this change is about"
+        );
+        let miss = chamfer.signed_distance_to(corner).abs();
+        let room = what_writing_the_corner_down_cost(exactly_the_corner.enclosure());
+        assert!(
+            miss > 0.0 && miss < room,
+            "the miss {miss:e} is inside the {room:e} that writing this corner down cost"
+        );
+
+        let baked = derive_a_corner(
+            vertex,
+            exactly_the_corner,
+            vec![
+                face_through_the_corner(Vector::new(1.0, 0.0, 0.0)),
+                face_through_the_corner(Vector::new(0.0, 1.0, 0.0)),
+                face_through_the_corner(Vector::new(0.0, 0.0, 1.0)),
+                Surface::Plane(chamfer),
+            ],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a fourth plane inside the allowance agrees rather than proving a miss");
+
+        assert_eq!(
+            baked.point.exact_coordinates(),
+            Some(corner.coordinates()),
+            "the three that place it still place it, and the fourth moved nothing"
+        );
+    }
+
+    /// The same disagreement the test above accepts is still refused when the
+    /// corner sits at the origin and the model is large — because this check
+    /// reads its size off the corner and `Model::validate` reads its own off
+    /// the model.
+    ///
+    /// [`what_writing_the_corner_down_cost`] floors the size at one, so a
+    /// corner at the origin is granted `1.421e-14` however big the part is,
+    /// while `Model::what_writing_a_plane_down_costs` scales by the model's
+    /// largest coordinate and floors nothing. A chamfer pinned through its own
+    /// corner `1e5` away misses the origin by `1.735e-13`: **12 times outside
+    /// what this check allows and 8000 times inside what `validate` compares
+    /// the same corner against.** So the two disagree, and [`MEASURING_SLACK`]'s
+    /// own doc comment says which way that has to go — a solid `validate` lets
+    /// through is one the fuse has to be able to bake (§75.6).
+    ///
+    /// **This is older than the growth above and much narrower because of it.**
+    /// Before it the re-check asked with no room at all, so every miss was a
+    /// refusal; now only a miss past the corner's own floored size is. The
+    /// growth shrank this gap rather than opening it, and closing it wants the
+    /// model's largest coordinate threaded down to [`derive_a_corner`], which is
+    /// a change to signatures across the fuse and a lane of its own.
+    ///
+    /// The numbers are measured, not argued: the crossover sits between a reach
+    /// of `1e4`, which still bakes, and `1e5`, which does not.
+    #[test]
+    #[ignore = "open: §136.4, this check's size is the corner's and validate's is the model's"]
+    fn a_corner_at_the_origin_of_a_big_model_is_refused_for_a_miss_validate_allows() {
+        let (model, cube) = a_cube_of_side_two();
+        let vertex = corners_as_stored(&model, cube)[0].0;
+        let corner = Point::origin();
+        let exactly_the_corner = PredicatePoint::from(corner.coordinates());
+        let face_through_the_corner = |normal| {
+            Surface::Plane(
+                Plane::from_point_and_normal(corner, normal).expect("an axis is a direction"),
+            )
+        };
+
+        // (r, r, -r) is on the chamfer through the origin, so pinning the plane
+        // there rather than here is what a face plane fitted through its own far
+        // corner is, and the miss at the origin is what that cost.
+        let reach = 1e5;
+        let chamfer = Plane::from_point_and_normal(
+            Point::new(reach, reach, -reach),
+            Vector::new(-1.0, -2.4539e-18, -1.0),
+        )
+        .expect("a 45 degree wall with a tilt is still a direction");
+
+        let miss = chamfer.signed_distance_to(corner).abs();
+        let validate_would_allow = MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * reach;
+        assert!(
+            miss < validate_would_allow,
+            "the miss {miss:e} is inside the {validate_would_allow:e} that writing a plane down \
+             costs at this model's size, which is what validate compares it against"
+        );
+
+        derive_a_corner(
+            vertex,
+            exactly_the_corner,
+            vec![
+                face_through_the_corner(Vector::new(1.0, 0.0, 0.0)),
+                face_through_the_corner(Vector::new(0.0, 1.0, 0.0)),
+                face_through_the_corner(Vector::new(0.0, 0.0, 1.0)),
+                Surface::Plane(chamfer),
+            ],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a miss validate allows is one the fuse has to be able to bake");
+    }
+
+    /// §70.3's ill-conditioned corner is still refused, and the check that
+    /// refuses it is not the one the growth above loosened.
+    ///
+    /// Three planes at a `1e-14` graze cross at the origin. A corner stored at
+    /// `(1, 1, 0)` is **within what writing each of those planes down cost of
+    /// all three of them** — `1e-14` against an allowance of `1.421e-14`, so
+    /// `Model::validate`, which compares a corner with the planes through it,
+    /// accepts this corner — and yet it sits `1.414` from where they actually
+    /// cross. That is §70.3's sentence, that a corner close to all three
+    /// surfaces can still be far from where they meet, written as numbers
+    /// instead of as a paragraph (§16.10).
+    ///
+    /// What refuses it is [`the_place_the_model_points_at`], which is asked
+    /// about the **stored** corner and runs before the re-check, which is asked
+    /// about the **solved** one. **The error variant is the evidence of which
+    /// of the two fired**: nothing placed the corner, so it is
+    /// [`Error::Undecidable`] and not an [`Invalid::VertexOffItsFacePlane`]
+    /// from the re-check. Growing the solved corner cannot reach a corner that
+    /// never got solved.
+    ///
+    /// The second half is the control, and without it a regression that made a
+    /// grazing triple unusable would leave the first half green for the wrong
+    /// reason: the same three planes, with the corner stored where they cross,
+    /// place it exactly. So the graze is not what refused the first.
+    #[test]
+    fn a_corner_near_three_grazing_planes_but_far_from_where_they_cross_is_refused() {
+        let (model, cube) = a_cube_of_side_two();
+        let vertex = corners_as_stored(&model, cube)[0].0;
+        let a_graze = 1e-14;
+        let through_the_origin = |normal| {
+            Plane::from_point_and_normal(Point::origin(), normal).expect("a direction with length")
+        };
+        let grazing = [
+            through_the_origin(Vector::new(0.0, 0.0, 1.0)),
+            through_the_origin(Vector::new(0.0, a_graze, 1.0)),
+            through_the_origin(Vector::new(a_graze, 0.0, 1.0)),
+        ];
+
+        let far_from_the_meet = Point::new(1.0, 1.0, 0.0);
+        let what_writing_a_plane_down_cost = MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF;
+        for plane in &grazing {
+            let off_it = plane.signed_distance_to(far_from_the_meet).abs();
+            assert!(
+                off_it <= what_writing_a_plane_down_cost,
+                "this corner is {off_it:e} off one of its planes, inside the \
+                 {what_writing_a_plane_down_cost:e} that writing the plane down cost, \
+                 so the per-plane check accepts it"
+            );
+        }
+
+        let mut log = ProvenanceLog::new();
+        let refused = derive_a_corner(
+            vertex,
+            PredicatePoint::from(far_from_the_meet.coordinates()),
+            grazing.map(Surface::Plane).to_vec(),
+            &Policy::certified(),
+            &mut log,
+        );
+        assert!(
+            matches!(refused, Err(Error::Undecidable { .. })),
+            "a corner far from where its surfaces cross is one nothing placed, not one \
+             a surface proved off its face, and it was {refused:?}"
+        );
+
+        let placed = derive_a_corner(
+            vertex,
+            PredicatePoint::from([0.0, 0.0, 0.0]),
+            grazing.map(Surface::Plane).to_vec(),
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("the same three planes place a corner stored where they cross");
+        assert_eq!(
+            placed.point.exact_coordinates(),
+            Some([0.0, 0.0, 0.0]),
+            "so the graze is not what refused the corner above"
         );
     }
 }
