@@ -63,7 +63,7 @@
 #![allow(dead_code)]
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Deflection, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Result,
+    Axis, Cone, Cylinder, Deflection, Error, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Result,
     Sphere, Surface, SurfaceMeet, Torus, Vector, intersect, walk,
 };
 use rcad_predicates::{
@@ -354,44 +354,75 @@ pub fn every_oracle_holds_of(pair: [Surface; 2]) -> Asked {
 /// If any point of any walked run is certified on the wrong side of either
 /// surface that named it.
 pub fn every_point_of_every_crossing_is_on_both_surfaces(pair: [Surface; 2]) -> usize {
+    how_every_crossing_was_walked(pair)
+        .iter()
+        .map(WhereARunWent::points_checked)
+        .sum()
+}
+
+/// **The same oracle, saying of each run how far down it got.**
+///
+/// [`every_point_of_every_crossing_is_on_both_surfaces`] hands back one number,
+/// and a zero there has four different meanings — the counter cannot tell a
+/// crossing whose walks all refused from one that was walked and whose every
+/// point then lost its box. The asserting is done here so that there is one
+/// body and not two; the public counter above is this sum.
+///
+/// # Panics
+///
+/// If any point of any walked run is certified on the wrong side of either
+/// surface that named it.
+pub fn how_every_crossing_was_walked(pair: [Surface; 2]) -> Vec<WhereARunWent> {
     let mut log = ProvenanceLog::new();
-    let mut checked = 0;
     let Ok(SurfaceMeet::Curves(runs)) =
         intersect(&pair[0], &pair[1], &Policy::certified(), &mut log)
     else {
-        return checked;
+        return Vec::new();
     };
+    let mut went = Vec::with_capacity(runs.len());
     for run in &runs {
         // The first walk is asked for as coarsely as a walk can be asked for, so
         // it costs a handful of points and comes back with the one number this
         // harness needs: how big the crossing itself is, which the published
         // deviation is a fixed share of.
         let roughly = Deflection::of(f64::MAX / 4.0).expect("a positive length");
-        let Ok(sized) = walk(
+        let sized = match walk(
             run,
             [&pair[0], &pair[1]],
             roughly,
             &Policy::certified(),
             &mut log,
-        ) else {
-            continue;
+        ) {
+            Ok(sized) => sized,
+            Err(why) => {
+                went.push(WhereARunWent::TheSizingWalkRefused(why));
+                continue;
+            }
         };
         let how_big = sized.deviation().magnitude() / POINT_ALONG_A_CROSSING_ROUNDOFF;
         let Ok(deflection) = Deflection::of(how_big * HOW_FINE) else {
+            went.push(WhereARunWent::TheSizeWasNotALength);
             continue;
         };
 
-        let Ok(along_it) = walk(
+        let along_it = match walk(
             run,
             [&pair[0], &pair[1]],
             deflection,
             &Policy::certified(),
             &mut log,
-        ) else {
-            continue;
+        ) {
+            Ok(along_it) => along_it,
+            Err(why) => {
+                went.push(WhereARunWent::TheFineWalkRefused(why));
+                continue;
+            }
         };
         let bound = along_it.deviation().magnitude();
+        let mut drawn = 0;
+        let mut checked = 0;
         for point in along_it.points() {
+            drawn += 1;
             let Some(box_it_is_in) = somewhere_within(*point, bound) else {
                 continue;
             };
@@ -404,8 +435,41 @@ pub fn every_point_of_every_crossing_is_on_both_surfaces(pair: [Surface; 2]) -> 
                 );
             }
         }
+        went.push(WhereARunWent::Walked { drawn, checked });
     }
-    checked
+    went
+}
+
+/// How far down [`how_every_crossing_was_walked`] one run got.
+///
+/// Exhaustive on purpose: these are the four ways out of that loop's body and
+/// nothing outside this module may add a fifth.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WhereARunWent {
+    /// The coarse sizing walk refused, so there is no size to ask the real walk
+    /// for.
+    TheSizingWalkRefused(Error),
+    /// The sizing walk answered but a hundredth of what it said is not a
+    /// positive length.
+    TheSizeWasNotALength,
+    /// The walk that would have produced the points refused.
+    TheFineWalkRefused(Error),
+    /// Points came back. `checked` is how many of them kept a box around them —
+    /// a point whose box collapses is dropped, which is why the two can differ.
+    Walked { drawn: usize, checked: usize },
+}
+
+impl WhereARunWent {
+    /// How many of this run's points the oracle actually asked about.
+    #[must_use]
+    pub fn points_checked(&self) -> usize {
+        match self {
+            Self::Walked { checked, .. } => *checked,
+            Self::TheSizingWalkRefused(_)
+            | Self::TheSizeWasNotALength
+            | Self::TheFineWalkRefused(_) => 0,
+        }
+    }
 }
 
 /// The box a computed point is really known to be inside, or `None` where the

@@ -31999,3 +31999,118 @@ The lesson is not that §124 was careless: it was explicit that it had run
 nothing, and it was right about the thing it was for. It is that a section which
 says "traced by reading" has a debt, and the debt falls due in the citations
 before it falls due in the conclusion.
+
+## 125. The walked-point oracle's zero is the sizing walk refusing, and it is a gap twice and a limit twice, measured 2026-09-18
+
+§108.4 left one question open in as many words — four slow units that are "one
+huge pipe against one small one … one question about scale and not four
+findings", and "what it costs is open … left as a question rather than answered
+here, because the answer is measurement this section did not do." This section
+is that measurement.
+
+The nights of 2026-09-17 and 2026-09-18 added three more units of the same
+family. Counting the two already seeded, five were decoded. Four come back
+`Asked { points: 0, orders: 1, scalings: 2 }` and one comes back
+`Asked { points: 10, … }`.
+
+### 125.1 A zero had four meanings and now has one
+
+`every_point_of_every_crossing_is_on_both_surfaces` counted one number, and the
+loop feeding it ends four ways: the coarse sizing walk refusing, the size it
+hands back not being a length, the fine walk refusing, or every walked point
+losing its box in `somewhere_within`. The fourth is the quiet one — `checked +=
+1` sits *after* that `continue`, so a point whose box collapses never reaches
+the counter, and a zero could have meant "walked plenty and silently dropped
+them all".
+
+**It is the first exit, on every run of all four, and never any of the other
+three.** `how_every_crossing_was_walked` now reports per run rather than per
+pair, and the public counter is its sum, so there is one body and not two.
+
+The fourth exit is cleared rather than argued away: on the one pair that does
+walk, `drawn == checked == 5` on both runs.
+
+### 125.2 Two of them are a gap
+
+`1bd43cf4` and `d8b562bb` are the seeded `7e62ebe6` with a y-component of
+`3.85e-122` or `1.15e-129` put on the thin pipe's axis, and nothing else
+changed. That cannot move where a pipe of radius `1.68e8` and one of radius
+`1.375` cross. Both refuse `TooManyPointsAlongOneCrossing { most: 1048576 }`.
+
+By §16.10 that is a **gap**: the answer exists and the arithmetic reaches it.
+The same two runs walk at `0.01`, `1.0`, `1e10` and `1e16`, every point coming
+back closer to the crossing than the thin pipe is wide. Only the harness's
+`f64::MAX / 4.0` sizing ask does not.
+
+The tilt is not a second bug. It is what takes this pair from *just* surviving
+that ask to not surviving it, which the untilted `7e62ebe6` shows by walking ten
+points through the same code.
+
+### 125.3 Two of them are a limit
+
+`5dddf2a9` and `3a4a8231` refuse at every ask, including the finest this harness
+makes — `CannotFollowACrossingWhereItsSurfacesAreTangent` in microseconds at
+`0.01`. Their loops are `4.34e-19` across where one step of the `f64` grid at
+those coordinates is `5.82e-11`, so no `f64` point sits on both pipes.
+
+By §16.10 that is a **limit**, and the family of fixes is named rather than
+waved at: a finer ask is refuted by the tangent refusal at `0.01`, a coarser one
+by the refusals at `1e16` and `f64::MAX / 4`, and a rescaling by the existing
+`the_same_pair_is_walked_as_soon_as_its_thin_pipe_spans_a_grid_step`, where
+nothing changes but the thin radius and at `1e-7` the same call walks. Here the
+oracle checking nothing is correct. Only the seconds it takes to say so are a
+gap, and that half is already pinned by
+`a_crossing_thinner_than_one_step_of_the_grid_crawls_to_the_point_cap`.
+
+### 125.4 The seeded `5dddf2a9` stays, and "it asserts nothing" is false
+
+It is in the corpus with a walked-point oracle that checks nothing, which looks
+like a seed asserting nothing. It is not. Replayed it asserts that `intersect`
+names the pair `Curves` rather than refusing, that naming it the other way round
+agrees, and that writing it at another power of two does not change it. What it
+does not assert is that some point sits on both pipes — which is not an
+assertion anyone can make about this pair, because no such point exists.
+
+It is also the only corpus member driving both the tangent refusal at a fine ask
+and the point cap at a coarse one, and §91 says an artifact not in the corpus is
+lost.
+
+### 125.5 The record and the tree disagree about `7e62ebe6`, and this section does not explain it
+
+§108.4 recorded all four of its slow units at `Asked { points: 0, … }` against
+`a2a93b9a` on 2026-09-14. `7e62ebe6` measures `Asked { points: 10, … }` on
+`19c6f3d1` today. So the pair started walking at some point in between, and the
+10-against-0 contrast this section is about did not exist when §108.4 was
+written.
+
+**Which commit moved it has not been established**, and nothing here should be
+read as naming one. It is recorded because a later reader comparing the two
+sections will otherwise take one of them for a mistake.
+
+### 125.6 What is not done, and where it already lived
+
+The fix is the marcher's step ceiling — `MOST_A_STEP_MAY_GROW_TO` in `march.rs`
+needs a bound that does not come from the caller's ask. That gap was already
+named, in the module doc of
+`what_makes_a_huge_pipe_against_a_thin_one_slow_to_walk.rs`, and **nowhere in
+this file**: `just decisions-find 'step ceiling'` and `'MOST_A_STEP_MAY_GROW_TO'`
+both came back empty before this section. A gap recorded only in the test that
+demonstrates it is a gap no roadmap or plan can see, which is the same failure
+§91 records for an artifact left outside the corpus.
+
+`1bd43cf4`, `d8b562bb` and `3a4a8231` were **not** seeded into the corpus. They
+would cost a gate replay roughly 7 s, 7 s and 5 s each, and the tests added here
+pin what they prove from the decoder's own `rebuild:` number lists, so the
+inputs are not lost in §91's sense.
+
+Commands run to reach this: `git log --oneline -1`; `git merge --ff-only main`;
+`git merge --no-edit d1e573a4`; `git merge --no-edit
+lane-points-oracle-checks-nothing`; `mise exec -- cargo build -q -p
+rcad-fuzz-explain` then `./target/debug/rcad-fuzz-explain
+where_two_surfaces_cross <each of the five inputs>`; `mise exec -- just decision
+108.4`; `mise exec -- just decisions-find 'step ceiling'`,
+`'MOST_A_STEP_MAY_GROW_TO'`; `git log --all --oneline -S'## 125. ' -- docs/decisions.md`;
+`mise exec -- just t a_hair_of_tilt_does_not_stop_these_pipes_being_walked_at_an_ordinary_ask`
+with `f64::MAX / 4.0` added to its ask list, which failed
+`asked for 4.4942328371557893e307 of room and got TooManyPointsAlongOneCrossing { most: 1048576 }`
+in 3.128 s and was reverted; `mise exec -- just gate`.
