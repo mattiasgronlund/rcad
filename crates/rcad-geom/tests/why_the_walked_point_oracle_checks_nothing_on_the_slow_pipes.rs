@@ -161,44 +161,43 @@ fn the_hair_thin_pipes_are_refused_at_the_finest_ask_too() {
     }
 }
 
-/// **Every zero is the sizing walk refusing**, pinned on the one of the four
-/// that is in the corpus, so the gate pays for that march once rather than four
-/// times.
+/// **Every zero is the sizing walk refusing**, for the seeded hair-thin pair.
 ///
-/// The other three are pinned by
-/// [`the_night_artifacts_give_up_at_the_sizing_walk_too`], which costs about
-/// twenty seconds and is ignored for it.
+/// One test per pair rather than a loop over the four, because each one marches
+/// to the million-point cap and takes seconds. Four in a row would be one
+/// twenty-second test; four apart are four that nextest runs at once.
 #[test]
 fn the_zero_on_the_seeded_hair_thin_pair_is_the_sizing_walk_refusing() {
-    for run in &how_every_crossing_was_walked(the_huge_pipe_and_the_thread_through_it()) {
+    only_the_sizing_walk_gives_up_on(the_huge_pipe_and_the_thread_through_it());
+}
+
+/// The same, for `3a4a8231`.
+#[test]
+fn the_zero_on_the_moved_hair_thin_pair_is_the_sizing_walk_refusing() {
+    only_the_sizing_walk_gives_up_on(the_same_thread_moved_and_the_huge_pipe_tilted_further());
+}
+
+/// The same, for `1bd43cf4`.
+#[test]
+fn the_zero_on_the_pipe_tilted_by_a_hundred_and_twenty_two_orders_is_the_sizing_walk() {
+    only_the_sizing_walk_gives_up_on(the_big_pipe_and_the_thin_one_tilted_by_3e_122());
+}
+
+/// The same, for `d8b562bb`.
+#[test]
+fn the_zero_on_the_pipe_tilted_by_a_hundred_and_twenty_nine_orders_is_the_sizing_walk() {
+    only_the_sizing_walk_gives_up_on(the_big_pipe_and_the_thin_one_tilted_by_1e_129());
+}
+
+/// Both runs of `pair` left the oracle at its first exit and at no other.
+fn only_the_sizing_walk_gives_up_on(pair: [Surface; 2]) {
+    let went = how_every_crossing_was_walked(pair);
+    assert_eq!(went.len(), 2, "each of these crosses in two runs");
+    for run in &went {
         assert!(
             matches!(run, WhereARunWent::TheSizingWalkRefused(_)),
             "this run left the oracle by {run:?} and not by the sizing walk"
         );
-    }
-}
-
-/// The same, for the three of the five that live only in the night's artifacts.
-///
-/// Ignored because the three sizing walks march to the million-point cap and
-/// cost about twenty seconds between them in a release build. Run it with
-/// `--run-ignored all`.
-#[test]
-#[ignore = "three marches to the million-point cap, about twenty seconds"]
-fn the_night_artifacts_give_up_at_the_sizing_walk_too() {
-    for pair in [
-        the_big_pipe_and_the_thin_one_tilted_by_3e_122(),
-        the_big_pipe_and_the_thin_one_tilted_by_1e_129(),
-        the_same_thread_moved_and_the_huge_pipe_tilted_further(),
-    ] {
-        let went = how_every_crossing_was_walked(pair);
-        assert_eq!(went.len(), 2, "each of these crosses in two runs");
-        for run in &went {
-            assert!(
-                matches!(run, WhereARunWent::TheSizingWalkRefused(_)),
-                "this run left the oracle by {run:?} and not by the sizing walk"
-            );
-        }
     }
 }
 
