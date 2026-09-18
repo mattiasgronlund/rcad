@@ -582,6 +582,41 @@ fn where_the_model_puts_a_corner(
 /// agreement, not a failure: the surface passes through the corner's box, which
 /// is as much as anything can say about a point that had to be built.
 ///
+/// # The corner is grown before it is asked, and it is the same growth
+///
+/// The box a triple solves the corner as says how well *that solve* is known.
+/// It says nothing about the fourth surface, which was fitted through corners
+/// that had already been rounded and so passes a few ulps from where the other
+/// three cross. Asking it about the bare box is asking it to agree bit for bit
+/// with a number it never saw, and it does not: a chamfered pin header whose
+/// two 45° walls are written with a `1.7e-18` tilt reaches a corner three
+/// planes place and the fourth reads ten ulps off, certified, so a solid this
+/// kernel imports and `Model::validate` accepts was one the fuse could not
+/// bake.
+///
+/// So the corner is grown by [`what_writing_the_corner_down_cost`] before it is
+/// asked — **the same allowance, from the same expression, that
+/// [`the_place_the_model_points_at`] already grows the stored corner by**, and
+/// through it the same allowance `check_flat_face` grants the same
+/// disagreement. A surface the grown box straddles answers
+/// [`Decision::Undecidable`], which is what "no `f64` could have written this
+/// any nearer" looks like from here.
+///
+/// **This does not reopen §70.3.** That corner is three surfaces at a grazing
+/// angle and a stored corner far from where they cross, and what stops it is
+/// [`the_place_the_model_points_at`] declining to pick a place at all — a test
+/// that runs first, on every corner, and is untouched. The re-check is asked
+/// only about places that test has already accepted, and it is asked with the
+/// same number, so nothing reaches it that the selector would have stopped.
+///
+/// The size is read off the corner rather than off the model, as
+/// [`what_writing_the_corner_down_cost`] argues, and that leaves this check
+/// **tighter** than `Model::validate`'s own reading, which uses the model's
+/// largest coordinate. The surfaces are in hand here where the selector has
+/// only two points, but they do not offer a better size: a plane's origin is
+/// whatever point it was written down against and not the reach of the face,
+/// so there is nothing wider here to read that is about this corner.
+///
 /// Every triple failing is not a geometry error: it is a corner nothing can
 /// place, which leaves the operation with nothing to return, so it is
 /// [`Error::Undecidable`](crate::Error::Undecidable) with a record naming
@@ -626,8 +661,9 @@ fn derive_a_corner(
         ));
     };
 
+    let asked_with_room = grown_by(point, what_writing_the_corner_down_cost(point.enclosure()));
     for surface in &around {
-        match side_of_surface(surface, point) {
+        match side_of_surface(surface, asked_with_room) {
             Decision::Zero | Decision::Undecidable { .. } => (),
             Decision::Neg | Decision::Pos => {
                 return Err(match surface {
@@ -740,6 +776,25 @@ fn what_writing_the_corner_down_cost(stored: [Interval; 3]) -> f64 {
         .map(|side| side.lo().abs().max(side.hi().abs()))
         .fold(0.0, f64::max);
     MEASURING_SLACK * Plane::SIGNED_DISTANCE_ROUNDOFF * size.max(1.0)
+}
+
+/// The corner with `room` added on every side, so a surface that passes through
+/// the grown box answers [`Decision::Undecidable`] rather than a sign.
+///
+/// A box and not a distance because only a plane hands a signed length out; a
+/// ball, a pipe, a cone and a ring answer with a sign and nothing else, so the
+/// allowance has to be spent on the point before the question rather than on
+/// the answer after it. That is the same move `not_provably_off` in
+/// [`validate`](crate::validate) makes for the same reason.
+fn grown_by(point: PredicatePoint, room: f64) -> PredicatePoint {
+    assert!(
+        room.is_finite() && room >= 0.0,
+        "an allowance read off a finite corner is finite and not negative, and this one is {room}"
+    );
+    PredicatePoint::Constructed(point.enclosure().map(|side| {
+        Interval::new(side.lo() - room, side.hi() + room)
+            .expect("growing a finite box by a finite room leaves a finite box")
+    }))
 }
 
 /// Whether two boxes have any point in common, sides included, once the second
