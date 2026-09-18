@@ -1514,9 +1514,10 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 ///
 /// The two references it takes — the longitude first and the latitude where the
 /// longitude says exactly nothing — and why one of them was not enough are
-/// [`which_way_a_closed_crossing_turns`]'s, along with why the whole chain runs
-/// in interval arithmetic rather than against `0.0`. All this function does with
-/// the answer is read the material's side off it.
+/// [`which_way_a_closed_crossing_turns`]'s, along with why it runs in interval
+/// arithmetic rather than against `0.0` and what its exact level under that is
+/// for (§122). All this function does with the answer is read the material's side
+/// off it.
 ///
 /// # Errors
 ///
@@ -3463,8 +3464,7 @@ mod tests {
         );
     }
 
-    /// A crossing a third of an `f64` step wide is refused, though its sign is
-    /// there to be had.
+    /// A crossing a third of an `f64` step wide, and its sign is there to be had.
     ///
     /// `(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` look like one direction written
     /// twice and are not. The doublings are exact — `0.2` is `2 × 0.1` and `0.6`
@@ -3476,17 +3476,18 @@ mod tests {
     /// `7.39e-17` of the two vectors that made it.
     ///
     /// **So this is a real crossing and not a rounding**, and the answer exists:
-    /// the exact dot is `-6.93889390390722838e-18`, and `fbab36ff` reads its sign
-    /// correctly as `Ok(Some(false))`. Refusing it is a *gap* (§16.10) that an
-    /// exact-expansion tier would close, and §111.3 keeps that question open
-    /// rather than pretending the refusal is obviously right.
+    /// the exact dot is `-6.93889390390722838e-18`, and `fbab36ff` read its sign
+    /// correctly as `Ok(Some(false))`. Between that sha and §122 this case was
+    /// refused, which §111.3 recorded as a *gap* (§16.10) rather than a limit;
+    /// §122's exact tier closes it and the answer is `fbab36ff`'s again — reached
+    /// this time by arithmetic that proves it rather than by luck.
     ///
-    /// What the enclosure runs into is that the true difference in the `y`
-    /// component is exactly one ulp of the two products it comes from, while an
-    /// interval holds each product to half an ulp — so the enclosure of the
-    /// difference is one ulp wide and the answer sits on its edge.
+    /// What the enclosure runs into, and still does, is that the true difference
+    /// in the `y` component is exactly one ulp of the two products it comes from,
+    /// while an interval holds each product to half an ulp — so the enclosure of
+    /// the difference is one ulp wide and the answer sits on its edge.
     #[test]
-    fn a_crossing_barely_one_f64_step_wide_is_refused_although_its_sign_exists() {
+    fn a_crossing_barely_one_f64_step_wide_is_settled_by_the_exact_level() {
         let ball =
             Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a ball at the origin"));
         let flat = Surface::Plane(
@@ -3502,15 +3503,16 @@ mod tests {
             "f64 gets the exact cross product here, so the crossing is real"
         );
 
-        assert!(matches!(
+        assert_eq!(
             a_closed_crossing_is_walked_the_way_it_is_stored(
                 [&ball, &flat],
                 nearly_one_direction,
                 corner,
                 Decision::Neg,
-            ),
-            Err(Error::CannotTellWhichWayAClosedEdgeRuns { .. })
-        ));
+            )
+            .expect("the exact level has this sign"),
+            Some(false)
+        );
     }
 
     /// `kicad/LED_D5.0mm-3.step`'s dome and body, lifted out of the file so the
