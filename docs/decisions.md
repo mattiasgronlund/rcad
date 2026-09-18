@@ -33904,16 +33904,55 @@ says why three: *"the five `just` invocations are five processes to fork, and
 take four seconds over five forks fails it, exactly as the preamble failed
 `-ge 8`.
 
-It is **not fixed here** and this is a deferral rather than a dismissal. Unlike the
-size check there is no tighter quantity to compare against: the property being
-tested — that the recipe did not run one target and wait for it — is *inherently*
-about wall-clock distance between launches, so any bound is a guess about how slow
-a machine may be. Raising it weakens the check; a relative bound needs something
-to be relative to, and the only candidate is the window, which is the quantity the
-spread is supposed to be independent of. Left because there is no evident fix, not
-because there is no evident problem, and it has never been seen to fire — all five
-stamped the same second even on the runner that failed above. Same judgement
-§136.5 made about the five bands it did not re-derive.
+**The bind is tighter than "any bound is a guess", and that is what makes it
+interesting.** The bound has to sit *between* two quantities that both move with
+the machine and the window: below it, five `just` forks, which is why three and
+not zero; above it, the spread a sequential recipe would produce. Sub-case four
+runs a six-second window and the stub sleeps `granted / 2`, so a recipe that ran
+one target and waited would launch them about three seconds apart and spread ~12 s
+— more with the `STUB_OVERRUN=8` target in the chain. So the bound **cannot be
+loosened for a slow runner at all**: raising 3 to 30 does not weaken the check, it
+deletes it. Any number in that gap is pinned at both ends.
+
+**A fix exists and it is a different kind of fix, not a better bound: make the
+recipe prove concurrency instead of measuring it.** A rendezvous — armed by an
+environment variable for this sub-case alone, each stub appends its target name to
+a file and then polls until the file holds five lines or a generous deadline
+passes; the arm asserts every target saw five. A concurrent recipe has all five
+arrive, each sees five, all proceed, and machine speed is irrelevant. A sequential
+one blocks target one at the barrier, so targets two through five never launch and
+the file ends at one line. Deterministic in both directions.
+
+What makes that a different family rather than another guess is an asymmetry:
+loosening `spread <= N` costs all of the check's power, per the paragraph above,
+while loosening a rendezvous timeout costs **none** — a correct recipe clears the
+barrier instantly at any value and a sequential one fails it at every value. The
+guess is removed rather than re-tuned. It also asserts something strictly stronger
+than what is there now: that all five were alive at one instant, which is the
+property the comment at `justfile:2780` already claims to be testing, rather than
+that they started within three seconds of each other.
+
+Named costs, so they are not discovered later: the stub is shared by every arm in
+the recipe, so the barrier must be env-var armed or any arm running fewer than
+five targets hangs; the timeout is a deadlock escape and not optional, since
+without it a broken recipe hangs `just gate` rather than failing it. A
+max-concurrency counter — stub increments on entry, decrements on exit, assert the
+maximum reached five — is the weaker sibling and is **not** the fix: it still needs
+the sleeps to outlast the launch spread, so it is a measurement again and inherits
+the same machine-speed guess.
+
+**So this is deferred as work to do, not as a limit.** §16.10's distinction: the
+answer exists and the arithmetic reaches it, which makes it a gap. It has never
+been seen to fire — all five stamped the same second even on the runner that
+failed above — so it is not urgent, and it is not this session's to write with
+`fc2e38a5` already in flight in the same recipe and `rcad-f1`'s renumber touching
+nine more of its sites.
+
+Raised by `rcad-f1` on 2026-09-19, the second time in one day it held a subsection
+of §137 to §16.10 and was right. The first correction, §137.5's, was to a claim
+that was false; this one is to a claim that no fix was evident, which is the
+softer and more common failure — and both were written by the same session in the
+same hour, which is the argument for the rule rather than against the session.
 
 ### 137.7 Provenance
 
