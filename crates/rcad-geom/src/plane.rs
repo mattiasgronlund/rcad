@@ -346,11 +346,14 @@ impl Plane {
     /// by `2^k` multiplies a plane's offset and leaves its normal alone, because
     /// a normal is a direction and not a length — so there is nothing left to
     /// work out and nothing that should round. Going back through
-    /// [`Plane::from_coefficients`] instead reduces and normalizes an
-    /// already-normalized vector, and that is not the normal that went in:
-    /// **24 733 of 100 000** random directions come back with other bits when a
-    /// plane is rebuilt from its own coefficients, which
+    /// [`Plane::from_coefficients`] instead scales an already-scaled vector to
+    /// length one, and that is not the normal that went in: **1 053 of
+    /// 100 000** random directions come back with other bits when a plane is
+    /// rebuilt from its own coefficients, which
     /// `rebuilding_a_plane_from_its_own_coefficients_tilts_its_normal` counts.
+    /// It was **24 733** until §121, because rounding a square root and then
+    /// rounding a division moves an already-unit triple far more often than
+    /// rounding once does. A twentieth of the footgun is still a footgun.
     /// `rcad-topo`'s `arrange` says the same thing in prose one crate away,
     /// where a moved plane moves a corner.
     ///

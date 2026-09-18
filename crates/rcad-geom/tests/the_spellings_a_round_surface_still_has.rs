@@ -100,8 +100,11 @@ fn a_planes_coefficients_written_at_any_scale_are_the_same_plane() {
 ///
 /// The fold above is about *proportional* coefficients, and a stored normal is
 /// not proportional to anything: it is the rounded normalizing of whatever built
-/// it. Reducing and normalizing it a second time therefore moves it, the same
+/// it. Scaling it to length one a second time therefore moves it, the same
 /// second scaling [`rcad_geom::Axis::moved_to`] exists to avoid for a direction.
+/// §121 made that scaling correctly rounded, which took the count from 24 733 in
+/// 100 000 to 1 053 and did not take it to zero — the nearest unit triple to an
+/// already-unit triple is usually but not always itself.
 ///
 /// This is the demonstration behind the number in [`Plane::moved_to`]'s doc
 /// comment, and behind the plane arm of the fuzzing harness's `scaled`. The
@@ -152,9 +155,9 @@ fn rebuilding_a_plane_from_its_own_coefficients_tilts_its_normal() {
         moved_by_moved_to, 0,
         "moved_to is supposed to hand the stored normal straight back"
     );
-    assert!(
-        tilted > draws / 5,
-        "only {tilted} of {draws} rebuilt normals moved, so the number in Plane::moved_to's doc \
+    assert_eq!(
+        tilted, 1053,
+        "{tilted} of {draws} rebuilt normals moved, so the number in Plane::moved_to's doc \
          comment no longer describes this arithmetic"
     );
 }

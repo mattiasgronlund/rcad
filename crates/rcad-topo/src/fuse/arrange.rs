@@ -6004,6 +6004,12 @@ mod what_the_curved_arrangement_reaches {
     /// [`how_many_planes_a_rounded_dot_calls_flush_with_an_axis_are_not`] says
     /// how common that is; this one is the pair written out end to end.
     ///
+    /// The numbers moved with §121: the pair written here has to be one both
+    /// constructors hand straight back, and the normal that used to be is not a
+    /// fixed point of a correctly rounded normalize. Another turned up in the
+    /// first two hundred thousand draws of the search beside it, so **the
+    /// disagreement did not move with its witness.**
+    ///
     /// `intersect` decides the same sign exactly and names the crossing
     /// `RightRoundWhereItsFacesCross`: one closed ellipse. The rounded test said
     /// the plane lay along the axis, so [`how_a_crossing_runs`] ordered that
@@ -6022,14 +6028,14 @@ mod what_the_curved_arrangement_reaches {
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
         let normal = Vector::new(
-            0.050_410_611_140_686_46,
-            0.827_151_841_248_433_8,
-            -0.559_712_963_762_452_5,
+            0.082_988_092_356_092_5,
+            -0.977_481_762_337_168_9,
+            0.194_016_444_729_097_85,
         );
         let along = Vector::new(
-            0.566_485_713_199_844_4,
-            -0.485_233_694_733_434_14,
-            -0.666_064_710_246_537_6,
+            0.292_520_127_841_236_6,
+            -0.162_218_223_338_325_75,
+            -0.942_399_714_996_085_8,
         );
         let flat = Plane::from_point_and_normal(Point::origin(), normal).expect("a plane");
         let pipe = Cylinder::new(Axis::new(Point::origin(), along).expect("an axis"), 1.0)
@@ -6195,26 +6201,33 @@ mod what_the_curved_arrangement_reaches {
     /// what orders it is `where_a_closed_crossing_starts` — a place to start on
     /// an ellipse this long is still findable here, so this one ends in an
     /// answer and not a refusal.
+    ///
+    /// The four numbers moved with §121, for the reason the row above gives:
+    /// the normal written here has to be one the constructor hands straight
+    /// back, and the one that used to be is not a fixed point of a correctly
+    /// rounded normalize. Another turned up in the first four hundred thousand
+    /// draws of the search beside it, so **both wrong signs at once did not move
+    /// with the witness.**
     #[test]
     fn a_rounded_apex_and_a_rounded_lean_together_call_a_closed_ellipse_two_rulings() {
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
         let normal = Vector::new(
-            -0.363_397_689_122_298_75,
-            -0.399_628_971_525_338,
-            0.841_569_251_255_161_7,
+            -0.015_199_035_761_460_7,
+            0.719_742_129_131_722_1,
+            -0.694_075_108_950_650_5,
         );
         let along = Vector::new(
-            -0.426_496_054_832_981_4,
-            0.483_888_527_748_997_2,
-            0.764_168_180_392_778_8,
+            -0.568_230_475_131_543_7,
+            0.364_735_305_605_051_3,
+            -0.737_619_335_414_256_8,
         );
         let apex = Point::new(
-            -0.162_754_196_529_426_2,
-            0.361_000_414_878_634_9,
-            0.101_146_430_287_779_8,
+            0.079_206_882_783_936_4,
+            -0.668_031_192_732_664_6,
+            -0.694_469_597_039_058_3,
         );
-        let slope = 0.759_265_215_818_364_9;
+        let slope = 1.259_277_112_883_655_5;
         let flat = Plane::from_point_and_normal(Point::origin(), normal).expect("a plane");
         let cone = Cone::new(Axis::new(apex, along).expect("an axis"), slope).expect("a cone");
         assert_eq!(
