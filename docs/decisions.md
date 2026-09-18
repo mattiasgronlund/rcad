@@ -35,7 +35,7 @@ and is now unreproduced**: §126.6.
 
 **§121 has landed** on 2026-09-18, with everything doing it needed: §129 its own
 run and the ulp that cost a corner, §130 the meet's exact tier, §132 the plane
-offset rounding once, §136 the corner allowance. `main` is `912cd168`.
+offset rounding once, §136 the corner allowance. The stack landed as `912cd168`.
 
 **What is left:** §126.6's counterexample; §124's, §136.4's and §125.6's gaps
 are deferred, not open work.
