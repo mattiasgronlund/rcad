@@ -31942,3 +31942,54 @@ decisions-find 'LED_D5.0mm-3'`, `'closed edge'`,
 `RCAD_STEP_CORPUS=<corpus> mise exec -- cargo run -p rcad-step --release
 --example blocker_depth_probe`; `RCAD_STEP_CORPUS=<corpus> mise exec -- just t
 how_often_a_real_file_imports --no-capture`.
+
+## 127. The `FaceKey` half lands, and the corpus line says `#15`, fixed 2026-09-18
+
+§123.5's three files, the §113.4 move one entity kind along.
+
+`Error::ADraftFaceCouldNotBeMeshed { face: usize, why: rcad_mesh::CannotTriangulate }`
+sits beside `ADraftEdgeHasACrossingThatCannotBeFollowed` in `error.rs`. `Written`
+gained a `faces: Vec<FaceSlot>` beside its `edges`, filled by `write_into` in the
+same pass; `which_described_face_the_sweep_meant` reads a `CannotMeshAFace`'s
+`FaceKey` back against it exactly the way `which_described_edge_the_sweep_meant`
+already read an `EdgeKey`, and `SolidBuilder::build` chains the two `map_err`s.
+`brep.rs` gained one arm in `which_entity_the_builder_meant`, reading
+`face_names` — already built, already indexed the right way, nothing else to
+change there.
+
+**The corpus line does say `#15`.** Twenty KiCad `LED_*` files now publish
+`ThisEntityOfTheSolidWasRefused` naming an `ADVANCED_FACE`, where before every
+one of them named only the solid — `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`
+is the first, its `MANIFOLD_SOLID_BREP` is `#15` in the file's own text
+(`grep MANIFOLD_SOLID_BREP` on it, not assumed), and the mapping now names the
+face the mesher gave up on rather than the solid as a whole.
+
+**Two tests, at two levels.**
+`builder::tests::a_face_the_sweep_cannot_mesh_names_its_own_position` in
+`rcad-topo` builds a tube whose "hole" is exactly as wide as its own wall —
+two cylinders of the same radius, each capped by an annulus of zero width —
+through `SolidBuilder` alone. Nothing before the mesh notices: `check_curved_face`
+asks only that a corner sit on its own surface, `check_flat_face` asks only
+that each wire of a cap wind the right way round, and neither asks where the
+other wire of the same face sits. Reverting the second `map_err` and rerunning
+shows the failure this section closes, verbatim:
+`CannotMeshAFace { face: FaceKey { slot: FaceSlot(3v1), model: ModelId(2) },
+why: LoopsTouch { corner: 4, side: 0, at: Point([2.0, 0.0, 0.0]) } }` — a key
+of a model nothing outside `build` ever holds. With the fix restored it is
+`ADraftFaceCouldNotBeMeshed { face: 2, .. }`, `2` being the bottom cap's own
+position in the description.
+`a_face_the_mesher_cannot_cut_up_names_its_own_advanced_face` in `rcad-step`
+is `a_crossing_the_marcher_gave_up_on_names_its_edge.rs`'s shape one entity
+kind along: whichever corpus files bottom out in `ADraftFaceCouldNotBeMeshed`,
+every one of them names an `ADVANCED_FACE`, with a floor of one file rather
+than a pinned count or a named file, for the same reason §112 gave — a rescue
+can empty the set, and emptying it is good news a pinned test would fail on.
+
+`mise exec -- just gate` is green on this tree.
+
+Commands run to reach this: `git log --oneline -1`; `git checkout -B
+lane-face-key d1e573a4`; `mise exec -- just decision 123`, `123.5`, `113.4`;
+`mise exec -- just t a_face_the_sweep_cannot_mesh_names_its_own_position`;
+`mise exec -- just t a_face_the_mesher_cannot_cut_up_names_its_own_advanced_face
+--nocapture`; `grep MANIFOLD_SOLID_BREP` on
+`kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`; `mise exec -- just gate`.

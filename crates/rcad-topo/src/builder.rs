@@ -852,10 +852,157 @@ define_handle!(DraftFace, "face");
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::Scale;
+    use rcad_geom::{Axis, Cylinder, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector};
     use rcad_predicates::{Policy, ProvenanceLog};
 
-    use crate::Model;
+    use super::{DraftStep, SolidBuilder};
+    use crate::{Error, Model};
+
+    /// Two pipes of the same radius about the same axis, each capped top and
+    /// bottom by the plane the other pipe's cap shares — a tube whose "hole"
+    /// is exactly as wide as its own wall.
+    ///
+    /// **Nothing before the mesh notices.** `check_curved_face` asks only that
+    /// a corner sit on the surface it is named against, which every corner
+    /// here does exactly — both pipes are cylinders about `Axis::z()` and
+    /// every corner sits at that pipe's own radius. `check_flat_face` asks
+    /// only that each wire of a cap wind the right way round the cap's own
+    /// normal, which is a fact about one wire and says nothing about where
+    /// the other wire of the same face sits. So a hole as wide as the wall it
+    /// is cut into reads as two soundly wound wires on a sound pair of
+    /// cylinders, and only [`SolidView::mesh`](crate::SolidView::mesh) —
+    /// reached because the solid has a curved face and so is not "wholly
+    /// flat" — finds that a cap's hole and its own outer edge fanned onto the
+    /// same corners and refuses to cut them into triangles.
+    ///
+    /// This is `SolidBuilder::build`'s own throwaway model failing the same
+    /// way the real corpus file behind `docs/decisions.md` §123 does: a
+    /// [`Error::CannotMeshAFace`] naming a [`crate::FaceKey`] of a model that
+    /// is dropped the moment `build` returns it. `docs/decisions.md` §123.5.
+    fn a_tube_whose_hole_is_exactly_as_wide_as_its_wall() -> SolidBuilder {
+        let outer_radius = 2.0;
+        let inner_radius = 2.0;
+        let height = 1.0;
+
+        let mut builder = SolidBuilder::new();
+        let outer_bottom = builder
+            .add_vertex(Point::new(outer_radius, 0.0, 0.0))
+            .expect("a finite point");
+        let outer_top = builder
+            .add_vertex(Point::new(outer_radius, 0.0, height))
+            .expect("a finite point");
+        let inner_bottom = builder
+            .add_vertex(Point::new(inner_radius, 0.0, 0.0))
+            .expect("a finite point");
+        let inner_top = builder
+            .add_vertex(Point::new(inner_radius, 0.0, height))
+            .expect("a finite point");
+
+        let mut circle = |corner| {
+            builder
+                .add_edge(corner, corner, EdgeRun::RightRoundWhereItsFacesCross)
+                .expect("one whole circle of the two faces crossing there")
+        };
+        let outer_bottom_circle = circle(outer_bottom);
+        let outer_top_circle = circle(outer_top);
+        let inner_bottom_circle = circle(inner_bottom);
+        let inner_top_circle = circle(inner_top);
+
+        let outer_seam = builder
+            .add_edge(outer_bottom, outer_top, EdgeRun::Straight)
+            .expect("a ruling of a pipe is straight");
+        let inner_seam = builder
+            .add_edge(inner_bottom, inner_top, EdgeRun::Straight)
+            .expect("a ruling of a pipe is straight");
+
+        let mut step = |edge, turn| {
+            DraftStep::Along(
+                builder
+                    .add_coedge(edge, turn)
+                    .expect("an edge of this build"),
+            )
+        };
+        let round_the_outer_wall = [
+            step(outer_bottom_circle, Orientation::Forward),
+            step(outer_seam, Orientation::Forward),
+            step(outer_top_circle, Orientation::Reversed),
+            step(outer_seam, Orientation::Reversed),
+        ];
+        let round_the_inner_wall = [
+            step(inner_bottom_circle, Orientation::Forward),
+            step(inner_seam, Orientation::Forward),
+            step(inner_top_circle, Orientation::Reversed),
+            step(inner_seam, Orientation::Reversed),
+        ];
+        let round_the_outer_bottom = [step(outer_bottom_circle, Orientation::Reversed)];
+        let round_the_inner_bottom = [step(inner_bottom_circle, Orientation::Reversed)];
+        let round_the_outer_top = [step(outer_top_circle, Orientation::Forward)];
+        let round_the_inner_top = [step(inner_top_circle, Orientation::Forward)];
+
+        let mut face = |surface, wires: &[&[DraftStep]]| {
+            let wires: Vec<_> = wires
+                .iter()
+                .map(|steps| builder.add_wire(steps).expect("a closed wire"))
+                .collect();
+            builder.add_face(surface, &wires).expect("a face")
+        };
+        let outer_wall = face(
+            Surface::Cylinder(Cylinder::new(Axis::z(), outer_radius).expect("a positive radius")),
+            &[&round_the_outer_wall],
+        );
+        let inner_wall = face(
+            Surface::Cylinder(Cylinder::new(Axis::z(), inner_radius).expect("a positive radius")),
+            &[&round_the_inner_wall],
+        );
+        let bottom = face(
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                    .expect("the z axis is a unit normal"),
+            ),
+            &[&round_the_outer_bottom, &round_the_inner_bottom],
+        );
+        let top = face(
+            Surface::Plane(
+                Plane::from_point_and_normal(
+                    Point::new(0.0, 0.0, height),
+                    Vector::new(0.0, 0.0, 1.0),
+                )
+                .expect("the z axis is a unit normal"),
+            ),
+            &[&round_the_outer_top, &round_the_inner_top],
+        );
+
+        builder
+            .add_shell(&[
+                (outer_wall, Orientation::Forward),
+                (inner_wall, Orientation::Forward),
+                (bottom, Orientation::Forward),
+                (top, Orientation::Forward),
+            ])
+            .expect("four faces close");
+        builder
+    }
+
+    /// The refusal names the face's own position in the description, not a
+    /// key of the throwaway model the sweep ran on and `build` then dropped.
+    #[test]
+    fn a_face_the_sweep_cannot_mesh_names_its_own_position() {
+        let builder = a_tube_whose_hole_is_exactly_as_wide_as_its_wall();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let refused = builder
+            .build(
+                &mut model,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a hole exactly as wide as its own wall cannot be cut into triangles");
+        assert!(
+            // Position 2: the bottom cap, described right after the two
+            // walls in `a_tube_whose_hole_is_exactly_as_wide_as_its_wall`.
+            matches!(refused, Error::ADraftFaceCouldNotBeMeshed { face: 2, .. }),
+            "got {refused:?}, and not a position into this build's own description"
+        );
+    }
 
     /// The one refusal in this module the sweep will not make for us, shown
     /// rather than claimed.
