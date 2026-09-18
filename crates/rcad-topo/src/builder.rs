@@ -338,7 +338,9 @@ impl SolidBuilder {
         let mut mine = ProvenanceLog::new();
         let swept = scratch.validate(policy, &mut mine);
         mine.drain_into(log);
-        swept.map_err(|why| which_described_edge_the_sweep_meant(&scratch, &written.edges, why))?;
+        swept
+            .map_err(|why| which_described_edge_the_sweep_meant(&scratch, &written.edges, why))
+            .map_err(|why| which_described_face_the_sweep_meant(&scratch, &written.faces, why))?;
 
         let solid = self.write_into(model, shell).solid;
         model.check_touched_solid(solid);
@@ -609,18 +611,23 @@ impl SolidBuilder {
             loc: Isometry::identity(),
             orient: Orientation::Forward,
         }]));
-        Written { solid, edges }
+        Written {
+            solid,
+            edges,
+            faces,
+        }
     }
 }
 
-/// One solid written into an arena, and the edges it became.
+/// One solid written into an arena, and the edges and faces it became.
 ///
-/// The edges are kept in the order they were described, so a refusal the sweep
+/// Both are kept in the order they were described, so a refusal the sweep
 /// raises about one of them can be handed back as the position the caller
-/// described it at. Nothing else the sweep names needs this yet.
+/// described it at.
 struct Written {
     solid: SolidSlot,
     edges: Vec<EdgeSlot>,
+    faces: Vec<FaceSlot>,
 }
 
 /// The same refusal with the position the caller described the edge at, in
@@ -648,6 +655,36 @@ fn which_described_edge_the_sweep_meant(
         .expect("the sweep ran on the solid this build just wrote and on nothing else");
     Error::ADraftEdgeHasACrossingThatCannotBeFollowed {
         edge: described_at,
+        why,
+    }
+}
+
+/// The same refusal with the position the caller described the face at, in
+/// place of a key into a model that is about to be dropped.
+///
+/// Everything else comes through untouched. §113.4's move, one entity kind
+/// along (`docs/decisions.md` §123.5).
+///
+/// # Panics
+///
+/// If the sweep names a face this build did not write. The model it swept is
+/// the one written two lines earlier and holds nothing else, so a face of it
+/// that is not in `faces` is a bug here.
+fn which_described_face_the_sweep_meant(
+    scratch: &Model,
+    faces: &[FaceSlot],
+    refusal: Error,
+) -> Error {
+    let Error::CannotMeshAFace { face, why } = refusal else {
+        return refusal;
+    };
+    let slot = face.slot_in(scratch.id());
+    let described_at = faces
+        .iter()
+        .position(|&written| written == slot)
+        .expect("the sweep ran on the solid this build just wrote and on nothing else");
+    Error::ADraftFaceCouldNotBeMeshed {
+        face: described_at,
         why,
     }
 }
