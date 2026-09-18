@@ -15,7 +15,7 @@ Each decision cites the roadmap section it comes from or contradicts.
 
 ## 0. Where the work is
 
-reviewed: 2026-09-17
+reviewed: 2026-09-18
 
 **unit:** *a crossing too nearly parallel to follow* — the corpus files that
 hang on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off
@@ -24,20 +24,20 @@ to follow it. §16.10 governs it: "too nearly parallel to follow" is a claim tha
 something cannot be done, so the unit owes a demonstration either way — a gap if
 a scaling or a reformulation reaches the sign, a limit if none does.
 
-**Three waves have run, and the demonstration is in.** §110–§113 named the pair
+**Four waves have run, and the demonstration is in.** §110–§113 named the pair
 and the site and falsified §109.6 — the wall is `settled`, not `one_step`.
 §115–§117 walked closed edges by this kernel's rule rather than the file's flag
 (KiCad import 97/323 → 110/323), leaving 26 files at the wall: **20 a limit,
 none transverse, 6 two equal pipes whose axes cross.** §118 answered those 6 in
-closed form and found two classifiers that disagree. §119 finished the
-convention §118.11 began — a pipe is `r` wide in every file now — and with it
-the turned quartic family stopped refusing, a resting ball was never on a knife
-edge after all, and a pair of pipes stopped answering `Ok(Nothing)` where they
-overlap. §29's *geometric* width claim is spent.
+closed form and found two classifiers that disagree. §119 made a pipe `r` wide
+in every file and spent §29's *geometric* width claim. §122–§124 took the last
+three, the third as a finding and not a fix: §115.4's hint is not wrong and
+neither is the file — the certified rule asks both faces of one closed edge to
+be forward, and only one of them can be.
 
-**What is left:** §113.7's `LoopsTouch`; §111.3's expansion tier; §115.4's hint
-against the certified rule; and §120, `Axis::new`'s normalize — booked rather
-than fixed inside §119 because it moves the stored bits of every plane and axis.
+**What is left:** §124's gap, with no reproduction yet (§124.4); §122.4's
+scale-and-retry; §123.5's `FaceKey` half; and §121, `Plane`'s normalize, booked
+inside §120 because it moves the stored bits of every plane.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, and healing, the biggest bucket, is refused by name in §42.9. §45.2
