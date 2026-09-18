@@ -33743,3 +33743,110 @@ exit code echoed after it and read back.
 **The loop went in a script because the worktree guard refused it inline.** A
 `for` loop naming a path with `git` in it is "too complex to verify"; a script
 in the scratchpad taking the worktree as its first argument is not.
+
+## 137. The night's selftest measured a share against the window it asked for instead of the window it got, fixed 2026-09-19
+
+`check-fuzz-overnight-selftest` turned `main` red on `bcff8e25`, a commit that
+changed **one line of `docs/decisions.md`**. It is a flaky arm, and the flake was
+not a race between two threads but a check comparing a measurement against the
+wrong constant.
+
+### 137.1 What it asserted and why that was wrong
+
+§129 made the night run all five targets at once rather than a fifth of the
+window each, and the arm that holds it asks what each target was *told*:
+
+```
+[ "$granted" -ge 8 ]   # of a twelve-second window
+```
+
+The five targets are handed `left = deadline - now`, computed once, where
+`deadline` was set to `now + 12` at the top of the recipe. So what a target
+receives is **twelve minus the preamble** — the watermark, the git calls, a
+nested `just` per target. On this machine the preamble rounds to nothing and
+`granted` is 12, measured twice. On the GitHub runner it was **9 seconds of the
+12**, and the *correct* recipe granted 3.
+
+The arithmetic is readable straight off the failing run's own log. All five
+targets logged `at=1789769029` with `-max_total_time=3`, so the deadline was
+`1789769032` and the recipe started at `1789769020` — nine seconds earlier.
+
+**The worse half is not the red build.** A fifth of twelve is 2. At a preamble of
+nine the correct recipe grants 3 and the mutation this arm exists to catch grants
+2, so the arm had lost almost all of its power to tell them apart. A check that
+fails the correct answer on a slow machine is also a check that would have passed
+the wrong one there.
+
+### 137.2 The fix: compare against what was actually left
+
+`granted` is now held against the time remaining when the targets launched, read
+out of the stub's own `at=` stamp:
+
+```
+launched=$(sed -n 's/.*fuzz run.*\[at=\([0-9]*\)\].*/\1/p' "$dir/log" | sort -n | head -1)
+whole=$(( started + 12 - launched ))
+[ "$granted" -ge "$whole" ]
+```
+
+`started` is read *before* `fuzz-overnight` begins, so `started + 12` is at or
+before the deadline the recipe sets, and `whole` is a **lower bound** on what a
+correct recipe grants. The assertion therefore cannot fail for a slow machine —
+only for a recipe that shares the window out. No fixture grew and the gate got no
+slower; the twelve-second window stands.
+
+### 137.3 The demonstration, both directions
+
+A test whose subject is a test still owes the two runs. `fuzz-overnight` was
+mutated in the tree, measured, and restored; `git diff` afterwards shows the
+assertion change alone.
+
+| probe | `granted` | `whole` | old `-ge 8` | new `-ge $whole` |
+|---|---|---|---|---|
+| as shipped | 12 | 12 | pass | **pass** |
+| `sleep 9` before the launch, case one only | 3 | 3 | **fail** | **pass** |
+| `left` divided by five | 2 | 12 | fail | **fail** |
+
+Row two reproduces the runner exactly, down to the message: *"each target was
+given 3 s of a twelve-second window"*, the same sentence CI printed. Row three is
+the one that matters for the fix's honesty — the new assertion still catches the
+mutation, and names it: *"each target was given 2 s of the 12 s still left when
+they launched"*.
+
+Row three needed the `elapsed -ge 4` check relaxed to be reached at all, because
+a divided window makes the night finish in a second and that guard fires first.
+Both guards catch the mutation; only the size one names it.
+
+### 137.4 Why it went unnoticed
+
+This arm landed on 2026-09-18 in `0ac02509` and was green on the runner twice
+before this. Its own comment already records a `date +%s` truncation race found
+by rcad-15 on 2026-09-09, fixed by sleeping *half* the slice — so the family was
+known and this member of it was missed anyway. The reason is that both the
+fixture and the assertion were written on a machine where the preamble rounds to
+zero, which makes `12` and `12 - preamble` the same number.
+
+That is §77.6's mistake once more: a check that passes for a property of the
+environment it ran in rather than of the tree. The three there were counting
+colour codes and asking after a plugin; this one hard-codes a constant that is
+only true on a fast machine. **The way to find the next one is the same: take
+away what the environment supplies and run it again.** Here that was `sleep 9`.
+
+### 137.5 What is left
+
+**The `distinct == 1` check above it has the same shape and is not fixed.** The
+five launches are a tight loop, so on a machine slow enough to straddle a second
+boundary two targets would be told 3 and three told 2, and the arm would report
+that the window "is still being divided" when it is not. It has not been seen —
+all five stamped the same second even on the runner that failed — and the obvious
+relaxation, allowing values to differ by one, is what would let a genuinely
+divided window through. Recorded, not acted on; the same judgement §136.5 made
+about the five bands it did not re-derive.
+
+### 137.6 Provenance
+
+Found by pushing `bcff8e25` and watching CI, 2026-09-19. Run `35399208851`
+failed; `35399049264` on `5336ff31` and `35398576360` on `912cd168` both
+succeeded, and `5336ff31` differs from `bcff8e25` by one line of prose in a file
+no part of this recipe reads — which is what said "flaky arm" before any of the
+arithmetic was done. The assertion was already on `a47d990a`, the green base the
+§121 stack landed on, so no commit of that stack introduced it.
