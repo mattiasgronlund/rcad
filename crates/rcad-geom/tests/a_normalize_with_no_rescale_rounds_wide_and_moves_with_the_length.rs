@@ -268,13 +268,21 @@ fn a_surface_built_from_one_ray_at_any_length_has_one_basis() {
                     let again = at(scale);
                     drawn += 1;
                     assert_eq!(
-                        Cylinder::new(first, 1.0).expect("a pipe of radius one").basis(),
-                        Cylinder::new(again, 1.0).expect("a pipe of radius one").basis(),
+                        Cylinder::new(first, 1.0)
+                            .expect("a pipe of radius one")
+                            .basis(),
+                        Cylinder::new(again, 1.0)
+                            .expect("a pipe of radius one")
+                            .basis(),
                         "a pipe on {short:?} and one on the same ray {scale} times over"
                     );
                     assert_eq!(
-                        Cone::new(first, 0.5).expect("a cone of slope a half").basis(),
-                        Cone::new(again, 0.5).expect("a cone of slope a half").basis(),
+                        Cone::new(first, 0.5)
+                            .expect("a cone of slope a half")
+                            .basis(),
+                        Cone::new(again, 0.5)
+                            .expect("a cone of slope a half")
+                            .basis(),
                         "a cone on {short:?} and one on the same ray {scale} times over"
                     );
                     assert_eq!(
@@ -408,7 +416,10 @@ fn how_often_a_surfaces_basis_is_not_the_nearest_f64() {
         let along = axis.direction();
         let leans_on_least = the_coordinate_direction_it_leans_on_least(along);
         let across = leans_on_least - along * along.dot(leans_on_least);
-        let bare = Cylinder::new(axis, 1.0).expect("a pipe of radius one").basis().0;
+        let bare = Cylinder::new(axis, 1.0)
+            .expect("a pipe of radius one")
+            .basis()
+            .0;
         let correct = correctly_rounded(across).expect("the axis is not along that direction");
         if bare != correct {
             a_pipes_basis_missed += 1;
