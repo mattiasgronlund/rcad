@@ -2399,19 +2399,21 @@ fuzz-overnight window="28800":
 
     # **What failed the night, now that the exit status cannot say.** libFuzzer
     # names every input it writes for what happened to it (`FuzzerLoop.cpp`), and
-    # four of those five names are a bug: `crash-`, `oom-`, `leak-`, `timeout-`.
+    # three of those five names are a bug: `crash-`, `oom-`, `leak-`.
     #
-    # `slow-unit-` is the fifth and is deliberately not among them. It means an
-    # input was slower than the rest, not that anything is wrong, and the night of
-    # 2026-09-13 wrote three while being an entirely good night.
+    # The other two are a measurement and not a fault. `slow-unit-` means an input
+    # was slower than its neighbours — the night of 2026-09-13 wrote three while
+    # being an entirely good night. `timeout-` means it was slower than the
+    # `-timeout=10` §132 sets, which on `where_two_surfaces_cross` is a nightly
+    # certainty rather than news: its tracked corpus holds inputs of 17 to 19
+    # seconds, so the replay writes one before any fuzzing starts. A standing
+    # population cannot be what fails a night — that is §91's failure reached by
+    # crying wolf instead of by staying quiet. Both are still copied out and still
+    # counted in the summary, which is how a new one gets noticed.
     #
     # Read out of the worktree rather than out of `$night/artifacts`, and against
     # `$since`, because the copy is made with `cp -Rn` and carries no useful mtime
-    # while the original has libFuzzer's own. **`timeout-` is here on today's
-    # meaning and item 2 has to revisit it**: with a per-input `-timeout` short
-    # enough to be worth setting, §91.3's six landed slow units would write one
-    # every night on the corpus replay alone, and a standing population cannot be
-    # what fails a night.
+    # while the original has libFuzzer's own.
     #
     # Guarded rather than left to `find` to report: a night where no target wrote
     # anything has no `fuzz/artifacts` at all, `find` exits 1, and `pipefail`
@@ -2420,7 +2422,7 @@ fuzz-overnight window="28800":
     found=0
     if [ -d fuzz/artifacts ]; then
         found=$(find fuzz/artifacts -type f -newer "$since" \
-            \( -name 'crash-*' -o -name 'oom-*' -o -name 'leak-*' -o -name 'timeout-*' \) \
+            \( -name 'crash-*' -o -name 'oom-*' -o -name 'leak-*' \) \
             | wc -l)
     fi
     if [ "$found" -gt 0 ]; then
@@ -2580,9 +2582,20 @@ fuzz-target target duration corpus_root="" max_len="" fork="0":
     # *depends* on them rather than merely tolerating them: with a per-input
     # `-timeout` the slow units of §91.3 time out on the corpus replay, and a
     # default that changed under us would end every target in its first minute.
+    #
+    # **`-timeout=10` is in here and not outside it, because it is only safe
+    # inside it** (§130.7, §132). `-ignore_timeouts` is a fork-mode flag; without
+    # `-fork` a timeout kills the process, and `fuzz/corpus/where_two_surfaces_cross`
+    # holds inputs of 17 to 19 seconds — so a hand-run `just fuzz 60` carrying this
+    # flag would die on its own corpus replay before fuzzing anything.
+    #
+    # Ten seconds is 1 270 times that target's p99 of 7.9 ms and caps a tail that
+    # took 19% of its night in 0.025% of its inputs. Deliberately loose rather
+    # than tight: an input killed here never enters the corpus, and on this target
+    # the slow inputs are the nearly-parallel crossings §0's unit is about.
     fork_flags=()
     if [ "{{fork}}" -gt 0 ]; then
-        fork_flags=(-fork={{fork}} -ignore_crashes=1 -ignore_timeouts=1 -ignore_ooms=1)
+        fork_flags=(-fork={{fork}} -timeout=10 -ignore_crashes=1 -ignore_timeouts=1 -ignore_ooms=1)
     fi
     RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz run {{target}} ${corpus[@]+"${corpus[@]}"} -- \
@@ -2827,6 +2840,11 @@ check-fuzz-overnight-selftest:
         || fail "the night asked for -fork=$forked, so nothing is isolated and one crash still ends a target"
     [ "$(grep -c 'ignore_crashes=1' "$dir/log")" -eq 5 ] \
         || fail "a target forks without -ignore_crashes=1, so its first crash still ends its night"
+
+    # And every target bounds one input (§132). Without it `where_two_surfaces_cross`
+    # spends 19% of its night on 0.025% of its inputs, at 17 to 19 seconds apiece.
+    [ "$(grep -c 'timeout=10' "$dir/log")" -eq 5 ] \
+        || fail "a target runs with no per-input timeout, so one input can still take twenty seconds of its night"
 
     # And the morning is told, because a copy nobody is told about is very nearly
     # as lost as the original. This arm's night also failed, so it proves the
@@ -3159,6 +3177,47 @@ check-fuzz-overnight-selftest:
         || fail "a crash left over from an earlier night failed this one: $(cat "$dir/logs/latest")"
     grep -q 'nothing found' "$dir/logs/latest" \
         || fail "a carried-over crash artifact was reported as tonight's find: $(cat "$dir/logs/latest")"
+
+    # Fourteen: a `timeout-` artifact is a measurement and not a fault (§132).
+    # `-timeout=10` makes one of these a nightly certainty on
+    # `where_two_surfaces_cross`, whose tracked corpus holds inputs of 17 to 19
+    # seconds — the replay writes one before any fuzzing starts. A night that
+    # failed on it would fail every night, and a night that always fails is a
+    # night nobody reads. It is still carried out and still counted.
+    : >"$dir/log"
+    status=0
+    STUB_ARTIFACT_KIND=timeout- STUB_ARTIFACT_KIND_TARGET=where_two_surfaces_cross \
+        run 8 || status=$?
+    [ "$status" -eq 0 ] \
+        || fail "a timed-out input failed the night, so every night fails from here on: $(cat "$dir/logs/latest")"
+    grep -q 'nothing found' "$dir/logs/latest" \
+        || fail "a timed-out input was reported as a find: $(cat "$dir/logs/latest")"
+    night="$dir/logs/$(date +%Y-%m-%d)"
+    [ -f "$night/artifacts/where_two_surfaces_cross/timeout-$tag" ] \
+        || fail "a timed-out input was not carried out of the worktree, so nobody can see a new one appear"
+    rm -f fuzz/artifacts/where_two_surfaces_cross/timeout-"$tag"
+
+    # Fifteen: **a hand run gets neither flag**, and that is not tidiness.
+    # `-ignore_timeouts` is a fork-mode flag, so without `-fork` a timeout kills
+    # the process — and `fuzz/corpus/where_two_surfaces_cross` is where the 17-to-19
+    # second inputs live. A `just fuzz 60` carrying `-timeout=10` would die on its
+    # own corpus replay before fuzzing a single new input (§130.7).
+    #
+    # Run against `fuzz-target` through `fuzz` rather than through `fuzz-overnight`,
+    # because the hand path is the one call site the night never takes. It lives in
+    # this arm's file because this is where the stub `cargo` is.
+    : >"$dir/log"
+    STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" {{just_executable()}} fuzz 2 >"$dir/out" 2>&1 \
+        || fail "a hand-run \`just fuzz\` failed: $(cat "$dir/out")"
+    grep -q 'fuzz run where_two_surfaces_cross' "$dir/log" \
+        || fail "a hand-run \`just fuzz\` did not reach the target at all: $(cat "$dir/log")"
+    # Negated with `!` and not written as `grep && fail`: the passing case is the
+    # grep finding nothing, which is a non-zero status, and `set -e` would take
+    # the recipe down on the arm that just succeeded.
+    ! grep -q 'timeout=' "$dir/log" \
+        || fail "a hand run was given a per-input timeout, which without -fork kills it on its own corpus replay"
+    ! grep -q 'fork=' "$dir/log" \
+        || fail "a hand run was given -fork, so a crash no longer stops it and prints"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed,
