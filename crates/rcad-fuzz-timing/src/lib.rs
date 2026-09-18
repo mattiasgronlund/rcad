@@ -29,16 +29,35 @@
 //! back to `cargo fuzz run`. A percentile names how slow the slow ones were; it
 //! cannot name *which*, and which is the thing somebody then goes and reads.
 //!
+//! # Many processes write here, and that is the hard part
+//!
+//! Under `-fork=N` the target is not one process. libFuzzer runs a churn of
+//! short-lived children — measured at twelve jobs in 101 seconds at `-fork=2`,
+//! so about seventeen seconds apiece, which over an eight-hour night at
+//! `-fork=24` is roughly **forty thousand processes per target**.
+//!
+//! Until 2026-09-18 each of them wrote its own report over the last one's and
+//! deleted the slow units it found. Measured: 54 845 runs across 12 jobs left a
+//! report reading `1 runs, 0.0 s in all`. Not a partial answer — the whole
+//! measurement, gone.
+//!
+//! A directory per process is no fix either, because forty thousand of them is
+//! not a report. So there is **one shared accumulation per target**, guarded by
+//! a lock file, and each process merges what it has seen into it. The slowest
+//! runs need no accumulation at all: a file's name already carries how slow it
+//! was, so the directory listing *is* the merged top, and pruning is a sort.
+//!
 //! # It is off unless a directory is named
 //!
 //! `RCAD_FUZZ_TIMINGS` is a directory, and nothing here runs without it — not
-//! even the clock. `RCAD_FUZZ_SLOWEST` is how many of the slowest runs to keep,
-//! and defaults to [`HOW_MANY_SLOW_RUNS_TO_KEEP`].
+//! even the clock, and not the merging thread. `RCAD_FUZZ_SLOWEST` is how many
+//! of the slowest runs to keep, and defaults to [`HOW_MANY_SLOW_RUNS_TO_KEEP`].
 
 #![forbid(unsafe_code)]
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Duration, Instant};
 
 /// How many of the slowest runs are kept, where `RCAD_FUZZ_SLOWEST` says nothing.
@@ -53,6 +72,9 @@ pub const HOW_MANY_SLOW_RUNS_TO_KEEP: usize = 64;
 /// report.
 static WATCH: OnceLock<Option<Mutex<Watch>>> = OnceLock::new();
 
+/// Guards the one merging thread, for the same reason `WATCH` is out here.
+static START_MERGING: Once = Once::new();
+
 /// Run one draw of a fuzz target, timing it where a directory has been named.
 ///
 /// Pass `env!("CARGO_BIN_NAME")` as `target` — it is the fuzz target's own name
@@ -64,6 +86,17 @@ pub fn timed<T>(target: &str, bytes: &[u8], run: impl FnOnce() -> T) -> T {
     let Some(watch) = WATCH.get_or_init(|| Watch::asked_for(target).map(Mutex::new)) else {
         return run();
     };
+
+    // The thread is started here rather than in the initialiser above because
+    // `get_or_init`'s closure cannot hand itself the `&'static` its thread needs.
+    START_MERGING.call_once(|| {
+        std::thread::spawn(|| {
+            loop {
+                std::thread::sleep(HOW_OFTEN_TO_MERGE);
+                merge_out(watch);
+            }
+        });
+    });
 
     // The clock is stopped before the lock is taken, and `run` is called outside
     // it, so a draw that panics — which is what a fuzz target is for — neither
@@ -78,19 +111,27 @@ pub fn timed<T>(target: &str, bytes: &[u8], run: impl FnOnce() -> T) -> T {
     answer
 }
 
-/// How long to leave between rewrites of the report.
+/// How long to leave between merges into the shared accumulation.
 ///
-/// The report is rewritten *while the run is going*, and not at the end, because
-/// there is no end a fuzz target is guaranteed to reach: libFuzzer calls `exit`
-/// on a crash and the timer kills a target that overruns its slice.
-const HOW_OFTEN_TO_WRITE: Duration = Duration::from_secs(30);
+/// **A second, where the report it replaced was rewritten every thirty.** A
+/// process only ever loses what it has seen since its last merge, and under
+/// `-fork` a process lives about seventeen seconds — so at thirty seconds most
+/// children would exit having merged nothing at all, and the loss would be the
+/// whole night rather than the edge of it. libFuzzer kills its children from
+/// outside, so there is no exit to hook and no way to make the loss zero.
+///
+/// The cost is a lock and a small read-modify-write per process per second,
+/// which against twenty-four of them is a rounding error next to the fuzzing.
+const HOW_OFTEN_TO_MERGE: Duration = Duration::from_secs(1);
 
-/// What one target's process has seen so far.
+/// What this process has seen and not yet merged.
 struct Watch {
     into: PathBuf,
+    keep: usize,
     took: HowLongRunsTook,
     slowest: TheSlowestRuns,
-    written: Option<Instant>,
+    /// Slow inputs already on disk, so a steady top is not rewritten every tick.
+    written: HashSet<String>,
 }
 
 impl Watch {
@@ -103,82 +144,168 @@ impl Watch {
             .unwrap_or(HOW_MANY_SLOW_RUNS_TO_KEEP);
         Some(Self {
             into: Path::new(&root).join(target),
+            keep,
             took: HowLongRunsTook::new(),
             slowest: TheSlowestRuns::keeping(keep),
-            written: None,
+            written: HashSet::new(),
         })
     }
 
     /// One run, counted and — where it is among the slowest — kept.
+    ///
+    /// No clock is read and nothing is written. Everything this process has seen
+    /// goes out on the merging thread's tick, which is what lets the run path
+    /// stay two `Instant::now()`s and an add.
     fn record(&mut self, took: Duration, bytes: &[u8]) {
         self.took.record(took);
+        self.slowest.offer(took, bytes);
+    }
+}
 
-        // The clock is read only for a run worth keeping, which after the first
-        // seconds is a few in a million. Asking whether a rewrite is due on
-        // every run instead costs a third `Instant::now()` on a path that two
-        // are already most of.
-        if !self.slowest.offer(took, bytes) {
-            return;
+/// Add what this process has seen to the shared accumulation, and rewrite the
+/// report from the result.
+///
+/// Every failure here is swallowed. A fuzz target that stopped fuzzing because
+/// its measurements could not be filed would be measuring the disk.
+fn merge_out(watch: &Mutex<Watch>) {
+    let (into, keep, mine, to_write) = {
+        let mut watch = watch
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        // The histogram is handed over and reset, so what is merged is a delta
+        // and a process that merges twice does not count its runs twice. The
+        // slowest are *not* reset: they are the process's running top, and
+        // dropping them would make every tick re-offer the whole corpus.
+        let mine = std::mem::replace(&mut watch.took, HowLongRunsTook::new());
+        let to_write: Vec<(Duration, Vec<u8>)> = watch
+            .slowest
+            .slowest_first()
+            .filter(|(took, bytes)| !watch.written.contains(&named_for(*took, bytes)))
+            .map(|(took, bytes)| (took, bytes.to_vec()))
+            .collect();
+        for (took, bytes) in &to_write {
+            watch.written.insert(named_for(*took, bytes));
         }
-        if self
-            .written
-            .is_none_or(|written| written.elapsed() >= HOW_OFTEN_TO_WRITE)
-        {
-            self.write_the_report();
-            self.written = Some(Instant::now());
-        }
+        (watch.into.clone(), watch.keep, mine, to_write)
+    };
+
+    if mine.runs == 0 && to_write.is_empty() {
+        return;
     }
 
-    /// The report and the slow inputs beside it.
-    ///
-    /// Every failure here is swallowed. A fuzz target that stopped fuzzing
-    /// because its measurements could not be filed would be measuring the disk.
-    fn write_the_report(&self) {
-        let slowest = self.into.join("slowest");
-        if std::fs::create_dir_all(&slowest).is_err() {
-            return;
-        }
-        clear_stale_slow_runs(&slowest);
-        for (took, bytes) in self.slowest.slowest_first() {
-            let _ = std::fs::write(slowest.join(named_for(took, bytes)), bytes);
-        }
-        let _ = std::fs::write(self.into.join("report"), self.report_text());
+    let slowest = into.join("slowest");
+    if std::fs::create_dir_all(&slowest).is_err() {
+        return;
     }
+    let Some(lock) = the_shared_report_locked(&into) else {
+        return;
+    };
 
-    /// The report, as it is written to disk.
-    fn report_text(&self) -> String {
-        let mut text = format!(
-            "{} runs, {:.1} s in all\n\nhow long one run took, as the low end of its bucket\n",
-            self.took.runs,
-            self.took.total.as_secs_f64()
-        );
-        for share in [50.0, 90.0, 95.0, 98.0, 99.0, 100.0] {
-            text.push_str(&format!(
-                "  p{share:<5} {:>14.3} ms\n",
-                self.took.at_percentile(share).as_secs_f64() * 1e3
-            ));
+    let mut everyones = HowLongRunsTook::read_back(&into.join("totals"));
+    everyones.add(&mine);
+    let _ = std::fs::write(into.join("totals"), everyones.written_out());
+
+    for (took, bytes) in &to_write {
+        let _ = std::fs::write(slowest.join(named_for(*took, bytes)), bytes);
+    }
+    let kept = prune_to_the_slowest_kept(&slowest, keep);
+    let _ = std::fs::write(into.join("report"), report_text(&everyones, &kept));
+
+    let _ = lock.unlock();
+}
+
+/// The lock every process takes before touching the shared accumulation.
+///
+/// A plain advisory lock on a file of its own. It is held for a read, an add and
+/// two small writes, so a process waits on it for microseconds even with all
+/// twenty-four forks ticking at once.
+fn the_shared_report_locked(into: &Path) -> Option<std::fs::File> {
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(into.join("lock"))
+        .ok()?;
+    lock.lock().ok()?;
+    Some(lock)
+}
+
+/// Cut `slowest/` back to the slowest `keep` runs, and say what is left.
+///
+/// **This is where the merging of the slow runs happens**, and it needs no
+/// accumulation because [`named_for`] puts the time in the name: whatever
+/// process wrote a file, its name says how slow it was and which input it was,
+/// so the listing sorted by time is the top across every process at once.
+///
+/// One input found by two processes is two names with the same hash and
+/// different times, and only the slowest is kept — the same rule
+/// [`TheSlowestRuns::offer`] applies inside one process, applied across them.
+///
+/// Only files this module writes are touched, so pointing `RCAD_FUZZ_TIMINGS` at
+/// a directory with something else in it cannot lose that something else.
+fn prune_to_the_slowest_kept(from: &Path, keep: usize) -> Vec<(Duration, String)> {
+    let Ok(listing) = std::fs::read_dir(from) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(Duration, String)> = Vec::new();
+    for entry in listing.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some((took, _)) = how_slow_the_name_says(&name) {
+            found.push((took, name));
         }
-        let cut = self.took.at_percentile(98.0);
+    }
+    found.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+
+    let mut kept: Vec<(Duration, String)> = Vec::new();
+    let mut held: HashSet<String> = HashSet::new();
+    for (took, name) in found {
+        let input = how_slow_the_name_says(&name)
+            .map(|(_, input)| input.to_string())
+            .unwrap_or_default();
+        if kept.len() < keep && held.insert(input) {
+            kept.push((took, name));
+        } else {
+            let _ = std::fs::remove_file(from.join(&name));
+        }
+    }
+    kept
+}
+
+/// The report, as it is written to disk.
+fn report_text(everyones: &HowLongRunsTook, kept: &[(Duration, String)]) -> String {
+    let mut text = format!(
+        "{} runs, {:.1} s in all\n\nhow long one run took, as the low end of its bucket\n",
+        everyones.runs,
+        everyones.total.as_secs_f64()
+    );
+    for share in [50.0, 90.0, 95.0, 98.0, 99.0, 100.0] {
         text.push_str(&format!(
-            "\n{} runs at or over p98, of which the slowest {} are kept in slowest/:\n",
-            self.took.how_many_took_at_least(cut),
-            self.slowest.runs.len(),
+            "  p{share:<5} {:>14.3} ms\n",
+            everyones.at_percentile(share).as_secs_f64() * 1e3
         ));
-        for (took, bytes) in self.slowest.slowest_first() {
-            text.push_str(&format!(
-                "  {:>12.3} ms  {}\n",
-                took.as_secs_f64() * 1e3,
-                named_for(took, bytes)
-            ));
-        }
-        text
     }
+    let cut = everyones.at_percentile(98.0);
+    text.push_str(&format!(
+        "\n{} runs at or over p98, of which the slowest {} are kept in slowest/:\n",
+        everyones.how_many_took_at_least(cut),
+        kept.len(),
+    ));
+    for (took, name) in kept {
+        text.push_str(&format!(
+            "  {:>12.3} ms  {}\n",
+            took.as_secs_f64() * 1e3,
+            name
+        ));
+    }
+    text
 }
 
 /// What one slow run's file is called.
 ///
 /// The time comes first so a listing sorts by it, and the hash last so the same
-/// input keeps the same name across rewrites and across nights.
+/// input keeps the same name across rewrites, across nights and across the many
+/// processes a `-fork` run is made of.
 fn named_for(took: Duration, bytes: &[u8]) -> String {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in bytes {
@@ -188,19 +315,14 @@ fn named_for(took: Duration, bytes: &[u8]) -> String {
     format!("slow-{:012}us-{hash:016x}", took.as_micros())
 }
 
-/// The slow inputs a previous rewrite left, which the current top no longer names.
+/// How slow a slow run's file name says it was, and which input it names.
 ///
-/// Only files this module writes are touched, so pointing `RCAD_FUZZ_TIMINGS` at
-/// a directory with something else in it cannot lose that something else.
-fn clear_stale_slow_runs(from: &Path) {
-    let Ok(listing) = std::fs::read_dir(from) else {
-        return;
-    };
-    for entry in listing.flatten() {
-        if entry.file_name().to_string_lossy().starts_with("slow-") {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
+/// The inverse of [`named_for`], and the reason the slow runs need no shared
+/// accumulation of their own.
+fn how_slow_the_name_says(name: &str) -> Option<(Duration, &str)> {
+    let rest = name.strip_prefix("slow-")?;
+    let (micros, input) = rest.split_once("us-")?;
+    Some((Duration::from_micros(micros.parse().ok()?), input))
 }
 
 /// How many runs landed in each bucket of nanoseconds.
@@ -224,6 +346,63 @@ impl HowLongRunsTook {
         self.total += took;
         let nanos = u64::try_from(took.as_nanos()).unwrap_or(u64::MAX);
         self.buckets[bucket_of(nanos)] += 1;
+    }
+
+    /// Add everything another process saw to this.
+    fn add(&mut self, other: &Self) {
+        self.runs += other.runs;
+        self.total += other.total;
+        for (mine, theirs) in self.buckets.iter_mut().zip(other.buckets.iter()) {
+            *mine += theirs;
+        }
+    }
+
+    /// The accumulation as it is stored, which only this module reads.
+    ///
+    /// Empty buckets are left out. A histogram of a real night touches a few
+    /// hundred of the 976, so the file stays a few kilobytes however long the
+    /// night runs, which is what makes a merge every second cheap.
+    fn written_out(&self) -> String {
+        let mut text = format!("runs {}\nnanos {}\n", self.runs, self.total.as_nanos());
+        for (bucket, count) in self.buckets.iter().enumerate() {
+            if *count > 0 {
+                text.push_str(&format!("b {bucket} {count}\n"));
+            }
+        }
+        text
+    }
+
+    /// What [`Self::written_out`] wrote, or an empty one where there is nothing
+    /// to read yet and where what is there cannot be understood.
+    ///
+    /// A file this cannot parse is treated as empty rather than as an error, for
+    /// the same reason every other failure here is swallowed — and losing a
+    /// night's counts to a torn file is better than a fuzz target that stops.
+    fn read_back(from: &Path) -> Self {
+        let mut took = Self::new();
+        let Ok(text) = std::fs::read_to_string(from) else {
+            return took;
+        };
+        for line in text.lines() {
+            let mut words = line.split_whitespace();
+            match (words.next(), words.next(), words.next()) {
+                (Some("runs"), Some(runs), None) => took.runs = runs.parse().unwrap_or(0),
+                (Some("nanos"), Some(nanos), None) => {
+                    took.total = Duration::from_nanos(
+                        u64::try_from(nanos.parse::<u128>().unwrap_or(0)).unwrap_or(u64::MAX),
+                    );
+                }
+                (Some("b"), Some(bucket), Some(count)) => {
+                    if let Ok(bucket) = bucket.parse::<usize>()
+                        && bucket < HOW_MANY_BUCKETS
+                    {
+                        took.buckets[bucket] = count.parse().unwrap_or(0);
+                    }
+                }
+                _ => {}
+            }
+        }
+        took
     }
 
     /// The value at a percentile by nearest rank, as the low end of its bucket.
@@ -346,6 +525,239 @@ impl TheSlowestRuns {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A directory of this test's own, named so two tests never share one.
+    fn somewhere_to_write(what: &str) -> PathBuf {
+        let into = std::env::temp_dir().join(format!(
+            "rcad-fuzz-timing-{}-{what}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&into);
+        into
+    }
+
+    /// A watch writing into `into`, as a process under `-fork` would have.
+    fn a_process_writing_into(into: &Path, keep: usize) -> Mutex<Watch> {
+        Mutex::new(Watch {
+            into: into.to_path_buf(),
+            keep,
+            took: HowLongRunsTook::new(),
+            slowest: TheSlowestRuns::keeping(keep),
+            written: HashSet::new(),
+        })
+    }
+
+    #[test]
+    fn two_processes_writing_at_once_keep_both_their_runs() {
+        // The regression. Under `-fork` the target is forty thousand short-lived
+        // processes over a night, every one of them pointed at this directory.
+        // Each used to write its own report over the last one's, so a measured
+        // 54 845 runs across 12 jobs left a report reading `1 runs`.
+        let into = somewhere_to_write("two-processes");
+        let first = a_process_writing_into(&into, 4);
+        let second = a_process_writing_into(&into, 4);
+
+        for run in 1..=3u64 {
+            first
+                .lock()
+                .unwrap()
+                .record(Duration::from_millis(run), &[run as u8]);
+        }
+        for run in 4..=9u64 {
+            second
+                .lock()
+                .unwrap()
+                .record(Duration::from_millis(run), &[run as u8]);
+        }
+        merge_out(&first);
+        merge_out(&second);
+
+        let report = std::fs::read_to_string(into.join("report")).expect("a report");
+        assert!(
+            report.starts_with("9 runs"),
+            "two processes recorded 3 and 6 runs; the report says {:?}",
+            report.lines().next()
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn a_process_that_merges_twice_does_not_count_its_runs_twice() {
+        // The merging thread ticks once a second for the whole life of a
+        // process, so all but the first tick of every process merges a delta on
+        // top of what that same process already put in.
+        let into = somewhere_to_write("merge-twice");
+        let watch = a_process_writing_into(&into, 4);
+
+        watch
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(5), b"once");
+        merge_out(&watch);
+        merge_out(&watch);
+        watch
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(5), b"twice");
+        merge_out(&watch);
+
+        let report = std::fs::read_to_string(into.join("report")).expect("a report");
+        assert!(
+            report.starts_with("2 runs"),
+            "two runs were recorded over three merges; the report says {:?}",
+            report.lines().next()
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn the_slow_runs_kept_are_the_slowest_across_every_process() {
+        // Each process only ever sees its own draws, so the top has to be taken
+        // across the directory rather than within a process. The old rewrite did
+        // the opposite: it deleted every slow unit the current process did not
+        // itself name.
+        // **The two kept have to come one from each process**, or the test is
+        // satisfied by a process that deletes everything it did not itself find
+        // and happens to hold both. That is how the old rewrite behaved, and a
+        // first draft of this test passed against it.
+        let into = somewhere_to_write("slowest-across");
+        let first = a_process_writing_into(&into, 2);
+        let second = a_process_writing_into(&into, 2);
+
+        first
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(85), b"second slowest of all");
+        second
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(90), b"slowest of all");
+        second
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(10), b"quick");
+        merge_out(&first);
+        merge_out(&second);
+
+        let kept: HashSet<String> = std::fs::read_dir(into.join("slowest"))
+            .expect("a slowest directory")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(kept.len(), 2, "two are kept, and these are {kept:?}");
+        assert!(
+            kept.contains(&named_for(Duration::from_millis(90), b"slowest of all")),
+            "the slowest run, which the second process found, was not kept: {kept:?}"
+        );
+        assert!(
+            kept.contains(&named_for(
+                Duration::from_millis(85),
+                b"second slowest of all"
+            )),
+            "the second slowest run, which the *first* process found, was not kept: {kept:?}"
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn one_input_two_processes_both_found_slow_is_kept_once() {
+        // Two processes replaying the same corpus entry time it differently, so
+        // the same bytes arrive under two names. Only the slower is kept — the
+        // rule `TheSlowestRuns::offer` applies inside a process, applied across
+        // them.
+        let into = somewhere_to_write("same-input");
+        let first = a_process_writing_into(&into, 8);
+        let second = a_process_writing_into(&into, 8);
+
+        first
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(30), b"same");
+        second
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(70), b"same");
+        merge_out(&first);
+        merge_out(&second);
+
+        let kept: Vec<String> = std::fs::read_dir(into.join("slowest"))
+            .expect("a slowest directory")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            kept.len(),
+            1,
+            "one input was kept under two names: {kept:?}"
+        );
+        assert_eq!(kept[0], named_for(Duration::from_millis(70), b"same"));
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn a_name_says_how_slow_it_was_and_which_input_it_was() {
+        // The whole reason the slow runs need no shared accumulation.
+        let name = named_for(Duration::from_millis(12), b"bytes");
+        let (took, input) = how_slow_the_name_says(&name).expect("a name this module wrote");
+        assert_eq!(took, Duration::from_millis(12));
+        assert_eq!(
+            input,
+            how_slow_the_name_says(&named_for(Duration::from_secs(9), b"bytes"))
+                .expect("the same input, timed differently")
+                .1,
+            "the same bytes did not give the same input part"
+        );
+        assert!(how_slow_the_name_says("something-else").is_none());
+    }
+
+    #[test]
+    fn what_was_written_out_reads_back_the_same() {
+        let mut took = HowLongRunsTook::new();
+        for run in [1u64, 1, 5, 900, 6_997_742] {
+            took.record(Duration::from_micros(run));
+        }
+        let into = somewhere_to_write("round-trip");
+        std::fs::create_dir_all(&into).expect("somewhere to write");
+        std::fs::write(into.join("totals"), took.written_out()).expect("a totals file");
+
+        let back = HowLongRunsTook::read_back(&into.join("totals"));
+        assert_eq!(back.runs, took.runs);
+        assert_eq!(back.total, took.total);
+        assert_eq!(back.buckets, took.buckets);
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn a_totals_file_that_cannot_be_read_is_empty_rather_than_a_panic() {
+        let into = somewhere_to_write("torn");
+        std::fs::create_dir_all(&into).expect("somewhere to write");
+        std::fs::write(into.join("totals"), "runs\nb 99999999 1\nb x y\nnonsense\n")
+            .expect("a torn file");
+        assert_eq!(HowLongRunsTook::read_back(&into.join("totals")).runs, 0);
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn adding_two_histograms_adds_their_runs_and_their_buckets() {
+        let mut first = HowLongRunsTook::new();
+        let mut second = HowLongRunsTook::new();
+        for run in 1..=50 {
+            first.record(Duration::from_millis(run));
+        }
+        for run in 51..=100 {
+            second.record(Duration::from_millis(run));
+        }
+        first.add(&second);
+
+        let mut all_at_once = HowLongRunsTook::new();
+        for run in 1..=100 {
+            all_at_once.record(Duration::from_millis(run));
+        }
+        assert_eq!(first.runs, all_at_once.runs);
+        assert_eq!(first.total, all_at_once.total);
+        assert_eq!(first.buckets, all_at_once.buckets);
+    }
 
     #[test]
     fn every_length_of_run_is_in_a_bucket_that_starts_at_or_below_it() {
@@ -482,18 +894,15 @@ mod tests {
 
     #[test]
     fn a_report_names_every_slow_input_it_wrote() {
-        let into = std::env::temp_dir().join(format!("rcad-fuzz-timing-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&into);
-        let mut watch = Watch {
-            into: into.clone(),
-            took: HowLongRunsTook::new(),
-            slowest: TheSlowestRuns::keeping(2),
-            written: None,
-        };
+        let into = somewhere_to_write("names-what-it-wrote");
+        let watch = a_process_writing_into(&into, 2);
         for run in [1u64, 40, 90] {
-            watch.record(Duration::from_millis(run), &[run as u8]);
+            watch
+                .lock()
+                .unwrap()
+                .record(Duration::from_millis(run), &[run as u8]);
         }
-        watch.write_the_report();
+        merge_out(&watch);
 
         let report = std::fs::read_to_string(into.join("report")).expect("a report");
         assert!(report.contains("3 runs"), "{report}");
@@ -511,23 +920,19 @@ mod tests {
     }
 
     #[test]
-    fn a_rewrite_clears_the_slow_runs_the_last_one_left() {
-        let into = std::env::temp_dir().join(format!("rcad-fuzz-stale-{}", std::process::id()));
+    fn a_file_this_module_did_not_write_is_left_alone() {
+        let into = somewhere_to_write("a-stranger");
         let slowest = into.join("slowest");
         std::fs::create_dir_all(&slowest).expect("somewhere to write");
-        std::fs::write(slowest.join("slow-000000000001us-dead"), b"old").expect("an old run");
         std::fs::write(slowest.join("something-else"), b"not ours").expect("a stranger");
 
-        let mut watch = Watch {
-            into: into.clone(),
-            took: HowLongRunsTook::new(),
-            slowest: TheSlowestRuns::keeping(1),
-            written: None,
-        };
-        watch.record(Duration::from_millis(9), b"new");
-        watch.write_the_report();
+        let watch = a_process_writing_into(&into, 1);
+        watch
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(9), b"new");
+        merge_out(&watch);
 
-        assert!(!slowest.join("slow-000000000001us-dead").exists());
         assert!(
             slowest.join("something-else").exists(),
             "a file this module did not write was removed"
