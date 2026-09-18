@@ -863,7 +863,9 @@ mod tests {
                 Some(Decision::Zero),
                 "and it is not square to it any more once stored as {stored:?}"
             );
-            let largest = along.into_iter().fold(0.0_f64, |so_far, c| so_far.max(c.abs()));
+            let largest = along
+                .into_iter()
+                .fold(0.0_f64, |so_far, c| so_far.max(c.abs()));
             assert!(
                 in_f64.abs() <= Plane::SIGNED_DISTANCE_ROUNDOFF * largest,
                 "the miss is inside what the f64 dot itself rounds, which is why \
