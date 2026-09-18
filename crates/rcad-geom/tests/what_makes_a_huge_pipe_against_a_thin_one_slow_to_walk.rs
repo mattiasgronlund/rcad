@@ -3,18 +3,30 @@
 //!
 //! The overnight fuzzer found four slow units on `where_two_surfaces_cross`
 //! across 2026-09-12 to 2026-09-14. All four decode to two pipes, one huge and
-//! one ordinary or thinner, and all four come back at
-//! `Asked { points: 0, orders: 1, scalings: 2 }` — named both ways round, scaled
-//! both ways, and not one point walked. **They are two cases and not one**, and
-//! the counter says so: `points: 0` means every walk refused.
+//! one ordinary or thinner. **They are two cases and not one**, and until
+//! 2026-09-17 the counter said so the same way for every one of them: all four
+//! came back `Asked { points: 0, orders: 1, scalings: 2 }` — named both ways
+//! round, scaled both ways, and not one point walked, `points: 0` meaning every
+//! walk refused.
 //!
-//! Naming is not what costs. Measured in release on the pair behind
-//! `262c17e4`, `intersect` takes 40.6µs one way round and 10.9µs the other,
-//! and the two coarse walks that follow take **7.30 seconds**. Every one of
-//! those seconds is inside [`walk`], and what ends it is
+//! **Two of the four stopped refusing on 2026-09-17, and this file said
+//! otherwise for a day.** `1f1da0bf` made a refused trial retry at the square
+//! root of the ask rather than at half of it, and `262c17e4` and `7e62ebe6` —
+//! the same pair drawn at two places along its own axis — have come back
+//! `Asked { points: 10, … }` ever since. §125.7 has the bisect that names it.
+//! Every `points: 0` reading below describes the tree before that commit; what
+//! is written about `5dddf2a9` is untouched by it and still holds.
+//!
+//! Naming is not what costs. Measured in release on the pair behind `262c17e4`
+//! **and before `1f1da0bf`**, `intersect` takes 40.6µs one way round and 10.9µs
+//! the other, and the two coarse walks that followed took **7.30 seconds**.
+//! Every one of those seconds was inside [`walk`], ended by
 //! [`MOST_POINTS_ALONG_ONE_CROSSING`](rcad_geom::MOST_POINTS_ALONG_ONE_CROSSING)
-//! — the marcher takes 1 048 576 steps and refuses with
-//! `TooManyPointsAlongOneCrossing`.
+//! — 1 048 576 steps and a `TooManyPointsAlongOneCrossing`. That crawl is gone
+//! for this pair:
+//! [`a_huge_pipe_and_a_thin_one_are_walked_even_when_asked_for_all_the_room_there_is`]
+//! walks both pairs, on both runs, at `f64::MAX / 4.0`, in **7ms together**. It
+//! is not gone for the thread below.
 //!
 //! # The first case is the sizing ask, and it is a gap
 //!
@@ -36,6 +48,12 @@
 //! `march.rs`'s `MOST_A_STEP_MAY_GROW_TO` is a million times the ask, and
 //! `SAGITTA_MAY_TAKE` is measured against the ask too, so both go vacuous
 //! exactly where they were needed.
+//!
+//! **That paragraph now describes a pair that survives the ask anyway.** Both
+//! ceilings are still the caller's ask in disguise; what `1f1da0bf` changed is
+//! how fast a refused trial shortens, which is a third knob and enough for this
+//! pair. It is not enough for the same pair with a hair of tilt on it, so the
+//! gap is still open and §125.2 carries it now, on `1bd43cf4` and `d8b562bb`.
 //!
 //! **It is the ask and not the pair.** Swept over the budget, the same run gives
 //! five points at `1e1`, `1e4`, `1e8`, `1e10` … `1e16`, crawls to the cap at
@@ -139,6 +157,38 @@ fn the_two_loops_a_thin_pipe_cuts_through_a_huge_one_are_walked() {
                     "the points may sit {off:e} off the loop, which is wider than the thin pipe"
                 );
             }
+        }
+    }
+}
+
+/// **The enormous ask is walked too, and that is new.** Pinned because nothing
+/// else here would catch it moving back.
+///
+/// The harness's sizing walk asks `f64::MAX / 4.0` before it asks for anything
+/// real, and until 2026-09-17 this pair refused exactly that ask — which was the
+/// whole of the `Asked { points: 0 }` the fuzz oracle reported (§125.1).
+/// `1f1da0bf` made a refused trial retry at the square root of the ask rather
+/// than half of it, and both pairs have walked it since (§125.7).
+///
+/// Every ask in [`the_two_loops_a_thin_pipe_cuts_through_a_huge_one_are_walked`]
+/// is an ordinary one, and an ordinary ask was never the one that refused. So
+/// that test passed on both sides of the change and would pass again if it went
+/// away.
+#[test]
+fn a_huge_pipe_and_a_thin_one_are_walked_even_when_asked_for_all_the_room_there_is() {
+    for huge_pipe_sits_at in [822083584.0, 805306368.0] {
+        let pair = the_huge_pipe_and_the_thin_one_through_it(huge_pipe_sits_at);
+        let runs = the_runs_of(&pair);
+        assert_eq!(runs.len(), 2, "a pipe punched through another leaves two");
+        for run in &runs {
+            let (drawn, off) = walk_it(&pair, run, f64::MAX / 4.0).unwrap_or_else(|why| {
+                panic!("the sizing ask got {why:?} at {huge_pipe_sits_at:e}")
+            });
+            assert!(drawn > 0, "the sizing ask drew no points at all");
+            assert!(
+                off < 1.375,
+                "the points may sit {off:e} off the loop, which is wider than the thin pipe"
+            );
         }
     }
 }
