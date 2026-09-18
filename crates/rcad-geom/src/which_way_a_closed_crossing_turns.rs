@@ -493,6 +493,47 @@ mod tests {
         );
     }
 
+    /// Handing the two sides over the other way round turns the retry's answer
+    /// round and does nothing else.
+    ///
+    /// The scale is read off each vector on its own, so swapping the two sides
+    /// swaps their two scales along with them: the copy is the same pair the
+    /// other way round, and `outward[0] × outward[1]` negates there exactly as
+    /// it does on the numbers as written.
+    ///
+    /// The witness is the one only the retry reaches — the assert on the exact
+    /// level says so for the swapped order too — so what passes here is the
+    /// retry and not the two levels under it (§126.5).
+    #[test]
+    fn swapping_the_two_sides_flips_the_answer_on_the_scaled_copy_too() {
+        let tiny = 2f64.powi(-600);
+        let round = Vector::new(0.1 * tiny, 0.2 * tiny, 0.3 * tiny);
+        let straight = Vector::new(0.3 * tiny, 0.6 * tiny, 0.9 * tiny);
+        let sideways = Vector::new(1.0, 0.0, 0.0);
+        assert!(
+            matches!(
+                enclosed_which_way_a_closed_crossing_turns([straight, round], round, sideways),
+                Decision::Undecidable { .. }
+            ),
+            "the enclosure cannot read the swapped pair either"
+        );
+        assert_eq!(
+            exactly_which_way_a_closed_crossing_turns([straight, round], round, sideways),
+            None,
+            "and neither can the exact level, so the retry is what answers"
+        );
+
+        assert_eq!(
+            which_way_a_closed_crossing_turns([round, straight], round, sideways),
+            Decision::Pos
+        );
+        assert_eq!(
+            which_way_a_closed_crossing_turns([straight, round], round, sideways),
+            Decision::Neg,
+            "the same crossing the other way round, and nothing else moved"
+        );
+    }
+
     /// What the retry still cannot reach: one vector spread across the whole
     /// `f64` range, so that no exponent brings its own components into range
     /// together.

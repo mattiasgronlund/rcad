@@ -32228,6 +32228,89 @@ lane-scale-and-retry d1e573a4`; `mise exec -- just decision 122`, `122.1`–`122
 a_vector_spread_across_the_whole_range_has_no_scale_that_works`; `mise exec --
 just gate`; `mise exec -- just t how_often_a_real_file_imports --no-capture`.
 
+### 126.5 The turned-pair failure blamed on this is not this, and the way to see that is a panic
+
+A session merging this lane onto `main` at `ef787559` saw
+`swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit` fail, read the
+diff, and guessed a cause: each of the four vectors is scaled by a power of two
+read off its own largest component, swapping the two sides of a fuse swaps
+`outward[0]` and `outward[1]`, so a different pair of scalings is chosen and the
+predicate's answer comes to depend on the order of its arguments.
+
+**That guess is wrong twice, and the second way is the one that settles it.**
+
+It is wrong on its own terms, because `brought_into_range` reads one vector and
+nothing else. Swapping `outward[0]` and `outward[1]` swaps their two scalings
+along with them, so the scaled copy is the same two vectors the other way round
+and the cross product at the top of the rule negates exactly, which is what the
+rule does on the numbers as written too.
+`swapping_the_two_sides_flips_the_answer_on_the_scaled_copy_too` is that sentence
+as a test: the §122.3 witness at `2^-600`, which only the retry reaches — the
+test asserts both lower levels decline on the swapped order as well — answers
+`Decision::Pos` one way round and `Decision::Neg` the other.
+
+That test passes without any change to the rule, and that is the point of it:
+there was no asymmetry to fix, and the claim is pinned rather than argued.
+
+**And it is wrong because the rule is never called at all by that family.**
+`a_turned_pair` draws from `lattice_solids`, which draws from `a_shape`, and
+`a_shape` is `Block`, `Ell`, `Comb` and `Frame` — four extruded polygons and no
+curved outline, exactly as §126's own note at `a_block_with_a_bar_through_it`
+says it deliberately is. A pair of those has no curved surface, so it has no
+closed edge, so `a_closed_crossing_is_walked_the_way_it_is_stored` — the one
+caller — is not reached.
+
+That is an unreachability claim, so it was demonstrated rather than written
+(CLAUDE.md, §16.10). `which_way_a_closed_crossing_turns`'s body was temporarily
+replaced by `panic!`, and on that build:
+
+- `mise exec -- just t swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit`
+  is **exit 0**, `1 test run: 1 passed`, 0.735 s.
+- `mise exec -- just t a_crossing_with_room_in_it_is_read_the_same_both_ways_round`
+  is **exit 100**, `panicked at which_way_a_closed_crossing_turns.rs:93:5:
+  TEMPORARY PROBE`.
+
+The second run is what makes the first one evidence: the panic is compiled in
+and does fire when the predicate is reached, and the turned-pair family does not
+reach it. The probe was reverted; it is written down here rather than left in the
+tree.
+
+**The failure did not reproduce anywhere.** 440 runs of that test, each 48
+configurations from a fresh random seed — `over` uses `TestRunner::new`, so every
+run is a new search and one green run of it is weak evidence either way:
+
+| tree | runs | failures |
+|---|---|---|
+| `91423951` + this lane, merged | 40 | 0 |
+| `91423951`, no §126 | 250 | 0 |
+| `ef787559` + this lane's `which_way_a_closed_crossing_turns.rs` | 150 | 0 |
+
+The last row is the configuration the report describes, built by checking out
+`ef787559` and taking one file off the branch — the merged file is byte-identical
+to the branch's, so that is the same code. 21 120 configurations, nothing.
+
+The 0.42 s in the report suggested a seed replayed out of
+`fuses_that_must_agree.proptest-regressions`, which would fail before the 48
+random cases and so look reproducible. That was checked and is not it: the file
+is 21 lines and 5 249 bytes in every worktree of this repo, the same as the
+committed one, so no session has added a seed to it.
+
+**So this lane is not blocked, and nothing downstream is named either.** What is
+recorded is a failure one session saw once and no run since has seen, in a
+property whose search is random, in a family this lane's code cannot enter. `mise
+exec -- just gate` on the merge is **exit 0, PASS, 2 000 tests** — `91423951`'s
+1 999 plus this lane's one new test — read off the exit code and not off the
+tail.
+
+Commands run to reach this: `git log --oneline -1`; `git checkout -B
+lane-126-symmetry 91423951`; `git merge --no-ff lane-scale-and-retry`; `mise exec
+-- just t swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit
+--no-capture`, 440 times across three trees; `mise exec -- just t
+a_crossing_with_room_in_it_is_read_the_same_both_ways_round` with a `panic!` in
+the rule; `git diff ef787559 91423951 -- crates/rcad-topo/tests/pairs/mod.rs
+crates/rcad-topo/tests/fuses_that_must_agree.rs` (empty); `wc -l` on every
+worktree's `fuses_that_must_agree.proptest-regressions`; `mise exec -- just gate`.
+
 ## 127. The `FaceKey` half lands, and the corpus line says `#15`, fixed 2026-09-18
 
 §123.5's three files, the §113.4 move one entity kind along.
