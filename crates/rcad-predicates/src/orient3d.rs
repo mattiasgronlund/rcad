@@ -1,5 +1,5 @@
 use crate::expansion::{
-    expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
+    difference_of_two_products, expansion_sign, expansion_sum, product_is_exact, scale_expansion,
 };
 use crate::interval::determinant;
 use crate::power_of_two::{exponent_that_brings_into_range, scaled_by_a_power_of_two};
@@ -415,18 +415,7 @@ const DETERMINANT_ENTRIES: usize = 96;
 
 /// `u.x * v.y - u.y * v.x`, exactly, or `None` if a product underflowed.
 fn minor(u: [f64; 3], v: [f64; 3]) -> Option<([f64; 4], usize)> {
-    if !product_is_exact(u[0], v[1]) || !product_is_exact(u[1], v[0]) {
-        return None;
-    }
-    let (forwards, forwards_roundoff) = two_product(u[0], v[1]);
-    let (backwards, backwards_roundoff) = two_product(u[1], v[0]);
-    let mut out = [0.0; 4];
-    let len = expansion_sum(
-        &[forwards_roundoff, forwards],
-        &[-backwards_roundoff, -backwards],
-        &mut out,
-    );
-    Some((out, len))
+    difference_of_two_products(u[0], v[1], u[1], v[0])
 }
 
 #[cfg(test)]
