@@ -1109,7 +1109,7 @@ mod tests {
     }
 
     /// [`Plane::offset_of`] rounds once, and dividing before multiplying
-    /// rounded twice (`docs/decisions.md` §132, §129.6).
+    /// rounded twice (`docs/decisions.md` §132, §130.6).
     ///
     /// The two spellings are the same real number and different `f64`. A sweep
     /// of 200 000 random coefficient sets in `[-10, 10]` told them apart 52 355
