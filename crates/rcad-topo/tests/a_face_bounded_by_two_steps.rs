@@ -139,6 +139,10 @@ fn a_two_step_face_turned_round_is_still_caught_by_the_mesh() {
 /// the chord the pipe on its far side as well and it really is the arc again:
 /// the flat face is one curve out and back, with no area at all. The sweep's
 /// mesh is what says so, because both edges walk into the same points.
+///
+/// The refusal names the bottom face by the position it was described at
+/// (§127), which is `0` here: `below` is the first face handed to the builder,
+/// and it is the first of the two the mesher reaches.
 #[test]
 fn a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh() {
     let policy = Policy::certified();
@@ -156,7 +160,8 @@ fn a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh() {
     assert!(
         matches!(
             refused,
-            Err(Error::CannotMeshAFace {
+            Err(Error::ADraftFaceCouldNotBeMeshed {
+                face: 0,
                 why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
                 ..
             })

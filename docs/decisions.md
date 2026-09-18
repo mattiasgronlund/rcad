@@ -32157,14 +32157,64 @@ every one of them names an `ADVANCED_FACE`, with a floor of one file rather
 than a pinned count or a named file, for the same reason §112 gave — a rescue
 can empty the set, and emptying it is good news a pinned test would fail on.
 
-`mise exec -- just gate` is green on this tree.
+~~`mise exec -- just gate` is green on this tree.~~ **It was not, and nobody
+had run one:** §127.1.
 
 Commands run to reach this: `git log --oneline -1`; `git checkout -B
 lane-face-key d1e573a4`; `mise exec -- just decision 123`, `123.5`, `113.4`;
 `mise exec -- just t a_face_the_sweep_cannot_mesh_names_its_own_position`;
 `mise exec -- just t a_face_the_mesher_cannot_cut_up_names_its_own_advanced_face
 --nocapture`; `grep MANIFOLD_SOLID_BREP` on
-`kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`; `mise exec -- just gate`.
+`kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`; `mise exec -- just gate`
+(started, never read — §127.1).
+
+### 127.1 The gate the lane started and never read, and the one test it would have caught
+
+The sentence above was written while a background gate was still running. The
+lane's last words were *"standing by for the gate to finish; will report the
+exit code once the background run completes"*, and then the session it ran in
+ended. So "green on this tree" was never a measurement — it was a forecast, and
+it was wrong.
+
+`a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh` in
+`crates/rcad-topo/tests/a_face_bounded_by_two_steps.rs` asserted the old
+`Error::CannotMeshAFace`. That refusal now arrives out of `SolidBuilder::build`
+as `ADraftFaceCouldNotBeMeshed { face: 0, why: CornersCoincide { position: 3 } }`,
+which is this section's whole point, so the test was asserting the answer
+§127 exists to change. It fails on `lane-face-key`'s own base as readily as on
+the merged tree: `git diff d1e573a4..ef787559` on that file is empty, so this
+is the lane's own regression and not the merge's.
+
+**The write set is where it went wrong, not the change.** §127 touched
+`error.rs` and `builder.rs` and stopped there; the test that reads the variant
+it replaced lives in `rcad-topo/tests/`, outside what the lane was given. That
+is the habit already booked once this week — a lane whose change flips an
+answer gets the tests asserting the old answer inside its write set from the
+start — and this is its second instance.
+
+The fix is one assertion, and it is strictly stronger than what it replaces:
+the pattern now pins `face: 0` as well as the triangulator's reason, so the
+position §127 adds is asserted at the `SolidBuilder` level by two tests rather
+than one. `below` is the first face handed to the builder in `a_segment_plate`
+and the first of the two zero-area flats the mesher reaches.
+
+**What it does not change:** every other `CannotMeshAFace` site in the tree is
+a `SolidView::mesh` refusal, not a `build` one, and `build` is the only path
+`which_described_face_the_sweep_meant` sits on. Checked, not assumed —
+`a_solid_with_a_cone_face.rs`, `how_far_out_a_ball_can_sit_and_still_mesh.rs`,
+`whether_a_coarser_deflection_always_meshes.rs`,
+`a_curved_solid_through_the_front_door.rs`, `measure.rs`, `mesh.rs` and
+`rcad/src/lib.rs` all read or name the variant on the mesh path and are right
+to keep it.
+
+Commands run to reach this: `mise exec -- just gate` on the merged tree (FAIL,
+exit 100, one test); `mise exec -- just t
+a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh
+--no-capture`; `mise exec -- just t --no-fail-fast` (1999 run, 1998 passed, 1
+failed — so the one failure is the only one); `git cat-file -e
+d1e573a4:crates/rcad-topo/tests/a_face_bounded_by_two_steps.rs` and `git diff
+d1e573a4..ef787559` on it; `grep -rn 'CannotMeshAFace\|ADraftFaceCouldNotBeMeshed'`
+over `crates/`; `mise exec -- just gate` again after the fix.
 
 ## 128. §124's trace, run — both pairs refused, and a dome on a shaft has no untangent version, built 2026-09-18
 
