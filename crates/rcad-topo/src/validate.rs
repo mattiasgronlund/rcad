@@ -1514,9 +1514,10 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 ///
 /// The two references it takes — the longitude first and the latitude where the
 /// longitude says exactly nothing — and why one of them was not enough are
-/// [`which_way_a_closed_crossing_turns`]'s, along with why the whole chain runs
-/// in interval arithmetic rather than against `0.0`. All this function does with
-/// the answer is read the material's side off it.
+/// [`which_way_a_closed_crossing_turns`]'s, along with why it runs in interval
+/// arithmetic rather than against `0.0` and what its exact level under that is
+/// for (§122). All this function does with the answer is read the material's side
+/// off it.
 ///
 /// # Errors
 ///

@@ -54,10 +54,11 @@ use crate::point::Vector;
 /// So the whole chain runs in interval arithmetic over the caller's numbers
 /// taken exactly, and anything that enclosure cannot prove goes to
 /// [`exactly_which_way_a_closed_crossing_turns`] below, which is the cascade's
-/// third level and decides every one of these signs that exists (§122).
-/// [`Decision::Undecidable`] is what is left when even that cannot run, and it
-/// is a result here and not a failure — it is the caller that has to turn it
-/// into one (§2.1, §4.1).
+/// third level and has no rounding in it at all (§122).
+/// [`Decision::Undecidable`] is what is left when even that cannot run — which
+/// takes numbers whose products fall off the ends of the `f64` range — and it is
+/// a result here and not a failure: it is the caller that has to turn it into one
+/// (§2.1, §4.1).
 ///
 /// **What neither level encloses** is the error already in `outward`,
 /// `gradient` and `axis`, which reached the caller as `f64` evaluations of
@@ -102,8 +103,8 @@ fn enclosed_which_way_a_closed_crossing_turns(
 /// The same rule with no rounding in it at all, or `None` when the exact
 /// arithmetic cannot run on these numbers.
 ///
-/// Both references are polynomials in the nine stored doubles — degree four
-/// along the longitude and degree five along the latitude — so
+/// Both references are polynomials in the twelve numbers the caller hands over —
+/// degree four along the longitude and degree five along the latitude — so
 /// [`Exact`] settles either sign whenever its products stay in the range where
 /// they are exact. `None` means level 3 declined, not that the answer is zero,
 /// and the caller keeps the enclosure's refusal rather than inventing one.
@@ -140,9 +141,9 @@ fn exactly_which_way_a_closed_crossing_turns(
         outward[1].components(),
     )?;
     let longitude = Exact::cross_of(&Exact::of_each(axis.components()), gradient)?;
-    let along_the_longitude = Exact::dot_of_two_exact(&walked, &longitude)?;
-    if along_the_longitude.sign() != Decision::Zero {
-        return Some(along_the_longitude.sign());
+    let along_the_longitude = Exact::dot_of_two_exact(&walked, &longitude)?.sign();
+    if along_the_longitude != Decision::Zero {
+        return Some(along_the_longitude);
     }
     let walked_across_the_gradient = Exact::cross_of(&walked, gradient)?;
     Some(Exact::dot_of_two_exact(&longitude, &walked_across_the_gradient)?.sign())
@@ -156,6 +157,7 @@ mod tests {
         enclosed_which_way_a_closed_crossing_turns, exactly_which_way_a_closed_crossing_turns,
         which_way_a_closed_crossing_turns,
     };
+    use crate::exact::Exact;
     use crate::point::Vector;
 
     /// A pipe crossing a ball squarely, which is as far from the hard cases as a
@@ -299,14 +301,70 @@ mod tests {
         }
     }
 
+    /// The case that says the exact level has to pick the reference itself.
+    ///
+    /// Here the dot against the longitude is **exactly zero** and the enclosure
+    /// cannot see it: the two terms that cancel are `−1 × walked.x` and
+    /// `1 × walked.y`, `walked.x` comes out of a product that rounds and
+    /// `walked.y` out of two that do not, so the enclosure of the difference is
+    /// an ulp wide with the true zero inside it. The wire is square to the
+    /// longitude and the latitude has its direction, exactly as
+    /// `a_wire_square_to_the_longitude_is_still_read_two_ways` — but nothing
+    /// short of exact arithmetic can tell.
+    ///
+    /// **So a level 3 handed a reference chosen at level 2 would answer
+    /// [`Decision::Zero`] here**, which claims the two surfaces touch rather than
+    /// cross and makes the caller skip an edge that has a perfectly good
+    /// direction. That is why
+    /// [`exactly_which_way_a_closed_crossing_turns`] re-asks both questions
+    /// rather than finishing one (§122).
+    ///
+    /// The numbers: with `c` one step above one, `2c` is exact and `3c` is not,
+    /// so `walked` is `(−c, −c, 2)` exactly while `f64` gets only the second
+    /// component right.
+    #[test]
+    fn a_longitude_that_is_exactly_zero_where_the_enclosure_cannot_see_it() {
+        let c = 1.0 + f64::EPSILON;
+        let gradient = Vector::new(1.0, 1.0, c);
+        let partner = Vector::new(1.0, 3.0, 2.0 * c);
+        let axis = Vector::new(0.0, 0.0, 1.0);
+
+        let walked = Exact::cross_of(&Exact::of_each(gradient.components()), partner.components())
+            .expect("a cross product of numbers this ordinary is exact");
+        let longitude = Exact::cross_of(&Exact::of_each(axis.components()), gradient.components())
+            .expect("and so is this one");
+        assert_eq!(
+            Exact::dot_of_two_exact(&walked, &longitude)
+                .expect("and so is the dot")
+                .sign(),
+            Decision::Zero,
+            "the wire really is square to the longitude"
+        );
+        assert!(
+            matches!(
+                enclosed_which_way_a_closed_crossing_turns([gradient, partner], gradient, axis),
+                Decision::Undecidable { .. }
+            ),
+            "and the enclosure really cannot see that"
+        );
+
+        assert_eq!(
+            which_way_a_closed_crossing_turns([gradient, partner], gradient, axis),
+            Decision::Pos
+        );
+    }
+
     /// Coordinates too small for the exact level's products to stay exact, which
     /// is the one way the third level declines.
     ///
-    /// Every component is scaled by `2^-600`, so each product of two of them is
-    /// around `2^-1200` — far below the `2^-969` where a product's low half stops
-    /// being a normal number. The enclosure cannot tell either, because the same
-    /// products flush to zero, so the whole rule refuses and that refusal is a
-    /// real one.
+    /// The witness crossing with both gradients scaled by `2^-600`, so each
+    /// product of two of them is around `2^-1200` — far below the `2^-969` where
+    /// a product's low half stops being a normal number. The enclosure cannot
+    /// tell either, because the same products flush to zero, so the whole rule
+    /// refuses.
+    ///
+    /// **The sign is still there**, because scaling by a power of two cannot have
+    /// changed it, so this is a gap and not a limit and §122.4 books the fix.
     #[test]
     fn a_crossing_written_far_too_small_to_multiply_is_still_refused() {
         let tiny = 2f64.powi(-600);
