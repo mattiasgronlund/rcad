@@ -31776,8 +31776,10 @@ neither surface is stored turned round.
 
 **The reader's hint**, `which_way_round_a_closed_edge_is_stored`
 (`brep.rs:610`), works out a travel vector per face and dots it against the
-sphere's longitude `ẑ × (corner − centre) = (0, 2.5, 0)` — exact, because the
-sphere's centre and the corner share the same stored `y` bit for bit. For
+sphere's longitude `ẑ × (corner − centre) = (0, 2.5, 8.3e-16)` — exact, because
+the sphere's centre and the corner share the same stored `y` bit for bit. That
+last term is not zero, as this section first wrote: the sphere's axis carries a
+`3.33e-16` `y` component of its own. It changes no sign below. For
 `#17` the travel comes to `(2.0e-15, 2.5, 8.3e-16)`, dot `+6.25`, `Forward`.
 For `#44` it is the exact negative, `(-2.0e-15, -2.5, -8.3e-16)`, dot `-6.25`,
 `Reversed`. Both dot products are nowhere near zero — this half of the
@@ -31788,13 +31790,13 @@ run this shared edge in exactly opposite spatial directions (`travel_44 =
 points, one face agrees with it and the other cannot.
 
 **The certified rule**, `a_closed_crossing_is_walked_the_way_it_is_stored`
-(`crates/rcad-topo/src/validate.rs:1555`), is run once per face, each time
+(`crates/rcad-topo/src/validate.rs:1556`), is run once per face, each time
 against the *other* face as `across`. §111.2 already proved its `turning`
 term — `(∇S × ∇T) · (ẑ × ∇S)`, `4.2062309985394852e-30` wide to
 `2.1e-44` either side of `Pos` — is not a coin toss for this file: it is an
 exact value of the stored numbers with nothing cancelling. What §111 did not
 trace is the other half the rule needs, `material_side`
-(`which_side_of_it_this_face_lies_on`, `validate.rs:1607`), which reads the
+(`which_side_of_it_this_face_lies_on`, `validate.rs:1608`), which reads the
 side of one corner **not** on the shared edge:
 
 - for face `#17`, the only such corner is `#31`, the sphere's pole at
@@ -31825,10 +31827,12 @@ Both come out **Forward**.
 `Model::validate`, and its own doc names the refusal for getting this wrong:
 `Error::ADraftEdgeIsWalkedTheSameWayTwice`. Running
 `RCAD_STEP_CORPUS=<corpus> mise exec -- just t how_often_a_real_file_imports
---no-capture` today (`kicad: 114 / 323 = 35.3%`, `nist: 1 / 44 = 2.3%` — both
-moved from §115.4's stale `110 / 323`, and neither is quoted from anywhere but
-this run) turns up 37 lines carrying exactly that shape, `"both coedges of the
-edge described at position N run the same way round"`, on a family of switch
+--no-capture` today (`kicad: 114 / 323 = 35.3%`, `nist: 1 / 44 = 2.3%` — kicad
+moved from §115.4's stale `110 / 323`, nist did not move and §115.4 says so
+itself, `1 of 44` either way, and neither is quoted from anywhere but this run)
+turns up **26 refusals across 25 files** carrying exactly that shape, `"both
+coedges of the edge described at position N run the same way round"`, on a
+family of switch
 files (`SW_PUSH_6mm*`, `SW_TH_Tactile_Omron*`, …) that this section does not
 otherwise touch — named here only to show the invariant is real and load-bearing
 elsewhere in the tree, not a theoretical possibility.
@@ -31859,9 +31863,15 @@ combines a **local** signal (`turning`, evaluated at the shared corner) with a
 somewhere else on each face) that the doc comment's own derivation — "the
 face's material is inside its partner" — only holds apart cleanly when the two
 surfaces genuinely cross, transversally, at the edge. `which_way_a_closed_crossing_turns`'s
-own doc comment says as much for the case it does catch: "two faces whose
-gradients point the same way are not crossing, and a crossing that is not one
-has no direction to name" — but that guard only fires on an *exact* zero
+own doc comment says as much for the case it does catch: "`Decision::Zero` out
+of both leaves the wire with nothing to be but the zero vector, which is two
+surfaces touching rather than crossing and has no direction to name"
+(`which_way_a_closed_crossing_turns.rs:39`). The shorter sentence this section
+first quoted here — "two faces whose gradients point the same way are not
+crossing" — is the doc of a *test*,
+`two_surfaces_that_touch_rather_than_cross_have_no_direction`, not of the
+function. The claim it was cited for survives the swap. But that guard only
+fires on an *exact* zero
 cross product, and this file's own femtometre-scale axis rounding is enough to
 give `∇S × ∇T` a real, provable-nonzero, but still line-thin value (§111's
 whole finding), so the file's near-tangency slips past the one check meant to
@@ -31891,10 +31901,15 @@ Two families were open, and only one fits what §124.1–124.2 measured:
   `material_side` at (or infinitesimally near) the same corner `turning`
   already uses, rather than at whichever other corner each face happens to
   carry, so the two terms are answering the same local question instead of a
-  local one and a global one. This is the more invasive fix: `which_side_of_it_this_face_lies_on`
-  is shared with the non-closed-edge trimming checks (`validate.rs:1607`'s own
-  doc: "This is the only place the model says which side"), so narrowing it
-  for this one caller risks the other two.
+  local one and a global one. This is the more invasive fix, though one level
+  further down than this section first said: `which_side_of_it_this_face_lies_on`
+  (`validate.rs:1608`) has exactly one caller, the closed-edge check itself
+  (`validate.rs:651`), so narrowing *it* risks nothing. What is shared is
+  `the_side_this_face_lies_on` (`holds.rs:533`), which it calls and whose doc
+  carries the sentence "This is the only place the model says which side"
+  (`holds.rs:515`). That one has three callers — `holds.rs:373`,
+  `validate.rs:563` and `validate.rs:1622` — so the risk is real, but it is a
+  risk to the function underneath rather than to this one.
 
 Neither is built here, on purpose — this lane owns a measurement and not
 `crates/`. What is **not** measured:
@@ -31903,7 +31918,7 @@ Neither is built here, on purpose — this lane owns a measurement and not
   (`kicad` + `nist`) carrying this exact refusal text — checked directly against
   today's `just t how_often_a_real_file_imports --no-capture` output, not
   assumed — so nothing here says how common an exact-radius, near-coincident-axis
-  dome-on-cylinder seam is outside this corpus. The 37-file "both coedges run the
+  dome-on-cylinder seam is outside this corpus. The 25-file "both coedges run the
   same way round" family above looks related by its error text but was not
   traced; it may be the same contradiction arrived at through the reader
   producing the *wrong* pair outright (a plain reader bug, no topology
@@ -31921,7 +31936,7 @@ Neither is built here, on purpose — this lane owns a measurement and not
   above, without needing anything this lane could not already reach.
 - **Whether `material_side`'s "distant corner" choice is wrong in general**, or
   only wrong once the two surfaces are this close to tangent, was not settled —
-  the doc comment's own Cauchy–Schwarz argument (`validate.rs:1555`) reads as
+  the doc comment's own Cauchy–Schwarz argument (`validate.rs:1498`) reads as
   though it holds for any crossing, and finding the exact angle at which it
   stops holding (if it is a threshold at all, rather than a discontinuity right
   at tangency) is a numerical-refusal question this lane did not have the
@@ -31942,3 +31957,45 @@ decisions-find 'LED_D5.0mm-3'`, `'closed edge'`,
 `RCAD_STEP_CORPUS=<corpus> mise exec -- cargo run -p rcad-step --release
 --example blocker_depth_probe`; `RCAD_STEP_CORPUS=<corpus> mise exec -- just t
 how_often_a_real_file_imports --no-capture`.
+
+### 124.5 What an audit of the above moved, and what it did not
+
+§124 was written from source read rather than source run, and §124.4 says so
+itself. A read-only lane re-derived every number and citation in it against
+`d1e573a4` on 2026-09-18. **The finding holds.** The one-file claim, both corpus
+rates, the 367-file corpus, every STEP entity quoted in §124.1, both travel
+vectors, the XOR in `walks_it_forward`, the both-Forward table and the
+local-versus-distant chain all reproduce. Nothing below changes the verdict.
+
+Six supporting facts did not reproduce, and they are corrected in place above
+rather than left standing with a note. Two of them are worth naming:
+
+- **The family is 25 files, not 37.** §124.2 counted `grep` lines and §124.4
+  reported them as files; 11 of the 37 are the test's own histogram summary, and
+  the 26 refusal lines fall on 25 distinct files, one file refusing twice.
+  A lane sizing that family off the old number would have started 48% over.
+  Re-derived here, not taken from the lane: `grep 'run the same way round' |
+  grep '  refused  ' | awk '{print $3}' | sort -u | wc -l` over a fresh
+  `how_often_a_real_file_imports --no-capture`.
+- **`which_side_of_it_this_face_lies_on` is not shared.** §124.4's second fix
+  family rested on it having three callers and carrying the "only place the
+  model says which side" doc. It has **one** caller and a different doc; the
+  sentence and the three callers belong to `the_side_this_face_lies_on` in
+  `holds.rs`, which it calls. The invasiveness argument survives one level
+  down, and §124.4 now says which function it is about.
+
+The other four are cosmetic and corrected above: two line numbers off by one,
+the Cauchy–Schwarz line 57 lines out, a winding vector whose `z` term is
+`8.3e-16` rather than `0`, and a sentence about NIST moving when §115.4 says it
+did not.
+
+**One claim could not be checked.** §124.1 quotes §111.2's `turning` value,
+`4.2062309985394852e-30`. It is asserted in no test — it appears only in this
+file — so §124.1 is quoting a decisions section for a number, which is the one
+thing §111.3, §115.4 and §120.5 between them have already been wrong about
+three times. Reproducing it means running `blocker_depth_probe`. Nobody has.
+
+The lesson is not that §124 was careless: it was explicit that it had run
+nothing, and it was right about the thing it was for. It is that a section which
+says "traced by reading" has a debt, and the debt falls due in the citations
+before it falls due in the conclusion.
