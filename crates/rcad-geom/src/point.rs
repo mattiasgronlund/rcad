@@ -1243,9 +1243,8 @@ mod tests {
         );
         // Where the exact reference stops, measured rather than read off
         // `ExactFrame::around`'s two constants.
-        let spread_of = |binades: i32| {
-            Vector::new(1.0, multiplied_by_a_power_of_two(1.0, -binades), 0.0)
-        };
+        let spread_of =
+            |binades: i32| Vector::new(1.0, multiplied_by_a_power_of_two(1.0, -binades), 0.0);
         assert!(
             ExactFrame::around(spread_of(900)).is_some(),
             "the exact reference is meant to carry a triple nine hundred binades wide"
@@ -1320,8 +1319,7 @@ mod tests {
                 .normalized()
                 .expect("a direction with a component of one has a length");
             assert_eq!(
-                old,
-                unit,
+                old, unit,
                 "(1, 0, 2^-{e}) is where the old arithmetic and the new one agree, and this test \
                  does not discriminate between them"
             );
