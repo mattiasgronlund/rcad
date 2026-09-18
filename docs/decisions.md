@@ -30,13 +30,13 @@ and the site and falsified §109.6 — the wall is `settled`, not `one_step`.
 transverse, 6 equal pipes whose axes cross**, answered in closed form by §118
 and §119. §122–§124 took the last three, the third a finding: the certified
 rule asks both faces of one closed edge to be forward and only one can be.
-§127 landed §123.5's `FaceKey` half; §128 built §124's reproduction and
-confirmed it.
+§127 landed §123.5's `FaceKey` half, §128 built §124's reproduction and
+confirmed it, and §126 landed §122.4's scale-and-retry — clearing itself of the
+commutativity failure blamed on it, the rule it changes being unreachable from
+that family. **That failure was real and is now unreproduced**: §126.6.
 
-**What is left:** §122.4's scale-and-retry, written and **not on `main`** — it
-breaks fuse commutativity, and its own section arrives with that diagnosis; and
-§121, `Plane`'s normalize, booked inside §120 because it moves every plane's
-stored bits. §124's gap is deferred, below.
+**What is left:** §121, `Plane`'s normalize, which §120 books because it moves
+every plane's stored bits; and §126.6's counterexample. §124's gap is deferred.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, and healing, the biggest bucket, is refused by name in §42.9. §45.2
