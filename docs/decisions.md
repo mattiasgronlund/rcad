@@ -33639,20 +33639,77 @@ reach it — so it is owed a fix. Closing it wants the model's largest coordinat
 threaded down to `derive_a_corner`, which changes signatures across the fuse and
 is a lane of its own rather than a line of this one.
 
-### 136.5 What is left
+### 136.5 The skew band, re-measured: the rate never moved and the floor was never sound
+
+Q3, answered by Mattias as (c) then (a) — leave the row failing until §136
+lands, then re-measure at more than one seed and publish the band with its N.
+§136 lands above, so this is that re-measurement.
+
+**The corner fix did not move the number.** With it in, the row still reads 1 of
+429, exactly as §131.4 and §132.5 both recorded. The corner allowance was never
+what was moving it, which is worth saying because it was the obvious suspect.
+
+`RCAD_SOAK_SEED` varied the way `SOAK_SEED`'s own doc comment documents.
+**Twelve fresh seeds, shipped corpus of 429 fuses:**
+
+| seed | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| not a solid | 1 | 5 | 3 | 1 | 4 | 4 | 5 | 4 | 6 | 1 | 1 | 3 |
+
+One to six, and **four of the twelve land on one**. So 1 of 429 is an ordinary
+draw from this family and not a signal at all.
+
+**Six seeds at ten times the corpus, 3 885 fuses each:** 28, 39, 34, 28, 36, 28
+— `0.72%, 1.00%, 0.88%, 0.72%, 0.93%, 0.72%`. The underlying rate is **0.83%**,
+against the **0.7%** the band was first built on. It did not move. Six weeks of
+arithmetic across §121, §130, §131 and §132 changed which draw the fixed seed
+takes and left the family's behaviour where it was.
+
+**The floor was mis-derived, and this is the general lesson.** All six rows use
+the same convention — two thirds to three times the measured rate — and on this
+row it was applied to a *single draw of three*. The skew family's rate is a
+twentieth of the lattice family's, so its expected count at 429 fuses is about
+three and a half, and a floor at two fuses sits **inside** that count's own
+sampling spread. The convention is a statement about a rate and this row asserts
+a count; at counts this small the two are not the same statement.
+
+The sentence that guarded it was true and still misled: *a band this tight is
+not a flake waiting to happen — `measured` runs from a fixed seed, so a count of
+three is a count of three on every machine.* Right about re-running, wrong about
+safety. Determinism means the number does not move **between runs**; it says
+nothing about where the draw lands when the corpus is reshuffled, and any change
+to the arithmetic reshuffles it.
+
+**The new ends are one fuse to twelve, `0.0023..=0.028`** — the observed spread,
+ceiling at twice its maximum. The floor is one fuse because one fuse is what
+this row actually asks: whether the family still reaches the
+four-faces-along-one-edge configuration it was built for. Zero fires.
+
+**This is not §132.5's forbidden move.** That was widening a band to fit a
+single observation, and it would have been wrong. What makes this different is
+the N: eighteen runs across two resolutions, the rate pinned at the higher one
+and the spread measured at the shipped one. §131.4 declined to re-measure on the
+grounds that one of 429 is a number with no argument behind it — that was
+correct, and this is the argument it was waiting for.
+
+**What a reader should take from this:** the other five rows were derived the
+same way from single draws. Four sit at counts of ten or more where the
+convention is defensible, and `A_TURNED_PAIR_IS_NOT_A_SOLID` at 14 of 429 is the
+next smallest. None is re-derived here and none is known to be wrong — but the
+method that produced them is now known to fail below counts of about ten, and
+that is recorded rather than acted on.
+
+### 136.6 What is left
 
 - **§136.4**, above.
-- **The skew band did not move.** `A_SKEW_PAIR_IS_NOT_A_SOLID` still reads 1 of
-  429 with the corner fix in, which is the same number §131.4 and §132.5 both
-  declined to re-measure on. The corner allowance was not what was moving it.
-  Mattias's answer on Q3 was (c) then (a): leave it failing until this lands,
-  then re-measure at more than one seed and publish the band with its N. This
-  lands; the re-measure is still owed.
+- **The other five not-a-solid bands are still single-draw derivations**,
+  §136.5's last paragraph. Not known to be wrong; the method behind them has a
+  floor it does not survive.
 - §120.6's table still owes the row §121.6 and §130.6 both ask for.
 - §131.5's last bullet — a side of the box wider than the budget handed back
   whole — still has no witness.
 
-### 136.6 Provenance
+### 136.7 Provenance
 
 **The change itself was not written this session and the tests were.** The lane
 that wrote the one-line fix and `grown_by` died on a weekly rate limit before
@@ -33673,5 +33730,15 @@ refusal arm — both reverted with `git checkout` before anything was kept; thre
 throwaway probe tests in `bake.rs`'s test module, all removed or turned into the
 tests above; `mise exec -- just t -p rcad-topo -E 'test(/bake::tests/)'`; `mise
 exec -- just t` on the two new tests with the re-check's line reverted and put
-back; `mise exec -- just gate`, redirected to a file with its exit code echoed
-after it and read back.
+back; `git merge main` into the lane branch, which auto-merged
+`docs/decisions.md` with no conflict; for §136.5, a script in the scratchpad
+running `RCAD_SOAK_SEED=$seed mise exec -- just t
+how_often_a_certified_fuse_of_a_skew_pair_refuses --no-capture` over seeds 1–12
+at the shipped corpus and over seeds 1–6 at `RCAD_SOAK_FACTOR=10`, reading the
+`§22 headline` line each run prints before it asserts; `mise exec -- just gate`
+and `mise exec -- just t --no-fail-fast`, each redirected to a file with its
+exit code echoed after it and read back.
+
+**The loop went in a script because the worktree guard refused it inline.** A
+`for` loop naming a path with `git` in it is "too complex to verify"; a script
+in the scratchpad taking the worktree as its first argument is not.

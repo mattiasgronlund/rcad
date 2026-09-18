@@ -440,19 +440,37 @@ const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.022..=0.098;
 /// families by some way, and it is the only one where the ratio to the lattice
 /// family is what the family was built to be about.
 ///
-/// Two thirds to three times 0.7% is 0.47% to 2.1%, and at a count of three
-/// those ends are two fuses and nine exactly. Rounding the floor to two figures
-/// rounds it up, which puts two fuses just outside, so in practice this row runs
-/// **three fuses to nine and fires if one of its three stops happening.** The
-/// end is left where the rounding put it rather than nudged down to take two
-/// fuses back in: the same rounding is applied to all twelve ends, and one end
-/// chosen a different way for comfort is the thing this re-derivation was for.
+/// **The ends are the count's own spread, and they are not two thirds to three
+/// times the rate.** That convention is what the other five rows use and what
+/// this row used until §136.5, where it gave `0.47%–2.1%` — three fuses to nine
+/// — from a single draw of three. It is the wrong tool here: the rate is a
+/// twentieth of the lattice family's, so the expected *count* at 429 fuses is
+/// about three and a half, and a band whose floor is two fuses sits inside that
+/// count's own sampling spread rather than outside it.
 ///
-/// A band this tight is not a flake waiting to happen. [`measured`] runs from a
-/// fixed seed, so a count of three is a count of three on every machine, and
-/// nothing but a change to the kernel or to the corpus can move it. It was 0.5%
-/// to 3%, the same three fuses at the bottom and three more at the top.
-const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0047..=0.021;
+/// Measured rather than argued, `RCAD_SOAK_SEED` varied the way [`SOAK_SEED`]
+/// documents. **Twelve fresh seeds at the shipped 429 fuses give 1, 5, 3, 1, 4,
+/// 4, 5, 4, 6, 1, 1, 3** — a spread of one to six, with four of the twelve
+/// landing on one. **Six seeds at ten times the corpus, 3 885 fuses, give
+/// 0.72%, 1.00%, 0.88%, 0.72%, 0.93% and 0.72%**, so the underlying rate is
+/// 0.83% and has not moved from the 0.7% this band was first built on. What
+/// moved was which draw the fixed seed takes.
+///
+/// So the ends are one fuse to twelve — `0.23%` to `2.8%` — the observed spread
+/// with the ceiling at twice its maximum. The floor is one fuse because one
+/// fuse is the question this row actually asks: whether the family still
+/// reaches the four-faces-along-one-edge configuration it was built to reach.
+/// Zero is the answer that fires.
+///
+/// **The sentence this replaces was true and still misled.** It said a band
+/// this tight is not a flake waiting to happen, because [`measured`] runs from
+/// a fixed seed and a count of three is a count of three on every machine. That
+/// is right about re-running and wrong about safety: a deterministic draw from
+/// a family whose counts run one to six moves anywhere in that range whenever
+/// the corpus is reshuffled, and §121, §130, §131 and §132 reshuffled it. The
+/// row then failed for six weeks' worth of arithmetic work having changed the
+/// draw, not the kernel's behaviour. §136.5.
+const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0023..=0.028;
 
 /// The same for its control, where both solids lean the same way.
 ///
