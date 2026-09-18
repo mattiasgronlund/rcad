@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 
 use spade::{ConstrainedDelaunayTriangulation, InsertionError, Point2, Triangulation};
 
-use rcad_geom::{Cone, Surface, Torus};
+use rcad_geom::{Cone, Point, Surface, Torus};
 use rcad_predicates::{Approximation, Cause, Decision, orient2d};
 
 use crate::domain::TrimmedDomain;
@@ -264,11 +264,19 @@ fn refuse_loops_that_touch(
                 Decision::Pos | Decision::Neg => {}
                 Decision::Zero => {
                     if lies_between(*at, corners[from], corners[to]) {
-                        return Err(CannotTriangulate::LoopsTouch { corner, side: from });
+                        return Err(CannotTriangulate::LoopsTouch {
+                            corner,
+                            side: from,
+                            at: domain.surface().point_at(at[0], at[1]),
+                        });
                     }
                 }
                 Decision::Undecidable { enclosure } => {
-                    return Err(CannotTriangulate::CannotTellIfLoopsTouch { corner, enclosure });
+                    return Err(CannotTriangulate::CannotTellIfLoopsTouch {
+                        corner,
+                        enclosure,
+                        at: domain.surface().point_at(at[0], at[1]),
+                    });
                 }
                 other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
             }
@@ -1173,12 +1181,26 @@ pub enum CannotTriangulate {
     ///
     /// See [`refuse_loops_that_touch`] for why this is refused, and for the
     /// part of the family that is refused although it would in fact be fine.
+    ///
+    /// **`at` is the field a caller further up can do anything with**, and it
+    /// is here because the two indices are not. They count corners of the
+    /// domain, which for the kernel's mesher is a list it assembled itself —
+    /// wires walked in an order of its own choosing, with a point put on every
+    /// bend — so "corner 7" is an address into something the caller of
+    /// `SolidView::mesh` never built. A place in space is one it can find.
+    /// `docs/decisions.md` §123.
     #[error("the corner at {corner} sits on the side leaving corner {side}, in another loop")]
     LoopsTouch {
         /// The corner sitting on someone else's side.
         corner: usize,
         /// Which corner that side leaves from.
         side: usize,
+        /// Where the two loops touch, on the surface this domain named.
+        ///
+        /// A caller that moved the domain into a frame of its own is expected
+        /// to move this back before publishing it — which is what the kernel's
+        /// mesher does (§113.6, §116, §123).
+        at: Point,
     },
 
     /// Nothing could prove whether two loops touch.
@@ -1192,6 +1214,9 @@ pub enum CannotTriangulate {
         corner: usize,
         /// How wide the enclosure that straddled zero was.
         enclosure: f64,
+        /// Where that corner is, on the surface this domain named. The same
+        /// field as [`CannotTriangulate::LoopsTouch`]'s, for the same reason.
+        at: Point,
     },
 
     /// A scaled coordinate is outside what the triangulation will take.
