@@ -33777,22 +33777,44 @@ nine the correct recipe grants 3 and the mutation this arm exists to catch grant
 fails the correct answer on a slow machine is also a check that would have passed
 the wrong one there.
 
-### 137.2 The fix: compare against what was actually left
+### 137.2 The fix: each grant against its own launch instant
 
-`granted` is now held against the time remaining when the targets launched, read
-out of the stub's own `at=` stamp:
+Every grant is held against the time remaining when **that** target launched,
+paired with it out of the stub's own log line:
 
 ```
-launched=$(sed -n 's/.*fuzz run.*\[at=\([0-9]*\)\].*/\1/p' "$dir/log" | sort -n | head -1)
-whole=$(( started + 12 - launched ))
-[ "$granted" -ge "$whole" ]
+pairs=$(sed -n 's/.*max_total_time=\([0-9]*\).*\[at=\([0-9]*\)\].*/\1 \2/p' "$dir/log")
+[ "$(grep -c . <<<"$pairs")" -eq 5 ] || fail ...
+while read -r granted at; do
+    whole=$(( started + 12 - at ))
+    [ "$granted" -ge "$whole" ] || fail ...
+done <<<"$pairs"
 ```
 
 `started` is read *before* `fuzz-overnight` begins, so `started + 12` is at or
-before the deadline the recipe sets, and `whole` is a **lower bound** on what a
-correct recipe grants. The assertion therefore cannot fail for a slow machine —
-only for a recipe that shares the window out. No fixture grew and the gate got no
-slower; the twelve-second window stands.
+before the deadline the recipe sets, and each `whole` is a **lower bound** on what
+a correct recipe grants that target. The assertion therefore cannot fail for a
+slow machine — only for a recipe that shares the window out. No fixture grew and
+the gate got no slower; the twelve-second window stands.
+
+**It replaced two checks with one, and the `distinct == 1` check went with it.**
+That check required all five grants to be the same number. §137.5 first recorded
+that as a latent flake and it is not one — see there, the claim was wrong — but it
+is unsound for a different reason: **it forbids a correct recipe.** One computing
+`deadline - now` inside the launch loop hands a target that started two seconds
+later two seconds less, which is right, and a set-wide check calls that a divided
+window. Allowing the values to differ instead is what lets a genuinely divided
+window through. No bound on the five values *together* separates those two cases,
+so the property does not belong on the set. Paired, it needs no new
+instrumentation: `$*` in the stub's `printf` is its whole argv, so every
+`-max_total_time=N` is already on the same line as the `at=` stamp of the target
+it was handed to.
+
+Raised by `rcad-f1` on 2026-09-19 against §16.10, which asks a claim that
+something cannot be done to name the family of fixes it considered. §137.5 had
+considered exactly one — relaxing the set-wide bound — and pairing is a second
+family it never named. The remedy is theirs; the reason below is not the one
+either of us started with.
 
 ### 137.3 The demonstration, both directions
 
@@ -33800,21 +33822,32 @@ A test whose subject is a test still owes the two runs. `fuzz-overnight` was
 mutated in the tree, measured, and restored; `git diff` afterwards shows the
 assertion change alone.
 
-| probe | `granted` | `whole` | old `-ge 8` | new `-ge $whole` |
-|---|---|---|---|---|
-| as shipped | 12 | 12 | pass | **pass** |
-| `sleep 9` before the launch, case one only | 3 | 3 | **fail** | **pass** |
-| `left` divided by five | 2 | 12 | fail | **fail** |
+| probe | grants | `whole` | old `-ge 8` | old `distinct == 1` | paired |
+|---|---|---|---|---|---|
+| as shipped | 12 | 12 | pass | pass | **pass** |
+| `sleep 9` before the launch, case one only | 3 | 3 | **fail** | pass | **pass** |
+| `left` divided by five | 2 | 12 | fail | pass | **fail** |
+| `left` recomputed inside the launch loop, `sleep 1` between | 11, 10, 9, 8, 7 | 10, 9, 8, 7, 6 | pass | **fail** | **pass** |
 
 Row two reproduces the runner exactly, down to the message: *"each target was
 given 3 s of a twelve-second window"*, the same sentence CI printed. Row three is
 the one that matters for the fix's honesty — the new assertion still catches the
-mutation, and names it: *"each target was given 2 s of the 12 s still left when
-they launched"*.
+mutation, and names it: *"a target was given 2 s of the 12 s still left when it
+launched"*.
+
+**Row four is the one that condemns `distinct == 1`.** Five different grants, each
+the whole of what was left when that target launched — a correct recipe, and the
+set-wide check rejects it as "still being divided" while the paired check passes
+it. That is not a hypothetical: it is what the obvious refactor of
+`fuzz-overnight` looks like.
 
 Row three needed the `elapsed -ge 4` check relaxed to be reached at all, because
 a divided window makes the night finish in a second and that guard fires first.
-Both guards catch the mutation; only the size one names it.
+Both guards catch the mutation; only the size one names it. Rows two and four are
+confined to case one by testing `{{ window }}` against 12, because a blunt `sleep`
+starves the later sub-cases, whose windows are 8, 6 and 0 — the first attempt at
+row two did exactly that and failed on "a night that found nothing exited
+non-zero" instead.
 
 ### 137.4 Why it went unnoticed
 
@@ -33831,18 +33864,58 @@ colour codes and asking after a plugin; this one hard-codes a constant that is
 only true on a fast machine. **The way to find the next one is the same: take
 away what the environment supplies and run it again.** Here that was `sleep 9`.
 
-### 137.5 What is left
+### 137.5 The claim this section first made about `distinct == 1`, and why it was wrong
 
-**The `distinct == 1` check above it has the same shape and is not fixed.** The
-five launches are a tight loop, so on a machine slow enough to straddle a second
-boundary two targets would be told 3 and three told 2, and the arm would report
-that the window "is still being divided" when it is not. It has not been seen —
-all five stamped the same second even on the runner that failed — and the obvious
-relaxation, allowing values to differ by one, is what would let a genuinely
-divided window through. Recorded, not acted on; the same judgement §136.5 made
-about the five bands it did not re-derive.
+This subsection first said the `distinct == 1` check was a latent flake of the
+same shape: that on a machine slow enough to straddle a second boundary, two
+targets would be told 3 and three told 2. **That cannot happen, and the reason is
+four lines above the check it describes.** `left` is computed *once*, before the
+launch loop:
 
-### 137.6 Provenance
+```
+left=$(( deadline - $(date +%s) ))
+pids=()
+for recipe in "${recipes[@]}"; do
+```
+
+and the per-target recipe spells it straight into `-max_total_time={{duration}}`.
+So however far apart the five launches drift, they are all told the same number by
+construction. Measured, with `sleep 1` forced between the launches: the `at=`
+stamps spread over five seconds — `…163, …164, …165, …166, …167` — while every
+target was handed `max_total_time=6`. One value, five instants.
+
+So the sentence described a mechanism that does not exist, in a section whose
+whole subject is a check that measured the wrong thing. §16.10 asks for the family
+of fixes considered; the prior text named one, and it was answering a question
+nobody had.
+
+**The check was unsound anyway, for the opposite reason**, and §137.2 has it: far
+from false-failing on a slow machine, `distinct == 1` false-fails a *correct*
+recipe — the per-target one of row four. Paired, the property no longer lives on
+the set and the check is gone.
+
+### 137.6 What is left: the launch-spread bound, which really is environment-shaped
+
+`spread <= 3` in sub-case four is the one check in this recipe still measured
+against a constant that is a property of the machine. It reads the `at=` stamps
+and asks that the five launches happened within three seconds, and its own comment
+says why three: *"the five `just` invocations are five processes to fork, and
+`date +%s` truncates to whole seconds either side."* A runner loaded enough to
+take four seconds over five forks fails it, exactly as the preamble failed
+`-ge 8`.
+
+It is **not fixed here** and this is a deferral rather than a dismissal. Unlike the
+size check there is no tighter quantity to compare against: the property being
+tested — that the recipe did not run one target and wait for it — is *inherently*
+about wall-clock distance between launches, so any bound is a guess about how slow
+a machine may be. Raising it weakens the check; a relative bound needs something
+to be relative to, and the only candidate is the window, which is the quantity the
+spread is supposed to be independent of. Left because there is no evident fix, not
+because there is no evident problem, and it has never been seen to fire — all five
+stamped the same second even on the runner that failed above. Same judgement
+§136.5 made about the five bands it did not re-derive.
+
+### 137.7 Provenance
 
 Found by pushing `bcff8e25` and watching CI, 2026-09-19. Run `35399208851`
 failed; `35399049264` on `5336ff31` and `35398576360` on `912cd168` both
@@ -33850,3 +33923,22 @@ succeeded, and `5336ff31` differs from `bcff8e25` by one line of prose in a file
 no part of this recipe reads — which is what said "flaky arm" before any of the
 arithmetic was done. The assertion was already on `a47d990a`, the green base the
 §121 stack landed on, so no commit of that stack introduced it.
+
+**The `-ge 8` half landed first, as `4ed17d23`, with `distinct == 1` left standing
+and §137.5 defending it on a mechanism that does not exist.** `rcad-f1` read that
+section the same day and held it to §16.10: one family of fixes considered is not
+an argument that the family is the only one. It named pairing, and named the
+instrumentation — `$*` in the stub's `printf` already carries the grant and the
+stamp on one line.
+
+Checking it is what found that §137.5's premise was false: `left` is computed once
+before the launch loop, so the straddle it feared is impossible, and the forced
+`sleep 1` measurement proves it. The remedy is `rcad-f1`'s, arrived at from a
+reading of the recipe that was wrong in the same place §137.5 was wrong — both of
+us had the five grants varying with launch time when they cannot. What justifies
+pairing is not straddling but row four of §137.3: the set-wide check rejects a
+correct per-target recipe.
+
+Which is the case for reading a peer's objection by checking the code rather than
+by weighing the argument. The objection was right, its reason was not, and the real
+reason was better than either.

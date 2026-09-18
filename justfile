@@ -2656,36 +2656,43 @@ check-fuzz-overnight-selftest:
     grep -q 'TO LOOK AT.*fuzz-reader' "$dir/logs/latest" \
         || fail "the summary line does not name the target that died"
 
-    # Every target got the same number of seconds, and that number is the whole
-    # of what was left and not a fifth of it. Distinct values, not a sum: the old
-    # recipe's five shares were all different, so one distinct value is the
-    # property, and the size check is what stops a recipe that divides equally by
-    # five from satisfying it.
+    # Every target got the whole of what was left when *it* launched, and not a
+    # fifth of it. This is the assertion that holds §129's change — five targets
+    # at once rather than a fifth of the window each.
     #
-    # **The yardstick is what was left when the targets launched, not the twelve
-    # the window was asked for.** The night spends its preamble — the watermark,
-    # git, a nested `just` per target — inside the window, and hands each target
-    # `deadline - now`, so what arrives is twelve minus the preamble. Here the
-    # preamble is under a second. On a GitHub runner it was **9 s of the 12**, so
-    # the correct recipe granted 3 and a `-ge 8` assertion called it a share:
-    # run 35399208851, red on a commit that changed one line of `docs/decisions.md`.
-    # Worse than red — at 3 s the arm could no longer tell the correct recipe from
-    # the mutation it exists to catch, a fifth of twelve being 2.
+    # **The yardstick is what was left, not the twelve the window was asked for.**
+    # The night spends its preamble — the watermark, git, a nested `just` per
+    # target — inside the window, and hands each target `deadline - now`, so what
+    # arrives is twelve minus the preamble. Here the preamble rounds to nothing
+    # and the grant is 12. On a GitHub runner it was **9 s of the 12**, so the
+    # correct recipe granted 3 and a `-ge 8` assertion called it a share: run
+    # 35399208851, red on a commit that changed one line of `docs/decisions.md`.
+    # Worse than red — at 3 s a fifth of twelve is 2, so the arm had almost no
+    # power left to tell the correct recipe from the mutation it exists to catch.
+    #
+    # **Asked per target, against that target's own launch instant, because no
+    # bound on the five values together is sound.** Requiring one value forbids a
+    # correct recipe: one computing `deadline - now` inside the launch loop hands
+    # a target that started two seconds later two seconds less, which is right,
+    # and a set-wide check calls it a divided window. Allowing the values to
+    # differ is what lets a genuinely divided window through. Pairing each grant
+    # with its own `at=` escapes the choice, and needs no new instrumentation —
+    # the stub already logs its whole argv and its stamp on one line, so it is one
+    # `sed` with two groups where there were two greps with one each.
     #
     # `started` is read before `fuzz-overnight` begins, so `started + 12` is at or
-    # before the deadline the recipe sets and `whole` is a *lower bound* on what a
-    # correct recipe grants. This cannot fail for a slow machine, only for one that
-    # divides. A preamble long enough to make `whole` too small to discriminate
-    # leaves nothing to launch with, and the `ran -eq 5` check above fires first.
-    granted=$(grep -o 'max_total_time=[0-9]*' "$dir/log" | cut -d= -f2 | sort -un)
-    [ "$(wc -l <<<"$granted")" -eq 1 ] \
-        || fail "the five targets were given different windows, so the window is still being divided: $(tr '\n' ' ' <<<"$granted")"
-    launched=$(sed -n 's/.*fuzz run.*\[at=\([0-9]*\)\].*/\1/p' "$dir/log" | sort -n | head -1)
-    [ -n "$launched" ] \
-        || fail "no target logged when it started, so what it was given cannot be judged"
-    whole=$(( started + 12 - launched ))
-    [ "$granted" -ge "$whole" ] \
-        || fail "each target was given $granted s of the $whole s still left when they launched, so the window is still being shared"
+    # before the deadline the recipe sets, and each `whole` is a *lower bound* on
+    # what a correct recipe grants that target. This cannot fail a merely slow
+    # machine, only a recipe that shares the window out. A preamble long enough to
+    # leave nothing to launch with is caught by the `ran -eq 5` check above.
+    pairs=$(sed -n 's/.*max_total_time=\([0-9]*\).*\[at=\([0-9]*\)\].*/\1 \2/p' "$dir/log")
+    [ "$(grep -c . <<<"$pairs")" -eq 5 ] \
+        || fail "$(grep -c . <<<"$pairs") of 5 targets logged both a window and a start time, so what they were given cannot be judged"
+    while read -r granted at; do
+        whole=$(( started + 12 - at ))
+        [ "$granted" -ge "$whole" ] \
+            || fail "a target was given $granted s of the $whole s still left when it launched, so the window is still being shared"
+    done <<<"$pairs"
 
     # Every target is told where to write its per-run timings, and the place is
     # this night's own directory. A target that was not told keeps nothing, and
