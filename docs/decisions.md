@@ -33908,11 +33908,23 @@ take four seconds over five forks fails it, exactly as the preamble failed
 interesting.** The bound has to sit *between* two quantities that both move with
 the machine and the window: below it, five `just` forks, which is why three and
 not zero; above it, the spread a sequential recipe would produce. Sub-case four
-runs a six-second window and the stub sleeps `granted / 2`, so a recipe that ran
-one target and waited would launch them about three seconds apart and spread ~12 s
-— more with the `STUB_OVERRUN=8` target in the chain. So the bound **cannot be
-loosened for a slow runner at all**: raising 3 to 30 does not weaken the check, it
-deletes it. Any number in that gap is pinned at both ends.
+runs a six-second window and the stub sleeps `granted / 2`, and its overrun target
+sleeps `3 + 8`: the named adversary — run one, wait for it, then start the other
+four — spreads **11 s**, and a fully sequential recipe stamps 0, 11, 14, 17, 20 and
+spreads **20**. So the bound **cannot be loosened for a slow runner at all**:
+raising 3 to 30 does not weaken the check, it deletes it. Any number in that gap is
+pinned at both ends.
+
+**And the 11 s of margin rests on something nothing states and nothing checks.**
+It is there only because `STUB_OVERRUN_TARGET` is `where_two_surfaces_cross`,
+which is what `fuzz` maps to (`justfile:2429`), and `fuzz` is `fuzz_all`'s **first**
+entry (`justfile:2088`) — so the overrunner leads the chain and its 11 s is what
+the adversary's spread becomes. Point `STUB_OVERRUN_TARGET` at any other target, or
+reorder `fuzz_all`, and a non-overrunning target leads: the adversary then spreads
+exactly 3, `spread <= 3` admits it, and **the arm keeps passing while it stops
+discriminating.** That is this section's own failure mode a third time, live in the
+check as it stands, and it is an argument for the rendezvous beyond the bound —
+a barrier does not care which target leads.
 
 **A fix exists and it is a different kind of fix, not a better bound: make the
 recipe prove concurrency instead of measuring it.** A rendezvous — armed by an
@@ -33953,6 +33965,12 @@ of §137 to §16.10 and was right. The first correction, §137.5's, was to a cla
 that was false; this one is to a claim that no fix was evident, which is the
 softer and more common failure — and both were written by the same session in the
 same hour, which is the argument for the rule rather than against the session.
+
+The leading-overrunner finding is `rcad-f1`'s too, and it arrived by looking for a
+*third* thin claim rather than by being told one was there: the comment at
+`justfile:2780` says what a sequential recipe fails to satisfy, and whether that
+sentence is true turns entirely on which target happens to be first. It is true
+today. Nothing holds it true tomorrow.
 
 ### 137.7 Provenance
 
