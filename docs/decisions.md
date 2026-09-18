@@ -32087,6 +32087,11 @@ written.
 read as naming one. It is recorded because a later reader comparing the two
 sections will otherwise take one of them for a mistake.
 
+**Established since, in §125.7:** `1f1da0bf`, on 2026-09-17, by bisect with the
+parent measured by hand. Read that rather than guessing from this paragraph —
+it also rules out the obvious suspect, and it changes what §125.2's gap is
+standing on.
+
 ### 125.6 What is not done, and where it already lived
 
 The fix is the marcher's step ceiling — `MOST_A_STEP_MAY_GROW_TO` in `march.rs`
@@ -32114,6 +32119,96 @@ where_two_surfaces_cross <each of the five inputs>`; `mise exec -- just decision
 with `f64::MAX / 4.0` added to its ask list, which failed
 `asked for 4.4942328371557893e307 of room and got TooManyPointsAlongOneCrossing { most: 1048576 }`
 in 3.128 s and was reverted; `mise exec -- just gate`.
+
+### 125.7 It was `1f1da0bf`, and the coarse ask is already being closed from one side, measured 2026-09-18
+
+§125.5 left "which commit moved it" open and refused to name one. It is
+`1f1da0bf fix(geom): the settling gave up on a subtraction, not on the
+geometry`, 2026-09-17, and this is a measurement rather than a suspicion.
+
+`git bisect run` over `a2a93b9a..19c6f3d1` — 121 commits, seven steps, one
+input, the decision being `points: 0` against anything larger. It named
+`1f1da0bf`. A bisect never runs the parent of its own answer, so the parent was
+run by hand: `3b7fd249` gives `Asked { points: 0, orders: 1, scalings: 2 }` and
+`1f1da0bf` gives `Asked { points: 10, … }` on the same bytes.
+
+Three things that could have faked that, each ruled out rather than argued away:
+
+- **The decoder.** The `case:` line the tool prints is byte-identical at both
+  ends of the whole range — the same two pipes, radii `167774208.0` and `1.375`.
+  The bytes still mean what they meant.
+- **The harness's ask.** The commit touches exactly one file,
+  `crates/rcad-geom/src/march.rs`, +212/−50. `tests/fuzzing/mod.rs` and its
+  `f64::MAX / 4.0` are not in it.
+- **The rest of the commit.** It carries three changes and the one that does
+  this is a single line. On the tree as it stands, replacing
+  `step = step.sqrt().min(step * 0.5)` with `step = step * 0.5` takes the pair
+  back to `points: 0`; putting it back restores the ten.
+
+`6db8b90c`, the correctly-rounded normalize, is **not** it. It is a *descendant*
+of `1f1da0bf`, 84 commits later on the same day, so it lands after the pair had
+already started walking. It was the obvious suspect, which is the whole reason it
+was measured instead of written down (§5 of `CLAUDE.md`).
+
+**The coarse ask §125.2 calls a gap is already being closed from one side, and
+on purpose.** The doc comment `1f1da0bf` added says so in its own words — "a
+coarse walk asking `f64::MAX / 4` of room could stop on a pair it crosses", and
+"a refused trial is retried at the square root of the ask … fifty halvings of
+`2.25e307`" reach only `9.3e43`. That ask is this ask. A commit whose subject
+line is a subtraction in `settled` moved this threshold on the way past.
+
+It moved **two** of §108.4's four and not one. The six corpus slow units, across
+the commit:
+
+| input | `3b7fd249` | `1f1da0bf` |
+| --- | --- | --- |
+| `262c17e4` | 0 | 10 |
+| `7e62ebe6` | 0 | 10 |
+| `5dddf2a9` | 0 | 0 |
+| `b9068e9e` | 0 | 0 |
+| `5a19686d` | 18 | 18 |
+| `6a164a91` | 10 | 10 |
+
+`262c17e4` and `7e62ebe6` are the pair §108.4 calls one case drawn at two places
+along its own axis, so the two that moved are the two that are the same shape.
+`5dddf2a9` still refuses, which §125.3 calls a limit and it still is.
+
+**§125.6's fix is not superseded.** The retry shortens a trial that was
+*refused*; `MOST_A_STEP_MAY_GROW_TO` bounds how far a step may *grow*. Two knobs
+on one walk, and only the second is the ceiling that does not come from the
+caller's ask — the tilted `1bd43cf4` and `d8b562bb` still refuse, which is
+§125.2's gap and is untouched by this. What has changed is the reason to write
+the ceiling down: it moves under work aimed at something else, and nothing failed
+when it did.
+
+Nothing failed because the claim was prose. The module doc of
+`what_makes_a_huge_pipe_against_a_thin_one_slow_to_walk.rs` said all four come
+back `points: 0` and put `262c17e4`'s two coarse walks at 7.30 s; both had been
+false since 2026-09-17 and the gate was green throughout, because no test
+asserted either. `0fbff52c` — §16.10, a claim can go stale and the audit above
+will not catch it — is *inside* the range bisected here. The doc now says which
+commit falsified it, and
+`a_huge_pipe_and_a_thin_one_are_walked_even_when_asked_for_all_the_room_there_is`
+pins both pairs at `f64::MAX / 4.0`, so the next move fails a test rather than a
+reading. It fails for the right reason too: with the retry put back to halving it
+refuses `CannotFollowACrossingWhereItsSurfacesAreTangent`, and with it in place
+both pairs walk both runs in 7 ms together.
+
+The gap is on `docs/plan.md` under 6.3 now, which is the roadmap item that owns
+`march.rs`. §125.6 noted it lived only in a test's module doc; a line of its own
+is not available, because `check-plan` derives the item list from the roadmap and
+fails when the two disagree.
+
+Commands run to reach this: `mise exec -- cargo build --release -p
+rcad-fuzz-explain`; `./target/release/rcad-fuzz-explain where_two_surfaces_cross
+<the input>` at `e4e2bab2`, `a2a93b9a`, `3b7fd249` and `1f1da0bf`; `git bisect
+start 19c6f3d1 a2a93b9a` then `git bisect run` on a script that builds, decodes
+and exits 0 on `points: 0`; `git merge-base --is-ancestor 1f1da0bf 6db8b90c` and
+`git rev-list --count 1f1da0bf..6db8b90c`; the one-line edit to `march.rs:570`
+and back, twice, once to measure and once to check the new test fails without it;
+`mise exec -- just t
+a_huge_pipe_and_a_thin_one_are_walked_even_when_asked_for_all_the_room_there_is`;
+`mise exec -- just gate`.
 
 ## 127. The `FaceKey` half lands, and the corpus line says `#15`, fixed 2026-09-18
 

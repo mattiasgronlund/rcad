@@ -33,7 +33,7 @@ Audited 2026-09-15 against `main` at `6939147`. `docs/decisions.md` §106.
 5.4      done       crates/rcad-topo/src/validate.rs — slop ordering, two opposite coedges per edge, wires close, dynamic range held
 6.1      partly     crates/rcad-geom/src/plane.rs crates/rcad-geom/src/segment.rs — closed-form closest point only; no general Newton distance to a B-spline and no Extrema type at all
 6.2      partly     crates/rcad-geom/src/three_surfaces.rs — a straight line against the five analytic surfaces, certified; no general curve, no Bezier clipping
-6.3      partly     crates/rcad-geom/src/intersect.rs crates/rcad-geom/src/march.rs — every analytic pair classified, certified marching for the two degree-4 pairs, named refusals elsewhere; the freeform path does not exist and is deferred for want of a consumer, decisions §24.1
+6.3      partly     crates/rcad-geom/src/intersect.rs crates/rcad-geom/src/march.rs — every analytic pair classified, certified marching for the two degree-4 pairs, named refusals elsewhere; the freeform path does not exist and is deferred for want of a consumer, decisions §24.1; the marcher's step ceiling MOST_A_STEP_MAY_GROW_TO is still the caller's own ask times a million, a §16.10 gap that moves under unrelated work, decisions §125.6 and §125.7
 6.4      done       crates/rcad-mesh/src/triangulate.rs — constrained Delaunay in uv, refined against a deflection, edge points shared between neighbours
 7.1      done       crates/rcad-topo/src/fuse/mod.rs crates/rcad-topo/src/fuse/history.rs — one split, then a rule picks; history maps come out
 7.2      done       crates/rcad-topo/src/fuse/mod.rs — Model::fuse takes slices of arguments and tools, not one of each
