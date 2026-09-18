@@ -492,7 +492,11 @@ mod tests {
     #[test]
     fn a_cut_at_45_degrees_through_a_lattice_corner_lands_on_the_corner() {
         assert_eq!(
-            meet_of_three_planes(the_top_of_the_cube(), the_cut_across(), the_cut_at_45_degrees()),
+            meet_of_three_planes(
+                the_top_of_the_cube(),
+                the_cut_across(),
+                the_cut_at_45_degrees()
+            ),
             Ok(Point::Exact([0.5, 1.5, 2.0]))
         );
     }
@@ -536,8 +540,7 @@ mod tests {
         });
         assert_eq!(widths, [6, 4, 1]);
         assert!(
-            widths.iter().max().expect("three sides") * 2
-                <= super::HOW_MANY_F64_ARE_WORTH_TRYING,
+            widths.iter().max().expect("three sides") * 2 <= super::HOW_MANY_F64_ARE_WORTH_TRYING,
             "the budget has room over a real near miss"
         );
     }
@@ -556,7 +559,10 @@ mod tests {
             Some(super::HOW_MANY_F64_ARE_WORTH_TRYING)
         );
         assert_eq!(
-            super::the_f64s_in(Interval::new(1.0, hi.next_up()).expect("a range"), &mut room),
+            super::the_f64s_in(
+                Interval::new(1.0, hi.next_up()).expect("a range"),
+                &mut room
+            ),
             None
         );
     }
