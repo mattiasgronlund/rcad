@@ -32008,19 +32008,26 @@ did not.
 
 **One claim could not be checked, and the remedy named for it was wrong.**
 §124.1 quoted §111.2's enclosure edge as if it were the `turning` value —
-corrected in §124.1 itself, to §111.1's `4.206230998539495e-30`. Neither
-figure is asserted in a test in this tree, so the debt this section flagged
-was real. But `blocker_depth_probe` does not pay it. Its own doc comment says
-what it does: "turns what it finds into the number that actually prices a
-fix: not how many files a reason stops first, but how many files have
-**only** that reason and nothing else behind it" — a census over the whole
-STEP corpus, one row per file, of which import blocker sticks after the
+corrected in §124.1 itself, to §111.1's `4.206230998539495e-30`. When this
+section was written, neither figure was asserted anywhere but in this file, so
+the debt it flagged was real. But `blocker_depth_probe` does not pay it. Its own
+doc comment says what it does: "turns what it finds into the number that
+actually prices a fix: not how many files a reason stops first, but how many
+files have **only** that reason and nothing else behind it" — a census over the
+whole STEP corpus, one row per file, of which import blocker sticks after the
 others are cleared. There is no path in it anywhere near a single edge's
-`turning` arithmetic, so running it would reproduce nothing here. What
-actually reproduces the value is recomputing the five-line chain directly,
-which `a_hemisphere_sitting_on_a_pipe_of_the_same_radius_barely_crosses_it_at_all`
-in `crates/rcad-topo/src/validate.rs` already does one step short of it, for
-the cross product `turning` is built from.
+`turning` arithmetic, so running it would reproduce nothing here.
+
+**The debt is paid now, and by a test rather than by that probe.**
+`the_dome_and_pipe_from_the_led_file_turn_by_a_real_amount`
+(`crates/rcad-geom/tests/`) recomputes the five-line chain from §111.1's own
+four points and one direction, written in as literals, and asserts both the
+cross product and `4.206230998539495e-30`. It needs no corpus, because §111.1
+names the whole input. Its opening draws the distinction §124.1 lost — that this
+is the value and **not** §111.2's enclosure — and it reaches the same verdict on
+those edges that §111.2 above now records: the `nextafter`-slack procedure was
+never checked in, so there is nothing to call and no way to reproduce them bit
+for bit.
 
 The lesson is not that §124 was careless: it was explicit that it had run
 nothing, and it was right about the thing it was for. It is that a section which
